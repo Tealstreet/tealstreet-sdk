@@ -6,9 +6,23 @@ use crate::request_context::{
     Attempt, CommandWrites, Context, Error, Operation, Owner, Policy, RejectionReports,
     ResendGrant, RetryEvidence, Scope, WriteResult,
 };
+#[cfg(feature = "http-plans")]
+use crate::request_context::{
+    HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
+};
 use std::collections::HashMap;
+#[cfg(feature = "http-plans")]
+use std::collections::VecDeque;
 
 const CAPACITY: usize = 256;
+
+#[cfg(all(test, feature = "http-plans"))]
+#[path = "request_context_preflight_tests.rs"]
+mod preflight_tests;
+
+#[cfg(all(test, feature = "http-plans"))]
+#[path = "request_context_preflight_entry_tests.rs"]
+mod preflight_entry_tests;
 
 #[cfg(test)]
 #[path = "request_context_replacement_registry_tests.rs"]
@@ -24,11 +38,9 @@ mod execution;
 struct CommandOwner {
     generation: u64,
     /// Exact logical completion authority survives expired-handle cleanup.
-    completion_root: Context,
+    phase: CommandPhase,
     /// Owner retention only. This never extends any issued logical deadline.
     last_deadline: f64,
-    /// Genuine initial entry holds its generation until typed terminal cleanup.
-    entry_owned: bool,
     writes: Option<CommandWrites>,
     mutation_declared: bool,
     pending: usize,
@@ -40,10 +52,107 @@ struct CommandOwner {
     leg_intents: Vec<(u64, crate::classify::Intent)>,
 }
 
-#[derive(Clone)]
+enum CommandPhase {
+    Context {
+        root: Context,
+        entry_owned: bool,
+    },
+    #[cfg(feature = "http-plans")]
+    Preflight(preflight::State),
+    #[cfg(feature = "http-plans")]
+    Planned(planned::State),
+    #[cfg(feature = "http-plans")]
+    Retiring(HttpOwnerRetirement),
+}
+
+impl CommandOwner {
+    /// One policy for issued Contexts and prospective Plan legs. Callers hold
+    /// the exact live owner and commit synchronously, without a callback gap.
+    fn prepare_leg_intent(
+        &self,
+        context: &Context,
+        intent: crate::classify::Intent,
+    ) -> Result<bool, Error> {
+        use crate::classify::Intent;
+        if self
+            .leg_intents
+            .iter()
+            .any(|(leg, _)| *leg == context.leg())
+        {
+            return Err(Error::Duplicate);
+        }
+        if self
+            .writes
+            .as_ref()
+            .is_some_and(|writes| writes.latest(context.leg()).is_some())
+        {
+            return Err(Error::State);
+        }
+        if self.intent == Some(intent) && context.operation() == Operation::Mutation {
+            return Ok(false);
+        }
+        let allowed = matches!(
+            (self.intent, intent),
+            (Some(Intent::Amend), Intent::Place)
+                | (Some(Intent::Place), Intent::Cancel | Intent::Setting)
+        );
+        if !allowed || context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        if self.leg_intents.len() >= CAPACITY {
+            return Err(Error::Capacity);
+        }
+        Ok(true)
+    }
+
+    fn context_root(&self) -> Option<&Context> {
+        match &self.phase {
+            CommandPhase::Context { root, .. } => Some(root),
+            #[cfg(feature = "http-plans")]
+            _ => None,
+        }
+    }
+
+    fn retained(&self) -> bool {
+        match &self.phase {
+            CommandPhase::Context { entry_owned, .. } => *entry_owned,
+            #[cfg(feature = "http-plans")]
+            CommandPhase::Preflight(_) | CommandPhase::Planned(_) | CommandPhase::Retiring(_) => {
+                true
+            }
+        }
+    }
+}
+
+#[cfg(feature = "http-plans")]
+#[path = "request_context_owned_call.rs"]
+mod owned_call;
+#[cfg(feature = "http-plans")]
+#[path = "request_context_preflight.rs"]
+mod preflight;
+#[cfg(feature = "http-plans")]
+pub(super) use owned_call::Admission as OwnedAdmission;
+
+#[cfg(feature = "http-plans")]
+#[path = "request_context_planned.rs"]
+mod planned;
+
+#[cfg(not(feature = "http-plans"))]
+#[path = "request_context_without_plans.rs"]
+mod without_plans;
+
+#[derive(Clone, Debug)]
 pub(super) struct Delivery {
     pub context: Context,
     pub attempt: Attempt,
+}
+
+impl PartialEq for Delivery {
+    fn eq(&self, other: &Self) -> bool {
+        self.context.same_issuer(&other.context)
+            && self.context == other.context
+            && self.attempt == other.attempt
+    }
 }
 
 pub(super) enum Seal {
@@ -61,9 +170,33 @@ pub(super) struct ContextRegistry {
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
     executions: execution::Executions,
+    #[cfg(feature = "http-plans")]
+    retirements: VecDeque<HttpOwnerRetirement>,
+    /// Scoped delivery loans outlive temporary marker removal and even owner
+    /// cleanup. Readiness may run only after the true outermost scope exits.
+    #[cfg(feature = "http-plans")]
+    delivery_depth: usize,
+    /// Logical identities promised to admitted plans but not yet issued.
+    #[cfg(feature = "http-plans")]
+    reserved_contexts: usize,
+    // Only admitted Plan owners; capacity is reserved before ID commitment.
+    #[cfg(feature = "http-plans")]
+    plan_index: Vec<CommandId>,
+    #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
+    plan_scan_visits: std::cell::Cell<usize>,
 }
 
 impl ContextRegistry {
+    pub(super) fn prune(&mut self, now: f64) {
+        self.contexts.retain(|_, old| old.deadline() > now);
+        self.commands.retain(|_, old| {
+            old.retained()
+                || old.last_deadline > now
+                || old.writes.is_some()
+                || old.pending > 0
+                || old.deliveries > 0
+        });
+    }
     pub(super) fn command_entry_unowned(&self, command: CommandId) -> bool {
         !self.commands.contains_key(&command)
     }
@@ -73,7 +206,7 @@ impl ContextRegistry {
             return true;
         };
         if !now.is_finite()
-            || owner.entry_owned
+            || owner.retained()
             || now < owner.last_deadline
             || owner.writes.is_some()
             || owner.pending != 0
@@ -93,7 +226,7 @@ impl ContextRegistry {
     pub(super) fn command_live(&self, id: CommandId, now: f64) -> bool {
         self.commands.get(&id).is_some_and(|owner| {
             !now.is_finite()
-                || owner.entry_owned
+                || owner.retained()
                 || now < owner.last_deadline
                 || owner.writes.is_some()
                 || owner.pending > 0
@@ -110,9 +243,15 @@ impl ContextRegistry {
             panic!("command entry must issue a command root");
         };
         let owner = self.commands.get_mut(&id).expect("issued command entry");
-        assert!(owner.generation == generation && owner.completion_root == *context);
-        assert!(!owner.entry_owned, "command entry already retained");
-        owner.entry_owned = true;
+        assert_eq!(owner.generation, generation);
+        let (root, entry_owned) = match &mut owner.phase {
+            CommandPhase::Context { root, entry_owned } => (root, entry_owned),
+            #[cfg(feature = "http-plans")]
+            _ => panic!("command entry must retain a Context root"),
+        };
+        assert_eq!(root, context);
+        assert!(!*entry_owned, "command entry already retained");
+        *entry_owned = true;
     }
 
     fn issue(
@@ -156,18 +295,11 @@ impl ContextRegistry {
         }
         // Abandoned handles must not permanently exhaust the bounded registry.
         // Retiring expired metadata is safe even if the new policy is refused.
-        self.contexts.retain(|_, old| old.deadline() > now);
-        // A delayed original timer must not let unrelated new work erase sent
-        // evidence. Active journals are bounded and survive live-handle expiry.
-        self.commands.retain(|_, old| {
-            old.entry_owned
-                || old.last_deadline > now
-                || old.writes.is_some()
-                || old.pending > 0
-                || old.deliveries > 0
-        });
+        // A delayed original timer must not erase sent evidence or retained
+        // childless generations when unrelated work is issued.
+        self.prune(now);
         if matches!(scope, Scope::Command(id) if self.commands.get(&id)
-            .is_some_and(|owner| (owner.entry_owned || owner.writes.is_some() || owner.pending > 0 || owner.deliveries > 0) && now >= owner.last_deadline))
+            .is_some_and(|owner| !matches!(owner.phase, CommandPhase::Context { .. }) || ((owner.writes.is_some() || owner.pending > 0 || owner.deliveries > 0) && now >= owner.last_deadline)))
         {
             return Err(Error::State);
         }
@@ -191,12 +323,18 @@ impl ContextRegistry {
             parent.deadline().min(now + f64::from(policy.timeout_ms))
         });
         if let Scope::Command(id) = scope
-            && let Some(owner) = self.commands.get(&id).filter(|owner| owner.entry_owned)
+            && let Some(root) = self.commands.get(&id).and_then(|owner| match &owner.phase {
+                CommandPhase::Context {
+                    root,
+                    entry_owned: true,
+                } => Some(root),
+                _ => None,
+            })
         {
-            if now >= owner.completion_root.deadline() {
+            if now >= root.deadline() {
                 return Err(Error::State);
             }
-            if deadline > owner.completion_root.deadline() {
+            if deadline > root.deadline() {
                 return Err(Error::Invalid);
             }
         }
@@ -211,7 +349,7 @@ impl ContextRegistry {
             policy.pacing,
         )?
         .with_retry(policy.retry)?;
-        if self.contexts.len() >= CAPACITY
+        if self.contexts.len() + self.reserved_context_count() >= CAPACITY
             || matches!(scope, Scope::Command(id)
                 if !self.commands.contains_key(&id) && self.commands.len() >= CAPACITY)
         {
@@ -219,6 +357,12 @@ impl ContextRegistry {
         }
         if self.contexts.contains_key(&identity) {
             return Err(Error::Duplicate);
+        }
+        self.contexts
+            .try_reserve(1 + self.reserved_context_count())
+            .map_err(|_| Error::Capacity)?;
+        if matches!(scope, Scope::Command(id) if !self.commands.contains_key(&id)) {
+            self.commands.try_reserve(1).map_err(|_| Error::Capacity)?;
         }
         context.bind_issuer(&self.issuer);
         if let Owner::Command { id, generation } = owner {
@@ -233,9 +377,11 @@ impl ContextRegistry {
                 })
                 .or_insert(CommandOwner {
                     generation,
-                    completion_root: context.clone(),
+                    phase: CommandPhase::Context {
+                        root: context.clone(),
+                        entry_owned: false,
+                    },
                     last_deadline,
-                    entry_owned: false,
                     writes: None,
                     mutation_declared: context.operation() == Operation::Mutation,
                     pending: 0,
@@ -281,6 +427,7 @@ impl ContextRegistry {
                 .filter(|context| context.deadline() > now)
                 .count()
                 + policies.len()
+                + self.reserved_context_count()
                 > CAPACITY
         {
             return Err(Error::Capacity);
@@ -328,7 +475,7 @@ impl ContextRegistry {
         // Reserve the pre-cleanup peak. Nothing visible has changed yet, and
         // journal.replace is the final fallible operation in the transaction.
         self.contexts
-            .try_reserve(children.len())
+            .try_reserve(children.len() + self.reserved_context_count())
             .map_err(|_| Error::Capacity)?;
         self.commands
             .get_mut(&id)
@@ -381,6 +528,7 @@ impl ContextRegistry {
         {
             return Err(Error::Revoked);
         }
+        self.validate_owned_context(context)?;
         Ok(())
     }
 
@@ -420,7 +568,20 @@ impl ContextRegistry {
         let owner = self.command_mut(context)?;
         let pending = owner.pending.checked_add(1).ok_or(Error::Capacity)?;
         if context.operation() == Operation::Mutation {
-            if let Some(writes) = owner.writes.as_mut() {
+            #[cfg(feature = "http-plans")]
+            let reserved = matches!(owner.phase, CommandPhase::Planned(_));
+            #[cfg(not(feature = "http-plans"))]
+            let reserved = false;
+            if reserved {
+                if owner
+                    .writes
+                    .as_ref()
+                    .and_then(|writes| writes.latest(context.leg()))
+                    != Some(request)
+                {
+                    return Err(Error::Revoked);
+                }
+            } else if let Some(writes) = owner.writes.as_mut() {
                 if let Some(previous) = writes.latest(context.leg()) {
                     context.retry(RetryEvidence::DefinitiveRefusal, now)?;
                     writes.retry(previous, request)?;
@@ -451,6 +612,13 @@ impl ContextRegistry {
     }
 
     pub(super) fn enter_delivery(&mut self, delivery: &Delivery) {
+        #[cfg(feature = "http-plans")]
+        if delivery.context.issued_by(&self.issuer) {
+            self.delivery_depth = self
+                .delivery_depth
+                .checked_add(1)
+                .expect("bounded engine delivery nesting");
+        }
         if let Ok(owner) = self.command_mut(&delivery.context) {
             owner.deliveries = owner
                 .deliveries
@@ -460,6 +628,13 @@ impl ContextRegistry {
     }
 
     pub(super) fn exit_delivery(&mut self, delivery: &Delivery) {
+        #[cfg(feature = "http-plans")]
+        if delivery.context.issued_by(&self.issuer) {
+            self.delivery_depth = self
+                .delivery_depth
+                .checked_sub(1)
+                .expect("scoped engine delivery exited once");
+        }
         if let Ok(owner) = self.command_mut(&delivery.context) {
             owner.deliveries = owner
                 .deliveries
@@ -532,6 +707,11 @@ impl ContextRegistry {
         status: u16,
         capture: impl FnOnce(&mut crate::request_context::UnprovenEvidence),
     ) -> Result<(), Error> {
+        self.unproven_writes(delivery)?
+            .unproven_result(delivery.attempt.request, status, capture)
+    }
+
+    fn unproven_writes(&mut self, delivery: &Delivery) -> Result<&mut CommandWrites, Error> {
         self.validate_handle(&delivery.context)?;
         if delivery.context.operation() != Operation::Mutation {
             return Err(Error::Invalid);
@@ -544,7 +724,7 @@ impl ContextRegistry {
         if writes.latest(delivery.context.leg()) != Some(delivery.attempt.request) {
             return Err(Error::Revoked);
         }
-        writes.unproven_result(delivery.attempt.request, status, capture)
+        Ok(writes)
     }
 
     fn result_with_reports(
@@ -583,6 +763,13 @@ impl ContextRegistry {
         if observer != self.is_observer(command) || (observer && delivery.is_some()) {
             return Err(Error::Revoked);
         }
+        if self
+            .commands
+            .get(&command)
+            .is_some_and(|owner| !matches!(owner.phase, CommandPhase::Context { .. }))
+        {
+            return Err(Error::Revoked);
+        }
         // Managed completion always has explicit generation-bearing authority.
         // Numeric calls remain legacy-only; a live journal/managed delivery
         // cannot be finalized by that bridge.
@@ -600,7 +787,7 @@ impl ContextRegistry {
                 && self
                     .commands
                     .get(&command)
-                    .is_none_or(|owner| owner.completion_root != *authority)
+                    .is_none_or(|owner| owner.context_root() != Some(authority))
             {
                 return Err(Error::Revoked);
             }
@@ -608,7 +795,7 @@ impl ContextRegistry {
             || self
                 .commands
                 .get(&command)
-                .is_some_and(|owner| owner.entry_owned || owner.mutation_declared)
+                .is_some_and(|owner| owner.retained() || owner.mutation_declared)
         {
             return Err(Error::Revoked);
         }
@@ -689,7 +876,78 @@ impl ContextRegistry {
         }
     }
 
-    pub(super) fn finish(&mut self, command: CommandId) {
+    fn seal_replacement_failure(
+        &mut self,
+        root: &Context,
+        child: &Context,
+        delivery: &Delivery,
+        now: f64,
+        error: VenueError,
+    ) -> Result<Seal, Error> {
+        if root.operation() != Operation::Mutation || child.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        self.validate(child, now)?;
+        self.validate_handle(&delivery.context)?;
+        let Owner::Command { id, generation } = root.owner() else {
+            return Err(Error::Invalid);
+        };
+        if !root.issued_by(&self.issuer)
+            || child.owner() != root.owner()
+            || delivery.context.owner() != root.owner()
+        {
+            return Err(Error::Revoked);
+        }
+        let owner = self.commands.get_mut(&id).ok_or(Error::Revoked)?;
+        if owner.generation != generation || owner.context_root() != Some(root) {
+            return Err(Error::Revoked);
+        }
+        let writes = owner.writes.as_mut().ok_or(Error::State)?;
+        if !writes.unreleased_replacement_child(
+            delivery.attempt.request,
+            delivery.context.leg(),
+            child.leg(),
+        ) {
+            return Err(Error::Revoked);
+        }
+        // Every authority check precedes sealing/removal. This path can only
+        // derive failure from the existing journal, never success or new I/O.
+        let error = writes.fail(error)?;
+        let reports = writes.reports().map(str::to_owned).collect();
+        owner.writes = None;
+        Ok(Seal::Failure(error, reports))
+    }
+
+    pub(super) fn finish(&mut self, command: CommandId) -> bool {
+        #[cfg(feature = "http-plans")]
+        if let Some(owner) = self.commands.get_mut(&command) {
+            match &owner.phase {
+                #[cfg(feature = "http-plans")]
+                CommandPhase::Preflight(_) | CommandPhase::Planned(_) => {
+                    if owner.pending != 0 || self.retirements.len() >= self.retirements.capacity() {
+                        return false;
+                    }
+                    if let CommandPhase::Planned(state) = &owner.phase {
+                        let Some(index) = self.plan_index.iter().position(|id| *id == command)
+                        else {
+                            return false;
+                        };
+                        self.plan_index.remove(index);
+                        self.reserved_contexts -= state.unissued();
+                    }
+                    let preflight = Preflight::new(&self.issuer, command, owner.generation);
+                    let token = HttpOwnerRetirement::new(preflight);
+                    owner.phase = CommandPhase::Retiring(token.clone());
+                    self.contexts
+                        .retain(|_, context| context.owner() != token.preflight().owner());
+                    self.retirements.push_back(token);
+                    return true;
+                }
+                #[cfg(feature = "http-plans")]
+                CommandPhase::Retiring(_) => return false,
+                CommandPhase::Context { .. } => {}
+            }
+        }
         self.forget_observer(command);
         if let Some(owner) = self.commands.remove(&command) {
             self.contexts.retain(|_, context| {
@@ -700,6 +958,7 @@ impl ContextRegistry {
                     }
             });
         }
+        true
     }
 }
 
@@ -711,6 +970,7 @@ impl<P> Cx<'_, P> {
         parent: &Context,
         policies: &[Policy],
     ) -> Result<Vec<Context>, Error> {
+        self.io.request_contexts.validate_legacy(parent)?;
         if policies.is_empty() {
             return Err(Error::Invalid);
         }
@@ -730,6 +990,29 @@ impl<P> Cx<'_, P> {
             .replace(parent, &delivery, first, policies, self.now)
     }
 
+    /// Abort an unreleased replacement child during its exact superseded
+    /// parent's callback. Normal old-parent completion stays revoked. This is
+    /// failure-only and grants no result, send, retry or success authority.
+    pub fn fail_replacement_context(
+        &mut self,
+        root: &Context,
+        child: &Context,
+        error: impl Into<VenueError>,
+    ) -> Result<(), Error> {
+        let Owner::Command { id, .. } = root.owner() else {
+            return Err(Error::Invalid);
+        };
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
+        let seal = self.io.request_contexts.seal_replacement_failure(
+            root,
+            child,
+            delivery,
+            self.now,
+            error.into(),
+        )?;
+        self.finish_sealed_command(id, None, seal)
+    }
+
     /// Capture the logical raw deadline and engine-owned owner/leg generation.
     /// This neither queues HTTP nor reserves admission, a transport or pacing.
     pub fn http_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
@@ -739,6 +1022,7 @@ impl<P> Cx<'_, P> {
     /// A new physical leg under the same logical authority. Preserve its exact
     /// raw deadline; integer timeout recomputation cannot round the bound up.
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
+        self.io.request_contexts.validate_legacy(parent)?;
         self.io.request_contexts.validate(parent, self.now)?;
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
@@ -784,6 +1068,7 @@ impl<P> Cx<'_, P> {
         context: &Context,
         evidence: RetryEvidence,
     ) -> Result<Context, Error> {
+        self.io.request_contexts.validate_legacy(context)?;
         if evidence == RetryEvidence::DefinitiveRefusal {
             return Err(Error::RetryForbidden);
         }
@@ -794,6 +1079,7 @@ impl<P> Cx<'_, P> {
     /// Check live issuance before presenting progress for already reserved work.
     /// This allocates nothing and grants no send, retry or completion rights.
     pub fn validate_http_context(&self, context: &Context) -> Result<(), Error> {
+        self.io.request_contexts.validate_legacy(context)?;
         self.io.request_contexts.validate(context, self.now)
     }
 
@@ -833,7 +1119,7 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .commands
             .get(&id)
-            .is_none_or(|owner| owner.completion_root != *root)
+            .is_none_or(|owner| owner.context_root() != Some(root))
         {
             return Err(Error::Revoked);
         }
@@ -863,7 +1149,7 @@ impl<P> Cx<'_, P> {
                 .request_contexts
                 .commands
                 .get(&id)
-                .is_none_or(|owner| owner.completion_root != *root)
+                .is_none_or(|owner| owner.context_root() != Some(root))
         {
             return Err(Error::Revoked);
         }
@@ -960,6 +1246,75 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         self.io.request_contexts.result(delivery, result)
+    }
+
+    /// Retain bounded native diagnostics/IDs when a delivered write ACK cannot
+    /// prove its effects. Fixed Internal/Unknown; no Store, retry or auth rights.
+    /// Capture runs only for the exact live, released, unresolved attempt.
+    pub fn http_write_unproven_result(
+        &mut self,
+        context: &Context,
+        capture: impl FnOnce(&mut crate::request_context::UnprovenEvidence),
+    ) -> Result<(), Error> {
+        self.validate_write_delivery_phase(context)?;
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context {
+            return Err(Error::Revoked);
+        }
+        self.io
+            .request_contexts
+            .unproven_writes(delivery)?
+            .unproven_native_result(delivery.attempt.request, capture)
+    }
+
+    /// Check normalized native facts before synchronous codec-selected effects.
+    /// This repeatable read-only check grants no send, retry or completion rights;
+    /// native decoding, row attribution and snapshot freshness remain separate.
+    pub fn validate_http_write_effects(&self, context: &Context) -> Result<(), Error> {
+        let (writes, request) = self.validate_http_write_record(context)?;
+        writes.validate_effects(request)
+    }
+
+    /// Exact response authority for synchronous nonfinancial terminal-row
+    /// housekeeping only. The codec must separately prove the captured rows were
+    /// already terminal and remain terminal on a validated native success reply.
+    /// Failed evidence never authorizes financial effects or native tombstones.
+    pub fn validate_http_write_housekeeping(&self, context: &Context) -> Result<(), Error> {
+        let (writes, request) = self.validate_http_write_record(context)?;
+        writes.validate_housekeeping(request)
+    }
+
+    fn validate_write_delivery_phase(&self, context: &Context) -> Result<(), Error> {
+        #[cfg(feature = "http-plans")]
+        if let Some(plan) = self.io.request_contexts.plan_from_context(context) {
+            return self.validate_plan_delivery(&plan, context);
+        }
+        self.validate_http_context(context)
+    }
+
+    fn validate_http_write_record(
+        &self,
+        context: &Context,
+    ) -> Result<(&CommandWrites, RequestId), Error> {
+        self.validate_write_delivery_phase(context)?;
+        if context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context {
+            return Err(Error::Revoked);
+        }
+        let Owner::Command { id, .. } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        let writes = self
+            .io
+            .request_contexts
+            .commands
+            .get(&id)
+            .and_then(|owner| owner.writes.as_ref())
+            .ok_or(Error::State)?;
+        Ok((writes, delivery.attempt.request))
     }
 
     /// Native reports are published centrally with the terminal logical legs.
@@ -1083,8 +1438,8 @@ impl<P> Cx<'_, P> {
     }
 
     /// One batch acknowledgement, items in caller order. The engine checks the
-    /// item count, joins accepted IDs and chooses Accepted, Rejected, KnownPartial
-    /// or Failed. `message` is the venue's existing text for a failed batch.
+    /// item count, joins accepted IDs and chooses Accepted, Rejected, KnownPartial,
+    /// PartialUnknown or Failed. `message` is the venue's existing text for a failed batch.
     pub fn http_write_batch(
         &mut self,
         context: &Context,
@@ -1139,7 +1494,6 @@ impl<P> Cx<'_, P> {
         context: &Context,
         intent: crate::classify::Intent,
     ) -> Result<(), Error> {
-        use crate::classify::Intent;
         self.io.request_contexts.validate(context, self.now)?;
         let Owner::Command { id, generation } = context.owner() else {
             return Err(Error::Invalid);
@@ -1151,35 +1505,9 @@ impl<P> Cx<'_, P> {
             .get_mut(&id)
             .filter(|owner| owner.generation == generation)
             .ok_or(Error::Revoked)?;
-        if owner
-            .leg_intents
-            .iter()
-            .any(|(leg, _)| *leg == context.leg())
-        {
-            return Err(Error::Duplicate);
+        if owner.prepare_leg_intent(context, intent)? {
+            owner.leg_intents.push((context.leg(), intent));
         }
-        if owner
-            .writes
-            .as_ref()
-            .is_some_and(|writes| writes.latest(context.leg()).is_some())
-        {
-            return Err(Error::State);
-        }
-        if owner.intent == Some(intent) && context.operation() == Operation::Mutation {
-            return Ok(());
-        }
-        let allowed = matches!(
-            (owner.intent, intent),
-            (Some(Intent::Amend), Intent::Place)
-                | (Some(Intent::Place), Intent::Cancel | Intent::Setting)
-        );
-        if !allowed || context.operation() != Operation::Mutation {
-            return Err(Error::Invalid);
-        }
-        if owner.leg_intents.len() >= CAPACITY {
-            return Err(Error::Capacity);
-        }
-        owner.leg_intents.push((context.leg(), intent));
         Ok(())
     }
 
@@ -1225,6 +1553,7 @@ impl<P> Cx<'_, P> {
     /// Command generation stays live until done/fail or its final bound expires.
     /// Expired current handles may retire; this grants no send/retry permission.
     pub fn finish_http_context(&mut self, context: &Context) -> Result<(), Error> {
+        self.io.request_contexts.validate_legacy(context)?;
         self.io.request_contexts.validate_handle(context)?;
         self.io.retire_http_leg(context);
         self.io.request_contexts.contexts.remove(&context.leg());
@@ -1237,6 +1566,206 @@ mod tests {
     use super::*;
     use crate::request_context::{Operation, RetryPolicy};
     use crate::{Notice, Store};
+
+    #[test]
+    fn native_unproven_public_capture_refuses_invalid_authority_before_callback() {
+        for case in 0..11 {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let mut mutation = policy();
+            mutation.operation = Operation::Mutation;
+            mutation.retry = RetryPolicy::DefinitiveRefusal;
+            let context = cx
+                .http_context(Scope::Command(7), mutation.clone())
+                .unwrap();
+            let request = RequestId(99);
+            cx.io
+                .request_contexts
+                .register_attempt(&context, request, 0.)
+                .unwrap();
+            if case != 1 {
+                *cx.io
+                    .request_contexts
+                    .release_flag(&context, request)
+                    .unwrap()
+                    .unwrap() = true;
+            }
+            cx.io.http_delivery = Some(Delivery {
+                context: context.clone(),
+                attempt: Attempt {
+                    request,
+                    generation: 100,
+                },
+            });
+            let mut argument = context.clone();
+            match case {
+                0 | 1 => {}
+                2 => {
+                    cx.io.http_delivery = None;
+                }
+                3 => {
+                    argument = cx.http_leg_context(&context, mutation.clone()).unwrap();
+                }
+                4 => {
+                    argument = ContextRegistry::default()
+                        .issue(1, Scope::Command(7), mutation.clone(), 0.)
+                        .unwrap();
+                }
+                5 => {
+                    cx.now = context.deadline();
+                }
+                6 => {
+                    cx.now = f64::NAN;
+                }
+                7 => {
+                    cx.io.request_contexts.contexts.remove(&context.leg());
+                }
+                8 => {
+                    cx.io
+                        .request_contexts
+                        .commands
+                        .get_mut(&7)
+                        .unwrap()
+                        .generation += 1;
+                }
+                9 => {
+                    cx.http_write_result(&context, WriteResult::Accepted { order_ids: vec![] })
+                        .unwrap();
+                }
+                10 => {
+                    cx.http_write_result(
+                        &context,
+                        WriteResult::Rejected(VenueError::new("refused")),
+                    )
+                    .unwrap();
+                    cx.http_replacement_contexts(&context, &[mutation]).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let mut captures = 0;
+            let result = cx.http_write_unproven_result(&argument, |e| {
+                captures += 1;
+                assert!(e.order_id("native"));
+            });
+            assert_eq!(result.is_ok(), case == 0, "case {case}");
+            assert_eq!(captures, usize::from(case == 0), "case {case}");
+            assert!(cx.io.pending.is_empty());
+            assert!(cx.io.actions.is_empty());
+            assert!(cx.io.timers.is_empty());
+        }
+    }
+
+    #[test]
+    fn effect_authority_is_bound_to_live_current_delivery_and_has_no_side_effects() {
+        for case in 0..10 {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let mut mutation = policy();
+            mutation.operation = Operation::Mutation;
+            mutation.retry = RetryPolicy::DefinitiveRefusal;
+            let context = cx
+                .http_context(Scope::Command(7), mutation.clone())
+                .unwrap();
+            let request = RequestId(99);
+            cx.io
+                .request_contexts
+                .register_attempt(&context, request, 0.)
+                .unwrap();
+            *cx.io
+                .request_contexts
+                .release_flag(&context, request)
+                .unwrap()
+                .unwrap() = true;
+            cx.io.http_delivery = Some(Delivery {
+                context: context.clone(),
+                attempt: Attempt {
+                    request,
+                    generation: 100,
+                },
+            });
+            cx.http_write_result(&context, WriteResult::Accepted { order_ids: vec![] })
+                .unwrap();
+            let mut argument = context.clone();
+            match case {
+                0 => {}
+                1 => {
+                    cx.io.http_delivery = None;
+                }
+                2 => {
+                    argument = cx.http_leg_context(&context, mutation.clone()).unwrap();
+                }
+                3 => {
+                    argument = ContextRegistry::default()
+                        .issue(1, Scope::Command(7), mutation, 0.)
+                        .unwrap();
+                }
+                4 => {
+                    cx.now = context.deadline();
+                }
+                5 => {
+                    cx.now = f64::NAN;
+                }
+                6 => {
+                    cx.io.request_contexts.contexts.remove(&context.leg());
+                }
+                7 => {
+                    cx.io
+                        .request_contexts
+                        .commands
+                        .get_mut(&7)
+                        .unwrap()
+                        .generation += 1;
+                }
+                8 => {
+                    cx.io.http_delivery.as_mut().unwrap().attempt.request = RequestId(100);
+                }
+                9 => {
+                    cx.done_context(&context, "done".into()).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let counts = (
+                cx.io.actions.len(),
+                cx.io.pending.len(),
+                cx.io.timers.len(),
+                cx.io.request_contexts.contexts.len(),
+                cx.io.request_contexts.commands.len(),
+            );
+            for _ in 0..2 {
+                assert_eq!(
+                    cx.validate_http_write_effects(&argument).is_ok(),
+                    case == 0,
+                    "case {case}"
+                );
+                assert_eq!(
+                    cx.validate_http_write_housekeeping(&argument).is_ok(),
+                    case == 0,
+                    "housekeeping case {case}"
+                );
+                assert_eq!(
+                    (
+                        cx.io.actions.len(),
+                        cx.io.pending.len(),
+                        cx.io.timers.len(),
+                        cx.io.request_contexts.contexts.len(),
+                        cx.io.request_contexts.commands.len()
+                    ),
+                    counts
+                );
+                assert!(!cx.store.hedged());
+            }
+        }
+    }
 
     #[test]
     fn child_contexts_keep_exact_parent_deadline_owner_and_no_transport_resources() {
