@@ -189,3 +189,18 @@ PR or CPU/memory/size claim; no full suite or CI dispatch was needed for this
 plan/test-only phase. Local logs stay outside Git:
 /tmp/codex-txflow-socket-original-controls.log and
 /tmp/codex-txflow-socket-native-controls.log.
+
+## Bounded request-owner review
+
+codex-hcmq3f cleared plan8b36a03daaa and original controls b007fe39387 after
+checking the full actual0418 diff, unchanged protected files, unfiltered HTTP/WS
+traces and owner execution logs. This was source/log inspection, with no
+independent test execution or production/performance clearance. It confirmed
+native roles, pacing/wire, receive-before-decode, startup independence,
+zero-private-obligation refresh and node-only account invalidation. #1883 retains
+only its docs/trading-test claim.
+
+The implementation must prove that refresh-due is consumed only when the existing
+native read/inflight owner accepts custody. Refused or partial handoff, admitted
+work retirement and stale wakes must preserve any newer due obligation. Shared
+API/custody review and production verification remain separate gates.
