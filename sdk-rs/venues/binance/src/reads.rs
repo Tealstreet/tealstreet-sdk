@@ -2,9 +2,9 @@
 use crate::{BinanceFutures, Credentials, Pending, Query};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::request_context::{
-    Context, Credential, Operation, Policy, RetryPolicy, Scope,
+    CommandEntryError, Context, Credential, Operation, Policy, RetryPolicy, Scope,
 };
-use safe_cex_engine::{CommandId, CredentialSlot, Cx, ErrorKind, Method, Venue, VenueError};
+use safe_cex_engine::{CredentialSlot, Cx, ErrorKind, Method, Venue, VenueError};
 
 pub(crate) struct Read {
     pub url: String,
@@ -26,13 +26,9 @@ fn policy(credential: Option<Credential>) -> Policy {
 impl BinanceFutures {
     pub(crate) fn read_context(
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
         credential: Option<Credential>,
-    ) -> Result<Context, VenueError> {
-        cx.http_context(Scope::Command(command), policy(credential))
-            .map_err(|_| {
-                VenueError::new("Binance read lifecycle is unavailable").kind(ErrorKind::Internal)
-            })
+    ) -> Result<Context, CommandEntryError> {
+        cx.admit_http_command(policy(credential))
     }
 
     pub(crate) fn background_read(
