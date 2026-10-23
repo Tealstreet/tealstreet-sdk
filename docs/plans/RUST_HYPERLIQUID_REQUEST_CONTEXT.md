@@ -304,7 +304,8 @@ without numeric completion or a fabricated owner. Cached lookup keeps precedence
 over ID validation, missing identity and the spot capability branch. Use a cached
 order index across admission and serialize the unchanged borrowed Order afterward;
 no clone, new result schema or venue finalizer is needed. Valid uncached perps
-lookups keep their existing REST path; spot uncached lookups keep their existing
+lookups retain the native public-only refusal or private REST path; the public-only
+refusal keeps its exact text even at full Context capacity. Spot uncached lookups keep their existing
 non-definitive local result. Neither gets a new unused Context.
 
 Files: history.rs, a new tests/request_context_cached_lookup.rs, this appendix,
