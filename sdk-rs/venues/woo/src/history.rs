@@ -7,6 +7,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, PageRow, RangeWalk, Step};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError, num};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -512,6 +513,18 @@ fn requested_symbol(raw: &str) -> String {
 }
 
 impl Woo {
+    fn fail_local_history(cx: &mut Cx<'_, Pending>, message: &str) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        let _ = cx.fail_context(&context, message);
+    }
     pub(crate) fn history_command(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -520,7 +533,7 @@ impl Woo {
     ) {
         let (route, symbol, order_id, kind, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(command, "WOO remote client order lookup is unsupported");
+                Self::fail_local_history(cx, "WOO remote client order lookup is unsupported");
                 return;
             }
             Query::Fills {
@@ -562,7 +575,7 @@ impl Woo {
             || from.zip(to).is_some_and(|(a, b)| a > b)
             || limit.is_some_and(|n| n == 0 || n > 100_000)
         {
-            cx.fail(command, "Invalid WOO history symbol, range or limit");
+            Self::fail_local_history(cx, "Invalid WOO history symbol, range or limit");
             return;
         }
         let complete = route == Route::Income && from.is_some() && to.is_some() && limit.is_none();
@@ -573,7 +586,7 @@ impl Woo {
         }) as usize;
         let window = (from, to.or(from.map(|_| cx.now)));
         if window.0.zip(window.1).is_some_and(|(a, b)| a > b) {
-            cx.fail(command, "Invalid WOO history range");
+            Self::fail_local_history(cx, "Invalid WOO history range");
             return;
         }
         let walk = if route == Route::Fills {
