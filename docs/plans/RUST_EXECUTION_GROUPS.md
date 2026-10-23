@@ -505,6 +505,18 @@ and `complete_execution`, and `waiters` is removed. Identity receipts use
   mutations need before they can be released. Confirm with dazzy3 whether
   ordinary Bybit adoption lands it first; if not, Hyro supplies only its own
   narrow codec through the same Venue hook.
+- Agreed with claude-dazzy3 (ordinary Bybit Plan, `feat/rust-bybit-plan-adoption`).
+  The split is the first branch of `trading.rs` `on_trade_command`. Their
+  `lib.rs` Venue arms match `Pending { then: Then::Trade(Request { call:
+  Call::Hyro(request), .. }) }` and delegate to four `hyro.rs` functions:
+  `hyro_reconciliation(&self, &Request) -> Result<ReconciliationData, Error>`,
+  `reconcile_hyro(&self, &mut Reconciliation, &ReconciliationData, Response)`
+  (dispatched on a Hyro marker in the data), `hyro_unproven_evidence(&self,
+  &Request, Response, &mut UnprovenEvidence)` and
+  `discard_hyro_command(&mut self, Owner)`. Both discard hooks run, each
+  guarded by owner. Until these exist the arms refuse (`Invalid`) or no-op.
+  The Hyro migration PR deletes the legacy branch, `send_hyro` and the
+  `Call::Hyro` arms (remove-before-master).
 - `RetryEvidence::ReconciledAbsence` and the execution journal touch
   `request_context.rs` / `request_context_registry.rs`, so the hook list goes to
   uufub4 before any edit.
