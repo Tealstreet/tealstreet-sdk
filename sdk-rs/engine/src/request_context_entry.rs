@@ -21,13 +21,17 @@ pub enum CommandWait {
     Expired,
 }
 
+/// Stamps kept before expired, uncarried ones are dropped.
+const WAIT_STAMPS: usize = 4096;
+
 /// The SDK's documented default caller wait, used when the host sends none.
 pub const DEFAULT_COMMAND_WAIT_MS: u32 = 120_000;
 /// The host's own bound on a caller wait.
 pub const MAX_COMMAND_WAIT_MS: u32 = 2_147_483_647;
 /// Absolute caller deadlines by command, each tied to the receipt that set it.
-/// Only a command's terminal removes its stamp, so an expired live or deferred
-/// command still reads `Expired`; storage is bounded by commands awaiting a reply.
+/// A held or deferred command's stamp leaves only with its own terminal, so it
+/// still reads `Expired`. Past capacity, expired stamps nothing carries are
+/// dropped: a venue that never answers cannot grow this without bound.
 #[derive(Default)]
 pub(super) struct Waits {
     stamps: HashMap<CommandId, (u64, f64)>,
@@ -85,11 +89,16 @@ impl Waits {
 
     /// Remove `command`'s stamp at its terminal. Inside its entry only that
     /// entry's own receipt may be removed, so a duplicate cannot clear it.
-    fn finish(&mut self, command: CommandId, entry_receipt: Option<Option<u64>>) {
+    /// Outside an entry, a stamp a held or deferred command still carries is
+    /// kept: that command has not run, so the terminal is another receipt's.
+    fn finish(&mut self, command: CommandId, entry_receipt: Option<Option<u64>>, carried: bool) {
         let matches = self
             .stamps
             .get(&command)
-            .is_some_and(|(receipt, _)| entry_receipt.is_none_or(|own| own == Some(*receipt)));
+            .is_some_and(|(receipt, _)| match entry_receipt {
+                Some(own) => own == Some(*receipt),
+                None => !carried,
+            });
         if matches {
             self.stamps.remove(&command);
         }
@@ -144,7 +153,37 @@ impl<P> Io<P> {
             .as_ref()
             .filter(|entry| entry.command == command)
             .map(|entry| entry.receipt);
-        self.command_waits.finish(command, entry);
+        let carried = self
+            .command_waits
+            .stamps
+            .get(&command)
+            .is_some_and(|(receipt, _)| self.carried_receipts().any(|held| held == *receipt));
+        self.command_waits.finish(command, entry, carried);
+    }
+
+    /// Receipts that held cancellations and deferred cancel-alls still carry.
+    fn carried_receipts(&self) -> impl Iterator<Item = u64> + '_ {
+        let held = self.placement_acks.receipts();
+        #[cfg(feature = "order-locks")]
+        let held = held.chain(self.order_locks.receipts());
+        held
+    }
+
+    /// Stamp one external receipt; past capacity, first drop expired stamps
+    /// that no held or deferred command carries.
+    pub(super) fn receive_command_wait(
+        &mut self,
+        command: CommandId,
+        deadline: Option<f64>,
+        now: f64,
+    ) {
+        if self.command_waits.stamps.len() >= WAIT_STAMPS {
+            let carried: Vec<u64> = self.carried_receipts().collect();
+            self.command_waits
+                .stamps
+                .retain(|_, (receipt, at)| *at > now || carried.contains(receipt));
+        }
+        self.command_waits.receive(command, deadline);
     }
     pub(super) fn end_command_entry(&mut self) {
         self.command_entry = None;

@@ -275,6 +275,11 @@ impl PlacementAcks {
         ready
     }
 
+    /// Caller-wait receipts the held commands carry.
+    pub fn receipts(&self) -> impl Iterator<Item = u64> + '_ {
+        self.held.iter().filter_map(|(.., receipt)| *receipt)
+    }
+
     /// Whether an earlier held write names the same order; it goes first.
     fn behind(&self, index: usize) -> bool {
         let command = &self.held[index].0;

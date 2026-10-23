@@ -162,6 +162,11 @@ impl OrderLocks {
         false
     }
 
+    /// Caller-wait receipts the deferred commands carry.
+    pub fn receipts(&self) -> impl Iterator<Item = u64> + '_ {
+        self.waiting.iter().filter_map(|(.., receipt)| *receipt)
+    }
+
     pub fn ready(&mut self) -> Vec<(Command, bool, Option<u64>)> {
         let mut ready = Vec::new();
         let uncertain = &self.uncertain;
