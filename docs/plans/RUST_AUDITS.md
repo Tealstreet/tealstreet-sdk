@@ -2219,3 +2219,14 @@ Native current-page facts remain local until complete validation; failed prefixe
 do not enter shared dedupe or output. Existing mixed-row diagnostics keep their
 timing and also supply the owner's missing-coverage fact. All-native strict
 refusals and consuming legacy signing setup remain separate.
+
+## Non-pageable history coverage ownership
+
+~~Kraken Spot, BreakoutProp and Hyperliquid Spot locally return [] for unsupported
+historical lists without declaring missing coverage.~~ Existing
+HistoryRows/Completion now owns these terminal results and emits an explicit
+command-scoped incomplete warning before the unchanged array payload. No row is
+staged or accepted and no native endpoint is fabricated. Public trades reject
+through Completion with typed pre-I/O Unsupported/NotSent, while lookup's
+nondefinitive contract remains separate. Hyperliquid perpetual history and all
+native trading/signing/account paths retain their existing behavior.
