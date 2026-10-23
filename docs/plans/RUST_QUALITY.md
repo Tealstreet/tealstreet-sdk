@@ -880,6 +880,24 @@ source/hash pins and growth/unrelated/pruned-parent negative controls. No rule,
 path or site-kind allowlist is added. Architecture gate: YES, consumers adopt the
 existing engine choke point. No all-venue completion or private parity claim.
 
+### Lighter synchronous cached Read Context controls
+
+Plan2a093966518 precedes original RED commit ffef6eaf580. Against actual732cf8
+production, five assertions fail: capacity for present/missing leverage and tier,
+plus invalid-clock leverage/tier; three compatibility controls pass. After the
+shared admission/terminal move all eight pass, retaining duplicate-owner isolation,
+all aliases/networks, finite recovery, no-I/O/no-Store publication, slot reuse and
+300 immediate completions without owner accumulation. Existing account_limits
+controls remain unchanged, including cached standard tier and SetAccountTier.
+Independent plan source/adversarial, caller and full-map reviews are CLEAN;
+architecture gate No: no new local capacity, clock, retry or completion mechanism.
+
+Cached-slice verification passes504 Lighter+Binance native tests (48 result groups),
+strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both request
+checks/14 controls. Actual e233cb05dfb is genuinely integrated; its incoming
+KuCoin/MEXC source and prunes are preserved. CI owns WASM/replay/size/timing;
+native success alone does not claim these broad gates or whole-venue closure.
+
 ## WOO family compiler throughput controls
 
 A plan and baseline named profile preceded the WOO-only compiler change.
