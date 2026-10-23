@@ -216,6 +216,13 @@ to landing as they merge. It is sequenced after #1773 (OKX), which rewrites
 `remoteSignerProvider.ts`, `hosted_signing.rs` and `construction-rules.json`,
 or coordinated with claude-4yjlw0.
 
+This plan narrows the design above. The `op` wire carries no `slot`, no `ops`
+batching and no `result` parts: one remote request is exactly one `Sign`
+operation, and the slot is resolved in Rust. The source gates below still
+check op count, order and dependencies on the engine-side `SignRequest`, so
+that a request that would need any of those features is refused before it
+leaves.
+
 **Scope.**
 - The additive versioned wire, the browser executor, recipe capability
   gating, and one versioned production recipe per non-HMAC format: EIP-712,
