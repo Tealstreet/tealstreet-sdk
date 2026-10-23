@@ -227,8 +227,11 @@ for #1852 and history.rs/tests/spot.rs for #1797; none belong to this slice.
 Only lib.rs, a new request_context_candles.rs test and the existing public candle
 fixture's shared prepared-action drain change, plus required shared appendices.
 
-Keep spot candles on their existing Pending::Candles path while tests/spot.rs is
-held. Use a distinct boxed ManagedCandles payload for perps; never store a runtime
+Keep both the standalone HyperliquidSpot instance and known merged spot markets
+on their existing Pending::Candles path while tests/spot.rs is held. Select this
+protocol boundary with self.spot and a pure market.is_spot==Some(true) lookup
+before admission; that lookup allocates no engine resource. Unknown symbols on a
+perps instance still use shared admission before native rejection. Use a distinct boxed ManagedCandles payload for perps; never store a runtime
 legacy-versus-Context authority switch inside one payload. The shared info sender
 and all spot numeric validation/completion expressions remain counted. Therefore
 this perps-only runtime cutover may remove zero lexical entries: preserve the
@@ -244,7 +247,8 @@ Extract only the pure existing candle JSON/time geometry into one helper reused
 by the old spot branch and new perps branch; preserve each old numeric expression
 verbatim to obey the shrink-only fingerprint rule. Preserve floor/clamp rules,
 limit default500/cap1500, from/to handling, raw coin/HIP-3 spelling, serialized
-field order and native main/test API-UI routes.
+field order and native REST api.hyperliquid.xyz / api.hyperliquid-testnet.xyz
+routes. Existing API-UI WS routes are unrelated and remain unchanged.
 
 Send POST /info with request_managed_with_headers using static ordered
 [("Content-Type","application/json")], unchanged body and no signer/credential.
@@ -265,7 +269,9 @@ retry, classifier, signer, auth, nonce or outcome algorithm is introduced.
 
 Original three assertion-RED controls are committed at 8fd78523f51; carry them
 with provenance onto this branch and rerun against actual legacy behavior before
-source. Extend controls first for failed incremental prefixes, original-bound
+source. At full capacity, even an invalid perps request must receive canonical
+Internal with outcomeNone before validation; normal native preflight metadata
+remains. Extend controls first for failed incremental prefixes, original-bound
 stream progress, input/capacity refusal, sibling isolation and native HIP-3 text.
 Allow exact current-page Cancel on retirement; forbid new Prepare/Bind/legacy
 HTTP. Keep existing public wire/schema assertions and every held spot assertion.
