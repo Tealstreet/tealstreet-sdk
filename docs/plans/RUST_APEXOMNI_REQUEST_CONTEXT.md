@@ -366,3 +366,90 @@ bans and both request-context checks. Independent source/adversarial, caller and
 full-map reviews must answer the architecture gate. No merge during the current
 MEXC/header-seam hold; genuinely integrate any newly landed shared engine seam
 and obtain fresh CI before a later venue window.
+
+
+## P0 write adoption, classifier pin 2026-10-23
+
+Audited actual source: `6741c1c6609437e32090c76745a56ca6c2262445`.
+This appendix supersedes the earlier draft WRITE API names. It is a plan and
+original-source regression specification; it does not migrate production code,
+close an audit row, prune inventory, or claim a managed signer is landed.
+
+### Reverified failures and native evidence
+
+| Classification audit row | Current source / trigger | Required caller result |
+| --- | --- | --- |
+| #5 | `src/lib.rs::api_response` recognizes code 20016/401 or any nonzero code whose message contains `sign`, before checking 408/5xx; `response` resends with legacy signing. | A released write with 408/5xx is Unknown and never earns a resend, including a signature-looking native body. |
+| #35 | `src/trading.rs::failure` leaves an unlisted numeric code with no outcome. | An unlisted code is explicitly Unknown, retains native code/message, and never proves refusal. |
+
+Existing numeric distinctions are 401 (AuthInvalid), 429 (RateLimited),
+20016 (signature refusal candidate), and success 0. There is no complete ApeX
+refusal table in current source. Move only independently justified existing
+codes into one `classify::CodeTable`: `success: &[Key::Int(0)]`, explicit
+`unlisted: Verdict::Unknown(None)`, and no bare-status refusal rows without a
+cited protocol guarantee. The old `contains("sign")` predicate is not native
+refusal evidence; do not turn it into a message row. Freeze the exact 20016
+refusal/resend mapping with the signer owner before implementation. Preserve
+native zkLink and primary/legacy HMAC bytes, never broaden retry eligibility.
+
+### Managed conversion and prerequisites
+
+1. After the signer/provider prerequisites (#1839/#1841), declare a genuine
+   command-owned Mutation with the real credential and immutable raw bound.
+   `admit_http_command(Policy)` is actual (#1830); queued preflight/multi-leg
+   commands still require the shared Plan/CallWindow admission design. No dummy
+   Read/Background context may authorize a write. Keep atomic native preflight,
+   entropy/ID allocation, virtual brackets and cancellation confirmation.
+2. Carry the exact Context through Pending and the managed signed request.
+   A native complete ID-bearing acknowledgement reports
+   `http_write_fact(ctx, WriteFact::Accepted { order_ids }, None)`. Decode the
+   integer code strictly, not through f64. A nominal success without a valid ID
+   reports `http_write_unproven`, not Accepted or an automatic retry.
+3. In the exact delivered callback, call `classify_write(ctx, &TABLE, native,
+   message)` and then `http_write_fact` with `WriteFact::Failed`, or use
+   `http_write_failure` for a whole failure. The engine supplies status, intent,
+   attempt provenance and 408/5xx precedence. Keep native code/message intact.
+   Only its opaque `ResendGrant` can feed `http_resend_context`; legacy signing
+   selection is a recipe input on that same logical leg and original deadline.
+4. Keep accepted sibling IDs as journal facts; use caller-ordered
+   `http_write_batch` only for a real single native batch acknowledgement.
+   Retain native stop/replacement sequencing and racing-fill sizing. Remove
+   `Job.effective` outcome demotion only with the full command journal adoption.
+   Narrow replacement Place intent with `http_write_leg_intent` when required.
+5. Complete once through `done_context`/`fail_context`; engine CommandWrites
+   aggregates prior releases, uncertain effects and reconciliation IDs. Never
+   call engine-test-only `http_write_result`, transitional `classify::write`,
+   local status ladders, text retries or a numeric completion fallback.
+
+Pre-release `request_context::Error::venue_error()` / preparation NotSent is
+valid for that attempt; a previously released sibling still determines the
+whole-command outcome. Released transport/integrity failures remain engine
+facts. Background session establishment belongs to claude-55ao7t; signer
+recipes and provider refs belong to claude-19pt8s. No production adoption in this
+slice until required shared seams actually land.
+
+### Original RED controls and acceptance
+
+Add isolated ignored contract tests to the unoccupied `tests/trading.rs` using
+its existing ready/order/request fixtures, without new test credentials. Run
+explicitly with `cargo test -p safe-cex-venue-apexomni --test trading
+p0_write_ -- --ignored --nocapture`. Each must compile and reach its behavioral
+assertion against the pinned original source: (a) a 500 + code 20016 signature
+body emits no resend; (b) an unlisted code returns Outcome::Unknown with its
+native code. The ignore reason declares the blocked adoption; remove the
+marker only in the eventual implementation, keeping assertions verbatim.
+
+Future GREEN controls also cover 408/503 signature bodies; documented 20016
+refusal permits at most one grant; malformed/empty/contradictory success cannot
+accept; retry grant from a sibling, old attempt or expired root is refused;
+earlier accepted IDs survive later refusal/timeout; duplicate/late callbacks
+produce one terminal; preparation failure after an earlier write does not
+claim the whole command NotSent. Recheck exact legacy fingerprints from the
+frozen inventory above at implementation time and prune only disappeared ApeX
+entries. This plan/tests slice prunes none and adds no CALLERS landed claim.
+
+Independent architecture gate: adoption must remain native codec facts plus
+engine policy. Any missing reusable admission, signing or retry mechanism is a
+shared prerequisite, never a second venue implementation. Implementation
+validation remains venue + Binance tests, scoped strict Clippy/fmt, bans, both
+request-context ratchets and exact-head CI; no local replay/timing sweep.
