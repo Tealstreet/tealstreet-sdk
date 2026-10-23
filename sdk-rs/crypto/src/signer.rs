@@ -2,11 +2,11 @@
 //! This module alone owns key material; engine/venue state receives opaque refs.
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
-    Algorithm, CredentialSetupPolicy, Encoding, Identities, Identity, KeyRef, Operation,
+    Algorithm, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef, Operation,
     PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
 use sha2::{Digest, Sha256, Sha512};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use zeroize::Zeroizing;
 mod key_material;
 pub use key_material::KeyEncoding;
@@ -32,6 +32,43 @@ pub struct LocalIdentity {
     pub secret_encoding: KeyEncoding,
     #[serde(default)]
     pub trim_credential: bool,
+    /// Declared extra signing material, e.g. ApeX's zkLink seed.
+    #[serde(default)]
+    pub extra: LocalExtras,
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalExtra {
+    pub value: Secret,
+    #[serde(default)]
+    pub encoding: KeyEncoding,
+}
+/// Duplicate names are refused rather than silently keeping one value.
+#[derive(Default)]
+pub struct LocalExtras(pub BTreeMap<ExtraKey, LocalExtra>);
+impl<'de> serde::Deserialize<'de> for LocalExtras {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = LocalExtras;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("extra signing material by name")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<LocalExtras, A::Error> {
+                let mut extras = BTreeMap::new();
+                while let Some((key, value)) = map.next_entry::<ExtraKey, LocalExtra>()? {
+                    if extras.insert(key, value).is_some() {
+                        return Err(serde::de::Error::custom("duplicate extra name"));
+                    }
+                }
+                Ok(LocalExtras(extras))
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
 }
 #[derive(Default)]
 pub struct Secret(Zeroizing<String>);
@@ -55,6 +92,7 @@ struct DecodedIdentity {
     secret: Zeroizing<Vec<u8>>,
     passphrase: Option<Zeroizing<Vec<u8>>>,
     stable_id: Option<String>,
+    extra: Vec<(ExtraKey, Zeroizing<Vec<u8>>)>,
 }
 impl DecodedIdentity {
     fn decode(identity: LocalIdentity) -> Result<Self, SignError> {
@@ -83,7 +121,16 @@ impl DecodedIdentity {
                 .map(|value| key_material::decode(value, KeyEncoding::Utf8))
                 .transpose()?,
             stable_id: identity.stable_id,
+            extra: identity
+                .extra
+                .0
+                .into_iter()
+                .map(|(name, extra)| Ok((name, key_material::decode(extra.value, extra.encoding)?)))
+                .collect::<Result<_, SignError>>()?,
         })
+    }
+    fn extra_ref(slot: &str, name: ExtraKey) -> KeyRef {
+        KeyRef(format!("{slot}.extra.{}", name.name()))
     }
     fn references(&self, slot: &str) -> Identity {
         Identity {
@@ -102,6 +149,12 @@ impl DecodedIdentity {
                 .as_ref()
                 .map(|_| KeyRef(format!("{slot}.passphrase"))),
             stable_id: self.stable_id.clone(),
+            extra: self
+                .extra
+                .iter()
+                .filter(|(_, bytes)| !bytes.is_empty())
+                .map(|(name, _)| (*name, Self::extra_ref(slot, *name)))
+                .collect(),
         }
     }
     fn install(self, signer: &mut LocalSigner, slot: &str) {
@@ -119,6 +172,11 @@ impl DecodedIdentity {
             signer
                 .keys
                 .insert(KeyRef(format!("{slot}.passphrase")), passphrase);
+        }
+        for (name, bytes) in self.extra {
+            if !bytes.is_empty() {
+                signer.keys.insert(Self::extra_ref(slot, name), bytes);
+            }
         }
     }
 }
@@ -157,10 +215,13 @@ impl LocalSigner {
             (&mut setup.primary, policy.primary),
             (&mut setup.secondary, policy.secondary),
         ] {
-            if let Some(identity) = identity
-                && let Some(trim) = rule.and_then(|rule| rule.trim_credential)
-            {
-                identity.trim_credential = trim;
+            if let Some(identity) = identity {
+                if let Some(trim) = rule.and_then(|rule| rule.trim_credential) {
+                    identity.trim_credential = trim;
+                }
+                if let Some(encoding) = rule.and_then(|rule| rule.secret_encoding) {
+                    identity.secret_encoding = encoding;
+                }
             }
         }
         let primary = setup.primary.map(DecodedIdentity::decode).transpose()?;
@@ -177,13 +238,20 @@ impl LocalSigner {
             (primary.as_ref(), validation.primary.as_mut()),
             (secondary.as_ref(), validation.secondary.as_mut()),
         ] {
-            if let (Some(material), Some(identity)) = (material, identity)
-                && material
+            if let (Some(material), Some(identity)) = (material, identity) {
+                if material
                     .passphrase
                     .as_ref()
                     .is_some_and(|bytes| bytes.is_empty())
-            {
-                identity.passphrase = Some(KeyRef(String::new()));
+                {
+                    identity.passphrase = Some(KeyRef(String::new()));
+                }
+                // Supplied-but-empty extras stay visible to declaration checks.
+                for (name, bytes) in &material.extra {
+                    if bytes.is_empty() {
+                        identity.extra.insert(*name, KeyRef(String::new()));
+                    }
+                }
             }
         }
         policy.apply_to_identities(&mut validation, public_data_only)?;
@@ -352,6 +420,18 @@ impl LocalSigner {
                             hash.update(key);
                             hash.finalize().to_vec()
                         }
+                        #[cfg(feature = "zklink")]
+                        Algorithm::ZkLinkContract => {
+                            if key.len() != 65 || message.len() != 36 {
+                                return Err(SignError::InvalidRequest);
+                            }
+                            crate::zklink::sign(key, &message)
+                                .map_err(|_| SignError::InvalidRequest)?
+                                .signature
+                                .to_vec()
+                        }
+                        #[cfg(not(feature = "zklink"))]
+                        Algorithm::ZkLinkContract => return Err(SignError::Unsupported),
                         // Vocabulary is not a claim that the local provider implements it.
                         Algorithm::Ed25519
                         | Algorithm::Es256
@@ -926,6 +1006,163 @@ mod tests {
         assert_eq!(
             SignError::Refused.to_string(),
             "Signing provider refused the request"
+        );
+    }
+
+    fn zklink_policy() -> CredentialSetupPolicy {
+        use safe_cex_engine::signing::{IdentitySetupPolicy, SetupFieldPolicy};
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                secret_encoding: Some(KeyEncoding::Base64Text),
+                extra: Some(safe_cex_engine::signing::ExtraKeyPolicy {
+                    key: ExtraKey::ZklinkSeed,
+                    field: SetupFieldPolicy::RequiredForPrivate,
+                }),
+                ..Default::default()
+            }),
+            secondary: None,
+        }
+    }
+    fn zklink_case() -> (String, Vec<u8>, String) {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/zklink/npm-wasm.json")).unwrap();
+        let case = &corpus["cases"][0];
+        let hex = |value: &str| value.trim_start_matches("0x").to_owned();
+        (
+            hex(case["seed"].as_str().unwrap()),
+            (0..36)
+                .map(|i| {
+                    u8::from_str_radix(
+                        &hex(case["payload"].as_str().unwrap())[i * 2..i * 2 + 2],
+                        16,
+                    )
+                    .unwrap()
+                })
+                .collect(),
+            case["signed"]["signature"]["signature"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        )
+    }
+    fn zklink_setup(seed: &str) -> String {
+        format!(
+            r#"{{"primary":{{"key":"apex-key","secret":"apex-secret","extra":{{"zklinkSeed":{{"value":"{seed}","encoding":"hex"}}}}}}}}"#
+        )
+    }
+    fn zklink_request(key: KeyRef, payload: Vec<u8>) -> SignRequest {
+        SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::ZkLinkContract,
+                key,
+                payload: vec![PayloadPart::Bytes { bytes: payload }],
+            }],
+        }
+    }
+
+    #[test]
+    fn declared_base64_text_encoding_matches_independent_node_hmac() {
+        // Node: createHmac('sha256', Buffer.from('apex-secret').toString('base64')).
+        let (seed, _, _) = zklink_case();
+        let (signer, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let primary = ids.primary.unwrap();
+        let request = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: primary.signing.clone(),
+                payload: vec![PayloadPart::Bytes {
+                    bytes: b"1700000000000GET/api/v3/account".to_vec(),
+                }],
+            }],
+        };
+        assert_eq!(
+            crate::hex(&signer.sign_now(&request).unwrap().values[0]),
+            "754e7df89fca47eee8f6c2458bb820526604226248620adb40045b6b003d6ad0"
+        );
+        assert_eq!(signer.key(&primary.signing).unwrap(), b"YXBleC1zZWNyZXQ=");
+    }
+
+    #[test]
+    fn zklink_extra_ref_is_installed_only_where_declared_and_redacted() {
+        let (seed, _, _) = zklink_case();
+        let (_, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let primary = ids.primary.unwrap();
+        assert_eq!(
+            primary.extra.get(&ExtraKey::ZklinkSeed),
+            Some(&KeyRef("primary.extra.zklinkSeed".into()))
+        );
+        assert_eq!(
+            primary.stable_id, None,
+            "extra material never becomes an identity"
+        );
+        let serialized = serde_json::to_string(&primary).unwrap();
+        assert!(!serialized.contains(&seed[..16]) && serialized.contains("zklinkSeed"));
+        // Undeclared, duplicate, unknown and required-but-missing extras refuse.
+        assert_eq!(
+            LocalSigner::from_json(zklink_setup(&seed)).err(),
+            Some(SignError::InvalidRequest)
+        );
+        let duplicate = zklink_setup(&seed).replace(
+            r#""encoding":"hex"}}"#,
+            &format!(r#""encoding":"hex"}},"zklinkSeed":{{"value":"{seed}"}}}}"#),
+        );
+        assert!(LocalSigner::from_json_with_policy(duplicate, zklink_policy()).is_err());
+        let unknown = zklink_setup(&seed).replace("zklinkSeed", "l1Wallet");
+        assert!(LocalSigner::from_json_with_policy(unknown, zklink_policy()).is_err());
+        let missing = r#"{"primary":{"key":"apex-key","secret":"apex-secret"}}"#.to_owned();
+        assert_eq!(
+            LocalSigner::from_json_with_policy(missing.clone(), zklink_policy()).err(),
+            Some(SignError::InvalidRequest)
+        );
+        assert!(
+            LocalSigner::from_json_with_policy_and_mode(missing, zklink_policy(), true).is_ok(),
+            "public mode bypasses only the primary requirement"
+        );
+        let empty = zklink_setup("");
+        assert!(LocalSigner::from_json_with_policy(empty, zklink_policy()).is_err());
+    }
+
+    #[cfg(feature = "zklink")]
+    #[test]
+    fn zklink_contract_matches_npm_vector_with_exact_lengths() {
+        let (seed, payload, expected) = zklink_case();
+        let (signer, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let key = ids.primary.unwrap().extra[&ExtraKey::ZklinkSeed].clone();
+        let request = zklink_request(key.clone(), payload.clone());
+        let result = signer.sign_now(&request).unwrap();
+        request.validate_result(&result).unwrap();
+        assert_eq!(crate::hex(&result.values[0]), expected);
+        for bad in [payload[..35].to_vec(), [payload.clone(), vec![0]].concat()] {
+            assert_eq!(
+                signer.sign_now(&zklink_request(key.clone(), bad)),
+                Err(SignError::InvalidRequest)
+            );
+        }
+        let mut short = LocalSigner::new();
+        short.insert(key.clone(), vec![1; 64]);
+        assert_eq!(
+            short.sign_now(&zklink_request(key, payload)),
+            Err(SignError::InvalidRequest)
+        );
+    }
+
+    #[cfg(not(feature = "zklink"))]
+    #[test]
+    fn zklink_contract_is_unsupported_without_the_feature() {
+        let (seed, payload, _) = zklink_case();
+        let (signer, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let key = ids.primary.unwrap().extra[&ExtraKey::ZklinkSeed].clone();
+        assert_eq!(
+            signer.sign_now(&zklink_request(key, payload)),
+            Err(SignError::Unsupported)
         );
     }
 }
