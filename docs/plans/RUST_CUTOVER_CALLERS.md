@@ -5629,28 +5629,6 @@ uncached spot miss, public-only perps refusal and private perps REST lookup reta
 their native behavior. The exchange-server order reconciliation caller consumes
 the same complete cached result and must retain non-definitive miss handling.
 
-
-## Managed subscription handoff before native reads
-
-OKX private reconnect account refreshes begin on a subsequent engine ingress
-following the handoff of their required subscription frames. The shared
-`set_socket_interests_then` API binds native Pending work to the current epoch
-and exact required interests. It waits for every paced batch and outstanding
-socket signature before arming an ordinary engine timer after final fencing.
-This establishes host handoff order; it promises neither peer acknowledgement
-nor a later JavaScript event-loop turn. Custom hosts must process the returned
-actions in order and deliver timer events through ordinary engine ingress.
-
-A committed removal or wire change cancels the dependent work. Unrelated
-additions preserve it behind the new revision; a refused replacement preserves
-still-needed work on the unchanged committed revision. Retirement, expiry,
-stale timers and duplicate delivery cannot issue its read. The callback has no
-borrowed HTTP delivery, command-entry, order-response or Plan activation token;
-reads retain their existing admission, signing, timeout and completion rules.
-
-The JS host removes inline-fired timer handles and ignores callbacks belonging
-to a cleared or superseded timer arm. Bitunix keeps its existing legacy socket
-boundary and its remove-before-master obligation.
 ## KuCoin synchronous local Read terminals
 
 Spot query credential refusal still precedes kind, cache and parameter handling.
@@ -5778,3 +5756,26 @@ Caller-visible changes:
   empty. claude-6mg5na confirmed tealstreet-next neither reads nor keys on the
   Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
   caller migration.
+
+
+## Managed subscription handoff before native reads
+
+OKX private reconnect account refreshes begin on a subsequent engine ingress
+following the handoff of their required subscription frames. The shared
+`set_socket_interests_then` API binds native Pending work to the current epoch
+and exact required interests. It waits for every paced batch and outstanding
+socket signature before arming an ordinary engine timer after final fencing.
+This establishes host handoff order; it promises neither peer acknowledgement
+nor a later JavaScript event-loop turn. Custom hosts must process the returned
+actions in order and deliver timer events through ordinary engine ingress.
+
+A committed removal or wire change cancels the dependent work. Unrelated
+additions preserve it behind the new revision; a refused replacement preserves
+still-needed work on the unchanged committed revision. Retirement, expiry,
+stale timers and duplicate delivery cannot issue its read. The callback has no
+borrowed HTTP delivery, command-entry, order-response or Plan activation token;
+reads retain their existing admission, signing, timeout and completion rules.
+
+The JS host removes inline-fired timer handles and ignores callbacks belonging
+to a cleared or superseded timer arm. Bitunix keeps its existing legacy socket
+boundary and its remove-before-master obligation.
