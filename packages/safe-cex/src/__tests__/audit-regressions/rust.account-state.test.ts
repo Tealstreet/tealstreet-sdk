@@ -126,7 +126,9 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
     httpFailed: idle,
     timer: idle,
     command: (json) => {
-      const command = JSON.parse(json);
+      // The caller wait is engine receipt metadata (pinned by the host tests),
+      // not part of the native command these regressions compare.
+      const { timeoutMs: _wait, ...command } = JSON.parse(json);
       commands.push(command);
       return command.command === undefined
         ? '[]'

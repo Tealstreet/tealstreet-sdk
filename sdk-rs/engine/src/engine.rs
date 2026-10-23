@@ -535,8 +535,10 @@ pub enum VenueAction {
 }
 
 /// The shared rejection for a venue action the venue does not implement.
+const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this venue";
+
 pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
-    cx.fail(command, "This action is not supported on this venue");
+    cx.fail(command, UNSUPPORTED_VENUE_ACTION);
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -849,6 +851,9 @@ mod command_entry_tests;
 #[cfg(test)]
 #[path = "command_wait_tests.rs"]
 mod command_wait_tests;
+#[cfg(test)]
+#[path = "read_root_expiry_tests.rs"]
+mod read_root_expiry_tests;
 
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
@@ -889,6 +894,8 @@ struct PendingHttp<P> {
     auth: Option<ReadAuth>,
 }
 
+#[path = "read_root_expiry.rs"]
+mod read_root_expiry;
 #[path = "request_context_registry.rs"]
 mod request_context_registry;
 
@@ -1481,10 +1488,18 @@ struct Io<P> {
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
     execution_timer: Option<(TimerId, f64)>,
+    /// Tracked caller-wait Read roots: (deadline, command, generation).
+    /// Preallocated to owner capacity so tracking never allocates.
+    read_roots: Vec<(f64, CommandId, u64, TimerId)>,
+    read_roots_expiring: bool,
+    /// Action capacity right after the sweep's reservation, for tests.
+    #[cfg(test)]
+    read_root_sweep_capacity: Option<usize>,
     public_feed_policy: PublicFeedPolicy,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
+    session_waits: request_context_registry::session::Waits<P>,
     signing: crate::signing_dispatch::Dispatch,
     protocol_clock: crate::protocol_clock::ProtocolClock,
     signer: Option<crate::signing::Provider>,
@@ -1522,13 +1537,17 @@ struct Io<P> {
     #[cfg(feature = "managed-sockets")]
     socket_effects: std::collections::VecDeque<crate::socket_driver::Effect>,
     #[cfg(feature = "managed-sockets")]
-    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal>,
+    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal<P>>,
     #[cfg(feature = "managed-sockets")]
     socket_proposal_bytes: usize,
     #[cfg(feature = "managed-sockets")]
     socket_proposal_next: u64,
     #[cfg(feature = "managed-sockets")]
     socket_after: std::collections::VecDeque<(crate::socket_lifecycle::Epoch, String)>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuations: std::collections::VecDeque<managed_sockets::Continuation<P>>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuation_bytes: usize,
 }
 
 impl<P> Default for Io<P> {
@@ -1565,10 +1584,15 @@ impl<P> Default for Io<P> {
             actions: Vec::new(),
             placement_acks: Default::default(),
             execution_timer: None,
+            read_roots: Vec::with_capacity(256),
+            read_roots_expiring: false,
+            #[cfg(test)]
+            read_root_sweep_capacity: None,
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
             pending: HashMap::new(),
             signatures: Vec::new(),
+            session_waits: Default::default(),
             signing: Default::default(),
             protocol_clock: Default::default(),
             signer: None,
@@ -1608,6 +1632,10 @@ impl<P> Default for Io<P> {
             socket_proposal_next: 0,
             #[cfg(feature = "managed-sockets")]
             socket_after: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuations: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuation_bytes: 0,
         }
     }
 }
@@ -2405,6 +2433,7 @@ impl<P> Cx<'_, P> {
             self.io.http_owner_poison = true;
             panic!("HTTP owner retirement bookkeeping failed");
         }
+        self.io.untrack_read_root(command);
         #[cfg(feature = "order-locks")]
         {
             if write_sealed
@@ -2536,6 +2565,17 @@ pub trait Venue {
     /// has sealed and retired it. No Store, response or completion authority.
     fn discard_unproven_http_command(&mut self, _owner: crate::request_context::Owner) {}
 
+    /// The engine retired this tracked Read root at its deadline. `pending`
+    /// holds the continuations of its outstanding requests, already discarded
+    /// from transport. Drop them and any queued continuation for `owner`; the
+    /// engine seals the command itself. No Cx: no completion, send or Store.
+    fn read_root_retired(
+        &mut self,
+        _owner: crate::request_context::Owner,
+        _pending: Vec<Self::Pending>,
+    ) {
+    }
+
     /// Discard only continuation state matching this exact retired generation.
     /// This cleanup hook has no Store, response, command or I/O authority.
     #[cfg(feature = "http-plans")]
@@ -2608,6 +2648,22 @@ pub trait Venue {
         _cx: &mut Cx<'_, Self::Pending>,
         _symbols: Option<&[String]>,
     ) {
+    }
+
+    /// A session waiter reached its owner's original deadline before the venue
+    /// drained it. Nothing was sent for that owner.
+    fn on_session_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        self.on_http_preparation_failed(
+            cx,
+            pending,
+            crate::request_context::Error::TimedOut,
+            error,
+        );
     }
 
     /// Defer symbol cancellation until placement native identities are known.
@@ -2696,6 +2752,15 @@ pub trait Venue {
         _event: crate::socket_lifecycle::LifecycleEvent,
     ) -> Result<(), crate::socket_lifecycle::SocketError> {
         Err(crate::socket_lifecycle::SocketError::NotPermitted)
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn on_socket_interests_released(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _epoch: crate::socket_lifecycle::Epoch,
+        _pending: Self::Pending,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Ok(())
     }
     #[cfg(feature = "managed-sockets")]
     fn encode_socket_interests(
@@ -3040,6 +3105,7 @@ impl<V: Venue> Engine<V> {
         update: PublicFeedUpdate,
     ) -> Result<(), &'static str> {
         self.assert_live();
+        self.expire_read_roots(now);
         if self.public_feed_policy() != PublicFeedPolicy::Shared {
             return Err("publicFeedUpdate requires shared public feed policy");
         }
@@ -3233,6 +3299,7 @@ impl<V: Venue> Engine<V> {
     pub fn start(&mut self, now: f64) {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
         if std::mem::replace(&mut self.started, true) {
             return;
         }
@@ -3251,6 +3318,10 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        // A poisoned engine traps before any expiry cleanup; then a due root
+        // is sealed before this receipt can find it still live.
+        self.assert_live();
+        self.expire_read_roots(now);
         // An external command receipt gets the SDK default caller wait.
         if let Event::Command(command) = &event
             && let Some(id) = command.completion_id()
@@ -3278,6 +3349,8 @@ impl<V: Venue> Engine<V> {
         }
         let deadline = command_entry::wait_deadline(now, wait_ms)
             .ok_or(crate::request_context::Error::Invalid)?;
+        self.assert_live();
+        self.expire_read_roots(now);
         if let Some(id) = command.completion_id() {
             self.io.receive_command_wait(id, Some(deadline), now);
         }
@@ -3289,6 +3362,12 @@ impl<V: Venue> Engine<V> {
     fn handle_received(&mut self, now: f64, event: Event<'_>) {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
+        if let Event::TimerFired { timer } = &event
+            && self.io.read_root_timer(*timer, now)
+        {
+            return;
+        }
         self.process_socket_work(now);
         self.io.http_responses.prune(now);
         // Expired observers detach before any delivery can project to them.
@@ -3400,9 +3479,9 @@ impl<V: Venue> Engine<V> {
         if !released.is_empty() {
             // A nested release (order-lock `ready` re-entering `handle`) keeps the flag.
             let was_releasing = std::mem::replace(&mut self.releasing, true);
-            self.io
-                .command_waits
-                .batch(released.iter().map(|(_, receipt)| *receipt));
+            for (_, receipt) in &released {
+                self.io.command_waits.batch(*receipt);
+            }
             for (command, receipt) in released {
                 let carried = command.completion_id().map(|id| (id, receipt));
                 let outer = self.io.command_waits.carry(carried);
@@ -3718,17 +3797,15 @@ impl<V: Venue> Engine<V> {
             Event::Command(Command::FetchAccount { command })
                 if self.venue.capabilities().account == AccountLookup::Unsupported =>
             {
-                cx.refuse_before_entry(command, |cx| unsupported_venue_action(cx, command));
+                cx.refuse_before_entry(command, UNSUPPORTED_VENUE_ACTION);
             }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.capabilities().amend_with_symbol =>
             {
-                cx.refuse_before_entry(command, |cx| {
-                    cx.fail(
-                        command,
-                        "symbol-aware amendment is unsupported by this venue",
-                    )
-                });
+                cx.refuse_before_entry(
+                    command,
+                    "symbol-aware amendment is unsupported by this venue",
+                );
             }
             Event::Command(command) => {
                 #[cfg(feature = "order-locks")]
@@ -3774,7 +3851,7 @@ impl<V: Venue> Engine<V> {
                             }
                             _ => "Order amendment or cancellation is already in flight",
                         };
-                        cx.refuse_before_entry(id, |cx| cx.fail(id, error));
+                        cx.refuse_before_entry(id, error);
                         return;
                     }
                 }
@@ -3793,9 +3870,7 @@ impl<V: Venue> Engine<V> {
                         _ => None,
                     };
                     if let Some(command) = unsupported {
-                        cx.refuse_before_entry(command, |cx| {
-                            cx.fail(command, "Options are not enabled on this account")
-                        });
+                        cx.refuse_before_entry(command, "Options are not enabled on this account");
                         return;
                     }
                 }
@@ -3852,9 +3927,9 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "order-locks")]
         let ready = self.io.order_locks.ready();
         #[cfg(feature = "order-locks")]
-        self.io
-            .command_waits
-            .batch(ready.iter().map(|(.., receipt)| *receipt));
+        for (.., receipt) in &ready {
+            self.io.command_waits.batch(*receipt);
+        }
         #[cfg(feature = "order-locks")]
         for (command, failed, receipt) in ready {
             let carried = command.completion_id().map(|id| (id, receipt));
@@ -3868,12 +3943,10 @@ impl<V: Venue> Engine<V> {
                     store: &mut self.store,
                     io: &mut self.io,
                 };
-                cx.refuse_before_entry(command, |cx| {
-                    cx.fail(
-                        command,
-                        "Placement outcome is uncertain; reconcile before cancel-all",
-                    )
-                });
+                cx.refuse_before_entry(
+                    command,
+                    "Placement outcome is uncertain; reconcile before cancel-all",
+                );
             } else {
                 if let Some(id) = command.completion_id() {
                     self.io.active_commands.remove(&id);
@@ -4117,7 +4190,22 @@ impl<V: Venue> Engine<V> {
                     cx.store,
                     &mut cx.io.actions,
                 );
+                // Session writes skip the journaled collector, so expose the
+                // reply metadata the write classifier reads during this callback.
+                let session_write = cx.io.http_delivery.as_ref().is_some_and(|delivery| {
+                    delivery.context.operation() == crate::request_context::Operation::Mutation
+                        && matches!(
+                            delivery.context.owner(),
+                            crate::request_context::Owner::Session { .. }
+                        )
+                });
+                if session_write {
+                    cx.io.http_write_reply = Some((response.status, response.headers.to_owned()));
+                }
                 self.venue.on_response(&mut cx, pending.value, response);
+                if session_write {
+                    cx.io.http_write_reply = None;
+                }
             }
             Err(_) => {
                 let make_failure = || malformed_body("response body is not UTF-8");
@@ -4409,6 +4497,7 @@ impl<V: Venue> Engine<V> {
 
     pub fn prepare_dispatch(&mut self, now: f64) {
         self.assert_live();
+        self.expire_read_roots(now);
         self.flush_http_owner_retirements();
         self.io.dispatch_now = now;
         self.flush_http_plans(now);
@@ -4621,6 +4710,8 @@ impl<V: Venue> Engine<V> {
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
         self.assert_live();
+        // No clock here: the last observed engine time, never a wall clock.
+        self.expire_read_roots(self.io.dispatch_now);
         self.flush_http_plans(self.io.dispatch_now);
         self.flush_http_owner_retirements();
         self.io.assert_actions_safe();
@@ -4653,6 +4744,11 @@ impl<V: Venue> Engine<V> {
         self.flush_http_owner_retirements();
         self.assert_live();
         self.io.assert_actions_safe();
+        #[cfg(feature = "managed-sockets")]
+        if !self.io.socket_continuations.is_empty() {
+            self.arm_socket_continuations(self.io.dispatch_now);
+            self.io.assert_actions_safe();
+        }
         self.io.actions.drain(..)
     }
 
@@ -4682,6 +4778,7 @@ impl<V: Venue> Engine<V> {
     /// this method deliberately leaves the stream's baseline untouched.
     pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
+        self.expire_read_roots(now);
         let buffer = std::mem::take(&mut self.io.snapshot);
         let mut w = FrameWriter::new(buffer, now);
         let everything = self.store.everything();
@@ -4705,6 +4802,7 @@ impl<V: Venue> Engine<V> {
     /// changes, queued events or public stream baselines.
     pub fn account_snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
+        self.expire_read_roots(now);
         let buffer = std::mem::take(&mut self.io.snapshot);
         let mut writer = FrameWriter::new(buffer, now);
         self.store
@@ -4719,6 +4817,7 @@ impl<V: Venue> Engine<V> {
     /// frame. Returns `None` when nothing changed.
     pub fn take_frame(&mut self, now: f64) -> Option<&[u8]> {
         self.assert_live();
+        self.expire_read_roots(now);
         self.write_frame(now, true)
     }
 
@@ -4728,6 +4827,7 @@ impl<V: Venue> Engine<V> {
     /// travel with the orders they belong to.
     pub fn take_market_frame(&mut self, now: f64) -> Option<&[u8]> {
         self.assert_live();
+        self.expire_read_roots(now);
         self.write_frame(now, false)
     }
 

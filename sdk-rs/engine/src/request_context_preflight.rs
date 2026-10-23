@@ -55,6 +55,7 @@ impl ContextRegistry {
                 mutation_declared,
                 pending: 0,
                 deliveries: 0,
+                waits: 0,
                 intent: self
                     .dispatch
                     .filter(|(id, _)| *id == command)
@@ -157,6 +158,34 @@ impl<P> Cx<'_, P> {
             PreflightPurpose::WriteAfterReads => Operation::Mutation,
         };
         self.with_command_entry(operation, |cx, command| cx.issue_preflight(command, policy))
+    }
+
+    /// Opt into the exact caller receipt cap before asynchronous Read work.
+    /// Missing receipt uses the shared typed refusal. Expired capture is Revoked
+    /// without effects; Fresh custody remains for reject_expired_command(Read).
+    pub fn begin_preflight_with_command_wait(
+        &mut self,
+        policy: PreflightPolicy,
+    ) -> Result<Preflight, crate::request_context::CommandEntryError> {
+        use crate::request_context::CommandEntryError;
+        if policy.purpose != PreflightPurpose::ReadOnly || !self.io.fresh_command_entry() {
+            return Err(CommandEntryError::Revoked);
+        }
+        let cap = match self.io.command_receipt() {
+            Ok(cap) => cap,
+            Err(reason) => return self.with_command_entry(Operation::Read, |_, _| Err(reason)),
+        };
+        if !self.now.is_finite() || cap.1 - self.now < 1. {
+            return Err(CommandEntryError::Revoked);
+        }
+        self.with_command_entry(Operation::Read, |cx, command| {
+            let preflight = cx.issue_preflight(command, policy)?;
+            cx.io
+                .request_contexts
+                .bind_preflight_receipt(&preflight, cap)
+                .expect("newly issued preflight");
+            Ok(preflight)
+        })
     }
 
     // Private issuer shared with pure engine state fixtures. Public initial

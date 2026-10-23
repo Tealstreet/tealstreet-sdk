@@ -134,8 +134,9 @@ It is not a command, a read or a socket epoch.
 - **Delivery.** The venue receives exactly one current delivery, through the
   existing callbacks: `on_response`, `on_http_preparation_failed` for NotSent,
   or `on_request_failed` for transport loss or timeout after release (Unknown).
-  No new callback is added. HTTP status alone never proves refusal; native
-  codecs classify definitive refusals (e.g. BingX expired key).
+  Ordinary session HTTP adds no new callback. HTTP status alone never proves
+  refusal; native codecs classify definitive refusals (e.g. BingX expired
+  key). The one exception is the provider key import (#1850 P6b, below).
 - **Retry and recovery.** There is no new retry policy, and no amendment to
   "Unknown writes never enter generic retry".
   - A session Mutation has one physical attempt per logical operation, with no
@@ -167,6 +168,35 @@ It is not a command, a read or a socket epoch.
   existing 256-context registry and 256 managed-HTTP slots. The session holds
   one bounded unresolved flag per generation. Capacity refusal returns the continuation and opens nothing.
 
+### Provider key import (#1850 P6b, claude-19pt8s)
+
+Agreed with claude-19pt8s for the Polymarket L2 derived key: the session core
+owns *when* to acquire and retire, and the import primitive owns
+*installation* only.
+- **Classification:** the derive GET (and `/time`) is a session Read
+  (deterministic key mint, repeat-safe). `Cx::request_import` accepts only a
+  live session-owned Read context; Command and Background contexts are
+  `Invalid`.
+- **Delivery:** for import attempts only, `on_import` replaces `on_response`.
+  Transport loss still goes to `on_request_failed`. Import responses skip
+  unproven-HTTP evidence, reconciliation and streaming.
+- **Liveness:** the engine checks that the session generation is live before
+  routing a body to `Signer::import`, so a late 2xx for a retired generation
+  is never installed.
+- **Retirement:**
+  - Imported refs are bound to `Owner::Session { generation }`.
+  - `retire_session` calls `Signer::drop_imported` after the HTTP discard and
+    revoke: synchronously for local providers, and as
+    `Action::DropImported { generation }` for host providers.
+  - Engine disposal retires every live session.
+  - The engine refuses (`Unavailable`), before reaching the provider, any
+    context whose credential names an imported ref from a dead generation.
+- **Readiness:** `on_import` success is where the venue calls `session_ready`
+  to release gated owners; failure maps to `session_failed`.
+- **Not built yet:** these engine hooks land with the #1850 seam, after #1832
+  and #1842. The retire-all-on-dispose and `drop_imported` calls are owned
+  here.
+
 ### Cadence and socket linkage (Phase C, after #1771 merges)
 
 The keepalive interval, failure backoff and expiry-driven recreation are
@@ -187,6 +217,76 @@ duplicated in every listen-key venue (see the timer table above).
   owner at a time.
 - Phase C deletes the native timers listed above. Phases A and B do not depend
   on the #1771 types.
+
+### Session prerequisite gate (owner ruling, 2026-10-23)
+
+claude-ddi2il assigned this gate to the session core, and credential core
+(claude-m26ps4) dropped its C7 gate. Here one session request gates N owners:
+success re-dispatches each owner on its own request, and failure fans out to
+all of them. Sites, from #1821 `RUST_EXECUTION_GROUPS.md` section B:
+- Paradex JWT queue (`paradex/src/account.rs` request/refresh/auth_failed)
+- GRVT `account.waiting` (`grvt/src/account.rs` account_defer/account_refresh/login)
+- BreakoutProp Login/Discover prerequisite (`breakoutprop/src/lib.rs`)
+
+Contract:
+- Each waiting owner keeps its own Context and original raw deadline.
+- Session success re-dispatches each owner on its own request.
+- Session failure or retirement gives each waiting owner a typed NotSent
+  pre-send failure. A waiting owner's expiry fails only that owner.
+- The bounded wait list lives in the engine, not in per-venue queues.
+- Credential core supplies only `SessionPolicy.credential`.
+- A GRVT trade re-sent after relogin is a new physical attempt under its
+  command journal, never a session replay.
+- AsterDEX `awaiting_clock` stays with the clock lane.
+
+API (A2), revised after an independent audit:
+- `Cx::session_wait(&Session, owner: &Context, pending: P) -> Result<(), (P, Error)>`
+  parks a continuation behind a live session.
+  - **Owner:** must be live. It cannot be a Session owner, because a
+    Login→Discover sequence waiting on its own session would deadlock; that
+    two-stage flow is plain venue sequencing.
+  - **Mutation owners:** refused (`State`) while their latest attempt was
+    released without a definitive fact. A 401 must be recorded as a definitive
+    refusal before a relogin re-send.
+  - **Keys and bounds:** waiters are keyed by owner leg, and a second wait is
+    `Duplicate`. The registry's 256 live contexts bound them. A refusal
+    returns the continuation.
+  - **Timer:** one engine timer at the owner's existing raw deadline (already
+    parent-capped, never extended). It queues no HTTP.
+- `Cx` cannot call venue hooks, so draining returns the waiters to the caller
+  in FIFO order. A wait made during handling parks for the next drain:
+  - `#[must_use] session_ready(&Session) -> Vec<Waiter<P>>`, where
+    `Waiter::{Ready(Context, P), Failed(Context, P, VenueError)}`. A live owner
+    is `Ready`, and the venue then issues the owner's own request. An expired
+    or revoked owner is `Failed` with Timeout or Revoked and outcome NotSent.
+    It is never dropped, because pending values carry venue in-flight
+    bookkeeping.
+  - `#[must_use] session_failed(&Session, VenueError)` and `retire_session`
+    return every waiter as `(Context, P, VenueError)` with NotSent.
+- **Outcome:** the forced NotSent is only the waiter's own pre-send fact.
+  Command seals still recompute the outcome from the journal.
+- **Expiry hook:** expiry is the only engine-initiated callback, through
+  `Venue::on_session_wait_expired(cx, P, VenueError)`. By default it delegates
+  to `on_http_preparation_failed(.., Error::TimedOut, ..)` with outcome NotSent
+  and kind Timeout, so there are no fail-closed panics.
+- **Placement:**
+  - The `Io` field `session_waits` sits after `pending`/`signatures`, clear of
+    #1816's `http_failure_kind` insert.
+  - The timer lookup goes in `expire_http_timer`'s not-found branch in
+    `http_lifecycle.rs`, so `Engine::handle` is untouched (#1771's insert
+    window).
+  - The hook goes right after `on_http_preparation_failed`.
+  - This departs from Phase A's "no new `Io` field / no `engine.rs`" only
+    because pending values are generic over `P`.
+- **Not waiters:**
+  - WS auth sends (Paradex `send_auth`, GRVT private/proxy auth) are venue
+    continuations after `session_ready`.
+  - The Paradex sign queue becomes `request_signed_managed`.
+  - BreakoutProp issues `request_managed` as soon as each owner drains, with
+    its 5/s limit moved into engine `http_pacing`. Re-queuing contexts in a
+    venue rate queue would leave them without a timer.
+  - GRVT's early return in `login()` during `login_retry`, which is #1821's
+    hang, is covered by the per-waiter deadline.
 
 ## Phases
 
@@ -244,6 +344,43 @@ duplicated in every listen-key venue (see the timer table above).
     Clippy/fmt/bans, shrink-only inventory.
   - **Review:** independent correctness/adversarial review answering the
     architecture gate.
+  - **Checkpoint** (`47c98d53c78` + `13d3f229329`):
+    - **Code:** `Owner::Session { generation }`, `Session`, `SessionPolicy`,
+      `Cx::open_session`/`session_context`/`retire_session`/`session_live`,
+      and the `claim_http` command-journal exemption. Nothing is public
+      beyond those.
+    - **Tests:** 22 session tests.
+    - **Fault controls:** four compiled faults fail the exact tests (journal
+      for every mutation, retirement without discard, no unresolved gate,
+      in-operation retry).
+    - **Gates:** engine 646 tests with order locks and 627 without, Binance
+      293, strict Clippy both ways, fmt, bans.
+    - **Review:** the independent review found a context issued before a write
+      became unresolved could still send a second write on a session that is
+      not repeat-safe, and a venue fact could overwrite an engine-recorded
+      failure. Both are fixed, with the review probes as regressions that fail
+      on `47c98d53c78`. Re-review is CLEAN; architecture gate No.
+    - **Ordering rule:** record the codec fact before `finish_http_context`;
+      finishing first leaves the write unknown (fail-safe, pinned).
+    - **Not yet:** no venue adopts sessions at this checkpoint.
+- **A2. Session prerequisite gate** (above), engine-only, before the Paradex/
+  GRVT/BreakoutProp adoptions.
+  - **Checkpoint:**
+    - **Code:** `Cx::session_wait`, `session_ready -> Vec<Waiter<P>>` and
+      `session_failed`; `retire_session` now returns its waiters; plus the
+      `Venue::on_session_wait_expired` hook and the waiter timer in the
+      `expire_http_timer` not-found branch.
+    - **Tests:** 29 session tests in all.
+    - **Fault controls:** seven compiled faults fail exact tests (no resend
+      gate, dropping revoked owners, no timer clear, early expiry, self-wait,
+      no command hold, no retry-policy check).
+    - **Gates:** engine 653 tests with order locks and 634 without, Binance
+      293, strict Clippy both ways, fmt, bans.
+    - **Review:** the independent review found that a parked command could
+      lose completion authority once pruned past its deadline. Waiters now
+      hold the command owner until it finishes. It also found the resend
+      check was looser than `retry`; it now shares `retry`'s journal
+      admission and requires the context's refusal policy.
 - **C. Cadence/feed linkage** as above, after #1771.
 - **D. Hand-off.** The API and adoption notes go to codex-9czdjh, codex-zs5e83,
   codex-ih35js and codex-hcmq3f. BingX adoption and deletion of the #1779
