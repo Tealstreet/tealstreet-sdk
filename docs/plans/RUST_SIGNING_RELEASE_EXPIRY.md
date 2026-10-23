@@ -134,6 +134,14 @@ release, and the unchanged capped managed repair deadline. No production or
 inventory source changed. These are new-contract metadata assertions; runtime
 and reviewer acceptance remain pending.
 
+Classifier/lifecycle plan review at `6fa528a7319` is CLEAR, including the
+additive hook and exact final-release custody. The requested additional
+`managed_denied_admission_observes_no_signing_release` control passes on the
+unchanged production source: a real Prepare/Bind/Claim reaches admission once,
+Denied returns Revoked with one typed failure, no observation or HTTP packet,
+and a duplicate claim remains inert. Scoped strict Clippy passes. Consumer
+review is still required before runtime.
+
 Additional source/new-contract controls before runtime is READY:
 
 - No metadata or mutation of another Pending before successful physical release;

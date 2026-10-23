@@ -4,8 +4,8 @@
 
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{
-    Claim, Credential, HttpAction, HttpRelease, Operation as HttpOperation, Policy, Prepared,
-    RetryPolicy, Scope,
+    Admission, Claim, Credential, Error, HttpAction, HttpRelease, Operation as HttpOperation,
+    Permit, Policy, Prepared, RetryPolicy, Scope,
 };
 use safe_cex_engine::signing::{
     Algorithm, Context, KeyRef, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
@@ -73,6 +73,8 @@ struct Probe {
     offset: f64,
     managed: bool,
     expiry: bool,
+    deny_admission: bool,
+    admissions: usize,
     observed: Vec<Observation>,
     errors: Vec<VenueError>,
 }
@@ -136,6 +138,14 @@ impl Venue for Probe {
     fn on_sign_error(&mut self, _: &mut Cx<'_, Pending>, _: Pending, error: VenueError) {
         self.errors.push(error);
     }
+    fn on_http_release(&mut self, _: &mut Pending, _: &HttpRelease) -> Result<Admission, Error> {
+        self.admissions += 1;
+        Ok(if self.deny_admission {
+            Admission::Denied
+        } else {
+            Admission::Unscheduled
+        })
+    }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         let Command::SetTickerSymbols { symbols } = command else {
             panic!("fixture uses only clock calibration commands");
@@ -161,10 +171,20 @@ impl Venue for Probe {
     }
 }
 fn engine(offset: f64, managed: bool, expiry: bool) -> Engine<Probe> {
+    engine_with_admission(offset, managed, expiry, false)
+}
+fn engine_with_admission(
+    offset: f64,
+    managed: bool,
+    expiry: bool,
+    deny_admission: bool,
+) -> Engine<Probe> {
     let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
         offset,
         managed,
         expiry,
+        deny_admission,
+        admissions: 0,
         observed: vec![],
         errors: vec![],
     });
@@ -206,7 +226,14 @@ fn legacy(offset: f64, expiry: bool) -> (Engine<Probe>, HttpRequest) {
     (engine, packets.into_iter().next().unwrap())
 }
 fn managed() -> (Engine<Probe>, HttpRelease) {
-    let mut engine = engine(5_000., true, true);
+    let (mut engine, permit) = managed_ready(false);
+    let Claim::Released(release) = engine.claim_http(START + 100., permit).unwrap() else {
+        panic!("fixture has no pacing");
+    };
+    (engine, release)
+}
+fn managed_ready(deny_admission: bool) -> (Engine<Probe>, Permit) {
+    let mut engine = engine_with_admission(5_000., true, true, deny_admission);
     let preparations: Vec<_> = engine
         .drain_actions()
         .filter_map(|action| match action {
@@ -242,10 +269,24 @@ fn managed() -> (Engine<Probe>, HttpRelease) {
         .collect();
     assert_eq!(binds.len(), 1);
     assert!(engine.venue().observed.is_empty(), "Bind is not release");
-    let Claim::Released(release) = engine.claim_http(START + 100., binds[0]).unwrap() else {
-        panic!("fixture has no pacing");
-    };
-    (engine, release)
+    (engine, binds[0])
+}
+
+#[test]
+fn managed_denied_admission_observes_no_signing_release() {
+    let (mut engine, permit) = managed_ready(true);
+    assert_eq!(engine.claim_http(START + 100., permit), Err(Error::Revoked));
+    assert_eq!(engine.venue().admissions, 1);
+    assert!(engine.venue().observed.is_empty());
+    assert_eq!(engine.venue().errors.len(), 1);
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    assert_eq!(engine.claim_http(START + 101., permit), Err(Error::Revoked));
+    assert_eq!(engine.venue().admissions, 1);
+    assert!(engine.venue().observed.is_empty());
 }
 
 #[test]
