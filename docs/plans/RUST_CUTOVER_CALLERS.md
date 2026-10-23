@@ -4520,6 +4520,20 @@ selection for an explicit limit (including zero). Unequal native columns fail
 atomically. A current HTTP429 response still pauses depth and account reads.
 The other MEXC HTTP consumers keep their existing transport paths.
 
+## Public managed HTTP static headers
+
+Native adapters can use `Cx::request_managed_with_headers` for public requests
+with fixed codec headers, including JSON POST `Content-Type`. The engine validates
+the ordered static declaration and captures it once before allocating transport
+resources. Invalid headers return the original pending value with typed refusal.
+Header names, values, duplicate order and absent versus empty bodies retain their
+declared bytes through the existing prepare/bind/claim path.
+
+Credential-bearing contexts still require the signed entry point and trusted
+provider. Static headers grant no additional routing, retry, command, publication
+or financial authority. Original Context deadlines and atomic resource admission
+apply; host, WASM and SDK transport schemas are unchanged.
+
 
 ## Crypto.com standalone REST depth on managed HTTP
 
