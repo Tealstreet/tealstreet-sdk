@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { CPU_COHORT_STEPS, sourceInputFingerprint, cohortKey, parseCohortJson, createGithubReader,
-  authenticateArtifactExecution, authenticateMeasurementWindow, formatMeasurementMarker } from './cpu-cohort.mjs';
+  authenticateArtifactExecution, authenticateMeasurementWindow, formatMeasurementMarker, requireGithubResponseSize } from './cpu-cohort.mjs';
 const anchor = { workflowId: 386369161, runNumber: 1, runId: 1000 };
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const git = (value) => createHash('sha1').update(value).digest('hex');
@@ -290,3 +290,81 @@ test('reader caches only immutable Git/ZIP/completed log bytes; mutable authorit
   assert.deepEqual(reader.snapshots({ since: reader.snapshotCursor() }), { responses: [], logs: [] });
 });
 
+
+
+test('runtime response admits the authentic 743167768-byte Bybit archive within the existing 4 GiB ZIP bound', () => {
+  assert.doesNotThrow(() => requireGithubResponseSize(743_167_768, 'runtime-artifact'));
+  assert.doesNotThrow(() => requireGithubResponseSize(4 * 1024 ** 3, 'runtime-artifact'));
+  assert.throws(() => requireGithubResponseSize(4 * 1024 ** 3 + 1, 'runtime-artifact'), /oversized/);
+});
+
+test('metadata, logs and ordinary archives retain the original 512 MiB bound', () => {
+  for (const kind of ['metadata', 'log', 'artifact']) {
+    assert.doesNotThrow(() => requireGithubResponseSize(512 * 1024 ** 2, kind));
+    assert.throws(() => requireGithubResponseSize(743_167_768, kind), /oversized/);
+  }
+  for (const length of [0, -1, 0.5, NaN, Infinity])
+    assert.throws(() => requireGithubResponseSize(length, 'runtime-artifact'));
+  assert.throws(() => requireGithubResponseSize(1, 'unbounded'), /invalid GitHub response kind/);
+});
+
+test('immutable artifact recovers one empty HTTP 200 without caching the empty bytes', async () => {
+  const calls = [], raw = Buffer.from('complete original archive');
+  const reader = createGithubReader({ repository: 'org/repo', fetch: async (url, options) => {
+    calls.push({ url, options }); return new Response(calls.length === 1 ? null : raw);
+  } });
+  assert.deepEqual(await reader.getArtifactBytes(700), raw);
+  assert.deepEqual(await reader.getArtifactBytes(700), raw);
+  assert.equal(calls.length, 2); assert.deepEqual(calls[0], calls[1]);
+  assert.equal(reader.snapshots().responses.length, 1);
+  assert.deepEqual(reader.snapshots().responses[0].raw, raw);
+});
+
+test('empty and socket failures share exactly two artifact retrieval attempts', async () => {
+  for (const failures of [['empty', 'empty'], ['empty', 'socket'], ['socket', 'empty']]) {
+    let calls = 0;
+    const reader = createGithubReader({ repository: 'org/repo', fetch: async () => {
+      const failure = failures[calls++];
+      if (failure === 'socket') throw socketClosure();
+      return new Response(null);
+    } });
+    await assert.rejects(reader.getArtifactBytes(700));
+    assert.equal(calls, 2, failures.join(' then '));
+    assert.equal(reader.snapshots().responses.length, 0);
+  }
+});
+
+test('empty metadata and completed physical logs are never retried', async () => {
+  let metadataCalls = 0, logCalls = 0;
+  const reader = createGithubReader({ repository: 'org/repo', fetch: async url => {
+    if (url.endsWith('actions/jobs/5')) return jsonResponse({ id: 5, status: 'completed', conclusion: 'success', completed_at: at(29) });
+    if (url.endsWith('/logs')) logCalls++; else metadataCalls++;
+    return new Response(null);
+  } });
+  await assert.rejects(reader.getRun(1000), /empty/); assert.equal(metadataCalls, 1);
+  await reader.getJob(5);
+  await assert.rejects(reader.getLog(5), /empty/); assert.equal(logCalls, 1);
+});
+
+test('empty CDN artifact retry rechecks the original authority and strips its token', async () => {
+  const calls = [], raw = Buffer.from('complete original ZIP');
+  const reader = createGithubReader({ repository: 'org/repo', token: 'fixture-token', fetch: async (url, options) => {
+    calls.push({ url, options });
+    if (url.startsWith('https://api.github.com/')) return new Response(null, { status: 302, headers: { location: 'https://fixture.blob.core.windows.net/archive' } });
+    return new Response(calls.length === 2 ? null : raw);
+  } });
+  assert.deepEqual(await reader.getArtifactBytes(700), raw);
+  assert.equal(calls.length, 4); assert.deepEqual(calls[0], calls[2]);
+  for (const index of [1, 3]) {
+    assert.equal(calls[index].options.headers, undefined);
+    assert.equal(calls[index].options.redirect, 'error');
+  }
+});
+
+test('artifact callers cannot request metadata or arbitrary response kinds', async () => {
+  let calls = 0;
+  const reader = createGithubReader({ repository: 'org/repo', fetch: async () => { calls++; return new Response('archive'); } });
+  for (const kind of ['metadata', 'log', 'unbounded', 4 * 1024 ** 3])
+    await assert.rejects(async () => reader.getArtifactBytes(700, kind), /invalid artifact response kind/);
+  assert.equal(calls, 0);
+});
