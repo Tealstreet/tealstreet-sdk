@@ -261,14 +261,17 @@ Revised after independent adversarial review (3 blockers, 4 major resolved).
    observers.
 2. **Background-observed reads (Bitrue).** This amends "no implicit background
    cache-warming observer" above explicitly, without weakening it: there is
-   still no implicit observer. Instead an existing `Owner::Background` read
-   Context may be named the execution root at begin (`Read` only). Its legs
-   stay `Owner::Background`, so the existing publication validator
-   (`validate_read_http_delivery` rules) is unchanged and Store publication
-   is unaffected by observers coming or going. Execution membership for those
-   legs lives in an engine side table keyed by the background leg Context.
-   Command observers receive only projections. The execution bound is the
-   background root's deadline. No background root can carry a mutation.
+   still no implicit observer. An existing `Owner::Background` read Context
+   may be named the execution root at begin (`Read` only). `Owner::Execution`
+   remains the single physical-leg authority: the background root's legs are
+   execution legs like any other, with no side table and no second route. The
+   one group read gate checks the exact execution, its epoch/liveness and the
+   current freshness token before codec, native-cache or Store changes. It
+   admits publication only while the background root generation is still live
+   or a live command observer survives; with neither, the reply retires
+   unpublished. Command observers receive only projections. The execution
+   bound is the background root's deadline. No background root can carry a
+   mutation.
 3. **Observer.** `Observer` is opaque: execution id/generation, command id and
    command generation, minted from the command's own issued root Context. Its
    effective deadline is `min(own root deadline, execution deadline)`.
@@ -297,9 +300,14 @@ Revised after independent adversarial review (3 blockers, 4 major resolved).
    fans identity receipts out to every live observer and retains a bounded
    snapshot replayed once to a later joiner, never as a new send. Each validates
    every observer and seals each live one exactly once. A Mutation execution
-   seals one shared `CommandWrites` journal; every observer gets the same
-   outcome projection, keeping earlier release evidence, partial IDs and
-   Unknown for writes released before it joined.
+   seals one shared `CommandWrites` journal exactly once at execution
+   terminal; each surviving observer is then finished through `finish_command`
+   with its own validated root as authority and that one projection. A detach
+   or timeout before terminal reads a non-consuming projection of the same
+   journal for that observer only (NotSent if nothing was released, else
+   Unknown with the known partial IDs) and never retires shared physical work
+   while a peer survives. There is no per-observer journal and no numeric
+   member seal. Progress only notifies; it never completes an owner.
 6. **Expiry: one terminal path.** The engine arms one execution timer at
    `min(earliest observer deadline strictly earlier than the execution
    deadline, execution deadline while no leg is in flight)`. Observer
@@ -340,7 +348,11 @@ Revised after independent adversarial review (3 blockers, 4 major resolved).
     engine continuation token backed by reconciliation-proven retry, specified
     in the Hyro phase after ordinary Bybit adoption and
     `RUST_COMMAND_REPLACEMENTS.md`. The core exposes only terminal state.
-11. **Refusal before a Context exists.** Only begin can fail before a Context
+11. **Entry custody.** Command-entry custody (#1830) is used only for the
+    initial begin or join, inside the command's own genuine callback. Later
+    legs, retries and responses use the issued opaque execution authority and
+    never mint or reborrow a command-entry loan.
+12. **Refusal before a Context exists.** Only begin can fail before a Context
     is issued (a join always holds the command's root Context). Such a refusal
     (BingX `begin_metadata`) uses the planned command-entry rejection for
     unissued commands (uufub4, `feat/rust-http-command-entry`: plan text and a
