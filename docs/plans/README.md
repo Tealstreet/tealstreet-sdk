@@ -205,3 +205,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Managed read response authority | Shared prerequisite | Before publishing paired-read responses or managed companion completion events. | [RUST_READ_RESPONSE_AUTHORITY.md](RUST_READ_RESPONSE_AUTHORITY.md) |
 | Hyperliquid RequestContext adoption | Inventory and phased plan | Before migrating perps/spot HTTP and completions; public JSON headers, held spot tests and shared signing/plan prerequisites. | [RUST_HYPERLIQUID_REQUEST_CONTEXT.md](RUST_HYPERLIQUID_REQUEST_CONTEXT.md) |
 | GRVT RequestContext adoption | Inventory and phased plan | Before migrating GRVT HTTP/completions; public JSON headers, bounded read retries and held account fixture prerequisites. | [RUST_GRVT_REQUEST_CONTEXT.md](RUST_GRVT_REQUEST_CONTEXT.md) |
+| Kucoin RequestContext | Committed inventory/plan | Before migrating this venue’s REST or completion authority. | [RUST_KUCOIN_REQUEST_CONTEXT.md](RUST_KUCOIN_REQUEST_CONTEXT.md) |
+| Bitrue RequestContext | Committed inventory/plan | Before migrating this venue’s REST or completion authority. | [RUST_BITRUE_REQUEST_CONTEXT.md](RUST_BITRUE_REQUEST_CONTEXT.md) |
+| Bitunix RequestContext | Committed inventory/plan | Before migrating this venue’s REST or completion authority. | [RUST_BITUNIX_REQUEST_CONTEXT.md](RUST_BITUNIX_REQUEST_CONTEXT.md) |
