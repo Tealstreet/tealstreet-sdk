@@ -828,6 +828,33 @@ mod setup_field_policy_tests {
     }
 
     #[test]
+    fn schnorr_digest_results_are_exactly_eighty_bytes() {
+        // Lighter's ECgFp5 Schnorr signature is s(40) || e(40).
+        let request = SignRequest {
+            receipt: SignReceipt::default(),
+            context: Context::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::SchnorrDigest,
+                key: KeyRef("primary.signing".into()),
+                payload: vec![PayloadPart::Bytes { bytes: vec![0; 40] }],
+            }],
+        };
+        assert_eq!(request.expected_result_lengths(), vec![Some(80)]);
+        request
+            .validate_result(&SignResult::new(vec![vec![1; 80]], SignReceipt::default()))
+            .unwrap();
+        for length in [64, 79, 81] {
+            assert_eq!(
+                request.validate_result(&SignResult::new(
+                    vec![vec![1; length]],
+                    SignReceipt::default()
+                )),
+                Err(SignError::InvalidResult)
+            );
+        }
+    }
+
+    #[test]
     fn zklink_contract_result_shape_and_setup_vocabulary_are_exact() {
         let request = SignRequest {
             receipt: SignReceipt::default(),

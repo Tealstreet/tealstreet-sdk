@@ -788,6 +788,78 @@ mod tests {
         );
     }
 
+    /// R1: the provider arm signs exactly what the legacy Lighter signer signs,
+    /// with the payload split as entropy (first 32 bytes) then input.
+    #[test]
+    fn schnorr_digest_matches_the_legacy_hedged_lighter_signature() {
+        let key =
+            "01000000000000000000000000000000000000000000000000000000000000000000000000000000";
+        let (signer, ids) = LocalSigner::from_json(
+            serde_json::json!({"primary":{"key":"lighter-api-key","secret":format!("0x{key}"),"secretEncoding":"hex"}})
+                .to_string(),
+        )
+        .unwrap();
+        let signing = ids.primary.unwrap().signing;
+        let sign = |entropy: [u8; 32], input: &[u8]| {
+            let mut payload = entropy.to_vec();
+            payload.extend_from_slice(input);
+            signer.sign_now(&SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![Operation::Sign {
+                    algorithm: Algorithm::SchnorrDigest,
+                    key: signing.clone(),
+                    payload: vec![PayloadPart::Bytes { bytes: payload }],
+                }],
+            })
+        };
+        let key_bytes: Vec<u8> = (0..40)
+            .map(|i| u8::from_str_radix(&key[i * 2..i * 2 + 2], 16).unwrap())
+            .collect();
+        // A canonical word, then words at and above p, which legacy and Go reduce.
+        for input in [
+            vec![1, 0, 0, 0, 0, 0, 0, 0],
+            vec![1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff],
+            vec![0xff; 16],
+        ] {
+            for entropy in [[0u8; 32], [0x5a; 32]] {
+                let legacy = crate::lighter::schnorr_sign(
+                    &input,
+                    &key_bytes,
+                    crate::lighter::hedged_nonce(&input, &key_bytes, &entropy).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(legacy.len(), 80);
+                assert_eq!(sign(entropy, &input).unwrap().values, vec![legacy]);
+            }
+        }
+        // Entropy alone, or input that is not whole words, is refused.
+        assert_eq!(sign([0; 32], &[]), Err(SignError::InvalidRequest));
+        assert_eq!(sign([0; 32], &[1, 2, 3]), Err(SignError::InvalidRequest));
+    }
+
+    /// R1: non-canonical and zero keys are refused, never reduced.
+    #[test]
+    fn schnorr_digest_refuses_noncanonical_and_zero_keys() {
+        for key in ["00".repeat(40), "ff".repeat(40)] {
+            let (signer, ids) = LocalSigner::from_json(
+                serde_json::json!({"primary":{"key":"k","secret":key,"secretEncoding":"hex"}})
+                    .to_string(),
+            )
+            .unwrap();
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![Operation::Sign {
+                    algorithm: Algorithm::SchnorrDigest,
+                    key: ids.primary.unwrap().signing,
+                    payload: vec![PayloadPart::Bytes { bytes: vec![0; 40] }],
+                }],
+            };
+            assert_eq!(signer.sign_now(&request), Err(SignError::InvalidRequest));
+        }
+    }
+
     #[test]
     fn secondary_signing_alias_names_the_primary_ref_without_a_second_copy() {
         let hex_policy = |encoding| CredentialSetupPolicy {
