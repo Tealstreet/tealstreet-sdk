@@ -424,3 +424,24 @@ fresh-signature-retry worst case is 320s. The same physical journal/root owner
 must handle writes and observer groups; no BingX-local ledger or timer owner is
 created. History and session ownership retain their previously documented
 explicit legacy boundaries until their own shared completion/session seams.
+
+## Lane takeover status (claude-4yjlw0, 2026-10-23)
+
+Checkpoint `c9fa7dfa879` confirmed: 24 commits ahead and 19 behind landing
+`73d04380dd9`. #1779 head `f2136f8154c` is historical. Single-owner reads and
+candles are managed. The paired leverage/margin metadata reads stay parked as
+two original REDs on uufub4's reviewed Plan/CallWindow pin, which declares 80s
+execution, 40s read-call and 20s physical attempt (uufub4 confirmed
+2026-10-23). Writes stay parked on the shared execution-group API, now owned by
+claude-fe7lgm. One temporary `sign_http` staging site remains for history and
+the listen-key POST/PUT.
+
+Next:
+1. Merge pinned landing `73d04380dd9`, which includes #1808. Run focused
+   BingX/Binance tests, then push to refresh #1779 and CI.
+2. Reverify the #1814 rows (missing 100412, signature-text resend) through
+   shared tables.
+3. Wire paired metadata once uufub4 sends the reviewed pin. Wire writes once
+   fe7lgm's execution-group API is actual. No local root, timer or ledger.
+4. Remove the staging site once cxxyqr's history Completion bridge and
+   55ao7t's session Context are both actual.
