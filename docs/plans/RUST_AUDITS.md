@@ -1899,6 +1899,105 @@ plus anonymous rows), Bybit deferred reporting, and remaining persistent copies
 remain open in [the reporting plan](RUST_ROW_ADMISSION.md). No all-venue closure
 or new live capture/parity claim is made by this first slice.
 
+
+## Grouped and deferred row-reporting engine path
+
+Phase2 moves duplicate-inclusive counts/first labels and ordered unique-ID plus
+anonymous counts into explicit engine `RowCount`/`RowKeys` collectors. Crypto.com
+keeps its exact summary formatting, including anonymous versus empty first labels;
+WOO keeps unique known IDs, each anonymous row, original retention/page progress
+and ChangedMessage/empty-group re-arm. Bybit keeps deferred unbounded Once memory
+at the accepted joined-order boundary, including admitted partial joins. Failed,
+noncurrent or incomplete whole joins do not consume it; clean/mapped rows do not
+re-arm it, and cached-row restoration remains outside report suppression. Both
+real Bybit constructors select that explicit policy and product swaps preserve it.
+
+Architecture gate YES: these are cross-cutting grouping/repeat policies behind
+engine coverage, with native identity/formatting/admission timing retained. The
+233 selected original native tests pass before migration; these are compatibility
+controls, not defect RED evidence. New core controls cover exact first labels,
+summary health/filtering, empty text versus absent summary and key-only re-arm
+at capacity. Financial reducers, signing, clocks and snapshot fences stay native.
+Seventeen bounded persistent source files remain for subsequent fan-out; no
+all-venue closure, live capture or stronger replay parity claim is made here.
+
+
+### Row reporting: BloFin and Kraken consumer migration (2026-10-23)
+
+Moved BloFin position/order, Kraken futures row/unlisted-symbol and Kraken Spot
+row diagnostic memories onto existing engine RowReports. Architecture gate YES:
+this is consumer fan-out of cross-cutting policy, not another venue policy copy
+or new engine API. The futures real constructor explicitly chooses bounded
+ErrorUpgrade plus separate unbounded Once; BloFin and Spot use bounded Once.
+Native messages, severities, keys, empty identities, 4096 clear-before-lookup,
+re-arm sites and pre-admission reporting remain unchanged. The final 126 original
+native account controls (55 BloFin,39 futures,32 Spot), including eleven new
+compatibility controls, pass against unchanged actual #1775 production. Exact
+source/test/log hashes are bound in
+`/tmp/codex-row-blofin-kraken-original-final-receipt.json` (SHA256
+`aa9137471325c9cb881aaa2cf4bf16f060e482db5ad4943038a5a37521489bc6`).
+An initial Spot test expected REST text for WS execution diagnostics; only that
+fixture expectation was corrected before the final original-GREEN run. No
+production defect/RED, financial repair or all-venue closure claim. Other bounded
+and unbounded reporter consumers remain open; see RUST_ROW_ADMISSION.md.
+
+Migrated engine/BloFin/Kraken/Binance focused suites pass1253 native tests across
+68 groups; strict all-target Clippy, scoped fmt, bans, root44 typecheck/28 lint
+(root tasks cached) pass. Both independent source/caller reviews are CLEAN.
+Actual #1781 `ff6870f921a79cedd108017903b49f86ce924d14` is genuinely integrated
+without conflicts, preserving both incoming files. Full green CI and current-head
+artifact proof remain pending.
+
+## Kraken futures owned-history fan-out
+
+~~Kraken futures histories retain rows, cursor sets, page counters and terminal
+ledger completeness emission in the venue.~~ Fills, closed orders, ledger and
+public trades now adopt the existing engine CursorHistory/Completion owner.
+Actual first/zero-eligible failure rejects typed; later actual failure retains
+only admitted pages with command-owned incompleteness. Native strict cursor/
+continuation-proof/budget refusals remain strict; terminal order folding sees
+only admitted rows. Native request/identity/units/filter/signing and ledger
+coverage facts remain unchanged. Other adapters, managed completion and B11
+coverage/runtime proof stay open. [Scope](RUST_OWNED_HISTORY.md).
+
+KuCoin owned-history follow-on: futures history/funding and spot fills
+adopt the existing engine query owner. Initial page failures become typed
+Internal rejects; later futures/funding failures return only validated eligible
+rows with command-owned incompleteness. Native continuation/census/safety proofs
+remain strict. Signing, disabled spot endpoints and B11/NX coverage are outside
+this slice; see RUST_OWNED_HISTORY.md and RUST_CUTOVER_CALLERS.md.
+
+## Bitrue single-page owned fills
+
+~~Bitrue fills keep native output storage and terminal completion beside streamed
+response validation.~~ Existing engine HistoryRows/Completion now owns staging,
+page admission, retry-page reset and typed terminal delivery. All native proof
+checks precede admission; a saturated filtered/duplicate page remains a strict
+refusal. No fictitious pagination, partial-success case or new venue marker is
+introduced. Public trades, unsupported histories and client-ID lookup stay
+separate; B11 caller/runtime coverage remains open. [Scope](RUST_OWNED_HISTORY.md).
+
+## Backpack owned-history fan-out
+
+~~Backpack retains accepted history rows and terminal paging decisions in its
+venue continuation, discarding earlier pages on later failure/repeat/cap.~~
+CursorHistory now owns page admission, repeat/cap coverage and completion, with
+the existing offset helper subordinate to owner-authorized continuation. Failed
+page prefixes remain staged; admitted malformed-fill skips supply owned coverage
+without changing native row isolation. Raw request displacement, native mapping,
+eager non-fill diagnostics and strict setup/admission behavior remain. This is
+shared-owner adoption, not universal history or NX B11 coverage closure.
+
+## ApeX bounded execution completion
+
+~~ApeX fills exhaust all native/display REST alternatives into apparent complete
+WS-cache or empty success, even when every REST attempt actually failed.~~
+Existing engine HistoryRows/Completion now owns terminal admission and delivery;
+all-actual-failure exhaustion rejects typed Internal. Validated successful empty/
+nonempty paths retain native/cache selection; bounded native upsert remains an
+endpoint normalization fact. No invented pager, partial recovery or cache-backed
+coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
+separate. [Scope and controls](RUST_OWNED_HISTORY.md).
 ## Metadata/settings freshness core (draft, two references)
 
 WEEX and BingX now adopt one engine/Store owner for same-revision coalescing,

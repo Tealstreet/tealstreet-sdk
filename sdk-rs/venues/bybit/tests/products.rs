@@ -1088,3 +1088,37 @@ fn owned_history_category_failure_keeps_sorted_globally_limited_prior_rows() {
         Some(safe_cex_engine::Notice::CommandDone { command: 811, .. })
     ));
 }
+
+#[test]
+fn unsupported_order_memory_is_separate_and_persistent_across_product_swaps() {
+    let mut h = ready(true);
+    let expected = "Bybit order shared-unsupported has an unsupported type and is not shown";
+    for round in 0..3 {
+        if round > 0 {
+            h.advance(15_000.0);
+        }
+        for (category, symbol) in [("linear", "BTCUSDT"), ("inverse", "BTCUSD")] {
+            let before = h.logs.iter().filter(|m| m.as_str() == expected).count();
+            let page = format!(
+                r#"{{"retCode":0,"result":{{"list":[{{"orderId":"shared-unsupported","symbol":"{symbol}","category":"{category}","orderType":"FutureType","orderStatus":"New","qty":"1"}}],"nextPageCursor":""}}}}"#
+            );
+            let mut first = true;
+            while h.requests.iter().any(|r| {
+                r.url.contains("order/realtime") && r.url.contains(&format!("category={category}"))
+            }) {
+                respond(&mut h, "order/realtime", category, None, &page);
+                first = false;
+            }
+            assert!(
+                !first,
+                "must exercise actual {category} account in round {round}; {:?}",
+                h.paths()
+            );
+            assert_eq!(
+                h.logs.iter().filter(|m| m.as_str() == expected).count(),
+                before + usize::from(round == 0)
+            );
+        }
+    }
+    assert_eq!(h.logs.iter().filter(|m| m.as_str() == expected).count(), 2);
+}

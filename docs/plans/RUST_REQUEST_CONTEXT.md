@@ -1450,3 +1450,75 @@ Binance/GRVT/Crypto/Orderly checks run before readiness. Start draft CI in paral
 with those additional checks; no proof/readiness/merge claim until every gate
 passes on the same immutable source. Preservation and inventory receipts are
 /tmp/codex-1741-post1767-{preservation,inventory-receipt}.json.
+
+
+## Deterministic Workers deadline fixture (priority test-only follow-up)
+
+Start from actual#1765 a3a89719d4079c97d56297bb4738fdc13c659ceb. The Workers
+transport test expects exact20,000/5,000ms budgets but leaves Date.now live while
+prepareFetch samples preparation and binding separately. A real1ms tick correctly
+consumes budget, making the unclocked fixture flaky. Production timing is correct.
+
+Plan before source: force one1ms Date.now tick inside the existing test to obtain
+an assertion-RED [19,999,5,000] versus [20,000,5,000], then replace that temporary
+clock with a test-context-scoped frozen Date.now. Preserve the exact timeout,
+abort-through-body and routing-metadata assertions. No tolerance widening,
+production clock injection/change, harness profile or semantic timeout change.
+Run the filtered original-RED/GREEN and full Workers/related managed-host unit
+checks, independently review the fixture and frozen assertions, then a small PR
+with CI/background watch. Integrate actual#1775 before the separate final guard
+and merge under owner queue. Architecture gate: No; this only fixes a test clock
+for the existing shared managed transport boundary.
+
+Fixture evidence: a temporary test-scoped clock returning1700000000000 for its
+first read and1700000000001 thereafter reproduced the exact assertion failure:
+expected[20000,5000], actual[19999,5000]. Replacing that temporary clock with one
+scoped constant passes the unchanged test. The committed source change is only
+that constant Date.now mock; TestContext restores it after the test. Independent
+plan/correctness/adversarial review CLEAN, architecture No.
+
+The package Workers unit script and managed-HTTP unit suite pass. An attempted
+full Workers plus managed-HTTP run passed37/39; two earlier real-engine startup
+tests timed out before the changed test. Keep that local failure visible; fresh
+CI with its matching built WASM must verify the complete integration suite.
+No production timing, timeout tolerance, route or response-body assertion changed.
+
+## Bounded private-path profiling after #1741
+
+Owner request (2026-10-23): after caller backfill #1777, profile the managed
+Binance private request path before growing the follow-on. Use actual #1741's
+retained CI Node WASM package (Rust run39844297596; verify ZIP/build/member
+hashes) on current landing, which differs only by the caller docs. Run exactly
+one sequential pass of the five existing Binance private gate cases: regular,
+Spot, COIN-M, PM and scripted USD-M lifecycle. No local rebuild, public replay,
+repeated benchmark, concurrency or live venue request. Bound each process to
+90 seconds and the full pass to300 seconds.
+
+Collect a sampling CPU profile plus synchronous engine-call timings/counters
+through an out-of-tree diagnostic preload; never count awaited wall time as
+CPU. Keep the replay source, clocks, options, tape bytes and output assertions
+unchanged. Compare every nonmetric Rust result against its exact CI output.
+Report startup/GC versus managed preparation/signing/claim/response work with
+sampling/instrumentation limitations; this is diagnosis, not new gate evidence.
+Only fix demonstrated clear waste that preserves all semantics, with focused
+regressions and independent review. Otherwise report findings without a source
+change. The shared response-proof/ordinary-Bybit work stays local and separate.
+
+Profiling result (one pass, 4.078 seconds total): all five entire nonmetric Rust
+outputs match the exact CI raw results. Aggregate managed prepare/bind/cancel
+counts were17/9/12/14/20 and matched claim/drain counts; no aggregate attempt
+inflation was demonstrated. Synchronous elapsed sums for the four lifecycle
+invoke wrappers (httpPreparationPending/httpPrepared/httpClaim/prepareDispatch)
+were1.627–2.346 ms per case; the three response wrappers
+(httpStart/httpChunk/httpEnd) were9.555–12.361 ms, with httpEnd largest.
+Inclusive WASM-ancestor response/control samples totaled355/54. These wrapper
+sums exclude host JS outside invoke and are not CPU totals or new gate evidence.
+
+No demonstrated removable waste justified a production change. The single-run
+sampling, shifted import accounting from diagnostic preload, local machine and
+stripped WASM symbols do not establish a cause for the CI ratio change. GC/idle
+and clock-boundary uncertainty remain separate. An ignored local regular tape
+failed preflight before any replay; the unchanged generator recovered exact CI
+bytes into a temporary input, leaving the working tape untouched. No measured
+case was rerun. Independent DATA/report review recomputed all five outputs,
+provenance, sums, counts and sampling tables CLEAN; architecture No.

@@ -8,6 +8,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Rejection, Report};
 use safe_cex_engine::fence::StaleGuard;
+use safe_cex_engine::history::{Completion, HistoryRows};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -15,7 +16,7 @@ use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Command, CommandId, Cx, Fill, Method, PublicFeedPolicy, Query, Response, SocketChannel,
-    SocketId, TimerId, Venue,
+    SocketId, TimerId, Venue, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -50,7 +51,7 @@ pub enum Pending {
         rows: Vec<Candle>,
         invalid: bool,
     },
-    Fills(CommandId),
+    Fills(Box<HistoryRows<String>>),
     Account(CommandId),
 }
 pub struct ReadOrders {
@@ -1337,7 +1338,7 @@ impl Venue for KucoinSpot {
                     Err(error) => cx.fail(command, error),
                 };
             }
-            Pending::Fills(command) => {
+            Pending::Fills(mut owner) => {
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Execution<'a> {
@@ -1367,11 +1368,19 @@ impl Venue for KucoinSpot {
                             commission_asset: r.fee_currency,
                         });
                     }
-                    serde_json::to_string(&rows).map_err(|e| e.to_string())
+                    rows.iter()
+                        .map(|row| serde_json::to_string(row).map_err(|e| e.to_string()))
+                        .collect::<Result<Vec<_>, _>>()
                 })();
                 match out {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                    Ok(rows) => {
+                        for row in rows {
+                            owner.stage(row);
+                        }
+                        owner.accept_page();
+                        owner.finish(cx, Ok(()));
+                    }
+                    Err(error) => owner.finish(cx, Err(VenueError::new(error))),
                 }
             }
         }
@@ -1407,9 +1416,12 @@ impl Venue for KucoinSpot {
                 self.write_failed(cx, j, crate::wire::write_failure(0, "", error.into()));
                 return;
             }
-            Pending::Candles { command, .. }
-            | Pending::Fills(command)
-            | Pending::Account(command) => {
+            Pending::Fills(owner) => {
+                cx.command_error(owner.command(), error);
+                owner.finish(cx, Err(VenueError::new(error)));
+                return;
+            }
+            Pending::Candles { command, .. } | Pending::Account(command) => {
                 cx.command_error(command, error);
                 cx.fail(command, error);
                 return;
@@ -1607,7 +1619,17 @@ impl KucoinSpot {
                 if let Some(n) = to_ms {
                     path.push_str(&format!("&endAt={}", n as u64));
                 }
-                self.request(cx, Method::Get, &path, None, true, Pending::Fills(command));
+                self.request(
+                    cx,
+                    Method::Get,
+                    &path,
+                    None,
+                    true,
+                    Pending::Fills(Box::new(HistoryRows::new(
+                        Completion::new(command),
+                        |rows| Ok(format!("[{}]", rows.join(","))),
+                    ))),
+                );
             }
             Query::OrderByClientId {
                 symbol,

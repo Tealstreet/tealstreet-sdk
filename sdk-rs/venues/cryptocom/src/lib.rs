@@ -137,30 +137,29 @@ fn quoted(s: &str) -> String {
 
 /// Unmappable rows of one read or frame, reported once as a summary; the rest still commits.
 #[derive(Default)]
-pub struct Skipped {
-    count: usize,
-    first: Option<String>,
-}
+pub struct Skipped(safe_cex_engine::coverage::RowCount);
 impl Skipped {
     pub(crate) fn add(&mut self, id: Option<&str>) {
-        self.count += 1;
-        self.first
-            .get_or_insert_with(|| id.unwrap_or("without an id").into());
+        self.0.add(id);
     }
     pub(crate) fn any(&self) -> bool {
-        self.count > 0
+        self.0.any()
     }
     pub(crate) fn report(&self, cx: &mut Cx<'_, Pending>, kind: &str) {
-        if let Some(first) = &self.first {
-            cx.notice(
-                Level::Warn,
-                code::ROW_SKIPPED,
+        safe_cex_engine::coverage::row_summary(
+            cx,
+            Level::Warn,
+            self.0.summary(|rows| {
+                let first = rows
+                    .first()
+                    .expect("nonempty group")
+                    .unwrap_or("without an id");
                 format!(
                     "Crypto.com skipped {} unmappable {kind} rows (first: {first})",
-                    self.count
-                ),
-            );
-        }
+                    rows.count()
+                )
+            }),
+        );
     }
 }
 
