@@ -124,3 +124,10 @@ No new host wire action or peer ACK is introduced. Tests compare concatenated
 ordered host batches, firing only the actual engine wakeup, and retain the exact
 native baseline comparison. The new internal scheduling turn is a caller-visible
 timing change and must be documented; no timeout or account policy is enlarged.
+
+The existing JS host passes two focused handoff controls using the actual
+EngineHost: both ordinary deferred timers and injected inline timers call the
+socket sender before arming and executing the continuation that issues HTTP.
+The new host test uses the host-unit filename glob, so the ordinary CI command
+picks it up. This proves host action ordering only; it does not establish the
+new engine receipt, cancellation or managed HTTP authority checks.
