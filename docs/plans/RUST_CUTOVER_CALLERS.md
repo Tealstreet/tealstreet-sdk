@@ -4869,13 +4869,22 @@ authority. The call shape and success value (`null`) are unchanged.
   refresh timed out` to `Execution deadline expired`. The outcome is unset
   (read). Each joined caller gets this once.
 - Capacity: one walk serves at most 64 callers. A 65th concurrent call fails
-  at once with message `Too many requests in flight`, kind `internal`,
+  at once with message `Engine request capacity reached`, kind `internal`,
   outcome `notSent`. The running walk and its 64 callers are unaffected, and a
   call after the walk ends starts a new one.
 - Founder departure: the walk is not owned by the first caller. If that
   caller's observer is detached, the walk continues for the remaining callers.
   Bybit itself has no caller-side cancellation for this call today, so this is
   an engine guarantee rather than an SDK-visible action.
+
+Engine capacity refusal text: every engine request-context capacity refusal
+(execution-group joins above, Binance command entry, Hyperliquid candle reads
+and any other `Capacity` refusal) now reads `Engine request capacity reached`
+instead of `Too many requests in flight`; kind `internal` and outcome
+`notSent` are unchanged. The old text matched the `rate_limit` health
+pattern (`/too.*many.*request/i`), so NX showed a rate-limit toast and a false
+rate-limit health signal for a local engine bound. The new text matches no
+`errorPatterns.ts` category.
 - Unchanged: shared-feed refusal, `Bybit market catalogue is not loaded`
   (`invalidInput`) and the discovery rate-limit refusal (`rateLimited` with
   `retryAfterMs`); request URLs, query and the `X-Referer` broker header; the
@@ -5125,7 +5134,7 @@ listener/chart migration, NX deployment or live private connectivity.
 Lighter and Robinhood command candle reads borrow their genuine engine callback's
 initial Read owner through shared `admit_http_command`, before validation or
 outbound work. When capacity is exhausted, callers receive exactly one correlated
-`CommandFailed` with `Too many requests in flight`, Internal kind and no financial
+`CommandFailed` with `Engine request capacity reached`, Internal kind and no financial
 outcome. Invalid clock/deadline admission instead returns `Invalid request
 context`, InvalidInput kind and no outcome. These replace the adapter's generic
 lifecycle-unavailable/Internal refusal. No caller retry or special transport path
