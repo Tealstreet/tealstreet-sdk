@@ -11,11 +11,13 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| AsterDEX RequestContext adoption | Pinned inventory and single-request-first plan | Before migrating Aster HTTP/completion, pruning its legacy inventory or touching files claimed by concurrent PRs. | [RUST_ASTERDEX_REQUEST_CONTEXT.md](RUST_ASTERDEX_REQUEST_CONTEXT.md) |
 | Selected signer mode | Active shared SDK fix; queued after #1741 | Before changing RemoteSigner precedence, PayloadSigner admission or runtime feed selection with both callbacks. | [RUST_SELECTED_SIGNER_MODE.md](RUST_SELECTED_SIGNER_MODE.md) |
 | Engine resource IDs | Planned shared allocator/host correction | Before changing physical socket/request/timer identities or managed host numeric ingress. | [RUST_SAFE_ENGINE_IDS.md](RUST_SAFE_ENGINE_IDS.md) |
 | Hosted signer presentation | Planned after #1757 | Extending primitive signature encoding or provider-owned passphrase presentation for OKX/Bitget. | [RUST_HOSTED_SIGNER_PRESENTATION.md](RUST_HOSTED_SIGNER_PRESENTATION.md) |
 | Gate failure ordering | Implemented shared harness fix; CI pending | Before changing gate failure serialization, console truncation or deterministic evidence comparisons. | [HARNESS_GATE_FAILURE_ORDER.md](HARNESS_GATE_FAILURE_ORDER.md) |
 | Credential selection and nonce authority | Active shared-core plan; review pending | Before choosing a credential slot, read key, account subject, auth evidence tag or signing nonce in venue code. | [RUST_CREDENTIAL_SELECTION.md](RUST_CREDENTIAL_SELECTION.md) |
+| Error classification | Active engine standardization plan; inventory ranked | Before classifying venue errors, native code tables, status-to-outcome rules, partial batch failures or error-driven resends. | [RUST_ERROR_CLASSIFICATION.md](RUST_ERROR_CLASSIFICATION.md) |
 | Request lifecycle and command outcomes | Active shared-core plan | Before HTTP retry/outcome sealing, actual-release admission, expiry projection or send pacing. | [RUST_REQUEST_CONTEXT.md](RUST_REQUEST_CONTEXT.md) |
 | Background-session Context | Plan; core not started | Before listen-key, WS-token or session-login HTTP, Background+Mutation contexts or session retry/fencing. | [RUST_BACKGROUND_SESSION.md](RUST_BACKGROUND_SESSION.md) |
 | Command replacement groups | Local follow-on; publish after #1741 | Before batch-to-single supersession, ordinary Bybit outcome aggregation or managed native retries. | [RUST_COMMAND_REPLACEMENTS.md](RUST_COMMAND_REPLACEMENTS.md) |
@@ -203,4 +205,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Managed read response authority | Shared prerequisite | Before publishing paired-read responses or managed companion completion events. | [RUST_READ_RESPONSE_AUTHORITY.md](RUST_READ_RESPONSE_AUTHORITY.md) |
 | Hyperliquid RequestContext adoption | Inventory and phased plan | Before migrating perps/spot HTTP and completions; public JSON headers, held spot tests and shared signing/plan prerequisites. | [RUST_HYPERLIQUID_REQUEST_CONTEXT.md](RUST_HYPERLIQUID_REQUEST_CONTEXT.md) |
 | GRVT RequestContext adoption | Inventory and phased plan | Before migrating GRVT HTTP/completions; public JSON headers, bounded read retries and held account fixture prerequisites. | [RUST_GRVT_REQUEST_CONTEXT.md](RUST_GRVT_REQUEST_CONTEXT.md) |
+| Kucoin RequestContext | Committed inventory/plan | Before migrating this venue’s REST or completion authority. | [RUST_KUCOIN_REQUEST_CONTEXT.md](RUST_KUCOIN_REQUEST_CONTEXT.md) |
+| Bitrue RequestContext | Committed inventory/plan | Before migrating this venue’s REST or completion authority. | [RUST_BITRUE_REQUEST_CONTEXT.md](RUST_BITRUE_REQUEST_CONTEXT.md) |
+| Bitunix RequestContext | Committed inventory/plan | Before migrating this venue’s REST or completion authority. | [RUST_BITUNIX_REQUEST_CONTEXT.md](RUST_BITUNIX_REQUEST_CONTEXT.md) |
 | BloFin managed requests | Inventory and phased adoption plan | Before BloFin HTTP/completion migration; exact legacy map, caller effects and shared API dependencies. | [RUST_BLOFIN_REQUEST_CONTEXT.md](RUST_BLOFIN_REQUEST_CONTEXT.md) |
