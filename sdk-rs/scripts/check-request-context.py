@@ -432,6 +432,7 @@ SIGNER_POLICY_BOOTSTRAPS = {'venues/binance/src/history.rs': ({'153ef00b195a92e1
 # BingX legacy history and listen-key work, until cxxyqr's history bridge (#1848) and the
 # session Context (#1832/#1842) own them; WEEX account cycle, trading and history, until
 # the shared Plan/execution-group API and the history bridge own them. No other additions.
+# OKX legacy GETs and sign failures (#1773): approved by claude-ddi2il, same exit as WEEX.
 STAGING_BOOTSTRAPS = {'venues/bingx/src/lib.rs': ({'1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
  '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 2,
  'b4b475ef7a3c08d3514bf2b7497dc3a85e7a328c33757287a83f82cb602f0a27': 1,
@@ -447,6 +448,20 @@ STAGING_BOOTSTRAPS = {'venues/bingx/src/lib.rs': ({'1620031f97e957d61d90d1f02aee
  'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
  'ca1a695870588abe078efa57b2d1e6f789b219044369ce2f8d1119a9c10664b7': 1,
  'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 1}),
+ 'venues/okx/src/lib.rs': ({'1cb580e20171923e6928e9cbc28b73b880ba2dd8c4f11a395557966119b8d038': 1,
+ '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 2,
+ 'a39517b8d72cf193e89578682d47a093f99c8b47724978190a59c88125595faf': 2,
+ 'b8eef2a79ada04918fd91d4c45f3a03a76d566ac79f733acf0c441b0fbbfc934': 1,
+ 'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1},
+    {'1cb580e20171923e6928e9cbc28b73b880ba2dd8c4f11a395557966119b8d038': 1,
+ '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 2,
+ '2e9218906fd923fa6c83c648873ea2527c33dd1068d609c8c1ec343630b36911': 1,
+ 'a39517b8d72cf193e89578682d47a093f99c8b47724978190a59c88125595faf': 2,
+ 'b1761cdefa174ea70037cfceab33b91ad7279e59d22ccecb872e996dd5b0c32c': 1,
+ 'b8eef2a79ada04918fd91d4c45f3a03a76d566ac79f733acf0c441b0fbbfc934': 1,
+ 'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2}),
  'venues/weex/src/lib.rs': ({'067aa233d0ebbb24c837ae5cb4549d6aa68e9f29bf4bdde0ba0630bda9f466c1': 1,
  '0d6bbb8e01da4f9bc9a177c0e8ca9d0d015c922780050cfeda6b33807cac8e78': 1,
  '1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
