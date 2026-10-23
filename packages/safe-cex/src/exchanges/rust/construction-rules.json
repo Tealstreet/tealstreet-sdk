@@ -4,6 +4,7 @@
     "privateEligible": [["canSign"]]
   },
   "venues": {
+    "weex": {"bridge": {"dispatchSigning": true}, "signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
     "okx": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}, "remoteSigning": {"signatureEncoding": "base64", "passphraseHeader": "OK-ACCESS-PASSPHRASE"}},
     "okxeu": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}, "remoteSigning": {"signatureEncoding": "base64", "passphraseHeader": "OK-ACCESS-PASSPHRASE"}},
     "okxdemo": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}, "remoteSigning": {"signatureEncoding": "base64", "passphraseHeader": "OK-ACCESS-PASSPHRASE"}},
@@ -27,6 +28,7 @@
     "lighter-robinhood": {"privateEligible": [["secret", "remoteSigner"], ["apiKeyIndex"]], "bridge": {"apiKeyIndexRequired": true}},
     "hyperliquid": {"privateEligible": [["vault", "applicationId", "key"]]},
     "asterdex": {"canSign": [["key"], ["remoteSigner", "asterLocalAuth"]], "bridge": {"isolatedBookSubscriptions": true}},
+    "bingx": {"bridge": {"dispatchSigning": true}},
     "bybit": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"wire": {"exchangeName": "bybit", "extraData": "bybitExpiry"}, "enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
     "bybitinverse": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"wire": {"exchangeName": "bybit", "extraData": "bybitExpiry"}, "enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
     "bybitspot": {"bridge": {"spot": true, "dispatchSigning": true}, "remoteSigning": {"wire": {"exchangeName": "bybit", "extraData": "bybitExpiry"}, "enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},

@@ -2,7 +2,7 @@
 //! snapshots that started before them; failed pages never replace store data.
 use crate::{Connection, MexcFutures, Pending, WS, sign, wire::*};
 use safe_cex_engine::Level;
-use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::error::{ErrorKind, VenueError};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -10,8 +10,6 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Cx, Fill, FillFinancials, Method, Response, SocketId, TimerId};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-
-const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Clone, Copy, Default)]
 pub struct Rails {
@@ -94,7 +92,7 @@ pub struct Account {
     pub fills: HashMap<String, f64>,
     pub paused_until: f64,
     /// `coin:`/`position:`/`order:` + identity (empty when unreadable) of skips already logged.
-    skip_logged: HashSet<String>,
+    skip_logged: RowReports<String>,
 }
 
 impl Account {
@@ -1053,24 +1051,13 @@ impl MexcFutures {
         level: Level,
         message: impl Into<String>,
     ) {
-        let logged = &mut self.account.skip_logged;
-        if logged.len() >= SKIP_LOG_LIMIT {
-            logged.clear();
-        }
-        if logged.insert(key) {
-            cx.notice(level, code::ROW_SKIPPED, message);
-        }
+        self.account.skip_logged.report(cx, key, level, message);
     }
     /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.
     fn rearm_skips(&mut self, prefix: &str, clean: bool, ids: Vec<String>) {
-        let logged = &mut self.account.skip_logged;
-        if clean {
-            logged.retain(|key| !key.starts_with(prefix));
-        } else {
-            for id in ids {
-                logged.remove(&format!("{prefix}{id}"));
-            }
-        }
+        self.account
+            .skip_logged
+            .rearm_namespace(prefix, clean, ids.iter().map(String::as_str));
     }
     pub fn account_response(
         &mut self,
