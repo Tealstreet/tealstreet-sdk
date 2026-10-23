@@ -2440,7 +2440,9 @@ impl Venue for BybitLinear {
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Then::Ordinary(request) = pending.then {
-            let error = VenueError::new(error).outcome(safe_cex_engine::Outcome::Unknown);
+            // Transport loss arrives typed through on_http_failed; this is a
+            // pre-transport (signing) failure.
+            let error = VenueError::new(error).outcome(safe_cex_engine::Outcome::NotSent);
             self.on_ordinary_leg_failed(cx, request, error);
             return;
         }

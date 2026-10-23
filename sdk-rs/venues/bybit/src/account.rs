@@ -2721,11 +2721,12 @@ impl BybitLinear {
         // A committed, wholly admitted fresh read clears the engine's
         // uncertain-write fence once no product's order read is still out.
         if !join.rejected.any()
+            && !self.account.orders_stale
             && self.account.orders.is_none()
             && self
                 .products
                 .iter()
-                .all(|state| state.account.orders.is_none())
+                .all(|state| state.account.orders.is_none() && !state.account.orders_stale)
         {
             cx.orders_reconciled(None);
         }

@@ -3104,3 +3104,39 @@ fn managed_mode_read_window_expiry_fails_not_sent_before_any_write() {
         "a late read plans nothing"
     );
 }
+
+/// Bybit's own clock in a 10002 refusal corrects the one native resend.
+fn recv_window_refusal(now: f64) -> String {
+    let server = now + 600_000.;
+    format!(
+        r#"{{"retCode":10002,"retMsg":"invalid request, please check your server timestamp or recv_window param. req_timestamp[{now}],server_timestamp[{server}],recv_window[20000]","result":{{}}}}"#
+    )
+}
+
+#[test]
+fn managed_recv_window_resends_carry_the_venue_clock() {
+    // A write leg: the classified grant's resend is re-signed on Bybit's clock.
+    let mut h = ready(Variant::Spot);
+    place(&mut h, 119, vec![order("BTCUSDT", 0.1)]);
+    let create = h.take("/v5/order/create");
+    h.reply(create.id, 200, &recv_window_refusal(h.now));
+    let resent = h.take("/v5/order/create");
+    assert_eq!(resent.body, create.body);
+    assert_eq!(
+        Harness::header(&resent, "X-BAPI-TIMESTAMP"),
+        Some((h.now + 600_000.).floor().to_string()),
+        "write resend uses the corrected clock"
+    );
+    // A mode read: its one native retry is corrected the same way.
+    let mut h = ready(Variant::Linear);
+    place(&mut h, 120, vec![order("BTCUSDT", 0.1)]);
+    let path = "/v5/position/list?category=linear&symbol=BTCUSDT";
+    let read = h.take(path);
+    h.reply(read.id, 200, &recv_window_refusal(h.now));
+    let retry = h.take(path);
+    assert_eq!(
+        Harness::header(&retry, "X-BAPI-TIMESTAMP"),
+        Some((h.now + 600_000.).floor().to_string()),
+        "mode-read retry uses the corrected clock"
+    );
+}

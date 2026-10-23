@@ -672,6 +672,8 @@ impl BybitLinear {
                 ack::position_mode(result, &symbol).map_err(not_sent)
             }
             Ok(Answer::Refused { code, message, .. }) => {
+                // Bybit's own clock is evidence; read it before sanitizing.
+                let server = server_time(&message);
                 // Signature diagnostics can contain the complete signed origin.
                 let message = crate::signing_rejection(code, &message).unwrap_or(message);
                 let native = Native {
@@ -691,7 +693,7 @@ impl BybitLinear {
                         RetryEvidence::DefinitiveRefusal,
                     )
                 {
-                    if let Some(server) = server_time(&message) {
+                    if let Some(server) = server {
                         cx.observe_protocol_time(server);
                     }
                     if !self.send_mode_read(cx, id, &symbol, context.clone()) {
@@ -970,6 +972,8 @@ impl BybitLinear {
     ) -> Decision {
         let context = &active.context;
         let planned = &active.leg.planned;
+        // Bybit's own clock is evidence; read it before sanitizing.
+        let server = server_time(&message);
         // Signature diagnostics can contain the complete signed origin.
         let mut message = crate::signing_rejection(code, &message).unwrap_or(message);
         if let Call::MarginMode { .. } = planned.call
@@ -1026,9 +1030,7 @@ impl BybitLinear {
                 Decision::Next(Vec::new())
             }
             (Verdict::RefusedResend(_), _) if grant.is_some() => {
-                if let Some(server) =
-                    server_time(error.venue_message.as_deref().unwrap_or_default())
-                {
+                if let Some(server) = server {
                     cx.observe_protocol_time(server);
                 }
                 Decision::Resend(grant.expect("checked above"))
