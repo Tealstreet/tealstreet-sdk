@@ -2060,6 +2060,15 @@ with the owned-read representation. The HTTP dispatcher and ten pending.request
 fields remain; account, private history, signing and coalesced FetchLeverage are
 outside this area. No other venue inventory entries change.
 
+## MEXC public candle lifecycle adoption
+
+The single `FetchCandles` path now consumes shared Context admission, managed
+public HTTP release and Context completion. Original-source RED controls cover
+unprepared dispatch, parked/released expiry, stale owner delivery and HTTP429
+side-effect authority. Native mapping/decoding/status/pause policy is retained.
+This closes only this command's lifecycle sites; startup, history, account,
+signing and background subscription repair remain separately inventoried.
+
 ## Paradex independent startup authority
 
 ~~Paradex public catalog and ticker seeds bypass managed HTTP authority and can

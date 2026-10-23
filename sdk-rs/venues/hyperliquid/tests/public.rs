@@ -3,6 +3,9 @@
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 
+#[path = "../../../engine/tests/support/public_managed_headers.rs"]
+mod public_managed_headers;
+
 fn response(engine: &mut Engine<Hyperliquid>, request: RequestId, body: &str) {
     engine.handle(
         1000.0,
@@ -196,6 +199,7 @@ fn posted_candle_read_preserves_body_and_streams() {
             r#"{"type":"candleSnapshot","req":{"coin":"BTC","interval":"1m","startTime":0,"endTime":60000}}"#
         )
     );
+    public_managed_headers::assert_native_public_intent_survives_managed_release(&req);
     response(
         &mut e,
         req.id,
