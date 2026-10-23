@@ -18,6 +18,10 @@ mod replacement_tests;
 #[path = "request_context_read_delivery_tests.rs"]
 mod read_delivery_tests;
 
+#[cfg(test)]
+#[path = "request_context_background_delivery_tests.rs"]
+mod background_delivery_tests;
+
 struct CommandOwner {
     generation: u64,
     /// Exact logical completion authority survives expired-handle cleanup.
