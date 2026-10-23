@@ -6,9 +6,11 @@
 //! the venue's COMPLETED shortcut omits REJECTED orders.
 use crate::wire::{Id, N, checked};
 use crate::{Orderly, Pending, symbol};
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
+use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -37,7 +39,7 @@ enum Kind {
     Trades,
 }
 pub struct Request {
-    pub command: CommandId,
+    owner: Box<CursorHistory<Row>>,
     kind: Kind,
     symbol: Option<String>,
     native: Option<String>,
@@ -47,14 +49,11 @@ pub struct Request {
     limit: usize,
     algo: bool,
     page: u32,
-    pages: u32,
     page_count: usize,
     page_new: usize,
     stage_count: usize,
     seen: HashSet<String>,
-    output_seen: HashSet<String>,
     occurrences: HashMap<String, u32>,
-    rows: Vec<Row>,
     invalid: Option<String>,
 }
 #[derive(Serialize)]
@@ -291,9 +290,9 @@ impl Request {
         }
     }
     fn append(&mut self, key: String, row: Row) {
-        if self.output_seen.insert(key) && self.stage_count < self.limit {
+        if self.owner.fresh(key) && self.stage_count < self.limit {
             self.stage_count += 1;
-            self.rows.push(row);
+            self.owner.stage(row);
         }
     }
     fn unpaged(&self) -> bool {
@@ -406,7 +405,12 @@ impl Orderly {
         self.history_request(
             cx,
             Request {
-                command,
+                owner: Box::new(CursorHistory::new(
+                    Completion::new(command),
+                    CursorWalk::starting_at(MAX_PAGES, "regular:1".into()),
+                    |_| "Orderly incomplete or repeated history pagination".into(),
+                    |rows| serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string())),
+                )),
                 kind,
                 symbol,
                 native,
@@ -420,14 +424,11 @@ impl Orderly {
                 }) as usize,
                 algo: false,
                 page: 1,
-                pages: 0,
                 page_count: 0,
                 page_new: 0,
                 stage_count: 0,
                 seen: HashSet::new(),
-                output_seen: HashSet::new(),
                 occurrences: HashMap::new(),
-                rows: vec![],
                 invalid: None,
             },
         );
@@ -509,7 +510,7 @@ impl Orderly {
                     Pending::History(request),
                 );
             }
-            Err(e) => cx.fail(request.command, e),
+            Err(e) => request.owner.reject(cx, VenueError::new(e)),
         }
     }
     pub(crate) fn history_item(
@@ -826,7 +827,6 @@ impl Orderly {
                 return;
             }
         };
-        request.pages += 1;
         if let Some(meta) = &page.meta
             && (meta.current_page.is_some_and(|p| p != request.page)
                 || meta
@@ -834,7 +834,7 @@ impl Orderly {
                     .is_some_and(|n| n == 0 || n > PAGE_SIZE)
                 || meta.total < request.seen.len() as u64)
         {
-            self.history_failed(cx, request, "Orderly inconsistent history pagination");
+            self.history_rejected(cx, request, "Orderly inconsistent history pagination");
             return;
         }
         let more = if request.unpaged() {
@@ -844,54 +844,88 @@ impl Orderly {
                 (request.seen.len() as u64) < m.total
             })
         };
-        if more && request.stage_count < request.limit {
-            if request.pages >= MAX_PAGES || request.page_count == 0 || request.page_new == 0 {
-                self.history_failed(
-                    cx,
-                    request,
-                    "Orderly incomplete or repeated history pagination",
-                );
-                return;
-            }
-            request.page += 1;
-            request.page_count = 0;
-            request.page_new = 0;
-            self.history_request(cx, request);
+        let continue_stage = more && request.stage_count < request.limit;
+        if continue_stage && (request.page_count == 0 || request.page_new == 0) {
+            self.history_rejected(
+                cx,
+                request,
+                "Orderly incomplete or repeated history pagination",
+            );
             return;
         }
-        if request.kind == Kind::Orders && !request.algo {
-            if request.pages >= MAX_PAGES {
-                self.history_failed(cx, request, "Orderly history pagination budget exhausted");
-                return;
-            }
-            request.algo = true;
-            request.page = 1;
-            request.page_count = 0;
-            request.page_new = 0;
-            request.stage_count = 0;
-            request.seen.clear();
-            self.history_request(cx, request);
-            return;
-        }
-        request.rows.sort_by(|a, b| {
-            b.time()
-                .total_cmp(&a.time())
-                .then_with(|| b.id().cmp(a.id()))
-        });
-        request.rows.truncate(request.limit);
-        {
-            let result: Result<String, String> =
-                serde_json::to_string(&request.rows).map_err(|e| e.to_string());
-            match result {
-                Ok(data) => cx.done(request.command, data),
-                Err(error) => cx.fail(request.command, error),
-            }
+        let next_stage = !continue_stage && request.kind == Kind::Orders && !request.algo;
+        // One walk covers both native order endpoints: restarting here would
+        // silently double the existing fifty-page command budget.
+        let next = if continue_stage {
+            let stage = if request.algo { "algo" } else { "regular" };
+            let page = request.page + 1;
+            Some(format!("{stage}:{page}"))
+        } else if next_stage {
+            Some("algo:1".into())
+        } else {
+            None
         };
+        match request.owner.advance(CursorPage {
+            want_more: next.is_some(),
+            next,
+            rows: request.page_count,
+            fresh: request.page_new,
+        }) {
+            CursorStep::More(_) => {
+                if next_stage {
+                    request.algo = true;
+                    request.page = 1;
+                    request.stage_count = 0;
+                    request.seen.clear();
+                } else {
+                    request.page += 1;
+                }
+                request.page_count = 0;
+                request.page_new = 0;
+                self.history_request(cx, request);
+            }
+            CursorStep::Done => self.history_finish(cx, request, Ok(())),
+            CursorStep::Stalled(_) => self.history_rejected(
+                cx,
+                request,
+                if next_stage {
+                    "Orderly history pagination budget exhausted"
+                } else {
+                    "Orderly incomplete or repeated history pagination"
+                },
+            ),
+        }
+    }
+    fn history_finish(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        result: Result<(), VenueError>,
+    ) {
+        let limit = request.limit;
+        request.owner.finish_with(cx, result, |mut rows| {
+            rows.sort_by(|a, b| {
+                b.time()
+                    .total_cmp(&a.time())
+                    .then_with(|| b.id().cmp(a.id()))
+            });
+            rows.truncate(limit);
+            serde_json::to_string(&rows).map_err(|e| VenueError::new(e.to_string()))
+        });
+    }
+    fn history_rejected(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        request.owner.reject(
+            cx,
+            VenueError::new(format!("Orderly history read failed: {error}")),
+        );
     }
     pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        cx.fail(
-            request.command,
-            format!("Orderly history read failed: {error}"),
+        self.history_finish(
+            cx,
+            request,
+            Err(VenueError::new(format!(
+                "Orderly history read failed: {error}"
+            ))),
         );
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
