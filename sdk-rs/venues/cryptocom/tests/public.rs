@@ -391,7 +391,10 @@ fn rest_book_success_and_failure_leave_live_book_ticker_and_account_untouched() 
                 limit: Some(1),
             }),
         );
-        let actions: Vec<_> = engine.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut engine, 3.0)
+            .into_iter()
+            .filter(|action| !matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+            .collect();
         assert_eq!(actions.len(), 1);
         let Action::Http(request) = &actions[0] else {
             panic!("unsigned public query")
