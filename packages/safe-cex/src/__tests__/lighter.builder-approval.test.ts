@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE } from '../exchanges/lighter/lighter.account-tier';
 import {
   buildLighterApproveIntegratorL1Message,
   checkLighterBuilderApproved,
   createLighterL1SignatureHelperUrl,
   prepareLighterBuilderApprovalContext,
 } from '../exchanges/lighter/lighter.builder-approval';
-import { LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE } from '../exchanges/lighter/lighter.account-tier';
 
 const { lighterApiGetMock, lighterApiGetNextNonceMock, lighterApiInstances, txGetAuthTokenMock } = vi.hoisted(() => ({
   lighterApiGetMock: vi.fn(),
@@ -147,6 +147,30 @@ describe('lighter.builder-approval utilities', () => {
     expect(lighterApiInstances[0]?.config?.baseUrl).toContain('https://api.rh.lighter.xyz');
   });
 
+  it('uses the Robinhood default integrator account index for approval context', async () => {
+    lighterApiGetNextNonceMock.mockResolvedValueOnce(921n);
+    lighterApiGetMock.mockResolvedValueOnce({
+      accounts: [
+        {
+          l1_address: '0xEB0F03ce558333846772efc2C0372f092E60B982',
+          approved_integrators: [],
+        },
+      ],
+    });
+
+    const context = await prepareLighterBuilderApprovalContext({
+      accountIdentifier: '21972',
+      apiKeyIndex: 2,
+      exchangeName: 'lighter-robinhood',
+    });
+
+    expect(context.nonce).toBe(921n);
+    expect(context.signerChainId).toBe(466324);
+    expect(context.integratorAccountIndex).toBe(47296n);
+    expect(context.l1Address).toBe('0xEB0F03ce558333846772efc2C0372f092E60B982');
+    expect(lighterApiInstances[0]?.config?.baseUrl).toContain('https://api.rh.lighter.xyz');
+  });
+
   it('treats an unexpired approval below the default taker fee cap as not approved', async () => {
     lighterApiGetMock.mockResolvedValueOnce({
       accounts: [
@@ -248,6 +272,36 @@ describe('lighter.builder-approval utilities', () => {
 
     expect(result.approved).toBe(true);
     expect(result.approvalStatus).toBe('approved');
+  });
+
+  it('checks Robinhood approval status against the Robinhood default integrator', async () => {
+    lighterApiGetMock.mockResolvedValueOnce({
+      accounts: [
+        {
+          l1_address: '0xEB0F03ce558333846772efc2C0372f092E60B982',
+          approved_integrators: [
+            {
+              account_index: 47296,
+              approval_expiry: Date.now() + 60_000,
+              max_perps_taker_fee: 250,
+              max_perps_maker_fee: 0,
+              max_spot_taker_fee: 250,
+              max_spot_maker_fee: 0,
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await checkLighterBuilderApproved({
+      accountIdentifier: '21972',
+      exchangeName: 'lighter-robinhood',
+    });
+
+    expect(result.approved).toBe(true);
+    expect(result.approvalStatus).toBe('approved');
+    expect(result.integratorAccountIndex).toBe(47296n);
+    expect(lighterApiInstances[0]?.config?.baseUrl).toContain('https://api.rh.lighter.xyz');
   });
 
   it('preserves flat requiredFeeValue compatibility for callers that pass it explicitly', async () => {

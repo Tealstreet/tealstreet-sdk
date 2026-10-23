@@ -68,6 +68,21 @@ describe('HyroTrader periodic public snapshots', () => {
     expect(get).not.toHaveBeenCalled();
     expect(frames()).toEqual([]);
   });
+  it('keeps bulk kline subscribe batches below Hyro topic limits', () => {
+    const { socket, frames } = setup();
+    const symbols = Array.from({ length: 33 }, (_, index) => `TEST${index}USDT`);
+    socket.listenOHLCVs({ symbols, interval: '1m' }, vi.fn());
+    expect(frames().map((frame) => frame.args.length)).toEqual([10, 10, 10, 3]);
+  });
+  it('preserves the pre-Hyro bulk kline subscribe cadence on ordinary Bybit', () => {
+    // Hyro's 10-topic cap is a simulator quirk; ordinary Bybit livenet handled
+    // 50-topic kline bulks fine, and shrinking that would 5x the subscribe
+    // frame count on dashboards with many kline streams. Guard the split.
+    const { socket, frames } = setup(false);
+    const symbols = Array.from({ length: 33 }, (_, index) => `TEST${index}USDT`);
+    socket.listenOHLCVs({ symbols, interval: '1m' }, vi.fn());
+    expect(frames().map((frame) => frame.args.length)).toEqual([33]);
+  });
   it('preserves trade-derived candles on ordinary Bybit', () => {
     const { socket, frames } = setup(false);
     const unsubscribe = socket.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, vi.fn());
