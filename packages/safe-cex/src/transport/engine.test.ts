@@ -952,10 +952,11 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
   it('direct UTA private sockets leave the direct v3 host after silence and never touch v2', () => {
     const raw = makeRaw();
     const routed = createEngineTransport('bitget', options(), raw);
-    for (let attempt = 0; attempt < 4; attempt++) routed.connect(utaUrl, withContext('account', false, 'private'));
+    const sockets = Array.from({ length: 4 }, () => routed.connect(utaUrl, withContext('account', false, 'private')));
     // The third attempt takes the ungated v3 relay (a relay socket, not a raw dial).
     expect(raw.connect.mock.calls.map(([url]) => url)).toEqual([utaUrl, utaUrl]);
     expect(utaRelay).toContain('v3');
+    for (const socket of sockets) socket.close();
   });
 
   it('a refused egress advances one route and a spent chain reports typed exhaustion without a dial', async () => {
@@ -965,7 +966,7 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
     routed.connect(utaUrl, withContext('account', false, 'private'));
     expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private');
     // Two-candidate chain (tunnel host, relay): the first refusal moves to the relay.
-    routed.connect(utaUrl, { ...handlers('private'), context: refuse });
+    const relay = routed.connect(utaUrl, { ...handlers('private'), context: refuse });
     expect(raw.connect).toHaveBeenCalledTimes(1);
     const exhausted = vi.fn();
     const closed = vi.fn();
@@ -975,14 +976,19 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
     expect(exhausted).toHaveBeenCalledOnce();
     expect(closed).not.toHaveBeenCalled();
     expect(raw.connect).toHaveBeenCalledTimes(1);
+    relay.close();
   });
 
   // Final ruling on #1890: TS #8093's tunnel bars are host route data, not venue counters.
   const tunnelHost = 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private';
   const dialTunnel = (routed: ReturnType<typeof createEngineTransport>, raw: ReturnType<typeof makeRaw>, open: boolean, message?: string) => {
     const before = raw.connect.mock.calls.length;
-    routed.connect(privateUrl, withContext('account', false, 'private'));
-    if (raw.connect.mock.calls.length === before) return 'relay';
+    const routedSocket = routed.connect(privateUrl, withContext('account', false, 'private'));
+    if (raw.connect.mock.calls.length === before) {
+      // Close the relay so its pending module load never dials after this test.
+      routedSocket.close();
+      return 'relay';
+    }
     const socket = raw.connect.mock.lastCall!;
     if (open) socket[1].onOpen();
     if (message) socket[1].onMessage(message);
@@ -1047,11 +1053,12 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
       routed.connect(privateUrl, withContext('account', false, 'private'));
       raw.connect.mock.lastCall![1].onMessage(message);
     }
-    routed.connect(privateUrl, withContext('account', false, 'private'));
+    const last = routed.connect(privateUrl, withContext('account', false, 'private'));
     // A proven route stays direct; a silent one moves to the ungated v2 relay,
     // which opens as a relay socket rather than a raw venue dial.
     expect(raw.connect).toHaveBeenCalledTimes(fallbackExpected ? 2 : 3);
     expect(raw.connect.mock.lastCall![0]).toBe(privateUrl);
+    last.close();
   });
 });
 
