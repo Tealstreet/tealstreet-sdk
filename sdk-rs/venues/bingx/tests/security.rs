@@ -9,7 +9,6 @@ fn credential_options_hold_only_opaque_refs() {
             signing: KeyRef("ref:owned-signing".into()),
             passphrase: None,
             stable_id: None,
-            extra: Default::default(),
         }),
         ..Default::default()
     };

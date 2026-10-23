@@ -196,7 +196,6 @@ fn identity_rejects_incomplete_saved_read_credentials_without_primary_fallback()
                 signing: safe_cex_engine::signing::KeyRef("ref:owned-primary-signing".into()),
                 passphrase: None,
                 stable_id: None,
-                extra: Default::default(),
             }),
             read_credentials: Some(safe_cex_engine::signing::Identity {
                 extra: Default::default(),
@@ -204,7 +203,6 @@ fn identity_rejects_incomplete_saved_read_credentials_without_primary_fallback()
                 signing: safe_cex_engine::signing::KeyRef(String::new()),
                 passphrase: None,
                 stable_id: None,
-                extra: Default::default(),
             }),
             ..Default::default()
         }));

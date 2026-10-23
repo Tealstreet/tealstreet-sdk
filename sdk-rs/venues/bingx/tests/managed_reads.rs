@@ -11,7 +11,6 @@ fn identity(slot: &str) -> Identity {
         signing: KeyRef(format!("ref:{slot}-signing")),
         passphrase: None,
         stable_id: None,
-        extra: Default::default(),
     }
 }
 fn engine() -> Engine<Bingx> {
