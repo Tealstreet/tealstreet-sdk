@@ -108,3 +108,16 @@ architecture gate: shared initial command authority, no per-venue mechanism for
 a cross-cutting concern. Full CI, explicit train slot, genuine latest landing,
 fresh separate preservation guard then head-matched merge. This closes local
 terminals only, not private history, signing or whole-venue zero.
+
+## Executed phase receipt
+
+Plan reviews corrected the survivor classification and separated three defensive
+guards from thirteen dispatcher-reachable terminals before production. Tests-first
+`84d84e1c27f`, corrected fixture `e9693e10536` delegates KuCoin's native mutation
+guard. The corrected original source ran five assertion RED/six compatibility
+GREEN controls; the same frozen tests pass all eleven after adoption. No failure
+was manufactured for a defensive branch. Full KuCoin/Binance all-feature native
+run passes586 tests across43 targets; KuCoin feature-off passes173 across17.
+Strict all-target/all-feature KuCoin Clippy, scoped fmt, bans and both request
+context checks (14 checker regressions) pass. Source/adversarial and caller
+reviews are CLEAN; final full-map review and normal PR CI are separate gates.

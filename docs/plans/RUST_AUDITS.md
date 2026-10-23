@@ -2269,3 +2269,16 @@ retire. Exact KuCoin inventory shrinks84 to80 occurrences and74 to70 hash rows;
 Spot mod shrinks20 to16. The shared Account failure hash stays at count2.
 No other venue prune or exemption is introduced. Private/HMAC, account/history,
 trading, bullet sessions and futures retain the committed full-map prerequisites.
+
+## KuCoin futures local terminal provenance
+
+Sixteen synchronous numeric history/funding terminals adopt shared initial Read
+admission and Context finalization. The exact ratchet shrinks KuCoin80->64
+occurrences and70->58 rows, nine files retained; history13->5 and funding9->1.
+Six conservative embedded macro fingerprints remain counted unchanged. Legacy
+signed-streaming, numeric Completion and multipage scheduling remain held for
+their shared signer/history/Plan prerequisites; no zero-legacy claim is made.
+No venue owner registry, finalizer wrapper or credential/routing substitute is
+introduced. Three defensive guards are migrated without an unreachable native
+original-RED claim; thirteen dispatcher-reachable exits supply the production
+acceptance coverage.
