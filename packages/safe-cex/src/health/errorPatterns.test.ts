@@ -316,3 +316,23 @@ describe('hyrotrader auth rejections the simulator sends', () => {
     expect(match('retCode:10003 retMsg:API key is invalid.')).toBe('auth_invalid');
   });
 });
+
+describe('engine capacity refusals are not venue rate limits', () => {
+  const match = (message: string) => {
+    for (const pattern of DEFAULT_ERROR_PATTERNS) {
+      for (const p of pattern.patterns) {
+        const hit = typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message);
+        if (hit) return pattern.category;
+      }
+    }
+    return null;
+  };
+
+  it('leaves the Rust engine capacity message unclassified', () => {
+    expect(match('Engine request capacity reached')).toBeNull();
+  });
+
+  it('documents why the former engine text was replaced', () => {
+    expect(match('Too many requests in flight')).toBe('rate_limit');
+  });
+});
