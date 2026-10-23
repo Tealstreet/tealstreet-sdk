@@ -545,3 +545,30 @@ against the current landing and restored incoming WEEX sites against the older
 branch parent. This checkpoint is not ready for landing: integrate current
 actual source and complete the real managed conversion before claiming those
 gates pass. No staging entry is changed or enlarged.
+
+### Original genuine-entry capacity refusals
+
+On unchanged production `024f995adb3` (actual #1873), two new compiled controls
+fail the final metadata admission assertion: unknown market and missing key.
+The fixture delegates the native BingX capability record and handler. It fills
+exactly 256 genuine command-callback Read roots at a fixed clock, validates
+each original root and live Context, then a genuine ReadOnly `begin_preflight`
+control proves `Rejected(Capacity)` and captures its exact typed terminal. A
+test timer completes one retained owner through `done_context`; preflight
+admission then succeeds and both native refusal texts remain unchanged.
+All these working controls run before the final expected RED comparison.
+
+With capacity exhausted, the legacy metadata path still emits its native text
+with `NotSent`, while the genuine Read control emits `Too many requests in
+flight`, `Internal`, and no write outcome. The expected replacement uses that
+exact engine error, without inventing `NotSent` for a Read. Each command has one
+terminal and no HTTP, sign, managed release, deactivation or authentication
+failure. Both tests reach the final assertion; an earlier wrapper-capability
+setup failure and a physical-capacity-only prototype are excluded from this
+command-owner RED evidence. The four earlier entry test blocks
+remain verbatim. No production source or engine internals change in this receipt.
+
+Independent rerun of the refined test tree reports 75 account tests passing and
+three intended assertion failures: these two command-owner capacity controls
+plus the original managed-Prepare RED. Source/adversarial review is CLEAR; the
+only follow-up is a fixture comment explaining why native startup I/O is omitted.

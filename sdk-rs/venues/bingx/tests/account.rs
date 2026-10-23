@@ -2383,3 +2383,222 @@ fn metadata_write_provider_refusal_releases_pending_owner_before_next_read() {
         assert_eq!(h.done.iter().filter(|(id, _)| *id == 944).count(), 1);
     }
 }
+
+mod metadata_entry_capacity {
+    use super::*;
+    use safe_cex_engine::Venue;
+    use safe_cex_engine::request_context::{
+        CommandEntryError, Context, Error, Operation, Policy, PreflightPolicy, PreflightPurpose,
+        RetryPolicy,
+    };
+
+    struct Probe {
+        native: Bingx,
+        markets: Vec<safe_cex_engine::model::Market>,
+        roots: Vec<Context>,
+        release: Option<TimerId>,
+        admission: Option<Result<(), CommandEntryError>>,
+    }
+    fn policy() -> Policy {
+        Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }
+    }
+    impl Venue for Probe {
+        type Pending = safe_cex_venue_bingx::Pending;
+        fn capabilities(&self) -> safe_cex_engine::Capabilities {
+            self.native.capabilities()
+        }
+
+        fn start(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>) {
+            // Only pre-admission metadata refusals run here; native startup I/O
+            // is outside this fixture, which supplies the ready market catalogue.
+            cx.store.set_markets(self.markets.clone());
+            self.release = Some(cx.set_timer(1001.));
+        }
+        fn on_command(
+            &mut self,
+            cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+            command: Command,
+        ) {
+            if let Command::FetchAccount { command: id } = command {
+                if (1000..1256).contains(&id) {
+                    self.roots.push(cx.admit_http_command(policy()).unwrap());
+                    return;
+                }
+                for root in &self.roots {
+                    cx.validate_read_root_context(root).unwrap();
+                    cx.validate_http_context(root).unwrap();
+                }
+                let result = cx.begin_preflight(PreflightPolicy {
+                    purpose: PreflightPurpose::ReadOnly,
+                    read_credential: None,
+                    write_credential: None,
+                });
+                self.admission = Some(result.as_ref().map(|_| ()).map_err(|e| *e));
+                if let Ok(preflight) = result {
+                    cx.done_preflight(&preflight, "admission-control".into())
+                        .unwrap();
+                }
+            } else {
+                self.native.on_command(cx, command);
+            }
+        }
+        fn on_timer(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>, timer: TimerId) {
+            assert_eq!(self.release.take(), Some(timer));
+            cx.done_context(&self.roots.pop().unwrap(), "released-one-owner".into())
+                .unwrap();
+        }
+        fn on_response(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+            _: Self::Pending,
+            _: Response<'_>,
+        ) {
+            panic!("entry proof releases no HTTP");
+        }
+        fn on_request_failed(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+            _: Self::Pending,
+            _: &str,
+        ) {
+            panic!("entry proof has no transport");
+        }
+        fn on_open(&mut self, _: &mut safe_cex_engine::Cx<'_, Self::Pending>, _: SocketId) {}
+        fn on_close(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+            _: SocketId,
+            _: u16,
+        ) {
+        }
+        fn on_message(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+            _: SocketId,
+            _: &str,
+        ) {
+        }
+        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    fn failed(actions: &[Action], id: u32) -> safe_cex_engine::VenueError {
+        let terminals = actions.iter().filter(|a| matches!(a,
+            Action::Notice(Notice::CommandDone { command, .. } | Notice::CommandFailed { command, .. }) if *command == id
+        )).collect::<Vec<_>>();
+        assert_eq!(terminals.len(), 1, "one correlated terminal");
+        match terminals[0] {
+            Action::Notice(Notice::CommandFailed { error, .. }) => error.clone(),
+            other => panic!("expected failure, got {other:?}"),
+        }
+    }
+    fn no_native_effects(actions: &[Action]) {
+        assert!(!actions.iter().any(|action| matches!(action,
+            Action::Http(_) | Action::Sign { .. } | Action::ManagedHttp(_) | Action::Notice(Notice::Deactivate)
+        ) || matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::AUTH_REJECTED
+        )));
+    }
+    fn check(missing_key: bool) {
+        let markets = Harness::ready().engine.store().markets().to_vec();
+        let (native, provider) = Options {
+            key: (!missing_key).then(|| "key".into()),
+            secret: (!missing_key).then(|| "secret".into()),
+            ..Options::default()
+        }
+        .build();
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
+            native,
+            markets,
+            roots: Vec::new(),
+            release: None,
+            admission: None,
+        });
+        engine.set_signer(Some(provider)).unwrap();
+        engine.start(1000.);
+        for id in 1000..1256 {
+            engine.handle(1000., Event::Command(Command::FetchAccount { command: id }));
+            no_native_effects(&engine.drain_actions().collect::<Vec<_>>());
+        }
+        assert_eq!(engine.venue().roots.len(), 256);
+        no_native_effects(&engine.drain_actions().collect::<Vec<_>>());
+        engine.handle(
+            1000.,
+            Event::Command(Command::FetchAccount { command: 976 }),
+        );
+        assert_eq!(
+            engine.venue().admission,
+            Some(Err(CommandEntryError::Rejected(Error::Capacity)))
+        );
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        no_native_effects(&actions);
+        let capacity = failed(&actions, 976);
+        assert_eq!(
+            capacity.outcome, None,
+            "Read admission does not invent a write outcome"
+        );
+        let symbol = if missing_key { "BTCUSDT" } else { "MISSING" };
+        engine.handle(
+            1000.,
+            Event::Command(Command::FetchLeverage {
+                command: 977,
+                symbol: symbol.into(),
+            }),
+        );
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        no_native_effects(&actions);
+        let exhausted = failed(&actions, 977);
+        let timer = engine.venue().release.unwrap();
+        engine.handle(1001., Event::TimerFired { timer });
+        assert_eq!(engine.venue().roots.len(), 255);
+        no_native_effects(&engine.drain_actions().collect::<Vec<_>>());
+        engine.handle(
+            1001.,
+            Event::Command(Command::FetchAccount { command: 978 }),
+        );
+        assert_eq!(engine.venue().admission, Some(Ok(())));
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        no_native_effects(&actions);
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 978, result }) if result == "admission-control")).count(), 1);
+        engine.handle(
+            1001.,
+            Event::Command(Command::FetchLeverage {
+                command: 979,
+                symbol: symbol.into(),
+            }),
+        );
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        no_native_effects(&actions);
+        let native = failed(&actions, 979);
+        assert_eq!(
+            native.legacy_text(),
+            if missing_key {
+                "BingX metadata requires credentials"
+            } else {
+                "Unknown BingX market"
+            }
+        );
+        assert_eq!(engine.health().auth_failures, 0);
+        assert_eq!(
+            exhausted, capacity,
+            "metadata pre-admission refusal must not bypass genuine engine capacity"
+        );
+    }
+    #[test]
+    fn unknown_market_cannot_bypass_entry_capacity() {
+        check(false);
+    }
+    #[test]
+    fn missing_key_cannot_bypass_entry_capacity() {
+        check(true);
+    }
+}
