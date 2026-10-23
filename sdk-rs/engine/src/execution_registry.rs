@@ -79,7 +79,7 @@ impl ContextRegistry {
         if self
             .contexts
             .len()
-            .checked_add(self.reserved_contexts)
+            .checked_add(self.reserved_context_count())
             .is_none_or(|total| total >= CAPACITY)
         {
             return Err(Error::Capacity);
@@ -88,7 +88,7 @@ impl ContextRegistry {
             return Err(Error::Duplicate);
         }
         self.contexts
-            .try_reserve(1 + self.reserved_contexts)
+            .try_reserve(1 + self.reserved_context_count())
             .map_err(|_| Error::Capacity)?;
         // Validate the root before committing any group state.
         let deadline = founder.deadline().min(now + f64::from(policy.timeout_ms));
@@ -228,10 +228,10 @@ impl ContextRegistry {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "http-plans"))]
 #[path = "execution_plan_capacity_tests.rs"]
 mod plan_capacity_tests;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "http-plans"))]
 #[path = "execution_plan_composition_tests.rs"]
 mod plan_composition_tests;

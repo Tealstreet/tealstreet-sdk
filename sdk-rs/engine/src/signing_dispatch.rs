@@ -120,9 +120,11 @@ impl Dispatch {
     pub fn available_id(&self) -> bool {
         self.next.available(1)
     }
+    #[cfg(feature = "http-plans")]
     pub(crate) fn available_ids(&self, count: u64) -> bool {
         self.next.available(count)
     }
+    #[cfg(feature = "http-plans")]
     pub(crate) fn reserve_ids(&mut self, count: u64) -> Option<std::ops::Range<u64>> {
         self.next.reserve(count)
     }
