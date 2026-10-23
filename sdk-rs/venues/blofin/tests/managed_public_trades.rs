@@ -574,7 +574,7 @@ fn immediate_managed_queue_refusal_is_typed_and_retires_each_read_owner() {
             Some(Outcome::NotSent),
             "entry must succeed before queue refusal"
         );
-        assert_eq!(error.message, "Too many requests in flight");
+        assert_eq!(error.message, Error::Capacity.to_string());
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         let prepares = actions
             .iter()

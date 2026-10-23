@@ -54,8 +54,7 @@ impl Signer {
         let clock = (safe_cex_engine::time::wire_stamp_ms(now) as u64)
             .checked_mul(1000)
             .ok_or("Kraken nonce overflow")?;
-        safe_cex_crypto::nonce::next("kraken", self.identity, clock, u64::MAX)
-            .map(|nonce| nonce.to_string())
+        safe_cex_crypto::nonce::kraken(self.identity, clock).map(|nonce| nonce.to_string())
     }
     fn digest(&self, bytes: &[u8]) -> String {
         let hash = Sha256::digest(bytes);
