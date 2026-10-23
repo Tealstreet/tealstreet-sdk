@@ -3043,10 +3043,13 @@ mod tests {
                 true,
             )
             .unwrap();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new(),
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new(),
+            },
+            None
+        ));
         let (_, token, _) = mutation(&mut engine, 7, 0.);
         let permit = bind(&mut engine, token, 1.);
         engine.claim_http(2., permit).unwrap();
@@ -3229,10 +3232,13 @@ mod tests {
             .order_locks
             .acquire(&placing, &engine.store, true)
             .unwrap();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new()
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new()
+            },
+            None
+        ));
         let (_, token, _) = mutation(&mut engine, 7, 0.);
         let permit = bind(&mut engine, token, 1.);
         engine.claim_http(2., permit).unwrap();
@@ -3271,10 +3277,13 @@ mod tests {
             )
             .unwrap();
         engine.io.order_locks.note_write();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new()
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new()
+            },
+            None
+        ));
         engine.io.order_locks.finish(7, true);
         let permit = bind(&mut engine, tokens[0], 1.);
         engine.claim_http(2., permit).unwrap();
@@ -3319,10 +3328,13 @@ mod tests {
                 true,
             )
             .unwrap();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new()
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new()
+            },
+            None
+        ));
         let (_, token, _) = mutation(&mut engine, 7, 0.);
         let permit = bind(&mut engine, token, 1.);
         assert_eq!(engine.claim_http(2., permit), Err(Error::Invalid));
