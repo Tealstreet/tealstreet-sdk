@@ -258,9 +258,18 @@ or coordinated with claude-4yjlw0.
      `allow` and returns `SignError::Refused` for any designed refusal. A
      refusal therefore never reaches the wire or the fatal streak.
    - `remoteSignerProvider` refuses `remote` on the `payloadSigner` path.
-   - After a remote reply, the server verifies the signature against the
-     account's public key from init before release: secp256k1 recovery, and
-     ed25519, ES256, Stark and Schnorr verification.
+   - After a remote reply, the server verifies the signature before release
+     whenever the account declares a public verification key. That key is
+     non-secret account config, trusted like any other account config:
+     - Orderly: the `ed25519:` public key in `key`;
+     - Paradex: the Stark subkey address;
+     - Aster and Hyperliquid: the signer or agent address (recovery);
+     - Lighter: the API public key.
+     Coinbase JWT carries only a key name, so it has no verification key and
+     relies on venue rejection. The plan states this and does not invent a
+     key. The new verify primitives are this PR's work: ES256 verify (`p256`),
+     Stark verify (`starknet-crypto`) and secp256k1 recovery (`alloy`).
+     `ed25519::verify` and `lighter::schnorr_verify` already exist.
 4. **Browser executor.**
    - `hosted_signing::Input::Op { recipe, inputs }`. It runs the recipe's
      `canonicalize` + `allow` (defence in depth) and signs with the
@@ -322,6 +331,9 @@ or coordinated with claude-4yjlw0.
 - P8 is the wire-format PR. Test venues calling the production
   canonicalizers are acceptable for its server-half proof, and no family
   becomes keyless in it.
+- If Lighter Schnorr splits into a follow-up because #1866 hasn't landed,
+  the Schnorr format's proof moves with it, and the PR body states that
+  explicitly; the overseer has been told.
 - Per-family obligation: each family's later adoption PR must carry the real
   end-to-end positive proof (the actual venue, both halves) before that
   family's in-venue signing is removed.
