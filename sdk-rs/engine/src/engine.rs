@@ -535,8 +535,10 @@ pub enum VenueAction {
 }
 
 /// The shared rejection for a venue action the venue does not implement.
+const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this venue";
+
 pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
-    cx.fail(command, "This action is not supported on this venue");
+    cx.fail(command, UNSUPPORTED_VENUE_ACTION);
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -846,6 +848,9 @@ mod command_entry;
 #[cfg(test)]
 #[path = "request_context_entry_tests.rs"]
 mod command_entry_tests;
+#[cfg(test)]
+#[path = "command_wait_tests.rs"]
+mod command_wait_tests;
 
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
@@ -898,6 +903,7 @@ mod execution_cx;
 #[cfg(test)]
 #[path = "execution_cx_tests.rs"]
 mod execution_cx_tests;
+pub use command_entry::{CommandWait, DEFAULT_COMMAND_WAIT_MS, MAX_COMMAND_WAIT_MS};
 pub use execution_cx::{ExecutionHandle, Joined, Window};
 
 /// A delivered response whose bytes the engine cannot hand to a codec. The
@@ -1451,6 +1457,8 @@ struct Io<P> {
     #[cfg(feature = "order-locks")]
     reconcile_due: Vec<(Option<Vec<String>>, f64)>,
     command_entry: Option<command_entry::Entry>,
+    /// Caller waits stamped at each external command receipt.
+    command_waits: command_entry::Waits,
     #[cfg(feature = "http-plans")]
     http_plan_ready: Option<crate::request_context::Plan>,
     #[cfg(feature = "http-plans")]
@@ -1542,6 +1550,7 @@ impl<P> Default for Io<P> {
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
             command_entry: None,
+            command_waits: Default::default(),
             #[cfg(feature = "http-plans")]
             http_plan_ready: None,
             #[cfg(feature = "http-plans")]
@@ -2406,6 +2415,7 @@ impl<P> Cx<'_, P> {
         };
         // A credential-free route's auth-kind refusal is no credential evidence.
         let credential_evidence = self.io.request_contexts.owner_credentialed(command);
+        self.io.finish_command_wait(command);
         self.io.retire_http_command(command);
         if !self.io.request_contexts.finish(command) {
             self.io.http_owner_poison = true;
@@ -3290,6 +3300,42 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        // An external command receipt gets the SDK default caller wait.
+        if let Event::Command(command) = &event
+            && let Some(id) = command.completion_id()
+        {
+            let deadline =
+                command_entry::wait_deadline(now, command_entry::DEFAULT_COMMAND_WAIT_MS);
+            self.io.receive_command_wait(id, deadline, now);
+        }
+        self.handle_received(now, event);
+        self.io.command_waits.end_receipt();
+    }
+
+    /// Dispatch one host command with the caller's own wait. A non-finite
+    /// clock, an out-of-range wait or a deadline that does not advance is
+    /// refused with nothing dispatched.
+    pub fn handle_command(
+        &mut self,
+        now: f64,
+        command: Command,
+        wait_ms: Option<u32>,
+    ) -> Result<(), crate::request_context::Error> {
+        let wait_ms = wait_ms.unwrap_or(command_entry::DEFAULT_COMMAND_WAIT_MS);
+        if !(1..=command_entry::MAX_COMMAND_WAIT_MS).contains(&wait_ms) {
+            return Err(crate::request_context::Error::Invalid);
+        }
+        let deadline = command_entry::wait_deadline(now, wait_ms)
+            .ok_or(crate::request_context::Error::Invalid)?;
+        if let Some(id) = command.completion_id() {
+            self.io.receive_command_wait(id, Some(deadline), now);
+        }
+        self.handle_received(now, Event::Command(command));
+        self.io.command_waits.end_receipt();
+        Ok(())
+    }
+
+    fn handle_received(&mut self, now: f64, event: Event<'_>) {
         self.assert_live();
         self.io.dispatch_now = now;
         self.process_socket_work(now);
@@ -3403,8 +3449,14 @@ impl<V: Venue> Engine<V> {
         if !released.is_empty() {
             // A nested release (order-lock `ready` re-entering `handle`) keeps the flag.
             let was_releasing = std::mem::replace(&mut self.releasing, true);
-            for command in released {
+            for (_, receipt) in &released {
+                self.io.command_waits.batch(*receipt);
+            }
+            for (command, receipt) in released {
+                let carried = command.completion_id().map(|id| (id, receipt));
+                let outer = self.io.command_waits.carry(carried);
                 self.handle_event(now, Event::Command(command));
+                self.io.command_waits.carry(outer);
             }
             self.releasing = was_releasing;
         }
@@ -3506,7 +3558,12 @@ impl<V: Venue> Engine<V> {
             match command {
                 Command::PlaceOrders { command, .. } => self.io.placement_acks.placing(*command),
                 Command::CancelOrders { .. } | Command::AmendOrder { .. }
-                    if self.io.placement_acks.hold(&self.store, command, now) =>
+                    if self.io.placement_acks.hold(
+                        &self.store,
+                        command,
+                        self.io.command_waits.receipt_of(command),
+                        now,
+                    ) =>
                 {
                     self.release_held(now);
                     return;
@@ -3716,12 +3773,12 @@ impl<V: Venue> Engine<V> {
             Event::Command(Command::FetchAccount { command })
                 if self.venue.capabilities().account == AccountLookup::Unsupported =>
             {
-                unsupported_venue_action(&mut cx, command);
+                cx.refuse_before_entry(command, UNSUPPORTED_VENUE_ACTION);
             }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.capabilities().amend_with_symbol =>
             {
-                cx.fail(
+                cx.refuse_before_entry(
                     command,
                     "symbol-aware amendment is unsupported by this venue",
                 );
@@ -3746,7 +3803,11 @@ impl<V: Venue> Engine<V> {
                         );
                         return;
                     }
-                    if cx.io.order_locks.defer(&command) {
+                    if cx
+                        .io
+                        .order_locks
+                        .defer(&command, cx.io.command_waits.receipt_of(&command))
+                    {
                         return;
                     }
                     if (!matches!(command, Command::PlaceOrders { .. })
@@ -3766,7 +3827,7 @@ impl<V: Venue> Engine<V> {
                             }
                             _ => "Order amendment or cancellation is already in flight",
                         };
-                        cx.fail(id, error);
+                        cx.refuse_before_entry(id, error);
                         return;
                     }
                 }
@@ -3785,7 +3846,7 @@ impl<V: Venue> Engine<V> {
                         _ => None,
                     };
                     if let Some(command) = unsupported {
-                        cx.fail(command, "Options are not enabled on this account");
+                        cx.refuse_before_entry(command, "Options are not enabled on this account");
                         return;
                     }
                 }
@@ -3840,7 +3901,15 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "order-locks")]
         let order_response = self.io.order_response_token.take();
         #[cfg(feature = "order-locks")]
-        for (command, failed) in self.io.order_locks.ready() {
+        let ready = self.io.order_locks.ready();
+        #[cfg(feature = "order-locks")]
+        for (.., receipt) in &ready {
+            self.io.command_waits.batch(*receipt);
+        }
+        #[cfg(feature = "order-locks")]
+        for (command, failed, receipt) in ready {
+            let carried = command.completion_id().map(|id| (id, receipt));
+            let outer = self.io.command_waits.carry(carried);
             if failed && self.venue.fence_uncertain_cancel_all() {
                 let Command::CancelSymbolOrders { command, .. } = command else {
                     unreachable!()
@@ -3850,7 +3919,7 @@ impl<V: Venue> Engine<V> {
                     store: &mut self.store,
                     io: &mut self.io,
                 };
-                cx.fail(
+                cx.refuse_before_entry(
                     command,
                     "Placement outcome is uncertain; reconcile before cancel-all",
                 );
@@ -3858,8 +3927,10 @@ impl<V: Venue> Engine<V> {
                 if let Some(id) = command.completion_id() {
                     self.io.active_commands.remove(&id);
                 }
-                self.handle(now, Event::Command(command));
+                // Not a new receipt: it keeps the receipt it was deferred with.
+                self.handle_received(now, Event::Command(command));
             }
+            self.io.command_waits.carry(outer);
         }
         self.process_socket_work(now);
         self.io.http_delivery = delivery;

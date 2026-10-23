@@ -29,7 +29,9 @@ describe('KuCoin spot Rust SDK boundary', () => {
       capabilities: () => engineCapabilities('kucoinspot'),
       start: noActions,
       command: (json) => {
-        const command = JSON.parse(json);
+        // The caller wait is engine receipt metadata (pinned by the host tests),
+        // not part of the native command these regressions compare.
+        const { timeoutMs: _wait, ...command } = JSON.parse(json);
         if (command.op === 'setTickerSymbols' || command.op === 'setPollScale') return '[]';
         commands.push(command);
         // KuCoin spot leverage is fixed: the engine confirms 1x rails for the symbol.
