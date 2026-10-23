@@ -1053,6 +1053,14 @@ impl WasmEngine {
         Ok(self.flush())
     }
 
+    /// Host-owned feedback: a `rejectRoute` connect had no remaining route.
+    #[wasm_bindgen(js_name = wsRouteExhausted)]
+    pub fn ws_route_exhausted(&mut self, socket: f64, now: f64) -> Result<String, js_sys::Error> {
+        let socket = SocketId(host_resource_id(socket)?);
+        self.inner.handle(now, Event::WsRouteExhausted { socket });
+        Ok(self.flush())
+    }
+
     /// A response begins; `headers` is `name: value` lines. The body follows
     /// as chunks so a large list never has to fit in memory at once.
     #[wasm_bindgen(js_name = httpStart)]

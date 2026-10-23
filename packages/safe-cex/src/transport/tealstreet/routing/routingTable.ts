@@ -112,21 +112,21 @@ const okxeuWs: WsGroup = {
 // Bitget checks the key's bound IP on private login (40018), so a proxied
 // account dials ws-proxy (the IP the add-account form asks Bitget users to bind)
 // and then the relay, which egresses from the same fleet as its REST.
+// TS #8093's tunnel bars: 2 opens that closed before a login answer, or 6
+// connects that never opened (an outage does that too, hence the higher bar).
+const BITGET_TUNNEL_ADVANCE = { silentOpens: 2, failedConnects: 6 };
 const bitgetWs: WsGroup = {
   // bitget.ws-secondary-public reuses the same public fallback host as ws-public.
   public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic, initialSilentConnects: 1 },
-  // Master's TS proxy/relay routing. The Rust engine still opens both classic and
-  // UTA private sockets on this channel, so its host hints and UTA direct bypass stay
-  // until the Rust Bitget venue adopts privateUta.
+  // A pong is not stream proof (TS private routing counts only venue frames).
   private: {
     kind: 'proxyConditional',
     host: WS.bitgetPrivate,
     fallback: WS.bitgetPrivate,
     relayUpstream: RELAY_UPSTREAM.bitgetPrivate,
     relayWhenTunnelled: true,
-    initialSilentConnects: 1,
     ignoredMessages: ['pong'],
-    directUrls: [BASE_WS_PRIVATE_UTA_URL],
+    tunnelAdvance: BITGET_TUNNEL_ADVANCE,
   },
   privateUta: {
     kind: 'proxyConditional',
@@ -134,6 +134,9 @@ const bitgetWs: WsGroup = {
     fallback: WS.bitgetPrivateUta,
     relayUpstream: RELAY_UPSTREAM.bitgetPrivateUta,
     relayWhenTunnelled: true,
+    ignoredMessages: ['pong'],
+    tunnelAdvance: BITGET_TUNNEL_ADVANCE,
+    matchUrls: [BASE_WS_PRIVATE_UTA_URL],
   },
 };
 const coinbaseWs: WsGroup = { private: { kind: 'proxyConditional', host: WS.coinbase } };

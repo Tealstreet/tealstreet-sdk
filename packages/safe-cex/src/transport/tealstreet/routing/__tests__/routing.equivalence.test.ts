@@ -130,24 +130,32 @@ describe('routing table / resolver (Epic 1 net)', () => {
     // Literal on purpose: sdk-rs's routing.mjs loads this file with a fixed import map.
     const bitgetRelay = (version: 'v2' | 'v3') =>
       `wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2F${version}%2Fws%2Fprivate`;
+    // The relay is the egress Bitget binds keys to, so it is offered ungated;
+    // tunnel thresholds and non-proof pongs hold on either resolution.
+    const tunnelAdvance = { silentOpens: 2, failedConnects: 6 };
     expect(resolveExchangeRouting('bitget', offProxy).wsPrivate).toEqual({
       tunnelled: false,
+      relayRequired: true,
+      tunnelAdvance,
       fallback: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
-      initialSilentConnects: 1,
       ignoredMessages: ['pong'],
-      directUrls: ['wss://ws.bitget.com/v3/ws/private'],
       relay: bitgetRelay('v2'),
     });
-    // The Rust engine still opens UTA on the private channel; its v3 URL stays direct
-    // on either resolution until the Rust Bitget venue adopts privateUta.
     expect(resolveExchangeRouting('bitget', proxy).wsPrivate).toEqual({
       tunnelled: true,
+      relayRequired: true,
+      tunnelAdvance,
+      ignoredMessages: ['pong'],
       host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
-      directUrls: ['wss://ws.bitget.com/v3/ws/private'],
       relay: bitgetRelay('v2'),
     });
+    // UTA's v3 socket is scoped to its own route on either resolution.
     expect(resolveExchangeRouting('bitget', proxy).wsPrivateUta).toEqual({
       tunnelled: true,
+      relayRequired: true,
+      tunnelAdvance,
+      ignoredMessages: ['pong'],
+      matchUrls: ['wss://ws.bitget.com/v3/ws/private'],
       host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private',
       relay: bitgetRelay('v3'),
     });

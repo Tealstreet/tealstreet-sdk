@@ -2848,20 +2848,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -2877,20 +2889,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -2906,20 +2930,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -2935,20 +2971,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -2964,20 +3012,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -2993,20 +3053,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3022,20 +3094,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3051,20 +3135,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3080,20 +3176,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3109,20 +3217,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3138,20 +3258,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3167,20 +3299,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3196,16 +3340,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3221,16 +3381,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3246,16 +3422,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3271,16 +3463,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3296,16 +3504,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3321,16 +3545,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3346,16 +3586,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3371,16 +3627,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3396,16 +3668,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3421,16 +3709,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3446,16 +3750,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3471,16 +3791,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3498,20 +3834,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3527,20 +3875,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3556,20 +3916,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3585,20 +3957,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3614,20 +3998,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3643,20 +4039,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3672,20 +4080,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3701,20 +4121,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3730,20 +4162,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3759,20 +4203,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3788,20 +4244,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3817,20 +4285,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -3846,16 +4326,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3871,16 +4367,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3896,16 +4408,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3921,16 +4449,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3946,16 +4490,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3971,16 +4531,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -3996,16 +4572,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4021,16 +4613,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4046,16 +4654,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4071,16 +4695,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4096,16 +4736,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4121,16 +4777,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4148,20 +4820,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4177,20 +4861,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4206,20 +4902,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4235,20 +4943,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4264,20 +4984,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4293,20 +5025,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4322,20 +5066,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4351,20 +5107,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4380,20 +5148,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4409,20 +5189,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4438,20 +5230,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4467,20 +5271,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
         "ignoredMessages": [
           "pong",
         ],
-        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPrivateUta": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": false,
       },
       "wsPublic": {
@@ -4496,16 +5312,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4521,16 +5353,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4546,16 +5394,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4571,16 +5435,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4596,16 +5476,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4621,16 +5517,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4646,16 +5558,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4671,16 +5599,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4696,16 +5640,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4721,16 +5681,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4746,16 +5722,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {
@@ -4771,16 +5763,32 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
       "wsPrivate": {
-        "directUrls": [
-          "wss://ws.bitget.com/v3/ws/private",
-        ],
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPrivateUta": {
         "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "matchUrls": [
+          "wss://ws.bitget.com/v3/ws/private",
+        ],
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+        "relayRequired": true,
+        "tunnelAdvance": {
+          "failedConnects": 6,
+          "silentOpens": 2,
+        },
         "tunnelled": true,
       },
       "wsPublic": {

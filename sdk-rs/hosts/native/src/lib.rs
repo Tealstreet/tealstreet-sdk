@@ -38,6 +38,8 @@ pub enum HostEvent {
     WsMessage(SocketId, String),
     WsBinary(SocketId, Vec<u8>),
     WsClosed(SocketId, u16),
+    /// Host-owned: a `reject_route` connect had no remaining route candidate.
+    WsRouteExhausted(SocketId),
     HttpStart {
         request: RequestId,
         status: u16,
@@ -286,6 +288,10 @@ impl<V: Venue, T: Transport> Host<V, T> {
             HostEvent::WsClosed(socket, code) => {
                 self.sockets.remove(&socket);
                 engine.handle(now, Event::WsClosed { socket, code })
+            }
+            HostEvent::WsRouteExhausted(socket) => {
+                self.sockets.remove(&socket);
+                engine.handle(now, Event::WsRouteExhausted { socket })
             }
             HostEvent::HttpStart {
                 request,

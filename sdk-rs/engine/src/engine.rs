@@ -382,9 +382,14 @@ pub enum SocketChannel {
 
 /// Stable feed identity and protocol recovery; hosts choose transport routes.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SocketContext {
     pub feed: String,
     pub recover: bool,
+    /// One-connect edge: the venue holds reply evidence that the previous
+    /// route's egress was refused, so the host advances one route candidate.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub reject_route: bool,
 }
 
 /// Everything a host needs to open one socket; `Cx::connect` takes it or a bare URL.
@@ -416,8 +421,24 @@ impl SocketSpec {
         self.context = Some(SocketContext {
             feed: feed.into(),
             recover,
+            reject_route: false,
         });
         self
+    }
+
+    /// Ask the host to advance one route candidate on this connect only. The
+    /// socket must declare a channel: route exhaustion is delivered only to
+    /// live role sockets, so feedback for an untracked socket is stale.
+    pub fn reject_route(mut self) -> Self {
+        if let Some(context) = self.context.as_mut() {
+            context.reject_route = true;
+        }
+        self
+    }
+
+    /// `reject_route` when the venue holds current refusal evidence.
+    pub fn reject_if(self, refused: bool) -> Self {
+        if refused { self.reject_route() } else { self }
     }
 
     pub fn headers(mut self, headers: Vec<(&'static str, String)>) -> Self {
@@ -786,6 +807,11 @@ pub enum Event<'a> {
     WsClosed {
         socket: SocketId,
         code: u16,
+    },
+    /// Host-owned feedback: a `reject_route` connect found no further route
+    /// candidate, so the host did not dial. No peer close can produce this.
+    WsRouteExhausted {
+        socket: SocketId,
     },
     /// A complete response.
     HttpResponse {
@@ -2587,6 +2613,11 @@ pub trait Venue {
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, text: &str);
     fn on_close(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, code: u16);
+    /// Every route candidate refused this socket's egress (host-owned feedback).
+    /// Venues without a refusal walk keep today's abnormal-close handling.
+    fn on_route_exhausted(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId) {
+        self.on_close(cx, socket, 1006)
+    }
     fn on_response(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -3288,7 +3319,8 @@ impl<V: Venue> Engine<V> {
         }
         if self.public_feed_policy() != PublicFeedPolicy::Direct
             && matches!(&event, Event::WsOpened { socket } | Event::WsBinary { socket, .. }
-            | Event::WsMessage { socket, .. } | Event::WsClosed { socket, .. } if socket.0 == 0)
+            | Event::WsMessage { socket, .. } | Event::WsClosed { socket, .. }
+            | Event::WsRouteExhausted { socket } if socket.0 == 0)
         {
             return;
         }
@@ -3397,6 +3429,20 @@ impl<V: Venue> Engine<V> {
                 cx.io.sockets.closed(socket, true);
                 cx.io.health.count(log_code::WS_CLOSED);
                 self.venue.on_close(&mut cx, socket, code)
+            }
+            Event::WsRouteExhausted { socket } => {
+                // Exactly once, for a live socket only: stale or duplicate
+                // feedback has no venue authority.
+                if !cx.io.sockets.closed(socket, true) {
+                    return;
+                }
+                for timer in cx.io.signing.close_socket(socket) {
+                    if timer.0 != 0 {
+                        cx.io.actions.push(Action::ClearTimer { timer });
+                    }
+                }
+                cx.io.health.count(log_code::WS_CLOSED);
+                self.venue.on_route_exhausted(&mut cx, socket)
             }
             Event::HttpResponse { request, response } => {
                 self.http_start(now, request, response.status, response.headers);

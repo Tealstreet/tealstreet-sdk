@@ -676,6 +676,31 @@ renew useful financial traffic. Existing timers coalesce read-only repair and
 Warn `row.skipped` uses the coded event path. Execution/fill-channel admission
 and accounting remain unchanged; this adds no write retry or caller API.
 
+#### Bitget egress-refusal route walk and tunnel thresholds (#1890)
+
+Bitget private WebSocket routing now matches TS #8093. Between #1869 (master's Bitget
+`proxyConditional`/relay routing) and this change, the Rust UTA v3 socket still
+bypassed that route, so a proxied, IP-bound key could fail UTA private login
+with 40018 on the Rust path. This change closes that gap. A UTA account's v3
+socket takes the declared `privateUta` route (EngineRoutingPlan
+`privateWsRoutes`), and a `relayWhenTunnelled` route plans its relay even when the
+global relay flag is off. The Bitget-only `directUrls` bypass is removed.
+
+| Contract | Host requirement |
+| --- | --- |
+| Connect `context.rejectRoute: true` (native `SocketContext.reject_route`) | Set only on the one connect after a pre-login 40018/40024 login refusal. Advance exactly one route candidate; this wins over `recover`. A host without routing may ignore it; the venue paces retries with its normal backoff. |
+| `onRouteExhausted()` handler; WASM `wsRouteExhausted(socket, now)`; native `Event::WsRouteExhausted` | When `rejectRoute` finds no remaining candidate, report this typed feedback and do not dial. It is never a peer close code. A host or engine without it falls back to `onClose(1006)`/`wsClose`. Stale or duplicate feedback is inert. |
+| Venue default `Venue::on_route_exhausted` | Equivalent to `on_close(1006)`. Bitget alone opts in: one Error `auth.rejected` notice per refusal streak ("…from every available egress IP"), then a paced redial of the last route. No startup failure, deactivation or command terminal; a successful login ends the streak. |
+| Route data `tunnelAdvance: { silentOpens: 2, failedConnects: 6 }` (Bitget `private`/`privateUta`) | While a proxy host or relay candidate is active, advance after 2 opens that closed with no non-ignored message, or 6 failed connects. An open resets failed connects; a message resets silent opens; any switch or refusal resets both. The direct candidate keeps the 2-silent-connect rule, and one relay strike never exhausts the relay. |
+
+These thresholds are host route data by owner ruling; venues keep no
+connection counters. Custom `Transport`/native hosts that implement routing
+must honour `rejectRoute`, `onRouteExhausted` and `tunnelAdvance` to match
+TS. Without them the account still recovers by backoff, but it never walks
+off a refused egress IP. Routing snapshot and native fixture changes are
+Bitget, `bitgetinverse` and `bitgetusdc` only. Caller APIs and saved options
+are unchanged.
+
 #### Bybit private-row admission (#1620)
 
 Ordinary Bybit REST order/position snapshots and WS order/position arrays now
