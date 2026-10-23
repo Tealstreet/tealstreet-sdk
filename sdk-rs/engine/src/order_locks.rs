@@ -215,6 +215,24 @@ impl OrderLocks {
         self.active.retain(|(id, _)| *id != command);
         marked
     }
+    /// What a reconcile read must cover for this held command: `None` is a
+    /// full read (unrouted IDs or an all-symbol cancel), else its symbols.
+    pub fn reconcile_scope(&self, command: CommandId) -> Option<Option<Vec<String>>> {
+        let (_, scope) = self.active.iter().find(|(id, _)| *id == command)?;
+        let mut symbols = scope.symbols.clone();
+        match &scope.all_symbol {
+            Some(symbol) if symbol.is_empty() => return Some(None),
+            Some(symbol) => symbols.push(symbol.clone()),
+            None => {}
+        }
+        if scope.unknown_symbol || symbols.is_empty() || symbols.iter().any(String::is_empty) {
+            return Some(None);
+        }
+        symbols.sort();
+        symbols.dedup();
+        Some(Some(symbols))
+    }
+
     pub fn resolved(&mut self, command: CommandId) {
         if let Some((_, scope)) = self
             .active

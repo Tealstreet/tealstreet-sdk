@@ -1431,10 +1431,10 @@ struct Io<P> {
     http_failure_kind: ErrorKind,
     // Status and headers of the managed write reply being delivered.
     http_write_reply: Option<(u16, String)>,
-    // Uncertain-write reconcile reads the engine owes the venue: symbols
-    // (empty = all) and the earliest time to ask.
+    // Reconcile reads the engine owes the venue, one per uncertain seal: the
+    // symbols (`None` = all) and the earliest time to ask.
     #[cfg(feature = "order-locks")]
-    reconcile_due: Vec<(Vec<String>, f64)>,
+    reconcile_due: Vec<(Option<Vec<String>>, f64)>,
     command_entry: Option<command_entry::Entry>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
@@ -1536,6 +1536,22 @@ impl<P> Default for Io<P> {
 }
 
 impl<P> Io<P> {
+    /// Bounded: past the cap, coalesce into one full read at the earliest time.
+    #[cfg(feature = "order-locks")]
+    fn queue_reconcile(&mut self, symbols: Option<Vec<String>>, at: f64) {
+        const RECONCILE_QUEUE: usize = 64;
+        if self.reconcile_due.len() < RECONCILE_QUEUE {
+            self.reconcile_due.push((symbols, at));
+            return;
+        }
+        let earliest = self
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .fold(at, f64::min);
+        self.reconcile_due = vec![(None, earliest)];
+    }
+
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
         let index = self.signatures.iter().position(|(id, _)| *id == request)?;
         Some(self.signatures.swap_remove(index).1)
@@ -2203,8 +2219,15 @@ impl<P> Cx<'_, P> {
             {
                 self.io.order_locks.managed_resolved(command);
             }
-            let uncertain = self.io.order_locks.finish(command, result.is_err());
-            if !uncertain.is_empty() {
+            let scope = self.io.order_locks.reconcile_scope(command);
+            let marked = self.io.order_locks.finish(command, result.is_err());
+            let unknown = result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.outcome == Some(crate::Outcome::Unknown));
+            // Every uncertain seal asks again, even for an already-uncertain
+            // symbol: an earlier in-flight read may predate this write.
+            if let Some(scope) = scope.filter(|_| unknown || !marked.is_empty()) {
                 // A rate limit or credential refusal must not fan out reads now.
                 let delay = match result.as_ref().err().and_then(|error| error.kind) {
                     Some(ErrorKind::RateLimited) => result
@@ -2217,7 +2240,7 @@ impl<P> Cx<'_, P> {
                     ) => crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS,
                     _ => 0.,
                 };
-                self.io.reconcile_due.push((uncertain, self.now + delay));
+                self.io.queue_reconcile(scope, self.now + delay);
             }
             self.io.active_commands.remove(&command);
         }
@@ -3425,18 +3448,32 @@ impl<V: Venue> Engine<V> {
     /// through `orders_reconciled` clears the order-lock fence as before.
     #[cfg(feature = "order-locks")]
     fn reconcile_uncertain(&mut self, now: f64) {
+        // Never inside a command entry; the hook runs with no HTTP delivery
+        // or order-read authority of its own.
+        if self.io.command_entry.is_some() {
+            return;
+        }
         let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.io.reconcile_due)
             .into_iter()
             .partition(|(_, at)| *at <= now);
         self.io.reconcile_due = later;
         if !due.is_empty() {
+            let mut all = false;
             let mut symbols: Vec<String> = Vec::new();
-            for symbol in due.into_iter().flat_map(|(symbols, _)| symbols) {
-                if !symbols.contains(&symbol) {
-                    symbols.push(symbol);
+            for scope in due.into_iter().map(|(scope, _)| scope) {
+                match scope {
+                    None => all = true,
+                    Some(scope) => {
+                        for symbol in scope {
+                            if !symbols.contains(&symbol) {
+                                symbols.push(symbol);
+                            }
+                        }
+                    }
                 }
             }
-            let all = symbols.iter().any(String::is_empty);
+            let delivery = self.io.http_delivery.take();
+            let token = self.io.order_response_token.take();
             let mut cx = Cx {
                 now,
                 store: &mut self.store,
@@ -3444,6 +3481,8 @@ impl<V: Venue> Engine<V> {
             };
             self.venue
                 .reconcile_uncertain(&mut cx, (!all).then_some(symbols.as_slice()));
+            self.io.http_delivery = delivery;
+            self.io.order_response_token = token;
         }
         let next = self
             .io

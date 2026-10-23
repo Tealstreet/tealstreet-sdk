@@ -954,6 +954,9 @@ mod tests {
         auth_observations: std::cell::Cell<usize>,
         hold_write_fact: Option<bool>,
         reconciles: Vec<Option<Vec<String>>>,
+        // Whether a reconcile hook ever saw borrowed delivery/read authority.
+        #[cfg(feature = "order-locks")]
+        reconcile_custody: bool,
     }
     const GROUP: Pacing = Pacing {
         group: 1,
@@ -1188,8 +1191,12 @@ mod tests {
                 panic!("unexpected transport failure");
             }
         }
-        fn reconcile_uncertain(&mut self, _: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
+        fn reconcile_uncertain(&mut self, _cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
             self.reconciles.push(symbols.map(<[String]>::to_vec));
+            #[cfg(feature = "order-locks")]
+            {
+                self.reconcile_custody |= _cx_has_custody(_cx);
+            }
         }
         fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
             if let Command::FetchLeverage { command, .. }
@@ -2722,53 +2729,146 @@ mod tests {
     }
 
     #[cfg(feature = "order-locks")]
-    #[test]
-    fn an_unknown_placement_asks_the_venue_once_to_reconcile_after_any_rate_wait() {
-        for rate_limited in [false, true] {
-            let (mut engine, _) = start(Probe::default());
-            let place = Command::PlaceOrders {
-                command: 7,
-                orders: vec![],
-            };
-            engine
-                .io
-                .order_locks
-                .acquire(&place, &engine.store, true)
-                .unwrap();
-            let (context, token, _) = mutation(&mut engine, 7, 0.);
-            let permit = bind(&mut engine, token, 1.);
-            engine.claim_http(2., permit).unwrap();
-            let mut fallback = VenueError::new("lost answer");
-            if rate_limited {
-                fallback = fallback
-                    .kind(crate::ErrorKind::RateLimited)
-                    .retry_after_ms(3_000.);
-            }
-            Cx {
-                now: 6.,
-                store: &mut engine.store,
-                io: &mut engine.io,
-            }
-            .fail_context(&context, fallback)
+    fn _cx_has_custody(cx: &Cx<'_, Pending>) -> bool {
+        cx.io.http_delivery.is_some()
+            || cx.io.order_response_token.is_some()
+            || cx.io.command_entry.is_some()
+    }
+
+    /// Seal `command` (held under `lock`) as an uncertain write at `at`.
+    #[cfg(feature = "order-locks")]
+    fn seal_uncertain(engine: &mut Engine<Probe>, lock: &Command, at: f64, error: VenueError) {
+        let id = lock.completion_id().unwrap();
+        engine
+            .io
+            .order_locks
+            .acquire(lock, &engine.store, false)
             .unwrap();
-            engine.finish_event_scope(6.);
-            engine.finish_event_scope(7.);
-            if !rate_limited {
-                assert_eq!(
-                    engine.venue.reconciles,
-                    vec![None],
-                    "once, for every symbol"
-                );
-                assert!(engine.reconcile_timer.is_none());
-                continue;
-            }
-            assert!(engine.venue.reconciles.is_empty(), "rate limit waits");
+        let (context, token, _) = mutation(engine, id, at);
+        let permit = bind(engine, token, at);
+        engine.claim_http(at, permit).unwrap();
+        Cx {
+            now: at,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .fail_context(&context, error)
+        .unwrap();
+        engine.finish_event_scope(at);
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn an_uncertain_write_asks_the_venue_once_per_seal_after_any_rate_wait() {
+        let place = |command, symbol: &str| Command::PlaceOrders {
+            command,
+            orders: vec![
+                serde_json::from_str(&format!(
+                    r#"{{"symbol":"{symbol}","type":"limit","side":"buy","amount":1,"price":1}}"#
+                ))
+                .unwrap(),
+            ],
+        };
+        // Each uncertain seal asks again, even for an already-uncertain symbol.
+        let (mut engine, _) = start(Probe::default());
+        seal_uncertain(
+            &mut engine,
+            &place(7, "BTCUSDT"),
+            6.,
+            VenueError::new("lost"),
+        );
+        seal_uncertain(
+            &mut engine,
+            &place(8, "BTCUSDT"),
+            7.,
+            VenueError::new("lost"),
+        );
+        let btc = Some(vec!["BTCUSDT".to_owned()]);
+        assert_eq!(engine.venue.reconciles, vec![btc.clone(), btc]);
+        assert!(!engine.venue.reconcile_custody);
+
+        // Scope follows the sealed command: routed cancels are symbols,
+        // unrouted IDs and an all-symbol cancel are full reads.
+        for (lock, expected) in [
+            (
+                Command::CancelOrdersWithSymbols {
+                    command: 9,
+                    orders: vec![crate::model::CancelOrderRef {
+                        id: "x".into(),
+                        symbol: "ETHUSDT".into(),
+                    }],
+                },
+                Some(vec!["ETHUSDT".to_owned()]),
+            ),
+            (
+                Command::CancelOrders {
+                    command: 9,
+                    ids: vec!["unrouted".into()],
+                },
+                None,
+            ),
+            (
+                Command::CancelSymbolOrders {
+                    command: 9,
+                    symbol: String::new(),
+                },
+                None,
+            ),
+        ] {
+            let (mut engine, _) = start(Probe::default());
+            seal_uncertain(&mut engine, &lock, 6., VenueError::new("lost"));
+            assert_eq!(engine.venue.reconciles, vec![expected], "{lock:?}");
+        }
+
+        // A rate limit waits its Retry-After; a credential refusal the default.
+        for (error, wait) in [
+            (
+                VenueError::new("slow down")
+                    .kind(crate::ErrorKind::RateLimited)
+                    .retry_after_ms(3_000.),
+                3_000.,
+            ),
+            (
+                VenueError::new("bad key").kind(crate::ErrorKind::AuthInvalid),
+                crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS,
+            ),
+        ] {
+            let (mut engine, _) = start(Probe::default());
+            seal_uncertain(&mut engine, &place(7, "BTCUSDT"), 6., error);
+            assert!(engine.venue.reconciles.is_empty(), "waits");
             let (timer, at) = engine.reconcile_timer.unwrap();
-            assert_eq!(at, 3_006.);
+            assert_eq!(at, 6. + wait);
+            engine.handle(
+                at - 1.,
+                Event::TimerFired {
+                    timer: TimerId(timer.0 + 99),
+                },
+            );
+            assert!(
+                engine.venue.reconciles.is_empty(),
+                "a stale timer is ignored"
+            );
             engine.handle(at, Event::TimerFired { timer });
-            assert_eq!(engine.venue.reconciles, vec![None]);
+            assert_eq!(engine.venue.reconciles.len(), 1);
             assert!(engine.reconcile_timer.is_none());
         }
+
+        // A duplicate (stale) seal of a finished command asks nothing more.
+        let (mut engine, _) = start(Probe::default());
+        seal_uncertain(
+            &mut engine,
+            &place(7, "BTCUSDT"),
+            6.,
+            VenueError::new("lost"),
+        );
+        Cx {
+            now: 7.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .fail(7, "late duplicate");
+        engine.finish_event_scope(7.);
+        assert_eq!(engine.venue.reconciles.len(), 1);
     }
 
     #[test]
