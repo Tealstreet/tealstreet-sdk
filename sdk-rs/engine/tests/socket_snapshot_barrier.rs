@@ -32,7 +32,7 @@ impl Venue for Native {
     }
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
         let feed = cx
-            .register_socket_feed(FeedPolicy {
+            .register_socket_feed_with_snapshot(FeedPolicy {
                 role: SocketChannel::Private,
                 supervision: Config {
                     connect_timeout_ms: 15_000.,
@@ -96,9 +96,11 @@ impl Venue for Native {
         }
         Ok(())
     }
-    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+    fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
         self.deliveries.fetch_add(1, Ordering::SeqCst);
         if text == "validated-orders-snapshot" {
+            cx.complete_socket_snapshot()
+                .expect("native snapshot proof before commit");
             self.snapshots.fetch_add(1, Ordering::SeqCst);
         }
     }

@@ -98,6 +98,8 @@ struct Runtime {
     login_retry: Option<TimerId>,
     batch_timer: Option<TimerId>,
     next_batch: Option<f64>,
+    snapshot_timeout: Option<f64>,
+    snapshot_pending: bool,
 }
 
 #[derive(Default)]
@@ -153,6 +155,25 @@ impl Driver {
     }
 
     pub(crate) fn register(&mut self, policy: FeedPolicy) -> Result<FeedId, SocketError> {
+        self.register_with_snapshot(policy, false)
+    }
+    pub(crate) fn register_with_snapshot(
+        &mut self,
+        policy: FeedPolicy,
+        snapshot: bool,
+    ) -> Result<FeedId, SocketError> {
+        if snapshot
+            && (policy.role != crate::SocketChannel::Private
+                || policy.auth != crate::socket_lifecycle::AuthMode::Required
+                || policy.controls != crate::socket_lifecycle::ControlPolicy::Native
+                || policy.recovery != AuthRecovery::Reconnect
+                || policy.supervision.auth_timeout_ms.is_none())
+        {
+            return Err(SocketError::InvalidPolicy);
+        }
+        let snapshot_timeout = snapshot
+            .then_some(policy.supervision.auth_timeout_ms)
+            .flatten();
         let config = policy.supervision;
         let feed = self.state.register(policy)?;
         let time = TimeBounds::new(self.state.policy(feed).expect("registered feed"));
@@ -165,10 +186,36 @@ impl Driver {
             login_retry: None,
             batch_timer: None,
             next_batch: None,
+            snapshot_timeout,
+            snapshot_pending: false,
         });
         Ok(feed)
     }
 
+    pub(crate) fn snapshot_feed(&self, feed: FeedId) -> bool {
+        self.runtimes
+            .get(feed.index())
+            .is_some_and(|r| r.snapshot_timeout.is_some())
+    }
+    pub(crate) fn complete_snapshot<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        epoch: Epoch,
+    ) -> Result<(), SocketError> {
+        if !self.state.current(epoch) || !self.state.authenticated(epoch.feed()) {
+            return Err(SocketError::Stale);
+        }
+        let runtime = self.runtime_mut(epoch.feed());
+        if !runtime.snapshot_pending
+            || !runtime.time.valid(cx.now)
+            || runtime.supervisor.expired(cx.now).is_some()
+        {
+            return Err(SocketError::Stale);
+        }
+        runtime.snapshot_pending = false;
+        runtime.supervisor.authenticated(cx);
+        Ok(())
+    }
     fn runtime_mut(&mut self, feed: FeedId) -> &mut Runtime {
         let runtime = &mut self.runtimes[feed.index()];
         debug_assert_eq!(runtime.feed, feed);
@@ -190,12 +237,19 @@ impl Driver {
         // every physical epoch, including replacement after a first pong.
         runtime.supervisor.set_idle_enabled(cx, idle);
         runtime.supervisor.connecting(cx);
+        runtime.snapshot_pending = runtime.snapshot_timeout.is_some();
+        if let Some(timeout) = runtime.snapshot_timeout {
+            runtime
+                .supervisor
+                .retain_snapshot_deadline(cx, cx.now + timeout);
+        }
         Ok(epoch)
     }
 
     fn cancel_runtime<P>(&mut self, cx: &mut Cx<'_, P>, feed: FeedId) {
         let runtime = self.runtime_mut(feed);
         runtime.supervisor.cancel(cx);
+        runtime.snapshot_pending = false;
         if let Some(timer) = runtime.login_retry.take() {
             cx.clear_timer(timer);
         }
@@ -464,7 +518,9 @@ impl Driver {
                 if let Some(timer) = runtime.login_retry.take() {
                     cx.clear_timer(timer);
                 }
-                runtime.supervisor.authenticated(cx);
+                if !runtime.snapshot_pending {
+                    runtime.supervisor.authenticated(cx);
+                }
                 let mut effects = vec![Effect::Authenticated { epoch, first }];
                 if ready {
                     effects.push(Effect::Ready { epoch, reopened });

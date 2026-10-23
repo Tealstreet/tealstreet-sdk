@@ -74,6 +74,30 @@ impl<P> Cx<'_, P> {
         self.io.managed_sockets = true;
         Ok(feed)
     }
+    pub fn register_socket_feed_with_snapshot(
+        &mut self,
+        policy: FeedPolicy,
+    ) -> Result<FeedId, SocketError> {
+        self.io.assert_actions_safe();
+        self.io.opaque_entry_activity();
+        if self.io.socket_failed {
+            return Err(SocketError::NotPermitted);
+        }
+        let feed = self.io.socket_driver.register_with_snapshot(policy, true)?;
+        self.io.managed_sockets = true;
+        Ok(feed)
+    }
+    pub fn complete_socket_snapshot(&mut self) -> Result<(), SocketError> {
+        self.io.assert_actions_safe();
+        self.io.opaque_entry_activity();
+        let epoch = self.io.socket_message.ok_or(SocketError::Stale)?;
+        if !self.io.next_id.available(1) {
+            return Err(SocketError::Capacity);
+        }
+        self.with_socket_driver(|d, cx| d.complete_snapshot(cx, epoch))?;
+        self.io.socket_message = None;
+        Ok(())
+    }
     pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
         self.io.socket_driver.state.epoch(feed)
     }
@@ -108,6 +132,9 @@ impl<P> Cx<'_, P> {
             return Err(SocketError::NotPermitted);
         }
         self.io.socket_driver.preflight_begin(feed, self.now)?;
+        if self.io.socket_driver.snapshot_feed(feed) && !self.io.next_id.available(3) {
+            return Err(SocketError::Capacity);
+        }
         let role = self.io.socket_driver.state.policy(feed)?.role.clone();
         if role == SocketChannel::Public && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return Err(SocketError::NotPermitted);
@@ -328,6 +355,7 @@ impl<V: Venue> Engine<V> {
     fn socket_native(&mut self, now: f64, event: LifecycleEvent) -> Result<(), SocketError> {
         self.assert_live();
         // Lifecycle work is independent of the HTTP codec that queued it.
+        let message = self.io.socket_message.take();
         let delivery = self.io.http_delivery.take();
         let mut cx = Cx {
             now,
@@ -339,6 +367,7 @@ impl<V: Venue> Engine<V> {
         // callback or hide invalid output behind a socket-retirement filter.
         self.io.assert_actions_safe();
         self.io.http_delivery = delivery;
+        self.io.socket_message = message;
         result
     }
     fn socket_enqueue(&mut self, now: f64, effects: Vec<Effect>) {
@@ -670,7 +699,10 @@ impl<V: Venue> Engine<V> {
                         store: &mut self.store,
                         io: &mut self.io,
                     };
+                    assert!(cx.io.socket_message.is_none());
+                    cx.io.socket_message = Some(epoch);
                     Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
+                    cx.io.socket_message = None;
                 }
             }
             Event::WsBinary { data, .. } => {
@@ -972,6 +1004,7 @@ impl<V: Venue> Engine<V> {
         }
         self.io.socket_continuation_bytes -= work.bytes;
         self.assert_live();
+        let message = self.io.socket_message.take();
         let delivery = self.io.http_delivery.take();
         let entry = self.io.command_entry.take();
         #[cfg(feature = "order-locks")]
@@ -989,6 +1022,7 @@ impl<V: Venue> Engine<V> {
         );
         self.io.assert_actions_safe();
         self.io.http_delivery = delivery;
+        self.io.socket_message = message;
         self.io.command_entry = entry;
         #[cfg(feature = "order-locks")]
         {
