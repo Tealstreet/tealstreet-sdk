@@ -6250,8 +6250,9 @@ INCOMPLETE marker or soft[]; parked continuations and late DATA cannot resume or
 finish a reused command. Ordinary released page transport/HTTP/parse failure or
 a child-only timeout while the root is live still emits the native command_error
 then soft[] for queries, discarding every prior page. Lookup rejects instead of
-claiming absence. Provider/preparation refusal and synchronous child/submission
-refusal are strict typed failures; before release they remain NotSent. Native
+claiming absence. Provider/preparation refusals before release are strict typed NotSent failures.
+Synchronous child/submission refusals are also strict, with the shared Read
+projection (outcome None). Native
 lookup codec errors retain their untyped kind. Serialization errors finalized
 through ReadCompletion use the shared Internal classification.
 
