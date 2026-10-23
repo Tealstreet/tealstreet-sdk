@@ -22,11 +22,12 @@ impl Driver {
                 secondary: None,
             })
             .unwrap();
-        options.identity = identities.primary;
+        options.identity = identities.primary.clone();
         let mut inner = safe_cex_engine::test_support::seeded_engine(Backpack::new(options));
         inner
             .set_signer(Some(std::sync::Arc::new(provider)))
             .unwrap();
+        inner.set_identities(identities).unwrap();
         Self { inner, now: 1000.0 }
     }
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
@@ -110,7 +111,7 @@ pub fn identity_only_orders_mode(
 ) -> Driver {
     let (snapshot, _) = super::ready_orders(orders);
     let options = Options {
-        identity: Some(identity),
+        identity: Some(identity.clone()),
         public_data_only,
         recv_window,
         ..Default::default()
@@ -118,6 +119,12 @@ pub fn identity_only_orders_mode(
     assert!(options.key.is_none() && options.secret.is_none());
     let mut inner = safe_cex_engine::test_support::seeded_engine(Backpack::new(options));
     inner.set_signer(Some(provider)).unwrap();
+    inner
+        .set_identities(safe_cex_engine::signing::Identities {
+            primary: Some(identity),
+            secondary: None,
+        })
+        .unwrap();
     inner.start(1000.);
     inner.drain_actions().for_each(drop);
     inner

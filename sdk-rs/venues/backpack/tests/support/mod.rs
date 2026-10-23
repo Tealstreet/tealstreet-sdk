@@ -105,7 +105,7 @@ fn ready_snapshot(
         })
         .unwrap();
     let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
-        identity: identities.primary,
+        identity: identities.primary.clone(),
         read_credentials: None,
         public_data_only: false,
         key: Some("test-public-key".into()),
@@ -113,6 +113,7 @@ fn ready_snapshot(
         recv_window: auth_window.map(|w| w.0),
     }));
     e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, 200, markets);
