@@ -4854,6 +4854,37 @@ history Completion bridge own them. A provider refusal leaves an unsent write
 `signHttpRequest`/`signWsAuth` for WEEX refuse until hosted admission passes its
 own gates; only explicit `engine: 'rust'` accounts are affected.
 
+### Bybit RefreshMarkets execution group (#1854; backfill)
+
+`refreshMarkets` on the Bybit engines (`bybit`, `bybitinverse`, `bybitspot`,
+`bybitdemo`, `hyrotrader`) now runs through the engine execution-group
+authority. The call shape and success value (`null`) are unchanged.
+
+- Joined calls: a call made while a walk is running joins it and sends no new
+  requests. Every joined call settles exactly once from that walk. Each
+  caller's deadline is its own 30 s bound, capped by the walk's bound (set by
+  the first caller), so a late joiner still has only the walk's remaining
+  time, as before.
+- Timeout: kind stays `timeout`; the message changes from `Bybit market
+  refresh timed out` to `Execution deadline expired`. The outcome is unset
+  (read). Each joined caller gets this once.
+- Capacity: one walk serves at most 64 callers. A 65th concurrent call fails
+  at once with message `Too many requests in flight`, kind `internal`,
+  outcome `notSent`. The running walk and its 64 callers are unaffected, and a
+  call after the walk ends starts a new one.
+- Founder departure: the walk is not owned by the first caller. If that
+  caller's observer is detached, the walk continues for the remaining callers.
+  Bybit itself has no caller-side cancellation for this call today, so this is
+  an engine guarantee rather than an SDK-visible action.
+- Unchanged: shared-feed refusal, `Bybit market catalogue is not loaded`
+  (`invalidInput`) and the discovery rate-limit refusal (`rateLimited` with
+  `retryAfterMs`); request URLs, query and the `X-Referer` broker header; the
+  atomic catalogue commit.
+
+No tealstreet-next caller matches on the old timeout text (the review grepped
+the tealstreet-sdk TS packages; `rust.market-refresh.test.ts` checks neither
+text nor kind). Callers branching on `kind === 'timeout'` need no change.
+
 
 ## Profile-specific STP and income capabilities
 
