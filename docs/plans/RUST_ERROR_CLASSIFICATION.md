@@ -383,6 +383,22 @@ Each PR lists its exact deltas under [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALL
   - the rule 5 deferral, `reconcile_uncertain` and Satisfied reconcile marking;
   - the cancel-echo check;
   - Binance's move to `http_write_batch`, and its read-side `venue_error`.
+- Phase 2b decisions from venue-lane review (codex-zs5e83):
+  - **Exact message rows.** Add `Key::Message`, an exact match on the native
+    message. The venue codec strips only its documented suffix grammar while
+    decoding (Hyperliquid: trailing punctuation/whitespace or ` asset=<digits>`)
+    and rejects anything else. A bare `MessagePrefix` widens success evidence,
+    so reconsider removing it.
+  - **Intent from the logical command.** The intent is bound at leg
+    registration from the logical command, not from the endpoint. The cancel
+    leg of an amend/replace is `Intent::Amend`, so a `Satisfied(Cancel)` row
+    cannot authorise a replacement.
+  - **408 never resends.** 408 is decided before any table lookup, so it can
+    never yield `RefusedResend`; Lighter's 21104 nonce resend currently admits it.
+- Row #17 correction (Paradex): `on_response` already extends accepted IDs
+  (`trading.rs:848-855`). The loss is `Job::failure` (`trading.rs:93-120`)
+  dropping the structured partial on a failing multi-leg command, and a mixed
+  placement reaching `done` (`trading.rs:793`).
 - A batch whose only effects are `Satisfied` items records `KnownPartial`
   without partial counts. The journal already treats that as known effects
   without IDs.
