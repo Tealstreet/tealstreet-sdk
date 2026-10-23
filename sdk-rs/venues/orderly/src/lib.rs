@@ -10,7 +10,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick, Timeout};
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, VenueError,
@@ -1220,65 +1220,53 @@ impl Venue for Orderly {
                         (from / 1000.0).floor(),
                         (to / 1000.0).floor()
                     ));
-                    match cx.http_context(
-                        Scope::Command(command),
-                        Policy {
-                            operation: Operation::Read,
-                            credential: None,
-                            timeout_ms: 20_000,
-                            pacing: None,
-                            retry: RetryPolicy::Never,
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) else {
+                        return;
+                    };
+                    self.candle_request(
+                        cx,
+                        format!("{}{path}", self.rest()),
+                        false,
+                        Pending::CandleHistory {
+                            context,
+                            from: from_ms,
+                            to: to_ms,
+                            limit,
                         },
-                    ) {
-                        Ok(context) => self.candle_request(
-                            cx,
-                            format!("{}{path}", self.rest()),
-                            false,
-                            Pending::CandleHistory {
-                                context,
-                                from: from_ms,
-                                to: to_ms,
-                                limit,
-                            },
-                        ),
-                        Err(error) => {
-                            let error = error.venue_error();
-                            cx.fail(command, error);
-                        }
-                    }
+                    );
                     return;
                 }
                 let path = format!(
                     "/v1/kline?symbol={native}&type={interval}&limit={}",
                     limit.unwrap_or(500).min(1000)
                 );
-                match cx.http_context(
-                    Scope::Command(command),
-                    Policy {
-                        operation: Operation::Read,
-                        credential: None,
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
+                self.candle_request(
+                    cx,
+                    format!("{}{path}", self.rest()),
+                    true,
+                    Pending::Candles {
+                        context,
+                        rows: vec![],
+                        invalid: false,
+                        from: from_ms,
+                        to: to_ms,
                     },
-                ) {
-                    Ok(context) => self.candle_request(
-                        cx,
-                        format!("{}{path}", self.rest()),
-                        true,
-                        Pending::Candles {
-                            context,
-                            rows: vec![],
-                            invalid: false,
-                            from: from_ms,
-                            to: to_ms,
-                        },
-                    ),
-                    Err(error) => {
-                        let error = error.venue_error();
-                        cx.fail(command, error);
-                    }
-                }
+                );
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Query { command, query } => self.history_command(cx, command, query),

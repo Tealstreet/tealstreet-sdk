@@ -70,14 +70,22 @@ fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity,
         .and_then(|identity| serde_json::to_string(&identity).map_err(|error| error.to_string()));
     match result {
         Ok(data) => cx.done(command, data),
-        Err(error) => {
-            cx.command_error(command, &error);
-            cx.fail(command, error);
-        }
+        Err(error) => fail_command(cx, command, error),
     }
 }
+
+/// Native and signer identity failures share one command completion.
+pub(crate) fn fail_command(
+    cx: &mut Cx<'_, Pending>,
+    command: CommandId,
+    error: impl Into<safe_cex_engine::VenueError>,
+) {
+    let error = error.into();
+    cx.command_error(command, &error.message);
+    cx.fail(command, error);
+}
 impl Bingx {
-    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+    pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
         if let Some(error) = self.config_error {
             finish(cx, command, Err(error.into()));
             return;
@@ -91,13 +99,38 @@ impl Bingx {
             );
             return;
         };
-        let (url, headers, body) = crate::sign::Params::new().into_request(
-            Method::Get,
-            "/openApi/swap/v3/user/balance",
-            Some(credentials),
-            cx.now,
-        );
-        cx.request(Method::Get, url, headers, body, Pending::Identity(command));
+        if let Err((pending, error)) = crate::managed::read(
+            cx,
+            credentials,
+            crate::managed::Read {
+                method: Method::Get,
+                path: "/openApi/swap/v3/user/balance",
+                params: crate::sign::Params::new(),
+                at: None,
+            },
+            Pending::Identity(command),
+            safe_cex_engine::request_context::Scope::Command(command),
+        ) {
+            <Self as safe_cex_engine::Venue>::on_sign_error(self, cx, *pending, error);
+        }
+    }
+    pub(crate) fn identity_response_context(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        context: &safe_cex_engine::request_context::Context,
+        response: Response<'_>,
+    ) {
+        match parse(response).and_then(|identity| {
+            serde_json::to_string(&identity).map_err(|error| error.to_string())
+        }) {
+            Ok(data) => {
+                let _ = cx.done_context(context, data);
+            }
+            Err(error) => {
+                let _ = cx.command_error_context(context, error.clone());
+                let _ = cx.fail_context(context, error);
+            }
+        }
     }
     pub(crate) fn identity_response(
         &self,

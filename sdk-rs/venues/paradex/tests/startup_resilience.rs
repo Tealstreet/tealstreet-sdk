@@ -15,8 +15,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         ..Options::default()
     }));
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -56,8 +56,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
             .expect("bounded public discovery backoff");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -81,8 +81,8 @@ fn private_start_is_independent_of_ticker_seed_responses() {
         ..Options::default()
     }));
     engine.start(0.0);
-    let request = engine
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -111,8 +111,8 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
         };
         let mut previous = safe_cex_engine::test_support::seeded_engine(Paradex::new(options()));
         previous.start(0.0);
-        let seed = previous
-            .drain_actions()
+        let seed = safe_cex_engine::test_support::prepared_actions(&mut previous, 0.0)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) => Some(request),
                 _ => None,
@@ -139,8 +139,8 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
                 .set_tickers(previous.store().tickers().to_vec());
         }
         engine.start(0.0);
-        let request = engine
-            .drain_actions()
+        let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) => Some(request),
                 _ => None,
@@ -189,8 +189,8 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
             })
             .unwrap();
         engine.handle(1000.0, Event::TimerFired { timer });
-        let recovered = engine
-            .drain_actions()
+        let recovered = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.0)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) => Some(request),
                 _ => None,
