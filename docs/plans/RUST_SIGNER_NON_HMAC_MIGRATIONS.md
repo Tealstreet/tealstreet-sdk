@@ -120,6 +120,20 @@ No family source edit depends on an unlanded prerequisite.
     passphrase;
   - the Polymarket L1 wallet key, alongside the L2 API key, secret and
     passphrase.
+
+  Schema conditions (2026-10-23):
+  - Sign-offs: uufub4 owns placement in `signing.rs`/`signer.rs`; m26ps4
+    owns nonce and credential semantics.
+  - Extra refs are signing material only. They are never a nonce domain, an
+    account subject, or a source or fallback for a stable id, account or
+    slot.
+  - Extra refs travel inside the selected slot's `Identity`. There is no
+    per-request selector beyond what the algorithm needs.
+  - Bounds apply to entry count, total name and ref bytes, and each entry.
+  - Trusted setup rejects duplicate or undeclared names.
+  - Every algorithm validates exact key, payload and result lengths.
+  - WASM/JS/Workers schema gates change together.
+  - The reviewed schema pin is frozen and sent before consumers integrate.
 - **P1. Setup key encodings.** Extend the existing `KeyEncoding` and
   `secretEncoding` setup seam; add no parallel mechanism.
   - New decodings: Base58 (Orderly seed), Base64Url (Polymarket L2 secret)
