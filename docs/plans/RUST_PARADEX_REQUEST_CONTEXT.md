@@ -288,3 +288,142 @@ checks (13 adversarial controls) and whitespace checks. Source/adversarial and
 caller follow-up reviews find the added fixture changes clean. Native codec,
 protocol bodies, public routing and all existing classifier behavior stay intact.
 CI and the overseer's merge window remain separate gates.
+
+## Next slice: local margin and position settings
+
+Plan checkpoint,2026-10-24, on actual landing
+`c473342d48363a057c98c59292abb957462f3590`. This appendix supersedes the
+historical holds and counts above for this slice. No production, test or
+inventory change is included in this checkpoint.
+
+### Inventory and collision refresh
+
+The complete fingerprint/destination mapping above remains the family map;
+the pinned manifest is the exact remaining multiset. Current path counts are:
+
+| Remaining path under `venues/paradex/src/` | Count | Destination |
+| --- | ---: | --- |
+| `account.rs` | 10 | CONFIG/AUTH/SNAPSHOT/SENDER |
+| `depth_query.rs` | 1 | BOOK initial authority refusal |
+| `history.rs` | 13 | HISTORY, private and local branches |
+| `identity.rs` | 3 | IDENTITY |
+| `public.rs` | 7 | PUBLIC/CANDLE |
+| `trading.rs` | 21 | NOIO/TRADE/LEVERAGE |
+| Total | 55 | |
+
+Previously mapped occurrences already removed are account public-system seed
+`5c28b0ebae1f2a54f344d52c2c422801c8e82381c7fd8ad95d13cd549e88ddec`:1;
+depth sender `7277348e8c2d96d515028483928e715a3e9c014072f494e18fd2e527dc2f360b`:1
+and one of its two `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa`
+failures; history public sender
+`a876e5300951dc42d8c9828d78f0d32d52e42b439cbaf763cc6cdd6b63174865`:1;
+both lib failures `56d848e442eb914c45e3641ce58f354c9b36dd108d1f0bd57c97c4a58794d4a5`:2
+and book sender `47a71c977b3aa01bebe78866d791cab178725822d90756258925d00d0b297eaa`:1;
+public seed `daa9160114df450bc32e689954faee7fd2d88713b62477953faf17c6ac8e3ebf`:1.
+Do not remove their remaining siblings in other paths or the retained depth
+issuance refusal as part of this work.
+
+Fresh open-PR file lists show no Paradex source/test collision. #1848 history
+bridge and #1877 error-text change have landed. #1905 still holds GRVT
+`account.rs`, `lib.rs` and account/history/identity/login/markets/products/trading
+fixtures. #1866 holds Lighter trading and Hyperliquid signing/trading; #1852
+also holds Hyperliquid signing/trading. Hyperliquid's candle fixture remains
+held by #1857/#1914/#1923 despite #1877 landing. Own #1935 holds Lighter
+`lib.rs` and its public/candle/depth/ticker fixture drivers. Recheck all file
+lists before source or test edits. Shared documents and inventory permit
+append-only updates and own-venue pruning under the standing integration rule.
+
+Choose the four fixed-mode terminal occurrences in `Trading::command`,
+currently lines650,656,666,671. They require no HTTP, credentials, signer,
+Plan, observer or history authority. The larger candle family has two native
+GET routes with a klines-to-TradingView fallback and polling owners; it needs
+a separate Plan/authority audit. This smaller slice uses an already landed
+command-entry seam. The adjacent generic unsupported-command branch mixes
+Read and Mutation callers, including book/account variants intercepted by
+`lib.rs`, and stays a separate caller audit. Paradex signing remains untouched
+while the remote Stark payload-signer option is being decided.
+
+### Native behavior and shared admission
+
+`lib.rs::on_command` routes these settings through `public_command` into
+`Trading::command`. The two arms precede credential checks and ignore their
+symbol argument. Preserve that precedence on production/testnet and both
+public-only and private-enabled construction, including an unknown symbol.
+
+| Command | Native reply before admission changes |
+| --- | --- |
+| `SetMarginType { isolated:false, .. }` | Exact JSON `[]`; no Store change |
+| `SetMarginType { isolated:true, .. }` | Unsupported/NotSent: `Paradex isolated account routing is unsupported` |
+| `SetPositionMode { hedged:false, .. }` | Exact JSON `[]`; no Store change |
+| `SetPositionMode { hedged:true, .. }` | Unsupported/NotSent: `Paradex supports one-way mode only` |
+
+At the start of each of these existing arms, before publishing its reply,
+call `Cx::admit_http_command(Policy)` with `Operation::Mutation`, no credential,
+20,000ms timeout, no pacing and `RetryPolicy::Never`. Admission borrows the
+genuine initial callback; do not pass a command ID, manufacture a Context,
+queue a request or create a venue completion wrapper. On either entry error,
+return handled immediately: Rejected already emitted the one correlated
+engine denial and Revoked gives no completion authority. Use `done_context`
+for `[]`, or `fail_context` with the existing typed unsupported/NotSent error;
+handle the returned Result without unwrap or numeric fallback. The engine
+owns custody, issuance, finalization and retirement. No codec or write-fact
+table is needed because these branches never release a venue operation.
+
+Caller-visible change: the current unconditional local reply now requires
+available genuine command authority and valid clock policy. At capacity it
+produces one engine-owned failure, `Engine request capacity reached`; invalid
+clock admission produces the shared InvalidInput error. Both are Mutation
+NotSent. Successful admission preserves all four native replies and leaves
+Store, order receipts, account, timers and outbound traffic untouched. Do not
+change another command's credential, market validation, wire or signer path.
+
+### Original REDs, implementation and proof gates
+
+1. Commit this plan before tests. In a separate test-only commit add
+   `tests/request_context_local_settings.rs`, using real Engine command entry
+   and the existing support fixtures without changing them. Pin native controls
+   for all four replies, both networks, public/private construction, absent or
+   unknown symbols and Store/frame equality. Retain the existing unsupported
+   position-mode control in `tests/trading.rs` unchanged.
+2. Fill the shared bound with256 genuine parked managed book Reads at one
+   unchanged clock; first assert every Prepare exists and none is claimed.
+   Each of the four settings must fail with exactly one correlated shared
+   capacity error and Mutation NotSent, never its old success/unsupported
+   reply. Record these four original assertion REDs against unchanged source.
+   Add invalid-clock admission controls with the engine's exact current policy
+   semantics. Keep successful native controls passing on that same source;
+   a fixture setup failure is not a valid RED.
+3. Add peer-isolation and recovery controls: all parked peers remain live;
+   retire one genuine Read, run each setting, verify its native reply and no
+   new HTTP/sign/WS/timer action, then prove the freed slot remains available.
+   Exercise300 sequential settings and command-ID reuse after completion to
+   expose leaked retained owners. An ID currently owned by a parked Read
+   must not terminalize that Read. Keep ordinary account/book/public-trades
+   and representative private trading behavior in the native suite.
+4. Independently review the original RED commit, then adopt only the two
+   setting arms in `src/trading.rs`. Re-run the same assertions without
+   weakening them. Prune exactly these fingerprints in that path:
+
+   | Full fingerprint | Removed multiplicity |
+   | --- | ---: |
+   | `6a0599e4c3ead752e1fac93edf85bc5bf64ee081d1300d7728344098cd86dd71` | 1 |
+   | `f80a7c4dd74d78d93f9fcaaf73728e8b73decaf64625a69627120abd7e21e2cf` | 1 |
+   | `2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b` | 2 |
+
+   Expected exact shrink: **Paradex55->51; trading21->17**. Every other
+   manifest key, including foreign venues and the adjacent unsupported branch,
+   remains identical. No inventory edit belongs in the plan or RED commits.
+5. Scoped native verification uses `CARGO_BUILD_JOBS=2 cargo test -p
+   safe-cex-venue-paradex -p safe-cex-venue-binance`, strict all-target Paradex
+   Clippy, scoped cargo fmt, bans, `python3 sdk-rs/scripts/check-request-context.py`
+   and `python3 sdk-rs/scripts/check-request-context.test.py`. First run the new
+   target alone on original source to establish REDs. Full WASM/replay/timing
+   gates run in CI, with only one background120s watcher per PR.
+6. Append the landed caller behavior to CALLERS and the exact native/RED/ratchet
+   receipts to AUDITS/QUALITY and this plan. Independent source/adversarial,
+   caller and full-map reviews must all be clean before asking for a train
+   slot. Architecture gate: **No** proposed per-venue cross-cutting mechanism;
+   the adapter only supplies native settings facts to existing engine admission
+   and context terminal APIs. Genuine actual-landing integration, green CI,
+   a fresh separate own-files/own-manifest-keys guard and a head-matched merge
+   remain mandatory. Combo-4 review duty may interrupt this planning slice.
