@@ -192,18 +192,21 @@ fn http_work(
     Ok((work, OutputKind::Http(policy)))
 }
 
-pub fn prepare(
-    venue: &str,
-    identities: &Identities,
-    input: Input,
-) -> Result<(SignRequest, OutputKind), SignError> {
-    let identity = identities.primary.as_ref().ok_or(SignError::Unavailable)?;
-    identity.validate().map_err(|_| SignError::InvalidRequest)?;
-    let context = Context {
-        venue: venue.into(),
-        method: "HOSTED".into(),
-        ..Default::default()
-    };
+/// Families with a hosted request codec. AsterDEX V3 signs with a wallet key,
+/// which must never become an HMAC key. Only an explicit setup-resolved V1
+/// qualifies: inference from options cannot see material held by the setup.
+pub fn admitted(venue: &str, options: &crate::EngineOptions) -> bool {
+    let _ = options;
+    match venue {
+        #[cfg(feature = "asterdex")]
+        "asterdex" => {
+            options.asterdex.api_version == Some(safe_cex_venue_asterdex::sign::Version::V1)
+        }
+        _ => family(venue),
+    }
+}
+
+fn family(venue: &str) -> bool {
     let binance = cfg!(feature = "binance")
         && matches!(
             venue,
@@ -217,7 +220,22 @@ pub fn prepare(
     let okx = cfg!(feature = "okx") && matches!(venue, "okx" | "okxeu" | "okxdemo" | "okxeudemo");
     let bitget =
         cfg!(feature = "bitget") && matches!(venue, "bitget" | "bitgetusdc" | "bitgetinverse");
-    if !binance && !bybit && !okx && !bitget {
+    binance || bybit || okx || bitget || (cfg!(feature = "asterdex") && venue == "asterdex")
+}
+
+pub fn prepare(
+    venue: &str,
+    identities: &Identities,
+    input: Input,
+) -> Result<(SignRequest, OutputKind), SignError> {
+    let identity = identities.primary.as_ref().ok_or(SignError::Unavailable)?;
+    identity.validate().map_err(|_| SignError::InvalidRequest)?;
+    let context = Context {
+        venue: venue.into(),
+        method: "HOSTED".into(),
+        ..Default::default()
+    };
+    if !family(venue) {
         return Err(SignError::Unsupported);
     }
     match input {
@@ -252,7 +270,8 @@ pub fn prepare(
             to_sign,
             output_format,
         } => {
-            if to_sign.is_empty() {
+            // AsterDEX authenticates its private socket with a listen key.
+            if to_sign.is_empty() || venue == "asterdex" {
                 return Err(SignError::InvalidRequest);
             }
             Ok((
