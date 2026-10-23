@@ -66,7 +66,7 @@ impl State {
 }
 
 impl ContextRegistry {
-    pub(in super::super) fn preflight_receipt_cap(
+    pub(in crate::engine) fn preflight_receipt_cap(
         &self,
         preflight: &Preflight,
     ) -> Result<Option<(u64, f64)>, Error> {

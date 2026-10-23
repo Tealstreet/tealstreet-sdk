@@ -293,6 +293,16 @@ impl<P> Cx<'_, P> {
         let Owner::Command { id: founder, .. } = preflight.owner() else {
             return Err(Error::Invalid);
         };
+        // A #1949 receipt cap is command-only: a capped Preflight never founds
+        // a shared execution, refused before any group, credit or identity.
+        if self
+            .io
+            .request_contexts
+            .preflight_receipt_cap(preflight)?
+            .is_some()
+        {
+            return Err(Error::Invalid);
+        }
         self.io
             .request_contexts
             .prepare_planned_execution(founder, key)?;
