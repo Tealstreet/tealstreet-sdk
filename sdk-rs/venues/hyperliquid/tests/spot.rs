@@ -1747,4 +1747,41 @@ mod owned_nonpageable {
         };
         assert_eq!(result, r#"{"found":false,"definitive":false}"#);
     }
+    #[test]
+    fn existing_local_lookup_hit_stays_separate_from_unavailable_history() {
+        let (mut e, _) = placed();
+        e.drain_actions().for_each(drop);
+        let cached = e.store().orders()[0].clone();
+        let client_order_id = cached
+            .client_order_id
+            .clone()
+            .expect("placement retains its client identity");
+        e.handle(
+            5000.,
+            Event::Command(Command::Query {
+                command: 400,
+                query: Query::OrderByClientId {
+                    symbol: cached.symbol.clone(),
+                    client_order_id,
+                },
+            }),
+        );
+        let output: Vec<_> = e.drain_actions().collect();
+        let [
+            Action::Notice(Notice::CommandDone {
+                command: 400,
+                result,
+            }),
+        ] = output.as_slice()
+        else {
+            panic!(
+                "cache lookup retains its own positive contract, no history marker/I/O: {output:?}"
+            );
+        };
+        let result: serde_json::Value = serde_json::from_str(result).unwrap();
+        assert_eq!(result["found"], true);
+        assert_eq!(result["order"]["id"], cached.id);
+        assert!(result.get("definitive").is_none());
+        assert_eq!(e.store().orders(), &[cached]);
+    }
 }

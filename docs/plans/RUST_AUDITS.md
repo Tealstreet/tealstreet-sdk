@@ -1998,3 +1998,14 @@ nonempty paths retain native/cache selection; bounded native upsert remains an
 endpoint normalization fact. No invented pager, partial recovery or cache-backed
 coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
 separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+## Non-pageable history coverage ownership
+
+~~Kraken Spot, BreakoutProp and Hyperliquid Spot locally return [] for unsupported
+historical lists without declaring missing coverage.~~ Existing
+HistoryRows/Completion now owns these terminal results and emits an explicit
+command-scoped incomplete warning before the unchanged array payload. No row is
+staged or accepted and no native endpoint is fabricated. Public trades reject
+through Completion with typed pre-I/O Unsupported/NotSent, while lookup's
+nondefinitive contract remains separate. Hyperliquid perpetual history and all
+native trading/signing/account paths retain their existing behavior.

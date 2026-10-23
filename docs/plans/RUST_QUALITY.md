@@ -520,3 +520,16 @@ bounded duplicate replacement after eviction, two/four candidate requests,
 signature reset, concurrent owners and persistent live cache. Native endpoint
 selection/upsert facts remain local; no new owner/pager/marker policy or shared
 signing-provenance implementation is copied into the venue.
+
+## Explicit non-pageable history results
+
+The three non-pageable adapters use existing HistoryRows/Completion without new
+engine API or result schema. Six original-source assertion-RED groups prove the
+previous missing owner coverage and untyped public-trade refusal; all 110 prior
+selected controls plus three new lookup compatibility controls pass on original
+source. Corrected controls require exactly one command-owned Warn before Done,
+including Error log level, [] shape despite live cached orders, zero I/O or Store
+mutation, distinct command IDs and explicit pre-I/O Unsupported/NotSent. Native
+unsupported capabilities remain unsupported and no numeric managed fallback is
+introduced. Caller polling guidance retains coverage while deduplicating UI
+alerts.

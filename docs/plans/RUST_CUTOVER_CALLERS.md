@@ -4291,3 +4291,28 @@ transport contract changes. NX adapters that adopt these helpers keep the exact
 root/leg handles, publish and complete without yielding, and discard invalid
 or stale callback data rather than falling back to numeric command completion.
 Joined-read execution/observer ownership remains a separate shared capability.
+
+## Non-pageable history coverage: Kraken Spot, BreakoutProp and Hyperliquid Spot
+
+Fills, order-history and income queries on these adapters still return `[]`
+without a native history read. The shared history owner now emits one Warn
+`history.incomplete` event before that result, with exactly `fields.command`
+identifying the query. The marker survives Error-level filtering. An empty
+Store, missing credentials, public-only mode or live cached orders cannot prove
+history absence; these results are explicitly incomplete, never authoritative
+empty history.
+
+Callers must correlate the coverage marker with the command and gate any
+completeness-dependent use of its result. Gate unsupported polling using venue
+capabilities and deduplicate user-facing alerts rather than displaying a fresh
+alert for every poll; retain each command's coverage fact even when UI alerts are
+suppressed. The engine does not suppress or rate-limit that coverage warning.
+
+Public-trade queries keep their existing refusal text but now report
+`kind=unsupported`, `outcome=notSent`, matching the pre-I/O refusal convention:
+no request was sent. They emit no history result or incomplete marker. Client-ID
+lookup misses keep `{"found":false,"definitive":false}` and no history marker;
+Hyperliquid's existing earlier cache-hit and identity/client-ID shortcuts remain.
+Live Store/cache access stays separate from history. No REST capability, result
+wrapper, managed-request migration or NX runtime adoption is added.
+[Scope and controls](RUST_OWNED_HISTORY.md).

@@ -2213,3 +2213,21 @@ its two notes: match the existing Unsupported/NotSent convention for public
 read refusal; CALLERS must advise capability-gating unsupported polling and
 deduplicating user-facing alerts while preserving every command's coverage
 fact. Do not rate-limit or suppress coverage inside the engine owner.
+
+Non-pageable checkpoint: regression-only `96451b00201` records 113 selected PASS
+and six expected assertion-RED groups on original source (110 prior controls and
+three new lookup compatibility controls GREEN). The implementation changes only
+the three specified query branches/imports. Narrow byte-preservation checks
+restore each old branch and recover the entire original Kraken trading and
+Hyperliquid history file, proving native trading/perpetual history and earlier
+cache/identity shortcuts unchanged. Breakout's query-only file adds no I/O.
+
+Corrected full engine/three-family native suite PASS: 1156 tests before a final
+additional positive Hyperliquid cache-hit control. The final selected five test
+binaries PASS 120/120, including that control. Strict all-target/all-feature
+Clippy/fmt/bans, request-context checker/all 13 controls and diff checks PASS.
+The legacy map is pure prune in exactly three files: Kraken Spot trading12->9,
+Breakout history3->0 (entry removed), Hyperliquid history15->13. No additions,
+other-map/checker edits, bootstrap or exemption. No local release WASM/full
+replay/timing run; independent source/caller/full-map review and source-bound CI
+remain distinct gates before landing after actual SafeIDs dependencies.
