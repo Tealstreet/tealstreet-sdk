@@ -228,10 +228,23 @@ impl<P> Io<P> {
         }
     }
 
+    pub(super) fn retire_http_owner(&mut self, owner: Owner) {
+        let requests = self
+            .managed_http
+            .iter()
+            .filter_map(|(request, managed)| {
+                (managed.lifecycle.context().owner() == owner).then_some(*request)
+            })
+            .collect::<Vec<_>>();
+        for request in requests {
+            self.discard_managed(request);
+        }
+    }
+
     fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
         self.request_contexts
-            .retire_attempt(managed.lifecycle.context());
+            .retire_attempt(managed.lifecycle.context(), request);
         self.signing.remove_request(request);
         self.timers.remove(&managed.timer);
         self.actions.push(Action::ClearTimer {
@@ -503,8 +516,11 @@ impl<V: Venue> Engine<V> {
             .request_contexts
             .release_flag(managed.lifecycle.context(), request)?;
         let pending = self.io.pending.get_mut(&request).ok_or(Error::Revoked)?;
-        let mutation = managed.lifecycle.context().operation() == Operation::Mutation;
-        if mutation {
+        // Session writes change no orders: no reconciliation record and no
+        // write-revision fence over unrelated command reconciliation.
+        let journal = managed.lifecycle.context().operation() == Operation::Mutation
+            && matches!(managed.lifecycle.context().owner(), Owner::Command { .. });
+        if journal {
             let capture = if self.io.streams.contains_key(&request) {
                 Err(Error::Invalid)
             } else {
@@ -549,7 +565,10 @@ impl<V: Venue> Engine<V> {
             }
             managed.recipe = None;
             managed.signing_attempt = None;
-            if mutation {
+            self.io
+                .request_contexts
+                .session_released(managed.lifecycle.context(), request);
+            if journal {
                 self.io.http_write_revision = self.io.http_write_revision.saturating_add(1);
                 let record = self
                     .io
@@ -581,7 +600,7 @@ impl<V: Venue> Engine<V> {
                 release.signature,
             );
         }
-        if mutation && !matches!(result, Ok(Claim::Released(_))) {
+        if journal && !matches!(result, Ok(Claim::Released(_))) {
             self.io.http_responses.remove(request);
         }
         if let Err(error) = result {

@@ -10,6 +10,9 @@ use std::collections::HashMap;
 
 const CAPACITY: usize = 256;
 
+#[path = "session_context.rs"]
+mod session;
+
 #[cfg(test)]
 #[path = "request_context_replacement_registry_tests.rs"]
 mod replacement_tests;
@@ -48,6 +51,7 @@ pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
     contexts: HashMap<u64, Context>,
     commands: HashMap<CommandId, CommandOwner>,
+    sessions: session::Sessions,
 }
 
 impl ContextRegistry {
@@ -118,6 +122,40 @@ impl ContextRegistry {
                 },
             },
         };
+        self.commit(owner, identity, policy, now, parent)
+    }
+
+    fn issue_session(
+        &mut self,
+        identity: u64,
+        generation: u64,
+        policy: Policy,
+        now: f64,
+        parent: Option<&Context>,
+    ) -> Result<Context, Error> {
+        if let Some(parent) = parent {
+            self.validate(parent, now)?;
+            if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
+                return Err(Error::Invalid);
+            }
+        }
+        if !now.is_finite() || policy.timeout_ms == 0 {
+            return Err(Error::Invalid);
+        }
+        self.sessions.admit(generation, &policy)?;
+        self.contexts.retain(|_, old| old.deadline() > now);
+        self.sessions.prune(&self.contexts);
+        self.commit(Owner::Session { generation }, identity, policy, now, parent)
+    }
+
+    fn commit(
+        &mut self,
+        owner: Owner,
+        identity: u64,
+        policy: Policy,
+        now: f64,
+        parent: Option<&Context>,
+    ) -> Result<Context, Error> {
         let deadline = parent.map_or(now + f64::from(policy.timeout_ms), |parent| {
             parent.deadline().min(now + f64::from(policy.timeout_ms))
         });
@@ -133,7 +171,7 @@ impl ContextRegistry {
         )?
         .with_retry(policy.retry)?;
         if self.contexts.len() >= CAPACITY
-            || matches!(scope, Scope::Command(id)
+            || matches!(owner, Owner::Command { id, .. }
                 if !self.commands.contains_key(&id) && self.commands.len() >= CAPACITY)
         {
             return Err(Error::Capacity);
@@ -292,6 +330,8 @@ impl ContextRegistry {
             || self.contexts.get(&context.leg()) != Some(context)
             || matches!(context.owner(), Owner::Command {id, generation}
                 if self.commands.get(&id).is_none_or(|owner| owner.generation != generation))
+            || matches!(context.owner(), Owner::Session { generation }
+                if !self.sessions.live(generation))
         {
             return Err(Error::Revoked);
         }
@@ -323,6 +363,9 @@ impl ContextRegistry {
         {
             return Ok(());
         }
+        if matches!(context.owner(), Owner::Session { .. }) {
+            return self.sessions.register(context, request);
+        }
         let owner = self.command_mut(context)?;
         let pending = owner.pending.checked_add(1).ok_or(Error::Capacity)?;
         if context.operation() == Operation::Mutation {
@@ -343,7 +386,11 @@ impl ContextRegistry {
         Ok(())
     }
 
-    pub(super) fn retire_attempt(&mut self, context: &Context) {
+    pub(super) fn retire_attempt(&mut self, context: &Context, request: RequestId) {
+        if matches!(context.owner(), Owner::Session { .. }) {
+            self.sessions.retire_attempt(context, request);
+            return;
+        }
         if let Ok(owner) = self.command_mut(context) {
             owner.pending = owner
                 .pending
@@ -375,7 +422,9 @@ impl ContextRegistry {
         context: &Context,
         request: RequestId,
     ) -> Result<Option<&mut bool>, Error> {
-        if context.operation() != Operation::Mutation {
+        if context.operation() != Operation::Mutation
+            || matches!(context.owner(), Owner::Session { .. })
+        {
             return Ok(None);
         }
         self.command_mut(context)?
@@ -386,9 +435,22 @@ impl ContextRegistry {
             .map(Some)
     }
 
+    /// Session writes record release separately: they have no command journal.
+    pub(super) fn session_released(&mut self, context: &Context, request: RequestId) {
+        if context.operation() == Operation::Mutation {
+            self.sessions.released(context, request);
+        }
+    }
+
     pub(super) fn result(&mut self, delivery: &Delivery, result: WriteResult) -> Result<(), Error> {
         if delivery.context.operation() != Operation::Mutation {
             return Err(Error::Invalid);
+        }
+        if matches!(delivery.context.owner(), Owner::Session { .. }) {
+            self.validate_handle(&delivery.context)?;
+            return self
+                .sessions
+                .result(&delivery.context, delivery.attempt.request, &result);
         }
         self.command_mut(&delivery.context)?
             .writes
@@ -585,6 +647,16 @@ impl<P> Cx<'_, P> {
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
+            Owner::Session { generation } => {
+                let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+                return self.io.request_contexts.issue_session(
+                    identity,
+                    generation,
+                    policy,
+                    self.now,
+                    Some(parent),
+                );
+            }
         };
         self.make_http_context(scope, policy, Some(parent))
     }
@@ -1866,7 +1938,7 @@ mod write_tests {
         assert!(registry.commands[&7].writes.is_none());
         let callback = delivery(&preflight, 12);
         registry.enter_delivery(&callback);
-        registry.retire_attempt(&preflight);
+        registry.retire_attempt(&preflight, RequestId(12));
         registry
             .issue(
                 3,
