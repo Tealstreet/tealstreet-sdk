@@ -162,3 +162,23 @@ in fresh CI; unchanged budgets/profile/reference/harness. Independent uuf API
 and source/custody clearance, fresh CI and train window precede landing.
 Original controls stay visible; no package-provenance claim is required by the
 current train rule. No merge, deploy, flag change or master cutover implied.
+
+## Executed shared original assertion controls
+
+On unchanged production45ab36cdc9e, the real Engine synthetic-native target
+`engine/tests/socket_snapshot_barrier.rs` uses the EXISTING registration API.
+Command: `cargo test -p safe-cex-engine --features managed-sockets,test-support
+--test socket_snapshot_barrier`. Six tests compile and execute:3 assertion RED,
+3 working GREEN,0ignored. Original missing trait methods/wrong Book import were
+fixture compilation errors, corrected before this receipt; no compilation error
+is counted as RED. The old registration does not declare the new contract, so
+the implementation will explicitly opt this synthetic consumer into the new
+registration API and add exact-message completion at its native commit point.
+That adoption delta will be separately identifiable, not a changed assertion.
+
+REDs: after delayed open, login acceptance and fresh pongs, connect+20s snapshot
+enters the native commit callback (1 instead of0); ACK/pongs without snapshot
+fail to close at20s; malformed native snapshot also leaves the bound discharged.
+Positives: login releases one AOP frame without snapshot; current valid native
+snapshot reaches commit; retired epoch cannot enter the decoder. These shared
+controls complement the native Phemex12-control6RED/6GREEN receiptc8812e4e85a.
