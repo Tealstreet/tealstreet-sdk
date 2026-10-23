@@ -6106,3 +6106,36 @@ This covers all four OKX aliases. [Plan](RUST_OKX_CALLER_CANDLES.md).
 - **Refusals are unchanged.** Unknown market still answers `[]`. Invalid
   bounds and unsupported bars keep their text, with no kind or outcome. Live
   candle subscriptions are unchanged.
+
+## Public derivations through the signer (P4)
+
+The engine signer gains two non-secret operations, `PublicAddress` and
+`PublicKey` (`RUST_SIGNER_PREREQUISITES.md`, "Public derivations (P4)").
+No venue uses them yet; the Hyperliquid, TxFlow, GRVT and Polymarket
+conversions adopt them. Caller-visible changes:
+
+- **`IdentitySetupPolicy.signing_algorithm`.** A new optional field declares a
+  slot's signing ref an asymmetric key (`ed25519`, `es256`, `secp256k1Digest`
+  or `starkDigest`). Rust literal constructors must set it, or use
+  `..Default::default()`. The TS `IdentitySetupPolicy` type and
+  `construction-rules.json` gain the optional `signingAlgorithm` key. A MAC
+  algorithm is refused, and so is an aliased secondary that declares a
+  different algorithm from its primary.
+- **Only a declared ref answers.** A provider answers a public operation only
+  for a ref that setup policy declared for exactly that algorithm. An HMAC,
+  undeclared, credential, passphrase or extra-role ref is refused, so no
+  secret is fingerprinted. `LocalSigner::insert` drops a replaced ref's
+  declaration.
+- **`Operation` gains two variants.** Exhaustive matches on
+  `safe_cex_engine::signing::Operation` outside this repo must add them.
+  Injected providers may refuse them (`InvalidRequest`/`Unsupported`); result
+  widths are exact (20-byte address, 32-byte Ed25519 key or Stark felt).
+- **`safe_cex_venues::fetch_public`.** Trusted setup asks a local provider
+  inline for public values: at most 4 public-only operations, validated first.
+  A host or remote provider gets `Unavailable` and nothing is scheduled. Every
+  answer is checked as a canonical curve value (Stark x, Ed25519 point), and a malformed one
+  is `InvalidResult`. Those accounts
+  supply the value as bound account metadata instead.
+- **`safe_cex_crypto::ethereum::signed_by`.** A shared pre-release check that
+  a low-s host/remote signature recovers to the bound actual signer. Families call
+  it before release; it never compares with expected venue config.
