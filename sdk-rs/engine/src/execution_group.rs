@@ -423,7 +423,9 @@ impl Groups {
         };
         let mut sealed = Vec::new();
         let timeout = group.timeout();
-        let closes = !group.terminal && group.legs == 0 && now >= group.deadline;
+        // The execution bound wins over a same-instant leg timeout, so owners
+        // get the typed timeout before the leg's own failure is delivered.
+        let closes = !group.terminal && now >= group.deadline;
         let (expired, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut group.observers)
             .into_iter()
             .partition(|entry| {

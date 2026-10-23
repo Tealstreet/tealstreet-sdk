@@ -164,16 +164,21 @@ fn execution_deadline_without_a_leg_seals_every_remaining_owner() {
 }
 
 #[test]
-fn an_in_flight_leg_defers_the_execution_deadline_to_the_post_callback_sweep() {
+fn the_execution_deadline_seals_owners_before_a_same_instant_leg_timeout() {
     let mut groups = Groups::default();
     let (execution, _) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
     groups.leg_issued(execution).unwrap();
     groups.leg_released(execution).unwrap();
-    assert!(groups.expire(execution, 900.).is_empty());
-    // The physical timeout reached the venue, which sealed nothing.
-    groups.leg_retired(execution).unwrap();
+    assert!(groups.expire(execution, 899.).is_empty());
     let sealed = groups.expire(execution, 900.);
     assert_eq!(owners(&sealed), [(1, 10)]);
+    assert_eq!(
+        sealed[0].result.as_ref().unwrap_err().kind,
+        Some(ErrorKind::Timeout)
+    );
+    // The leg's own timeout then finds nothing left to seal.
+    groups.leg_retired(execution).unwrap();
+    assert!(groups.expire(execution, 900.).is_empty());
 }
 
 #[test]

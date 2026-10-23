@@ -1,7 +1,7 @@
 //! Explicit public discovery, staged independently from startup/account reconciliation.
 use super::*;
 use safe_cex_engine::engine::{ExecutionHandle, Window};
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Error, Operation, Policy, RetryPolicy};
 use serde::Deserialize;
 
 const DEADLINE_MS: u32 = 30_000;
@@ -79,11 +79,15 @@ impl BybitLinear {
             return; // The engine owns initial admission rejection.
         };
         if let Some(walk) = self.market_refresh.active.as_ref() {
-            if cx.join_execution(&walk.execution, &root, "").is_ok() {
-                return;
+            match cx.join_execution(&walk.execution, &root, "") {
+                Ok(_) => return,
+                // The walk's execution already ended; start a fresh one.
+                Err(Error::Revoked) => self.market_refresh.active = None,
+                Err(error) => {
+                    let _ = cx.fail_context(&root, error.venue_error());
+                    return;
+                }
             }
-            // The walk's execution already ended; start a fresh one.
-            self.market_refresh.active = None;
         }
         // An optional product that degraded during startup must recover through
         // restart; refresh never activates a new account product as a side effect.
