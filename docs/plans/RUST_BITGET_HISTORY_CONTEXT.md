@@ -201,3 +201,41 @@ Compatibility controls that must pass both before and after:
   once it has a per-page leg method (requested in that review); this slice
   keeps `read_credential`/`signing_identity` selection, captured once at
   entry for the whole query.
+
+## Original RED receipt
+
+`sdk-rs/venues/bitget/tests/history_context.rs`, on unchanged production at
+this branch's base (caller slice 1 plus #1945). It uses the real
+`handle_command` for caller waits. Result: 5 assertion REDs, 4 passing
+controls, 0 ignored.
+
+- `private_history_page_releases_through_a_managed_read_context`: the fills
+  page is released outside managed Context custody (RED 1).
+- `short_caller_wait_ends_the_detection_wait_with_a_typed_timeout`: no terminal
+  by the 1.5 s wait, because the native 10 s detection wait governs (RED 2).
+- `caller_wait_bounds_the_whole_walk_across_valid_pages`: 5 s pages keep
+  paging past the 30 s caller wait (RED 3, shortened from the 120 s
+  default for test speed).
+- `an_unanswered_page_times_out_twenty_seconds_after_its_dequeue_and_retries`:
+  no page timeout or native retry by dequeue + 20.3 s (RED 4).
+- `unstamped_receipt_fails_closed_without_a_default_root`: the walk starts,
+  and its signing times out NotSent at the unstamped clock, where it should be
+  the outcome-None entry refusal (RED 7).
+
+Two planned REDs are not reachable as assertion REDs on this production:
+
+- **RED 5 (Expired Fresh entry).** A Bitget Query is never held, so its
+  genuine entry always sees the full `Remaining` wait. The `Expired` branch
+  stays in the implementation and is covered by #1945's engine controls. It
+  is not faked here.
+- **RED 6 (sign failure).** Today's `cx.fail(command, error)` already carries
+  the typed `VenueError`. Preserving it through `fail_context(&root, ...)` is
+  a post-implementation control, not a RED.
+
+The four controls pass:
+
+- the entry refusal texts and order;
+- a 300 s wait completing a 26-page, 130 s walk (no fixed 120 s root);
+- three retries, then `Bitget history incomplete:`;
+- unsigned PublicTrades.
+
