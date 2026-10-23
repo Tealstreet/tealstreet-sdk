@@ -59,14 +59,16 @@ separate; their evidence does not establish this performance objective.
 
 Executed on the unchanged source above; no engine/venue/host/harness source was
 edited. Raw evidence is under `/tmp/codex-9czdjh-kcs-profile/`:
-`landing-rust.cpuprofile` (whole replay), `steady-rust.cpuprofile` (exact warm-mark
-to measure interval), replay JSONs, `native-sample.txt`, `native-run.log`, native
+`landing-rust.cpuprofile` (whole replay), `steady-rust.cpuprofile` (warm-mark
+to measure capture, with boundary instrumentation overhead), replay JSONs, `native-sample.txt`, `native-run.log`, native
 build log and machine-readable `attribution.json`. The temporary native driver
 and corpus are under `/tmp/codex-9czdjh-kcs-native-profile/`.
 
 The single optimized-WASM steady capture uses Node22's inspector at100us sampling,
 started by a preload at Tape.play's warm-mark threadCpuUsage call and stopped at
-the steady measurement call. The preload does not alter tape/engine/host code.
+the first measurement thread-CPU call, just before its steady-delta read. Starting
+precedes the recorded warm CPU baseline; this is an approximate window with
+instrumentation overhead. The preload does not alter tape/engine/host code.
 Its518.625ms sampled interval includes301.454ms idle and26ms inspector setup;
 WASM leaf samples account for49.217ms. Main self costs outside WASM include
 socketFor14.294ms, active11.870ms, querystring unescape9.416ms and URL parameter
@@ -77,20 +79,22 @@ per-Rust-function WASM attribution; local profile metrics are not a gate result.
 The supplemental native release driver uses unchanged landing engine/KuCoin
 dependencies, opt3/fat LTO/one codegen unit plus symbols, two build jobs, the real
 968-market startup and the recorded final19,820 WS payloads. One12-second profile
-processed15,142,480 repeated events, averaging793.32ns/event. macOS sample
-collected5,872 main-thread samples:
+processed15,142,480 repeated events, averaging793.32ns/event of elapsed wall
+time. macOS sample captured eight seconds within that twelve-second driver run,
+collecting5,872 main-thread samples:
 
 | Requested shared seam | Steady path and measured evidence |
 | --- | --- |
 | #1830 command entry | Admission, begin/end loan and command-owner lookup are not reached by ticker/depth events. Ambient custody assertions in assert_live/failed still execute; they inline into generic handle/drain work, so this profile does not isolate their incremental cost. No claim of zero instructions or zero code-layout effect. |
 | #1837 classifier | No read/write classifier or command write-intent call on these WS events; there are no HTTP write deliveries or command records. Changed layout/codegen effects remain unisolated. |
-| #1854 execution groups | One unconditional sweep per ordinary WS event. Its empty-root expiry/managed-leg revocation/timer work totals60/5,872 samples, about1.02% native time (roughly8ns/event by sample allocation, not a separate timing measurement). The sweep still scans managed HTTP state and recomputes the next group deadline when no group exists. |
+| #1854 execution groups | One unconditional sweep per ordinary WS event. Its empty-root expiry/managed-leg revocation/timer work totals60/5,872 samples, about1.02% native time (roughly8ns/event by wall-time-weighted sample allocation, not a separate CPU timing measurement). The sweep still scans managed HTTP state and recomputes the next group deadline when no group exists. |
 
 Native self samples are dominated by JSON string scanning16.54%, memcmp14.63%,
 shared `num::parse_decimal`10.51%, Price deserialization8.84%, and JSON parse_str
 6.85%. Price/Store ticker lookup is also a substantial inclusive branch. These
 are source-attribution measurements, not WASM speed predictions: the driver omits
-JS host/frame costs, repeats the corpus, and older depth snapshots are rejected
+JS host/frame costs, fixes raw time at100ms, discards timer actions, repeats the
+corpus, and older depth snapshots are rejected
 after the first cycle. Sampling proportions have ordinary statistical error.
 
 #1835 discovery has no new steady ticker/depth work: its managed discovery
