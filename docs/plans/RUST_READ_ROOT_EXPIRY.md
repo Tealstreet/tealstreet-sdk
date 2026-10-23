@@ -108,8 +108,8 @@ passes):
 2. **Fallible storage reservations** (after the effect-free checks have also
    confirmed two available identities and valid pacing):
    - an index slot, with `read_roots` preallocated to owner capacity, 256;
-   - the timer action slot (`actions.try_reserve(2)`, for a clear plus an
-     arm);
+   - the timer action slot (`actions.try_reserve(1)`, for the root's own
+     `SetTimer`);
    - the registry's owner and context storage.
 3. **IDs, the only spend:** the root identity and the timer id through one
    `reserve_ids(2)`. A refusal here, or at any earlier step, leaves no id,
@@ -265,7 +265,8 @@ and records which command each INCOMPLETE marker belongs to.
    - Two roots due at the same boundary: the cleanup for A cannot publish or
      send for B, and each gets exactly one Timeout.
    - A live third root and a Plan owner are untouched.
-   - There is one engine timer, and the empty guard emits no timer actions.
+   - Each root has its own engine timer, cleared at its terminal, and the
+     empty guard emits no timer actions.
 8. **Public entrypoints.** `http_prepared`, `claim_http`, `prepare_dispatch`,
    a frame call, `apply_public_feed` and `drain_actions` (at
    `io.dispatch_now`) each expire a due root first.

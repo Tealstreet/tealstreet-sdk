@@ -6078,3 +6078,42 @@ shorter native declaration. No transport cancellation, original Read-root cast
 or accepted-prefix recovery permission follows from observing this cap.
 Mutation and execution-owned capped Plans are outside this first slice; native
 mutation/provider errors and their outcome projections remain unchanged.
+
+## Engine-owned expiry of caller-wait Read roots (#1945 follow-up)
+
+A venue that admits its original Read root with `Cx::admit_caller_read_root`
+gets a root bounded by the caller's exact receipt deadline. The engine ends
+that root itself at the deadline:
+
+- **Terminal.** The engine emits exactly one strict `CommandFailed` with
+  kind Timeout and no financial outcome.
+- **Nothing published.** Accepted history rows are not published, and no
+  INCOMPLETE marker or native finalizer runs, even when earlier pages were
+  accepted.
+- **Venue.** Outstanding requests are cancelled. Their continuations reach
+  `Venue::read_root_retired`, which runs with no `Cx` and only drops queued
+  work.
+- **Inert afterwards.** Late replies, binds and venue completions through the
+  expired root are inert.
+
+A page timeout while the root is still live keeps the venue's native
+accepted-only partial recovery.
+
+Missing receipts. A genuine command with no receipt of its own (an exhausted
+receipt sequence, a duplicate of a live legacy id, or an unstampable clock)
+is refused once:
+- a Read gets no outcome;
+- a Mutation gets `NotSent`.
+
+No default deadline is ever minted. Callers see a typed failure, not a
+120 s wait.
+
+Adopting venues must complete only through their root and must never use
+numeric `done` or `fail`. A numeric completion after the owner is removed is
+a separate gap that predates this change and is not closed here. Callers can
+distinguish the following:
+
+| Event | Meaning |
+| --- | --- |
+| Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
+| Engine Timeout terminal | The root expired. No further work is issued. |
