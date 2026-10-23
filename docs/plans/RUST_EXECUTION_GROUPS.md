@@ -440,10 +440,14 @@ terminal is correct (confirmed with uufub4).
 ## Plan-backed executions (claude-fe7lgm, 2026-10-23)
 
 Branch `feat/rust-planned-execution`, stacked on the reviewed #1873 pin
-`2fe13f4d892`, behind `http-plans`. This implements the composition contract
-(full text on `feat/rust-hyro-execution`, cleared for API fit by uufub4).
-The three Plan extensions (reconciliation continuation, reconciliation resend
-grant, imported journal facts) and the intent ledger are separate follow-ups.
+`2fe13f4d892`, behind `http-plans`. **This first cut does NOT implement the
+composition contract uufub4 cleared** (full text on `feat/rust-hyro-execution`,
+`82c23a39e66`): that contract has one `Owner::Execution` physical Plan and an
+explicit founder Observer whose detach or expiry leaves peers running. Here
+the Plan stays owned by the founder command, so the founder cannot detach.
+uufub4's API-fit review blocks this narrower lifetime policy; it needs either
+the contract ownership or an explicit overseer ruling. The three Plan
+extensions and the intent ledger are separate follow-ups and wait for this.
 
 - **Admission:** `Cx::begin_planned_execution(&preflight, steps, policy,
   Window::UntilTerminal) -> (Plan, ExecutionHandle)`. It checks the
