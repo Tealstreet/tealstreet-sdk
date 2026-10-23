@@ -38,9 +38,9 @@ First scope: signed plain command Read roots and physical children. Background,
 Session, Execution and Plan roots are not admitted by this new constructor.
 Standalone command/background single-leg APIs remain unchanged. Unsigned and
 public history is OUT OF SCOPE: Bitget/OKX public candles and BloFin PublicTrades
-have no selected Identity and keep plain admit_http_command plus
+have no selected Identity and keep plain admit_caller_read_root(None,None) plus
 http_leg_context under their existing shared Read/history APIs. Do not route a
-public read through command_root(Err(CredentialUnavailable)) or LocalRefusal.
+public read through command_root(Err(CredentialUnavailable)) or LocalRefusal. Public caller-wait roots use plain admit_caller_read_root(None,None).
 
 ## Dependencies and collision map
 
@@ -50,7 +50,7 @@ public read through command_root(Err(CredentialUnavailable)) or LocalRefusal.
   This phase creates only this plan and its shared README index row.
 - #1945 is reviewed/frozen at `15df705c0b5`. command_wait() is a caller observation,
   not admission. Consumers obtain the genuine Fresh-entry wait before root
-  creation: Remaining(ms) becomes the explicit root timeout; Expired goes to
+  creation: Remaining confirms live receipt custody; the shared root constructor captures its exact raw deadline; Expired goes to
   reject_expired_command(Read) with no admission; None grants no new authority.
   Missing/unavailable wait handling must follow the cause-aware core contract,
   not a guessed 120s default or native command-ID fallback.
@@ -171,7 +171,7 @@ controls (assertions reviewed before implementation):
 
 1. Fresh caller-wait root creation, duplicate/foreign callback rejection and
    missing-selection diagnostic-before-one-terminal preserve #1962 behavior.
-   Expired/None wait uses the reviewed core refusal, no Context/HTTP/Store effect.
+   Expired/None wait uses the reviewed core refusal, no HTTP/Store effect. Missing selection may arm and clear the engine root timer before notices.
 2. Compile/API privacy controls prove only ReadRoot exposes wrapper leg
    derivation; ReadLeg offers no grandchild/retry method and no external Context
    can be wrapped. Borrowed Context still has existing generic Cx authority;
@@ -276,3 +276,8 @@ physical versus root timeout, diagnostic/refusal custody, wrong root/engine,
 discard-and-resend with stale delivery, pending preservation and streaming.
 Shared history admission remains core-owned; no local accepted-prefix finalizer
 is introduced. No production consumer source or manifest is changed.
+
+Core constructor fit review: CLEAR after composing ce54. A local missing-selection
+refusal may arm and clear the engine timer; only HTTP/provider work is absent.
+Capacity precedes native credential diagnostics. No draft timeout argument
+remains. Unsigned caller-wait roots use the plain shared tracked issuer.
