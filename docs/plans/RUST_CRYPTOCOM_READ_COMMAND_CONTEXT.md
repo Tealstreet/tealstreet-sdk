@@ -179,21 +179,26 @@ by this plan checkpoint; those are the next separate commit.
 
 ## Original assertion RED receipt
 
-On unchanged production at78c443c2a64, two new integration targets compile and
-run16 tests: ten assertion failures and six passing native compatibility controls.
-Eight candle REDs cover preparation/claim custody, parked/released deadline,
-initial clocks/capacity, typed setup/transport and undecodable delivered bodies.
-Two local history REDs cover bounded-owner capacity and invalid command clocks.
-Finite controls preserve all five local branches, bounded Income limit0 dispatch,
+Original test commit cc2916a8037 precedes production edits. Its initial run had
+10 failures/6 passes, including one incorrect expectation that streamed text
+would receive Internal. That assertion is excluded from qualifying RED evidence.
+After correcting it and permitting only engine cancellation cleanup (never new
+Prepare/Bind/HTTP/Sign), the tests were rerun against exact unchanged production
+from cc2916a8037 using owned source snapshots restored in a finally block.
+The corrected original run compiles16 controls: nine assertion failures and seven
+passing native compatibility controls. Seven candle REDs cover preparation/claim
+custody, parked/released deadline, initial clocks/capacity and typed setup/network
+causes. Two local history REDs cover capacity and invalid command clocks.
+No compiler failure is counted. No original native dispatch, row, deadline,
+metadata or owner-isolation assertion was removed.
+
+Native controls preserve all five local branches, bounded Income limit0 dispatch,
 private/public history continuations, every candle timeframe/live-UAT URL and
 credential combination, numeric-string coercion, raw row order/timestamps, full
 native response error fields/auth-health, and local unsupported intervals.
-No compiler failure is counted, and no production file has changed at this point.
-
-The shared engine already supplies Internal through on_http_failed for a wholly
-undecodable delivered body. Managed candles preserve that typed cause plus read
-NotSent, alongside typed Network/Timeout. This is an intentional metadata change
-from the legacy adapter's string forwarding and must be in CALLERS. It does not
-apply to native envelope/status errors, malformed rows or stream-codec string
-errors; their full native fields stay unchanged. No local kind demotion or status
-classification is introduced.
+Undecodable text is explicitly controlled:200 uses the streamed malformed/list
+callback,500 bypasses the success-list selector and uses the native HTTP ladder;
+both retain existing string-error fields. The candle selector also applies when
+the host supplies a whole HttpResponse event. An on_http_failed Internal cause,
+if supplied by the shared engine, remains typed like Network/Timeout; this does
+not reclassify native malformed text/rows/envelopes or introduce a status table.

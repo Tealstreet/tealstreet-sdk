@@ -44,11 +44,14 @@ fn terminals(actions: &[Action], owner: u32) -> Vec<Result<String, VenueError>> 
 fn no_io_auth(actions: &[Action]) {
     assert!(!actions.iter().any(|a| matches!(
         a,
-        Action::Http(_)
-            | Action::ManagedHttp(_)
-            | Action::Sign { .. }
-            | Action::Notice(Notice::AccountAuth { .. })
+        Action::Http(_) | Action::Sign { .. } | Action::Notice(Notice::AccountAuth { .. })
     )));
+    assert!(
+        !actions.iter().any(|a| matches!(a,
+            Action::ManagedHttp(action) if !matches!(action.as_ref(), HttpAction::Cancel { .. })
+        )),
+        "only engine cancellation cleanup is allowed after settlement"
+    );
 }
 fn failure(actions: &[Action], owner: u32, kind: ErrorKind, outcome: Option<Outcome>) {
     let result = terminals(actions, owner);
@@ -453,12 +456,22 @@ fn unsupported_interval_is_local_and_original_root_bound_still_applies() {
 }
 
 #[test]
-fn original_undecodable_delivered_body_preserves_shared_internal_cause() {
+fn finite_native_undecodable_stream_body_keeps_string_failure() {
     for status in [200, 500] {
         let mut e = engine(Options::default());
         let packet = release(&mut e, NOW, 16);
         let actions = reply(&mut e, NOW + 1., &packet, status, "unavailable", false);
-        failure(&actions, 16, ErrorKind::Internal, Some(Outcome::NotSent));
+        let result = terminals(&actions, 16);
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            *result[0].as_ref().unwrap_err(),
+            VenueError::new(if status == 500 {
+                "Crypto.com HTTP error 500"
+            } else {
+                "response did not contain the expected list: unavailable"
+            })
+        );
+        no_io_auth(&actions);
         assert_eq!(e.health().auth_failures, 0);
     }
 }
