@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 mod support;
 use crate::support::FixtureOptions as Options;
-use crate::support::{MARKET, TICKER, actions, envelope};
+use crate::support::{MARKET, TICKER, actions, envelope, prepared};
 use safe_cex_engine::{Action, Command, Engine, Event, Method, Notice, Query, Response};
 use safe_cex_venue_okx::Okx;
 use serde::Deserialize;
@@ -56,9 +56,11 @@ fn ready(eea: bool, testnet: bool, private: bool) -> Engine<Okx> {
         testnet,
         public_data_only: !private,
     });
-    e.start(1_710_000_000_000.0);
+    let mut now = 1_710_000_000_000.0;
+    e.start(now);
     for _ in 0..30 {
-        let out = actions(&mut e);
+        let out = prepared(&mut e, now);
+        now = 1_710_000_000_001.0;
         let mut requests = 0;
         for a in out {
             if let Action::Http(r) = a {
