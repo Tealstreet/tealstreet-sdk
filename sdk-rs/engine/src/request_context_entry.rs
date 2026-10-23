@@ -165,6 +165,18 @@ impl<P> Io<P> {
 }
 
 impl<P> Cx<'_, P> {
+    /// An engine refusal before the venue's entry ends under this receipt's
+    /// own entry, so a duplicate id never clears the live command's wait.
+    pub(super) fn refuse_before_entry(
+        &mut self,
+        command: CommandId,
+        refuse: impl FnOnce(&mut Self),
+    ) {
+        self.io.begin_command_entry(Some(command));
+        refuse(self);
+        self.io.end_command_entry();
+    }
+
     /// The caller's remaining wait, only inside this command's genuine entry
     /// callback (before or after admission, never once rejected or spent)
     /// and only for its own receipt. `None` in every borrowed callback.
