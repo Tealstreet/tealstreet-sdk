@@ -43,8 +43,25 @@ mod planned_execution {
         cx: &mut Cx<'_, Context>,
         preflight: &Preflight,
         steps: &[StepBound<'_>],
-    ) -> Result<(Plan, ExecutionHandle), Error> {
-        cx.begin_planned_execution(preflight, steps, plan_policy(), Window::UntilTerminal)
+        read: bool,
+    ) -> Result<(Plan, ExecutionHandle, Option<Context>), Error> {
+        let policy = if read {
+            read_plan_policy()
+        } else {
+            plan_policy()
+        };
+        // Parent: the founder owns the Plan and has no observer root.
+        cx.begin_planned_execution(preflight, steps, policy, Window::UntilTerminal)
+            .map(|(plan, execution)| (plan, execution, None))
+    }
+
+    fn read_plan_policy() -> PlanPolicy {
+        PlanPolicy {
+            operation: Operation::Read,
+            credential: None,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }
     }
 
     #[derive(Default)]
@@ -56,15 +73,28 @@ mod planned_execution {
         refusals: Vec<Error>,
         invalid_steps: bool,
         probe_handle: bool,
+        /// A Read Plan with Read followers instead of a write.
+        read: bool,
+        founder: Option<Context>,
+        withheld: Vec<Error>,
+        own_root_send: bool,
     }
 
     impl Shared {
         fn found(&mut self, cx: &mut Cx<'_, Context>) {
             let preflight = cx
-                .begin_preflight(PreflightPolicy {
-                    purpose: PreflightPurpose::WriteAfterReads,
-                    read_credential: None,
-                    write_credential: Some(credential()),
+                .begin_preflight(if self.read {
+                    PreflightPolicy {
+                        purpose: PreflightPurpose::ReadOnly,
+                        read_credential: None,
+                        write_credential: None,
+                    }
+                } else {
+                    PreflightPolicy {
+                        purpose: PreflightPurpose::WriteAfterReads,
+                        read_credential: None,
+                        write_credential: Some(credential()),
+                    }
                 })
                 .unwrap();
             let calls = [CallBound {
@@ -81,7 +111,8 @@ mod planned_execution {
                 let ids = cx.io.next_id;
                 let actions = cx.io.actions.len();
                 let contexts = cx.io.request_contexts.plan_context_storage();
-                self.refusals.push(share(cx, &preflight, &[]).unwrap_err());
+                self.refusals
+                    .push(share(cx, &preflight, &[], self.read).unwrap_err());
                 assert_eq!(cx.io.next_id, ids, "refusal spends no identity");
                 assert_eq!(cx.io.actions.len(), actions);
                 assert_eq!(cx.io.request_contexts.plan_context_storage(), contexts);
@@ -89,18 +120,31 @@ mod planned_execution {
                 cx.fail_preflight(&preflight, "refused admission").unwrap();
                 return;
             }
-            let (plan, execution) = share(cx, &preflight, &steps).expect("shared plan execution");
+            let (plan, execution, founder) =
+                share(cx, &preflight, &steps, self.read).expect("shared plan execution");
             let slot = cx.plan_slots(&plan).unwrap().remove(0);
             let leg = cx.plan_leg_context(&plan, &slot).unwrap();
-            cx.request_signed_managed(
-                leg.clone(),
-                Method::Post,
-                "https://venue.test/write".into(),
-                None,
-                Box::new(Recipe),
-                leg,
-            )
-            .unwrap();
+            if self.read {
+                cx.request_managed(
+                    leg.clone(),
+                    Method::Get,
+                    "https://venue.test/read".into(),
+                    None,
+                    leg,
+                )
+                .unwrap();
+            } else {
+                cx.request_signed_managed(
+                    leg.clone(),
+                    Method::Post,
+                    "https://venue.test/write".into(),
+                    None,
+                    Box::new(Recipe),
+                    leg,
+                )
+                .unwrap();
+            }
+            self.founder = founder;
             if self.probe_handle {
                 self.refusals
                     .push(cx.abort_execution(&execution, "direct").unwrap_err());
@@ -119,8 +163,36 @@ mod planned_execution {
         }
 
         fn follow(&mut self, cx: &mut Cx<'_, Context>, timeout_ms: u32) {
-            let root = cx.admit_http_command(follower_policy(timeout_ms)).unwrap();
+            let policy = if self.read {
+                Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }
+            } else {
+                follower_policy(timeout_ms)
+            };
+            let root = cx.admit_http_command(policy).unwrap();
             let joined = cx.join_execution(self.execution.as_ref().unwrap(), &root, "same");
+            if joined.is_ok() && self.own_root_send {
+                // A member's only physical work is the Plan's.
+                let sent = cx.request_signed_managed(
+                    root.clone(),
+                    Method::Post,
+                    "https://venue.test/own-root".into(),
+                    None,
+                    Box::new(Recipe),
+                    root.clone(),
+                );
+                self.refusals.push(
+                    sent.map(|_| ())
+                        .map_err(|(_, e)| e)
+                        .err()
+                        .unwrap_or(Error::Duplicate),
+                );
+            }
             self.joined.push(joined);
         }
     }
@@ -145,7 +217,16 @@ mod planned_execution {
         fn on_response(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: Response<'_>) {
             let plan = self.plan.clone().unwrap();
             let slot = self.slot.clone().unwrap();
-            cx.validate_plan_delivery(&plan, &context).unwrap();
+            if let Err(error) = cx.validate_plan_delivery(&plan, &context) {
+                // Nothing may be published once no observer survives.
+                self.withheld.push(error);
+                return;
+            }
+            if self.read {
+                cx.finish_plan_call(&plan, &slot, &context).unwrap();
+                cx.done_plan(&plan, "candles".into()).unwrap();
+                return;
+            }
             cx.http_write_result(
                 &context,
                 crate::request_context::WriteResult::Accepted {
@@ -422,5 +503,165 @@ mod planned_execution {
         assert_eq!(e.venue.refusals, vec![Error::Invalid]);
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert_eq!(terminals(&actions, FOUNDER).len(), 1);
+    }
+
+    fn detach_founder(engine: &mut Engine<Shared>, now: f64) {
+        let founder = engine.venue.founder.clone().expect("founder observer root");
+        Cx {
+            now,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .detach_execution_observer(&founder, "founder left")
+        .unwrap();
+    }
+
+    fn respond(engine: &mut Engine<Shared>, token: Preparation, now: f64) {
+        engine.handle(
+            now,
+            Event::HttpResponse {
+                request: token.attempt().request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "{}",
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn the_plan_is_owned_by_its_execution_not_the_founder() {
+        let (e, _, _) = shared_write(&[]);
+        let plan = e.venue.plan.as_ref().unwrap();
+        assert!(matches!(
+            plan.owner(),
+            crate::request_context::Owner::Execution { .. }
+        ));
+        assert_eq!(
+            plan.owner(),
+            e.venue.execution.as_ref().unwrap().context().owner()
+        );
+        assert!(
+            e.venue.founder.is_some(),
+            "the founder is an explicit observer"
+        );
+    }
+
+    #[test]
+    fn a_detached_founder_leaves_the_shared_write_to_live_peers() {
+        let (mut e, token, _) = shared_write(&[FOLLOWER]);
+        detach_founder(&mut e, 500.);
+        let detached = e.drain_actions().collect::<Vec<_>>();
+        let founder = terminals(&detached, FOUNDER);
+        assert_eq!(founder.len(), 1);
+        assert_eq!(founder[0].clone().unwrap_err().message, "founder left");
+        respond(&mut e, token, 1_000.);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(terminals(&actions, FOLLOWER), vec![Ok("placed".into())]);
+        assert!(terminals(&actions, FOUNDER).is_empty());
+        assert!(e.venue.withheld.is_empty(), "a live peer may publish");
+    }
+
+    #[test]
+    fn the_last_observer_leaving_withholds_publication_of_a_sent_write() {
+        let (mut e, token, _) = shared_write(&[]);
+        detach_founder(&mut e, 500.);
+        e.drain_actions().for_each(drop);
+        respond(&mut e, token, 1_000.);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(
+            e.venue.withheld.len(),
+            1,
+            "no codec or Store work for an orphan"
+        );
+        assert!(terminals(&actions, FOUNDER).is_empty());
+    }
+
+    #[test]
+    fn the_last_observer_leaving_before_release_sends_nothing() {
+        let mut e = crate::test_support::seeded_engine(Shared::default());
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let token = prepared(&actions)[0];
+        detach_founder(&mut e, 1.);
+        let detached = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(terminals(&detached, FOUNDER).len(), 1);
+        e.http_prepared(
+            2.,
+            token,
+            Prepared {
+                id: token.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        assert!(
+            !e.drain_actions().any(|a| matches!(
+                a,
+                Action::ManagedHttp(a) if matches!(*a, HttpAction::Bind { .. })
+            )),
+            "an orphaned Plan never binds its unsent write"
+        );
+    }
+
+    #[test]
+    fn read_followers_receive_the_plan_result() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            read: true,
+            ..Default::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., FOLLOWER);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let tokens = prepared(&actions);
+        assert_eq!(tokens.len(), 1);
+        e.http_prepared(
+            0.,
+            tokens[0],
+            Prepared {
+                id: tokens[0].attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let permit = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("read binding");
+        assert!(matches!(e.claim_http(0., permit), Ok(Claim::Released(_))));
+        respond(&mut e, tokens[0], 100.);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        for owner in [FOUNDER, FOLLOWER] {
+            assert_eq!(
+                terminals(&actions, owner),
+                vec![Ok("candles".into())],
+                "owner {owner}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_follower_cannot_send_on_its_own_root() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            own_root_send: true,
+            ..Default::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., FOLLOWER);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(e.venue.refusals, vec![Error::Revoked]);
+        assert_eq!(
+            prepared(&actions).len(),
+            1,
+            "only the Plan's write is prepared"
+        );
     }
 }
