@@ -999,3 +999,17 @@ and next actual function delta before another change. If a large gap remains,
 continue profiling before fresh CI. Final performance evidence still requires
 the fixed same-runner CI-WASM comparison and fresh full CI, not native results
 or favorable reruns.
+
+Phase G first measured result (`9f992fdff2c`): the repeated native ABBA means
+are 29.668 ms/tape at landing and 34.263 ms/tape at the candidate, leaving a
+large 4.595 ms gap. `process_socket_work` still has about 0.622 ms of estimated
+self time. The native symbol table contains that function but no separate
+`process_pending_socket_work`: optimization folded the heavy loop back into the
+wrapper. This is compiled evidence that the intended boundary was not retained,
+not a claim of an additional protocol cost.
+
+Refine only code-generation annotations: make the small wrapper inline-always
+and the unchanged processing helper inline-never. Preserve the same checks,
+loop bytes and all call sites. Rebuild with the same native driver/flags, verify
+the compiled helper boundary, then repeat the same native ABBA sampling and
+report the remaining gap before fresh CI or further source changes.
