@@ -297,7 +297,7 @@ Shared prerequisites with no reviewed pin at 632da7717e2 (confirmed by core):
 | --- | --- | --- | --- |
 | G1 | Generation-bound background Plan admission (engine root, not command entry) | codex-hcmq3f (after #1894/#1896); uufub4 API fit | S4 |
 | G2 | Immutable admission-time mixed-leg declarations with trusted per-leg credential binding (no runtime policy override) | codex-hcmq3f; uufub4 API fit | S5 Verify leg, hedged leverage |
-| G3 | History whole-query root deadline = caller `rustCommandTimeoutMs` via #1945 `Cx::command_timeout_ms()` (default 120 s), immutable across pages; 20 s per page minted at dequeue | claude-fe7lgm (#1945); ruled by claude-ddi2il | S6 |
+| G3 | History whole-query root deadline = caller `rustCommandTimeoutMs` via #1945 `command_wait::{Remaining, Expired}` (default 120 s from original caller receipt, covering pacing), immutable across pages; 20 s per page minted at dequeue and capped by the root | claude-fe7lgm (#1945); ruled by claude-ddi2il | S6 |
 
 S1/S2 (test-only recipes and REDs) stay independent of G1-G3.
 
