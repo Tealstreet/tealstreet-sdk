@@ -161,3 +161,36 @@ Workers/native terminal once-only cleanup and late-callback suppression. Forced
 low-ceiling engine tests supply reachable exhaustion without load or timing
 experiments. No local WASM release build is needed: actual-WASM acceptance uses
 CI-built matching artifacts, retaining artifact provenance and explicit limits.
+
+Host plan review refinements: inspect sticky state only before invocation and
+after a normal return, never through a new Rust getter after a WASM trap. The
+existing terminal cleanup remains the owner of resource disposal. A detached JS
+action batch must stop when the host dies; managed claims still hand off
+synchronously. Outbound validation checks the entire batch, including nested and
+managed IDs, before any action is exposed, and latches the same fatal engine state
+on unsafe output so the common native guard recognizes it. Native guards cover
+initial startup and final frame generation too; ordinary venue StartupFailed is
+not a fatal allocator event. Worker death during synchronous start clears its
+matching host before interval installation, and late death cannot retire a newer
+host or suppress already-owned pending command failures.
+
+The actual-WASM original regression uses the existing CI Binance module from
+run `39869163120`, artifact `12465757900`, without a local WASM build. ZIP SHA256
+is `d280a6c4b48e67d7f2d0380bab7c56c249836505134d97d4f0761dc9e5793bfa`;
+its build manifest records synthetic checkout `90a3d46dc42795825581cdc4bcd36895e7793ef7`
+and the retained #1780 input fingerprint. This is historical original-RED
+evidence only, not a current-head package or merge-proof claim. The native managed
+prepare/bind/claim path releases HTTP request 2. Supplying 4294967298 to
+httpFailed aliases it, increases httpFailures from zero to one and cancels its
+managed resource. The durable actual-WASM fixture reproduces 97 assertion failures
+and one compatibility pass across 98 controls: sixteen ingress exports fail to
+reject six malformed-number classes, plus the above-u32 alias control. The
+MAX-safe unrelated-ID compatibility control passes. Temporary ignored package
+copies are removed afterward; the fixture requires a current CI module for its
+eventual GREEN result.
+
+Two JS-host original regressions separately exercise an already-sticky failed
+engine before invocation and failure latched during a normal native return. They
+pin zero/one native entries respectively and no transient connect or timer arm;
+the existing 189 host controls pass while these two new assertions fail. Neither
+case substitutes a thrown trap for the sticky-state contract.
