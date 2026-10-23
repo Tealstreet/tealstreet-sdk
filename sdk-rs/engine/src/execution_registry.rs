@@ -12,6 +12,11 @@ pub(super) struct Executions {
 }
 
 impl ContextRegistry {
+    /// Cheap per-event guard: most engines never hold an execution.
+    pub(in crate::engine) fn has_executions(&self) -> bool {
+        !self.executions.roots.is_empty()
+    }
+
     pub(in crate::engine) fn is_observer(&self, command: CommandId) -> bool {
         self.executions.observers.contains_key(&command)
     }
