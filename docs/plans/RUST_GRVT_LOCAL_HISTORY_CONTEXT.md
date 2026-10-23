@@ -125,3 +125,13 @@ manifest prunes precisely the seven planned singletons and preserves foreign
 bytes. The unchanged target now passes all19 tests, including recovery suffixes
 and later invalid-clock variants. Full native/strict checks and independent final
 reviews remain gates; no CI or merge readiness claim is made at this checkpoint.
+
+
+Final local gates on the unchanged runtime candidate: all208 GRVT and305 Binance
+native tests PASS (513 total, zero ignored); strict GRVT all-target/all-feature
+Clippy, scoped formatting and whitespace PASS. Request scanner,15 negative tests
+and bans PASS. Independent source/adversarial, caller and full-map implementation
+reviews CLEAR; the caller wording correction explicitly distinguishes one typed
+clock/capacity rejection from revoked/duplicate custody without a new terminal.
+The source/test/manifest remain exact29c43/7b2fa through the docs-only correction.
+CI/replay/size/timing and a separately authorized train window remain outstanding.
