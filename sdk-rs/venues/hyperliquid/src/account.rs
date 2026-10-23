@@ -178,7 +178,12 @@ impl Hyperliquid {
         self.options
             .vault
             .as_deref()
-            .or(self.options.application_id.as_deref())
+            .filter(|identity| !identity.is_empty())
+            .or(self
+                .options
+                .application_id
+                .as_deref()
+                .filter(|identity| !identity.is_empty()))
     }
     fn account_read(
         &mut self,
@@ -361,9 +366,8 @@ impl Hyperliquid {
             return;
         }
         if self.options.public_data_only || (self.user().is_none() && self.options.key.is_none()) {
-            // Anonymous public discovery retains the venue's fee fallback. Private
-            // agents must resolve their trading account before asking for its tier.
-            self.account_read(cx, "userFees", None, Request::Fees, false);
+            // Public or unresolved discovery keeps the metadata fee defaults.
+            // A real trading account must be known before querying its fee tier.
             return;
         }
         if self.user().is_none() {
