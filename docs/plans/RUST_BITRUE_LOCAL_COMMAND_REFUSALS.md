@@ -79,3 +79,9 @@ signing remain gated on their separately owned shared/adoption work.
 Plan reviews: source/adversarial, caller and independent scanner/full-map are
 CLEAR at af731bfc50e. trade_command returns bool: admission refusal and completed
 local failure must both return true, so lib cannot redispatch a handled command.
+
+Original-source evidence: the isolated test compiles and executes on unchanged
+production. All three capacity assertions fail for the intended native-error
+versus shared-Capacity mismatch; three working controls pass for credential
+ordering/Store preservation, keyless one-way success and valid signed wire under
+real registry saturation. Zero tests are ignored.
