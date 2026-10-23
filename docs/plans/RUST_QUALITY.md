@@ -1170,6 +1170,15 @@ The 32 focused BloFin controls and three shared bridge controls pass; scoped
 strict Clippy/fmt and request-context checks with 15 regressions pass. The historical
 run of 501 native tests is distinct; fresh CI and a venue merge window remain gates.
 
+## WOO local history custody controls
+
+Real Engine<Woo> controls cover each original local refusal at invalid engine
+time, finite native error metadata/precedence, repeated settlement and same-ID
+reuse, zero I/O/Store effects, Fills aliases, unchanged private credential refusal
+and unchanged unsigned public GET dispatch. Three original assertion REDs plus
+four compatibility passes become seven passes without assertion changes. Shared
+capacity and revoked-entry mechanics retain the existing engine-suite coverage.
+
 
 ### Bitunix public REST managed Read proof
 
