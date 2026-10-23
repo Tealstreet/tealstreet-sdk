@@ -46,7 +46,7 @@ pub enum Request {
         cycle: bool,
     },
     Orders {
-        revision: u64,
+        token: safe_cex_engine::OrderSnapshotToken,
         rows: Vec<NativeOrder>,
         seen: HashSet<String>,
         coverage: SnapshotCoverage<String>,
@@ -160,7 +160,6 @@ pub struct Account {
     poll: Option<TimerId>,
     repair_orders: Option<TimerId>,
     repair_positions: Option<TimerId>,
-    orders_revision: u64,
     positions_revision: u64,
     position_versions: HashMap<String, (f64, bool)>,
     position_sequences: HashMap<String, i64>,
@@ -210,7 +209,6 @@ impl Account {
             poll: None,
             repair_orders: None,
             repair_positions: None,
-            orders_revision: 0,
             positions_revision: 0,
             position_versions: HashMap::new(),
             position_sequences: HashMap::new(),
@@ -315,8 +313,8 @@ impl Account {
     pub fn native_order(&self, id: &str) -> Option<&NativeOrder> {
         self.native.get(id)
     }
-    pub fn bump_orders(&mut self) {
-        self.orders_revision = self.orders_revision.wrapping_add(1);
+    pub fn bump_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        cx.store.invalidate_order_snapshots();
     }
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
@@ -1034,6 +1032,17 @@ impl Account {
         if self.orders_busy {
             return;
         }
+        let Some(token) = cx.store.begin_orders_snapshot() else {
+            cx.notice(
+                Level::Error,
+                code::SNAPSHOT_DISCARDED,
+                "Paradex order snapshot admission exhausted",
+            );
+            if cycle {
+                self.margins(cx, false);
+            }
+            return;
+        };
         self.orders_busy = true;
         self.request(
             cx,
@@ -1042,7 +1051,7 @@ impl Account {
             None,
             Some(ArrayAt::Field("results")),
             Pending::Account(Request::Orders {
-                revision: self.orders_revision,
+                token,
                 rows: vec![],
                 seen: HashSet::new(),
                 coverage: SnapshotCoverage::default(),
@@ -1332,7 +1341,7 @@ impl Account {
                 }
             }
             Request::Orders {
-                revision,
+                token,
                 rows,
                 coverage,
                 invalid,
@@ -1340,61 +1349,20 @@ impl Account {
                 ..
             } => {
                 self.orders_busy = false;
-                if !invalid && revision == self.orders_revision {
-                    let mut mapped = vec![];
-                    let mut native = HashMap::new();
-                    for row in rows {
-                        if self.terminals.contains(&row.id) {
-                            continue;
-                        }
-                        let (Ok(order), Ok(version)) = (map_order(&row), OrderVersion::new(&row))
-                        else {
-                            continue;
-                        };
-                        let evidence = if self.stale_order(&row.id, version) {
-                            OrderEvidence::Ignore
-                        } else {
-                            self.order_evidence(&row, version, order.status != OrderStatus::Open)
-                        };
-                        if evidence == OrderEvidence::Ignore {
-                            // A read started after a live event can still hit an
-                            // older replica. Preserve both store and signing
-                            // evidence, without reviving invalidated amend data.
-                            if let Some(current) = cx.store.order(&row.id)
-                                && current.status == OrderStatus::Open
-                            {
-                                mapped.push(current.clone());
-                                if let Some(current) = self.native.get(&row.id) {
-                                    native.insert(row.id.clone(), current.clone());
-                                }
-                            }
-                            continue;
-                        }
-                        self.remember_order(&row.id, version);
-                        if order.status == OrderStatus::Open {
-                            mapped.push(order);
-                            if evidence == OrderEvidence::Coherent {
-                                native.insert(row.id.clone(), row);
-                            }
-                        } else {
-                            self.terminal_order(&row.id);
-                        }
-                    }
-                    for current in cx.store.orders() {
-                        if !coverage.allows_absence(&current.id)
-                            && current.status == OrderStatus::Open
-                            && !self.terminals.contains(&current.id)
-                            && !mapped.iter().any(|o: &Order| o.id == current.id)
-                        {
-                            mapped.push(current.clone());
-                            if let Some(row) = self.native.get(&current.id) {
-                                native.insert(current.id.clone(), row.clone());
-                            }
-                        }
-                    }
-                    self.native = native;
-                    cx.store.set_orders(mapped);
-                } else if invalid {
+                if !invalid {
+                    // Decode all fallible mapping before entering native publication.
+                    let prepared = rows
+                        .into_iter()
+                        .filter_map(|row| {
+                            let order = map_order(&row).ok()?;
+                            let version = OrderVersion::new(&row).ok()?;
+                            Some((row, order, version))
+                        })
+                        .collect();
+                    cx.store.commit_orders_snapshot([token], |current| {
+                        self.publish_orders_snapshot(prepared, coverage, current)
+                    });
+                } else {
                     cx.notice(
                         Level::Warn,
                         code::SNAPSHOT_DISCARDED,
@@ -1406,6 +1374,63 @@ impl Account {
                 }
             }
         }
+    }
+    /// Runs only after Store has validated the read's complete authority.
+    fn publish_orders_snapshot(
+        &mut self,
+        rows: Vec<(NativeOrder, Order, OrderVersion)>,
+        coverage: SnapshotCoverage<String>,
+        current_rows: &[Order],
+    ) -> Vec<Order> {
+        let mut mapped = vec![];
+        let mut native = HashMap::new();
+        for (row, order, version) in rows {
+            if self.terminals.contains(&row.id) {
+                continue;
+            }
+            let evidence = if self.stale_order(&row.id, version) {
+                OrderEvidence::Ignore
+            } else {
+                self.order_evidence(&row, version, order.status != OrderStatus::Open)
+            };
+            if evidence == OrderEvidence::Ignore {
+                // A read started after a live event can still hit an
+                // older replica. Preserve both store and signing
+                // evidence, without reviving invalidated amend data.
+                if let Some(current) = current_rows.iter().find(|current| current.id == row.id)
+                    && current.status == OrderStatus::Open
+                {
+                    mapped.push(current.clone());
+                    if let Some(current) = self.native.get(&row.id) {
+                        native.insert(row.id.clone(), current.clone());
+                    }
+                }
+                continue;
+            }
+            self.remember_order(&row.id, version);
+            if order.status == OrderStatus::Open {
+                mapped.push(order);
+                if evidence == OrderEvidence::Coherent {
+                    native.insert(row.id.clone(), row);
+                }
+            } else {
+                self.terminal_order(&row.id);
+            }
+        }
+        for current in current_rows {
+            if !coverage.allows_absence(&current.id)
+                && current.status == OrderStatus::Open
+                && !self.terminals.contains(&current.id)
+                && !mapped.iter().any(|o: &Order| o.id == current.id)
+            {
+                mapped.push(current.clone());
+                if let Some(row) = self.native.get(&current.id) {
+                    native.insert(current.id.clone(), row.clone());
+                }
+            }
+        }
+        self.native = native;
+        mapped
     }
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         match request {
@@ -1558,7 +1583,7 @@ impl Account {
             return false;
         }
         self.remember_order(&row.id, version);
-        self.bump_orders();
+        self.bump_orders(cx);
         order.last_update = cx.now;
         if order.status != OrderStatus::Open {
             self.native.remove(&row.id);

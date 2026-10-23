@@ -33,9 +33,9 @@ The following `ApproveIntegrator` details are confirmed from official references
 
 ## Information still needed
 
-- Tealstreet integrator account indexes for testnet and Robinhood Chain.
-- Robinhood Chain builder attribution is not configured yet; do not reuse the
-  ordinary zkLighter mainnet integrator account index for Robinhood.
+- Tealstreet integrator account index for testnet.
+- Robinhood Chain builder attribution uses Robinhood-specific account index
+  `47296`; do not reuse the ordinary zkLighter mainnet index for Robinhood.
 - First required production flow:
   - same-master (`L2` signature only), or
   - cross-master (`L1Sig` required).
@@ -92,6 +92,7 @@ not re-adding the already implemented tx type.
   - `apps/web/src/components/settings/accountsSettings/LighterBuilderFeeApproval.tsx`
   - helper route `apps/web/src/app/[locale]/(bare)/trade/lighter-l1sig/page.tsx`
 - Ordinary zkLighter mainnet has a configured default integrator account index.
-- Robinhood Chain Lighter deliberately has no default integrator account index;
-  attribution should remain disabled until a Robinhood-specific Tealstreet
-  integrator account index is obtained and validated.
+- Robinhood Chain Lighter has a configured default integrator account index:
+  `47296`.
+- Robinhood `ApproveIntegrator` and attributed order placement still need live
+  validation before production rollout.
