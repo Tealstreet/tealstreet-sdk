@@ -16,6 +16,9 @@ use std::collections::VecDeque;
 
 const CAPACITY: usize = 256;
 
+#[path = "session_context.rs"]
+mod session;
+
 #[cfg(all(test, feature = "http-plans"))]
 #[path = "request_context_preflight_tests.rs"]
 mod preflight_tests;
@@ -178,6 +181,7 @@ pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
     contexts: HashMap<u64, Context>,
     commands: HashMap<CommandId, CommandOwner>,
+    sessions: session::Sessions,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
     executions: execution::Executions,
@@ -375,10 +379,44 @@ impl ContextRegistry {
                 Scope::Execution => return Err(Error::Invalid),
             },
         };
+        self.commit(owner, identity, policy, now, parent)
+    }
+
+    fn issue_session(
+        &mut self,
+        identity: u64,
+        generation: u64,
+        policy: Policy,
+        now: f64,
+        parent: Option<&Context>,
+    ) -> Result<Context, Error> {
+        if let Some(parent) = parent {
+            self.validate(parent, now)?;
+            if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
+                return Err(Error::Invalid);
+            }
+        }
+        if !now.is_finite() || policy.timeout_ms == 0 {
+            return Err(Error::Invalid);
+        }
+        self.sessions.admit(generation, &policy)?;
+        self.contexts.retain(|_, old| old.deadline() > now);
+        self.sessions.prune(&self.contexts);
+        self.commit(Owner::Session { generation }, identity, policy, now, parent)
+    }
+
+    fn commit(
+        &mut self,
+        owner: Owner,
+        identity: u64,
+        policy: Policy,
+        now: f64,
+        parent: Option<&Context>,
+    ) -> Result<Context, Error> {
         let deadline = parent.map_or(now + f64::from(policy.timeout_ms), |parent| {
             parent.deadline().min(now + f64::from(policy.timeout_ms))
         });
-        if let Scope::Command(id) = scope
+        if let Owner::Command { id, .. } = owner
             && let Some(root) = self.commands.get(&id).and_then(|owner| match &owner.phase {
                 CommandPhase::Context {
                     root,
@@ -406,7 +444,7 @@ impl ContextRegistry {
         )?
         .with_retry(policy.retry)?;
         if self.contexts.len() + self.reserved_context_count() >= CAPACITY
-            || matches!(scope, Scope::Command(id)
+            || matches!(owner, Owner::Command { id, .. }
                 if !self.commands.contains_key(&id) && self.commands.len() >= CAPACITY)
         {
             return Err(Error::Capacity);
@@ -417,7 +455,7 @@ impl ContextRegistry {
         self.contexts
             .try_reserve(1 + self.reserved_context_count())
             .map_err(|_| Error::Capacity)?;
-        if matches!(scope, Scope::Command(id) if !self.commands.contains_key(&id)) {
+        if matches!(owner, Owner::Command { id, .. } if !self.commands.contains_key(&id)) {
             self.commands.try_reserve(1).map_err(|_| Error::Capacity)?;
         }
         context.bind_issuer(&self.issuer);
@@ -584,6 +622,8 @@ impl ContextRegistry {
             || self.contexts.get(&context.leg()) != Some(context)
             || matches!(context.owner(), Owner::Command {id, generation}
                 if self.commands.get(&id).is_none_or(|owner| owner.generation != generation))
+            || matches!(context.owner(), Owner::Session { generation }
+                if !self.sessions.live(generation))
             || (matches!(context.owner(), Owner::Execution { .. }) && !self.execution_live(context))
         {
             return Err(Error::Revoked);
@@ -622,6 +662,9 @@ impl ContextRegistry {
         {
             return Ok(());
         }
+        if matches!(context.owner(), Owner::Session { .. }) {
+            return self.sessions.register(context, request);
+        }
         if matches!(context.owner(), Owner::Execution { .. }) {
             return self.execution_leg_issued(context);
         }
@@ -658,7 +701,11 @@ impl ContextRegistry {
         Ok(())
     }
 
-    pub(super) fn retire_attempt(&mut self, context: &Context) {
+    pub(super) fn retire_attempt(&mut self, context: &Context, request: RequestId) {
+        if matches!(context.owner(), Owner::Session { .. }) {
+            self.sessions.retire_attempt(context, request);
+            return;
+        }
         if matches!(context.owner(), Owner::Execution { .. }) {
             self.execution_leg_retired(context);
             return;
@@ -708,7 +755,9 @@ impl ContextRegistry {
         context: &Context,
         request: RequestId,
     ) -> Result<Option<&mut bool>, Error> {
-        if context.operation() != Operation::Mutation {
+        if context.operation() != Operation::Mutation
+            || matches!(context.owner(), Owner::Session { .. })
+        {
             return Ok(None);
         }
         self.command_mut(context)?
@@ -719,9 +768,22 @@ impl ContextRegistry {
             .map(Some)
     }
 
+    /// Session writes record release separately: they have no command journal.
+    pub(super) fn session_released(&mut self, context: &Context, request: RequestId) {
+        if context.operation() == Operation::Mutation {
+            self.sessions.released(context, request);
+        }
+    }
+
     pub(super) fn result(&mut self, delivery: &Delivery, result: WriteResult) -> Result<(), Error> {
         if delivery.context.operation() != Operation::Mutation {
             return Err(Error::Invalid);
+        }
+        if matches!(delivery.context.owner(), Owner::Session { .. }) {
+            self.validate_handle(&delivery.context)?;
+            return self
+                .sessions
+                .result(&delivery.context, delivery.attempt.request, &result);
         }
         self.command_mut(&delivery.context)?
             .writes
@@ -1088,6 +1150,16 @@ impl<P> Cx<'_, P> {
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
+            Owner::Session { generation } => {
+                let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+                return self.io.request_contexts.issue_session(
+                    identity,
+                    generation,
+                    policy,
+                    self.now,
+                    Some(parent),
+                );
+            }
             Owner::Execution { .. } => Scope::Execution,
         };
         self.make_http_context(scope, policy, Some(parent))
@@ -1497,7 +1569,8 @@ impl<P> Cx<'_, P> {
         if absent {
             self.fence_absent_orders(context);
         }
-        if !resendable {
+        // Session writes get one attempt per operation: no resend grant.
+        if !resendable || !matches!(context.owner(), Owner::Command { .. }) {
             return Ok(None);
         }
         match self.io.request_contexts.grant_resend(&delivery) {
@@ -1602,7 +1675,11 @@ impl<P> Cx<'_, P> {
     /// created outside dispatch has no trusted intent.
     fn write_intent(&self, context: &Context) -> Result<crate::classify::Intent, Error> {
         let Owner::Command { id, generation } = context.owner() else {
-            return Ok(crate::classify::Intent::Place);
+            // Session writes (listen keys, logins) change account state, not orders.
+            return Ok(match context.owner() {
+                Owner::Session { .. } => crate::classify::Intent::Setting,
+                _ => crate::classify::Intent::Place,
+            });
         };
         let owner = self
             .io
@@ -3383,7 +3460,7 @@ mod write_tests {
         assert!(registry.commands[&7].writes.is_none());
         let callback = delivery(&preflight, 12);
         registry.enter_delivery(&callback);
-        registry.retire_attempt(&preflight);
+        registry.retire_attempt(&preflight, RequestId(12));
         registry
             .issue(
                 3,
