@@ -80,6 +80,26 @@ mod planned_execution {
         own_root_send: bool,
         /// Two serial writes; the second is queued from the first's DATA.
         two_steps: bool,
+        /// The first write is definitively refused; the second is due later.
+        reject_first: bool,
+    }
+
+    impl Shared {
+        fn queue_next(&mut self, cx: &mut Cx<'_, Context>) {
+            let plan = self.plan.clone().unwrap();
+            let slot = cx.plan_slots(&plan).unwrap().remove(0);
+            let leg = cx.plan_leg_context(&plan, &slot).unwrap();
+            cx.request_signed_managed(
+                leg.clone(),
+                Method::Post,
+                "https://venue.test/write".into(),
+                None,
+                Box::new(Recipe),
+                leg,
+            )
+            .unwrap();
+            self.slot = Some(slot);
+        }
     }
 
     impl Shared {
@@ -115,7 +135,8 @@ mod planned_execution {
                     calls: &calls,
                 },
                 StepBound {
-                    wait_ms: 0,
+                    // A refused first write waits before the second is due.
+                    wait_ms: if self.reject_first { 500 } else { 0 },
                     calls: &calls,
                 },
             ];
@@ -245,6 +266,17 @@ mod planned_execution {
                 cx.done_plan(&plan, "candles".into()).unwrap();
                 return;
             }
+            if self.reject_first && self.delivered == 1 {
+                cx.http_write_result(
+                    &context,
+                    crate::request_context::WriteResult::Rejected(
+                        VenueError::new("insufficient margin").outcome(crate::Outcome::Rejected),
+                    ),
+                )
+                .unwrap();
+                cx.finish_plan_call(&plan, &slot, &context).unwrap();
+                return;
+            }
             cx.http_write_result(
                 &context,
                 crate::request_context::WriteResult::Accepted {
@@ -255,21 +287,15 @@ mod planned_execution {
             cx.validate_http_write_effects(&context).unwrap();
             cx.finish_plan_call(&plan, &slot, &context).unwrap();
             if self.two_steps && self.delivered == 1 {
-                let slot = cx.plan_slots(&plan).unwrap().remove(0);
-                let leg = cx.plan_leg_context(&plan, &slot).unwrap();
-                cx.request_signed_managed(
-                    leg.clone(),
-                    Method::Post,
-                    "https://venue.test/write".into(),
-                    None,
-                    Box::new(Recipe),
-                    leg,
-                )
-                .unwrap();
-                self.slot = Some(slot);
+                self.queue_next(cx);
                 return;
             }
             cx.done_plan(&plan, "placed".into()).unwrap();
+        }
+        fn on_http_plan_ready(&mut self, cx: &mut Cx<'_, Context>, _: &Plan) {
+            if self.reject_first && self.delivered == 1 {
+                self.queue_next(cx);
+            }
         }
         fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, _: &str) {}
         fn capture_http_reconciliation(
@@ -804,5 +830,55 @@ mod planned_execution {
         respond(&mut e, token, 1_000.);
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert_eq!(terminals(&actions, FOLLOWER), vec![Ok("placed".into())]);
+    }
+
+    #[test]
+    fn an_early_observer_after_a_refused_first_write_is_told_unknown_while_more_may_send() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            two_steps: true,
+            reject_first: true,
+            ..Default::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., SHORT_FOLLOWER);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let timer = short_timer(&actions);
+        let first = prepared(&actions)[0];
+        release(&mut e, first, 0.);
+        respond(&mut e, first, 10.);
+        let refused = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            prepared(&refused).is_empty(),
+            "the second write is not yet due"
+        );
+        e.handle(100., Event::TimerFired { timer });
+        let expired = e.drain_actions().collect::<Vec<_>>();
+        let short = terminals(&expired, SHORT_FOLLOWER);
+        assert_eq!(short.len(), 1);
+        let error = short[0].clone().unwrap_err();
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown), "{error:?}");
+        let due = expired
+            .iter()
+            .chain(refused.iter())
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms >= 500. && *at_ms < 1_000. => {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .expect("second write's readiness");
+        e.handle(due.1, Event::TimerFired { timer: due.0 });
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let second = prepared(&actions)[0];
+        release(&mut e, second, due.1);
+        respond(&mut e, second, 1_000.);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(
+            terminals(&actions, FOUNDER).len(),
+            1,
+            "the peer completes once"
+        );
+        assert!(terminals(&actions, SHORT_FOLLOWER).is_empty());
     }
 }
