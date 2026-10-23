@@ -2707,3 +2707,40 @@ Pure inventory prune removes only `venues/binance/src/identity.rs`:
 and `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa: 1`.
 All other manifest bytes/maps remain exact; Binance shrinks from 26 fingerprints
 / 30 occurrences to 24 / 28. No rehash, site growth or checker exemption.
+
+## Phemex unsigned public-trades Context ownership
+
+The unsigned /md/v2/trade query now owns one genuine public Read root and
+managed delivery, including its existing native pause queue. Row admission and
+terminal ownership use ReadCompletion/ReadHistoryRows; stale429 cannot extend a
+pause, and typed preparation/network/expiry errors survive to the correct owner.
+Native signed public/private, income, identity, trading and socket paths remain
+held consumers. Their shared legacy fingerprints are retained. Only the public
+tuple codec's conservative f913fd4f macro occurrence is removed (1F/1O); this is
+not a claim that the shared physical request funnel has migrated.
+
+## Selected managed signed Read composition
+
+Shared admission/selection/queue/refusal composition is additive in engine
+selected_read.rs, with genuine callback and original-generation controls. The
+original BingX/WEEX copies erase capacity denial fields; those two native
+assertion REDs are retained for separate consumer adoption, not marked fixed by
+engine probes. No venue P0, private signer, Plan history or inventory-zero
+claim is closed by this library seam.
+
+## BingX identity selected Read adoption
+
+FetchAccount now consumes actual #1962 rather than the legacy local completion
+and admission-error fallback. Its two identity terminal fingerprints are removed;
+family inventory is 32F/35O at actual 9f405e55403. Original capacity/clock and
+typed Network/Timeout assertions pass alongside native wire/config/codec controls.
+The generic managed helper and all other family callers remain with their owners.
+
+### Phemex dispatch-signing custody candidate
+
+Full native funnel and WS auth now use opaque provider recipes, removing14
+legacy lib credential/material fingerprints. Typed signer refusal preserves
+accepted-prefix IDs and native rollback revisions; actual-release raw expiry
+is accumulated as a maximum before the native5s reconciliation skew. Production
+wire/financial controls pass. Independent source/caller reviews are CLEAR;
+full-map/HMAC review, final CI and the combined #1970/#1974 landing remain gates.

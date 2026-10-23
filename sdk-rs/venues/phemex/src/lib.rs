@@ -5,7 +5,9 @@ mod history;
 mod identity;
 mod income;
 mod public_candles;
+mod public_trades;
 mod sign;
+pub use sign::dispatch as dispatch_signing;
 mod socket_codec;
 mod trading;
 mod wire;
@@ -23,23 +25,12 @@ use safe_cex_engine::{
 };
 use std::collections::HashMap;
 use wire::*;
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
-}
-safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
+    pub read_credentials: Option<safe_cex_engine::signing::Identity>,
 }
 
 pub enum Pending {
@@ -65,6 +56,7 @@ pub enum Pending {
     Trade(trading::Request),
     History(history::Request),
     Income(income::Request),
+    PublicTrades(Box<public_trades::Read>),
 }
 #[derive(Default)]
 struct Connection {
@@ -97,9 +89,9 @@ impl BookState {
     }
 }
 pub struct PhemexPerpetuals {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
-    credentials: Option<sign::Credentials>,
-    read_credentials: Option<sign::Credentials>,
+    options: Options,
+    credentials: Option<safe_cex_engine::signing::Identity>,
+    read_credentials: Option<safe_cex_engine::signing::Identity>,
     public: Connection,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, Interval), u32>,
@@ -117,23 +109,12 @@ pub struct PhemexPerpetuals {
 }
 impl PhemexPerpetuals {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = options
-            .key
+            .credentials
             .as_ref()
-            .zip(options.secret.as_ref())
-            .filter(|(k, s)| !k.is_empty() && !s.is_empty())
-            .map(|(key, secret)| sign::Credentials {
-                key: key.clone(),
-                secret: secret.clone(),
-            });
-        let read_credentials = options
-            .read_credentials
-            .as_ref()
-            .map(|read| sign::Credentials {
-                key: read.key.clone(),
-                secret: read.secret.clone(),
-            });
+            .filter(|identity| identity.validate().is_ok())
+            .cloned();
+        let read_credentials = options.read_credentials.clone();
         Self {
             options,
             credentials,
@@ -207,9 +188,17 @@ impl PhemexPerpetuals {
         } else {
             self.credentials.as_ref()
         };
-        let headers = credentials
-            .map(|c| c.headers(path, query, body.as_deref().unwrap_or(""), cx.now))
-            .unwrap_or_default();
+        let recipe = credentials.map(|identity| {
+            dispatch_signing::Http::new(
+                identity.clone(),
+                self.options.testnet,
+                method,
+                path.into(),
+                query.into(),
+                body.clone(),
+            )
+        });
+        let headers = Vec::new();
         let url = format!(
             "{}{path}{}",
             self.rest(),
@@ -224,6 +213,9 @@ impl PhemexPerpetuals {
         } else {
             cx.request(method, url, headers, body, pending)
         };
+        if let Some(recipe) = recipe {
+            cx.sign_http(id, Box::new(recipe));
+        }
         if primary {
             cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
         }
@@ -312,6 +304,9 @@ impl PhemexPerpetuals {
             Pending::Orders(r) => self.orders_read_failed(cx, r, error),
             Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Unknown),
             Pending::History(r) => self.history_failed(cx, r, error),
+            Pending::PublicTrades(read) => {
+                self.public_trades_failed(cx, *read, safe_cex_engine::VenueError::new(error));
+            }
             Pending::Income(r) => self.income_failed(cx, r, error),
             Pending::Depth { symbol, generation } => {
                 if self
@@ -573,11 +568,17 @@ impl Venue for PhemexPerpetuals {
             }
             Pending::Account(r) => self.account_item(cx, r, item),
             Pending::History(r) => self.history_item(cx, r, item),
+            Pending::PublicTrades(read) => read.item(cx, item),
             Pending::Income(r) => self.income_item(cx, r, item),
             _ => {}
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, r: Response<'_>) {
+        if let Pending::PublicTrades(read) = &p
+            && !read.valid_delivery(cx)
+        {
+            return;
+        }
         if r.status == 429 {
             self.paused_until = self.paused_until.max(
                 cx.now
@@ -675,7 +676,21 @@ impl Venue for PhemexPerpetuals {
             Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
             Pending::Trade(p) => self.trade_response(cx, p, r),
             Pending::History(p) => self.history_response(cx, p, r),
+            Pending::PublicTrades(read) => self.public_trades_response(cx, *read, r),
             Pending::Income(p) => self.income_response(cx, p, r),
+        }
+    }
+    fn on_signing_release(
+        &mut self,
+        target: safe_cex_engine::SigningTarget<'_, Pending>,
+        release: safe_cex_engine::SigningRelease,
+    ) {
+        if let safe_cex_engine::SigningTarget::Http {
+            request,
+            pending: Pending::Trade(trade),
+        } = target
+        {
+            self.trade_signing_release(request, trade, release);
         }
     }
     fn on_sign_error(
@@ -685,6 +700,9 @@ impl Venue for PhemexPerpetuals {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Identity(command) => self.identity_failed(cx, command, error),
+            Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
+            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
             Pending::PublicCandles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
@@ -698,6 +716,7 @@ impl Venue for PhemexPerpetuals {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
             Pending::PublicCandles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
@@ -888,22 +907,5 @@ impl Venue for PhemexPerpetuals {
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
-    }
-}
-
-#[cfg(test)]
-mod security_constructor {
-    use super::*;
-    #[test]
-    fn incomplete_credentials_are_retained_only_in_a_scrubbing_owner() {
-        for key in [None, Some(String::new())] {
-            let venue = PhemexPerpetuals::new(Options {
-                key,
-                secret: Some("private-secret".into()),
-                ..Options::default()
-            });
-            let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
-            assert!(venue.credentials.is_none());
-        }
     }
 }

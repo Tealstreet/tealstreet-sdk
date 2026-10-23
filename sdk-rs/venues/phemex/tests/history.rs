@@ -1,16 +1,19 @@
+mod support;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response};
-use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+use safe_cex_venue_phemex::PhemexPerpetuals;
 use serde::Deserialize;
+use support::Options;
 
+const NOW: f64 = 1_710_000_000_000.;
 const FILL: &str = r#"{"transactTimeNs":1669407633999999999,"symbol":"BTCUSDT","currency":"USDT","side":"Sell","tradeType":"Trade","execQtyRq":"0.001","execPriceRp":"16600","execFeeRv":"0.00166","execID":"5c3d96e1-8874-53b6-b6e5-9dcc4d28b4ab","orderID":"fcdfeafa-ed68-45d4-b2bd-7bc27f2b2b0b"}"#;
 const ORDER: &str = r#"{"actionTimeNs":1667562110213260743,"transactTimeNs":1667562110221077395,"orderId":"743fc923-cb01-4261-88d1-b35dba2cdac0","symbol":"BTCUSDT","side":"Buy","ordType":"Market","ordStatus":"Filled","priceRp":"21206.7","orderQtyRq":"0.001","cumQtyRq":"0.001","reduceOnly":false}"#;
 fn engine(private: bool) -> Engine<PhemexPerpetuals> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         key: private.then(|| "key".into()),
         secret: private.then(|| "secret".into()),
         ..Options::default()
-    }));
+    });
     e.store_mut().set_markets(vec![Market {
         id: "BTC/USDT:USDT".into(),
         symbol: "BTCUSDT".into(),
@@ -48,11 +51,8 @@ fn actions(e: &mut Engine<PhemexPerpetuals>) -> Vec<Action> {
     e.drain_actions().collect()
 }
 fn query(e: &mut Engine<PhemexPerpetuals>, query: Query) -> Action {
-    e.handle(
-        1_710_000_000_000.0,
-        Event::Command(Command::Query { command: 10, query }),
-    );
-    actions(e)
+    e.handle(NOW, Event::Command(Command::Query { command: 10, query }));
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .expect("HTTP request")
@@ -87,7 +87,7 @@ fn respond(e: &mut Engine<PhemexPerpetuals>, request: &Action, body: &str, strea
     };
     if streamed {
         e.handle(
-            2.0,
+            NOW + 1.,
             Event::HttpStart {
                 request: r.id,
                 status: 200,
@@ -96,17 +96,17 @@ fn respond(e: &mut Engine<PhemexPerpetuals>, request: &Action, body: &str, strea
         );
         for data in body.as_bytes().chunks(7) {
             e.handle(
-                2.0,
+                NOW + 1.,
                 Event::HttpChunk {
                     request: r.id,
                     data,
                 },
             );
         }
-        e.handle(2.0, Event::HttpEnd { request: r.id });
+        e.handle(NOW + 1., Event::HttpEnd { request: r.id });
     } else {
         e.handle(
-            2.0,
+            NOW + 1.,
             Event::HttpResponse {
                 request: r.id,
                 response: Response {
@@ -205,7 +205,7 @@ fn malformed_unknown_enum_and_failed_reads_are_errors_not_empty_success() {
     let a = query(&mut e, fills());
     let Action::Http(r) = a else { unreachable!() };
     e.handle(
-        2.0,
+        NOW + 1.,
         Event::HttpFailed {
             request: r.id,
             error: "network failure",
@@ -388,12 +388,12 @@ fn private_history_rejects_rows_beyond_the_documented_page_maximum() {
 #[test]
 fn public_only_mode_refuses_private_history_even_with_credentials() {
     let market = engine(true).store().markets()[0].clone();
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.store_mut().set_markets(vec![market]);
     e.handle(
         1.0,
@@ -762,7 +762,7 @@ fn income_single_millisecond_window_and_unsupported_filters_fail_closed() {
 #[test]
 fn secondary_reads_never_change_definitive_lookup_identity_or_routing() {
     let market = engine(true).store().markets()[0].clone();
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: Some(safe_cex_engine::ReadCredentials {
@@ -771,7 +771,7 @@ fn secondary_reads_never_change_definitive_lookup_identity_or_routing() {
             passphrase: None,
         }),
         ..Options::default()
-    }));
+    });
     e.store_mut().set_markets(vec![market]);
     let a = query(&mut e, fills());
     let Action::Http(r) = &a else { unreachable!() };
@@ -1175,14 +1175,14 @@ mod owned_bounded {
                 };
                 match failure {
                     0 => e.handle(
-                        2.,
+                        NOW + 1.,
                         Event::HttpFailed {
                             request: request.id,
                             error: "connection lost",
                         },
                     ),
                     1 => e.handle(
-                        2.,
+                        NOW + 1.,
                         Event::HttpResponse {
                             request: request.id,
                             response: Response {
@@ -1217,7 +1217,11 @@ mod owned_bounded {
                 assert_eq!(errors.len(), 1, "exactly one failure: {output:?}");
                 assert_eq!(
                     errors[0].kind,
-                    Some(ErrorKind::Internal),
+                    Some(if axis == 2 && failure == 0 {
+                        ErrorKind::Network
+                    } else {
+                        ErrorKind::Internal
+                    }),
                     "axis {axis}, failure {failure}, streamed {streamed}"
                 );
                 assert_eq!(errors[0].outcome, None, "reads gain no write outcome");
@@ -1259,7 +1263,7 @@ mod owned_bounded {
                 unreachable!()
             };
             e.handle(
-                2.,
+                NOW + 1.,
                 Event::HttpStart {
                     request: request.id,
                     status: 200,
@@ -1275,7 +1279,7 @@ mod owned_bounded {
                 format!("[{},", row(axis))
             };
             e.handle(
-                2.,
+                NOW + 1.,
                 Event::HttpChunk {
                     request: request.id,
                     data: prefix.as_bytes(),
@@ -1286,7 +1290,7 @@ mod owned_bounded {
                 "no terminal or marker before the envelope closes"
             );
             e.handle(
-                2.,
+                NOW + 1.,
                 Event::HttpFailed {
                     request: request.id,
                     error: "truncated transport",
@@ -1294,9 +1298,14 @@ mod owned_bounded {
             );
             let output = actions(&mut e);
             no_result_or_gap(&output);
+            let kind = if axis == 2 {
+                ErrorKind::Network
+            } else {
+                ErrorKind::Internal
+            };
             assert!(output.iter().any(|a| matches!(a,
                 Action::Notice(Notice::CommandFailed { command: 10, error })
-                    if error.kind == Some(ErrorKind::Internal) && error.message == "truncated transport"
+                    if error.kind == Some(kind) && error.message == "truncated transport"
             )));
         }
     }
@@ -1340,7 +1349,7 @@ mod owned_bounded {
             let mut e = engine(true);
             let first = query(&mut e, fills());
             e.handle(
-                2.,
+                NOW + 1.,
                 Event::Command(Command::Query {
                     command: 42,
                     query: axis_query(1, None),

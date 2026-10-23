@@ -1,6 +1,8 @@
 //! Native protocol fixtures; lifecycle controls exercise actual engine ingress.
+mod support;
 use safe_cex_engine::{Action, Engine, Event, Response, SocketId};
-use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+use safe_cex_venue_phemex::PhemexPerpetuals;
+use support::Options;
 
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"500","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"error":null,"result":[{"symbol":"BTCUSDT","bidRp":"20690.1","askRp":"20690.2","lastRp":"20690.2","markRp":"20690.3","indexRp":"20690","openRp":"20000","openInterestRv":"250","fundingRateRr":"0.0001","volumeRq":"10"}]}"#;
@@ -11,10 +13,10 @@ fn actions(engine: &mut Engine<PhemexPerpetuals>, now: f64) -> Vec<Action> {
 }
 
 fn connecting() -> (Engine<PhemexPerpetuals>, SocketId) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut engine = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     engine.start(0.);
     for (at, path, body) in [(1., "products", PRODUCTS), (2., "24hr/all", DAILY)] {
         let request = actions(&mut engine, at - 1.)

@@ -1314,3 +1314,44 @@ GREEN, including 300 same-clock/same-command local refusals and exact selected
 signer request bytes. The same eleven tests pass after conversion, with no
 transport, extra diagnostic or Store mutation on initial admission refusal.
 No manufactured Context or fixture bypass is used.
+
+## Phemex unsigned public-trades custody controls
+
+Original checkpoint fc1b87973fa compiles13 controls on unchanged15bd production:
+8 behavioral assertion REDs and5 native passes, zero ignored. The dedicated
+public target retains those selected assertions; held signed REDs remain on
+feat/rust-phemex-bounded-history-context at321992b680c. Additional controls pin
+invalid-entry refusal, typed route metadata without auth evidence and cleanup
+after a pause exceeds the original20s root. Existing native history fixtures
+use the shared prepared-action driver and monotonic response clocks; only the
+unsigned transport-kind expectation changes to Network, while strict financial
+rows, errors, no-prefix/no-gap and signed-path assertions remain. Rebuilt CI
+continues to own replay, CPU, size and retained-memory certification.
+
+## Selected managed signed Read custody
+
+One non-Clone engine wrapper retains selected opaque identity, egress/evidence
+and original Context through queue and retry, with exact typed refusal and
+pending return. Missing-selection command diagnostics precede a single typed
+terminal under genuine local authority. Provider/prepare metadata and ordered
+recipe headers remain unchanged. Genuine engine controls cover capacity,
+duplicate entry, phase custody, expiry, retry, streaming and account evidence;
+native compatibility controls do not substitute for later venue adoption.
+
+## BingX identity original Read owner
+
+One AdmittedRead couples selection, credential and terminal authority without a
+venue admission or numeric fallback. Exact managed delivery is checked before
+native response decoding/publication. Local config precedence and 20s/Never
+remain native; typed transport/refusal errors keep checked diagnostic ordering.
+Only identity.rs loses two legacy terminal occurrences; other inventory is intact.
+
+### Phemex full signer cutover evidence
+
+Original signer test checkpoint17b9ee461cb had6GREEN/16assertionRED/0ignored.
+All22 are now GREEN with the same assertions, plus2 malformed-provider controls
+and the trusted-setup security control. Native256 and extended signer24/security2,
+registry3 and SDK constructor5 pass; strict Phemex Clippy passes. The exact
+combined staging map is17F/18O ->16F/16O, with one temporary sign_http; trading
+stays4F/4O via its approved release-metadata re-expression. No checker predicate
+or negative assertion is weakened. Actual #1970/#1974 and final CI remain gates.

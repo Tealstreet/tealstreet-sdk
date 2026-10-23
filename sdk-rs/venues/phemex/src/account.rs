@@ -761,7 +761,12 @@ impl PhemexPerpetuals {
             LifecycleEvent::Opened(epoch) => {
                 self.account.open = true;
                 if let Some(credentials) = &self.credentials {
-                    cx.send(epoch.socket(), credentials.websocket_auth(cx.now, 999));
+                    let recipe = crate::dispatch_signing::WsAuth::new(
+                        credentials.clone(),
+                        epoch.socket(),
+                        999,
+                    );
+                    cx.send_signed(epoch.socket(), recipe.unsigned(), Box::new(recipe));
                     self.account.next_id.set(1200);
                     cx.send_after_socket_interests(
                         epoch.feed(),
