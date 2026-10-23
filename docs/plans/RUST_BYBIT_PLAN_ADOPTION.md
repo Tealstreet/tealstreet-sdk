@@ -147,9 +147,10 @@ and an Unknown outcome. Its Hyro twin stays unchanged (see the carve-out below).
    the original bytes. There is no text or transport resend and no replacement
    or resend after any per-item effect or native ID.
 6. **Cancel-all housekeeping** keeps the approved narrow rule: only captured,
-   already Closed/Canceled rows, after an exact validated retCode 0, with no ID
-   overflow and no malformed or unproven response; never a live or uncaptured
-   row. The command stays Unknown, and CALLERS says this proves nothing about
+   already Closed/Canceled rows, after an exact validated retCode 0 whose
+   affected list decoded and with no ID overflow; never a live, derived or
+   uncaptured row. Omitted live orders still make the recorded fact unproven;
+   housekeeping proves nothing about them. The command stays Unknown, and CALLERS says this proves nothing about
    omitted live orders.
 7. **Terminal.** `done_plan` / `fail_plan` (the journal projection) replace the
    numeric `cx.done` / `cx.fail`.

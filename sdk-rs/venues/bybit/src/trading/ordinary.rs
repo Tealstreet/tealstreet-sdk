@@ -730,6 +730,9 @@ impl BybitLinear {
             .finish_preflight_call(&entry.preflight, &context)
             .is_err()
         {
+            let error =
+                internal("Bybit position-mode read lost its custody").outcome(Outcome::NotSent);
+            let _ = cx.fail_preflight(&entry.preflight, error);
             return;
         }
         // A mode change while the read was out leaves this answer stale.
@@ -994,8 +997,11 @@ impl BybitLinear {
             Call::Cancel { ids } => ids,
             _ => &[],
         };
-        let partial_stop = match &planned.call {
-            Call::CancelPartialStop { id, .. } => Some(id.as_str()),
+        // The order a single-target answer may echo: a partial stop, or the
+        // amend's target (an attached TP/SL's parent).
+        let own_target = match &planned.call {
+            Call::CancelPartialStop { id, .. } => Some(id.clone()),
+            Call::Amend => fields(&planned.body).order_id,
             _ => None,
         };
         // A whole answer with item rows or native IDs contradicts itself; an
@@ -1006,7 +1012,7 @@ impl BybitLinear {
                     || (rows && evidence.is_empty())
                     || evidence
                         .iter()
-                        .any(|echo| !targets.contains(echo) && partial_stop != Some(echo.as_str()))
+                        .any(|echo| !targets.contains(echo) && own_target.as_ref() != Some(echo))
             }
             verdict => verdict.is_refusal() && (rows || !evidence.is_empty()),
         };
