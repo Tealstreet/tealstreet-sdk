@@ -152,6 +152,20 @@ impl safe_cex_engine::signing_remote::RemoteRecipe for Rest {
     }
 }
 pub static REST: Rest = Rest;
+
+/// Verifier for `orderly.rest.1` results from the account's public `ed25519:` key.
+pub fn remote_verifier(
+    key: &str,
+) -> Result<safe_cex_engine::signing_remote::RemoteVerifier, String> {
+    let public: [u8; 32] = bs58::decode(key.strip_prefix("ed25519:").unwrap_or(key))
+        .into_vec()
+        .map_err(|_| "Orderly key must be base58")?
+        .try_into()
+        .map_err(|_| "Orderly public key must be 32 bytes")?;
+    Ok(Box::new(move |payload, signature| {
+        safe_cex_crypto::ed25519::verify(payload, &public, signature).unwrap_or(false)
+    }))
+}
 pub static REMOTE_RECIPES: &[&dyn safe_cex_engine::signing_remote::RemoteRecipe] = &[&REST];
 
 impl safe_cex_crypto::secrets::EraseSecrets for Credentials {
@@ -203,6 +217,32 @@ mod tests {
             }))
             .unwrap();
         assert_eq!(read, b"1GET/v1/order/123/trades");
+    }
+
+    #[test]
+    fn remote_verifier_accepts_only_the_account_key_over_the_exact_bytes() {
+        // RFC 8032 test 1: a published seed/public-key pair, not account material.
+        let seed = [
+            0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec,
+            0x2c, 0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03,
+            0x1c, 0xae, 0x7f, 0x60,
+        ];
+        let public = [
+            0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64,
+            0x07, 0x3a, 0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68,
+            0xf7, 0x07, 0x51, 0x1a,
+        ];
+        let text = b"1GET/v1/positions";
+        let signature = safe_cex_crypto::ed25519::sign(text, &seed).unwrap();
+        let key = format!("ed25519:{}", bs58::encode(public).into_string());
+        let verify = remote_verifier(&key).unwrap();
+        assert!(verify(text, &signature));
+        assert!(!verify(b"1GET/v1/orders", &signature));
+        assert!(!verify(text, &signature[..63]));
+        assert!(!remote_verifier(&credentials().key).unwrap()(
+            text, &signature
+        ));
+        assert!(remote_verifier("ed25519:not-base58-0OIl").is_err());
     }
 
     #[test]

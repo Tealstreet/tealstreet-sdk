@@ -119,6 +119,23 @@ impl RemoteRecipe for Code {
     }
 }
 
+/// Verifier for Aster V3/Code results: the recovered signer must be the
+/// account's configured public signer address.
+pub fn remote_verifier(
+    signer: &str,
+) -> Result<safe_cex_engine::signing_remote::RemoteVerifier, String> {
+    let checksummed = ethereum::get_address(signer)?;
+    let expected: [u8; 20] = (0..20)
+        .map(|i| u8::from_str_radix(&checksummed[2 + i * 2..4 + i * 2], 16))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "Invalid Aster signer address")?
+        .try_into()
+        .map_err(|_| "Invalid Aster signer address")?;
+    Ok(Box::new(move |digest, signature| {
+        ethereum::recover_digest_address(digest, signature) == Some(expected)
+    }))
+}
+
 pub static STANDARD: Standard = Standard;
 pub static CODE: Code = Code;
 pub static REMOTE_RECIPES: &[&dyn RemoteRecipe] = &[&STANDARD, &CODE];
@@ -138,6 +155,7 @@ mod tests {
         hash: String,
         code_query: String,
         code_hash: String,
+        signature: String,
         testnet: bool,
     }
     fn corpus() -> Vec<Case> {
@@ -178,6 +196,26 @@ mod tests {
             );
             assert_eq!(code, code_digest(&case.code_query, case.testnet));
         }
+    }
+
+    #[test]
+    fn remote_verifier_recovers_the_configured_signer() {
+        let case = corpus().remove(0);
+        let digest = STANDARD
+            .canonicalize(&serde_json::json!({
+                "payload": case.payload, "user": case.user,
+                "signer": case.signer, "nonce": case.nonce
+            }))
+            .unwrap();
+        // Wire signatures are 0x r||s||v with v 27/28; providers return v 0/1.
+        let hex = case.signature.trim_start_matches("0x");
+        let mut signature: Vec<u8> = (0..65)
+            .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())
+            .collect();
+        signature[64] -= 27;
+        assert!(remote_verifier(&case.signer).unwrap()(&digest, &signature));
+        assert!(!remote_verifier(&case.user).unwrap()(&digest, &signature));
+        assert!(remote_verifier("0x12").is_err());
     }
 
     #[test]

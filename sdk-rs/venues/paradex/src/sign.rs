@@ -430,6 +430,33 @@ impl safe_cex_engine::signing_remote::RemoteRecipe for OrderRecipe {
     }
 }
 pub static ORDER: OrderRecipe = OrderRecipe;
+
+/// Verifier for `paradex.order.1` results from the account's Stark public key,
+/// which delegated mode already carries as its non-secret `key`.
+pub fn remote_verifier(
+    public_key: &str,
+) -> Result<safe_cex_engine::signing_remote::RemoteVerifier, String> {
+    let public = felt(public_key).map_err(|_| "Invalid Paradex public key")?;
+    if public == Felt::ZERO {
+        return Err("Invalid Paradex public key".into());
+    }
+    Ok(Box::new(move |digest, signature| {
+        let (Ok(digest), Some((r, s))) = (
+            <[u8; 32]>::try_from(digest),
+            signature
+                .split_at_checked(32)
+                .filter(|(_, s)| s.len() == 32),
+        ) else {
+            return false;
+        };
+        starknet::verify(
+            &Felt::from_bytes_be(&digest),
+            &public,
+            &Felt::from_bytes_be_slice(r),
+            &Felt::from_bytes_be_slice(s),
+        )
+    }))
+}
 pub static REMOTE_RECIPES: &[&dyn safe_cex_engine::signing_remote::RemoteRecipe] = &[&ORDER];
 
 fn word(input: &str) -> Result<Felt, String> {
@@ -692,6 +719,25 @@ mod tests {
                 U256::from_be_bytes(s.to_bytes_be())
             )
         );
+    }
+
+    #[test]
+    fn remote_verifier_checks_the_stark_public_key() {
+        use safe_cex_engine::signing_remote::RemoteRecipe;
+        let digest = ORDER.canonicalize(&recipe_inputs(None)).unwrap();
+        let key = Felt::from(5u8);
+        let (r, s) = starknet::sign(&Felt::from_bytes_be_slice(&digest), &key).unwrap();
+        let mut signature = r.to_bytes_be().to_vec();
+        signature.extend(s.to_bytes_be());
+        let public = format!("{:#x}", starknet::public_key(&key));
+        assert!(remote_verifier(&public).unwrap()(&digest, &signature));
+        let other = format!("{:#x}", starknet::public_key(&Felt::from(6u8)));
+        assert!(!remote_verifier(&other).unwrap()(&digest, &signature));
+        assert!(!remote_verifier(&public).unwrap()(
+            &digest[..31],
+            &signature
+        ));
+        assert!(remote_verifier("0x0").is_err());
     }
 
     #[test]
