@@ -301,6 +301,13 @@ Shared prerequisites with no reviewed pin at 632da7717e2 (confirmed by core):
 
 S1/S2 (test-only recipes and REDs) stay independent of G1-G3.
 
+**Custody cutover is one commit.** Removing raw credentials from `lib.rs`
+leaves every still-legacy private header unusable. So the production custody
+cutover is gated on ALL of G1-G3 and lands as ONE coherent source commit
+covering S3-S6, after the RED tests. There is no raw-credential fallback or
+staging carrier, no disabled endpoints, and no signer-only state to make an
+intermediate commit compile. Only S1/S2 land before that.
+
 Native requirements the shared designs must preserve (9czdjh audit):
 
 - **Orders refresh is one aggregate:** a single `orders_busy` traversal across
