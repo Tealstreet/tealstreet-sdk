@@ -46,6 +46,17 @@ describe('AsterDEX trusted setup mapping', () => {
     exchange.dispose();
   });
 
+  it('surfaces a setup refusal at start, where the app routes it, with credentials already stripped', async () => {
+    const exchange = new RustEngineExchange(
+      'asterdex',
+      { key: '0x1111111111111111111111111111111111111111', secret: '12'.repeat(32), extra: { asterdexApiVersion: 'v1' } } as ExchangeOptions,
+      new DefaultStore(),
+    );
+    expect(exchange.options).not.toHaveProperty('secret');
+    await expect(exchange.start()).rejects.toThrow(/^Aster API Wallet\/vault keys require the Main Wallet Address\./);
+    exchange.dispose();
+  });
+
   for (const raw of golden.cases) {
     const testCase = expand(raw) as typeof raw;
     it(`matches the shared golden: ${testCase.name}`, () => {
