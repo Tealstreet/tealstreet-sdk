@@ -100,6 +100,7 @@ mod plan_expiry_cleanup {
                         calls: &calls,
                     }],
                     PlanPolicy {
+                        independent_calls: false,
                         operation: Operation::Mutation,
                         credential: Some(credential),
                         pacing: None,

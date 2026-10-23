@@ -57,6 +57,7 @@ impl Venue for CreditProbe {
                     &preflight,
                     &steps,
                     PlanPolicy {
+                        independent_calls: false,
                         operation: Operation::Read,
                         credential: None,
                         pacing: None,

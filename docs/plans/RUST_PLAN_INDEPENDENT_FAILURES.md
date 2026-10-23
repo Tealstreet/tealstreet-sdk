@@ -12,7 +12,8 @@ The overseer requires the same continuation contract for independent BingX and
 Bybit batches, including placements and cancels. The final result remains the
 shared journal projection: Unknown if a released leg is unproven, preserving
 bounded known IDs. Continuing a sibling grants no retry of the uncertain leg.
-Dependent cancel/recreate or amend steps must retain whole-Plan abort behavior.
+Dependent cancel/recreate or amend steps must retain whole-Plan abort behavior: a
+handler declines to settle that call, even inside an opted-in Plan.
 
 This is a separate engine follow-up on #1932; that reviewed head stays frozen.
 No venue dispatch, classifier table, fixture, reference, budget or ratchet edit
@@ -23,15 +24,19 @@ belongs to this core change. BingX and Bybit adopt the flag in their child PRs.
 Add public PlanPolicy.independent_calls: bool. Existing literals explicitly use
 false. Admission copies it into the immutable Plan body. True is valid only for
 Mutation Plans; a Read Plan is refused with Invalid before IDs, credits, owner
-phase or timers change. It declares independence for every call in the Plan;
-it cannot be toggled after admission or used to bypass dependency semantics.
+phase or timers change. It permits the native handler to settle independent calls; the venue still
+recognizes dependent follow-ups and declines settlement for them. It cannot be
+toggled after admission or used to bypass dependency semantics.
 
 For an exact released delivered 408/5xx, record the existing unproven fact and
 UnprovenEvidence IDs before any callback. If the Plan declared independence,
 route that same failure through with_owned_read_failure and the existing typed
 Venue::on_http_failed. The wrapper marks the original call failed. The venue
 may finish_plan_failed_call and synchronously queue its next independent call.
-No response DATA codec runs. No http_write_reply authority is installed, so a
+The callback error has Unknown outcome, Timeout kind for 408 or VenueUnavailable
+for 5xx, and the captured evidence IDs. No response DATA codec runs and no failed
+call Store row is published. Like transport loss, this is uncertainty for the
+final seal and never a fresh order read. No http_write_reply authority is installed, so a
 second venue write fact or resend grant for the failed call is refused State.
 
 The wrapper tests the ORIGINAL failed delivery after the callback. If that
@@ -55,6 +60,7 @@ seal, rather than once per independent leg.
    Prepare/Sign/Bind/Claim. For both 408 and 503, capture an evidence ID, settle
    the failed call in on_http_failed and synchronously submit its sibling. The
    sibling reaches Prepare, succeeds, and the single final Unknown retains IDs.
+   Assert the callback error kind/outcome and captured partial IDs too.
 3. A handler that declines settlement gets exactly one Unknown terminal, no
    sibling request, and retirement of the unissued suffix. Keep a false-flag
    compatibility control proving the old no-callback abort remains unchanged.
@@ -72,3 +78,13 @@ seal, rather than once per independent leg.
 The #1857 reconcile hook is absent from the initial #1932 branch parent. Its
 actual combo landing must be integrated before claiming the per-seal reconcile
 control passes; no fabricated hook or inherited test result substitutes for it.
+
+## Inert declaration checkpoint
+
+On the #1932 parent with only the inert field/false-literal scaffold and these
+tests, six focused controls compile and run: four assertion REDs (missing typed
+callback, no-settle callback, duplicate/sibling path and Read admission) and two
+GREEN controls (default direct abort and ordinary Read admission). The RED log
+is local `/tmp/codex-plan-independent-original-red.log`. No gateway delivery
+behavior changed at this checkpoint. The per-seal #1857 reconcile assertion is
+still pending genuine integration of that prerequisite.

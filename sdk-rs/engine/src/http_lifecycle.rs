@@ -1167,6 +1167,8 @@ mod tests {
     include!("request_context_planned_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_plan_expiry_tests.rs");
+    #[cfg(feature = "http-plans")]
+    include!("request_context_plan_independence_tests.rs");
 
     #[derive(Debug)]
     struct Pending(Context);
