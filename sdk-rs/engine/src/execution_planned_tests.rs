@@ -78,6 +78,8 @@ mod planned_execution {
         withheld: Vec<Error>,
         delivered: usize,
         own_root_send: bool,
+        /// Two serial writes; the second is queued from the first's DATA.
+        two_steps: bool,
     }
 
     impl Shared {
@@ -103,10 +105,25 @@ mod planned_execution {
                 retry_window: RetryWindow::Shared,
                 after_refusal: &[],
             }];
-            let steps = [StepBound {
+            let step = StepBound {
                 wait_ms: 0,
                 calls: &calls,
-            }];
+            };
+            let two = [
+                StepBound {
+                    wait_ms: 0,
+                    calls: &calls,
+                },
+                StepBound {
+                    wait_ms: 0,
+                    calls: &calls,
+                },
+            ];
+            let steps: &[StepBound<'_>] = if self.two_steps {
+                &two
+            } else {
+                std::slice::from_ref(&step)
+            };
             if self.invalid_steps {
                 let ids = cx.io.next_id;
                 let actions = cx.io.actions.len();
@@ -121,7 +138,7 @@ mod planned_execution {
                 return;
             }
             let (plan, execution, founder) =
-                share(cx, &preflight, &steps, self.read).expect("shared plan execution");
+                share(cx, &preflight, steps, self.read).expect("shared plan execution");
             let slot = cx.plan_slots(&plan).unwrap().remove(0);
             let leg = cx.plan_leg_context(&plan, &slot).unwrap();
             if self.read {
@@ -231,12 +248,27 @@ mod planned_execution {
             cx.http_write_result(
                 &context,
                 crate::request_context::WriteResult::Accepted {
-                    order_ids: vec!["native-1".into()],
+                    order_ids: vec![format!("native-{}", self.delivered)],
                 },
             )
             .unwrap();
             cx.validate_http_write_effects(&context).unwrap();
             cx.finish_plan_call(&plan, &slot, &context).unwrap();
+            if self.two_steps && self.delivered == 1 {
+                let slot = cx.plan_slots(&plan).unwrap().remove(0);
+                let leg = cx.plan_leg_context(&plan, &slot).unwrap();
+                cx.request_signed_managed(
+                    leg.clone(),
+                    Method::Post,
+                    "https://venue.test/write".into(),
+                    None,
+                    Box::new(Recipe),
+                    leg,
+                )
+                .unwrap();
+                self.slot = Some(slot);
+                return;
+            }
             cx.done_plan(&plan, "placed".into()).unwrap();
         }
         fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, _: &str) {}
@@ -683,6 +715,94 @@ mod planned_execution {
         assert_eq!(short.len(), 1);
         let error = short[0].clone().unwrap_err();
         assert_eq!(error.kind, Some(ErrorKind::Timeout));
-        assert_ne!(error.outcome, Some(crate::Outcome::NotSent), "the write was released");
+        assert_ne!(
+            error.outcome,
+            Some(crate::Outcome::NotSent),
+            "the write was released"
+        );
+    }
+
+    fn short_timer(actions: &[Action]) -> TimerId {
+        actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == 100. => Some(*timer),
+                _ => None,
+            })
+            .expect("short observer deadline")
+    }
+
+    #[test]
+    fn an_observer_expiring_during_a_released_write_is_told_unknown() {
+        let (mut e, token, actions) = shared_write(&[SHORT_FOLLOWER, FOLLOWER]);
+        e.handle(
+            100.,
+            Event::TimerFired {
+                timer: short_timer(&actions),
+            },
+        );
+        let expired = e.drain_actions().collect::<Vec<_>>();
+        let short = terminals(&expired, SHORT_FOLLOWER);
+        assert_eq!(short.len(), 1);
+        let error = short[0].clone().unwrap_err();
+        assert_eq!(error.kind, Some(ErrorKind::Timeout));
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown), "{error:?}");
+        respond(&mut e, token, 1_000.);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(terminals(&actions, FOLLOWER), vec![Ok("placed".into())]);
+        assert!(terminals(&actions, SHORT_FOLLOWER).is_empty());
+    }
+
+    #[test]
+    fn an_early_expiry_carries_the_accepted_prefix_and_unknown_remainder() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            two_steps: true,
+            ..Default::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., SHORT_FOLLOWER);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let timer = short_timer(&actions);
+        let first = prepared(&actions)[0];
+        release(&mut e, first, 0.);
+        respond(&mut e, first, 10.);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let second = prepared(&actions)[0];
+        release(&mut e, second, 20.);
+        e.handle(100., Event::TimerFired { timer });
+        let expired = e.drain_actions().collect::<Vec<_>>();
+        let short = terminals(&expired, SHORT_FOLLOWER);
+        assert_eq!(short.len(), 1);
+        let error = short[0].clone().unwrap_err();
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown), "{error:?}");
+        assert_eq!(
+            error.partial.map(|partial| partial.order_ids),
+            Some(vec!["native-1".to_owned()])
+        );
+        respond(&mut e, second, 1_000.);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(terminals(&actions, FOUNDER), vec![Ok("placed".into())]);
+        assert!(terminals(&actions, SHORT_FOLLOWER).is_empty());
+    }
+
+    #[test]
+    fn detaching_before_release_with_a_live_peer_never_claims_not_sent() {
+        let mut e = crate::test_support::seeded_engine(Shared::default());
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., FOLLOWER);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let token = prepared(&actions)[0];
+        detach_founder(&mut e, 1.);
+        let detached = e.drain_actions().collect::<Vec<_>>();
+        let founder = terminals(&detached, FOUNDER);
+        assert_eq!(founder.len(), 1);
+        let error = founder[0].clone().unwrap_err();
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown), "{error:?}");
+        release(&mut e, token, 2.);
+        respond(&mut e, token, 1_000.);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(terminals(&actions, FOLLOWER), vec![Ok("placed".into())]);
     }
 }
