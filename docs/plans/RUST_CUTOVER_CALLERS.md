@@ -5369,3 +5369,59 @@ treat successful local fallback as proof that cache or Store state was refreshed
 A satisfied native cancel may prove a subset without creating IDs. That proof
 still leaves any unresolved targets Unknown; a successful subset never cleans up
 the remainder or extends its deadline.
+
+## Context-owned history completion and admission
+
+For adapters using `ReadCompletion` and the `Read*History` types, the history
+owner retains the original engine-issued command Read root across pages and
+composite stages. Legacy numeric owners keep their existing lifecycle; each
+venue's adoption carries its own caller contract. Bind the matching command/root once; a page
+leg, foreign issuer, stale generation, background owner or mutation owner cannot
+substitute for that root. `ReadCompletion::from_context` validates that binding
+without reserving exclusive completion; only the first valid context terminal
+can complete the owner. Read ownership does not become numeric completion
+authority when a lifecycle check refuses it. Plan and joined-observer ownership
+use their own explicit APIs.
+
+Native adapters use the borrowed admission guard for row staging, identities,
+accepted output and coverage. The guard checks the exact current HTTP leg and
+physical attempt; native response validation and publication freshness are
+separate requirements.
+Scope the guard around admission, drop it before mutable Cx diagnostics or Store
+publication, and re-admit if more staging follows. Native cache/Store effects
+outside the history owner require the same synchronous root/leg check.
+Read cursor identities stay page-local until admission, so a discarded failed
+prefix cannot suppress those rows in a later retry. Discard the failed staged
+page before retry admission; a different physical attempt is refused until that
+binding and its unvalidated rows and identities are cleared.
+
+Migrate a venue's owner to the Read type as a whole. Handle or deliberately
+ignore a Context ownership error; never unwrap it or retry through numeric
+done/fail. Stale or mixed-mutation ownership cannot run a captured finalizer,
+publish a history.incomplete companion, or consume the proper command owner's
+terminal authority. Preparation/policy refusals reject strictly; actual later
+page failures can return previously accepted rows with one command-scoped
+incomplete Warn. Native strict endpoint-policy refusals remain strict.
+
+SDK/NX callers keep the incomplete fact correlated to the command and treat
+its returned rows as partial coverage. An absent or refused managed result does
+not establish complete history. Existing native row shapes and result shaping
+remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
+and [owned history](RUST_OWNED_HISTORY.md).
+
+## BloFin PublicTrades managed history
+
+PublicTrades uses prepared public HTTP and the original 20-second command Read
+owner. A response must match the released, claimed physical attempt before trade
+rows or identities enter the shared history owner. Expired, unreleased or stale
+responses cannot publish results. Preparation refusals retain their typed kind
+and notSent outcome; released transport failures retain network and expiry
+retains timeout. Failed first pages publish neither a staged prefix nor an
+incompleteness warning.
+
+The native unsigned GET, ordered query parameters, empty headers, default and
+clamped wire limit, millisecond timestamps and trade result fields are preserved.
+The wire limit does not truncate returned rows. Known cross-market rows, native
+row order, unknown-market identity consumption, numeric defaults, contract-size
+quantities and side conversion retain their existing behavior. Private history
+and signing paths keep their existing lifecycle.

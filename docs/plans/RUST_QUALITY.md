@@ -949,3 +949,18 @@ before the two-hash refresh, and zero errors/eleven known afterward; the public
 report remains186 known. Every diagnostic path/rationale and all other manifest
 entries are byte-preserved; the original reports remain strict FAIL. No replay,
 local release build, new declaration, threshold or comparison-policy change.
+
+## BloFin PublicTrades managed history regressions
+
+The native test-first controls exercise preparation/binding/claim, unreleased
+responses, original-deadline expiry, typed preparation and released transport
+failures, duplicate commands and stale responses. Fixed-clock repetition beyond
+the 256-owner bound covers preflight, success and immediate managed-queue
+refusal, so elapsed time cannot conceal missing terminal retirement.
+
+Compatibility controls assert every Trade field, native row order, cross-market
+rows, identity consumption before unknown-market skipping, timestamp precedence
+and milliseconds, numeric defaults, signed quantities and the wire-only limit.
+Malformed or refused first pages discard their streamed prefix without an
+incomplete marker. Six original-source assertion failures preceded production;
+five native compatibility controls already passed that original source.
