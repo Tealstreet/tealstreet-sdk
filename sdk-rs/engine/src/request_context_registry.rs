@@ -1387,8 +1387,8 @@ impl<P> Cx<'_, P> {
     }
 
     /// One batch acknowledgement, items in caller order. The engine checks the
-    /// item count, joins accepted IDs and chooses Accepted, Rejected, KnownPartial
-    /// or Failed. `message` is the venue's existing text for a failed batch.
+    /// item count, joins accepted IDs and chooses Accepted, Rejected, KnownPartial,
+    /// PartialUnknown or Failed. `message` is the venue's existing text for a failed batch.
     pub fn http_write_batch(
         &mut self,
         context: &Context,
