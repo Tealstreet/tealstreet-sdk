@@ -16,6 +16,7 @@ mod independent_plan_calls {
         independent: bool,
         settle: bool,
         read: bool,
+        overflow: bool,
         plan: Option<Plan>,
         active: Option<Slot>,
         callbacks: Vec<VenueError>,
@@ -28,6 +29,7 @@ mod independent_plan_calls {
                 independent,
                 settle,
                 read: false,
+                overflow: false,
                 plan: None,
                 active: None,
                 callbacks: Vec::new(),
@@ -149,6 +151,24 @@ mod independent_plan_calls {
                 Error::State,
             );
             self.callbacks.push(error);
+            if self.overflow {
+                assert!(
+                    self.callbacks
+                        .last()
+                        .unwrap()
+                        .message
+                        .contains("truncated IDs")
+                );
+                assert_eq!(
+                    cx.finish_plan_failed_call(
+                        self.plan.as_ref().unwrap(),
+                        self.active.as_ref().unwrap(),
+                        &context
+                    ),
+                    Err(Error::State)
+                );
+                return;
+            }
             if self.settle {
                 cx.finish_plan_failed_call(
                     self.plan.as_ref().unwrap(),
@@ -194,6 +214,9 @@ mod independent_plan_calls {
             evidence: &mut crate::request_context::UnprovenEvidence,
         ) {
             evidence.order_id("unproven-id");
+            if self.overflow {
+                assert!(!evidence.order_id(&"x".repeat(1025)));
+            }
         }
         fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {
             self.retired += 1;
@@ -368,6 +391,24 @@ mod independent_plan_calls {
         assert!(response(&mut e, first, 408, 5.).is_empty());
         assert_eq!(e.venue.callbacks.len(), 1);
         assert_eq!(e.venue.retired, 1);
+    }
+    #[test]
+    fn evidence_overflow_still_runs_cleanup_but_cannot_continue_siblings() {
+        let (mut e, actions) = setup(true, true);
+        let first = release(&mut e, &actions, 0.);
+        e.venue.overflow = true;
+        let actions = response(&mut e, first, 503, 1.);
+        assert_eq!(
+            e.venue.callbacks.len(),
+            1,
+            "overflow bypassed typed cleanup"
+        );
+        assert_eq!(failures(&actions).len(), 1);
+        assert_eq!(failures(&actions)[0].outcome, Some(crate::Outcome::Unknown));
+        assert!(failures(&actions)[0].message.contains("truncated IDs"));
+        assert_eq!(e.venue.retired, 1);
+        assert!(e.io.managed_http.is_empty());
+        assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. }))));
     }
     #[test]
     fn read_plan_refuses_independence_before_mutating_admission_state() {
