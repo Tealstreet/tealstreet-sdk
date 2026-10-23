@@ -622,7 +622,11 @@ issuance, delivery validation and settlement through the existing
 projection read-only. Private: credit commit, journal import/projection,
 custody and root checks, the observer seal path.
 
-### Amendments to #1873 this needs (each requires uufub4 agreement)
+### Follow-up engine changes on top of #1873 (owner ruling, 2026-10-23)
+
+These do not go into #1873, which stays frozen in scope until it lands. They
+land as a separate engine follow-up PR stacked on #1873, owned by
+claude-fe7lgm and reviewed by uufub4 for API fit.
 
 1. **Proof-gated reconciliation continuation.** Today an unproven Mutation
    response (408/5xx/lost) fails the call, and only *independent* steps may
@@ -631,6 +635,8 @@ custody and root checks, the observer seal path.
    proof-gated resend, all inside the declared budget. If this is refused, a
    single call ends `Unknown` and recovery happens only on resume, and the
    Hyro acceptance cases are rewritten to match.
+   (These three follow-ups extend #1873's Plan rules; uufub4's review is for
+   API fit.)
 2. **Reconciliation resend grant.** A new grant kind, minted by the engine
    only in the exact delivery of a complete two-axis `orderLinkId` read over a
    `Failed` (unproven) attempt, under these conditions:
