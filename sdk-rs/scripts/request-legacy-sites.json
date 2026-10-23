@@ -529,9 +529,6 @@
     "83c6b712d19379913a85bf575a1a1834358d1b5f84d4c7a04a2f241487399a9c": 1,
     "a77d14858a6b097716fd945cddafa2c827e671194bbe1122e95c60b698c56006": 1
   },
-  "venues/cryptocom/src/depth_query.rs": {
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-  },
   "venues/cryptocom/src/history.rs": {
     "073a9daacf5c0553bfb2650ddc8db7b942b5f6a0c8125261daff7479814953b7": 1,
     "2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b": 1,

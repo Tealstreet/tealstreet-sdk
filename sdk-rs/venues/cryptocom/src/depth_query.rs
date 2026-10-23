@@ -1,7 +1,7 @@
 //! Public REST snapshots belong to their command, never the subscription cache.
 use crate::{Cryptocom, Pending};
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
-use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, Response, Venue, VenueError};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::{Cx, ErrorKind, Method, Outcome, Response, Venue, VenueError};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
@@ -112,30 +112,15 @@ fn snapshot<'a>(envelope: Envelope<'a>) -> Result<Output<'a>, VenueError> {
     }
 }
 impl Cryptocom {
-    pub(crate) fn fetch_book(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        symbol: &str,
-    ) {
-        let context = match cx.http_context(
-            Scope::Command(command),
-            Policy {
-                operation: Operation::Read,
-                credential: None,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            },
-        ) {
-            Ok(context) => context,
-            Err(reason) => {
-                // No Context was issued. The command-entry custody seam will
-                // replace this last inventoried pre-issuance finalizer.
-                let error = reason.venue_error();
-                cx.fail(command, error);
-                return;
-            }
+    pub(crate) fn fetch_book(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
         };
         if let Err((pending, reason)) = cx.request_managed(
             context.clone(),

@@ -4406,3 +4406,10 @@ available. Auth-looking public errors never invalidate account credentials;
 standalone results never change subscription books, tickers or account state.
 Worker/hosted callers preserve the typed error fields and surface one rejection;
 no signature change or NX adoption/deployment is implied by this adapter change.
+
+Crypto.com standalone depth now uses genuine engine command-entry admission
+before any transport work. An initial clock or resource-capacity rejection emits
+one typed failure with no write outcome, replacing the old pre-Context numeric
+NotSent fallback. Existing owners remain intact; a rejected new command ID can
+be reused later. Post-release read Network/Timeout behavior retains its existing
+NotSent declaration. No retry, payload or host transport contract changes.

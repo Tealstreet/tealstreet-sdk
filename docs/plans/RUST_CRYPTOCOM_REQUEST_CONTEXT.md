@@ -278,3 +278,12 @@ all prior five lifecycle controls and every native depth assertion unchanged.
 Then prune only the now-empty depth_query.rs inventory map, making Crypto totals
 30 occurrences/27 entries (35/31 at the original plan pin). Original raw budget,
 public route/no-retry and read transport/expiry behavior remain unchanged.
+
+Canonical-entry implementation: the two separately committed controls at
+`c307c1f1c01` both failed on the old pre-Context NotSent fallback. The adapter now
+returns on either shared command-entry error without a numeric finalizer, and
+its helper/caller carry no numeric command argument. The last depth_query.rs
+manifest entry is removed; Crypto totals30 occurrences/27 entries. Independent
+source/adversarial, caller and full-map reviews are clean, architecture No.
+Scoped fmt, strict all-target Clippy and both ratchets (13 controls) pass; full
+native suites and new-head CI remain the final proof for the dependency change.

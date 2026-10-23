@@ -855,10 +855,8 @@ impl Venue for Cryptocom {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
-            Command::FetchOrderBook {
-                command, symbol, ..
-            } => {
-                self.fetch_book(cx, command, &symbol);
+            Command::FetchOrderBook { symbol, .. } => {
+                self.fetch_book(cx, &symbol);
             }
             Command::SubscribeOrderBook { symbol } => {
                 let state = self
