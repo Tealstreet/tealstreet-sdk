@@ -93,7 +93,7 @@ single exact Capacity failure instead of bypassing admission. Label and commit
 those compiling assertion REDs separately before production. No ignored tests,
 renamed bindings, deliberately reselecting fixtures or missing-API RED claims.
 
-Controls pin native errors and ordering with free capacity, no HTTP/provider/
+Controls pin native errors and ordering with free capacity, no HTTP/signing-provider/
 timer/Store changes, recovery after releasing fixture capacity, unrelated-owner
 completion, command-ID reuse and valid private/public request wire fallthrough.
 Keep truthful Read-vs-Mutation denial outcomes (Read None, Mutation NotSent).
@@ -110,3 +110,10 @@ window. Bitrue's three refusals follow in their own small draft.
 Architecture gate: no per-venue cross-cutting fix. These call existing shared
 command admission and typed completion; no new shared mechanism is implemented
 inside a venue. The separate no-I/O success gap stays with the core owner.
+
+Plan review refinement: Spot placement construction can consume UUID identity
+entropy before credentials or a later build failure. Preserve those draws and
+credential/error precedence; only HTTP and signing-provider work must be absent.
+Pin supplied/generated clientOid and later batch failure separately. The native
+guard policies must be forwarded by the genuine Engine Probe. Three independent
+plan/source/caller/full-map reviews are CLEAR at8fb8e5b0453.
