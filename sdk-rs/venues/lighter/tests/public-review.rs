@@ -77,7 +77,8 @@ fn subscribe(e: &mut Engine<Lighter>) -> HttpRequest {
             symbol: "ETH".into(),
         }),
     );
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(e, 1_000.0)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -140,8 +141,8 @@ fn malformed_success_depth_does_not_restore_a_stale_book() {
         );
         e.drain_actions().for_each(drop);
         e.handle(100_000.0, Event::TimerFired { timer: poll });
-        let request = e
-            .drain_actions()
+        let request = safe_cex_engine::test_support::prepared_actions(&mut e, 100_000.0)
+            .into_iter()
             .find_map(|a| {
                 if let Action::Http(r) = a {
                     r.url.contains("orderBookOrders").then_some(r)
@@ -184,8 +185,8 @@ fn gap_invalidates_rest_request_started_before_the_gap() {
     );
     e.drain_actions().for_each(drop);
     e.handle(100_000.0, Event::TimerFired { timer: poll });
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 100_000.0)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 r.url.contains("orderBookOrders").then_some(r)
@@ -259,7 +260,8 @@ fn prior_subscription_depth_failure_cannot_release_the_new_request() {
     );
     e.handle(5_000.0, Event::TimerFired { timer: poll });
     assert!(
-        !e.drain_actions()
+        !safe_cex_engine::test_support::prepared_actions(&mut e, 5_000.0)
+            .into_iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("orderBookOrders")))
     );
 }
