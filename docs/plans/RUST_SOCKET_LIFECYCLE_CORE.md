@@ -855,3 +855,35 @@ pin Native/default behavior, no-classifier native delivery, invalid raw time,
 exact idle expiry and retired ingress. Contradictory None policies refuse before
 registration. This is native/source verification only; remaining Bitunix CPU is
 still a real blocker until fresh CI measurement passes.
+
+### Phase E — one current-socket lookup per fresh admission
+
+The unchanged03a single Bitunix retry remains a real CPU failure (200.936ms
+Rust,193.727ms TS,174.3543ms target); no additional retry is allowed. Static
+hot-path audit finds each Driver ingress looks up the exact current physical
+epoch for fresh time/expiry validation, then Lifecycle.admit repeats the same
+bounded-index lookup immediately. Native control correctly re-enters ingress,
+so an ordinary text event repeats four map lookups even with no intervening
+socket mutation. Keep both fresh ingress/control admission checks and every
+Supervisor expiry/time check; remove only the duplicate lookup inside each.
+
+Add a crate-private Lifecycle.admit_checked(socket, ingress, check) boundary.
+It resolves one exact current epoch, invokes a synchronous FnOnce(Epoch) checked
+fresh raw-time/expiry query from the Driver's immutable runtimes, then retains
+the exact existing phase/expiry/retirement order. Invalid time still denies;
+unknown/retired sockets never invoke the query. Driver supplies the existing
+TimeBounds.valid and Supervisor.expired at the same cx.now. There is no cached
+clock/admission token, new permission, venue policy or public API. The existing
+static-expiry test helper can remain test-only and delegate to this boundary.
+
+First commit assertion-RED controls with test-only lookup accounting: current
+message admission and the independent fresh control boundary each perform one
+index query, rather than two. Pin accepted delivery/idle receipt, exact expiry,
+invalid raw time, retired socket refusal and repeated-generation behavior.
+Keep native control revalidation, all OKX/Bitunix wire/auth tests and SafeIDs
+fatal/HTTP-delivery isolation tests. Production changes are confined to the
+shared socket driver/lifecycle; no venue, Engine HTTP, allocator, host, harness,
+budget or timing-threshold edit. Review the concrete API/order before source,
+run focused four-crate native/strict checks and independent source reviews,
+then measure the resulting exact head in CI. A reduced lookup count is not a
+CPU-pass claim.
