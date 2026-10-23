@@ -1235,7 +1235,8 @@ impl BybitLinear {
     /// Reconcile an uncertain Hyro write with a fresh atomic snapshot; reads
     /// already out predate the write, so they are abandoned, not joined.
     pub(crate) fn reconcile_hyro_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !self.account.authed {
+        // Before the subscribe ack, its own snapshot follows and reconciles.
+        if !self.account.authed || self.account.handshake.is_some() {
             return;
         }
         self.drop_account_reads(cx);

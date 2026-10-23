@@ -116,6 +116,7 @@ fn call_bound<'a>(after_refusal: &'a [StepBound<'a>]) -> CallBound<'a> {
 
 pub(crate) const HYRO_RECONNECTING: &str =
     "HyroTrader account is reconnecting; wait for private state reconciliation";
+const HYRO_RECOVERING: &str = "HyroTrader private state is recovering";
 
 /// Bybit names its own clock in a recv-window refusal; it corrects ours.
 pub(crate) fn server_time(message: &str) -> Option<f64> {
@@ -555,9 +556,9 @@ impl BybitLinear {
             );
             return;
         };
-        // A Hyro write waits for reconciled private state, as at entry.
+        // A later Hyro leg waits for reconciled private state (legacy text).
         if !self.private_ready() {
-            let _ = cx.fail_plan(&run.plan, not_sent(HYRO_RECONNECTING));
+            let _ = cx.fail_plan(&run.plan, not_sent(HYRO_RECOVERING));
             return;
         }
         self.note_hyro_write();
