@@ -14,6 +14,9 @@ mod independent_plan_calls {
 
     struct Batch {
         independent: bool,
+        physical: bool,
+        physical_retirements: usize,
+        execution: Option<crate::engine::ExecutionHandle>,
         settle: bool,
         read: bool,
         overflow: bool,
@@ -28,6 +31,9 @@ mod independent_plan_calls {
         fn new(independent: bool, settle: bool) -> Self {
             Self {
                 independent,
+                physical: false,
+                physical_retirements: 0,
+                execution: None,
                 settle,
                 read: false,
                 overflow: false,
@@ -61,11 +67,28 @@ mod independent_plan_calls {
     impl Venue for Batch {
         type Pending = Context;
         fn start(&mut self, _: &mut Cx<'_, Context>) {}
-        fn on_command(&mut self, cx: &mut Cx<'_, Context>, _: Command) {
+        fn on_command(&mut self, cx: &mut Cx<'_, Context>, command: Command) {
             let credential = (!self.read).then(|| crate::request_context::Credential {
                 slot: CredentialSlot::Primary,
                 reference: crate::signing::KeyRef("fixture".into()),
             });
+            if self.physical && matches!(command, Command::PlaceOrders { command: 8, .. }) {
+                let root = cx
+                    .admit_http_command(Policy {
+                        operation: Operation::Mutation,
+                        credential,
+                        timeout_ms: 200,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    })
+                    .unwrap();
+                assert!(matches!(
+                    cx.join_execution(self.execution.as_ref().unwrap(), &root, "independent")
+                        .unwrap(),
+                    crate::engine::Joined::Live(_)
+                ));
+                return;
+            }
             let preflight = cx
                 .begin_preflight(PreflightPolicy {
                     purpose: if self.read {
@@ -96,21 +119,34 @@ mod independent_plan_calls {
             let ids = cx.io.next_id;
             let storage = cx.io.request_contexts.plan_context_storage();
             let action_count = cx.io.actions.len();
-            let admitted = cx.admit_plan(
-                &preflight,
-                &steps,
-                PlanPolicy {
-                    independent_calls: self.independent,
-                    operation: if self.read {
-                        Operation::Read
-                    } else {
-                        Operation::Mutation
-                    },
-                    credential,
-                    pacing: None,
-                    retry: RetryPolicy::Never,
+            let policy = PlanPolicy {
+                independent_calls: self.independent,
+                operation: if self.read {
+                    Operation::Read
+                } else {
+                    Operation::Mutation
                 },
-            );
+                credential,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            };
+            let admitted = if self.physical {
+                cx.begin_planned_execution(
+                    &preflight,
+                    &steps,
+                    policy,
+                    crate::engine::Window::UntilTerminal,
+                    "independent",
+                )
+                .map(|(plan, execution, founder)| {
+                    assert!(matches!(plan.owner(), Owner::Execution { .. }));
+                    assert!(matches!(founder.owner(), Owner::Command { id: 7, .. }));
+                    self.execution = Some(execution);
+                    plan
+                })
+            } else {
+                cx.admit_plan(&preflight, &steps, policy)
+            };
             if self.read && self.independent {
                 assert_eq!(admitted.unwrap_err(), Error::Invalid);
                 assert_eq!(cx.io.next_id, ids);
@@ -220,8 +256,16 @@ mod independent_plan_calls {
                 assert!(!evidence.order_id(&"x".repeat(1025)));
             }
         }
-        fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {
+        fn on_http_owner_retired(&mut self, retired: &crate::request_context::HttpOwnerRetirement) {
             self.retired += 1;
+            if self.physical
+                && self
+                    .plan
+                    .as_ref()
+                    .is_some_and(|plan| retired.matches_plan(plan))
+            {
+                self.physical_retirements += 1;
+            }
         }
         fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Context>, _: Option<&[String]>) {
             assert!(cx.io.http_delivery.is_none());
@@ -249,7 +293,10 @@ mod independent_plan_calls {
         }
     }
     fn setup(independent: bool, settle: bool) -> (Engine<Batch>, Vec<Action>) {
-        let mut e = crate::test_support::seeded_engine(Batch::new(independent, settle));
+        setup_batch(Batch::new(independent, settle))
+    }
+    fn setup_batch(batch: Batch) -> (Engine<Batch>, Vec<Action>) {
+        let mut e = crate::test_support::seeded_engine(batch);
         e.start(0.);
         e.handle(
             0.,
@@ -324,6 +371,89 @@ mod independent_plan_calls {
                 _ => None,
             })
             .collect()
+    }
+    #[test]
+    fn physical_independent_plan_continues_and_projects_identically_to_both_observers() {
+        for status in [408, 503] {
+            let (mut e, actions) = setup_batch(Batch {
+                physical: true,
+                ..Batch::new(true, true)
+            });
+            e.handle(0., Event::Command(Command::PlaceOrders {
+                command: 8,
+                orders: vec![serde_json::from_str(r#"{"symbol":"BTCUSD","type":"limit","side":"buy","amount":1,"price":1}"#).unwrap()],
+            }));
+            assert!(!e.drain_actions().any(|a| matches!(
+                a,
+                Action::ManagedHttp(_)
+                    | Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
+            )));
+            let first = release(&mut e, &actions, 0.);
+            let actions = response(&mut e, first, status, 1.);
+            assert_eq!(
+                e.venue.callbacks.len(),
+                1,
+                "physical Plan bypassed the independent failure callback"
+            );
+            assert_eq!(e.venue.callbacks[0].outcome, Some(crate::Outcome::Unknown));
+            assert_eq!(
+                e.venue.callbacks[0].kind,
+                Some(if status == 408 {
+                    ErrorKind::Timeout
+                } else {
+                    ErrorKind::VenueUnavailable
+                })
+            );
+            assert!(!actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
+            )));
+            assert_eq!(e.venue.physical_retirements, 0);
+            let second = release(&mut e, &actions, 2.);
+            let actions = response(&mut e, second, 200, 3.);
+            assert_eq!(e.venue.physical_retirements, 1);
+            let terminals = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command, error }) => {
+                        Some((*command, error))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                terminals
+                    .iter()
+                    .map(|(command, _)| *command)
+                    .collect::<Vec<_>>(),
+                [7, 8]
+            );
+            assert_eq!(terminals[0].1, terminals[1].1);
+            assert_eq!(terminals[0].1.outcome, Some(crate::Outcome::Unknown));
+            assert_eq!(
+                terminals[0].1.partial.as_ref().unwrap().order_ids,
+                ["unproven-id", "accepted-id"]
+            );
+            assert_eq!(e.venue.callbacks.len(), 1);
+            assert_eq!(e.venue.responses, 1);
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+            );
+            assert!(e.io.managed_http.is_empty());
+            assert!(e.io.pending.is_empty());
+            for (request, now) in [(first, 4.), (second, 5.)] {
+                let late = response(&mut e, request, 503, now);
+                assert!(!late.iter().any(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
+                )));
+            }
+            assert_eq!(e.venue.callbacks.len(), 1);
+            assert_eq!(e.venue.responses, 1);
+            assert_eq!(e.venue.physical_retirements, 1);
+        }
     }
     #[test]
     fn unproven_independent_leg_settles_then_synchronously_submits_its_sibling() {
@@ -410,7 +540,10 @@ mod independent_plan_calls {
         let first = release(&mut e, &actions, 0.);
         let actions = response(&mut e, first, 408, 1.);
         assert_eq!(e.venue.callbacks.len(), 1);
-        assert_eq!(e.venue.reconciles, 0, "unsealed leg triggered reconciliation");
+        assert_eq!(
+            e.venue.reconciles, 0,
+            "unsealed leg triggered reconciliation"
+        );
         assert!(failures(&actions).is_empty());
         assert_eq!(e.venue.retired, 0);
 
@@ -422,12 +555,24 @@ mod independent_plan_calls {
         assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
         assert_eq!(error.partial.as_ref().unwrap().order_ids, ["unproven-id"]);
         assert_eq!(e.venue.retired, 1);
-        assert_eq!(e.venue.reconciles, 1, "final seal must request reconciliation once");
+        assert_eq!(
+            e.venue.reconciles, 1,
+            "final seal must request reconciliation once"
+        );
 
         assert!(response(&mut e, first, 408, 4.).is_empty());
         assert!(response(&mut e, second, 503, 5.).is_empty());
-        e.handle(6., Event::HttpFailed { request: second, error: "duplicate" });
-        assert!(!e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }))));
+        e.handle(
+            6.,
+            Event::HttpFailed {
+                request: second,
+                error: "duplicate",
+            },
+        );
+        assert!(!e.drain_actions().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+        )));
         assert_eq!(e.venue.callbacks.len(), 2);
         assert_eq!(e.venue.reconciles, 1);
         assert_eq!(e.venue.retired, 1);
@@ -439,10 +584,19 @@ mod independent_plan_calls {
         let plan = e.venue.plan.clone().unwrap();
         assert!(e.io.http_delivery.is_none());
         let mut called = false;
-        Cx { now: 1., store: &mut e.store, io: &mut e.io }
-            .with_independent_plan_failure(&plan,
-                VenueError::new("unowned failure").kind(ErrorKind::VenueUnavailable).outcome(crate::Outcome::Unknown),
-                |_, _| called = true).unwrap();
+        Cx {
+            now: 1.,
+            store: &mut e.store,
+            io: &mut e.io,
+        }
+        .with_independent_plan_failure(
+            &plan,
+            VenueError::new("unowned failure")
+                .kind(ErrorKind::VenueUnavailable)
+                .outcome(crate::Outcome::Unknown),
+            |_, _| called = true,
+        )
+        .unwrap();
         assert!(!called, "unowned delivery borrowed the typed callback");
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert_eq!(failures(&actions).len(), 1);
