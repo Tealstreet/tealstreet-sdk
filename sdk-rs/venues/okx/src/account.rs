@@ -5,9 +5,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{
-    CommandId, Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError, json, num,
-};
+use safe_cex_engine::{CommandId, Cx, ErrorKind, Fill, Response, TimerId, VenueError, json, num};
 use std::collections::{HashMap, HashSet};
 
 pub const PRIVATE: usize = 1;
@@ -256,23 +254,6 @@ impl Okx {
                 version,
             }),
         );
-    }
-
-    pub(crate) fn get(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        path: &str,
-        private: bool,
-        pending: Pending,
-    ) {
-        let request = cx.request(
-            Method::Get,
-            format!("{}{path}", self.rest()),
-            self.headers(Method::Get),
-            None,
-            pending,
-        );
-        self.sign_request(cx, request, Method::Get, path, private, false);
     }
 
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {

@@ -20,7 +20,7 @@ pub struct HistoryState {
 
 pub struct Request {
     lookup: Option<String>,
-    command: CommandId,
+    pub(crate) command: CommandId,
     endpoint: &'static str,
     symbol: Option<String>,
     instrument: Option<String>,
@@ -1058,14 +1058,6 @@ impl Okx {
         r.after = r.oldest.take();
         let timer = cx.set_timer(100.0);
         self.history.delayed.push((timer, r));
-    }
-
-    pub(crate) fn history_sign_failed(
-        cx: &mut Cx<'_, Pending>,
-        request: Request,
-        error: safe_cex_engine::VenueError,
-    ) {
-        cx.fail(request.command, error);
     }
 
     pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {

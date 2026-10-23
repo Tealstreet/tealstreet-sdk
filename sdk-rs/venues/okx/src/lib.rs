@@ -386,6 +386,23 @@ impl Okx {
         );
     }
 
+    pub(crate) fn get(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        private: bool,
+        pending: Pending,
+    ) {
+        let request = cx.request(
+            Method::Get,
+            format!("{}{path}", self.rest()),
+            self.headers(Method::Get),
+            None,
+            pending,
+        );
+        self.sign_request(cx, request, Method::Get, path, private, false);
+    }
+
     fn list(&self, cx: &mut Cx<'_, Pending>, path: &str, private: bool, pending: Pending) {
         let headers = self.headers(Method::Get);
         let request = cx.request_streamed(
@@ -1382,9 +1399,9 @@ impl Venue for Okx {
     ) {
         match pending {
             Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
-            Pending::History(request) => Self::history_sign_failed(cx, request, error),
             Pending::Closed(request) => Self::closed_sign_failed(cx, request, error),
             Pending::Account(account::Request::Leverage { command, .. })
+            | Pending::History(history::Request { command, .. })
             | Pending::Candles { command, .. } => cx.fail(command, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
