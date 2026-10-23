@@ -2191,3 +2191,20 @@ bare/Volta yarn, npx or account-policy. No local release WASM/full replay/timing
 sweeps. Source and adversarial/caller review precede a draft, caller changes stay
 in the same PR, actual #1784 build input is a final-proof prerequisite, and the
 existing landing queue/announced separate guard and merge rules remain.
+
+
+MEXC local implementation receipt: plan `3a6257c19df` precedes regression-only
+`94bceed7a93`. Original ten controls pass; the five added original-source tests
+produce four assertion RED groups and one page-cap compatibility pass. Corrected
+source passes all eighteen history controls, including the additional window
+identity/order, concurrent marker and single-request/global-limit cases. The
+focused engine/MEXC run passes 746 native tests. Strict all-target Clippy/fmt,
+bans and the request-context checker plus thirteen checker controls pass.
+
+Source/native-preservation and separate adversarial/test/caller self-audits are
+CLEAN: admission/window tiling, entire request/header builder and native mapping
+blocks are byte-identical to the requested actual base. Full-map comparison
+proves a pure nine-to-six MEXC history prune, every other map/checker unchanged.
+This is local evidence, with independent exact-head review and source-bound
+current CI/final artifact proof tracked in the draft PR. No new native capability
+is implied for the documented Spot/Breakout stubs.

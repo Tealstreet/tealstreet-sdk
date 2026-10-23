@@ -92,7 +92,7 @@ fn paginates_full_pages_and_deduplicates_exact_execution_ids() {
     assert_eq!(out.matches("commissionAsset").count(), 100);
 }
 #[test]
-fn failed_second_page_rejects_instead_of_returning_partial_history() {
+fn failed_second_page_returns_only_accepted_rows_with_owned_warning() {
     let mut e = ready();
     let r = query(&mut e, fills(Some(101)));
     let rows = vec![EXEC; 100].join(",");
@@ -107,7 +107,10 @@ fn failed_second_page_rejects_instead_of_returning_partial_history() {
         &r,
         r#"{"success":false,"code":510,"message":"rate limited","data":[]}"#,
     );
-    assert!(result(&mut e).is_err());
+    // Explicitly supersedes the former whole-read refusal.
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&owned_terminal(&mut e, 99, true).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
 }
 #[test]
 fn funding_nested_pages_filter_time_and_keep_ledger_units() {
@@ -517,4 +520,92 @@ fn owned_terminal_page_thousand_succeeds_and_continuation_cap_stays_strict() {
             assert_eq!(rows.len(), 1);
         }
     }
+}
+
+#[test]
+fn owned_window_identity_retention_and_encounter_order_are_unchanged() {
+    let mut e = ready();
+    let day = 86_400_000.0;
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(1.0),
+            to_ms: Some(100.0 * day),
+            limit: Some(1000),
+        },
+    );
+    let newest = EXEC.replace("1700000000123", "8639999999");
+    response(
+        &mut e,
+        &r,
+        &format!(r#"{{"success":true,"code":0,"data":[{newest}]}}"#),
+    );
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.contains("end_time=864000000") && r.url.contains("page_num=1"));
+    let duplicate = EXEC.replace("1700000000123", "100");
+    let fresh = duplicate.replace("739113577038255616", "739113577038255618");
+    response(
+        &mut e,
+        &r,
+        &format!(r#"{{"success":true,"code":0,"data":[{duplicate},{fresh}]}}"#),
+    );
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&owned_terminal(&mut e, 99, false).unwrap()).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["id"], "739113577038255616");
+    assert_eq!(rows[0]["timestamp"], 8639999.0);
+    assert_eq!(rows[1]["id"], "739113577038255618");
+}
+#[test]
+fn owned_concurrent_query_markers_and_empty_success_are_isolated() {
+    let mut e = ready();
+    let first = query(&mut e, fills(Some(101)));
+    e.handle(
+        1700000000000.0,
+        Event::Command(Command::Query {
+            command: 100,
+            query: fills(Some(101)),
+        }),
+    );
+    let other = requests(&mut e).remove(0);
+    response(&mut e, &first, &full_page());
+    let continuation = requests(&mut e).remove(0);
+    response(&mut e, &other, r#"{"success":true,"code":0,"data":[]}"#);
+    assert_eq!(owned_terminal(&mut e, 100, false).unwrap(), "[]");
+    fail_read(&mut e, &continuation, 0);
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&owned_terminal(&mut e, 99, true).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+}
+#[test]
+fn owned_order_specific_fills_stay_single_page_and_global_limit_is_exact() {
+    let mut e = ready();
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: None,
+            order_id: Some("739113577038255617".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(101),
+        },
+    );
+    assert!(r.url.contains("/deal_details/739113577038255617?"));
+    response(&mut e, &r, &full_page());
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&owned_terminal(&mut e, 99, false).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    let r = query(&mut e, fills(Some(1)));
+    let fresh = EXEC.replace("739113577038255616", "739113577038255618");
+    response(
+        &mut e,
+        &r,
+        &format!(r#"{{"success":true,"code":0,"data":[{EXEC},{fresh}]}}"#),
+    );
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&owned_terminal(&mut e, 99, false).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "739113577038255616");
 }
