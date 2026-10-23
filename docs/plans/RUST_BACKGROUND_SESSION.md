@@ -316,6 +316,31 @@ Contract:
     - **Not yet:** no venue adopts sessions at this checkpoint.
 - **A2. Session prerequisite gate** (above), engine-only, before the Paradex/
   GRVT/BreakoutProp adoptions.
+  - **BingX checkpoint** (stacked on #1832 and landing; claude-4yjlw0
+    confirmed no overlap with #1884):
+    - **Code:** listenKey POST create and PUT keepalive run as repeat-safe
+      session Mutations through a thin `managed::session_write` over the
+      existing managed `queue()`. BingX listen keys expire 60 minutes after
+      their last keepalive, so an extra create or keepalive is harmless. The
+      writes are created with `resent: true`, because a listen key presents
+      only the API key and legacy never resent it on a signature refusal.
+    - **Session lifecycle:** each create and every `invalidate_private` retire
+      the previous session. Native `epoch`/`key_in_flight` recovery stays as
+      it was.
+    - **Ratchet:** `bingx/src/account.rs` goes 17 → 15 (its two listen-key
+      callers).
+    - **Not removed yet:** `Self::request` stays on landing because
+      `fetch_metadata` still uses it; whichever of this and #1884 lands second
+      deletes it. The `lib.rs` STAGING_BOOTSTRAPS `sign_http` allowance stays
+      until codex-cxxyqr's history Completion bridge removes the history
+      callers.
+    - **Declared caller change:** an explicit 20 s raw bound. A hung create
+      now fails, logs and retries after the native 30 s backoff;
+      `a_hung_listen_key_create_fails_at_its_bound_and_retries` fails on the
+      legacy code.
+  - **MEXC:** no session HTTP consumer. Rust MEXC authenticates its private
+    socket with a signed WS `login` (confirmed by codex-ih35js), which is
+    #1771/signer work.
 - **C. Cadence/feed linkage** as above, after #1771.
 - **D. Hand-off.** The API and adoption notes go to codex-9czdjh, codex-zs5e83,
   codex-ih35js and codex-hcmq3f. BingX adoption and deletion of the #1779
