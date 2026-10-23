@@ -12,6 +12,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, PublicFeedPolicy, Response, SocketId,
@@ -68,7 +69,7 @@ pub enum Pending {
         limit: usize,
     },
     Candles {
-        command: CommandId,
+        context: Context,
         limit: usize,
     },
 }
@@ -551,7 +552,9 @@ impl MexcFutures {
                     self.resync(cx, &symbol);
                 }
             }
-            Pending::Candles { command, .. } => cx.fail(command, error),
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::BookQuery { command, .. } => cx.fail(
                 command,
                 VenueError::new(error)
@@ -923,7 +926,7 @@ impl Venue for MexcFutures {
                 }
             }
             Pending::BookQuery { .. } => unreachable!(),
-            Pending::Candles { command, limit } => {
+            Pending::Candles { context, limit } => {
                 let result = Envelope::checked(response.body).and_then(|e| {
                     let k: Klines =
                         serde_json::from_str(e.payload()?).map_err(|e| e.to_string())?;
@@ -953,10 +956,30 @@ impl Venue for MexcFutures {
                     serde_json::to_string(&rows).map_err(|e| e.to_string())
                 });
                 match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                    Ok(data) => {
+                        let _ = cx.done_context(&context, data);
+                    }
+                    Err(error) => {
+                        let _ = cx.fail_context(&context, error);
+                    }
                 };
             }
+        }
+    }
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, error.outcome(Outcome::NotSent));
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -1088,12 +1111,29 @@ impl Venue for MexcFutures {
                 from_ms,
                 to_ms,
             } => {
+                let context = match cx.http_context(
+                    Scope::Command(command),
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                ) {
+                    Ok(context) => context,
+                    Err(reason) => {
+                        let error = reason.venue_error();
+                        cx.fail(command, error);
+                        return;
+                    }
+                };
                 let Some(i) = wire::interval(interval) else {
-                    cx.fail(command, interval.unsupported("MEXC"));
+                    let _ = cx.fail_context(&context, interval.unsupported("MEXC"));
                     return;
                 };
                 let Some(m) = cx.store.market(&symbol) else {
-                    cx.fail(command, "Unknown MEXC market");
+                    let _ = cx.fail_context(&context, "Unknown MEXC market");
                     return;
                 };
                 let mut path = format!("/api/v1/contract/kline/{}?interval={i}", m.id);
@@ -1103,14 +1143,18 @@ impl Venue for MexcFutures {
                 if let Some(t) = to_ms {
                     path.push_str(&format!("&end={}", (t / 1000.0).floor()));
                 }
-                self.get(
-                    cx,
-                    &path,
+                if let Err((pending, error)) = cx.request_managed(
+                    context.clone(),
+                    Method::Get,
+                    format!("{REST}{path}"),
+                    None,
                     Pending::Candles {
-                        command,
+                        context,
                         limit: limit.map_or(usize::MAX, |n| n as usize),
                     },
-                );
+                ) {
+                    self.on_sign_error(cx, pending, error.venue_error());
+                }
             }
             trade => self.trade_command(cx, trade),
         }

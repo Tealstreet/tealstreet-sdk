@@ -200,3 +200,33 @@ test('a synchronous open trap closes the socket returned after fatal cleanup', (
   assert.equal(r.host.sockets.size, 0);
   assert.equal(r.deaths.length, 1);
 });
+
+test('a sticky failed engine is retired before native re-entry', () => {
+  let entries = 0;
+  const r = rig({ failed: () => true, start() { entries++; return JSON.stringify([socketAction]); } });
+  r.host.start();
+  assert.equal(entries, 0);
+  assert.equal(r.host.dead, true);
+  assert.equal(r.deaths.length, 1);
+  assert.equal(r.sockets.length, 0);
+  r.host.start();
+  assert.equal(r.deaths.length, 1);
+});
+
+test('sticky failure on normal native return suppresses that turn of actions', () => {
+  let failed = false;
+  let entries = 0;
+  let armed = 0;
+  const r = rig({
+    failed: () => failed,
+    start() { entries++; failed = true; return JSON.stringify([socketAction, { op: 'setTimer', timer: 9, at: 124 }]); },
+  }, { setTimeout() { armed++; return 1; } });
+  r.host.start();
+  assert.equal(entries, 1);
+  assert.equal(failed, true);
+  assert.equal(armed, 0);
+  assert.equal(r.host.dead, true);
+  assert.equal(r.deaths.length, 1);
+  assert.equal(r.sockets.length, 0);
+  assert.equal(r.timers.size, 0);
+});

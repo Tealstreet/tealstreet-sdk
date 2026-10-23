@@ -12,7 +12,7 @@
 //      | { op: 'accountAuth', credential, scope, outcome }  (opted-in clients only)
 //      levels are debug/info/warn/error; code is stable, message is display data
 // Credentials arrive with 'start' and live only in the object's memory.
-import { EngineHost, socketMessages } from './host.mjs';
+import { EngineDeadError, EngineHost, socketMessages } from './host.mjs';
 import { prepareFetch } from './managed-http.mjs';
 
 /** Header-capable WebSocket constructor for HOW/relay in Workers. */
@@ -170,6 +170,7 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
       // Clients that predate accountAuth may reject an unknown op, so it is opt-in.
       this.accountAuthClients = new Set();
       this.host = undefined;
+      this.hostLifetime = undefined;
       this.starting = undefined;
       this.timers = [];
     }
@@ -189,9 +190,20 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
       this.clients.add(server);
       server.addEventListener('message', (event) => { void this.receive(server, event.data); });
       server.addEventListener('close', () => this.leave(server));
-      if (this.host) server.send(this.host.snapshot());
+      const host = this.host;
+      let terminalSnapshot = false;
+      try {
+        if (host) server.send(host.snapshot());
+      } catch (error) {
+        if (!(error instanceof EngineDeadError) || error !== host?.deadError) {
+          this.leave(server);
+          throw error;
+        }
+        // The matching onDead callback already broadcast to this accepted peer.
+        terminalSnapshot = true;
+      }
       // A client joining after startup failed must not wait on it.
-      if (this.startupFailure) server.send(this.startupFailure);
+      if (this.startupFailure && !terminalSnapshot) server.send(this.startupFailure);
       await this.state.storage.setAlarm(Date.now() + KEEPALIVE_MS);
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -230,6 +242,9 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
         this.startupFailure = undefined;
         let host;
         let engine;
+        // Captured command promises keep their own terminal owner after a new
+        // host is installed. This record owns no engine commands or resources.
+        const lifetime = { deadError: undefined };
         try {
           const { WasmEngine } = await loadEngine(message.venue);
           if (this.starting !== attempt || !this.clients.has(client)) return;
@@ -255,6 +270,20 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
                 this.startupFailure = JSON.stringify({ op: 'startupFailed', detail });
                 this.broadcast(this.startupFailure);
               },
+              onDead: (error) => {
+                if (!(error instanceof EngineDeadError) || error !== host?.deadError) return;
+                lifetime.deadError = error;
+                if (this.host !== host || this.hostLifetime !== lifetime) return;
+                this.timers.forEach(clearInterval);
+                this.timers = [];
+                this.host = undefined;
+                this.hostLifetime = undefined;
+                this.startupFailure = JSON.stringify({ op: 'startupFailed', detail: {
+                  message: 'Exchange engine stopped unexpectedly; recreate the engine',
+                  kind: 'internal', outcome: 'unknown',
+                } });
+                this.broadcast(this.startupFailure);
+              },
               onLog: (level, text) => this.notify(level !== 'info', { op: 'event', level: level === 'warning' ? 'warn' : level, code: 'host.diagnostic', message: text, fields: {} }),
               onEvent: ({ level, code, message, fields }) => {
                 // Command diagnostics are delivered through their owning request below.
@@ -272,14 +301,15 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
           );
           if (this.starting !== attempt || !this.clients.has(client)) { host.dispose(); return; }
           this.host = host;
+          this.hostLifetime = lifetime;
           host.start();
           if (this.host !== host) return;
-          this.timers.push(setInterval(() => this.host?.flush(), flush.store));
-          if (flush.books < flush.store) this.timers.push(setInterval(() => this.host?.flush(true), flush.books));
+          this.timers.push(setInterval(() => { if (this.host === host) host.flush(); }, flush.store));
+          if (flush.books < flush.store) this.timers.push(setInterval(() => { if (this.host === host) host.flush(true); }, flush.books));
         } catch {
           host?.dispose();
           if (!host) { try { engine?.free?.(); } catch { /* Best-effort failed construction cleanup. */ } }
-          if (this.host === host) this.host = undefined;
+          if (this.host === host) { this.host = undefined; this.hostLifetime = undefined; }
           this.reply(client, { op: 'event', level: 'error', code: 'host.rejected', fields: {}, message: 'Engine start failed' });
         } finally {
           if (this.starting === attempt) this.starting = undefined;
@@ -292,6 +322,7 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
           return;
         }
         const host = this.host;
+        const lifetime = this.hostLifetime;
         try {
           const result = await host.command(message.command, {
             onEvent: ({ level, code, message: text, fields }) => {
@@ -304,7 +335,9 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
           });
           if (this.host === host) this.reply(client, { op: 'done', id: message.id, result });
         } catch (error) {
-          if (this.host === host) this.reply(client, { op: 'done', id: message.id, error: String(error?.message ?? error) });
+          const terminal = error instanceof EngineDeadError && lifetime?.deadError === host.deadError
+            && lifetime?.deadError !== undefined && error.cause === lifetime.deadError.cause;
+          if (this.host === host || terminal) this.reply(client, { op: 'done', id: message.id, error: String(error?.message ?? error) });
         }
       }
     }
@@ -331,6 +364,7 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
       this.timers = [];
       this.host?.dispose();
       this.host = undefined;
+      this.hostLifetime = undefined;
       this.startupFailure = undefined;
     }
 

@@ -155,6 +155,15 @@ pub enum Error {
     RetryForbidden,
 }
 
+/// A first-command admission failure, distinct from an issued Context failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandEntryError {
+    /// The engine already published the exact unissued command's failure.
+    Rejected(Error),
+    /// No fresh genuine-command loan; this grants no terminal authority.
+    Revoked,
+}
+
 impl Context {
     pub fn new(
         owner: Owner,
@@ -441,11 +450,11 @@ impl Permit {
 }
 
 fn token_attempt(request: u64, generation: u64) -> Result<Attempt, Error> {
-    if request == 0 || generation == 0 {
+    if request == 0 || request > crate::resource_ids::MAX_RESOURCE_ID || generation == 0 {
         return Err(Error::Invalid);
     }
     Ok(Attempt {
-        request: RequestId(u32::try_from(request).map_err(|_| Error::Invalid)?),
+        request: RequestId(request),
         generation,
     })
 }
