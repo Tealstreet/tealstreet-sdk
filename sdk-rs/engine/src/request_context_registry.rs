@@ -2000,6 +2000,60 @@ mod tests {
     }
 
     #[test]
+    fn only_owners_that_carried_a_credential_count_auth_failures() {
+        use crate::{CredentialSlot, ErrorKind, Notice, VenueError};
+        let credential = || {
+            Some(crate::request_context::Credential {
+                slot: CredentialSlot::Primary,
+                reference: crate::signing::KeyRef("fixture".into()),
+            })
+        };
+        for kind in [
+            ErrorKind::AuthInvalid,
+            ErrorKind::AuthExpired,
+            ErrorKind::AuthPermission,
+        ] {
+            // (root credential, leg credential, counted)
+            for (root, leg, counted) in [
+                (false, None, 0),
+                (true, None, 1),
+                (false, Some(false), 0),
+                (false, Some(true), 1),
+            ] {
+                let mut io = super::super::Io::<()>::default();
+                let mut store = Store::default();
+                let mut cx = Cx {
+                    now: 100.,
+                    store: &mut store,
+                    io: &mut io,
+                };
+                let mut root_policy = policy();
+                root_policy.credential = if root { credential() } else { None };
+                let first = cx.http_context(Scope::Command(7), root_policy).unwrap();
+                let failed = match leg {
+                    Some(signed) => {
+                        let mut leg_policy = policy();
+                        leg_policy.credential = if signed { credential() } else { None };
+                        cx.http_context(Scope::Command(7), leg_policy).unwrap()
+                    }
+                    None => first,
+                };
+                // A credential-free route can still refuse with an auth kind.
+                let error = VenueError::new("route refused").kind(kind).venue_code("route");
+                cx.fail_context(&failed, error).unwrap();
+                assert_eq!(
+                    cx.io.health.auth_failures, counted,
+                    "{kind:?} root={root} leg={leg:?}"
+                );
+                // The typed terminal keeps its metadata either way.
+                assert!(cx.io.actions.iter().any(|action| matches!(action,
+                    crate::Action::Notice(Notice::CommandFailed { command: 7, error })
+                        if error.kind == Some(kind) && error.venue_code.as_deref() == Some("route"))));
+            }
+        }
+    }
+
+    #[test]
     fn engine_issues_unique_legs_and_generations_while_a_command_shares_its_owner() {
         let mut io = super::super::Io::<()>::default();
         let mut store = Store::default();
