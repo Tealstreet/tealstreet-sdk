@@ -2205,3 +2205,17 @@ publishing a staged prefix, partial result or incomplete marker. Native limits,
 filters, dedupe, sort/shape, shared rate pause and lookup/income policy remain.
 This is bounded owner adoption, not a new pager or managed completion seam.
 [Scope and original controls](RUST_OWNED_HISTORY.md).
+
+## MEXC initial Plan credential refusal audit closure
+
+~~The initial plan-list read retries a parsed terminal credential refusal after
+MODE succeeds.~~ Re-verified on actual #1786: the old general statement that a
+refused key fails startup covered MODE but missed the streamed Plan path. Both
+normal Plan envelopes and complete error envelopes without data now reuse the
+existing native refusal helper and engine StartupFailed authority. Terminal
+cleanup discards the initial staged join and prevents late sibling pagination,
+private-login refresh, account poll and asset refresh from resuming account HTTP.
+The existing transient public/private startup policies and post-startup behavior
+remain. This closure does not migrate signing, request ownership or classification.
+Architecture gate: No; existing native facts and shared startup publication are
+reused. Account/history ownership remains separate from #1793.
