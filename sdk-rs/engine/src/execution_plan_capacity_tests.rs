@@ -34,14 +34,11 @@ impl Venue for CreditProbe {
     fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
         if command.completion_id() == Some(99) {
             let preflight = cx
-                .begin_preflight(
-                    99,
-                    PreflightPolicy {
-                        purpose: PreflightPurpose::ReadOnly,
-                        read_credential: None,
-                        write_credential: None,
-                    },
-                )
+                .begin_preflight(PreflightPolicy {
+                    purpose: PreflightPurpose::ReadOnly,
+                    read_credential: None,
+                    write_credential: None,
+                })
                 .unwrap();
             let calls = (0..250)
                 .map(|_| CallBound {

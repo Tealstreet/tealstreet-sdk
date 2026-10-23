@@ -89,12 +89,10 @@ mod planned_calls {
             }
         }
     }
-    impl Venue for Plans {
-        type Pending = Context;
-        fn start(&mut self, cx: &mut Cx<'_, Context>) {
+    impl Plans {
+        fn admit(&mut self, cx: &mut Cx<'_, Context>) {
             let owner = cx
                 .begin_preflight(
-                    7,
                     PreflightPolicy {
                         purpose: if self.write {
                             PreflightPurpose::WriteAfterReads
@@ -164,6 +162,10 @@ mod planned_calls {
                 self.queue(cx)
             }
         }
+    }
+    impl Venue for Plans {
+        type Pending = Context;
+        fn start(&mut self, _: &mut Cx<'_, Context>) {}
         fn on_response(
             &mut self,
             cx: &mut Cx<'_, Context>,
@@ -297,13 +299,24 @@ mod planned_calls {
         fn on_timer(&mut self, _: &mut Cx<'_, Context>, _: TimerId) {
             self.timers += 1
         }
-        fn on_command(&mut self, _: &mut Cx<'_, Context>, _: Command) {}
+        fn on_command(&mut self, cx: &mut Cx<'_, Context>, _: Command) { self.admit(cx); }
+        fn on_venue_action(&mut self, cx: &mut Cx<'_, Context>, _: CommandId, _: VenueAction) { self.admit(cx); }
         fn book(&self, _: &str) -> Option<&Book> {
             None
         }
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
         }
+    }
+    fn start(engine: &mut Engine<Plans>, now: f64) {
+        engine.start(now);
+        let command = if engine.venue.write {
+            Command::Venue { command: 7, action: VenueAction::FetchBalanceInfo }
+        } else {
+            Command::FetchCandles { command: 7, symbol: "BTCUSD".into(),
+                interval: Interval::M1, limit: Some(2), from_ms: None, to_ms: None }
+        };
+        engine.handle(now, Event::Command(command));
     }
     fn prepared(actions: &[Action]) -> (Preparation, HttpRequest) {
         actions
@@ -379,7 +392,7 @@ mod planned_calls {
             long: true,
             ..Default::default()
         });
-        e.start(0.);
+        start(&mut e, 0.);
         let mut actions = e.drain_actions().collect::<Vec<_>>();
         let plan = e.venue.plan.clone().unwrap();
         assert_eq!(plan.deadline(), 320_000.);
@@ -416,7 +429,7 @@ mod planned_calls {
             idle: true,
             ..Default::default()
         });
-        e.start(0.);
+        start(&mut e, 0.);
         let actions = e.drain_actions().collect::<Vec<_>>();
         let timer = actions
             .iter()
@@ -441,7 +454,7 @@ mod planned_calls {
             write: true,
             ..Default::default()
         });
-        e.start(0.);
+        start(&mut e, 0.);
         let actions = e.drain_actions().collect::<Vec<_>>();
         let (first, _) = prepared(&actions);
         release(&mut e, first, 0.);
@@ -470,7 +483,7 @@ mod planned_calls {
                 continue_failure,
                 ..Default::default()
             });
-            e.start(0.);
+            start(&mut e, 0.);
             let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
             let timer = e.io.managed_http[&first.attempt().request].timer;
             release(&mut e, first, 0.);
@@ -502,7 +515,7 @@ mod planned_calls {
             wait: 1_000,
             ..Default::default()
         });
-        e.start(0.);
+        start(&mut e, 0.);
         let actions = e.drain_actions().collect::<Vec<_>>();
         let timer = actions
             .iter()
@@ -542,7 +555,7 @@ mod planned_calls {
             wait: 1_000,
             ..Default::default()
         });
-        e.start(0.);
+        start(&mut e, 0.);
         e.drain_actions().for_each(drop);
         let context = Cx {
             now: 0.,
@@ -587,7 +600,7 @@ mod planned_calls {
             timeout: 32,
             ..Default::default()
         });
-        e.start(raw);
+        start(&mut e, raw);
         let actions = e.drain_actions().collect::<Vec<_>>();
         let timer = actions
             .iter()
@@ -618,7 +631,7 @@ mod planned_calls {
                 io: &mut e.io,
             };
             let preflight = cx
-                .begin_preflight(
+                .issue_preflight(
                     7,
                     PreflightPolicy {
                         purpose: PreflightPurpose::WriteAfterReads,
@@ -684,7 +697,7 @@ mod planned_calls {
             io: &mut e.io,
         };
         let preflight = cx
-            .begin_preflight(
+            .issue_preflight(
                 7,
                 PreflightPolicy {
                     purpose: PreflightPurpose::ReadOnly,
@@ -753,7 +766,7 @@ mod planned_calls {
             fallback: true,
             ..Default::default()
         });
-        e.start(0.);
+        start(&mut e, 0.);
         let (parent, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
         release(&mut e, parent, 0.);
         response(&mut e, parent, 1., "replace");
@@ -780,7 +793,7 @@ mod planned_calls {
             io: &mut e.io,
         };
         let preflight = cx
-            .begin_preflight(
+            .issue_preflight(
                 7,
                 PreflightPolicy {
                     purpose: PreflightPurpose::WriteAfterReads,
@@ -809,7 +822,7 @@ mod planned_calls {
             wait: 1_000,
             ..Default::default()
         });
-        e.start(0.);
+        start(&mut e, 0.);
         e.drain_actions().for_each(drop);
         let mut cx = Cx {
             now: 0.,
@@ -817,7 +830,7 @@ mod planned_calls {
             io: &mut e.io,
         };
         let owner = cx
-            .begin_preflight(
+            .issue_preflight(
                 8,
                 PreflightPolicy {
                     purpose: PreflightPurpose::ReadOnly,
@@ -877,7 +890,7 @@ mod planned_calls {
             panic_ready: true,
             ..Default::default()
         });
-        e.start(0.);
+        start(&mut e, 0.);
         let actions = e.drain_actions().collect::<Vec<_>>();
         let timer = actions
             .iter()
@@ -936,7 +949,7 @@ mod planned_calls {
             bad_retry: true,
             ..Default::default()
         });
-        e.start(0.);
+        start(&mut e, 0.);
         let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
         release(&mut e, first, 0.);
         response(&mut e, first, 19_000., "retry");
@@ -955,8 +968,8 @@ mod planned_calls {
             idle: true,
             ..Default::default()
         });
-        first.start(0.);
-        second.start(0.);
+        start(&mut first, 0.);
+        start(&mut second, 0.);
         let a = first.venue.plan.clone().unwrap();
         let b = second.venue.plan.clone().unwrap();
         assert_eq!(a.owner(), b.owner());
@@ -990,7 +1003,7 @@ mod planned_calls {
             io: &mut second.io,
         };
         let next = cx
-            .begin_preflight(
+            .issue_preflight(
                 7,
                 PreflightPolicy {
                     purpose: PreflightPurpose::ReadOnly,
@@ -1010,7 +1023,7 @@ mod planned_calls {
             idle: true,
             ..Default::default()
         });
-        e.start(0.);
+        start(&mut e, 0.);
         let plan = e.venue.plan.clone().unwrap();
         let mut cx = Cx {
             now: 1.,

@@ -26,7 +26,7 @@ struct Probe {
 impl Probe {
     fn retire_cached(&mut self, cx: &mut Cx<'_, ()>) {
         let owner = cx
-            .begin_preflight(7, policy(PreflightPurpose::ReadOnly))
+            .issue_preflight(7, policy(PreflightPurpose::ReadOnly))
             .unwrap();
         self.callback_owner = Some(owner.clone());
         if self.corrupt_queue {
@@ -38,7 +38,7 @@ impl Probe {
         } else {
             cx.done_preflight(&owner, "cached".into()).unwrap();
             assert!(matches!(
-                cx.begin_preflight(7, policy(PreflightPurpose::ReadOnly)),
+                cx.issue_preflight(7, policy(PreflightPurpose::ReadOnly)),
                 Err(Error::State)
             ));
         }
@@ -133,7 +133,7 @@ fn read_policy() -> Policy {
 }
 fn begin(engine: &mut Engine<Probe>, command: CommandId, purpose: PreflightPurpose) -> Preflight {
     cx(engine, 0., |cx| {
-        cx.begin_preflight(command, policy(purpose))
+        cx.issue_preflight(command, policy(purpose))
     })
     .unwrap()
 }
@@ -155,13 +155,13 @@ fn childless_generation_survives_unrelated_pruning_and_generic_completion() {
         cx.done(7, "numeric bypass".into());
         cx.fail(7, "numeric bypass");
         assert!(matches!(
-            cx.begin_preflight(7, policy(PreflightPurpose::ReadOnly)),
+            cx.issue_preflight(7, policy(PreflightPurpose::ReadOnly)),
             Err(Error::State)
         ));
         assert!(cx.validate_http_context(&unrelated).is_ok());
         cx.done_preflight(&owner, "cached".into()).unwrap();
         assert!(matches!(
-            cx.begin_preflight(7, policy(PreflightPurpose::ReadOnly)),
+            cx.issue_preflight(7, policy(PreflightPurpose::ReadOnly)),
             Err(Error::State)
         ));
     });
@@ -223,7 +223,7 @@ fn wrong_issuer_old_generation_and_foreign_delivery_cannot_finish_owner() {
         );
         assert_eq!(cx.fail_preflight(&owner, "borrowed"), Err(Error::Revoked));
         assert!(matches!(
-            cx.begin_preflight(8, policy(PreflightPurpose::ReadOnly)),
+            cx.issue_preflight(8, policy(PreflightPurpose::ReadOnly)),
             Err(Error::Revoked)
         ));
     });
@@ -266,7 +266,7 @@ fn preflight_policy_clock_and_safe_capacity_refuse_before_identity_or_owner_muta
         };
         let ids = engine.io.next_id;
         assert!(matches!(
-            cx(&mut engine, 0., |cx| cx.begin_preflight(7, invalid)),
+            cx(&mut engine, 0., |cx| cx.issue_preflight(7, invalid)),
             Err(Error::Invalid)
         ));
         assert_eq!(engine.io.next_id, ids);
@@ -276,7 +276,7 @@ fn preflight_policy_clock_and_safe_capacity_refuse_before_identity_or_owner_muta
         let ids = engine.io.next_id;
         assert!(matches!(
             cx(&mut engine, now, |cx| cx
-                .begin_preflight(7, policy(PreflightPurpose::ReadOnly))),
+                .issue_preflight(7, policy(PreflightPurpose::ReadOnly))),
             Err(Error::Invalid)
         ));
         assert_eq!(engine.io.next_id, ids);
@@ -287,7 +287,7 @@ fn preflight_policy_clock_and_safe_capacity_refuse_before_identity_or_owner_muta
         reference: crate::signing::KeyRef("".into()),
     });
     assert!(matches!(
-        cx(&mut engine, 0., |cx| cx.begin_preflight(7, invalid)),
+        cx(&mut engine, 0., |cx| cx.issue_preflight(7, invalid)),
         Err(Error::Invalid)
     ));
     engine.io.next_id =
@@ -295,7 +295,7 @@ fn preflight_policy_clock_and_safe_capacity_refuse_before_identity_or_owner_muta
     let ids = engine.io.next_id;
     assert!(matches!(
         cx(&mut engine, 0., |cx| cx
-            .begin_preflight(7, policy(PreflightPurpose::ReadOnly))),
+            .issue_preflight(7, policy(PreflightPurpose::ReadOnly))),
         Err(Error::Capacity)
     ));
     assert_eq!(engine.io.next_id, ids);
@@ -315,7 +315,7 @@ fn reserved_retirement_backing_covers_all_active_owners_without_post_seal_alloca
     let ids = engine.io.next_id;
     assert!(matches!(
         cx(&mut engine, 0., |cx| cx
-            .begin_preflight(999, policy(PreflightPurpose::ReadOnly))),
+            .issue_preflight(999, policy(PreflightPurpose::ReadOnly))),
         Err(Error::Capacity)
     ));
     assert_eq!(engine.io.next_id, ids);
@@ -507,7 +507,7 @@ fn lock_admission_never_relabels_prior_send_or_acquires_read_mutation_intent() {
         engine.io.order_locks.note_write();
         let ids = engine.io.next_id;
         assert!(matches!(
-            cx(&mut engine, 0., |cx| cx.begin_preflight(7, policy(purpose))),
+            cx(&mut engine, 0., |cx| cx.issue_preflight(7, policy(purpose))),
             Err(Error::State)
         ));
         assert_eq!(engine.io.next_id, ids);
@@ -530,14 +530,14 @@ fn lock_admission_never_relabels_prior_send_or_acquires_read_mutation_intent() {
         .unwrap();
     assert!(matches!(
         cx(&mut engine, 0., |cx| cx
-            .begin_preflight(7, policy(PreflightPurpose::ReadOnly))),
+            .issue_preflight(7, policy(PreflightPurpose::ReadOnly))),
         Err(Error::State)
     ));
     let ids = engine.io.next_id;
     let mut invalid = policy(PreflightPurpose::WriteAfterReads);
     invalid.write_credential = None;
     assert!(matches!(
-        cx(&mut engine, 0., |cx| cx.begin_preflight(7, invalid)),
+        cx(&mut engine, 0., |cx| cx.issue_preflight(7, invalid)),
         Err(Error::Invalid)
     ));
     assert_eq!(engine.io.next_id, ids);

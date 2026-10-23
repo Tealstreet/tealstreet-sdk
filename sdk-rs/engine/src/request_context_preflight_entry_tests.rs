@@ -18,11 +18,8 @@ fn read_policy() -> Policy {
         retry: crate::request_context::RetryPolicy::Never,
     }
 }
-// Baseline adapter only: no entry state, authority, cleanup or notice is forged.
-// Replace this call with the public no-ID operation when its signature changes.
 fn initial(cx: &mut Cx<'_, ()>, policy: PreflightPolicy) -> Result<Preflight, CommandEntryError> {
-    cx.begin_preflight(7, policy)
-        .map_err(CommandEntryError::Rejected)
+    cx.begin_preflight(policy)
 }
 #[derive(Default)]
 struct Probe {

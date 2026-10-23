@@ -150,8 +150,23 @@ impl ContextRegistry {
 
 impl<P> Cx<'_, P> {
     /// Retain a command generation while bounded prerequisite reads run. This
-    /// issues no Context, request, root deadline or write permission.
+    /// issues no Context, request, root deadline or write permission. Initial
+    /// admission consumes this genuine command callback's one entry loan.
+    /// Rejected already emitted one failure; Revoked emits no second terminal.
     pub fn begin_preflight(
+        &mut self,
+        policy: PreflightPolicy,
+    ) -> Result<Preflight, crate::request_context::CommandEntryError> {
+        let operation = match policy.purpose {
+            PreflightPurpose::ReadOnly => Operation::Read,
+            PreflightPurpose::WriteAfterReads => Operation::Mutation,
+        };
+        self.with_command_entry(operation, |cx, command| cx.issue_preflight(command, policy))
+    }
+
+    // Private issuer shared with pure engine state fixtures. Public initial
+    // admission always obtains command/generation custody from the callback.
+    pub(in crate::engine) fn issue_preflight(
         &mut self,
         command: CommandId,
         policy: PreflightPolicy,

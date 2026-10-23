@@ -78,9 +78,10 @@ mod preflight_calls {
     }
     impl Venue for Calls {
         type Pending = Context;
-        fn start(&mut self, cx: &mut Cx<'_, Context>) {
+        fn start(&mut self, _: &mut Cx<'_, Context>) {}
+        fn on_command(&mut self, cx: &mut Cx<'_, Context>, _: Command) {
             let p = policy(self.signed);
-            let owner = cx.begin_preflight(7, PreflightPolicy { purpose: PreflightPurpose::ReadOnly,
+            let owner = cx.begin_preflight(PreflightPolicy { purpose: PreflightPurpose::ReadOnly,
                 read_credential: p.credential.clone(), write_credential: None }).unwrap();
             let context = cx.preflight_read_context(&owner, p, terms(self.shared)).unwrap();
             queue(cx, context.clone(), self.signed).unwrap();
@@ -119,7 +120,6 @@ mod preflight_calls {
         fn on_close(&mut self, _: &mut Cx<'_, Context>, _: SocketId, _: u16) {}
         fn on_message(&mut self, _: &mut Cx<'_, Context>, _: SocketId, _: &str) {}
         fn on_timer(&mut self, _: &mut Cx<'_, Context>, _: TimerId) { panic!("physical timer leaked") }
-        fn on_command(&mut self, _: &mut Cx<'_, Context>, _: Command) {}
         fn book(&self, _: &str) -> Option<&Book> { None }
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> { Box::new(std::iter::empty()) }
     }
@@ -136,6 +136,9 @@ mod preflight_calls {
     fn start(probe: Calls) -> (Engine<Calls>, Vec<Action>) {
         let mut engine = crate::test_support::seeded_engine(probe);
         engine.start(0.);
+        engine.handle(0., Event::Command(Command::FetchCandles { command: 7,
+            symbol: "BTCUSD".into(), interval: Interval::M1, limit: Some(2),
+            from_ms: None, to_ms: None }));
         let actions = engine.drain_actions().collect();
         (engine, actions)
     }
@@ -270,7 +273,7 @@ mod preflight_calls {
         for io_short in [true, false] {
             let mut e = crate::test_support::seeded_engine(Calls::default());
             let p = policy(true);
-            let owner = cx(&mut e, 0., |cx| cx.begin_preflight(7, PreflightPolicy {
+            let owner = cx(&mut e, 0., |cx| cx.issue_preflight(7, PreflightPolicy {
                 purpose: PreflightPurpose::ReadOnly, read_credential: p.credential.clone(), write_credential: None,
             })).unwrap();
             if !io_short {
@@ -302,7 +305,7 @@ mod preflight_calls {
     fn ready_call_can_fail_before_queue_and_after_its_window_without_success_or_reset() {
         for now in [1., 50_000.] {
             let mut e = crate::test_support::seeded_engine(Calls::default());
-            let owner = cx(&mut e, 0., |cx| cx.begin_preflight(7, PreflightPolicy {
+            let owner = cx(&mut e, 0., |cx| cx.issue_preflight(7, PreflightPolicy {
                 purpose: PreflightPurpose::ReadOnly, read_credential: None, write_credential: None,
             })).unwrap();
             cx(&mut e, 0., |cx| cx.preflight_read_context(&owner, policy(false), terms(false))).unwrap();
@@ -367,7 +370,7 @@ mod preflight_calls {
       for bad_headers in [false, true] {
         let mut e = crate::test_support::seeded_engine(Calls::default());
         let p = policy(true);
-        let owner = cx(&mut e, 0., |cx| cx.begin_preflight(7, PreflightPolicy {
+        let owner = cx(&mut e, 0., |cx| cx.issue_preflight(7, PreflightPolicy {
             purpose: PreflightPurpose::WriteAfterReads,
             read_credential: p.credential.clone(), write_credential: p.credential.clone(),
         })).unwrap();
