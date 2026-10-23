@@ -88,3 +88,15 @@ No fixture changes: the strict codec accepts a create acknowledgement without
 an `orderLinkId` echo and refuses only a mismatched one. Absent-order answers
 are recognised only by native code (`110001`/`170213`); if Bybit options turn
 out to use another code, it needs a cited row.
+
+## 4b original REDs (`tests/products.rs`)
+
+- Q1 `option_queries_are_managed_command_reads`
+- Q2 `option_expiries_need_command_authority`
+- Q3 `option_seeds_are_managed_background_reads`
+- Q4 `an_option_chain_read_expires_as_a_timeout`
+
+All four fail on unchanged source. Compatibility controls:
+- `products.rs` 211, 271, 484, 823 and 907;
+- the combined-products harness's chain, expiries and Greeks parity.
+
