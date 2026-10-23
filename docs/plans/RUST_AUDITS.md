@@ -2500,3 +2500,14 @@ admission gates staging, identities, page advancement and terminal publication.
 Strict failures discard prefixes; stale/reused owners produce no result/marker.
 Only the obsolete public sender is removed (Paradex56→55, history14→13); all
 private history counts remain. No signing, session, Plan or engine source edit.
+
+## Hyperliquid local lookup custody
+
+The cached-order match and invalid-client-ID/missing-identity returns now consume
+shared genuine Read entry and exact Context terminal authority. The original
+numeric returns passed through invalid clocks and exhausted Context capacity;
+six original admission REDs cover those branches, with native payload/precedence,
+owner isolation, synchronous retirement and unchanged fallthrough controls.
+Only the two exact local completion fingerprints are pruned (Hyperliquid50->48,
+history13->11). Private history/signing and spot REST capabilities stay native.
+Architecture gate: No; existing engine admission and completion choke points.
