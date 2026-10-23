@@ -1206,7 +1206,10 @@ fn an_option_amend_acknowledging_another_order_is_unknown() {
         200,
         r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"some-other-order","orderLinkId":""},"retExtInfo":{},"time":1}"#,
     );
-    assert_eq!(failed(&h, 83).outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(
+        failed(&h, 83).outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
 }
 
 /// O4 (D2): an absent option cancels nothing locally; one fresh read decides.
