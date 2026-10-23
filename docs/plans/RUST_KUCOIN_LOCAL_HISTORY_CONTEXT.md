@@ -40,8 +40,11 @@ in nine files. All other venue/file maps remain incoming verbatim.
 | `funding.rs:138` | `9a60e91368234580b182f6a992676102fae962a3e073ccdc5c5af671782ab1ef` | cx.fail(command, "Invalid KuCoin funding time range"); |
 | `funding.rs:143` | `2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b` | empty result |
 
-The remaining history/funding entries are native request-failure delegates and
-request issuance under existing legacy signed paging; none is hidden or exempted.
+The remaining six history/funding scanner entries are conservative embedded
+macros: five history assertions whose tokens include done or request.url, and
+one funding format! invocation with request.api_symbol. Keep all six exact;
+none is exempted. Native legacy signed_streamed, Completion and paging source
+remains separately held even where the scanner does not count it.
 All other KuCoin inventory groups remain: account3, identity2, lib10,
 secondary_tests10, Spot mod16, Spot trading12, futures trading5. The original
 full venue map and held paths remain in RUST_KUCOIN_REQUEST_CONTEXT.md.
