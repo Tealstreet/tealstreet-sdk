@@ -17,7 +17,7 @@ enum ManagedRecipe {
 pub(super) struct Managed {
     lifecycle: Lifecycle,
     original: HttpRequest,
-    timer: TimerId,
+    pub(super) timer: TimerId,
     response_started: bool,
     signing_attempt: Option<RequestId>,
     recipe: Option<crate::signing_dispatch::Pending>,
@@ -216,6 +216,8 @@ impl<P> Cx<'_, P> {
             timer,
             at_ms: deadline,
         });
+        // A leg in flight owns the execution deadline through its own timer.
+        self.io.rearm_execution_timer();
         self.io
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
@@ -273,10 +275,32 @@ impl<P> Io<P> {
         }
     }
 
+    /// Unsent legs of an execution with no live owner get no send right.
+    pub(super) fn revoke_unsent_execution_legs(&mut self) {
+        let revoked = self
+            .managed_http
+            .iter()
+            .filter(|(_, managed)| {
+                matches!(
+                    managed.lifecycle.context().owner(),
+                    crate::request_context::Owner::Execution { .. }
+                ) && managed.lifecycle.release().is_none()
+                    && !self
+                        .request_contexts
+                        .execution_live(managed.lifecycle.context())
+            })
+            .map(|(request, _)| *request)
+            .collect::<Vec<_>>();
+        for request in revoked {
+            self.discard_managed(request);
+        }
+    }
+
     fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
         self.request_contexts
             .retire_attempt(managed.lifecycle.context());
+        self.rearm_execution_timer();
         self.signing.remove_request(request);
         self.timers.remove(&managed.timer);
         self.actions.push(Action::ClearTimer {
@@ -504,6 +528,7 @@ impl<V: Venue> Engine<V> {
         }
         self.io.request_contexts.exit_delivery(&delivery);
         self.finish_event_scope(now);
+        self.sweep_executions(now);
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
         }
@@ -586,6 +611,9 @@ impl<V: Venue> Engine<V> {
             if let Some(released) = release_flag {
                 *released = true;
             }
+            self.io
+                .request_contexts
+                .execution_leg_released(managed.lifecycle.context());
             managed.recipe = None;
             managed.signing_attempt = None;
             if mutation {
@@ -918,6 +946,7 @@ impl<V: Venue> Engine<V> {
                     &self.store,
                     &mut self.io.actions,
                 );
+                self.io.http_write_reply = Some((response.status, response.headers.to_owned()));
                 self.venue.on_response(
                     &mut Cx {
                         now,
@@ -927,6 +956,7 @@ impl<V: Venue> Engine<V> {
                     pending.value,
                     response,
                 );
+                self.io.http_write_reply = None;
             }
             self.io.http_delivery = previous;
             self.io.request_contexts.exit_delivery(&delivery);
@@ -1142,19 +1172,31 @@ mod tests {
                     "write cannot inherit a prior read fence"
                 );
                 if self.retry_refusal && self.responses == 1 {
-                    cx.http_write_result(
-                        &pending.0,
-                        crate::request_context::WriteResult::Rejected(
-                            VenueError::new("native timestamp refusal").venue_code("10002"),
-                        ),
-                    )
-                    .unwrap();
-                    let context = cx
-                        .http_retry_context(
+                    use crate::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
+                    const TIMESTAMP: CodeTable = CodeTable {
+                        rows: &[Row {
+                            key: Key::Int(10002),
+                            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+                            only: None,
+                        }],
+                        success: &[],
+                        unlisted: Verdict::Unknown(None),
+                        status: &[],
+                    };
+                    let native = Native {
+                        code: NativeCode::Int(10002),
+                        message: "invalid timestamp",
+                    };
+                    let (_, grant) = cx
+                        .http_write_failure(
                             &pending.0,
-                            crate::request_context::RetryEvidence::DefinitiveRefusal,
+                            &TIMESTAMP,
+                            Some(&native),
+                            "native timestamp refusal",
+                            None,
                         )
                         .unwrap();
+                    let context = cx.http_resend_context(&pending.0, grant.unwrap()).unwrap();
                     cx.request_signed_managed(
                         context.clone(),
                         Method::Post,
@@ -1797,6 +1839,8 @@ mod tests {
         } else {
             RetryPolicy::Never
         };
+        // Issued as if dispatched from a placement command.
+        engine.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
         let mut cx = Cx {
             now: at,
             store: &mut engine.store,
@@ -1817,6 +1861,7 @@ mod tests {
                 },
             )
             .unwrap();
+        cx.io.request_contexts.dispatch = None;
         let request = if signed {
             cx.request_signed_managed(
                 context.clone(),

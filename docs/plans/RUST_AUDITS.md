@@ -2068,3 +2068,90 @@ unprepared dispatch, parked/released expiry, stale owner delivery and HTTP429
 side-effect authority. Native mapping/decoding/status/pause policy is retained.
 This closes only this command's lifecycle sites; startup, history, account,
 signing and background subscription repair remain separately inventoried.
+
+## KuCoin Spot discovery authority proof
+
+The unsigned catalogue/ticker seeds retain their original read Context through
+stream staging and publication, retire it on every terminal callback, and use the
+shared static-header preparation seam. No private credential, retry, row codec or
+error-classification policy is duplicated. Exact source inventory remains 84
+occurrences: the original shared streamed helper still serves unmigrated candles,
+so this area justifies no ratchet prune or zero-legacy claim. The complete venue
+inventory and remaining prerequisites are committed in PR #1819.
+
+## MEXC candle initial rejection ownership
+
+Closed: the candle adapter's pre-Context numeric refusal no longer assigns
+NotSent to an unissued read. Genuine engine command-entry admission publishes
+initial rejection once and denies numeric fallback. Original-source RED controls
+cover nonfinite time, capacity, valid ID reuse and preservation of an existing
+parked owner. Other MEXC command families remain separately inventoried.
+
+### MEXC/Phemex/Polymarket bounded reporter ownership (2026-10-23)
+
+These three account consumers use existing engine `RowReports<String>` bounded
+Once instead of local 4096-entry sets. This is a compatibility migration, not a
+new financial defect finding: native messages, severity, labels and rearm sites
+remain authoritative. MEXC keeps its rejection-filtered mapped IDs and shared
+coin/position/order memory. Phemex keeps currency-specific clean rearm and
+leg-ID filtering before symbol-key rearm inside admitted reads. Polymarket keeps
+validated zero/priced holding forgetting before complete-response admission;
+its separate permanent unlisted-asset memory remains unchanged.
+
+Nine new original-GREEN native controls pass with all116 account tests on
+unchanged actual #1780 production (40 MEXC,40 Phemex,36 Polymarket). The sealed
+source/test/log receipt is
+`60396c532d8eb3d220bd3ba74d73578a67d92ba7fd2ef0ae6ee67a2864abba1c`.
+The controls pin namespace/currency isolation, rejected duplicate versus named
+partial recovery, stale-slice no-rearm, and early valid holding recovery despite
+later duplicate invalidation. No product-RED, all-venue closure or private parity
+claim. Remaining queued integrations, current-head CI and authenticated complete
+raw/ordered-gate proof remain required before merge.
+
+
+## Lighter candle request ownership
+
+Command candle reads and subscription REST fallbacks use the existing managed
+HTTP lifecycle. Commands use Context finalizers and the exact read-delivery
+validator; background reads use engine delivery admission plus native
+subscription generation/revision fences against stale candle publication.
+Typed preparation failures retain engine-provided metadata; terminal background
+paths retire their handle before freshness exits and release only their own
+in-flight generation. No venue admission, retry or outcome algorithm is added.
+
+The four removed lexical occurrences shrink Lighter51->47 and its lib10->6.
+One existing numeric failure remains solely when Context issuance itself refuses
+before returning authority; its removal belongs to the shared pre-authority
+failure seam. All other venue maps remain exact. This closes this candle area
+only, not the remaining public/private/history/signing inventory or master gate.
+
+## Paradex independent startup authority
+
+~~Paradex public catalog and ticker seeds bypass managed HTTP authority and can
+remain pending without an engine-owned original deadline.~~ Independent background
+Read Contexts now own preparation, release and each 20-second attempt. Native
+staging commits only on successful validated delivery; refusal, expiry and
+transport failure retire authority before the existing startup Backoff runs.
+Candle fallback, authenticated/account/history and joined startup work remain in
+their previously committed inventory; this closes only public_seed's send site.
+
+## Hyperliquid perps candle Context authority
+
+Perps candles use actual shared command admission, unsigned static-header ingress,
+exact read delivery validation and Context terminals. Native row parsing, body
+geometry and the existing single HTTP status codec remain. Spot candles preserve
+their legacy protocol branch; no signer, retry, deadline or classification core
+is implemented in the adapter. All 52 inventory occurrences (41 fingerprints)
+remain because spot and other paths still use every shared lexical site. This
+runtime area makes no inventory deletion or all-family closure claim.
+
+## BloFin candle entry fallback retirement
+
+The final numeric candle refusal recorded in the earlier BloFin public-read
+audit is removed. Initial admission uses the landed engine command-entry seam;
+shared rejection owns the pre-Context terminal. Candle payloads no longer carry
+a numeric command ID, and physical callbacks complete through their Managed
+Context. The remaining discovery error fallback accepts only Markets/Tickers.
+No venue admission policy or finalizer is introduced. The exact own inventory
+shrinks 24 to23 occurrences (20 to19 hash rows, five to four files); account,
+closed/private history and trading remain tracked with their original owners.

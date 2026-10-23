@@ -41,7 +41,7 @@ impl<V: Venue> Sim<V> {
         sim
     }
     fn collect(&mut self) {
-        for action in self.e.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.e, self.now) {
             match action {
                 Action::Http(r) => {
                     self.public_bullets += usize::from(r.url.ends_with("/bullet-public"));

@@ -661,6 +661,25 @@ pub enum Command {
 }
 
 impl Command {
+    /// The logical intent a write under this command serves. Venue actions
+    /// classify conservatively as placements.
+    pub(crate) fn write_intent(&self) -> crate::classify::Intent {
+        use crate::classify::Intent;
+        match self {
+            Self::PlaceOrders { .. } => Intent::Place,
+            Self::CancelOrders { .. }
+            | Self::CancelOrdersWithSymbols { .. }
+            | Self::CancelSymbolOrders { .. } => Intent::Cancel,
+            Self::AmendOrder { .. } | Self::AmendOrderWithSymbol { .. } => Intent::Amend,
+            Self::SetLeverage { .. }
+            | Self::SetMarginType { .. }
+            | Self::SetPositionMode { .. }
+            | Self::SetStpMode { .. } => Intent::Setting,
+            Self::Venue { .. } => Intent::Place,
+            _ => Intent::Read,
+        }
+    }
+
     pub(crate) fn completion_id(&self) -> Option<CommandId> {
         match self {
             Self::PlaceOrders { command, .. }
@@ -869,6 +888,14 @@ mod request_context_registry;
 
 #[path = "http_lifecycle.rs"]
 mod http_lifecycle;
+
+#[path = "execution_cx.rs"]
+mod execution_cx;
+
+#[cfg(test)]
+#[path = "execution_cx_tests.rs"]
+mod execution_cx_tests;
+pub use execution_cx::{ExecutionHandle, Joined, Window};
 
 /// A delivered response whose bytes the engine cannot hand to a codec. The
 /// venue answered, so this is never transport loss.
@@ -1410,6 +1437,8 @@ struct Io<P> {
     // Typed cause of the HttpFailed being delivered: Network from the host,
     // Timeout when the engine expires a released request at its deadline.
     http_failure_kind: ErrorKind,
+    // Status and headers of the managed write reply being delivered.
+    http_write_reply: Option<(u16, String)>,
     command_entry: Option<command_entry::Entry>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
@@ -1426,6 +1455,8 @@ struct Io<P> {
     order_response_token: Option<u64>,
     actions: Vec<Action>,
     placement_acks: crate::placement_acks::PlacementAcks,
+    /// One engine timer for the earliest execution-group deadline.
+    execution_timer: Option<(TimerId, f64)>,
     public_feed_policy: PublicFeedPolicy,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
@@ -1462,6 +1493,7 @@ impl<P> Default for Io<P> {
             request_contexts: Default::default(),
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
+            http_write_reply: None,
             command_entry: None,
             http_responses: Default::default(),
             http_write_revision: 0,
@@ -1478,6 +1510,7 @@ impl<P> Default for Io<P> {
             order_response_token: None,
             actions: Vec::new(),
             placement_acks: Default::default(),
+            execution_timer: None,
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
             pending: HashMap::new(),
@@ -2132,6 +2165,16 @@ impl<P> Cx<'_, P> {
         result: Result<String, VenueError>,
         authority: Option<&crate::request_context::Context>,
     ) -> Result<(), crate::request_context::Error> {
+        self.finish_command_as(command, result, authority, false)
+    }
+
+    fn finish_command_as(
+        &mut self,
+        command: CommandId,
+        result: Result<String, VenueError>,
+        authority: Option<&crate::request_context::Context>,
+        observer: bool,
+    ) -> Result<(), crate::request_context::Error> {
         if authority.is_none() && !self.io.numeric_entry_completion_allowed(command) {
             return Err(crate::request_context::Error::Revoked);
         }
@@ -2140,12 +2183,16 @@ impl<P> Cx<'_, P> {
             Err(error) => (None, Some(error)),
         };
         let mut write_sealed = false;
-        let result = match self.io.request_contexts.seal(
-            command,
-            self.io.http_delivery.as_ref(),
-            authority,
-            error,
-        ) {
+        let delivery = if observer {
+            None
+        } else {
+            self.io.http_delivery.as_ref()
+        };
+        let result = match self
+            .io
+            .request_contexts
+            .seal_as(command, delivery, authority, error, observer)
+        {
             request_context_registry::Seal::Stale => {
                 return Err(crate::request_context::Error::Revoked);
             }
@@ -2879,10 +2926,23 @@ impl<V: Venue> Engine<V> {
         self.assert_live();
         self.io.dispatch_now = now;
         self.io.http_responses.prune(now);
+        // Expired observers detach before any delivery can project to them.
+        self.sweep_executions(now);
         if self.expire_http_timer(now, &event) {
+            self.sweep_executions(now);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            return;
+        }
+        if let Event::TimerFired { timer } = &event
+            && self
+                .io
+                .execution_timer
+                .is_some_and(|(own, _)| own == *timer)
+        {
+            self.io.execution_timer = None;
+            self.sweep_executions(now);
             return;
         }
         let admitted = self.admit_http_event(now, &event);
@@ -2931,7 +2991,17 @@ impl<V: Venue> Engine<V> {
         }
         if let Some(request) = completed_http {
             self.settle_http_event(request);
+            self.sweep_executions(now);
         }
+    }
+
+    fn sweep_executions(&mut self, now: f64) {
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        cx.sweep_executions();
     }
 
     /// Dispatch held cancellations whose acknowledged ids are now stored, or
@@ -3211,7 +3281,9 @@ impl<V: Venue> Engine<V> {
             }
             Event::Command(Command::Venue { command, action }) => {
                 cx.io.begin_command_entry(Some(command));
+                cx.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
                 self.venue.on_venue_action(&mut cx, command, action);
+                cx.io.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
             Event::Command(Command::FetchAccount { command })
@@ -3291,7 +3363,13 @@ impl<V: Venue> Engine<V> {
                     }
                 }
                 cx.io.begin_command_entry(command.completion_id());
+                // The classifier takes intent from the command, never the venue
+                // (an amend's cancel leg is still an amend).
+                cx.io.request_contexts.dispatch = command
+                    .completion_id()
+                    .map(|id| (id, command.write_intent()));
                 self.venue.on_command(&mut cx, command);
+                cx.io.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
         }

@@ -5,7 +5,7 @@
 use crate::wire::Number;
 use crate::{Pending, Polymarket, sign};
 use safe_cex_engine::Level;
-use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -26,7 +26,6 @@ const MAX_PAGES: usize = 10000;
 // page is incomplete, never permission to replace holdings with a prefix.
 const MAX_POSITION_OFFSET: usize = 10000;
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
-const SKIP_LOG_LIMIT: usize = 4_096;
 
 pub enum Request {
     Time,
@@ -70,7 +69,7 @@ pub(crate) struct Account {
     coverage: HashMap<String, Vec<(f64, HashSet<String>)>>,
     unlisted: HashSet<String>,
     /// Assets (empty for an unidentified row) whose skipped holding was already logged.
-    skip_logged: HashSet<String>,
+    skip_logged: RowReports<String>,
 }
 
 #[derive(Deserialize)]
@@ -644,7 +643,7 @@ impl Polymarket {
                     return;
                 }
                 if row.size.0 == 0.0 {
-                    self.account.skip_logged.remove(row.asset);
+                    self.account.skip_logged.forget(row.asset);
                     return;
                 }
                 let Some(market) = cx.store.market_by_id(row.asset) else {
@@ -719,7 +718,7 @@ impl Polymarket {
                     .store
                     .market_index_by_id(row.asset)
                     .expect("known market");
-                self.account.skip_logged.remove(row.asset);
+                self.account.skip_logged.forget(row.asset);
                 snapshot.holdings.push(PredictionHolding {
                     market: index,
                     redeemable: row.redeemable,
@@ -1312,12 +1311,9 @@ fn log_skip(
     level: Level,
     message: impl Into<String>,
 ) {
-    if account.skip_logged.len() >= SKIP_LOG_LIMIT {
-        account.skip_logged.clear();
-    }
-    if account.skip_logged.insert(asset.to_owned()) {
-        cx.notice(level, code::ROW_SKIPPED, message);
-    }
+    account
+        .skip_logged
+        .report(cx, asset.to_owned(), level, message);
 }
 
 #[cfg(test)]

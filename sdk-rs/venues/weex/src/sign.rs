@@ -1,69 +1,23 @@
 //! WEEX signs the exact bytes sent; callers construct sorted, encoded queries.
-use safe_cex_crypto::{Encoding, hmac_sha256};
+use safe_cex_engine::signing::Identity;
 pub use safe_cex_engine::url::encode;
+use safe_cex_engine::{CredentialSlot, Method};
 
+/// Opaque refs only; trusted setup and the injected provider own the material.
+#[derive(Clone, Debug, Default)]
 pub struct Credentials {
-    pub key: String,
-    pub secret: String,
-    pub passphrase: String,
+    /// A complete private primary identity; absent for public accounts.
+    pub primary: Option<Identity>,
+    pub read: Option<Identity>,
 }
 impl Credentials {
-    fn auth(&self, timestamp: String, payload: String) -> Vec<(&'static str, String)> {
-        vec![
-            ("ACCESS-KEY", self.key.clone()),
-            ("ACCESS-PASSPHRASE", self.passphrase.clone()),
-            ("ACCESS-TIMESTAMP", timestamp),
-            (
-                "ACCESS-SIGN",
-                hmac_sha256(self.secret.as_bytes(), payload.as_bytes(), Encoding::Base64),
-            ),
-            ("Content-Type", "application/json".into()),
-            ("User-Agent", "Tealstreet".into()),
-        ]
-    }
-    pub fn headers(
-        &self,
-        method: &str,
-        path_query: &str,
-        body: &str,
-        now: f64,
-    ) -> Vec<(&'static str, String)> {
-        let timestamp = format!("{:.0}", safe_cex_engine::time::wire_stamp_ms(now));
-        let payload = format!(
-            "{timestamp}{}{path_query}{body}",
-            method.to_ascii_uppercase()
-        );
-        self.auth(timestamp, payload)
-    }
-    pub fn ws_headers(&self, now: f64) -> Vec<(&'static str, String)> {
-        let timestamp = format!("{:.0}", safe_cex_engine::time::wire_stamp_ms(now));
-        let payload = format!("{timestamp}/v3/ws/private");
-        self.auth(timestamp, payload)
+    /// GET reads use the secondary identity when provisioned, even without a
+    /// usable primary; every other method requires the primary.
+    pub fn select(&self, method: Method) -> Option<(&Identity, CredentialSlot)> {
+        match (&self.read, &self.primary) {
+            (Some(read), _) if method == Method::Get => Some((read, CredentialSlot::Secondary)),
+            (_, Some(primary)) => Some((primary, CredentialSlot::Primary)),
+            _ => None,
+        }
     }
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn exact_rest_and_upgrade_payloads() {
-        let c = Credentials {
-            key: "k".into(),
-            secret: "secret".into(),
-            passphrase: "p".into(),
-        };
-        let h = c.headers("get", "/capi/v3/openOrders?limit=100&page=0", "", 1234.9);
-        assert_eq!(h[2].1, "1234");
-        // Fixed vectors generated independently with Python hashlib/hmac.
-        assert_eq!(h[3].1, "bCU4mL/nryWPHh2ijQKaUlRR81jLGrRazQ5ZFQPfR+E=");
-        let h = c.headers("POST", "/capi/v3/order", r#"{"symbol":"BTCUSDT"}"#, 1234.0);
-        assert_eq!(h[3].1, "LGImWmNEu6Q2o2LhDIPtwbUT0PBJLHsWBbY7mB0+0JY=");
-        assert_eq!(
-            c.ws_headers(1234.0)[3].1,
-            "8IL8D6LBPFWJeTejIF/swS90xLfKkMPm++NyP0LDezA="
-        );
-        assert_ne!(c.ws_headers(1234.0)[3].1, c.ws_headers(2234.0)[3].1);
-        assert_eq!(encode("a b/+"), "a%20b%2F%2B");
-    }
-}
-
-safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret, passphrase);
