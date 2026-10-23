@@ -291,3 +291,22 @@ context at first queue and every retry; no caller-supplied replacement pair.
 Architecture gate: shared concern, implemented once in engine. The two existing
 venue ownership copies are removed through coordinated adoption; this seam
 introduces no per-venue cross-cutting policy or signing recipe.
+
+## Executed original controls
+
+On unchanged `a828ede7ebb` production, separate new native test files compile
+and run four controls per venue: **two semantic assertion REDs total and six
+compatibility GREENs**. Both capacity controls observe the real 256-root bound
+and fail on the venue copy replacing exact Capacity/None outcome with generic
+Internal/NotSent. Duplicate pending-command controls already pass in both
+venues; they remain unchanged compatibility controls, not RED evidence. The
+remote fixtures use only opaque refs and real Prepare/provider-result/Bind/Claim;
+secondary credential/signing refs, ordered headers and primary fallback pass.
+They prove native delegated dispatch, not execution of an external signing
+service. No Context, Selection or Cx is fabricated. An initial fixture compile
+attempt named the Sign operation variant incorrectly; it was corrected before
+this receipt and is not counted as a RED. No production or inventory changed.
+
+Overseer provenance disposition: hcmq3f owns trusted issuer/subject/config-
+generation snapshot retirement inside G2 or a separate G2c slice. This helper
+continues to consume existing Context generation only.
