@@ -81,24 +81,25 @@ impl BitunixFutures {
                 .into_iter()
                 .enumerate()
                 .map(|(i, t)| Interest {
-                    key: format!("0:{i}"),
+                    key: format!("0:{i}").into(),
                     wire_args: t.into(),
                 })
                 .chain(self.subscriptions(cx).into_iter().map(|topic| Interest {
-                    key: format!("1:{topic}"),
-                    wire_args: topic,
+                    key: format!("1:{topic}").into(),
+                    wire_args: topic.into(),
                 }))
                 .collect(),
             Feed::Public { channel, range } => cx.store.markets()[range.clone()]
                 .iter()
                 .enumerate()
                 .map(|(i, m)| Interest {
-                    key: format!("{i:08}"),
+                    key: format!("{i:08}").into(),
                     wire_args: serde_json::to_string(&PublicArg {
                         symbol: &m.symbol,
                         ch: channel,
                     })
-                    .expect("native public argument"),
+                    .expect("native public argument")
+                    .into(),
                 })
                 .collect(),
         }
@@ -259,7 +260,7 @@ impl BitunixFutures {
                 for batch in items.chunks(20) {
                     let args = batch
                         .iter()
-                        .map(|i| i.wire_args.as_str())
+                        .map(|i| i.wire_args.as_ref())
                         .collect::<Vec<_>>()
                         .join(",");
                     emit(EncodedBatch {

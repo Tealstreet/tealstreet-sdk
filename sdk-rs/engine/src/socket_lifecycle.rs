@@ -160,13 +160,29 @@ pub enum LifecycleEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Interest {
-    pub key: String,
-    pub wire_args: String,
+    pub key: Arc<str>,
+    pub wire_args: Arc<str>,
+}
+impl Interest {
+    /// Use one immutable allocation when the opaque native argument is its key.
+    pub fn from_wire_args(args: impl Into<Arc<str>>) -> Self {
+        let args = args.into();
+        Self {
+            key: args.clone(),
+            wire_args: args,
+        }
+    }
+    fn canonicalize(mut self) -> Self {
+        if self.key == self.wire_args {
+            self.wire_args = self.key.clone();
+        }
+        self
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EncodedBatch {
     pub text: String,
-    pub covered_keys: Vec<String>,
+    pub covered_keys: Vec<Arc<str>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,8 +244,8 @@ struct QueuedBatch {
 }
 #[derive(Default)]
 struct Interests {
-    desired: BTreeMap<String, Arc<Interest>>,
-    released: BTreeMap<String, Arc<Interest>>,
+    desired: BTreeMap<Arc<str>, Arc<Interest>>,
+    released: BTreeMap<Arc<str>, Arc<Interest>>,
     revision: u64,
     queue: VecDeque<QueuedBatch>,
 }
@@ -256,7 +272,12 @@ impl Interests {
         self.queue
             .iter()
             .map(|b| {
-                b.batch.text.len() + b.batch.covered_keys.iter().map(String::len).sum::<usize>()
+                b.batch.text.len()
+                    + b.batch
+                        .covered_keys
+                        .iter()
+                        .map(|key| key.len())
+                        .sum::<usize>()
             })
             .sum()
     }
@@ -724,7 +745,7 @@ impl Lifecycle {
             if item.key.is_empty()
                 || item.key.len() > 1024
                 || item.wire_args.len() > MAX_FRAME_BYTES
-                || !unique.insert(item.key.as_str())
+                || !unique.insert(item.key.as_ref())
             {
                 return Err(SocketError::InvalidInterest);
             }
@@ -786,6 +807,7 @@ impl Lifecycle {
             InterestInput::Proposed(rows) => rows
                 .into_iter()
                 .map(|i| {
+                    let i = i.canonicalize();
                     let row = f
                         .interests
                         .desired
@@ -800,7 +822,7 @@ impl Lifecycle {
                 rows.into_iter().map(|row| (row.key.clone(), row)).collect()
             }
         };
-        let forced: BTreeSet<_> = repair.iter().collect();
+        let forced: BTreeSet<_> = repair.iter().map(String::as_str).collect();
         if forced.len() != repair.len() || forced.iter().any(|k| !desired.contains_key(*k)) {
             return Err(SocketError::InvalidInterest);
         }
@@ -808,12 +830,14 @@ impl Lifecycle {
             .interests
             .released
             .values()
-            .filter(|i| desired.get(&i.key) != Some(i) || forced.contains(&i.key))
+            .filter(|i| desired.get(&i.key) != Some(i) || forced.contains(i.key.as_ref()))
             .map(|i| i.as_ref().clone())
             .collect();
         let added: Vec<_> = desired
             .values()
-            .filter(|i| f.interests.released.get(&i.key) != Some(i) || forced.contains(&i.key))
+            .filter(|i| {
+                f.interests.released.get(&i.key) != Some(i) || forced.contains(i.key.as_ref())
+            })
             .map(|i| i.as_ref().clone())
             .collect();
         let mut queue = VecDeque::new();
@@ -822,7 +846,7 @@ impl Lifecycle {
             if items.is_empty() {
                 continue;
             }
-            let expected: BTreeSet<_> = items.iter().map(|i| i.key.as_str()).collect();
+            let expected: BTreeSet<_> = items.iter().map(|i| i.key.as_ref()).collect();
             let mut covered = BTreeSet::new();
             let mut failure = None;
             let result = {
@@ -835,7 +859,7 @@ impl Lifecycle {
                             || batch.text.len() > MAX_FRAME_BYTES
                             || batch.covered_keys.is_empty()
                             || batch.covered_keys.iter().any(|key| {
-                                !expected.contains(key.as_str()) || !covered.insert(key.clone())
+                                !expected.contains(key.as_ref()) || !covered.insert(key.clone())
                             })
                         {
                             return Err(SocketError::InvalidCoverage);
@@ -870,7 +894,10 @@ impl Lifecycle {
             if let Some(error) = failure {
                 return Err(error);
             }
-            if covered.iter().map(String::as_str).collect::<BTreeSet<_>>() != expected {
+            // Each covered key was checked against expected and inserted
+            // exactly once. Equal cardinality proves full coverage without
+            // allocating another tree of the same canonical keys.
+            if covered.len() != expected.len() {
                 return Err(SocketError::InvalidCoverage);
             }
         }
@@ -961,37 +988,73 @@ mod tests {
         l.replace_interests(f, vec![interest(key)], |op, rows, emit| {
             encoded_key = rows[0].key.as_ptr() as usize;
             encode(op, rows, emit)
-        }).unwrap();
+        })
+        .unwrap();
         let (map_key, row) = l.feeds[f.0].interests.desired.iter().next().unwrap();
         let desired_key = row.key.as_ptr() as usize;
         let desired_arg = row.wire_args.as_ptr() as usize;
         let desired_map = map_key.as_ptr() as usize;
-        let coverage = l.feeds[f.0].interests.queue.front().unwrap().batch.covered_keys[0].as_ptr() as usize;
+        let coverage = l.feeds[f.0]
+            .interests
+            .queue
+            .front()
+            .unwrap()
+            .batch
+            .covered_keys[0]
+            .as_ptr() as usize;
         assert!(l.release_batch(e, false).is_some());
-        let released_map = l.feeds[f.0].interests.released.keys().next().unwrap().as_ptr() as usize;
-        [desired_key, desired_arg, desired_map, coverage, released_map, encoded_key]
+        let released_map = l.feeds[f.0]
+            .interests
+            .released
+            .keys()
+            .next()
+            .unwrap()
+            .as_ptr() as usize;
+        [
+            desired_key,
+            desired_arg,
+            desired_map,
+            coverage,
+            released_map,
+            encoded_key,
+        ]
     }
 
     #[test]
     fn equal_native_key_and_argument_share_canonical_text_storage() {
         let addresses = retained_text_allocations();
-        assert_eq!(addresses[0], addresses[1], "equal immutable native text must not be retained twice");
+        assert_eq!(
+            addresses[0], addresses[1],
+            "equal immutable native text must not be retained twice"
+        );
     }
     #[test]
     fn desired_and_released_map_keys_share_the_canonical_row_key() {
         let addresses = retained_text_allocations();
-        assert_eq!(addresses[0], addresses[2], "desired map key must not duplicate row text");
-        assert_eq!(addresses[0], addresses[4], "released map key must share the same canonical text");
+        assert_eq!(
+            addresses[0], addresses[2],
+            "desired map key must not duplicate row text"
+        );
+        assert_eq!(
+            addresses[0], addresses[4],
+            "released map key must share the same canonical text"
+        );
     }
     #[test]
     fn queued_coverage_uses_the_canonical_row_key_storage() {
         let addresses = retained_text_allocations();
-        assert_eq!(addresses[0], addresses[3], "queued coverage must retain a handle, not duplicate native text");
+        assert_eq!(
+            addresses[0], addresses[3],
+            "queued coverage must retain a handle, not duplicate native text"
+        );
     }
     #[test]
     fn encoder_scratch_reuses_canonical_interest_text() {
         let addresses = retained_text_allocations();
-        assert_eq!(addresses[0], addresses[5], "transaction scratch must retain a handle, not deep-clone text");
+        assert_eq!(
+            addresses[0], addresses[5],
+            "transaction scratch must retain a handle, not deep-clone text"
+        );
     }
 
     #[test]
@@ -1397,7 +1460,7 @@ mod tests {
             encode,
         )
         .unwrap();
-        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args, "A");
+        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ref(), "A");
         assert_eq!(
             l.feeds[f.0].interests.released["A"].wire_args.as_ptr(),
             pointer
@@ -1541,8 +1604,8 @@ mod tests {
         );
         let excessive = (0..129)
             .map(|n| Interest {
-                key: n.to_string(),
-                wire_args: "x".repeat(MAX_FRAME_BYTES),
+                key: n.to_string().into(),
+                wire_args: "x".repeat(MAX_FRAME_BYTES).into(),
             })
             .collect();
         assert_eq!(
@@ -1637,8 +1700,8 @@ mod tests {
         let revision = l.feeds[f.0].interests.revision;
         let values = (0..129)
             .map(|i| Interest {
-                key: i.to_string(),
-                wire_args: "x".repeat(MAX_FRAME_BYTES),
+                key: i.to_string().into(),
+                wire_args: "x".repeat(MAX_FRAME_BYTES).into(),
             })
             .collect();
         let mut calls = 0;
@@ -1708,8 +1771,8 @@ mod tests {
         let second = l.register(policy(AuthMode::None)).unwrap();
         let items = (0..61)
             .map(|i| Interest {
-                key: i.to_string(),
-                wire_args: "x".repeat(MAX_FRAME_BYTES),
+                key: i.to_string().into(),
+                wire_args: "x".repeat(MAX_FRAME_BYTES).into(),
             })
             .collect();
         l.replace_interests(first, items, |_, items, emit| {
@@ -1722,8 +1785,8 @@ mod tests {
         let mut calls = 0;
         let items = (0..4)
             .map(|i| Interest {
-                key: i.to_string(),
-                wire_args: "x".repeat(MAX_FRAME_BYTES),
+                key: i.to_string().into(),
+                wire_args: "x".repeat(MAX_FRAME_BYTES).into(),
             })
             .collect();
         assert_eq!(

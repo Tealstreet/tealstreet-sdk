@@ -743,3 +743,15 @@ Concrete shared changes, plan and audit before source:
 Architecture gate: shared lifecycle storage and admission lookup are engine choke
 points, consumed by two different native codecs. No venue policy, allocator,
 HTTP release/authority, retry/auth semantics, budget or external wire change.
+
+### Shared text storage checkpoint
+
+Four original assertion-RED allocation controls are GREEN after canonical
+`Arc<str>` sharing across desired/released map keys, native arguments, coverage
+and encoder scratch. Logical byte charges and frame/batch/coverage bounds are
+unchanged; identical key/argument normalization happens only after preflight.
+OKX and Bitunix retain the existing exact wire and ordering assertions. All
+1,384 four-crate all-target tests and strict all-feature/all-target Clippy pass;
+both independent correctness and adversarial reviews are CLEAR. This checkpoint
+makes no measured memory or CPU claim; the indexed lookup phase and fresh CI
+measurements remain required.

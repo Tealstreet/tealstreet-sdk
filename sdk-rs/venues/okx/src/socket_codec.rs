@@ -29,10 +29,7 @@ impl Okx {
         let mut values = Vec::new();
         let mut add = |topic: Topic<'_>| {
             let text = serde_json::to_string(&topic).expect("native topic");
-            values.push(Interest {
-                key: text.clone(),
-                wire_args: text,
-            });
+            values.push(Interest::from_wire_args(text));
         };
         if channel == PUBLIC {
             for name in [
@@ -306,7 +303,7 @@ impl Okx {
             }
             let args = batch
                 .iter()
-                .map(|i| i.wire_args.as_str())
+                .map(|i| i.wire_args.as_ref())
                 .collect::<Vec<_>>()
                 .join(",");
             emit(EncodedBatch {
