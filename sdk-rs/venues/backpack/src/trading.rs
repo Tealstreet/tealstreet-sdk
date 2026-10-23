@@ -1649,10 +1649,9 @@ impl Request {
                     && row.operation == "Ok"
                     && !row.id.trim().is_empty()
                     && rows.iter().filter(|other| other.id == row.id).count() == 1
+                    && !evidence.order_id(&row.id)
                 {
-                    if !evidence.order_id(&row.id) {
-                        break;
-                    }
+                    break;
                 }
             }
         }
