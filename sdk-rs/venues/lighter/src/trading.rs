@@ -1407,3 +1407,67 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 fn uncertain(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
+
+#[cfg(test)]
+mod client_index_parity_tests {
+    use super::*;
+    use safe_cex_engine::test_support::{ProbeVenue, seeded_engine};
+
+    #[test]
+    fn client_index_maximum_is_reserved_once_then_exhaustion_never_wraps() {
+        let mut venue = Lighter::new(crate::Options::default());
+        venue.trading.next_id = MAX_CLIENT_INDEX - 1;
+        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
+            assert_eq!(venue.mint_id(cx), Ok(MAX_CLIENT_INDEX));
+            assert_eq!(
+                venue.mint_id(cx).unwrap_err(),
+                "Lighter client order index namespace exhausted."
+            );
+            assert_eq!(venue.trading.next_id, MAX_CLIENT_INDEX);
+            assert!(venue.mint_id(cx).is_err());
+            assert_eq!(venue.trading.next_id, MAX_CLIENT_INDEX);
+        }));
+        engine.start(1000.);
+        assert!(!engine.drain_actions().any(|action| matches!(
+            action,
+            safe_cex_engine::Action::Http(_) | safe_cex_engine::Action::Sign { .. }
+        )));
+    }
+
+    #[test]
+    fn a_zero_timestamp_and_entropy_candidate_still_reserves_positive_indices() {
+        let entropy = safe_cex_engine::Entropy::new(
+            Box::new(|bytes| {
+                bytes.fill(0);
+                Ok(())
+            }),
+            Box::new(|bytes| {
+                bytes.fill(0);
+                Ok(())
+            }),
+        );
+        let venue = Lighter::new(crate::Options::default());
+        let mut engine = safe_cex_engine::Engine::new(
+            ProbeVenue::new(venue, |venue, cx| {
+                assert_eq!(venue.mint_id(cx), Ok(1));
+                assert_eq!(venue.mint_id(cx), Ok(2));
+            }),
+            Some(entropy),
+        )
+        .unwrap();
+        engine.start(0.);
+    }
+
+    #[test]
+    fn each_reservation_reconsiders_the_current_timestamp_candidate() {
+        let mut venue = Lighter::new(crate::Options::default());
+        venue.trading.next_id = 7;
+        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
+            let first = venue.mint_id(cx).unwrap();
+            assert!((170_000_000_000_000..=170_000_000_000_099).contains(&first));
+            let next = venue.mint_id(cx).unwrap();
+            assert!(next > first && next <= MAX_CLIENT_INDEX);
+        }));
+        engine.start(1_700_000_000_000.);
+    }
+}
