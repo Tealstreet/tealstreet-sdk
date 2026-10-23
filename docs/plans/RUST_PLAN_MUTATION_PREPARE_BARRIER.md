@@ -174,3 +174,19 @@ reprepare only. Classifierdazzy3 cleared projection with required auth-health,
 order-lock, reprepare-budget and pre/post-commit expiry controls. Coreuufub4
 requires the fallible release-admission split and pacing refusal above; these are
 concrete shared source prerequisites, not runtime approval.
+
+## Original-source checkpoint
+
+The unchanged a828 source reproduces both intended assertions through an async
+provider, real Prepare/Bind/Claim and HMAC primitive work: signing the first leg
+releases it while the second waits, and second-provider refusal cannot undo that
+HTTP. The both-succeed compatibility control passes, checking exact bodies,
+remote presentation headers, reverse replies and one total terminal. These are
+engine lifecycle proofs, not family remote cryptographic/signing parity.
+
+The standard prepared_actions helper deliberately refuses parked external
+signing, so this isolated fixture drives the existing public protocol directly.
+Its deterministic prepared resource IDs are checked against Bind/claim tokens.
+The two original REDs stay owned/ignored pending G2b runtime. Classification
+controls for order-lock state, native resend after reprepare, late commit expiry
+and release-hook preparation remain implementation gates, not claimed passing.
