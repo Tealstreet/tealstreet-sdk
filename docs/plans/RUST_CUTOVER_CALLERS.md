@@ -6022,3 +6022,30 @@ the immutable deadline fences ingress before native decoding/publication, even
 if the host delivers its watchdog late. Hosts use the existing socket actions
 and ordinary timer ingress; no new host message or wire format is required.
 Snapshot completion grants no command, HTTP, signing or new send authority.
+
+
+## Phemex whole-family managed socket lifecycle
+
+Phemex public and private sockets use shared feed identity, admission, interest
+release, liveness and reconnect supervision. Public receive-before-decode liveness
+and native subscription/refcount/depth-seed behavior remain intact. Shared and
+Disabled public-feed policies suppress the public transport while allowing a
+configured private socket and its financial publication. Retired, duplicate,
+late-open or idle-expired ingress cannot decode or publish through either feed.
+
+Private login acceptance and accepted native orders snapshot are independent.
+The private15s connect,12.5s PongOnly idle,5s ping and1s-to16s backoff policy is
+shared. A20s snapshot deadline starts at physical connect and remains live after
+login/pongs until the existing validated orders snapshot completes it before
+Store publication. Positions/accounts-only and malformed snapshots do not
+complete that barrier. Accepted revision-conflicted orders snapshots still do,
+while preserving newer financial state as the native reducer requires.
+
+Opening emits only user.auth999. After accepted login, the shared interest batch
+emits aop_p.subscribe1202 before the retained server.ping1201. This deliberately
+replaces the earlier auth,ping,ACK,AOP order; individual native JSON/signature/
+expiry and RPC identities remain exact. Subsequent periodic pings require
+accepted login and do not grant snapshot authority. No venue-owned socket timer,
+epoch map, retry queue or financial predecoder is introduced. REST account polls,
+reconciliation, HTTP/candle/history callbacks, signing and trading reducers keep
+their existing owners. Bitunix retains its separately recorded legacy boundary.

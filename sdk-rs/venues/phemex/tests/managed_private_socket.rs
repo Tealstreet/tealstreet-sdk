@@ -21,12 +21,16 @@ struct Harness {
     timers: HashMap<TimerId, f64>,
     http: Vec<HttpRequest>,
     private: Vec<SocketId>,
+    public: Vec<SocketId>,
     sent: Vec<(SocketId, String)>,
     closed: Vec<SocketId>,
 }
 
 impl Harness {
     fn new() -> Self {
+        Self::with_policy(safe_cex_engine::PublicFeedPolicy::Direct)
+    }
+    fn with_policy(policy: safe_cex_engine::PublicFeedPolicy) -> Self {
         let mut h = Self {
             e: safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
                 key: Some("key".into()),
@@ -37,9 +41,11 @@ impl Harness {
             timers: HashMap::new(),
             http: vec![],
             private: vec![],
+            public: vec![],
             sent: vec![],
             closed: vec![],
         };
+        h.e.set_public_feed_policy(policy).unwrap();
         h.e.start(NOW);
         h.collect();
         h.respond("products", PRODUCTS);
@@ -68,6 +74,7 @@ impl Harness {
                     channel: Some(SocketChannel::Private),
                     ..
                 } => self.private.push(socket),
+                Action::WsConnect { socket, .. } => self.public.push(socket),
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::WsClose { socket } if self.private.contains(&socket) => {
                     self.closed.push(socket)
@@ -383,4 +390,62 @@ fn account_ping_and_aop_require_accepted_login() {
         r#"{"id":1202,"method":"aop_p.subscribe","params":[]}"#
     );
     assert_eq!(sent[2], r#"{"id":1201,"method":"server.ping","params":[]}"#);
+}
+
+#[test]
+fn suppressed_public_modes_keep_private_login_and_financial_publication() {
+    for policy in [
+        safe_cex_engine::PublicFeedPolicy::Shared,
+        safe_cex_engine::PublicFeedPolicy::Disabled,
+    ] {
+        let mut h = Harness::with_policy(policy);
+        assert!(h.public.is_empty());
+        assert_eq!(h.private.len(), 1);
+        h.open();
+        let socket = h.socket();
+        assert_eq!(h.sent_to(socket, "user.auth"), 1);
+        assert_eq!(h.sent_to(socket, "server.ping"), 0);
+        h.message(AUTHED);
+        h.message(&snapshot(1));
+        assert_eq!(h.e.store().order("one").unwrap().price, 69000.);
+        assert!(h.e.store().loaded().orders);
+        assert_eq!(h.sent_to(socket, "aop_p.subscribe"), 1);
+        assert!(h.public.is_empty());
+    }
+}
+
+#[test]
+fn prelogin_financial_snapshot_cannot_grant_ready_or_publish() {
+    let mut h = Harness::new();
+    h.open();
+    h.message(&snapshot(1));
+    assert!(h.e.store().order("one").is_none());
+    assert!(!h.e.store().loaded().orders);
+    h.message(AUTHED);
+    h.message(&snapshot(1));
+    assert_eq!(h.e.store().order("one").unwrap().price, 69000.);
+}
+
+#[test]
+fn retired_private_epoch_cannot_publish_into_a_fresh_snapshot() {
+    let mut h = Harness::new();
+    h.open();
+    h.message(AUTHED);
+    h.message(&snapshot(1));
+    let old = h.socket();
+    h.event(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    h.advance(NOW + 1_000.);
+    assert_ne!(h.socket(), old);
+    h.open();
+    h.message(AUTHED);
+    h.event(Event::WsMessage {
+        socket: old,
+        text: &snapshot(2).replace("69000", "68000"),
+    });
+    assert_eq!(h.e.store().order("one").unwrap().price, 69000.);
+    h.message(&snapshot(2).replace("69000", "70000"));
+    assert_eq!(h.e.store().order("one").unwrap().price, 70000.);
 }

@@ -209,3 +209,22 @@ complete_socket_snapshot. Failure returns without publication. Positions-only,
 accounts-only and rejected snapshots do not call it; accepted revision conflicts
 do, preserving the original safe_snapshot behavior. No financial code/table,
 request builder, signing recipe or REST callback change belongs in this slice.
+
+## Whole-family implementation checkpoint
+
+Production6a03237b0c8 removes the private Supervisor/rawSocket/connected_at and
+uses the reviewed snapshot feed while leaving HTTP/sign/history/trading/wire
+source untouched. Scoped dedicated controls13PASS after the explicitly ruled
+ping-order update. Full native216tests across15targets PASS after d34842a08ea:
+the recurring-ping fixture supplies a genuine accepted ACK, opening-ping control
+asserts zero before ACK/one after, and stable-stream checks compare against the
+known closed-retired count before the current connection. Existing financial
+assertions are unchanged. The first optimistic edit used an incorrect cwd-relative
+path and changed no source; the corrected edit and result are recorded here.
+
+Original accepted-login REDb265d081c07 executes on the same immutable native861462
+archive and fails with one opening ping instead of zero. No compile failure is
+counted as RED. New controls add Shared/Disabled private financial publication,
+prelogin denial with a current accepted positive, and old-epoch denial alongside
+a real new-epoch orders snapshot. Source-review, actual dependency landing,
+strict checks and full CPU/memory/size/replay CI remain separate gates.

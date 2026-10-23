@@ -145,9 +145,6 @@
   "venues/paradex/src/public.rs": {
     "f6f8d25a5c60b29e224eefe904a8f74baeadf4fc57b9921da2dcae54cb152dac": 1
   },
-  "venues/phemex/src/account.rs": {
-    "c42cbb663aa3220ad6b6ccb5c064414482645c5a658b8ed112350d89b70625ff": 1
-  },
   "venues/polymarket/src/account.rs": {
     "fa5d212e681c96ea593cc1d269023ae773a6ae98e350a9c791a8c518bfb8682c": 2
   },
