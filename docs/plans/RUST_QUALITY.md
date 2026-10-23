@@ -576,3 +576,11 @@ query bounds, tail/zero/no-limit results, atomic malformed-column rejection,
 HTTP/native envelope errors, and live versus stale HTTP429 depth/account pauses.
 The original 1000-row no-limit fixture retains its payload/result assertions and
 uses only the shared prepared-actions executor for this command.
+
+## MEXC initial candle admission regressions
+
+Two separately committed original-source RED controls require initial read
+rejection to have no write outcome, no transport/signing or auth evidence, and
+exactly one typed terminal. They prove valid ID reuse after invalid time and
+continued prepare/claim/completion of an existing read after the256-owner limit.
+The nine prior candle lifecycle controls and native fixture assertions remain.

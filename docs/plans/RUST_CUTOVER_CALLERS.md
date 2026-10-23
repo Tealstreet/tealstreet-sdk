@@ -4519,3 +4519,15 @@ bounds/timestamps, OHLCV ordering, all rows when no limit is supplied and tail
 selection for an explicit limit (including zero). Unequal native columns fail
 atomically. A current HTTP429 response still pauses depth and account reads.
 The other MEXC HTTP consumers keep their existing transport paths.
+
+## MEXC candle initial command admission
+
+`FetchCandles` borrows initial HTTP command ownership directly from the engine,
+without passing a numeric command ID to issuance or falling back to a numeric
+terminal. Invalid command time and exhausted owner capacity emit one typed
+InvalidInput/Internal rejection before any Context or transport exists. These
+initial read rejections have no write outcome or credential evidence. A later
+valid invocation may reuse the rejected ID, and capacity refusal preserves all
+existing parked reads. Revoked entry custody grants no adapter completion.
+The existing 20-second public Read policy, no-retry behavior and issued-Context
+transport/expiry error contract remain in force.
