@@ -3,8 +3,8 @@ use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, Socke
 use safe_cex_venue_blofin::{Blofin, Options};
 const INSTRUMENT: &str = r#"{"code":"0","data":[{"instId":"BTC-USDT","instType":"SWAP","contractType":"linear","baseCurrency":"BTC","quoteCurrency":"USDT","state":"live","contractValue":"0.001","minSize":"0.1","lotSize":"0.1","tickSize":"0.1","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"150"}]}"#;
 fn request(engine: &mut Engine<Blofin>) -> RequestId {
-    engine
-        .drain_actions()
+    safe_cex_engine::test_support::prepared_actions(engine, 0.)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r.id)
@@ -35,7 +35,7 @@ fn seeded() -> (Engine<Blofin>, SocketId) {
     engine.start(0.0);
     let id = request(&mut engine);
     reply(&mut engine, id, INSTRUMENT);
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.);
     let socket = actions
         .iter()
         .find_map(|a| {
@@ -200,8 +200,8 @@ fn candles_use_documented_volume_and_request_window() {
             to_ms: None,
         }),
     );
-    let r = e
-        .drain_actions()
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 120_000.)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -398,7 +398,7 @@ fn null_ticker_row_is_reported_without_hiding_other_symbols_or_halting_private_s
     let id = request(&mut engine);
     reply(&mut engine, id, INSTRUMENT);
     // Private startup begins at markets, before the ticker response.
-    let mut actions: Vec<_> = engine.drain_actions().collect();
+    let mut actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.);
     let id = actions
         .iter()
         .find_map(|a| match a {
@@ -413,7 +413,10 @@ fn null_ticker_row_is_reported_without_hiding_other_symbols_or_halting_private_s
     );
     assert_eq!(engine.store().ticker("BTCUSDT").unwrap().last, 60000.0);
     assert!(engine.store().loaded().tickers);
-    actions.extend(engine.drain_actions());
+    actions.extend(safe_cex_engine::test_support::prepared_actions(
+        &mut engine,
+        0.,
+    ));
     assert!(
         actions.iter().any(
             |action| matches!(action, Action::WsConnect{url, ..} if url.ends_with("/private"))
