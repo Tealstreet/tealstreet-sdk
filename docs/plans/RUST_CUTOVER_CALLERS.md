@@ -6212,41 +6212,6 @@ Raising a caller's timeout lengthens an adopting venue's root but never
 renews it. Plan consumers are not capped by the caller wait until the
 separate receipt-cap seam (#1949) lands.
 
-## Caller command wait in the engine (#1945)
-
-The WASM host now adds the effective caller wait to every reply command's
-native envelope as `timeoutMs`. The effective wait is the per-call
-`options.timeoutMs` if given, else the configured `rustCommandTimeoutMs`, and
-it is the same validated number that arms the host's own timer. No-reply
-controls send no field.
-
-- **Receipt stamp.** The engine stamps one absolute deadline per external
-  receipt. Native hosts and envelopes without the field get the SDK default of
-  120000 ms, stamped at receipt. Held and deferred commands keep the receipt
-  they arrived with.
-- **Refusals.** A present but invalid `timeoutMs` (null, non-integer, zero,
-  negative or over 2147483647) is refused at decode. A non-finite clock is
-  refused by `handle_command`, with a `JsError` and no dispatch.
-- **Venue behaviour.** Nothing changes until a venue adopts
-  `Cx::command_wait`.
-
-Two separate events, which callers must not conflate:
-
-- **Caller abandonment.** The host timer rejects the promise with
-  `COMMAND_TIMEOUT`. The engine keeps any in-flight transport, and a late
-  native reply is dropped by the host.
-- **Engine-root expiry.** An adopting venue uses the `Remaining` wait as its
-  original Read root and stops issuing work at that same absolute deadline. A
-  Fresh entry that is already expired ends through
-  `reject_expired_command`: one typed Timeout terminal with zero HTTP, timer or
-  Store effects, `NotSent` for a mutation and no outcome for a Read. After
-  admission, expiry ends through the existing Context or Plan authority and
-  never claims `NotSent`.
-
-Raising a caller's timeout lengthens an adopting venue's root but never
-renews it. Plan consumers are not capped by the caller wait until the
-separate receipt-cap seam (#1949) lands.
-
 ## Opt-in Read Plans retain the caller receipt deadline
 
 `begin_preflight_with_command_wait` opts a Read command into the original caller
@@ -6283,6 +6248,84 @@ The exact GET/query/header bytes and userId codec are preserved. Rare identity
 reads leave live account state unchanged. Network/Timeout metadata now survives
 with the native correlated diagnostic before the single terminal. No history,
 account-poll, trading or socket caller is migrated by this slice.
+
+
+## Shared two-run CPU certification
+
+Every registered replay suite uses the same CPU certification policy. A complete
+public first measurement with only CPU misses below 5% of its existing limits
+requests one separate physical runner. All three CPU objectives must pass the
+arithmetic mean of the two runner-relative normalized ratios. The policy never
+selects the better run or averages memory, correctness or size failures.
+A strict first pass and an existing declared diagnostic result keep their
+ordinary manifest verdict and request no second measurement. Original strict
+reports, diagnostic lists and raw outputs remain unchanged, including FAILs.
+
+The existing `Rust / replay gate (<suite>)` checks certify the decision after
+initial `Rust / replay measurement (<suite>)` jobs. The global planner, shared certifier and final
+checks run even after upstream failure. Each final check requires the successful
+same-run, same-checkout complete output of that shared certifier. The second-run matrix is skipped when
+there is no eligible miss; otherwise it contains exactly the selected suites.
+Consumers of check-rollup metadata must allow that conditional job to be
+skipped, while requiring every final replay check to succeed. Missing, failed,
+retried or ambiguous second evidence fails certification; there is no third
+measurement. A workflow retry cannot add another candidate to the same cohort.
+A separately requested fresh workflow owns independent evidence.
+
+Both measurements use the original sealed source, Node, dependencies, tape,
+compiled JS/WASM and initial loader cache. Runtime or canonical output drift
+fails certification. Private replay workloads and existing diagnostic handling
+keep their strict policy. Build arguments, CPU thresholds and fixtures retain
+their existing contracts. [Policy and controls](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md).
+
+An immutable artifact or completed-log download can recover one TypeError caused
+by UND_ERR_SOCKET. Immutable artifact downloads can also recover one empty HTTP
+200; both causes share exactly two retrieval attempts. Metadata/log empties,
+HTTP refusals, oversized responses and invalid evidence still fail closed.
+Only registered runtime archives use the existing 4 GiB ZIP response bound;
+metadata, logs and ordinary archives retain the 512 MiB response bound. Exact
+size, digest, producer, source, ZIP and restored-runtime checks remain required.
+This retrieval recovery adds no physical measurement and cannot repeat a failed
+second run.
+
+## Engine-owned expiry of caller-wait Read roots (#1945 follow-up)
+
+A venue that admits its original Read root with `Cx::admit_caller_read_root`
+gets a root bounded by the caller's exact receipt deadline. The engine ends
+that root itself at the deadline:
+
+- **Terminal.** The engine emits exactly one strict `CommandFailed` with
+  kind Timeout and no financial outcome.
+- **Nothing published.** Accepted history rows are not published, and no
+  INCOMPLETE marker or native finalizer runs, even when earlier pages were
+  accepted.
+- **Venue.** Outstanding requests are cancelled. Their continuations reach
+  `Venue::read_root_retired`, which runs with no `Cx` and only drops queued
+  work.
+- **Inert afterwards.** Late replies, binds and venue completions through the
+  expired root are inert.
+
+A page timeout while the root is still live keeps the venue's native
+accepted-only partial recovery.
+
+Missing receipts. A genuine command with no receipt of its own (an exhausted
+receipt sequence, a duplicate of a live legacy id, or an unstampable clock)
+is refused once:
+- a Read gets no outcome;
+- a Mutation gets `NotSent`.
+
+No default deadline is ever minted. Callers see a typed failure, not a
+120 s wait.
+
+Adopting venues must complete only through their root and must never use
+numeric `done` or `fail`. A numeric completion after the owner is removed is
+a separate gap that predates this change and is not closed here. Callers can
+distinguish the following:
+
+| Event | Meaning |
+| --- | --- |
+| Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
+| Engine Timeout terminal | The root expired. No further work is issued. |
 
 ## Bitget native dispatch signer checkpoint (draft; hosted prerequisite pending)
 
