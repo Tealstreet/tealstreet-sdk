@@ -208,3 +208,31 @@ The socket scanner removes exactly Hyperliquid's 2 fingerprints/3 occurrences
 and its family root; every other family entry remains exact. Native source,
 strict and preservation review evidence is separate from rebuilt CI's CPU,
 retained-memory, size and replay gates. No native result is a performance claim.
+
+## Review regressions and correction
+
+Request-owner review of `3b261bf21b2` found two concrete issues. The executed
+test-only checkpoint `ae9c1205a64` has 2 assertion REDs and 16 GREENs: mode
+completion loses its spot read after genuine shared interest-count refusal,
+capacity freed and fresh reconnect/handoff; final perps book removal emits bbo
+before l2Book. The spot five-variant final-unsubscribe control passes on that
+same source. Wire fix `8cd6ed75ac7` restores native removed-key ordering and
+passes both ordered-wire controls. Additional RED `ecc147faca5` proves that
+retiring admitted mode work also loses its obligation after a new handoff.
+
+Uufub4 clears an intent-only native mode_refresh_due state with shared recovery,
+not a venue queue/timer/epoch. Fix `6a3f9dda954` preserves it across refused and
+retired handoffs. The native mode state/timer still change synchronously. Matching
+current-feed capacity refusal uses shared retirement/backoff; Ready and ordinary
+open interest changes register fresh shared handoffs for still-due work. The
+validated callback first hands spot work to the existing native read owner
+(including its quota queue), checks native inflight ownership when required,
+and performs native balance publication before clearing intent. A late old wake
+cannot consume the intent while its fresh handoff is pending; duplicate old/new
+wakes cannot issue the read twice. No shared source or signature changes.
+
+All 243 scoped native tests across 17 targets pass, including all 18 socket
+controls; strict all-target/all-feature Clippy, scoped formatting and bans pass.
+The two new zero-frame balance/timer assertions also pass against isolated
+pre-adapter `12cc6044e5f` production in a cold target. Final review and fresh CI
+apply to the corrected head; earlier CI remains historical evidence only.

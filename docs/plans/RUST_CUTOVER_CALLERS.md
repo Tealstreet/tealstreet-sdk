@@ -5795,6 +5795,11 @@ frames compared with the earlier private/HTTP/public opening trace; it promises
 host handoff ordering, neither peer acknowledgement nor a later JavaScript turn.
 Custom hosts must dispatch returned actions in order and deliver timers through
 normal engine ingress. Mode resolution still synchronously clears its own timer.
+Shared subscription capacity refusal reconnects through the native backoff;
+mode-completion intent survives refusal and retirement until a fresh handoff
+transfers its spot refresh to the native read owner. Stale or duplicate wakeups
+cannot consume or repeat that work. Final book unsubscriptions retain native
+l2Book-before-bbo order and the five ordered spot depth variants.
 Refreshes with no private frames (not open, unresolved mode or no private user)
 retain their native behavior instead of waiting for nonexistent convergence.
 
