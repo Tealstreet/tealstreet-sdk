@@ -2719,6 +2719,23 @@ held consumers. Their shared legacy fingerprints are retained. Only the public
 tuple codec's conservative f913fd4f macro occurrence is removed (1F/1O); this is
 not a claim that the shared physical request funnel has migrated.
 
+## Selected managed signed Read composition
+
+Shared admission/selection/queue/refusal composition is additive in engine
+selected_read.rs, with genuine callback and original-generation controls. The
+original BingX/WEEX copies erase capacity denial fields; those two native
+assertion REDs are retained for separate consumer adoption, not marked fixed by
+engine probes. No venue P0, private signer, Plan history or inventory-zero
+claim is closed by this library seam.
+
+## BingX identity selected Read adoption
+
+FetchAccount now consumes actual #1962 rather than the legacy local completion
+and admission-error fallback. Its two identity terminal fingerprints are removed;
+family inventory is 32F/35O at actual 9f405e55403. Original capacity/clock and
+typed Network/Timeout assertions pass alongside native wire/config/codec controls.
+The generic managed helper and all other family callers remain with their owners.
+
 
 ## Shared CPU certification owner
 
