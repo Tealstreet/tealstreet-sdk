@@ -181,7 +181,10 @@ impl OrderLocks {
         ready
     }
 
-    pub fn finish(&mut self, command: CommandId, failed: bool) {
+    /// Returns the symbols this finish newly marks uncertain (an empty symbol
+    /// means every symbol); the engine schedules their reconcile read.
+    pub fn finish(&mut self, command: CommandId, failed: bool) -> Vec<String> {
+        let mut marked = Vec::new();
         if failed
             && let Some((_, scope)) = self
                 .active
@@ -196,8 +199,10 @@ impl OrderLocks {
                     .cloned()
                     .map(|symbol| (symbol, self.epoch)),
             );
+            marked.clone_from(&scope.symbols);
             if scope.symbols.is_empty() {
                 self.uncertain.insert(String::new(), self.epoch);
+                marked.push(String::new());
             }
             for (waiting, failed) in &mut self.waiting {
                 if matches!(waiting, Command::CancelSymbolOrders { symbol, .. }
@@ -208,7 +213,42 @@ impl OrderLocks {
             }
         }
         self.active.retain(|(id, _)| *id != command);
+        marked
     }
+    /// Fence symbols (`None`: every symbol) until a fresh order read clears
+    /// them through `reconciled`: an absent-order answer proved the order is not
+    /// open, not that it was cancelled.
+    pub fn fence(&mut self, symbols: Option<&[String]>) {
+        self.epoch = self.epoch.saturating_add(1);
+        match symbols {
+            Some(symbols) => {
+                for symbol in symbols {
+                    self.uncertain.insert(symbol.clone(), self.epoch);
+                }
+            }
+            None => {
+                self.uncertain.insert(String::new(), self.epoch);
+            }
+        }
+    }
+
+    /// What a reconcile read must cover for this held command: `None` is a
+    /// full read (unrouted IDs or an all-symbol cancel), else its symbols.
+    pub fn reconcile_scope(&self, command: CommandId) -> Option<Option<Vec<String>>> {
+        let (_, scope) = self.active.iter().find(|(id, _)| *id == command)?;
+        let mut symbols = scope.symbols.clone();
+        match &scope.all_symbol {
+            Some(symbol) if symbol.is_empty() => return Some(None),
+            Some(symbol) => symbols.push(symbol.clone()),
+            None => {}
+        }
+        if scope.unknown_symbol || symbols.is_empty() || symbols.iter().any(String::is_empty) {
+            return Some(None);
+        }
+        // The engine de-duplicates when it drains; no sort here (wasm size).
+        Some(Some(symbols))
+    }
+
     pub fn resolved(&mut self, command: CommandId) {
         if let Some((_, scope)) = self
             .active
