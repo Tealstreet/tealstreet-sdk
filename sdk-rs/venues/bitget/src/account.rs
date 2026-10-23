@@ -1058,6 +1058,9 @@ impl BitgetFutures {
         self.account.uta = true;
         self.account.generation += 1;
         self.account.detected = false;
+        // A v2 egress refusal is no evidence about the v3 route chain.
+        self.account.reject_route = false;
+        self.account.egress_refusal = None;
         self.account.positions_in_flight = false;
         self.account.balance_in_flight = false;
         self.account.orders_in_flight = false;

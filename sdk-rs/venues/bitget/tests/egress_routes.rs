@@ -295,3 +295,32 @@ fn other_login_refusals_are_unchanged() {
         );
     }
 }
+
+#[test]
+fn a_pending_route_rejection_never_leaks_onto_the_promoted_uta_socket() {
+    let mut h = Harness::classic();
+    let socket = private(&h);
+    h.event(Event::WsClosed { socket, code: 1006 });
+    let socket = next_private(&mut h);
+    h.event(Event::WsOpened { socket });
+    // The v2 refusal waits out the backoff while the account turns out to be UTA.
+    h.private_message(IP_BOUND);
+    h.respond(
+        "/account/accounts",
+        200,
+        r#"{"code":"40085","msg":"Unified Account mode","data":null}"#,
+    );
+    h.respond(
+        SETTINGS,
+        200,
+        r#"{"code":"00000","data":{"holdMode":"hedge_mode"}}"#,
+    );
+    while !h.sockets.iter().any(|(_, u)| u.contains("/v3/ws/private")) {
+        next_private(&mut h);
+    }
+    let uta = private(&h);
+    assert!(
+        !rejects_route(&h, uta),
+        "the v2 refusal says nothing about v3"
+    );
+}
