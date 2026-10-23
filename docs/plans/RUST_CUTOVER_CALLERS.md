@@ -5695,3 +5695,17 @@ clientOrderLookup disabled, that caller retains its existing non-definitive
 open-orders lookup. Valid public/private history keeps native unsigned/signed
 dispatch, credential selection, rows, page recovery, range budgets and pacing.
 No managed HTTP-history or signer adoption is implied.
+
+### Paradex local history results require genuine Read admission
+
+Public-only Fills, OrderHistory and Income still return exact `[]`; public-only
+OrderByClientId still returns `{"found":false,"definitive":false}`, including
+invalid private query inputs. Private-enabled invalid client IDs and explicit
+invalid history bounds retain their exact native messages and unclassified
+Read errors. Fills without a symbol still returns `[]` after bounds validation,
+before authentication. These local results now require genuine engine command
+Read admission: capacity and invalid clock policy produce one correlated typed
+engine refusal without a financial outcome. Successful admission preserves the
+native decision order and introduces no request, signer, timer, Store mutation
+or incomplete marker. PublicTrades retains its existing managed public path;
+other private history, signing, settings and REST fallthrough remain unchanged.
