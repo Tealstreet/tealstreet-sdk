@@ -120,3 +120,22 @@ The exact own prune removes only the four planned hashes:84->80 occurrences,
 incoming BingX/Lighter/MEXC manifest prunes via genuine current-landing integration.
 The13 ratchet regressions already pass. Final CI follows that integration; no
 merge readiness or zero-legacy claim is implied by these local gates.
+
+## Actual venue-phase integration proof
+
+Productionbf6f3c3387f genuinely integrates landing680eab0e026 at1a03cff60fd.
+Only the four shared docs conflicted: full incoming text is kept first, followed
+by our appendix/index row once verbatim. Independent preservation review is
+CLEAN: exactly eight intended paths differ, all incoming unowned files/prunes
+are preserved, and KuCoin/Binance/engine/crypto/root Cargo blobs exactly match
+the locally tested production. Incoming signer/registry/host feature declarations
+are preserved and will receive fresh full CI; no source-equivalent CI shortcut
+is claimed for this new PR.
+
+Integrated14 native controls, strict scoped Clippy/fmt, bans, current request-context
+checker and all14 current checker regressions PASS. The full575 native/42-target
+run covers the identical runtime/dependency blobs. The previous13-check count
+records the earlier checker snapshot; incoming checker now contains14 tests.
+Source/adversarial, caller/documentation, full-map and integration reviews are
+CLEAN; architecture No. The QUALITY queued-request wording was corrected per
+caller review. CI and merge-train authorization remain required before merge.
