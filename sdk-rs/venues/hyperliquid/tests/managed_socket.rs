@@ -1,7 +1,9 @@
 //! Original-source controls for the whole multiplexed socket boundary.
 mod support;
 
-use safe_cex_engine::{Action, Engine, Event, Response, SocketChannel, SocketId};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, PublicFeedPolicy, Response, SocketChannel, SocketId,
+};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 
 const MIDS: &str = r#"{"channel":"allMids","data":{"mids":{"BTC":"123"}}}"#;
@@ -184,4 +186,171 @@ fn retired_private_frame_cannot_publish() {
     assert_eq!(engine.store().positions()[0].contracts, 2.0);
     assert_eq!(engine.store().setting("BTC-PERP").unwrap().leverage, 10.0);
     assert_eq!(engine.store().balance().used, 20.0);
+}
+
+#[test]
+fn private_socket_keeps_financial_ingress_under_both_non_direct_policies() {
+    for policy in [PublicFeedPolicy::Shared, PublicFeedPolicy::Disabled] {
+        let (mut engine, socket, sent) = support::ready_with_policy("disabled", policy);
+        let topics: Vec<serde_json::Value> = sent
+            .iter()
+            .map(|text| serde_json::from_str(text).unwrap())
+            .collect();
+        assert!(
+            topics
+                .iter()
+                .any(|topic| topic["subscription"]["type"] == "orderUpdates")
+        );
+        assert!(
+            !topics
+                .iter()
+                .any(|topic| topic["subscription"]["type"] == "allMids")
+        );
+        engine.handle(
+            2000.0,
+            Event::WsMessage {
+                socket,
+                text: PRIVATE_STATE,
+            },
+        );
+        assert_eq!(engine.store().positions()[0].contracts, 3.0);
+        assert_eq!(engine.store().balance().used, 30.0);
+    }
+}
+
+#[test]
+fn standalone_spot_keeps_all_mids_and_five_native_depth_variants() {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    engine.start(1000.0);
+    let request = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(support::kind(&request), "spotMetaAndAssetCtxs");
+    support::reply(
+        &mut engine,
+        &request,
+        200,
+        r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"PURR","index":1,"szDecimals":0}],"universe":[{"name":"PURR/USDC","tokens":[1,0],"index":0}]},[{"coin":"PURR/USDC","midPx":"0.2","markPx":"0.2"}]]"#,
+    );
+    let socket = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket, channel, ..
+            } => {
+                assert_eq!(channel, Some(SocketChannel::Public));
+                Some(socket)
+            }
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(1000.0, Event::WsOpened { socket });
+    let sent: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        [r#"{"method":"subscribe","subscription":{"type":"allMids"}}"#]
+    );
+    engine.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    let depths: Vec<serde_json::Value> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => {
+                Some(serde_json::from_str::<serde_json::Value>(&text).unwrap())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(depths.len(), 5);
+    for (depth, figures) in depths.iter().zip([
+        serde_json::Value::Null,
+        2.into(),
+        3.into(),
+        4.into(),
+        5.into(),
+    ]) {
+        assert_eq!(
+            *depth,
+            serde_json::json!({"method":"subscribe", "subscription":{
+                "type":"l2Book", "coin":"PURR/USDC", "nSigFigs":figures
+            }})
+        );
+    }
+}
+
+#[test]
+fn private_reconnect_hands_subscriptions_off_before_account_refresh() {
+    let (mut engine, socket) = support::ready("disabled");
+    engine.drain_actions().for_each(drop);
+    engine.handle(2000.0, Event::WsClosed { socket, code: 1006 });
+    let timer = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(4000.0, Event::TimerFired { timer });
+    let replacement = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket, channel, ..
+            } => {
+                assert_eq!(channel, Some(SocketChannel::Private));
+                Some(socket)
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(replacement, socket);
+    engine.handle(
+        4000.0,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let refresh = actions
+        .iter()
+        .position(|a| matches!(a, Action::Http(_)))
+        .unwrap();
+    let private: Vec<_> = actions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, a)| match a {
+            Action::WsSend { socket, text } => {
+                assert_eq!(*socket, replacement);
+                let value: serde_json::Value = serde_json::from_str(text).unwrap();
+                value["subscription"]["user"].is_string().then_some(index)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        private.len(),
+        9,
+        "seven fixed private and two active assets"
+    );
+    assert!(
+        private.iter().all(|index| *index < refresh),
+        "full-action native handoff order"
+    );
 }

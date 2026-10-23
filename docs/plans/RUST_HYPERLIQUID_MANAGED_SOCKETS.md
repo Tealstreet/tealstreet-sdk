@@ -86,6 +86,21 @@ trace equivalence if all committed public frames precede the later refresh.
 Any additional sequencing authority requires shared-owner review, not a
 venue-local queue. Native HTTP/reducer publication semantics stay unchanged.
 
+Request-owner coupling review permits the complete private-then-public batch
+before the #1943 wakeup and HTTP refresh. Pin the unfiltered returned host
+batches and record the moved public/HTTP ordering in CALLERS. This is not an
+exact cross-transport trace claim. The continuation selects current native
+refresh/inflight/revision state at callback time, never at proposal time.
+
+Only defer when native private subscriptions actually exist. mode_ready must
+still synchronously mark mode_resolved and clear mode_timer, then perform its
+native refresh_spot_holdings/live_balance when no socket is open or no user
+exists. Similarly, opening with unresolved mode still refreshes a known
+private account even though private_subscribe has no frames. Do not park these
+zero-frame obligations behind convergence or a nonexistent epoch. Add original
+working controls for mode before first open, mode while closed and open before
+mode, in addition to the full-action private/public/HTTP trace.
+
 ## Original REDs and working controls
 
 Commit this plan first, then new real-engine tests against unchanged production:
@@ -130,10 +145,16 @@ CALLERS text with the implementation, keeping proof/status in the PR body.
 ## Original-source checkpoint
 
 On unchanged `abc72534026` production, the dedicated managed_socket target
-compiles and runs8 tests:5 genuine assertion REDs and3 working GREENs,
+compiles and runs 8 tests: 5 genuine assertion REDs and 3 working GREENs,
 zero ignored. Duplicate public and private opens replay work; late open
 releases frames; idle-expired allMids changes100 to123; the identical expired
-private state changes contracts2 to3. Live private state and retired private
+private state changes contracts 2 to 3. Live private state and retired private
 state controls distinguish accepted publication from inert old ingress.
 Exact native opening public JSON also passes. No adapter or feature opt-in
 was present for this run; this is not a CPU/memory or full-suite result.
+
+After plain integration of actual `a828ede7ebb`, the Hyperliquid production
+source is still byte-identical. Three additional original working controls
+pass: Shared/Disabled private financial ingress, standalone spot's five exact
+depth variants, and the full-action private reconnect subscription-before-HTTP
+order. The resulting run is 5 assertion REDs and 6 GREENs, zero ignored.
