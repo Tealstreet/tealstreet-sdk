@@ -81,7 +81,7 @@ fn passphrase_venues_refuse_private_accounts_without_one() {
         ),
         (
             &["okx", "okxeu", "okxdemo", "okxeudemo"][..],
-            "OKX requires a passphrase",
+            "Invalid local signer setup",
         ),
     ] {
         for venue in venues {
@@ -728,7 +728,7 @@ fn bitunix_secondary_reads_reach_the_native_signer() {
 
 #[test]
 fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
-    for venue in ["okx", "hyperliquid", "orderly"] {
+    for venue in ["hyperliquid", "orderly"] {
         assert_eq!(
             rejected(
                 venue,
@@ -742,6 +742,10 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
 #[test]
 fn migrated_opaque_refs_require_an_injected_provider_before_construction() {
     for venue in [
+        "okx",
+        "okxeu",
+        "okxdemo",
+        "okxeudemo",
         "bitget",
         "bitgetusdc",
         "bitgetinverse",

@@ -2,9 +2,10 @@
 #![allow(dead_code)]
 mod support;
 
+use crate::support::FixtureOptions as Options;
+use crate::support::*;
 use safe_cex_engine::{Action, Command, Engine, Event, Notice, VenueAction};
-use safe_cex_venue_okx::{Okx, Options};
-use support::*;
+use safe_cex_venue_okx::Okx;
 
 const NOW: f64 = 1_710_000_000_000.0;
 

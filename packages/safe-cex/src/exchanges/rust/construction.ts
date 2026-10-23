@@ -5,7 +5,11 @@ import rules from './construction-rules.json';
 import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex/asterdex.types';
 
 export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'requiredWithPrimaryFallback';
-export type IdentitySetupPolicy = { trimCredential?: boolean; passphrase?: PassphraseSetupPolicy };
+export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
+export type ExtraKeyPolicy = { key: 'zklinkSeed'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
+export type IdentitySetupPolicy = {
+  trimCredential?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
+};
 export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
 export type CredentialPresence = Readonly<{ key: boolean; secret: boolean }>;
 export type RemoteSigningPolicy = Readonly<{
@@ -15,7 +19,7 @@ export type RemoteSigningPolicy = Readonly<{
   protectedHeaders?: readonly string[];
   signatureEncoding?: 'hex' | 'base64';
   passphraseHeader?: string;
-  wire?: Readonly<{ exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot'; requestId?: string }>;
+  wire?: Readonly<{ exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot' | 'okxTimestamp'; requestId?: string }>;
 }>;
 
 type Rule = {

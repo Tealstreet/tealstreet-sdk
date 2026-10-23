@@ -563,12 +563,14 @@ fn required_family_policy_applies_to_raw_json_and_opaque_setup_without_material_
                 signing: KeyRef("primary.signing".into()),
                 passphrase: Some(KeyRef("primary.passphrase".into())),
                 stable_id: None,
+                extra: Default::default(),
             }),
             secondary: Some(Identity {
                 credential: KeyRef("secondary.credential".into()),
                 signing: KeyRef("secondary.signing".into()),
                 passphrase: None,
                 stable_id: None,
+                extra: Default::default(),
             }),
         };
         policy.apply_to_identities(&mut opaque, false).unwrap();
@@ -699,9 +701,9 @@ fn passphrase_only_primary_survives_raw_setup_as_alias_and_defaults_remain_optio
     );
 }
 
-#[cfg(feature = "okx")]
+#[cfg(feature = "bitget")]
 #[test]
-fn required_field_declarations_do_not_enable_unmigrated_okx_injection() {
+fn required_field_declarations_do_not_enable_unmigrated_bitget_injection() {
     struct NeverConstruct;
     impl safe_cex_venues::Visit for NeverConstruct {
         type Output = ();
@@ -710,14 +712,14 @@ fn required_field_declarations_do_not_enable_unmigrated_okx_injection() {
         }
     }
     let (provider, identities) = local_signer_from_json_for(
-        "okx",
+        "bitget",
         r#"{"primary":{"key":"key","secret":"secret","passphrase":"pass"}}"#.into(),
     )
     .unwrap();
     let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
     options.signing = Some(identities);
     let error = safe_cex_venues::build_with_signer(
-        "okx",
+        "bitget",
         options,
         Some(safe_cex_engine::test_support::seeded_entropy(17)),
         Some(provider),

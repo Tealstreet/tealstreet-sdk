@@ -1,10 +1,11 @@
 #![allow(dead_code)]
 mod support;
+use crate::support::FixtureOptions as Options;
+use crate::support::{MARKET, TICKER, envelope};
 use safe_cex_engine::{
     Action, Command, Engine, Event, PublicFeedPolicy, Response, SocketId, TimerId,
 };
-use safe_cex_venue_okx::{Okx, Options};
-use support::{MARKET, TICKER, envelope};
+use safe_cex_venue_okx::Okx;
 
 const LOGIN_OK: &str = r#"{"event":"login","code":"0","msg":""}"#;
 
@@ -20,7 +21,7 @@ struct Harness {
 
 impl Harness {
     fn new(options: Options, policy: PublicFeedPolicy) -> Self {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(options));
+        let mut engine = crate::support::engine(options);
         engine.set_public_feed_policy(policy).unwrap();
         let mut h = Self {
             engine,

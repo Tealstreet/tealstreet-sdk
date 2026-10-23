@@ -792,15 +792,16 @@ impl Okx {
             return;
         };
         if let Some(step) = job.steps.front() {
-            let headers = self.headers(cx.now, Method::Post, step.path, &step.body, true);
+            let headers = self.headers(Method::Post);
             cx.command_progress(command, step.receipts.clone());
-            cx.request(
+            let request = cx.request(
                 Method::Post,
                 format!("{}{}", self.rest(), step.path),
                 headers,
                 Some(step.body.clone()),
                 Pending::Trade(Request { command }),
             );
+            self.sign_request(cx, request, Method::Post, step.path, true, true);
             return;
         }
         let job = self.trading.jobs.remove(&command).expect("job");
@@ -1035,6 +1036,15 @@ impl Okx {
     }
 
     fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: VenueError) {
+        self.finish_failed_trade(cx, request, error, false);
+    }
+
+    pub(crate) fn trade_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
         self.finish_failed_trade(cx, request, error, false);
     }
 

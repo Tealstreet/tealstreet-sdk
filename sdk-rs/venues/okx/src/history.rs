@@ -20,7 +20,7 @@ pub struct HistoryState {
 
 pub struct Request {
     lookup: Option<String>,
-    command: CommandId,
+    pub(crate) command: CommandId,
     endpoint: &'static str,
     symbol: Option<String>,
     instrument: Option<String>,
@@ -530,7 +530,7 @@ impl Okx {
             encode(&instrument),
             encode(&client_order_id)
         );
-        let headers = self.primary_headers(cx.now, Method::Get, &path, "");
+        let headers = self.headers(Method::Get);
         let request = cx.request(
             Method::Get,
             format!("{}{path}", self.rest()),
@@ -559,6 +559,7 @@ impl Okx {
                 rows: Rows::Orders(Vec::new()),
             }),
         );
+        self.sign_request(cx, request, Method::Get, &path, true, true);
         cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
     }
 

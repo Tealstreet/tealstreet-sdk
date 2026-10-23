@@ -1,10 +1,11 @@
 #![allow(dead_code)]
 mod support;
 
+use crate::support::FixtureOptions as Options;
+use crate::support::*;
 use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query};
-use safe_cex_venue_okx::{Okx, Options};
+use safe_cex_venue_okx::Okx;
 use serde::Deserialize;
-use support::*;
 
 // OKX v5 documented schemas: fills, orders-history, account bills and market trades.
 // https://www.okx.com/docs-v5/en/
