@@ -6,16 +6,7 @@ mod call;
 pub(super) use call::State;
 
 impl ContextRegistry {
-    pub(super) fn prune(&mut self, now: f64) {
-        self.contexts.retain(|_, old| old.deadline() > now);
-        self.commands.retain(|_, old| {
-            old.retained()
-                || old.last_deadline > now
-                || old.writes.is_some()
-                || old.pending > 0
-                || old.deliveries > 0
-        });
-    }
+
 
     fn prepare_preflight(
         &mut self,

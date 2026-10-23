@@ -1444,8 +1444,10 @@ struct Io<P> {
     #[cfg(feature = "order-locks")]
     reconcile_due: Vec<(Option<Vec<String>>, f64)>,
     command_entry: Option<command_entry::Entry>,
+    #[cfg(feature = "http-plans")]
     http_plan_ready: Option<crate::request_context::Plan>,
     http_owner_poison: bool,
+    #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
@@ -1504,8 +1506,10 @@ impl<P> Default for Io<P> {
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
             command_entry: None,
+    #[cfg(feature = "http-plans")]
             http_plan_ready: None,
             http_owner_poison: false,
+    #[cfg(feature = "http-plans")]
             http_plan_poison: false,
             http_responses: Default::default(),
             http_write_revision: 0,
@@ -2390,10 +2394,12 @@ pub trait Venue {
 
     /// Discard only continuation state matching this exact retired generation.
     /// This cleanup hook has no Store, response, command or I/O authority.
+    #[cfg(feature = "http-plans")]
     fn on_http_owner_retired(&mut self, _owner: &crate::request_context::HttpOwnerRetirement) {}
 
     /// Typed readiness after actual HTTP scope exit. The engine marks due slots
     /// once before this callback; no delivery/publication authority is lent.
+    #[cfg(feature = "http-plans")]
     fn on_http_plan_ready(
         &mut self,
         _cx: &mut Cx<'_, Self::Pending>,
@@ -3910,15 +3916,31 @@ impl<V: Venue> Engine<V> {
     /// A fatal allocator failure permanently retires this engine.
     pub fn failed(&self) -> bool {
         self.io.http_owner_poison
-            || self.io.http_plan_poison
+            || self.plan_callback_failed()
             || self.io.command_entry.is_some()
             || self.io.next_id.failed()
             || self.io.signing.failed()
     }
 
+    fn plan_callback_failed(&self) -> bool {
+        #[cfg(feature = "http-plans")]
+        { self.io.http_plan_poison }
+        #[cfg(not(feature = "http-plans"))]
+        { false }
+    }
+
+    #[cfg(not(feature = "http-plans"))]
+    fn flush_http_plans(&mut self, _now: f64) {}
+
+    #[cfg(not(feature = "http-plans"))]
+    fn expire_plan_timer(&mut self, _now: f64, _event: &Event<'_>) -> bool { false }
+
+    #[cfg(not(feature = "http-plans"))]
+    fn flush_http_owner_retirements(&mut self) { self.assert_live(); }
+
     fn assert_retirement_safe(&self) {
         assert!(
-            !self.io.http_owner_poison && !self.io.http_plan_poison,
+            !self.io.http_owner_poison && !self.plan_callback_failed(),
             "engine HTTP owner callback or cleanup failed"
         );
     }
@@ -3937,12 +3959,13 @@ impl<V: Venue> Engine<V> {
     }
 
     /// Test-only counter of Plan scheduling cells visited by this engine.
-    #[cfg(feature = "test-support")]
+    #[cfg(all(feature = "test-support", feature = "http-plans"))]
     #[doc(hidden)]
     pub fn plan_scan_visits(&self) -> usize {
         self.io.request_contexts.plan_scan_visits()
     }
 
+    #[cfg(feature = "http-plans")]
     fn flush_http_plans(&mut self, now: f64) {
         if self.io.request_contexts.has_plans() {
             self.flush_live_http_plans(now);
@@ -3950,6 +3973,7 @@ impl<V: Venue> Engine<V> {
     }
 
     #[inline(never)]
+    #[cfg(feature = "http-plans")]
     fn flush_live_http_plans(&mut self, now: f64) {
         self.io.request_contexts.end_plan_admission();
         if !now.is_finite()
@@ -4005,6 +4029,7 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    #[cfg(feature = "http-plans")]
     fn expire_plan_timer(&mut self, now: f64, event: &Event<'_>) -> bool {
         let Event::TimerFired { timer } = event else {
             return false;
@@ -4017,6 +4042,7 @@ impl<V: Venue> Engine<V> {
         true
     }
 
+    #[cfg(feature = "http-plans")]
     fn flush_http_owner_retirements(&mut self) {
         self.io.request_contexts.end_plan_admission();
         self.assert_live();
@@ -4026,6 +4052,7 @@ impl<V: Venue> Engine<V> {
     }
 
     #[inline(never)]
+    #[cfg(feature = "http-plans")]
     fn flush_pending_http_owner_retirements(&mut self) {
         while let Some(token) = self.io.request_contexts.next_retirement() {
             self.assert_live();

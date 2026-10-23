@@ -111,6 +111,10 @@ impl State {
 }
 
 impl ContextRegistry {
+    pub(super) fn reserved_context_count(&self) -> usize {
+        self.reserved_contexts
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     pub(in super::super) fn plan_scan_visits(&self) -> usize {
         self.plan_scan_visits.get()

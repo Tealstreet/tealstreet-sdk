@@ -3,19 +3,22 @@
 use super::{CommandId, Cx, RequestId};
 use crate::VenueError;
 use crate::request_context::{
-    Attempt, CommandWrites, Context, Error, HttpOwnerRetirement, Operation, Owner, Plan,
-    PlanPolicy, Policy, Preflight, PreflightPolicy, PreflightPurpose, RejectionReports,
+    Attempt, CommandWrites, Context, Error, Operation, Owner, Policy, RejectionReports,
     ResendGrant, RetryEvidence, Scope, WriteResult,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
+#[cfg(feature = "http-plans")]
+use std::collections::VecDeque;
+#[cfg(feature = "http-plans")]
+use crate::request_context::{HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose};
 
 const CAPACITY: usize = 256;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "http-plans"))]
 #[path = "request_context_preflight_tests.rs"]
 mod preflight_tests;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "http-plans"))]
 #[path = "request_context_preflight_entry_tests.rs"]
 mod preflight_entry_tests;
 
@@ -49,8 +52,11 @@ struct CommandOwner {
 
 enum CommandPhase {
     Context { root: Context, entry_owned: bool },
+    #[cfg(feature = "http-plans")]
     Preflight(preflight::State),
+    #[cfg(feature = "http-plans")]
     Planned(planned::State),
+    #[cfg(feature = "http-plans")]
     Retiring(HttpOwnerRetirement),
 }
 
@@ -101,6 +107,7 @@ impl CommandOwner {
     fn context_root(&self) -> Option<&Context> {
         match &self.phase {
             CommandPhase::Context { root, .. } => Some(root),
+            #[cfg(feature = "http-plans")]
             _ => None,
         }
     }
@@ -108,6 +115,7 @@ impl CommandOwner {
     fn retained(&self) -> bool {
         match &self.phase {
             CommandPhase::Context { entry_owned, .. } => *entry_owned,
+            #[cfg(feature = "http-plans")]
             CommandPhase::Preflight(_) | CommandPhase::Planned(_) | CommandPhase::Retiring(_) => {
                 true
             }
@@ -115,14 +123,22 @@ impl CommandOwner {
     }
 }
 
+#[cfg(feature = "http-plans")]
 #[path = "request_context_owned_call.rs"]
 mod owned_call;
+#[cfg(feature = "http-plans")]
 #[path = "request_context_preflight.rs"]
 mod preflight;
+#[cfg(feature = "http-plans")]
 pub(super) use owned_call::Admission as OwnedAdmission;
 
+#[cfg(feature = "http-plans")]
 #[path = "request_context_planned.rs"]
 mod planned;
+
+#[cfg(not(feature = "http-plans"))]
+#[path = "request_context_without_plans.rs"]
+mod without_plans;
 
 #[derive(Clone, Debug)]
 pub(super) struct Delivery {
@@ -153,19 +169,33 @@ pub(super) struct ContextRegistry {
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
     executions: execution::Executions,
+    #[cfg(feature = "http-plans")]
     retirements: VecDeque<HttpOwnerRetirement>,
     /// Scoped delivery loans outlive temporary marker removal and even owner
     /// cleanup. Readiness may run only after the true outermost scope exits.
+    #[cfg(feature = "http-plans")]
     delivery_depth: usize,
     /// Logical identities promised to admitted plans but not yet issued.
+    #[cfg(feature = "http-plans")]
     reserved_contexts: usize,
     // Only admitted Plan owners; capacity is reserved before ID commitment.
+    #[cfg(feature = "http-plans")]
     plan_index: Vec<CommandId>,
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
 }
 
 impl ContextRegistry {
+    pub(super) fn prune(&mut self, now: f64) {
+        self.contexts.retain(|_, old| old.deadline() > now);
+        self.commands.retain(|_, old| {
+            old.retained()
+                || old.last_deadline > now
+                || old.writes.is_some()
+                || old.pending > 0
+                || old.deliveries > 0
+        });
+    }
     pub(super) fn command_entry_unowned(&self, command: CommandId) -> bool {
         !self.commands.contains_key(&command)
     }
@@ -295,7 +325,8 @@ impl ContextRegistry {
                     root,
                     entry_owned: true,
                 } => Some(root),
-                _ => None,
+                #[cfg(feature = "http-plans")]
+            _ => None,
             })
         {
             if now >= root.deadline() {
@@ -316,7 +347,7 @@ impl ContextRegistry {
             policy.pacing,
         )?
         .with_retry(policy.retry)?;
-        if self.contexts.len() + self.reserved_contexts >= CAPACITY
+        if self.contexts.len() + self.reserved_context_count() >= CAPACITY
             || matches!(scope, Scope::Command(id)
                 if !self.commands.contains_key(&id) && self.commands.len() >= CAPACITY)
         {
@@ -326,7 +357,7 @@ impl ContextRegistry {
             return Err(Error::Duplicate);
         }
         self.contexts
-            .try_reserve(1 + self.reserved_contexts)
+            .try_reserve(1 + self.reserved_context_count())
             .map_err(|_| Error::Capacity)?;
         if matches!(scope, Scope::Command(id) if !self.commands.contains_key(&id)) {
             self.commands.try_reserve(1).map_err(|_| Error::Capacity)?;
@@ -394,7 +425,7 @@ impl ContextRegistry {
                 .filter(|context| context.deadline() > now)
                 .count()
                 + policies.len()
-                + self.reserved_contexts
+                + self.reserved_context_count()
                 > CAPACITY
         {
             return Err(Error::Capacity);
@@ -442,7 +473,7 @@ impl ContextRegistry {
         // Reserve the pre-cleanup peak. Nothing visible has changed yet, and
         // journal.replace is the final fallible operation in the transaction.
         self.contexts
-            .try_reserve(children.len() + self.reserved_contexts)
+            .try_reserve(children.len() + self.reserved_context_count())
             .map_err(|_| Error::Capacity)?;
         self.commands
             .get_mut(&id)
@@ -530,6 +561,7 @@ impl ContextRegistry {
         let owner = self.command_mut(context)?;
         let pending = owner.pending.checked_add(1).ok_or(Error::Capacity)?;
         if context.operation() == Operation::Mutation {
+            #[cfg(feature = "http-plans")]
             if matches!(owner.phase, CommandPhase::Planned(_)) {
                 if owner
                     .writes
@@ -570,6 +602,7 @@ impl ContextRegistry {
     }
 
     pub(super) fn enter_delivery(&mut self, delivery: &Delivery) {
+        #[cfg(feature = "http-plans")]
         if delivery.context.issued_by(&self.issuer) {
             self.delivery_depth = self
                 .delivery_depth
@@ -585,6 +618,7 @@ impl ContextRegistry {
     }
 
     pub(super) fn exit_delivery(&mut self, delivery: &Delivery) {
+        #[cfg(feature = "http-plans")]
         if delivery.context.issued_by(&self.issuer) {
             self.delivery_depth = self
                 .delivery_depth
@@ -875,8 +909,10 @@ impl ContextRegistry {
     }
 
     pub(super) fn finish(&mut self, command: CommandId) -> bool {
+        #[cfg(feature = "http-plans")]
         if let Some(owner) = self.commands.get_mut(&command) {
             match &owner.phase {
+                #[cfg(feature = "http-plans")]
                 CommandPhase::Preflight(_) | CommandPhase::Planned(_) => {
                     if owner.pending != 0 || self.retirements.len() >= self.retirements.capacity() {
                         return false;
@@ -897,6 +933,7 @@ impl ContextRegistry {
                     self.retirements.push_back(token);
                     return true;
                 }
+                #[cfg(feature = "http-plans")]
                 CommandPhase::Retiring(_) => return false,
                 CommandPhase::Context { .. } => {}
             }
@@ -2684,7 +2721,8 @@ mod write_tests {
                 crate::Action::Notice(Notice::CommandError { message, .. }) => {
                     Some(message.as_str())
                 }
-                _ => None,
+                #[cfg(feature = "http-plans")]
+            _ => None,
             })
             .collect();
         assert_eq!(messages, ["A1", "A2", "B1", "B2"]);
@@ -2759,7 +2797,8 @@ mod write_tests {
                 .iter()
                 .filter_map(|a| match a {
                     crate::Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
-                    _ => None,
+                    #[cfg(feature = "http-plans")]
+            _ => None,
                 })
                 .collect::<Vec<_>>();
             if state == 3 {
@@ -2774,7 +2813,8 @@ mod write_tests {
                         0 => Some(Outcome::NotSent),
                         1 => Some(Outcome::Unknown),
                         2 => Some(Outcome::Rejected),
-                        _ => None,
+                        #[cfg(feature = "http-plans")]
+            _ => None,
                     }
                 );
                 if state == 4 {
