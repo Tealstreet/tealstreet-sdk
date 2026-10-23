@@ -167,7 +167,7 @@ impl MexcFutures {
     pub fn start_query(&self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(command, "MEXC client-order-ID lookup is unsupported");
+                Self::fail_local_read(cx, "MEXC client-order-ID lookup is unsupported");
                 return;
             }
             Query::Fills {
@@ -194,7 +194,7 @@ impl MexcFutures {
                     .as_deref()
                     .is_none_or(|k| !k.eq_ignore_ascii_case("FUNDING_FEE"))
                 {
-                    cx.fail(command, "MEXC income supports only kind FUNDING_FEE");
+                    Self::fail_local_read(cx, "MEXC income supports only kind FUNDING_FEE");
                     return;
                 }
                 (Kind::Funding, symbol, None, from_ms, to_ms, limit)
@@ -228,7 +228,7 @@ impl MexcFutures {
             None
         };
         if let Some(error) = error {
-            cx.fail(command, error);
+            Self::fail_local_read(cx, error);
             return;
         }
         let limit = limit.unwrap_or(100) as usize;
@@ -239,7 +239,7 @@ impl MexcFutures {
             pair => pair,
         };
         if window_from.zip(window_to).is_some_and(|(a, b)| a > b) {
-            cx.fail(command, "Invalid MEXC query time range");
+            Self::fail_local_read(cx, "Invalid MEXC query time range");
             return;
         }
         let mut windows = VecDeque::new();
@@ -248,7 +248,7 @@ impl MexcFutures {
         } else if let (Some(a), Some(b)) = (window_from, window_to) {
             // Newest first: a limited read stops with the most recent rows.
             let Some(tiles) = paging::windows(a, b, WINDOW, WindowOrder::NewestFirst, 1000) else {
-                cx.fail(command, "MEXC query range exceeds 1000 windows");
+                Self::fail_local_read(cx, "MEXC query range exceeds 1000 windows");
                 return;
             };
             windows.extend(tiles.into_iter().map(|(a, b)| (Some(a), Some(b))));

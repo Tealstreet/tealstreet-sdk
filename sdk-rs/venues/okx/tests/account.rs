@@ -355,8 +355,46 @@ fn resweep(
     risk: &str,
     position: &str,
     orders: &str,
-) {
-    ws(e, private, r#"{"event":"login","code":"0"}"#);
+    now: f64,
+) -> safe_cex_engine::SocketId {
+    // A duplicate ACK on an already authenticated epoch must not resync.
+    // Obtain a real replacement epoch to exercise the financial reducer.
+    e.handle(
+        now,
+        Event::WsClosed {
+            socket: private,
+            code: 1006,
+        },
+    );
+    let out = actions(e);
+    let (timer, at) = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms }
+                if *at_ms >= now + 750. && *at_ms <= now + 30_000. =>
+            {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("private reconnect backoff");
+    e.handle(at, Event::TimerFired { timer });
+    let private = actions(e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(socket),
+            _ => None,
+        })
+        .expect("replacement private epoch");
+    e.handle(at, Event::WsOpened { socket: private });
+    actions(e);
+    e.handle(
+        at,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"event":"login","code":"0"}"#,
+        },
+    );
     let mut requests: Vec<_> = actions(e)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
@@ -372,13 +410,14 @@ fn resweep(
         } else {
             envelope("")
         };
-        reply(e, &a, &body, 6.0);
+        reply(e, &a, &body, at + 1.0);
         requests.extend(
             actions(e)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
     }
+    private
 }
 
 #[test]
@@ -392,6 +431,7 @@ fn bad_position_row_keeps_its_stored_copy_while_the_balance_commits() {
         r#"{"balData":[{"ccy":"USDT","eq":"6000"}]}"#,
         &bad,
         ORDER,
+        10.0,
     );
     assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().positions()[0].contracts, 0.05);
@@ -407,7 +447,7 @@ fn bad_balance_currency_row_keeps_its_equity_while_positions_commit() {
         let (mut e, private, _, pending) = startup();
         complete(&mut e, pending, ORDER);
         let grown = POSITION.replace("\"pos\":\"5\"", "\"pos\":\"6\"");
-        resweep(&mut e, private, risk, &grown, ORDER);
+        resweep(&mut e, private, risk, &grown, ORDER, 10.0);
         assert_eq!(e.store().positions()[0].contracts, 0.06, "{risk}");
         assert_eq!(e.store().balance().total, 4950.0, "{risk}");
     }
@@ -432,6 +472,7 @@ fn bad_order_row_keeps_its_stored_copy_and_new_orders_commit() {
             balance,
             POSITION,
             &format!("{bad},{fresh}"),
+            10.0,
         );
         let mut ids: Vec<_> = e.store().orders().iter().map(|o| o.id.as_str()).collect();
         ids.sort();
@@ -892,12 +933,13 @@ fn rejected_currency_row_holds_the_usd_balance_instead_of_double_counting() {
     let before = e.store().balance().clone();
     assert_eq!(before.total, 40_000.0);
     // The BTC was sold for USDT; the BTC row now fails to read.
-    resweep(
+    let private = resweep(
         &mut e,
         private,
         r#"{"balData":[{"ccy":"BTC","eq":"bad"},{"ccy":"USDT","eq":"40000"}]}"#,
         "",
         "",
+        10.0,
     );
     assert_eq!(*e.store().balance(), before);
     let mut coins: Vec<_> = e
@@ -918,6 +960,7 @@ fn rejected_currency_row_holds_the_usd_balance_instead_of_double_counting() {
         r#"{"balData":[{"ccy":"BTC","eq":"0"},{"ccy":"USDT","eq":"40000"}]}"#,
         "",
         "",
+        5000.0,
     );
     assert_eq!(e.store().balance().total, 40_000.0);
 }

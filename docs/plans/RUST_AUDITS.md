@@ -875,23 +875,23 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 
 
 Known nonce limits (owner decision: document only; no production change):
-`crypto/src/nonce.rs:9,19–28` keeps signer-domain history and allocates
-`max(floor(now), previous + 1)`. `ethereum_agent` keys that history by the
-signer's public-address digest (`nonce.rs:33–44`); Hyperliquid writes use it at
-`venues/hyperliquid/src/trading.rs:641–644`. Engine recreation and backward clock
+`engine/src/nonce.rs` `reserve` keeps signer-domain history and allocates
+`max(floor(now), previous + 1)`. The `hyperliquid-agent` domain keys that history
+by the signer's public-address digest (`NonceKey::ethereum_address`); Hyperliquid and TxFlow writes reserve through
+`venues/hyperliquid/src/sign.rs` `reserve_agent_nonce`. Engine recreation and backward clock
 resynchronization within the same native process or Wasm memory preserve that
 history. The synchronized SDK clock is passed at
 `packages/safe-cex/src/exchanges/rust/rust.exchange.ts:892,917`; it can move
 backward (`packages/safe-cex/src/utils/virtualClock.ts:98–110,151`).
 
 - Fresh process, worker or Wasm-memory restarts lose the history, as documented
-  in `sdk-rs/crypto/src/nonce.rs:1–2`. A same-ms restart after the previous counter
+  in the `sdk-rs/engine/src/nonce.rs` header. A same-ms restart after the previous counter
   ran ahead of wall time can reuse a nonce. Deployment boundaries must coordinate
   signers if they need continuity across those restarts; TS Date.now-based
   signing has the same restart limitation.
 - The allocator checks finite/nonnegative time and the safe-integer ceiling,
   rather than the venue's T−2-day/T+1-day freshness window
-  (`sdk-rs/crypto/src/nonce.rs:24–26,33–44`). A >1-day forward clock excursion, or
+  (`sdk-rs/engine/src/nonce.rs` `floor` and the `HYPERLIQUID_AGENT` limit). A >1-day forward clock excursion, or
   sustained >1000 writes/s for one signer, can leave its counter ahead of the
   allowed future window even after clock correction. These are known limits,
   not regressions from #1693; synchronized time reduces ordinary skew rejections.
@@ -2402,6 +2402,115 @@ to every venue using symbol lookup; WOO's cached-index WS reducer remains outsid
 that hot path. No authority policy, codec, venue-specific shortcut or legacy-site
 exemption changes. Exact paired CI performance and family memory/size gates remain
 separate evidence from diagnostic profiles.
+
+## Draft socket lifecycle architecture adoption
+
+The shared Supervisor alone did not own current epochs, auth acceptance,
+subscription coverage or invalidation. The draft Engine socket lifecycle now
+owns those boundaries for OKX and rejects late ingress before health
+or native mutation. Review found and corrected inactive retry-stop ownership,
+unexpected-close accounting, per-event health reset, silent callback errors and
+cleanup loss on queue exhaustion. Safe-integer physical IDs use the landed shared allocator; full family adoption and deployed cutover
+proof remain open. No allocator change is included in this socket draft.
+
+The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
+temporary socket inventory records that deferred family. No source or gate
+claim is inherited from the historical two-family experiment.
+
+### Lighter depth snapshot Context ownership
+
+The independent public REST depth sender consumes an engine Background Read
+Context and retires it on every success/failure, including stale subscription or
+WS-revision returns. Original deadline/release authority fences publication;
+matching-generation native cleanup cannot release a replacement's latch.
+Exactly one sender is removed (Lighter43→42, lib3→2). Ticker adoption is deferred
+because #1877 holds its interfering candle timer fixture; no timing/order or
+source-ownership workaround is introduced. No held signing/trading/test edits.
+
+## KuCoin futures local terminal provenance
+
+Sixteen synchronous numeric history/funding terminals adopt shared initial Read
+admission and Context finalization. The exact ratchet shrinks KuCoin80->64
+occurrences and70->58 rows, nine files retained; history13->5 and funding9->1.
+Six conservative embedded macro fingerprints remain counted unchanged. Legacy
+signed-streaming, numeric Completion and multipage scheduling remain held for
+their shared signer/history/Plan prerequisites; no zero-legacy claim is made.
+No venue owner registry, finalizer wrapper or credential/routing substitute is
+introduced. Three defensive guards are migrated without an unreachable native
+original-RED claim; thirteen dispatcher-reachable exits supply the production
+acceptance coverage.
+## Bitunix local history authority adoption
+
+Five synchronous history terminal expressions now consume genuine command-entry
+Read authority and complete through the shared Context APIs. The exact four
+history.rs scanner rows retire: Bitunix23 to18 occurrences,20 to16 hash rows,
+four tothree files. Account3, lib7 and trading8 occurrences remain, including
+four conservative trading macro matches. This does not close private history's
+legacy Completion/pager or the blocked physical dispatchers; #1771 source claims,
+signer and shared multi-request prerequisites remain separate.
+
+## Bitrue local history terminal provenance
+
+Five synchronous numeric refusals consume shared initial Read admission and
+Context completion directly. Bitrue inventory shrinks42->37 occurrences,
+27->22 rows and five->four files; every other incoming hash/count stays exact.
+The still-legacy signed fill/HistoryRows/Completion path and account lookup stay
+held for their shared prerequisites, even where the scanner no longer lists the
+history source. No private read, group or whole-venue zero claim is introduced.
+
+## Bitrue local leverage terminal provenance
+
+Four synchronous account-command refusals adopt shared Read admission and Context
+failure. This independent slice prunes only two count-two account hashes:
+Bitrue42->38 occurrences,27->25 rows, five files retained. The separate history
+slice's prune composes independently. Native successful leverage joins, refresh,
+projection, account replies and signed bracket requests remain unchanged; no
+managed private-read, execution-group or whole-venue zero claim is introduced.
+
+## Phemex synchronous history/income Context ownership
+
+~~Eleven synchronous local history/income exits publish numeric terminals without
+command-entry Context admission.~~ Local branches now borrow genuine shared
+admission and immediately use its Context terminal, before active-set mutation.
+Original-source controls show full-capacity local errors lack Internal typing,
+unknown-market lookup succeeds despite full capacity, and invalid-clock errors
+lack InvalidInput typing. Finite native payloads, refusal order and outstanding
+requests are preserved. Exactly eleven Phemex occurrences/entries are removed;
+managed network/history and signer adoption remain deferred. Architecture gate:
+No lifecycle copy; the adapter consumes shared admission and finalization.
+
+## MEXC local read refusal custody
+
+Eight immediate native refusal sites now consume shared genuine command entry
+and settle through fail_context: five history admission sites and three leverage
+admission sites. They can no longer bypass the shared command-owner bound or
+nonfinite-clock rejection. Native validation precedence, full finite VenueError
+fields and all successful transport/paging/reducer paths are preserved. This
+closes exactly eight request-legacy fingerprints/occurrences, 29/29 to 21/21;
+private signing, account callbacks, discovery and valid history transport remain
+separately inventoried. The architecture gate is No: only native local error
+projection changes, with no venue-owned lifecycle, timer, credential selection,
+retry, classifier or owner registry. CI/replay/size proof remains a separate gate.
+
+### Paradex public-trades Read history bridge adoption
+
+Unsigned single-page public trades now use a dedicated Context-bearing history
+owner, separate from legacy private history. Shared exact root/leg/Attempt
+admission gates staging, identities, page advancement and terminal publication.
+Strict failures discard prefixes; stale/reused owners produce no result/marker.
+Only the obsolete public sender is removed (Paradex56→55, history14→13); all
+private history counts remain. No signing, session, Plan or engine source edit.
+
+## Hyperliquid local lookup custody
+
+The cached-order match and invalid-client-ID/missing-identity returns now consume
+shared genuine Read entry and exact Context terminal authority. The original
+numeric returns passed through invalid clocks and exhausted Context capacity;
+six original admission REDs cover those branches, with native payload/precedence,
+owner isolation, synchronous retirement and unchanged fallthrough controls.
+Only the two exact local completion fingerprints are pruned (Hyperliquid50->48,
+history13->11). Private history/signing and spot REST capabilities stay native.
+Architecture gate: No; existing engine admission and completion choke points.
 
 ## KuCoin local Read ownership
 
