@@ -353,7 +353,7 @@ or shared source belonging to another open PR is replaced.
    their native IDs even if another row fails or is absent. Only a complete
    proof publishes the existing paired success reducer.
 4. Every requested explicit cancellation contributes to the command verdict.
-   Continue native optional child work where it already continues, while its
+   Continue native optional child work for callback-delivered native failures, while its
    failure remains in the journal: a final Done cannot erase it. Native optional
    child failures can therefore produce a failed command with prior effects,
    rather than a misleading successful empty result. Remove local effective
@@ -376,3 +376,20 @@ Architecture gate: native request/ACK correlation and Store freshness stay here;
 command ownership, clock, preparation, signing, retry, classification, aggregate
 outcome and cleanup authority remain engine/provider choke points. This is a
 foreground trading slice, not whole-family signer or background readiness.
+
+
+Plan-audit rulings: the overseer explicitly approved today's shared core rule:
+a delivered 408/5xx immediately stops the Plan as Unknown, retains prior IDs and
+retires unsent legs. Callers must reconcile before resending. Adopt the upcoming
+shared PlanPolicy independence flag when it lands to restore native optional/
+continue-on-error continuation; this remains an open obligation, with no venue
+fallback. The explicit new 20-second managed attempt policy is also approved.
+
+Before first managed mutation release, capture bounded native correlation data
+through capture_http_reconciliation and define the conservative late policy.
+Never publish late rows without the independent native account revision fences.
+Add an original optional-child RED: accepted entry, failed TP, accepted SL still
+emits CHILD_LEG_FAILED and sends SL, then one failed terminal with both accepted
+IDs rather than Done. Preserve native wire/sequence oracles. Classified DATA
+settles via finish_plan_call; callback-delivered preparation/transport failures
+use finish_plan_failed_call if continuing, never fabricate current DATA.
