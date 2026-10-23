@@ -21,7 +21,10 @@ fn shared_crc_preserves_native_decimal_spelling_and_recovery() {
     h.message(r#"{"arg":{"channel":"books","instId":"BTCUSDT"},"action":"update","data":[{"pseq":11,"seq":12,"checksum":1828144228}]}"#);
     assert_eq!(h.engine.book("BTCUSDT").unwrap().bids()[0], (99.0, 1.5));
     h.message(r#"{"arg":{"channel":"books","instId":"BTCUSDT"},"action":"update","data":[{"bids":[["99.00","0"],["98.0","2.500"],["97.000","4.0"]],"checksum":1443586883}]}"#);
-    assert_eq!(h.engine.book("BTCUSDT").unwrap().bids(), [(98.0, 2.5), (97.0, 4.0)]);
+    assert_eq!(
+        h.engine.book("BTCUSDT").unwrap().bids(),
+        [(98.0, 2.5), (97.0, 4.0)]
+    );
     h.message(r#"{"arg":{"channel":"books","instId":"BTCUSDT"},"action":"update","data":[{"bids":[["98.0","5"]],"checksum":1}]}"#);
     assert!(h.engine.book("BTCUSDT").is_none());
     h.message(r#"{"arg":{"channel":"books","instId":"BTCUSDT"},"action":"update","data":[{"bids":[["99.00","1.000"]],"checksum":-1585548243}]}"#);

@@ -1998,3 +1998,15 @@ nonempty paths retain native/cache selection; bounded native upsert remains an
 endpoint normalization fact. No invented pager, partial recovery or cache-backed
 coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
 separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+## Shared book checksum accumulator
+
+Bitget and Kraken Spot use the engine `checksum::Crc32` byte stream instead of
+two reflected IEEE CRC32 loops. Venue serialization remains native: Bitget
+interleaves top-25 bid/ask decimal strings with colons and checks signed i32;
+Kraken Spot concatenates normalized ask-then-bid digits for top 10 per side.
+This resolves the duplicate accumulator finding from `RUST_BITGET_PUBLIC_CPU`
+without asserting a previous wrong-checksum bug or a measured CPU improvement.
+The existing sequence, missing-checksum, cache retention and mismatch recovery
+policies are preserved. Checksum-bearing native controls are necessary because
+the diagnostic Bitget public replay contains no checksummed books.

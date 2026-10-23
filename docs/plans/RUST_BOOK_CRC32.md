@@ -65,3 +65,14 @@ correctness coverage; unchanged replay outputs establish compatibility only.
 
 No guard or merge precedes actual #1789, #1785, #1786, #1787 and #1788. Real
 integration/fresh proof requirements apply to all changed shared inputs.
+
+## Implementation checkpoint
+
+Plan commit `e0c70a3354b` received independent correctness and adversarial CLEAR
+reviews before source edits. Regression-only commit `0ef8e5e2705` compiled each
+new venue test separately against the original engine: both failed precisely
+on unresolved `safe_cex_engine::checksum` (API-adoption RED, no product-bug
+claim). After adding the shared core and both consumers, all four native venue
+controls pass. Wire CRC literals are fixed independently of the helper; the
+shared helper also asserts two of those vectors without generating wire
+expectations. RED and GREEN logs are retained under `/tmp/codex-shared-crc32-*`.

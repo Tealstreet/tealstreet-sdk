@@ -4291,3 +4291,13 @@ transport contract changes. NX adapters that adopt these helpers keep the exact
 root/leg handles, publish and complete without yielding, and discard invalid
 or stale callback data rather than falling back to numeric command completion.
 Joined-read execution/observer ownership remains a separate shared capability.
+
+## Shared Bitget and Kraken Spot book CRC32
+
+Both public book adapters use the engine IEEE CRC32 accumulator. Bitget keeps
+its original decimal strings, bid/ask interleaving, top-25 cutoff, separators and
+signed checksum comparison. Kraken Spot keeps ask-before-bid normalized digits,
+trailing zeros and top-10 cutoff. A checksum mismatch continues to invalidate
+the book and require a fresh snapshot under the native recovery policy. No
+caller API, payload format, callback, transport, timing policy or build-profile
+migration is required for this accumulator standardization.
