@@ -226,8 +226,6 @@ impl ContextRegistry {
     }
     pub(super) fn prune(&mut self, now: f64) {
         self.contexts.retain(|_, old| old.deadline() > now);
-        #[cfg(feature = "order-locks")]
-        self.forget_dead_read_marks();
         self.commands.retain(|_, old| {
             old.retained()
                 || old.last_deadline > now
@@ -235,6 +233,8 @@ impl ContextRegistry {
                 || old.pending > 0
                 || old.deliveries > 0
         });
+        #[cfg(feature = "order-locks")]
+        self.forget_dead_read_marks();
     }
     pub(super) fn command_entry_unowned(&self, command: CommandId) -> bool {
         !self.commands.contains_key(&command)
