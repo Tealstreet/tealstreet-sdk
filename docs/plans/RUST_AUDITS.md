@@ -2500,3 +2500,12 @@ admission gates staging, identities, page advancement and terminal publication.
 Strict failures discard prefixes; stale/reused owners produce no result/marker.
 Only the obsolete public sender is removed (Paradex56→55, history14→13); all
 private history counts remain. No signing, session, Plan or engine source edit.
+
+## WOO local history admission
+
+The three synchronous pre-I/O history refusal sites use genuine engine Read
+entry and Context completion. The separately committed original tests reproduce
+three typed-admission assertion failures and four compatibility passes on native
+source; the narrow cutover passes all seven assertions unchanged. Exact inventory
+shrink is three fingerprints/three occurrences, WOO34/37 to31/34. HTTP pagination,
+private signing and socket ownership are separate conversion targets.

@@ -1102,3 +1102,12 @@ actual2badd1cb0e3 preserves tested dependency blobs and all foreign prunes. Both
 request checks/14 controls and bans pass on the integrated head; bridge blobs
 remain exact to authorized f471. This is executed native consumer evidence, not
 an actual bridge landing or complete WASM/replay/size proof.
+
+## WOO local history custody controls
+
+Real Engine<Woo> controls cover each original local refusal at invalid engine
+time, finite native error metadata/precedence, repeated settlement and same-ID
+reuse, zero I/O/Store effects, Fills aliases, unchanged private credential refusal
+and unchanged unsigned public GET dispatch. Three original assertion REDs plus
+four compatibility passes become seven passes without assertion changes. Shared
+capacity and revoked-entry mechanics retain the existing engine-suite coverage.

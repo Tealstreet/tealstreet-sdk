@@ -80,3 +80,13 @@ CALLERS and accurate audit/quality receipts. Independent source/adversarial,
 caller and full-map reviews must be clean. Architecture gate: use the existing
 engine custody choke point; add no venue retry/authority mechanism. Merge only
 with a fresh guard and an explicit overseer window.
+
+## Original checkpoint and narrow implementation
+
+Plan `e18f8db92da` precedes original test commit `eec6e17ee9d`. The original
+untouched WOO source produces exactly three InvalidInput-kind assertion failures
+and four compatibility passes, zero ignored. The implementation changes only
+the three selected terminals and a history-only native error projection onto
+existing shared admission/completion. All seven original tests then pass
+unchanged. No compilation/fixture failures are counted as REDs. Full focused
+gates, independent implementation review and exact-head CI are still pending.
