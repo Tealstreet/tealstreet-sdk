@@ -2069,6 +2069,16 @@ side-effect authority. Native mapping/decoding/status/pause policy is retained.
 This closes only this command's lifecycle sites; startup, history, account,
 signing and background subscription repair remain separately inventoried.
 
+## KuCoin Spot discovery authority proof
+
+The unsigned catalogue/ticker seeds retain their original read Context through
+stream staging and publication, retire it on every terminal callback, and use the
+shared static-header preparation seam. No private credential, retry, row codec or
+error-classification policy is duplicated. Exact source inventory remains 84
+occurrences: the original shared streamed helper still serves unmigrated candles,
+so this area justifies no ratchet prune or zero-legacy claim. The complete venue
+inventory and remaining prerequisites are committed in PR #1819.
+
 
 ## TxFlow indexed history ownership
 

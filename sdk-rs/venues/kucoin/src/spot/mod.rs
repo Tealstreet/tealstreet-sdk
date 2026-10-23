@@ -12,6 +12,7 @@ use safe_cex_engine::history::{Completion, HistoryRows};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
@@ -29,10 +30,12 @@ const EXECUTION_PROGRESS_LIMIT: usize = 20_000;
 
 pub enum Pending {
     Markets {
+        context: Context,
         rows: Vec<Market>,
         invalid: bool,
     },
     Tickers {
+        context: Context,
         rows: Vec<Ticker>,
         invalid: bool,
     },
@@ -53,6 +56,14 @@ pub enum Pending {
     },
     Fills(Box<HistoryRows<String>>),
     Account(CommandId),
+}
+impl Pending {
+    fn discovery_context(&self) -> Option<&Context> {
+        match self {
+            Self::Markets { context, .. } | Self::Tickers { context, .. } => Some(context),
+            _ => None,
+        }
+    }
 }
 pub struct ReadOrders {
     revision: u64,
@@ -175,31 +186,62 @@ impl KucoinSpot {
             execution_order: Default::default(),
         }
     }
-    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
-        self.streamed(
-            cx,
-            if tickers {
-                "/api/v1/market/allTickers"
-            } else {
-                "/api/v2/symbols"
+    fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+        let context = match cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
             },
-            if tickers {
-                ArrayAt::Path(&["data", "ticker"])
-            } else {
-                ArrayAt::EnvelopeField("data")
-            },
-            if tickers {
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                self.discovery.failed(cx, tickers);
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    error.venue_error().message,
+                );
+                return;
+            }
+        };
+        let (path, at, pending) = if tickers {
+            (
+                "/api/v1/market/allTickers",
+                ArrayAt::Path(&["data", "ticker"]),
                 Pending::Tickers {
+                    context: context.clone(),
                     rows: vec![],
                     invalid: false,
-                }
-            } else {
+                },
+            )
+        } else {
+            (
+                "/api/v2/symbols",
+                ArrayAt::EnvelopeField("data"),
                 Pending::Markets {
+                    context: context.clone(),
                     rows: vec![],
                     invalid: false,
-                }
-            },
-        );
+                },
+            )
+        };
+        match cx.request_managed_with_headers(
+            context,
+            Method::Get,
+            format!("{REST}{path}"),
+            sign::PUBLIC_HEADERS,
+            None,
+            pending,
+        ) {
+            Ok(id) => cx.stream_response(id, at),
+            Err((pending, error)) => {
+                self.on_request_failed(cx, pending, &error.venue_error().message)
+            }
+        }
     }
     fn request(
         &self,
@@ -1001,14 +1043,20 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if pending
+            .discovery_context()
+            .is_some_and(|context| cx.validate_http_context(context).is_err())
+        {
+            return;
+        }
         match pending {
-            Pending::Markets { rows, invalid: _ } => {
+            Pending::Markets { rows, .. } => {
                 match serde_json::from_str::<Instrument>(item).map(Instrument::market) {
                     Ok(market) if market.precision.is_tradable() => rows.push(market),
                     _ => safe_cex_engine::startup::skipped_row(cx),
                 }
             }
-            Pending::Tickers { rows, invalid: _ } => match serde_json::from_str::<Price>(item) {
+            Pending::Tickers { rows, .. } => match serde_json::from_str::<Price>(item) {
                 Ok(r) => rows.push(r.ticker()),
                 Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
@@ -1020,6 +1068,15 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Some(context) = pending.discovery_context() {
+            if cx.validate_http_context(context).is_err() {
+                let _ = cx.finish_http_context(context);
+                return;
+            }
+            if cx.finish_http_context(context).is_err() {
+                return;
+            }
+        }
         if let Pending::Bullet {
             channel,
             generation,
@@ -1045,7 +1102,7 @@ impl Venue for KucoinSpot {
             }
         };
         match pending {
-            Pending::Markets { rows, invalid } => {
+            Pending::Markets { rows, invalid, .. } => {
                 if invalid || rows.is_empty() {
                     self.discovery.failed(cx, false);
                     return;
@@ -1063,7 +1120,9 @@ impl Venue for KucoinSpot {
                     cx.store.set_balance(Balance::default());
                 }
             }
-            Pending::Tickers { mut rows, invalid } => {
+            Pending::Tickers {
+                mut rows, invalid, ..
+            } => {
                 rows.retain(|r| cx.store.market(&r.symbol).is_some());
                 if invalid || rows.is_empty() {
                     self.discovery.failed(cx, true);
@@ -1386,6 +1445,10 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Some(context) = pending.discovery_context() {
+            // Engine-admitted failures may retire after the original deadline.
+            let _ = cx.finish_http_context(context);
+        }
         let discovery = matches!(&pending, Pending::Markets { .. } | Pending::Tickers { .. });
         match pending {
             Pending::Bullet {

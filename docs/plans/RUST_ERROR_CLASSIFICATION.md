@@ -98,15 +98,16 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
     - Code 0 or a 2xx status never proves a successful body or list; success proof
       stays with the venue codec.
     - Auth is derived once, from the table, inside the existing
-      `Venue::account_auth_outcome` hook, through `classify::auth_outcome`. It
-      applies only when the read's Context carries a credential: public reads
+      `Venue::account_auth_outcome` hook, through `classify::auth_outcome(table,
+      native)`. The engine consults that hook only for credentialed account
+      reads (`PendingHttp.auth`, set by `tag_account_read`), so public reads
       never produce credential evidence, even with auth-looking codes such as
-      Crypto.com 40101.
-    - `account_auth_outcome` gains a `credentialed: bool` argument. The engine
-      fills it from the delivery Context on managed reads, and on legacy reads from
-      its own per-request credential record (`PendingHttp.auth`). The venue never
-      supplies it. `auth_outcome(table,
-      credentialed, native)` returns `None` whenever `credentialed` is false.
+      Crypto.com 40101. Venues must not call `auth_outcome` outside the hook.
+      Managed reads must keep the same gate when they adopt the hook.
+    - Read retry: a rate limit waits for its Retry-After, or else the engine
+      default (10 s). An auth refusal never retries. A proven `RefusedResend`
+      resends once. Any other unproven answer is a read failure, which honours a
+      Retry-After on any status.
 
 `kind` comes from the verdict. `retryAfterMs` is set only when a Retry-After header
 is actually present. A new `startup::retry_after_ms(&Response) -> Option<f64>`
@@ -156,8 +157,8 @@ impl CodeTable {
     pub fn verdict(&self, native: &Native<'_>, intent: Intent) -> Verdict; // WS login, startup
 }
 pub fn decode_int(token: &str) -> Option<i64>;            // strict integer, rule 4
-pub fn auth_outcome(table: &CodeTable, credentialed: bool, native: &Native<'_>)
-    -> Option<AuthOutcome>;                               // rule 10, credentialed only
+pub fn auth_outcome(table: &CodeTable, native: &Native<'_>)
+    -> Option<AuthOutcome>;          // rule 10, only inside account_auth_outcome
 pub fn assert_table(table: &CodeTable);                   // venue table tests
 
 // Managed path (Cx). Each call records the fact in the command journal.
@@ -360,3 +361,60 @@ reading `ExchangeError` fields will see (`opts.classified`, `isUnknownOutcome`,
 
 Each PR lists its exact deltas under [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALLERS.md)
 "Error strings that must move to codes".
+
+## Progress
+
+- 2026-10-23, phase 2a (core plus the Binance proof):
+  - `engine/src/classify.rs` provides the precedence, the tables, strict
+    decoding, the batch projection, header-only Retry-After and credentialed
+    auth evidence.
+  - The `Cx` entries `http_write_failure`, `http_write_unproven`,
+    `http_write_batch` and `http_resend_context` are added.
+  - Resends need an engine `ResendGrant`, one per logical leg, and
+    `http_retry_context` refuses write evidence.
+  - The Binance `failure()` match becomes the `BINANCE` table with documented
+    status rows (#36 closed for Binance).
+- Deferred to phase 2b ("write fact authority"):
+  - narrowing `http_write_result` to `Accepted`;
+  - binding intent and expected count at leg registration;
+  - classifying from the engine-delivered response;
+  - `http_write_not_sent`;
+  - `http_read_failure`/`ReadRetry`;
+  - the credentialed `account_auth_outcome` argument;
+  - the rule 5 deferral, `reconcile_uncertain` and Satisfied reconcile marking;
+  - the cancel-echo check;
+  - Binance's move to `http_write_batch`, and its read-side `venue_error`.
+- 2026-10-23, phase 2b (write fact authority and reads):
+  - Refusals exist only as `classify::Fact`. A fact comes from
+    `Cx::classify_write`, which uses the engine-delivered reply and the intent
+    captured on the command owner at dispatch, and it is bound to its attempt.
+  - `Cx::http_write_fact` records `WriteFact` and refuses an empty placement
+    acknowledgement. `http_write_leg_intent` narrows a leg before its first
+    attempt.
+  - `classify::read` returns `ReadFailure` / `ReadRetry` with no `Outcome`.
+  - Auth evidence needs no `credentialed` argument: the engine consults
+    `account_auth_outcome` only for credentialed account reads
+    (`PendingHttp.auth`), and the hook uses `classify::auth_outcome`.
+  - Still deferred to phase 2c: the rule 5 deferral, `reconcile_uncertain`,
+    Satisfied reconcile marking, the cancel-echo check, and Binance's
+    read-side `venue_error`.
+- Phase 2b decisions from venue-lane review (codex-zs5e83):
+  - **Exact message rows.** Add `Key::Message`, an exact match on the native
+    message. The venue codec strips only its documented suffix grammar while
+    decoding (Hyperliquid: trailing punctuation/whitespace or ` asset=<digits>`)
+    and rejects anything else. A bare `MessagePrefix` widens success evidence,
+    so reconsider removing it.
+  - **Intent from the logical command.** The intent is bound at leg
+    registration from the logical command, not from the endpoint. The cancel
+    leg of an amend/replace is `Intent::Amend`, so a `Satisfied(Cancel)` row
+    cannot authorise a replacement.
+  - **408 never resends.** 408 is decided before any table lookup, so it can
+    never yield `RefusedResend`; Lighter's 21104 nonce resend currently admits it.
+- Row #17 correction (Paradex): `on_response` already extends accepted IDs
+  (`trading.rs:848-855`). The loss is `Job::failure` (`trading.rs:93-120`)
+  dropping the structured partial on a failing multi-leg command, and a mixed
+  placement reaching `done` (`trading.rs:793`).
+- A batch whose only effects are `Satisfied` items records `KnownPartial`
+  without partial counts. The journal already treats that as known effects
+  without IDs.
+
