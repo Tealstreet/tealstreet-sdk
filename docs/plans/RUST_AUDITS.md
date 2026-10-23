@@ -2566,3 +2566,33 @@ three typed-admission assertion failures and four compatibility passes on native
 source; the narrow cutover passes all seven assertions unchanged. Exact inventory
 shrink is three fingerprints/three occurrences, WOO34/37 to31/34. HTTP pagination,
 private signing and socket ownership are separate conversion targets.
+
+### Paradex local history terminal custody
+
+Plan `987e5ea81e2`; original test-only checkpoint `45c743903b8`. With production
+and inventory byte-identical to actual `c473342d483`, the new target compiles
+and has three native/control passes plus five intended assertion REDs: four
+capacity cases and invalid-clock admission. The adapter adopts genuine Read
+command entry plus context done/fail in only those four synchronous branches.
+The same eight tests pass after source adoption, without assertion changes.
+
+Native controls retain public-only precedence, exact JSON and error metadata,
+Unicode client-ID bounds, all three history range validators, pre-auth no-symbol
+Fills, PublicTrades bypass, real256-peer isolation and recovery, duplicate-owner
+protection, and300 fixed-clock completions followed by full capacity refill.
+Inventory removes four single-occurrence hashes only in Paradex `history.rs`:
+55->51 total,13->9 in that file. Other paths and same-hash trading siblings stay
+intact. The rejected settings proposal remains held on genuine keyless Mutation
+no-op terminal authority; no signing, credential or outcome workaround was added.
+Broader native gates, independent implementation review and CI are separate.
+
+Local history verification on reviewed integration `56dacc36562` genuinely
+includes actual landing `23d0d490009` (#1892 background executions and #1817
+credential selection). All513 Paradex/Binance tests pass across42 targets,
+none ignored, including the same eight original local-history controls.
+Strict all-target/all-feature Paradex Clippy, scoped formatting, bans, the
+request-context scanner and all15 ratchet tests pass. Source/adversarial,
+caller and full-map reviews are CLEAN on this actual integration; architecture
+No. The seven-path diff preserves every unowned incoming blob and all foreign
+manifest entries, with only the four planned Paradex history occurrences pruned.
+CI and an authorized train slot remain separate gates.
