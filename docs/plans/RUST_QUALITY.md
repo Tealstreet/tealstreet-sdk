@@ -662,6 +662,108 @@ refusals and270 successes with stale previous-response probes. Existing native
 candle mapping, validation precedence and preparation/expiry assertions remain.
 This closes the earlier pre-Context numeric refusal gap using the shared seam.
 
+
+### Profile capability truthfulness
+
+Aster V1 STP, Bybit Spot/Hyro income and Coinbase Spot/INTX/CFM income no longer
+inherit an advertised command they refuse for that profile. Six original
+assertion REDs cover those profiles; supported Aster V3 and Bybit
+linear/inverse/demo remain positive peers. Native refusals and V3 STP route
+contracts stay separate from capability assertions. Only the three capability
+fields change in production; no handler, signing, history or PnL policy changes.
+
+### Polymarket unsupported history advertisements
+
+The valid-state capability audit found three inherited history claims whose
+native handlers unconditionally refuse. Six original-source assertion REDs
+cover public/credentialed fills, orders and income across all three signer
+modes, independently checking exact unsupported failure and zero HTTP before
+the capability assertion. Set those three bits false, preserve supported peers,
+and align the host cfg(test) record fixture. Future native history adoption must
+restore the corresponding bit atomically with valid-state dispatch. The SDK
+branded-empty fallback and coverage obligations are recorded in CALLERS.
+
+
+## TxFlow indexed history owner controls
+
+Original ten native controls pass. Added original-source controls produce three
+assertion RED groups (typed first/filtered-only failure, accepted-page recovery,
+and mixed-income stage recovery), plus a terminal-offset/cap compatibility pass.
+The corrected suite also checks numeric fill-ID ties, strict empty/repeated
+continuation after accepted output, and a terminal-cap income stage followed by
+fresh funding offsets. Existing exact request sequence, full pagination before
+final output limit, signed funding, raw-millisecond filters, native ID dedupe,
+delisted/relisted instrument mapping and native order quantities remain covered.
+No local release WASM/full replay timing sweep substitutes for final CI/artifacts.
+
+
+## Orderly shared history controls
+
+The original seventeen integration controls establish the native baseline.
+Failing-first controls pin typed first failures, accepted-page continuation
+recovery and regular-to-algo failure recovery. The corrected controls assert
+failed-prefix exclusion, filtered-only refusal, strict native metadata/progress
+checks, the total fifty-page budget with a terminal fiftieth page, separate stage
+identity/limits, concurrent command attribution and strict signing refusal.
+Existing funding spacing and delayed-timer, nested algo, canonical ID, native
+identity, empty/malformed page and final-format tests remain in the focused
+Orderly suite. Two old whole-read continuation/algo-error assertions are explicitly
+superseded by accepted-only partial output plus the shared incomplete warning.
+
+
+## MEXC history owner controls
+
+Original-source tests pin the native ten-control history baseline. New failing-
+first assertions cover typed first/filtered-only failures, accepted-page loss,
+funding page-prefix rollback and older-window failure. The original-source page-
+1000 compatibility control passes separately. Corrected controls additionally
+check identity retention across windows and native encounter order, concurrent
+command markers/empty success, single-request order fills and exact global
+limits. One old whole-read continuation refusal is explicitly superseded by
+accepted-only partial output plus the engine warning. Existing tests retain
+exact native window request sequence, units/IDs, funding and public-trade shapes,
+deduplication, and limited newest-first reads. No local release WASM/replay timing
+run substitutes for the current-head CI and final artifact proof.
+
+## Phemex bounded non-income shared owner
+
+Fills, orders and public trades reuse HistoryRows/Completion with one page and
+strict response admission. Four original-source assertion-RED groups pin typed
+Internal terminal failure; all 28 prior controls and three new compatibility
+controls pass on the original source. Compatibility covers valid empty/full
+native caps with no continuation, stable equal-time ordering, peer isolation
+and unchanged lookup classification. Corrected controls exercise transport,
+HTTP, invalid-prefix and oversized failures in direct/streamed modes, same-ID
+slot reuse and zero partial/gap publication. Endpoint codecs, requests, signing,
+account and income source remain outside this change.
+
+## WOO shared owner across native history routes
+
+All WOO history axes adopt existing CursorHistory without an engine API change.
+A continuous owner counts every physical native continuation, including empty/
+failed alternative transitions; no empty/no-new-row stall flags are installed.
+Eight original-source assertion-RED groups cover typed failures, accepted-only
+later recovery, filtered-only refusal, mixed-page coverage and strict native
+refusal classification. Three additional compatibility controls pass on the
+original source, including the terminal-1000 versus required-1001 boundary,
+combined alternative/legacy budget and streamed failed-prefix identity reuse.
+Native builder/codec precision, symbol aliases, row isolation, ledger pacing and
+zero Store publication remain pinned. Caller controls distinguish the unchanged
+immediate row warning from the owned terminal coverage marker.
+
+## Explicit non-pageable history results
+
+The three non-pageable adapters use existing HistoryRows/Completion without new
+engine API or result schema. Six original-source assertion-RED groups prove the
+previous missing owner coverage and untyped public-trade refusal; all 110 prior
+selected controls plus three new lookup compatibility controls pass on original
+source. Corrected controls require exactly one command-owned Warn before Done,
+including Error log level, [] shape despite live cached orders, zero I/O or Store
+mutation, distinct command IDs and explicit pre-I/O Unsupported/NotSent. Native
+unsupported capabilities remain unsupported and no numeric managed fallback is
+introduced. Caller polling guidance retains coverage while deduplicating UI
+alerts.
+
 ## KuCoin Spot candle managed-read controls
 
 Tests-first controls distinguish unreleased, bound-but-unclaimed and claimed
