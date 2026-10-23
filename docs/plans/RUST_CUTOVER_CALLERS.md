@@ -6332,8 +6332,9 @@ distinguish the following:
 Seven native local history refusals retain their original validation order and
 error messages: unsupported income, missing session, unknown market, invalid
 bounds, range/empty order ID, client-ID syntax and missing subaccount. Publication
-now requires a genuine shared Read root. Clock/capacity/custody refusal produces
-one engine terminal without a financial outcome; successful local admission keeps
-the original untyped native error. Both networks preserve the same behavior.
+now requires a genuine shared Read root. Clock/capacity rejection produces one
+typed terminal without a financial outcome. Revoked entry and live duplicate IDs
+preserve the existing owner without a second terminal. Successful local admission
+keeps the original untyped native error. Both networks preserve the same behavior.
 Remote history queries, session setup, headers, paging, completion and codecs
 remain unchanged. This slice issues no Context on remote fallthrough.

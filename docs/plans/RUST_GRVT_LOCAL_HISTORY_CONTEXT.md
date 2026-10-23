@@ -79,8 +79,9 @@ as managed remote history. Existing native history tests remain untouched.
 ## Caller behavior and review gates
 
 Finite admitted local errors retain exact native message/kind/outcome and native
-precedence. Clock/capacity/custody refusal now owns the single publication; these
-Read errors acquire no financial NotSent/Unknown outcome. No public signature,
+precedence. Clock/capacity rejection owns one typed terminal. Revoked entry/live
+duplicates preserve the existing owner without a second terminal. These Read
+errors acquire no financial NotSent/Unknown outcome. No public signature,
 query capability or successful remote behavior changes.
 
 Independent source/adversarial, caller and full-map reviews before source and
