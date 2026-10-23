@@ -5756,3 +5756,16 @@ Caller-visible changes:
   empty. claude-6mg5na confirmed tealstreet-next neither reads nor keys on the
   Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
   caller migration.
+
+### Lighter Schnorr signer contract (Lighter P3 part 1)
+
+Plan: [RUST_LIGHTER_SCHNORR_RECIPE.md](RUST_LIGHTER_SCHNORR_RECIPE.md). This
+defines the reserved `Algorithm::SchnorrDigest` and adds its provider arm. The
+Lighter venue still signs eagerly until its admission PR.
+
+| Change | tealstreet-next file:line | Old usage | New usage | Impact |
+| --- | --- | --- | --- | --- |
+| `SchnorrDigest` result width goes from 64 to **80 bytes** (`s \|\| e`) | none; the variant was reserved and had no callers | reserved, 64-byte group | Lighter ECgFp5 Schnorr over Goldilocks Poseidon2. Payload is 32 entropy bytes then little-endian u64 words; a 40-byte LE scalar key | none |
+| Keys are refused, not reduced | none until Lighter admission | legacy `Signer` reduces a key at or above the group order (Go semantics) | the provider arm refuses zero or non-canonical keys with `InvalidRequest` | behaviour change at admission: an out-of-range key fails typed instead of signing |
+| Crypto `schnorr` feature | WASM family builds | n/a | only a family that signs through the provider enables it; without it `SchnorrDigest` refuses as `Unsupported` | none |
+| `host.d.mts` `'schnorrDigest'` (already in the union) | custom JS host signers | refuse | a host that implements it must use the payload's first 32 bytes as nonce entropy and never its own randomness | none until P8 |

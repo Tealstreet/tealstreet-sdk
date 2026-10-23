@@ -260,7 +260,8 @@ pub enum Algorithm {
     Secp256k1Digest,
     /// Stark over a 32-byte big-endian field digest; 32-byte big-endian r || s.
     StarkDigest,
-    /// Reserved: Schnorr curve/hash contract requires definition before provider support.
+    /// Lighter ECgFp5 Schnorr over Goldilocks Poseidon2. 40-byte canonical LE
+    /// scalar key; message is 32 entropy bytes then LE u64 words; 80-byte s || e.
     SchnorrDigest,
     /// zkLink Rescue/MuSig over an exact 36-byte contract; 65-byte seed key;
     /// raw 64-byte packed signature. Deterministic: no entropy or nonce state.
@@ -409,9 +410,9 @@ impl SignRequest {
                     | Algorithm::Ed25519
                     | Algorithm::Es256
                     | Algorithm::StarkDigest
-                    | Algorithm::SchnorrDigest
                     | Algorithm::ZkLinkContract => 64,
                     Algorithm::Secp256k1Digest => 65,
+                    Algorithm::SchnorrDigest => 80,
                 }),
             })
             .collect()

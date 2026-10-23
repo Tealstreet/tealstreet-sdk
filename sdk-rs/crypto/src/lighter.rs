@@ -22,6 +22,12 @@ fn scalar(bytes: &[u8]) -> Result<[u8; 40], String> {
     let value = ScalarField::from_bytes_le(bytes)?;
     Ok(ScalarField::from_non_canonical_limbs(value.limbs()).to_bytes_le())
 }
+/// True for a canonical (below the group order), nonzero 40-byte scalar. Prime
+/// order means such a key never maps to the neutral point. Legacy paths reduce.
+pub fn canonical_scalar(key: &[u8]) -> Result<bool, String> {
+    let reduced = scalar(key)?;
+    Ok(key == reduced && !ScalarField::from_bytes_le(&reduced)?.is_zero())
+}
 /// Poseidon2 hash to the quintic extension used by Schnorr.
 pub fn poseidon2_hash_fp5(input: &[u8]) -> Result<[u8; 40], String> {
     Ok(hash_to_quintic_extension(&words(input)?).to_bytes_le())

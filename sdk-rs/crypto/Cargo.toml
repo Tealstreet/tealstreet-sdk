@@ -38,6 +38,7 @@ ed25519 = []
 es256 = []
 secp256k1 = []
 stark = []
+schnorr = []
 
 [dev-dependencies]
 alloy-signer = { workspace = true, features = ["eip712"] }

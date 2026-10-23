@@ -112,6 +112,34 @@ pub(super) fn stark_digest(key: &[u8], digest: &[u8]) -> Result<Vec<u8>, SignErr
     }
 }
 
+/// 40-byte little-endian ECgFp5 scalar, canonical and nonzero (refused, never
+/// reduced); payload is 32 bytes of nonce entropy then the word-aligned input.
+/// Lighter's hedged Schnorr, 80-byte s || e; no randomness of its own.
+pub(super) fn schnorr_digest(key: &[u8], payload: &[u8]) -> Result<Vec<u8>, SignError> {
+    #[cfg(feature = "schnorr")]
+    {
+        let canonical =
+            crate::lighter::canonical_scalar(key).map_err(|_| SignError::InvalidRequest)?;
+        if !canonical {
+            return Err(SignError::InvalidRequest);
+        }
+        let Some((entropy, input)) = payload.split_first_chunk::<32>() else {
+            return Err(SignError::InvalidRequest);
+        };
+        if input.is_empty() || !input.len().is_multiple_of(8) {
+            return Err(SignError::InvalidRequest);
+        }
+        let nonce = crate::lighter::hedged_nonce(input, key, entropy)
+            .map_err(|_| SignError::InvalidRequest)?;
+        crate::lighter::schnorr_sign(input, key, nonce).map_err(|_| SignError::InvalidRequest)
+    }
+    #[cfg(not(feature = "schnorr"))]
+    {
+        let _ = (key, payload);
+        Err(SignError::Unsupported)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,6 +287,8 @@ mod tests {
         assert_eq!(secp256k1_digest(&key, &key), Err(SignError::Unsupported));
         #[cfg(not(feature = "stark"))]
         assert_eq!(stark_digest(&key, &key), Err(SignError::Unsupported));
+        #[cfg(not(feature = "schnorr"))]
+        assert_eq!(schnorr_digest(&key, &key), Err(SignError::Unsupported));
         let _ = key;
     }
 }
