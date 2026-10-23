@@ -5478,6 +5478,19 @@ not establish complete history. Existing native row shapes and result shaping
 remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
 and [owned history](RUST_OWNED_HISTORY.md).
 
+
+## Managed order reads reconcile from their earliest leg
+
+A managed order read clears an uncertain-write fence only if its earliest
+released leg (page, settle coin or product) was released after the fence.
+A read that straddles a fence leaves it set until the next full read, which the
+engine already requests. Caller outcomes and frames are unchanged; an order row
+may stay one extra read cycle after an unknown write.
+
+Legacy `cx.request` order reads still carry the per-attempt overclaim: a paged
+legacy read can clear a fence on rows read before it. This stays true for each
+venue until that venue moves its order reads onto managed contexts.
+
 ### Lighter public order-book seed uses managed Background Read
 
 The independent `orderBookOrders?market_id={id}&limit=100` snapshot now waits for
@@ -5757,6 +5770,64 @@ Caller-visible changes:
   Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
   caller migration.
 
+
+## Managed subscription handoff before native reads
+
+OKX private reconnect account refreshes begin on a subsequent engine ingress
+following the handoff of their required subscription frames. The shared
+`set_socket_interests_then` API binds native Pending work to the current epoch
+and exact required interests. It waits for every paced batch and outstanding
+socket signature before arming an ordinary engine timer after final fencing.
+This establishes host handoff order; it promises neither peer acknowledgement
+nor a later JavaScript event-loop turn. Custom hosts must process the returned
+actions in order and deliver timer events through ordinary engine ingress.
+
+A committed removal or wire change cancels the dependent work. Unrelated
+additions preserve it behind the new revision; a refused replacement preserves
+still-needed work on the unchanged committed revision. Retirement, expiry,
+stale timers and duplicate delivery cannot issue its read. The callback has no
+borrowed HTTP delivery, command-entry, order-response or Plan activation token;
+reads retain their existing admission, signing, timeout and completion rules.
+
+The JS host removes inline-fired timer handles and ignores callbacks belonging
+to a cleared or superseded timer arm. Bitunix keeps its existing legacy socket
+boundary and its remove-before-master obligation.
+
+
+## WEEX ordinary trading: complete managed Plan
+
+The ordinary placement/cancel/amend/leverage/margin/mode pipeline now enters
+through genuine Preflight authority, admits its entire native serial sequence,
+and releases only through the existing primary dispatch recipe and shared
+Prepare/Bind/Claim path. Each native call retains 20s and one attempt; eight
+serial placement lots can complete over 152s inside their 160s Plan. No write
+retries or caller-side key selection were introduced. History/account/public
+callers and their temporary generic sender remain separate migrations.
+
+Accepted native IDs survive subsequent provider, refusal, transport, malformed
+ACK or expiry failures through the engine journal. Native code 40015 is a system
+error and remains Unknown, including when an old fixture's message says
+insufficient balance. Unlisted codes do not prove refusal. HTTP 408/5xx use the
+engine's typed Unknown reason, with native decoding/publication fenced. Two
+existing classification assertions were updated under overseer approval;
+payload fixtures are unchanged.
+
+CancelSymbolOrders still attempts its separate ordinary and algorithm families
+after an ordinary provider refusal or transport failure: exact failed-call
+settlement advances the Plan, and its journal retains the earlier NotSent or
+Unknown fact. It never retries either failed call. HTTP 408/5xx still terminate
+through the core before ordinary callbacks; no local continuation bypass exists.
+
+Late metadata contains bounded native client/cancel identities. Late replies
+remain nonpublishing and cannot produce a second terminal; native Store
+publication stays with authoritative active account/reconciliation reads.
+An immutable late reducer cannot also update WEEX native tombstone/freshness
+state, so freshness-aware late publication remains explicit follow-up debt.
+
+The inventory shrinks exactly 51 ->46 occurrences (42 -> 38 entries), with
+trading.rs 5 ->0: two numeric completions plus three conservative macro matches.
+No other venue inventory, shared checker, allowance or signer source changes.
+
 ## OKX dispatch signer adoption (draft; CI evidence pending)
 
 This proposed family change covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`.
@@ -5925,3 +5996,27 @@ Two separate events, which callers must not conflate:
 Raising a caller's timeout lengthens an adopting venue's root but never
 renews it. Plan consumers are not capped by the caller wait until the
 separate receipt-cap seam (#1949) lands.
+
+## Opt-in Read Plans retain the caller receipt deadline
+
+`begin_preflight_with_command_wait` opts a Read command into the original caller
+receipt cap before JWT/preflight work. The eventual Plan ends no later than
+that absolute deadline, and still ends earlier when its declared native work
+has a shorter bound. Native page, retry, fallback and per-call geometry are
+unchanged. Later callbacks, stages and retries cannot renew the receipt cap.
+Existing native-only preflight/Plan callers keep their current lifetime.
+
+An absent host timeout receives the SDK default once at external receipt. A
+missing or failed receipt never manufactures another default: genuine Fresh
+admission uses one typed engine Read refusal with no financial outcome. Borrowed
+or spent custody emits nothing. An already-expired own receipt leaves Fresh
+custody for `reject_expired_command(Read)`, the sole initial Timeout emitter.
+Expiry at Plan admission leaves valid preflight failure authority and returns
+TimedOut; adapters use the canonical Read error projection when settling it.
+
+Host listener abandonment and engine Plan expiry remain distinct. Raising the
+configured/per-call wait can lengthen the caller cap, but cannot enlarge a
+shorter native declaration. No transport cancellation, original Read-root cast
+or accepted-prefix recovery permission follows from observing this cap.
+Mutation and execution-owned capped Plans are outside this first slice; native
+mutation/provider errors and their outcome projections remain unchanged.

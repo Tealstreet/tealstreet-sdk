@@ -673,3 +673,63 @@ fn prompt_login_signature_is_released_on_the_live_socket() {
         h.sent
     );
 }
+
+#[test]
+fn reconnect_subscription_precedes_its_account_refresh() {
+    let mut h = Harness::private();
+    let first = h.open("/private");
+    h.requests.clear();
+    h.event(Event::WsClosed {
+        socket: first,
+        code: 1006,
+    });
+    let (timer, at) = h
+        .timers
+        .iter()
+        .copied()
+        .filter(|(_, at)| *at <= h.now + 1000.)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("reconnect timer");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    let replacement = h.socket("/private");
+    assert_ne!(first, replacement);
+    h.now += 1.;
+    h.event(Event::WsOpened {
+        socket: replacement,
+    });
+    h.engine.handle(
+        h.now + 1.,
+        Event::WsMessage {
+            socket: replacement,
+            text: LOGIN_OK,
+        },
+    );
+    let mut out: Vec<_> = h.engine.drain_actions().collect();
+    let wakeups: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    for (timer, at) in wakeups {
+        h.engine.handle(at, Event::TimerFired { timer });
+        out.extend(h.engine.drain_actions());
+    }
+    let subscribe = out.iter().position(|action| matches!(action,
+        Action::WsSend { socket, text } if *socket == replacement && text.contains("subscribe")
+    )).expect("private subscription");
+    let refresh = out
+        .iter()
+        .position(|action| {
+            matches!(action,
+                Action::Http(request) if request.url.contains("/api/v5/account/")
+            )
+        })
+        .expect("account HTTP refresh");
+    assert!(
+        subscribe < refresh,
+        "HTTP refresh preceded private subscription release: subscribe={subscribe}, refresh={refresh}"
+    );
+}

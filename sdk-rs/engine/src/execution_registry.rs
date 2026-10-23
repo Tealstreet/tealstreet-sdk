@@ -102,12 +102,13 @@ impl ContextRegistry {
             return Err(Error::Invalid);
         };
         let owner = self.commands.get(&id).ok_or(Error::Revoked)?;
-        if !matches!(&owner.phase, CommandPhase::Context { root: issued, entry_owned: true } if issued == root)
+        if !matches!(&owner.phase, CommandPhase::Context { root: issued, entry_owned: true, .. } if issued == root)
         {
             return Err(Error::Revoked);
         }
         if owner.pending != 0
             || owner.deliveries != 0
+            || owner.waits != 0
             || owner.writes.is_some()
             || owner.mutation_declared
             || self

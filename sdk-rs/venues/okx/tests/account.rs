@@ -116,7 +116,7 @@ fn startup() -> (
         let sent = actions(&mut e);
         assert!(sent.iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text.contains("\"op\":\"login\"") && text.contains("test-passphrase"))));
         ws(&mut e, socket, r#"{"event":"login","code":"0","msg":""}"#);
-        let subscriptions = actions(&mut e);
+        let subscriptions = handoff_actions(&mut e, 4.);
         assert!(subscriptions.iter().any(|a| matches!(a, Action::WsSend { text, .. } if text.contains(if socket == business { "orders-algo" } else { "positions" }))));
     }
     (
@@ -128,6 +128,22 @@ fn startup() -> (
             .filter(|a| matches!(a, Action::Http(_)))
             .collect(),
     )
+}
+
+fn handoff_actions(engine: &mut Engine<Okx>, now: f64) -> Vec<Action> {
+    let mut output = actions(engine);
+    let wakeups: Vec<_> = output
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == now => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    for timer in wakeups {
+        engine.handle(now, Event::TimerFired { timer });
+        output.extend(actions(engine));
+    }
+    output
 }
 
 fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str) {
@@ -396,7 +412,7 @@ fn resweep(
             text: r#"{"event":"login","code":"0"}"#,
         },
     );
-    let mut requests: Vec<_> = actions(e)
+    let mut requests: Vec<_> = handoff_actions(e, at)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
@@ -530,8 +546,14 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
         .unwrap();
     e.handle(2_001.0, Event::WsOpened { socket });
     actions(&mut e);
-    ws(&mut e, socket, r#"{"event":"login","code":"0","msg":""}"#);
-    let fresh: Vec<_> = actions(&mut e)
+    e.handle(
+        2_002.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"event":"login","code":"0","msg":""}"#,
+        },
+    );
+    let fresh: Vec<_> = handoff_actions(&mut e, 2_002.)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();

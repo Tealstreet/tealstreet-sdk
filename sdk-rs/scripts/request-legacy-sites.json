@@ -794,8 +794,8 @@
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
   },
   "venues/mexc/src/lib.rs": {
-    "a1d7eb3cdf7f4e938351efa132ee68dac79fc9e6e26db557c0ffd67282e9ae14": 1,
     "2cb4c59f38cca507a15b20d1ace303afd27defc1b4fe0aba50dddcbcb1f9c37c": 1,
+    "a1d7eb3cdf7f4e938351efa132ee68dac79fc9e6e26db557c0ffd67282e9ae14": 1,
     "e7ec3b5f8c170e9a5887721f2eedda084ecf9f5a5eba8d1e899957c63019e0bb": 1
   },
   "venues/mexc/src/secondary_tests.rs": {
@@ -1111,12 +1111,6 @@
   },
   "venues/weex/src/secondary_tests.rs": {
     "f758cbc2754c2b39d2f81d56901f6920f66dcc953a7fe7faa9b5c8f2a5b46c90": 1
-  },
-  "venues/weex/src/trading.rs": {
-    "257046a5e47fb2e691f995b7340e6df7993bb189972fad4218002ab4f7dbee9b": 2,
-    "a3929c62720c7893d6477453bb8092ee1dc649a8b5024ffd9867b8715c3afc2f": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
-    "ea183a3f6fb38fae59d7c32102842bce797af23286a824eb9c17fa5cf43b38d5": 1
   },
   "venues/woo/src/account.rs": {
     "84cbbb2145bd157642ac2382cdc442278adcbc91dac618d336f080d5622f4a87": 1,
