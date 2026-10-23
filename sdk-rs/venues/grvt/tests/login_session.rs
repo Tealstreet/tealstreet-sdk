@@ -81,6 +81,24 @@ impl Harness {
 fn login_is_prepared_on_the_primary_private_egress_with_its_bound() {
     let mut engine = engine();
     engine.start(NOW);
+    let catalog = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("all_instruments") => Some(request),
+            _ => None,
+        })
+        .expect("catalog read");
+    engine.handle(
+        NOW,
+        Event::HttpResponse {
+            request: catalog.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: CATALOG,
+            },
+        },
+    );
     engine.prepare_dispatch(NOW);
     let login = engine.drain_actions().find_map(|action| match action {
         Action::ManagedHttp(action) => match *action {
