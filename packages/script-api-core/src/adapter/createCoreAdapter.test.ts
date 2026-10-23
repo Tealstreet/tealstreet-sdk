@@ -4,7 +4,7 @@ import type { HostBindings, HostWriteEvent } from './HostBindings';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { OrderType } from '@tealstreet/safe-cex/src/types';
+import { OrderSide, OrderType } from '@tealstreet/safe-cex/src/types';
 
 import { CORE_WRITE_API_PATHS } from '../runtime/runtimeSurface';
 import { createCoreAdapter } from './createCoreAdapter';
@@ -118,6 +118,79 @@ describe('createCoreAdapter', () => {
     expect(writes[0].error).toMatch(/unknown market/);
   });
 
+  describe('partial batch failures', () => {
+    const batch = [
+      { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Market, amount: 1 },
+      { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Market, amount: 2 },
+    ];
+
+    it('retains accepted IDs and the exact outcome in the failed write event', async () => {
+      const failure = Object.assign(new Error('second leg response lost'), {
+        partialOrderIds: ['accepted-1'],
+        outcome: 'unknown',
+      });
+      const placeOrders = vi.fn().mockRejectedValue(failure);
+      const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders }) });
+      const success = vi.fn();
+      await createCoreAdapter(host)
+        .placeOrders(batch, 'main')
+        .then(success, () => undefined);
+
+      expect(success).not.toHaveBeenCalled();
+      expect(placeOrders).toHaveBeenCalledTimes(1);
+      expect(writes).toEqual([
+        {
+          method: 'placeOrders',
+          account: 'main',
+          summary: 'placeOrders 2x BTCUSDT',
+          ok: false,
+          error: 'second leg response lost',
+          partialOrderIds: ['accepted-1'],
+          outcome: 'unknown',
+        },
+      ]);
+      expect(writes[0]).not.toHaveProperty('orderIds');
+    });
+
+    it('rejects with a typed partial failure without changing the SDK message', async () => {
+      const failure = Object.assign(new Error('second leg rejected'), {
+        partialOrderIds: ['accepted-1'],
+        outcome: 'rejected',
+      });
+      const { host } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      const success = vi.fn();
+      const caught = await createCoreAdapter(host)
+        .placeOrders(batch, 'main')
+        .then(success, (error: unknown) => error);
+
+      expect(success).not.toHaveBeenCalled();
+      expect(caught).toMatchObject({
+        name: 'ScriptBatchOrderError',
+        message: 'second leg rejected',
+        partialOrderIds: ['accepted-1'],
+        outcome: 'rejected',
+        cause: failure,
+      });
+    });
+
+    it('keeps ordinary failures unchanged and never reports them as success', async () => {
+      const failure = new Error('batch refused before sending');
+      const { host, writes } = fakeHost({
+        getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }),
+      });
+      await expect(createCoreAdapter(host).placeOrders(batch, 'main')).rejects.toBe(failure);
+      expect(writes).toEqual([
+        {
+          method: 'placeOrders',
+          account: 'main',
+          summary: 'placeOrders 2x BTCUSDT',
+          ok: false,
+          error: failure.message,
+        },
+      ]);
+    });
+  });
+
   it('cancels exactly the ids named, ignoring the other filter fields', async () => {
     const orders = [order({ id: 'a' }), order({ id: 'b', side: 'buy' }), order({ id: 'c' })];
     const { host, cancelOrders } = fakeHost({
@@ -189,7 +262,14 @@ describe('createCoreAdapter', () => {
     const { host } = fakeHost();
     await expect(
       createCoreAdapter(host).placeOrder(
-        { symbol: 'BTCUSDT', side: 'sell', type: OrderType.Limit, amount: 0.04, price: 60_000, reduceOnly: true } as never,
+        {
+          symbol: 'BTCUSDT',
+          side: 'sell',
+          type: OrderType.Limit,
+          amount: 0.04,
+          price: 60_000,
+          reduceOnly: true,
+        } as never,
         'main',
       ),
     ).rejects.toThrow(/below the venue lot step/);
@@ -329,10 +409,7 @@ describe('createCoreAdapter', () => {
   });
 
   it('closes each matching position and reports partial ids when a later leg throws', async () => {
-    const placeOrder = vi
-      .fn()
-      .mockResolvedValueOnce(['id-1'])
-      .mockRejectedValueOnce(new Error('venue said no'));
+    const placeOrder = vi.fn().mockResolvedValueOnce(['id-1']).mockRejectedValueOnce(new Error('venue said no'));
     const positions = [position({ side: 'long' }), position({ side: 'short', contracts: 1 })];
     const { host, writes } = fakeHost({
       getExchange: () => ({ name: 'binance', placeOrder, store: { positions } }) as never,
@@ -362,14 +439,14 @@ describe('createCoreAdapter', () => {
     const { host } = fakeHost({
       getExchange: () => {
         const placeOrder = vi.fn(async () => [`id-${used.length + 1}`]);
-        return ({
+        return {
           name: 'binance',
           placeOrder: (opts: never) => {
             used.push(placeOrder);
             return placeOrder(opts);
           },
           store: { positions },
-        }) as never;
+        } as never;
       },
       getStore: () => ({ positions, markets: [market()] }) as never,
     });
