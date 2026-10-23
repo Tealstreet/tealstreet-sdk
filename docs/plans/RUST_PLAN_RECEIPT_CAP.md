@@ -312,6 +312,14 @@ borrowed no-terminal refusal and reused-id/retired-preflight isolation.
 Ten integration controls and all five custody controls pass on this source.
 These are engine proofs, not native history adoption receipts.
 
+Focused regressions pass: command-wait 18, preflight 38, Plan-filter 69 and
+feature-off error 9. Strict engine all-target/all-feature Clippy passes after
+replacing an unnecessary lazy error closure; the first strict run caught that
+local lint. The initial Plan module filter matched zero tests and was replaced
+by the executed 69-test filter. Own Rust formatting passes. Bans still refuses
+the inherited #1945 `command.rs` untyped wait decoder; scanner unit gates pass.
+That dependency failure is not waived or fixed in this PR.
+
 Context Read-root expiry belongs to fe7's separate #1945 follow-up. #1949 adds
 no such timer/funnel. #1945's frozen dependency must be refreshed once its owner
 publishes the successor fixing decode/bans, feature-fixture and WASM gates; no

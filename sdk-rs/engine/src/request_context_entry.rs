@@ -165,18 +165,13 @@ impl<P> Io<P> {
         {
             return Err(Error::Revoked);
         }
-        let (receipt, deadline) =
-            *self
-                .command_waits
-                .stamps
-                .get(&entry.command)
-                .ok_or_else(|| {
-                    if self.command_waits.receipts == u64::MAX {
-                        Error::Capacity
-                    } else {
-                        Error::Revoked
-                    }
-                })?;
+        let (receipt, deadline) = *self.command_waits.stamps.get(&entry.command).ok_or({
+            if self.command_waits.receipts == u64::MAX {
+                Error::Capacity
+            } else {
+                Error::Revoked
+            }
+        })?;
         if entry.receipt != Some(receipt) {
             return Err(Error::Revoked);
         }
