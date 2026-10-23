@@ -94,7 +94,9 @@ impl ReadLeg {
 
 ReadRoot/ReadLeg have private fields and no Clone. There is no constructor from
 external Context, public root/leg cast, or leg()/retry() on ReadLeg. A prior child
-cannot be supplied as a parent. command_root admits exactly once through genuine
+cannot be supplied as a parent through this wrapper API. Borrowed context()
+exposes existing core Context authority: these type restrictions do not prove a
+holder cannot call generic Cx methods directly. Do not claim global non-derivability. command_root admits exactly once through genuine
 command entry, reusing the standalone missing-selection diagnostic/refusal path.
 It returns the original admitted-root wrapper, not a queued HTTP attempt. Its
 Context is Read, with the chosen credential, root RetryNever and no root pacing.
@@ -135,8 +137,13 @@ or terminal operations as required by the history API.
 
 The caller retains ReadRoot for the entire walk and binds ReadCompletion to its
 original Context. Final root completion and child DATA admission are distinct.
-Retiring a finished leg must not retire the root; root terminal/expiry must
-revoke all children through shared engine authority. Shared core determines
+Accepted-page cleanup uses existing attempt cleanup/pruning or exact child-leg
+retirement, never done_context/fail_context on a child (those terminate the
+command). Only the original root supplies logical completion. Child cleanup must
+leave that root live; its typed done/fail terminal or fe7's reviewed root-expiry
+operation must revoke all children through shared engine authority.
+finish_http_context(root) only retires that root Context leg; it is NOT command
+settlement or a substitute for cascading child revocation. Shared core determines
 whether a failure is a live-root physical timeout eligible for accepted-prefix
 recovery or an expired root that cannot recover. This helper chooses neither
 native recovery nor completion, and supplies no local finalizer.
@@ -156,11 +163,14 @@ controls (assertions reviewed before implementation):
 1. Fresh caller-wait root creation, duplicate/foreign callback rejection and
    missing-selection diagnostic-before-one-terminal preserve #1962 behavior.
    Expired/None wait uses the reviewed core refusal, no Context/HTTP/Store effect.
-2. Compile/API privacy controls prove only ReadRoot exposes leg derivation;
-   ReadLeg cannot create a grandchild or physical retry and no external Context
-   can be wrapped. These are type/privacy controls, not semantic original REDs.
+2. Compile/API privacy controls prove only ReadRoot exposes wrapper leg
+   derivation; ReadLeg offers no grandchild/retry method and no external Context
+   can be wrapped. Borrowed Context still has existing generic Cx authority;
+   these controls do not establish global non-derivability or global denial of
+   child-based terminal methods. They are type/privacy controls, not semantic REDs.
 3. Root lifetime 120s with 20s pages: page one queued at 0 has deadline20s;
-   after legitimate completion, page two at15s has deadline35s, not20s. It has a
+   after page acceptance plus child cleanup (without root terminal), page two
+   at15s has deadline35s, not20s. It has a
    distinct leg/Attempt but the same original owner/generation, credential,
    selected signing refs, egress and evidence. Root deadline never changes.
 4. A late page with under20s remaining caps at the original raw root deadline;
@@ -174,12 +184,16 @@ controls (assertions reviewed before implementation):
 6. Queue/preparation/provider refusal preserves native pending+exact error and
    leaves root versus leg settlement with the caller. Retirement of one completed
    child leaves the original root available for its next native page; retiring
-   the root denies any queued/late child. Losing a Rust wrapper alone is not an
-   asserted engine retirement primitive.
+   the original root through typed done_context/fail_context, or fe7's reviewed
+   root-expiry operation, denies queued/late child work. Calling
+   finish_http_context(root) is explicitly NOT this operation. Neither child
+   cleanup nor losing a Rust wrapper is a command retirement primitive.
 7. Streaming and non-streamed pages retain raw native row order, exact URL/body/
    ordered headers, selected provider refs and physical delivery identity.
-   Early prefix, stale/duplicate data and first/later-page failure recovery use
-   real shared history admission under its owner-reviewed contract.
+   Early prefix, stale/duplicate data, cross-generation/late stream staging and
+   first/later-page failure recovery use real shared history admission under
+   its owner-reviewed contract. Distinguish a live-root physical Timeout from
+   root expiry using the actual shared cause-aware path before any recovery.
 
 ## Execution and landing sequence
 
@@ -204,3 +218,8 @@ controls (assertions reviewed before implementation):
 Architecture gate: one shared root/leg composition using existing engine
 custody. No local selection policy, expiry finalizer, history settlement,
 credential fallback or new owner/scheduler machinery.
+
+Core review at c06c is bounded direction/API-fit only. The exact constructor
+signature must compose fe7's reviewed receipt/root-expiry seam before source;
+new-contract tests proceed only at that reviewed dependency pin. Wrapper privacy
+and borrowed low-level Context authority are separate claims.
