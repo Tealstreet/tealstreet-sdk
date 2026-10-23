@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Public managed HTTP headers | Shared additive API plan | Before unsigned HL/GRVT JSON POSTs need static headers on the existing managed transport path. | [RUST_PUBLIC_HTTP_HEADERS.md](RUST_PUBLIC_HTTP_HEADERS.md) |
 | Selected signer mode | Active shared SDK fix; queued after #1741 | Before changing RemoteSigner precedence, PayloadSigner admission or runtime feed selection with both callbacks. | [RUST_SELECTED_SIGNER_MODE.md](RUST_SELECTED_SIGNER_MODE.md) |
 | Engine resource IDs | Planned shared allocator/host correction | Before changing physical socket/request/timer identities or managed host numeric ingress. | [RUST_SAFE_ENGINE_IDS.md](RUST_SAFE_ENGINE_IDS.md) |
 | Hosted signer presentation | Planned after #1757 | Extending primitive signature encoding or provider-owned passphrase presentation for OKX/Bitget. | [RUST_HOSTED_SIGNER_PRESENTATION.md](RUST_HOSTED_SIGNER_PRESENTATION.md) |
