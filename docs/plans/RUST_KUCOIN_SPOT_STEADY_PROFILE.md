@@ -54,3 +54,61 @@ queued-group controls and source preservation review. If native codec/Store/host
 work dominates instead, report that evidence and request the appropriate scope.
 No merge until a new window is granted. Existing venue PRs and Bitunix work stay
 separate; their evidence does not establish this performance objective.
+
+## Initial measured profile (before performance code)
+
+Executed on the unchanged source above; no engine/venue/host/harness source was
+edited. Raw evidence is under `/tmp/codex-9czdjh-kcs-profile/`:
+`landing-rust.cpuprofile` (whole replay), `steady-rust.cpuprofile` (exact warm-mark
+to measure interval), replay JSONs, `native-sample.txt`, `native-run.log`, native
+build log and machine-readable `attribution.json`. The temporary native driver
+and corpus are under `/tmp/codex-9czdjh-kcs-native-profile/`.
+
+The single optimized-WASM steady capture uses Node22's inspector at100us sampling,
+started by a preload at Tape.play's warm-mark threadCpuUsage call and stopped at
+the steady measurement call. The preload does not alter tape/engine/host code.
+Its518.625ms sampled interval includes301.454ms idle and26ms inspector setup;
+WASM leaf samples account for49.217ms. Main self costs outside WASM include
+socketFor14.294ms, active11.870ms, querystring unescape9.416ms and URL parameter
+parse8.663ms. These are weighted sampling intervals, not additive exact CPU
+measurements. Inspector overhead and stripped WASM names prevent an exact
+per-Rust-function WASM attribution; local profile metrics are not a gate result.
+
+The supplemental native release driver uses unchanged landing engine/KuCoin
+dependencies, opt3/fat LTO/one codegen unit plus symbols, two build jobs, the real
+968-market startup and the recorded final19,820 WS payloads. One12-second profile
+processed15,142,480 repeated events, averaging793.32ns/event. macOS sample
+collected5,872 main-thread samples:
+
+| Requested shared seam | Steady path and measured evidence |
+| --- | --- |
+| #1830 command entry | Admission, begin/end loan and command-owner lookup are not reached by ticker/depth events. Ambient custody assertions in assert_live/failed still execute; they inline into generic handle/drain work, so this profile does not isolate their incremental cost. No claim of zero instructions or zero code-layout effect. |
+| #1837 classifier | No read/write classifier or command write-intent call on these WS events; there are no HTTP write deliveries or command records. Changed layout/codegen effects remain unisolated. |
+| #1854 execution groups | One unconditional sweep per ordinary WS event. Its empty-root expiry/managed-leg revocation/timer work totals60/5,872 samples, about1.02% native time (roughly8ns/event by sample allocation, not a separate timing measurement). The sweep still scans managed HTTP state and recomputes the next group deadline when no group exists. |
+
+Native self samples are dominated by JSON string scanning16.54%, memcmp14.63%,
+shared `num::parse_decimal`10.51%, Price deserialization8.84%, and JSON parse_str
+6.85%. Price/Store ticker lookup is also a substantial inclusive branch. These
+are source-attribution measurements, not WASM speed predictions: the driver omits
+JS host/frame costs, repeats the corpus, and older depth snapshots are rejected
+after the first cycle. Sampling proportions have ordinary statistical error.
+
+#1835 discovery has no new steady ticker/depth work: its managed discovery
+Context checks and retirement are in startup item/response callbacks, separate
+from on_message. The source review confirms this path distinction; it does not
+rule out compiler/code-layout effects from a larger module.
+
+## Disposition and proposed next measurement
+
+The profile identifies a shared empty-group sweep opportunity, but its roughly1%
+native share does not justify claiming the required7.50% overall CPU reduction.
+Do not optimize that path speculatively or disable custody checks. Coordinate any
+shared execution-group optimization with its owner; an empty-root shortcut must
+still revoke abandoned unsent execution legs and preserve deadline/observer
+semantics. The larger observed shared numeric-parser/ticker-lookup and generic
+codec costs warrant targeted source attribution next. Anonymous WASM indices
+must first gain a trustworthy symbol mapping or equivalent controlled evidence
+before assigning their costs to those native hotspots.
+
+Plan and initial profile are sent to the overseer before performance code. The
+1.20x median target remains unproven. No merge window is requested for code yet.
