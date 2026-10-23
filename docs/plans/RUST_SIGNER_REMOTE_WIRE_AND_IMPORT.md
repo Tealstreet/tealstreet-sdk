@@ -262,12 +262,14 @@ or coordinated with claude-4yjlw0.
      whenever the account declares a public verification key. That key is
      non-secret account config, trusted like any other account config:
      - Orderly: the `ed25519:` public key in `key`;
-     - Paradex: the Stark subkey address;
-     - Aster and Hyperliquid: the signer or agent address (recovery);
-     - Lighter: the API public key.
-     Coinbase JWT carries only a key name, so it has no verification key and
-     relies on venue rejection. The plan states this and does not invent a
-     key. The new verify primitives are this PR's work: ES256 verify (`p256`),
+     - Paradex: the Stark public key itself, which delegated mode already
+       carries in `key` (also sent as `PayloadSignRequest.key`), not the
+       subkey address;
+     - Aster and Hyperliquid: the signer or agent address (recovery).
+     Coinbase JWT and Lighter have no verification key: Coinbase carries
+     only a key name, and Lighter's config has no API public key. Both rely
+     on venue rejection. The plan states this and invents no key; Lighter's
+     adoption may add a public-key config field later. The new verify primitives are this PR's work: ES256 verify (`p256`),
      Stark verify (`starknet-crypto`) and secp256k1 recovery (`alloy`).
      `ed25519::verify` and `lighter::schnorr_verify` already exist.
 4. **Browser executor.**
