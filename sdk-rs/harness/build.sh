@@ -40,6 +40,9 @@ family_args() {
   if [[ $family == asterdex ]]; then
     # Restore pre-#1656 venue throughput only for this family, not combined/native.
     build_args+=(--config 'profile.release.package.safe-cex-venue-asterdex.opt-level=3')
+  elif [[ $family == woo ]]; then
+    # Keep WOO ticker decoding throughput within the fixed CPU and size gates.
+    build_args+=(--config 'profile.release.package.safe-cex-venue-woo.opt-level=3')
   elif [[ $family == paradex ]]; then
     # Keep standalone Paradex within the fixed size gate; public replay also gates CPU and memory.
     build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level="z"'

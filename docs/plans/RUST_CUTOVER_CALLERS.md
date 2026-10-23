@@ -5223,6 +5223,55 @@ snapshot-discard notice and issue no order read. Account cycles continue through
 their ordinary next stage and poll schedule; accepted native writes and stream
 updates remain usable. Existing SDK callers need no new option or state migration.
 
+### Lighter cached leverage and account-tier Read ownership
+
+`fetchLeverage` and the `FetchAccountTier` extension now admit the engine's genuine
+current Read command before consulting their synchronous caches. Finite admitted
+calls retain leverage JSON, native missing-setting errors and tier string/null;
+tier fetch remains cache-only and does not trigger accountLimits refresh.
+
+At shared owner capacity or with a non-finite clock, these calls now produce one
+typed engine Read refusal (no financial outcome) rather than bypassing admission.
+They allocate no HTTP, preparation, signer, socket or timer and need no new
+transport hook or external caller signature. Duplicate IDs cannot replace a live
+owner, and immediate completion releases capacity for the next call. SetAccountTier,
+account refresh cadence, signing and all other commands keep their native paths.
+
+## Script adapter batch failures retain SDK-reported IDs
+
+`createCoreAdapter.placeOrders` rejects with the exported `ScriptBatchOrderError`
+when its SDK failure contains a nonempty string array of `partialOrderIds`. Its
+message is the original SDK message, and `cause` retains the original failure.
+The error owns a frozen copy of those IDs and preserves a valid `outcome`
+(`notSent`, `rejected` or `unknown`) exactly; a missing outcome stays absent. Valid
+nonnegative integer `partialOrderCount` and `totalOrderCount` remain available.
+Other allowlisted SDK fields and reporting state remain on the rejected error
+through the canonical `serializeCommandError` validator; arbitrary cause fields
+are not promoted. Ordinary failures and local validation errors retain their
+original identity.
+
+The failed host write event stays `ok: false` with its existing error string,
+and carries the same partial IDs, outcome and valid counts. It does not expose
+them as successful `orderIds`. The successful batch result remains unchanged.
+Web, CLI and mobile host bindings share this adapter contract.
+
+Scripts catching the rejected batch and hosts consuming `HostWriteEvent` can
+reconcile the reported IDs separately. A partial failure is never whole-batch
+success or permission to retry the entire batch. An `unknown` outcome remains
+uncertain evidence; callers must not upgrade it to confirmed placement. An
+uncaught `runScript` failure still has a string-only `RunScriptResult.error`, so
+Agent/automation hosts must retain the failed write event for these details.
+
+## WOO family WASM venue throughput
+
+Standalone WOO family builds compile the WOO venue crate at opt-level3. This
+applies to public and private WOO execution in browser/Worker and Node family
+artifacts. Callers download a larger module within the existing fixed size cap;
+SDK construction, endpoints, signing, transports, row shapes and errors retain
+their contracts. Combined/native builds continue using the package size profile;
+this supersedes the earlier package-profile description for the WOO family only.
+[Profile and controls](RUST_WOO_PUBLIC_CPU.md).
+
 
 ## Shared two-run CPU certification
 

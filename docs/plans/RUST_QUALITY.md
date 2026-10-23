@@ -880,6 +880,48 @@ source/hash pins and growth/unrelated/pruned-parent negative controls. No rule,
 path or site-kind allowlist is added. Architecture gate: YES, consumers adopt the
 existing engine choke point. No all-venue completion or private parity claim.
 
+### Lighter synchronous cached Read Context controls
+
+Plan2a093966518 precedes original RED commit ffef6eaf580. Against actual732cf8
+production, five assertions fail: capacity for present/missing leverage and tier,
+plus invalid-clock leverage/tier; three compatibility controls pass. After the
+shared admission/terminal move all eight pass, retaining duplicate-owner isolation,
+all aliases/networks, finite recovery, no-I/O/no-Store publication, slot reuse and
+300 immediate completions without owner accumulation. Existing account_limits
+controls remain unchanged, including cached standard tier and SetAccountTier.
+Independent plan source/adversarial, caller and full-map reviews are CLEAN;
+architecture gate No: no new local capacity, clock, retry or completion mechanism.
+
+Cached-slice verification passes504 Lighter+Binance native tests (48 result groups),
+strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both request
+checks/14 controls. Actual e233cb05dfb is genuinely integrated; its incoming
+KuCoin/MEXC source and prunes are preserved. CI owns WASM/replay/size/timing;
+native success alone does not claim these broad gates or whole-venue closure.
+
+## WOO family compiler throughput controls
+
+A plan and baseline named profile preceded the WOO-only compiler change.
+Five interleaved baseline/candidate Rust pairs alternate execution order:
+medians23.105/18.957ms, four of five pairs improve. Every run serves77 frames
+without protocol errors or unserved requests. One correctness replay per
+artifact has identical final snapshots and all five checkpoints; every
+nonmetric output field also matches. The normal candidate grows61,376 bytes
+(1,142,442→1,203,818), within the unchanged1,343,488-byte ceiling. Inventory,
+tape, clocks, budgets, comparison rules and runtime/shared paths are unchanged.
+Local medians and sparse overlapping profiles do not establish the TS/Rust1.10x
+CI target or private runtime proof. The exact-head CI build and replay gates
+remain required. [Reproduction and evidence](RUST_WOO_PUBLIC_CPU.md).
+
+Production WOO CI at f564c7b50f1 (run 39977265913, job 120495031043) passes the
+nine-pair public gate at reported TS 15.8 ms / Rust 8.9 ms steady CPU, 1.78x.
+Its actual CI WASM is 1,197,465 bytes within the unchanged 1,343,488-byte ceiling;
+manifest hashes and the CI checkout tree match the tested head. Strict
+verification records one public PASS, one existing declared known-private FAIL
+and zero unexpected failures. This does not establish private authenticated
+lifecycle parity. The tested head has 43 successful checks and one browser skip;
+source-equivalent current integration, final guard and merge GO remain separate.
+The fixed gates and comparison policies are unchanged.
+
 
 ## Shared CPU remeasurement controls
 
