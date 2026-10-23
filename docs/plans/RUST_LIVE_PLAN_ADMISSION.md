@@ -181,12 +181,14 @@ held signing resources and transport drain under the existing fatal policy.
 3. Peel checked declarations, full safe-ID/capacity reservation, live Plan slots,
    readiness/timer ownership and journal settlement. Keep ordinary Bybit source,
    observer groups, history Completion and retry waits outside this code diff.
-4. Run the preserved native regressions through Bybit and BingX consumer
-   checkpoints. Record exact native RED/GREEN receipts separately from synthetic
-   engine controls; no adapter readiness claim based only on API inspection.
-5. Audit the full integrated source, publish the reviewed Plan/CallWindow pin and
-   open the shared core PR with an explicit prerequisite matrix and CALLERS
-   behavior. Final gate is green integrated-head CI (including replay gates),
+4. Audit the full integrated source, publish the reviewed Plan/CallWindow pin and
+   open a draft shared core PR with an explicit prerequisite matrix and CALLERS
+   behavior. The maintainer authorizes core CI and native consumer ports to run
+   in parallel; publication does not waive either consumer acceptance gate.
+5. Run the preserved native regressions through Bybit and BingX consumer
+   checkpoints before readiness/merge. Record exact native RED/GREEN receipts
+   separately from synthetic engine controls; no adapter readiness claim based
+   only on API inspection. Final gate is green integrated-head CI (including replay gates),
    independent reviews, and a separately executed fresh guard and head-matched
    merge in the assigned exclusive engine window. A second full artifact
    provenance collection is not a merge requirement.
