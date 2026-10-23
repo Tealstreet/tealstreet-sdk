@@ -24,6 +24,8 @@ struct Probe {
     refusal: Option<&'static crate::classify::CodeTable>,
     finish_first: bool,
     retire_in_response: Option<Session>,
+    command_fact: bool,
+    items: usize,
     facts: Vec<Result<(), Error>>,
     responses: Vec<(Owner, String)>,
     failures: Vec<Owner>,
@@ -39,6 +41,8 @@ impl Default for Probe {
             refusal: None,
             finish_first: false,
             retire_in_response: None,
+            command_fact: false,
+            items: 0,
             facts: vec![],
             responses: vec![],
             failures: vec![],
@@ -80,6 +84,16 @@ impl Venue for Probe {
             return;
         }
         let session = matches!(pending.0.owner(), Owner::Session { .. });
+        if !session && self.command_fact && pending.0.operation() == Operation::Mutation {
+            self.facts.push(
+                cx.http_write_fact(
+                    &pending.0,
+                    crate::classify::WriteFact::Accepted { order_ids: vec![] },
+                    None,
+                )
+                .map(drop),
+            );
+        }
         if session && self.finish_first {
             cx.finish_http_context(&pending.0).unwrap();
         }
@@ -113,6 +127,9 @@ impl Venue for Probe {
         if session && !self.finish_first {
             cx.finish_http_context(&pending.0).unwrap();
         }
+    }
+    fn on_item(&mut self, _: &mut Cx<'_, Pending>, _: &mut Pending, _: &str) {
+        self.items += 1;
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: &str) {
         self.failures.push(pending.0.owner());
@@ -918,15 +935,49 @@ fn prepared_intent(
         .expect("prepared login")
 }
 
-fn open_private(engine: &mut Engine<Probe>) -> Session {
+fn granted() -> Option<crate::request_context::PrivateEgress> {
+    let slots = crate::credential_selection::Slots::new(Some(()), None, Default::default());
+    let (selection, _) = slots
+        .select(crate::credential_selection::CredentialRole::SessionAuth)
+        .unwrap();
+    selection.session_egress()
+}
+
+fn open_private_with(engine: &mut Engine<Probe>, repeat_safe: bool) -> Session {
     with(engine, 0., |cx| {
         cx.open_session(SessionPolicy {
             credential: None,
-            repeat_safe: true,
-            private_egress: Some(CredentialSlot::Primary),
+            repeat_safe,
+            private_egress: granted(),
         })
     })
     .unwrap()
+}
+
+fn open_private(engine: &mut Engine<Probe>) -> Session {
+    open_private_with(engine, true)
+}
+
+#[test]
+fn only_a_primary_session_auth_selection_grants_private_egress() {
+    use crate::credential_selection::{CredentialRole::*, PrimaryReason, Slots};
+    assert!(granted().is_some());
+    let both = Slots::new(Some(()), Some(()), Default::default());
+    for role in [
+        Read { scope: None },
+        PrimaryRead {
+            reason: PrimaryReason::Catalog,
+            scope: None,
+        },
+        Mutation,
+    ] {
+        assert_eq!(both.select(role).unwrap().0.session_egress(), None);
+    }
+    assert_eq!(
+        both.select(SessionAuth).unwrap().0.slot(),
+        CredentialSlot::Primary,
+        "session egress never routes through the read key's proxy"
+    );
 }
 
 #[test]
@@ -1026,7 +1077,7 @@ fn work_carrying_a_session_token_rides_its_egress_without_gaining_authority() {
         with(&mut engine, 2., |cx| cx.open_session(SessionPolicy {
             credential: signed.credential.clone(),
             repeat_safe: true,
-            private_egress: Some(CredentialSlot::Primary),
+            private_egress: granted(),
         })),
         Err(Error::Invalid),
         "a signed session declares no unsigned egress"
@@ -1041,7 +1092,7 @@ fn forged_and_foreign_session_egress_is_refused() {
         unreachable!()
     };
     let forged = crate::request_context::Egress::Session(
-        crate::request_context::SessionEgress::new(CredentialSlot::Primary, generation),
+        crate::request_context::SessionEgress::new(generation),
     );
     for operation in [Operation::Read, Operation::Mutation] {
         assert_eq!(
@@ -1134,5 +1185,128 @@ fn retirement_fences_sends_on_its_egress_but_not_sent_write_outcomes() {
             .iter()
             .any(|(owner, _)| matches!(owner, Owner::Command { id: 7, .. })),
         "a write sent before retirement still delivers its outcome"
+    );
+}
+
+#[test]
+fn session_egress_exempts_no_write_from_its_journal_or_gate() {
+    let mut engine = engine();
+    let session = open_private_with(&mut engine, false);
+    // A command write riding session egress keeps the full command journal.
+    let command = with(&mut engine, 1., |cx| {
+        cx.session_scoped_context(&session, Scope::Command(7), policy(Operation::Mutation))
+    })
+    .unwrap();
+    let revision = engine.io.http_write_revision;
+    let write = {
+        let token = queue(&mut engine, &command, 1.);
+        release(&mut engine, token, 2.)
+    };
+    assert!(engine.io.http_responses.contains(write));
+    assert_ne!(engine.io.http_write_revision, revision);
+    // A session write under its egress keeps the one-unresolved-write gate.
+    let login = {
+        let token = session_write(&mut engine, &session, 3.);
+        release(&mut engine, token, 3.)
+    };
+    respond(&mut engine, login, 4., "{}");
+    assert_eq!(
+        with(&mut engine, 5., |cx| cx
+            .session_context(&session, policy(Operation::Mutation))),
+        Err(Error::State)
+    );
+}
+
+#[test]
+fn retirement_fences_claims_and_retries_but_not_streams_or_facts() {
+    let mut engine = engine();
+    engine.venue.command_fact = true;
+    let session = open_private(&mut engine);
+    engine.io.request_contexts.dispatch = Some((7, crate::classify::Intent::Setting));
+    let write = with(&mut engine, 1., |cx| {
+        cx.session_scoped_context(&session, Scope::Command(7), policy(Operation::Mutation))
+    })
+    .unwrap();
+    engine.io.request_contexts.dispatch = None;
+    let sent = {
+        let token = queue(&mut engine, &write, 1.);
+        release(&mut engine, token, 1.)
+    };
+    let retryable = Policy {
+        retry: RetryPolicy::ReadFailure,
+        ..policy(Operation::Read)
+    };
+    let read = with(&mut engine, 1., |cx| {
+        cx.session_scoped_context(&session, Scope::Command(8), retryable)
+    })
+    .unwrap();
+    let streamed = queue(&mut engine, &read, 1.);
+    with(&mut engine, 1., |cx| {
+        cx.stream_response(streamed.attempt().request, crate::json::ArrayAt::Root)
+    });
+    let streamed = release(&mut engine, streamed, 1.);
+    let bound = with(&mut engine, 1., |cx| {
+        cx.session_scoped_context(&session, Scope::Command(9), policy(Operation::Read))
+    })
+    .unwrap();
+    let bound = queue(&mut engine, &bound, 1.);
+    engine.http_prepared(
+        1.,
+        bound,
+        Prepared {
+            id: bound.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let permit = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        2.,
+        Event::HttpStart {
+            request: streamed,
+            status: 200,
+            headers: "",
+        },
+    );
+    with(&mut engine, 3., |cx| cx.retire_session(&session)).unwrap();
+
+    assert!(
+        engine.claim_http(3., permit).is_err(),
+        "a bound send is fenced"
+    );
+    assert_eq!(
+        with(&mut engine, 3., |cx| cx.http_retry_context(
+            &read,
+            crate::request_context::RetryEvidence::ReadFailure
+        )),
+        Err(Error::Revoked)
+    );
+    for data in [&b"[1,"[..], &b"2]"[..]] {
+        engine.handle(
+            4.,
+            Event::HttpChunk {
+                request: streamed,
+                data,
+            },
+        );
+    }
+    engine.handle(4., Event::HttpEnd { request: streamed });
+    assert_eq!(
+        engine.venue.items, 2,
+        "a stream already sent keeps delivering"
+    );
+    respond(&mut engine, sent, 5., "{}");
+    assert_eq!(
+        engine.venue.facts,
+        [Ok(())],
+        "the public write-fact path records a sent write after retirement"
     );
 }

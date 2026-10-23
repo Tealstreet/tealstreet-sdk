@@ -217,32 +217,44 @@ reviews the rule).** The seam reuses #1833's issuance-time egress
 (`Context.egress`, `ContextRegistry::issue_with_egress`). Legs, replacements
 and retries inherit it. There is no second Context field.
 - **`Egress::Session(SessionEgress)`** is an unsigned request carrying a
-  session's login or token on that slot's private egress.
-  - `SessionEgress {slot, generation}` is opaque: the session core alone mints
-    it. `http_context_with_egress` refuses it, so a venue cannot forge one.
+  session's login or token on the primary private egress.
+  - `SessionEgress {generation}` is opaque: the session core alone mints it.
+    `http_context_with_egress` refuses it, so a venue cannot forge one.
+  - It is Primary only. #1833 restricts unsigned secondary-proxy routing, so
+    a keyless request never takes the read key's egress.
   - Allowed for Read and Mutation, only with no credential: no `KeyRef`, no
     signer, and the signer-iff-credential rule is untouched.
     Primary/PublicCors/Direct stay unsigned-Read-only.
-  - `routing_intent()` is the slot's intent, and `route()` is `None`.
+  - `routing_intent()` is Primary, and `route()` is `None`.
   - It is routing only. It never grants write, signing or session authority:
     a Background mutation is still refused.
 - **Session side:**
-  - `SessionPolicy.private_egress: Option<CredentialSlot>`. Only a keyless
-    session may declare it; venues pass the slot of their `SessionAuth`
-    selection.
+  - `SessionPolicy.private_egress: Option<PrivateEgress>`. The grant is
+    opaque: only `Selection::session_egress()` creates it, and only for a
+    primary `SessionAuth` selection. Only a keyless session may declare it.
   - `session_context` stamps the egress on every session context and leg.
   - `session_scoped_context(&session, scope, policy)` lets command or
     background work that carries the session token ride the same egress,
     under its own owner.
-- **Retirement fence.** `validate` refuses a context whose session generation
-  is retired, so no issuance, leg or send happens after retirement; a
-  prepared send fails typed. Delivery facts of a write sent earlier stay
-  recordable, so a sent write's outcome is never lost.
+- **Retirement fence.** `validate_send` refuses a context whose session
+  generation is retired. It guards issuance (legs, replacements, retries,
+  resends) and every physical send step: queue, prepare, sign completion,
+  claim and re-preparation. A fenced send fails typed (NotSent).
+  - Plain `validate` keeps delivery, streaming and write facts for an attempt
+    sent earlier. A sent write's outcome is never lost, and a stream already
+    sent keeps delivering.
 - **Regressions** (`session_context_tests.rs`):
   - The original RED now passes.
-  - Negative controls: forged egress, a foreign session, a stale generation,
-    Background mutation, signed work, and a signed session declaring egress
-    are all refused.
+  - Negative controls:
+    - forged egress and a foreign session
+    - a stale generation: issuance, leg, queue, prepared send, bound claim
+      and retry
+    - Background mutation, signed work, and a signed session declaring egress
+    - non-`SessionAuth` selections, which grant nothing
+  - Riding the egress exempts no write. A command write keeps its journal and
+    write revision. A session write keeps the one-unresolved-write gate.
+  - After retirement, the public `http_write_fact` path still records a
+    command write sent earlier.
   - Keyless sessions without declared egress still route Public.
 - **Not included:** no inference from method, URL or body, and no fallback
   to Public when the private route is unavailable (preparation fails typed).

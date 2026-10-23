@@ -67,8 +67,8 @@ impl Sessions {
     }
 
     pub(super) fn egress(&self, generation: u64) -> Option<Egress> {
-        let slot = self.live.get(&generation)?.policy.private_egress?;
-        Some(Egress::Session(SessionEgress::new(slot, generation)))
+        self.live.get(&generation)?.policy.private_egress?;
+        Some(Egress::Session(SessionEgress::new(generation)))
     }
 
     pub(super) fn retire(&mut self, generation: u64) -> bool {

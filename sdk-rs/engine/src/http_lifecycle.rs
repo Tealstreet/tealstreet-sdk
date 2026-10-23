@@ -111,7 +111,7 @@ impl<P> Cx<'_, P> {
             ManagedRecipe::Unsigned(headers) => (None, headers),
             ManagedRecipe::Signed(step) => (Some(step), &[][..]),
         };
-        if let Err(error) = self.io.request_contexts.validate(&context, self.now) {
+        if let Err(error) = self.io.request_contexts.validate_send(&context, self.now) {
             return Err((pending, error));
         }
         if context.credential().is_some() != step.is_some() {
@@ -371,7 +371,7 @@ impl<V: Venue> Engine<V> {
         let prepared_result = self
             .io
             .request_contexts
-            .validate(managed.lifecycle.context(), now)
+            .validate_send(managed.lifecycle.context(), now)
             .and_then(|()| {
                 if prepared.expires_at.is_some_and(|at| at <= now) {
                     return Err(Error::TimedOut);
@@ -457,7 +457,7 @@ impl<V: Venue> Engine<V> {
         let prepared = self
             .io
             .request_contexts
-            .validate(managed.lifecycle.context(), now)
+            .validate_send(managed.lifecycle.context(), now)
             .and_then(|()| pending.managed_freshness().ok_or(Error::State))
             .and_then(|(revision, until)| {
                 managed
@@ -565,7 +565,7 @@ impl<V: Venue> Engine<V> {
         if let Err(error) = self
             .io
             .request_contexts
-            .validate(managed.lifecycle.context(), now)
+            .validate_send(managed.lifecycle.context(), now)
         {
             self.http_preparation_failed(
                 now,
@@ -703,7 +703,7 @@ impl<V: Venue> Engine<V> {
         let next = self
             .io
             .request_contexts
-            .validate(managed.lifecycle.context(), now)
+            .validate_send(managed.lifecycle.context(), now)
             .and_then(|()| managed.lifecycle.reprepare());
         if let Err(error) = next {
             self.http_preparation_failed(

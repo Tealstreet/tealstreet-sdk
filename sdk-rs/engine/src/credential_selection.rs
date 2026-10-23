@@ -1,7 +1,7 @@
 //! Engine-owned credential choice. A venue declares what a request is for; the
 //! selection fixes slot, egress and evidence scope before signing. HTTP method
 //! is never an input. See docs/plans/RUST_CREDENTIAL_SELECTION.md.
-use crate::request_context::{Credential, RoutingIntent};
+use crate::request_context::{Credential, PrivateEgress, RoutingIntent};
 use crate::signing::KeyRef;
 use crate::{AccountReadScope, CredentialSlot, Cx, RequestId, RequestRoute, SignStep};
 
@@ -56,9 +56,16 @@ pub struct Selection {
     pinned_primary: bool,
     secondary_supplied: bool,
     evidence: Option<AccountReadScope>,
+    session_auth: bool,
 }
 
 impl Selection {
+    /// Primary egress for a keyless session whose unsigned requests carry
+    /// this key's login or token (`SessionPolicy.private_egress`).
+    pub fn session_egress(&self) -> Option<PrivateEgress> {
+        (self.session_auth && self.slot == CredentialSlot::Primary).then(PrivateEgress::granted)
+    }
+
     pub fn slot(&self) -> CredentialSlot {
         self.slot
     }
@@ -162,6 +169,7 @@ impl<T> Slots<T> {
             pinned_primary: matches!(role, CredentialRole::PrimaryRead { .. }),
             secondary_supplied: self.secondary_supplied(),
             evidence,
+            session_auth: role == CredentialRole::SessionAuth,
         };
         Ok((selection, material))
     }

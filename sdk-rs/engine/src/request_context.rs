@@ -116,9 +116,20 @@ pub struct SessionPolicy {
     /// The venue contract makes a new create/keepalive harmless while an
     /// earlier one is unresolved (cite it at the declaration site).
     pub repeat_safe: bool,
-    /// Unsigned requests that carry this slot's login or session token in
-    /// their body or headers. Only a keyless session may declare it.
-    pub private_egress: Option<CredentialSlot>,
+    /// Unsigned requests that carry the primary key's login or session token
+    /// in their body or headers. Only a keyless session may declare it.
+    pub private_egress: Option<PrivateEgress>,
+}
+
+/// Granted only by a `SessionAuth` credential selection
+/// (`Selection::session_egress`); a venue cannot construct it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrivateEgress(());
+
+impl PrivateEgress {
+    pub(crate) fn granted() -> Self {
+        Self(())
+    }
 }
 
 /// Independent of HTTP method: private POST snapshots are still reads.
@@ -146,7 +157,7 @@ pub enum Egress {
     PublicCors,
     /// Unsigned public reads sent directly, bypassing account proxies.
     Direct,
-    /// The slot's private egress for unsigned requests carrying a session's
+    /// Primary private egress for unsigned requests carrying a session's
     /// login or token. Minted only by the session core; routing only.
     Session(SessionEgress),
 }
@@ -155,13 +166,12 @@ pub enum Egress {
 /// It names no key and grants no write, signing or session authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SessionEgress {
-    slot: CredentialSlot,
     generation: u64,
 }
 
 impl SessionEgress {
-    pub(crate) fn new(slot: CredentialSlot, generation: u64) -> Self {
-        Self { slot, generation }
+    pub(crate) fn new(generation: u64) -> Self {
+        Self { generation }
     }
     pub(crate) fn generation(&self) -> u64 {
         self.generation
@@ -348,12 +358,8 @@ impl Context {
     }
     pub fn routing_intent(&self) -> RoutingIntent {
         match self.egress {
-            Some(Egress::Primary) => RoutingIntent::Primary,
+            Some(Egress::Primary | Egress::Session(_)) => RoutingIntent::Primary,
             Some(Egress::PublicCors | Egress::Direct) => RoutingIntent::Public,
-            Some(Egress::Session(egress)) => match egress.slot {
-                CredentialSlot::Primary => RoutingIntent::Primary,
-                CredentialSlot::Secondary => RoutingIntent::Secondary,
-            },
             None => self.credential_intent(),
         }
     }

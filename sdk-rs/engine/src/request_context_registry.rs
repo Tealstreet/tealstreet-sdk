@@ -142,7 +142,7 @@ impl ContextRegistry {
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
         if let Some(parent) = parent {
-            self.validate(parent, now)?;
+            self.validate_send(parent, now)?;
             if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
                 return Err(Error::Invalid);
             }
@@ -216,7 +216,7 @@ impl ContextRegistry {
         parent: Option<&Context>,
     ) -> Result<Context, Error> {
         if let Some(parent) = parent {
-            self.validate(parent, now)?;
+            self.validate_send(parent, now)?;
             if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
                 return Err(Error::Invalid);
             }
@@ -320,7 +320,7 @@ impl ContextRegistry {
         policies: &[Policy],
         now: f64,
     ) -> Result<Vec<Context>, Error> {
-        self.validate(parent, now)?;
+        self.validate_send(parent, now)?;
         if parent.operation() != Operation::Mutation || delivery.context != *parent {
             return Err(Error::Revoked);
         }
@@ -430,7 +430,14 @@ impl ContextRegistry {
         if self.superseded(context) {
             return Err(Error::Revoked);
         }
-        // Send-time fence only: delivery facts of a sent write stay recordable.
+        Ok(())
+    }
+
+    /// `validate` plus the session-egress retirement fence, for issuance and
+    /// physical send only. Delivery, streaming and write facts of an attempt
+    /// sent earlier use plain `validate`, so its outcome stays recordable.
+    pub(super) fn validate_send(&self, context: &Context, now: f64) -> Result<(), Error> {
+        self.validate(context, now)?;
         if let Some(Egress::Session(session)) = context.egress()
             && !self.sessions.live(session.generation())
         {
@@ -841,7 +848,7 @@ impl<P> Cx<'_, P> {
     /// A new physical leg under the same logical authority. Preserve its exact
     /// raw deadline; integer timeout recomputation cannot round the bound up.
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
-        self.io.request_contexts.validate(parent, self.now)?;
+        self.io.request_contexts.validate_send(parent, self.now)?;
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
@@ -895,7 +902,7 @@ impl<P> Cx<'_, P> {
         if evidence == RetryEvidence::DefinitiveRefusal {
             return Err(Error::RetryForbidden);
         }
-        self.io.request_contexts.validate(context, self.now)?;
+        self.io.request_contexts.validate_send(context, self.now)?;
         context.retry(evidence, self.now)
     }
 
@@ -1303,7 +1310,7 @@ impl<P> Cx<'_, P> {
         context: &Context,
         grant: ResendGrant,
     ) -> Result<Context, Error> {
-        self.io.request_contexts.validate(context, self.now)?;
+        self.io.request_contexts.validate_send(context, self.now)?;
         if self.io.request_contexts.latest_write(context)? != Some(grant.attempt) {
             return Err(Error::Revoked);
         }
