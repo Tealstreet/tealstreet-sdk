@@ -5207,3 +5207,19 @@ its returned rows as partial coverage. An absent or refused managed result does
 not establish complete history. Existing native row shapes and result shaping
 remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
 and [owned history](RUST_OWNED_HISTORY.md).
+
+### Paradex unsigned public-trades Context history consumer
+
+`fetchPublicTrades` keeps the native unsigned GET query, limit1..500/default100,
+row schema, encounter order, first-ID dedupe and truncation. The endpoint remains
+one physical page even when a valid continuation cursor is returned. A missing
+market returns admitted []. Private history, JWT and Stark signing are unchanged.
+
+The command now requires managed prepare/bind/claim support in custom transports.
+Preparation and the full response share the original20s Read bound; stale or
+reused owners cannot emit a result or history.incomplete marker. Malformed or
+failed prefixes reject strictly without returning staged rows. Typed route
+failures retain their engine metadata; released transport loss is Network and
+expiry Timeout, while native malformed/status errors retain Internal. Capacity
+admission precedes missing-market completion. Callers treat a rejected read as
+unavailable history, not an authoritative empty snapshot; no SDK signature changes.

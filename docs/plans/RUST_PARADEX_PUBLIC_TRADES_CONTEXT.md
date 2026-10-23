@@ -161,3 +161,28 @@ Paradex signing, auth, account/trading or private history authority is changed.
 Sam's pending remote Stark payloadSigner option C has no bearing on unsigned
 GET /trades. The current source/test hold check clears history.rs/lib.rs and the
 new regression file; recheck before source. No reviewed seam is claimed actual.
+
+## Executed native consumer: seven original controls now GREEN
+
+On current reviewed stack0e2d36075ae, all seven original efafc26dedc controls
+compile and fail by assertion on the original native legacy HTTP dispatch.
+Implementation puts public trades in history/public_trades.rs with a dedicated
+boxed ReadCursorHistory, retaining the existing Row/valid_row/native trade codec
+and keeping the legacy private owner separate. The original Read root is also
+the one physical leg; every row identity/stage/advance uses borrowed admission.
+Missing-market [] completes directly through admitted ReadCompletion. A failed
+page discards staging and strictly rejects; it cannot emit a partial marker.
+
+All seven controls pass unchanged after implementation, executing real
+Prepare→Bind→Claim→response, both network/private-enabled combinations, encoded
+market and limit clamps, raw native order/dedupe/truncate/schema, ignored valid
+cursor and rejected malformed cursor, failed prefixes, typed route/transport
+failures, parked/released expiry, capacity before empty result and stale reuse.
+Shared engine source/tests remain byte-exact reviewed f471; no Plan/Execution or
+signer/session authority is cast into a Read root. Typed forwarding is narrow to
+the new Pending variant; existing book/private error paths remain unchanged.
+The obsolete public request_streamed is deleted; the actual scanner removes only
+a876e5300951dc42d8c9828d78f0d32d52e42b439cbaf763cc6cdd6b63174865 once:
+Paradex56→55, history14→13. Full native/strict checks, independent implementation
+reviews and CI remain required; this is native consumer evidence, not actual
+bridge landing or a whole-venue readiness claim.

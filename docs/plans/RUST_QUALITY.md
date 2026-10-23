@@ -831,3 +831,15 @@ Verification on the integrated startup fix passes456 MEXC+Binance tests across
 40 targets, including all44 account tests. Scoped fmt/strict all-target Clippy
 and both ratchets (14 controls) pass. Three independent reviews are clean;
 architecture No. Source/test files held by history #1793 remain untouched.
+
+### Paradex second native Read-history consumer controls
+
+Original plan dec36cfa468 and seven original REDs efafc26dedc retain their assertions
+on reviewed #1848 f471 plus actual e233. All seven fail on legacy dispatch before
+implementation and pass through real managed release afterward. Controls preserve
+unsigned query/body/headers/native codec, limit geometry, encounter order/dedupe,
+forced single page, strict malformed/failed prefixes, typed preparation/transport,
+original deadline and stale token/ID reuse without marker or Store leakage.
+Only one public sender fingerprint is pruned; private authority and shared bridge
+blobs remain unchanged. Full native/strict/CI and independent review are separate
+readiness gates; this native receipt alone does not claim bridge landing.
