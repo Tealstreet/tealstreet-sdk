@@ -279,3 +279,20 @@ Backpack/Bitrue/KuCoin history inventory removals absent from this branch; queue
 actual-history integration is required before final bans/CI proof. No ratchet
 exception or inventory edits were added for this checkpoint. Actual matching-WASM
 98-control GREEN, final integration/CI/package proof and merge remain outstanding.
+
+## Replacement-context integration after actual #1783
+
+Owner-approved adaptation belongs in this allocator PR, not socket1771. Actual
+response-proof core9a48b645d49 adds a bounded replacement child allocator using
+the prior scalar u32 next_id; this must consume Io.reserve_ids instead. Preserve
+empty/oversized request checks and exact current Delivery precheck before reserve;
+reserve the entire child range atomically, then retain monotonic burned gaps if
+policy, ownership or journal admission later refuses. ContextRegistry replacement
+first/child identities use u64 and checked safe-end validation. No new timer,
+send authority, journal ledger or allocator is added. Existing replacement
+financial/ownership/negative controls remain, with fixtures using ResourceIds
+states and the actual host-safe maximum. Add success crossing2^32 and atomic
+last-safe whole-child-range refusal/one-child success controls. Both independent
+reviews and focused engine/native/reference gates must pass before refreezing.
+The former076 head/evidence remain historical; only socket1771 is authorized to
+consume the new reviewed freeze, and actual1784 is still ahead in merge order.
