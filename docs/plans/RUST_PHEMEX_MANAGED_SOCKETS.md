@@ -251,3 +251,34 @@ and lexical prune. Actualcab37 session landings are genuinely integrated atf61b.
 Current scoped native219tests/15targets, strict all-target/all-feature Clippy and
 full bans/ratchets PASS. No actual1970, CI/performance or train-ready claim follows
 from these local/independent results. Full fresh CI measures unchanged budgets.
+
+
+## Combined socket and signer landing
+
+Per the owner ruling, #1974 now includes reviewed signer handoff
+`6ff43a058d98b47c5166da74e5d61554cad5587b` through plain merge
+`3d5752624cc19a39d7c5c918fd9225ac25b7a77d`. Its whole tree equals the
+handoff tree; no merge resolution changed source. The frozen #1970 prerequisite
+remains `04b0078dd29` and must land first. Actual incoming `6c7f4fcf292d`
+contains the unsigned PublicTrades conversion, preserved byte for byte.
+
+The direct Phemex lib.rs inventory boundary is incoming 17 fingerprints/18
+occurrences to combined 16/16. The old adapter-only 15/15 checkpoint will not
+land separately. The two approved request-checker literal rows and Phemex
+signing-scan scope remain exact to the reviewed signer implementation; request
+checker AST is unchanged after removing those two literal assignments.
+
+The codec is byte-identical to reviewed adapter85fa; the signing change in
+account.rs is confined to the same-epoch Opened auth recipe. Accepted login
+still releases AOP1202 before retained ping1201, and the native validated orders
+snapshot remains the only financial completion proof. HMAC/full-map receipts
+are in RUST_PHEMEX_DISPATCH_SIGNING.md. The shared core is unchanged by this fold.
+
+Fresh combined local verification at merge3d575: 259 Phemex tests across16
+targets PASS,0failed/ignored; strict all-target/all-feature Clippy and scoped
+rustfmt PASS. The dedicated SDK construction test passes. The initial local
+ratchet invocation at the merge commit compared its adapter-only first parent
+85fa15/15 against combined16/16 and refused; that is not the intended actual
+landing boundary. Final checked PR descendants and CI must retain the direct
+actual17/18 comparison with no new predicate or intermediate landing.
+Fresh combined CI and independent cross-review are separate publication gates.
