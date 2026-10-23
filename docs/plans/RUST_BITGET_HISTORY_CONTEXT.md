@@ -47,9 +47,18 @@ vec![], body, pending)` text byte-exact, so `5b441164` does not rename. The
    - `Expired`: `cx.reject_expired_command(Operation::Read)` and return. No
      admission, Context, timer or request.
    - `Remaining(ms)`: the root's `timeout_ms = ms`.
-   - `None`: `DEFAULT_COMMAND_WAIT_MS`, per the #1945 owner's clarification
-     that `None` falls through normal admission with the shared default. This
-     path is reachable only from an unstamped receipt.
+   - `None`: fail closed (overseer ruling, 2026-10-24). #1945 already
+     stamps `DEFAULT_COMMAND_WAIT_MS` when the host sends no wait, so `None`
+     in a genuine entry means the receipt was never stamped (a non-finite or
+     non-advancing clock, receipt-sequence exhaustion, or a duplicate live id).
+     The query ends with the typed initial Read entry refusal: outcome None,
+     with no admission, Context, timer or request. It never defaults to 120 s
+     and never fakes a zero-timeout admission.
+     - Shared gap: no public API emits that refusal today, because
+       `reject_expired_command` answers `Revoked` unless the wait is
+       `Expired`. Implementation needs a shared entry refusal for an
+       unstamped receipt (a #1945 follow-up, owner fe7lgm). This venue adds
+       no local receipt logic.
 2. `cx.admit_http_command(read_policy_with(timeout))`. The credential is
    `read_credential(path)` for private queries (Secondary when configured,
    else Primary) and `None` for PublicTrades. A `Rejected` admission already
@@ -114,8 +123,9 @@ with that typed error.
 **Root expiry while queued.** There is no automatic root timer. A query
 waiting on its 100 ms or retry timer observes the expiry at that wake-up,
 through `http_leg_context` refusal or `validate_http_context`, and fails
-then. In-flight children are already root-capped. Exact-at-root cleanup of
-queued work would need a shared seam, and is not claimed.
+then. In-flight children are already root-capped. The overseer accepted
+next-dequeue expiry for now. When fe7lgm's engine root-expiry funnel (a
+#1945 follow-up) lands, this venue adopts it. It never adds a venue timer.
 
 ## Native invariants kept
 
@@ -150,6 +160,10 @@ ignored tests. Assertion REDs on unchanged production:
    starts).
 6. A sign failure for a history page ends with the typed error fields
    preserved (today: `cx.fail` drops kind/outcome).
+7. An unstamped receipt: the public `handle` at a raw clock where
+   `now + 120000` does not advance, so `command_wait()` is `None`. It gives
+   one typed initial Read entry refusal, outcome None, zero HTTP/timer, and
+   no 120 s default root (today: a native query starts).
 
 Compatibility controls that must pass both before and after:
 
@@ -165,8 +179,11 @@ Compatibility controls that must pass both before and after:
 
 ## Gates
 
-- Before implementation: plan review by codex-uufub4 (API fit for root plus
-  timer-issued legs and stream registration) and claude-ddi2il.
+- Before implementation:
+  - plan review by codex-uufub4 (API fit for a root plus timer-issued legs
+    and stream registration);
+  - claude-ddi2il has ruled on order, `None` and root expiry;
+  - the shared unstamped-receipt refusal API must land first.
 - After implementation:
   - strict all-target Bitget Clippy and fmt;
   - both ratchets with the exact prune above;
