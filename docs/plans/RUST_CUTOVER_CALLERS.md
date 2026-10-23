@@ -5306,6 +5306,7 @@ remain unchanged. The two private replay tape identities reflect the authorized
 master/harness integrator change; their eleven existing diagnostics each and all
 public declarations are unchanged. Raw replay reports remain FAIL with known
 failures; this content-hash refresh does not establish complete venue parity.
+
 ## Managed native-plan admission and preflight
 
 Rust embedders enable the engine's `http-plans` Cargo feature to use Preflight
@@ -5356,6 +5357,18 @@ write or abandon another selected call. The original deadline and native cache
 publication rules stay in force. NX receives the native result once and must not
 treat successful local fallback as proof that cache or Store state was refreshed.
 
+
+### Proven subset with unresolved write remainder
+
+| Native proof | Command outcome | NX handling |
+| --- | --- | --- |
+| A validated subset took effect; other targets remain unresolved (`PartialUnknown`) | `Unknown`, with bounded proven IDs and batch position metadata when available | Keep the proven subset, reconcile the remainder through reads, and never resend the whole write. |
+| A complete mixed acceptance/refusal is proven (`KnownPartial`) | Partial failure with the resolved facts | Keep accepted results and report refused targets. |
+| Count-mismatched, empty-ID or wholly unproven ACK (`Failed`) | `Unknown`; retained IDs are evidence only | Reconcile through reads; infer no Store effect or optimistic success from those IDs. |
+
+A satisfied native cancel may prove a subset without creating IDs. That proof
+still leaves any unresolved targets Unknown; a successful subset never cleans up
+the remainder or extends its deadline.
 ## Shared metadata/settings owner: WEEX and BingX
 
 BingX same-symbol metadata calls at the same eligible settings revision share

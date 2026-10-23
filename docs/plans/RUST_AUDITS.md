@@ -2383,6 +2383,7 @@ Each existing per-leg mint reservation considers the current candidate and
 retains monotonic state; exhaustion refuses without wrap. No transaction nonce,
 managed ownership, retry or outcome policy is introduced. No legacy inventory
 site changes; all incoming maps and the #1869 TS reference/harness remain exact.
+
 ## Native mode-preflight redo liveness
 
 Repeated external mode changes can make an adapter redo its prerequisite mode
@@ -2390,7 +2391,6 @@ reads indefinitely. Each request remains bounded by its declared read policy,
 but the final write-plan root starts only when the native write steps are fixed.
 No arbitrary whole-preflight or 120-second product cap is added. A finite redo
 limit would change caller-visible liveness policy and needs a separate decision.
-
 ## Metadata/settings freshness core
 
 The engine/Store owner supplies BingX query coalescing, settings-write fences
