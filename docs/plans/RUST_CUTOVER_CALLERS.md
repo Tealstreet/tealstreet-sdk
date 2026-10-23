@@ -5745,3 +5745,12 @@ engine refusal without a financial outcome. Successful admission preserves the
 native decision order and introduces no request, signer, timer, Store mutation
 or incomplete marker. PublicTrades retains its existing managed public path;
 other private history, signing, settings and REST fallthrough remain unchanged.
+
+### Bybit fee, account info and wallet reads on managed authority (slice 1d-i)
+
+| Change | Outcome | NX handling |
+| --- | --- | --- |
+| The startup fee read, account info and the wallet are signed Background reads with a 20 s window | An expired fee read keeps its contract (a warning, empty fees, markets still publish); an expired account-info or wallet read takes its existing failure path | None. |
+| Re-reads after a signature/timestamp refusal | Once, re-signed, only on a native `10002`/`10004`; a message that merely mentions `recv_window` under another code is a plain failure (was a text-matched resend). Bybit's server clock is still observed from the refusal | None. |
+| Hyro | Unchanged: no account-info read and an empty fee map; its wallet read takes the same managed path | None. |
+
