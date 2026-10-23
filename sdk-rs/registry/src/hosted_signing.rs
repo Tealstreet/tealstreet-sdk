@@ -93,6 +93,31 @@ fn http_work(
     Ok((work, OutputKind::Http(policy)))
 }
 
+/// Families with a hosted request codec. AsterDEX V3 signs with a wallet key,
+/// which must never become an HMAC key, so only resolved V1 accounts qualify.
+pub fn admitted(venue: &str, options: &crate::EngineOptions) -> bool {
+    let _ = options;
+    match venue {
+        #[cfg(feature = "asterdex")]
+        "asterdex" => options.aster_api_version() == safe_cex_venue_asterdex::sign::Version::V1,
+        _ => family(venue),
+    }
+}
+
+fn family(venue: &str) -> bool {
+    let binance = cfg!(feature = "binance")
+        && matches!(
+            venue,
+            "binance" | "binancepm" | "binanceinverse" | "binancespot"
+        );
+    let bybit = cfg!(feature = "bybit")
+        && matches!(
+            venue,
+            "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader"
+        );
+    binance || bybit || (cfg!(feature = "asterdex") && venue == "asterdex")
+}
+
 pub fn prepare(
     venue: &str,
     identities: &Identities,
@@ -105,17 +130,7 @@ pub fn prepare(
         method: "HOSTED".into(),
         ..Default::default()
     };
-    let binance = cfg!(feature = "binance")
-        && matches!(
-            venue,
-            "binance" | "binancepm" | "binanceinverse" | "binancespot"
-        );
-    let bybit = cfg!(feature = "bybit")
-        && matches!(
-            venue,
-            "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader"
-        );
-    if !binance && !bybit {
+    if !family(venue) {
         return Err(SignError::Unsupported);
     }
     match input {

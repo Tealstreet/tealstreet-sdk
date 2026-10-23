@@ -824,14 +824,15 @@ impl WasmEngine {
             None
         };
         #[cfg(feature = "dispatch-signing")]
-        let hosted_identity = dispatch_signing
-            .then(|| {
-                options
-                    .signing
-                    .clone()
-                    .map(|identities| (venue.to_owned(), identities))
-            })
-            .flatten();
+        let hosted_identity = (dispatch_signing
+            && safe_cex_venues::hosted_signing::admitted(venue, &options))
+        .then(|| {
+            options
+                .signing
+                .clone()
+                .map(|identities| (venue.to_owned(), identities))
+        })
+        .flatten();
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
         let inner = safe_cex_venues::build_with_signer(
