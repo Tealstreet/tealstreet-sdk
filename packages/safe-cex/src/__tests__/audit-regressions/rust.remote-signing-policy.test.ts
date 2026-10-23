@@ -22,8 +22,6 @@ describe('shared delegated signing declarations', () => {
     for (const name of ['mexc', 'kraken'] as ExchangeName[]) expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
   });
   it.each([
-    ['okx', 'OK-ACCESS-PASSPHRASE'], ['okxeu', 'OK-ACCESS-PASSPHRASE'],
-    ['okxdemo', 'OK-ACCESS-PASSPHRASE'], ['okxeudemo', 'OK-ACCESS-PASSPHRASE'],
     ['bitget', 'ACCESS-PASSPHRASE'], ['bitgetinverse', 'ACCESS-PASSPHRASE'], ['bitgetusdc', 'ACCESS-PASSPHRASE'],
   ] as const)('%s declares presentation without enabling dispatch or remote admission', (name, passphraseHeader) => {
     const policy = deriveRemoteSigningPolicy(name);
@@ -31,5 +29,11 @@ describe('shared delegated signing declarations', () => {
     expect(policy?.enabled).not.toBe(true);
     expect(policy?.payloadSupported).not.toBe(true);
     expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(false);
+  });
+
+  it.each(['okx', 'okxeu', 'okxdemo', 'okxeudemo'] as const)('%s admits RemoteSigner while refusing unsupported private PayloadSigner', (name) => {
+    expect(deriveRemoteSigningPolicy(name)).toMatchObject({ enabled: true, payloadSupported: false,
+      signatureEncoding: 'base64', passphraseHeader: 'OK-ACCESS-PASSPHRASE', wire: { exchangeName: name, extraData: 'okxTimestamp' } });
+    expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
   });
 });

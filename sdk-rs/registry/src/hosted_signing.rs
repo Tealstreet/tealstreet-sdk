@@ -93,6 +93,35 @@ fn http_work(
     Ok((work, OutputKind::Http(policy)))
 }
 
+/// Families with a hosted request codec. AsterDEX V3 signs with a wallet key,
+/// which must never become an HMAC key. Only an explicit setup-resolved V1
+/// qualifies: inference from options cannot see material held by the setup.
+pub fn admitted(venue: &str, options: &crate::EngineOptions) -> bool {
+    let _ = options;
+    match venue {
+        #[cfg(feature = "asterdex")]
+        "asterdex" => {
+            options.asterdex.api_version == Some(safe_cex_venue_asterdex::sign::Version::V1)
+        }
+        _ => family(venue),
+    }
+}
+
+fn family(venue: &str) -> bool {
+    let binance = cfg!(feature = "binance")
+        && matches!(
+            venue,
+            "binance" | "binancepm" | "binanceinverse" | "binancespot"
+        );
+    let bybit = cfg!(feature = "bybit")
+        && matches!(
+            venue,
+            "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader"
+        );
+    let okx = cfg!(feature = "okx") && matches!(venue, "okx" | "okxeu" | "okxdemo" | "okxeudemo");
+    binance || bybit || okx || (cfg!(feature = "asterdex") && venue == "asterdex")
+}
+
 pub fn prepare(
     venue: &str,
     identities: &Identities,
@@ -105,17 +134,7 @@ pub fn prepare(
         method: "HOSTED".into(),
         ..Default::default()
     };
-    let binance = cfg!(feature = "binance")
-        && matches!(
-            venue,
-            "binance" | "binancepm" | "binanceinverse" | "binancespot"
-        );
-    let bybit = cfg!(feature = "bybit")
-        && matches!(
-            venue,
-            "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader"
-        );
-    if !binance && !bybit {
+    if !family(venue) {
         return Err(SignError::Unsupported);
     }
     match input {
@@ -150,7 +169,8 @@ pub fn prepare(
             to_sign,
             output_format,
         } => {
-            if to_sign.is_empty() {
+            // AsterDEX authenticates its private socket with a listen key.
+            if to_sign.is_empty() || venue == "asterdex" {
                 return Err(SignError::InvalidRequest);
             }
             Ok((
@@ -280,11 +300,11 @@ mod presentation_tests {
     }
 
     #[test]
-    fn two_future_families_use_one_owned_atomic_work_and_formatter_without_admission() {
+    fn two_families_use_one_owned_atomic_work_and_formatter_with_explicit_admission() {
         let (identity, signer) = fixture();
         for (venue, names) in families() {
             let policy = crate::remote_signing_policy(venue);
-            assert!(!policy.enabled);
+            assert_eq!(policy.enabled, venue == "okx");
             assert_eq!(policy.signature_encoding, SignatureEncoding::Base64);
             assert_eq!(policy.passphrase_header, Some(names[0]));
             let (work, kind) = prepared(&identity, policy);
@@ -302,17 +322,19 @@ mod presentation_tests {
                 output.headers.unwrap(),
                 vec![(names[0].into(), "fixture-presentation".into())]
             );
-            assert!(matches!(
-                prepare(
-                    venue,
-                    &Identities {
-                        primary: Some(identity.clone()),
-                        secondary: None
-                    },
-                    Input::Credential {}
-                ),
-                Err(SignError::Unsupported)
-            ));
+            let capture = prepare(
+                venue,
+                &Identities {
+                    primary: Some(identity.clone()),
+                    secondary: None,
+                },
+                Input::Credential {},
+            );
+            if venue == "okx" && cfg!(feature = "okx") {
+                assert!(capture.is_ok());
+            } else {
+                assert!(matches!(capture, Err(SignError::Unsupported)));
+            }
         }
     }
 
@@ -433,7 +455,13 @@ mod presentation_tests {
                 vec![(protected[0].into(), "callback".into())]
             );
             assert!(matches!(
-                finish(OutputKind::Http(base), &result),
+                finish(
+                    OutputKind::Http(RemoteSigningPolicy {
+                        protected_headers: None,
+                        ..base
+                    }),
+                    &result
+                ),
                 Err(SignError::InvalidResult)
             ));
             result.headers = (0..32)

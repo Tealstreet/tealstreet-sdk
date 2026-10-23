@@ -2,8 +2,8 @@
 //! This module alone owns key material; engine/venue state receives opaque refs.
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
-    Algorithm, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef, Operation,
-    PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
+    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef,
+    Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::{BTreeMap, HashMap};
@@ -36,6 +36,9 @@ pub struct LocalIdentity {
     /// Declared extra signing material, e.g. ApeX's zkLink seed.
     #[serde(default)]
     pub extra: LocalExtras,
+    /// Secondary only: sign with the primary's ref instead of own material.
+    #[serde(default)]
+    pub signing_from_primary: bool,
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -236,12 +239,47 @@ impl LocalSigner {
                 }
             }
         }
+        // The alias shares one installed copy, so both slots must declare the
+        // same decoding and only the secondary may name the primary.
+        let alias = setup
+            .secondary
+            .as_ref()
+            .is_some_and(|id| id.signing_from_primary);
+        if setup
+            .primary
+            .as_ref()
+            .is_some_and(|id| id.signing_from_primary)
+            || alias
+                && (setup
+                    .secondary
+                    .as_ref()
+                    .is_some_and(|id| !id.secret.0.is_empty())
+                    || setup.primary.as_ref().is_none_or(|primary| {
+                        primary.secret.0.is_empty()
+                            || setup.secondary.as_ref().map(|id| id.secret_encoding)
+                                != Some(primary.secret_encoding)
+                    }))
+        {
+            return Err(SignError::InvalidRequest);
+        }
         let primary = setup.primary.map(DecodedIdentity::decode).transpose()?;
         let secondary = setup.secondary.map(DecodedIdentity::decode).transpose()?;
         let mut identities = Identities {
             primary: primary.as_ref().map(|id| id.references("primary")),
             secondary: secondary.as_ref().map(|id| id.references("secondary")),
         };
+        if alias {
+            // A prefix-only hex key decodes to nothing; it cannot be aliased.
+            let (Some(primary), Some(secondary)) =
+                (identities.primary.as_ref(), identities.secondary.as_mut())
+            else {
+                return Err(SignError::InvalidRequest);
+            };
+            if primary.signing.0.is_empty() {
+                return Err(SignError::InvalidRequest);
+            }
+            secondary.signing = primary.signing.clone();
+        }
         // The same policy validates bytes and opaque refs. Empty decoded material
         // is represented only in temporary validation metadata as an invalid ref.
         // Optional explicit-empty passphrases retain their existing installed ref.
@@ -475,9 +513,33 @@ impl LocalSigner {
         Ok(result)
     }
 }
+/// Mirrors the `sign_now` arms; keep the two in step.
+fn implemented(algorithm: Algorithm) -> bool {
+    match algorithm {
+        Algorithm::HmacSha256 | Algorithm::HmacSha512 | Algorithm::Sha256SecretSuffix => true,
+        Algorithm::ZkLinkContract => cfg!(feature = "zklink"),
+        Algorithm::Ed25519
+        | Algorithm::Es256
+        | Algorithm::Secp256k1Digest
+        | Algorithm::StarkDigest
+        | Algorithm::SchnorrDigest => false,
+    }
+}
+
 impl Signer for LocalSigner {
     fn immediate(&self) -> bool {
         true
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        let usable = match algorithm {
+            Algorithm::ZkLinkContract => self.role_key(key, ExtraKey::ZklinkSeed).is_ok(),
+            _ => self.key(key).is_ok(),
+        };
+        if usable && implemented(algorithm) {
+            Capability::Supported
+        } else {
+            Capability::Unsupported
+        }
     }
     fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
         Some(self.sign_now(request))
@@ -727,6 +789,71 @@ mod tests {
     }
 
     #[test]
+    fn secondary_signing_alias_names_the_primary_ref_without_a_second_copy() {
+        let hex_policy = |encoding| CredentialSetupPolicy {
+            primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                secret_encoding: Some(KeyEncoding::Hex),
+                ..Default::default()
+            }),
+            secondary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                secret_encoding: Some(encoding),
+                ..Default::default()
+            }),
+        };
+        let setup = |secondary: serde_json::Value| {
+            serde_json::json!({"primary":{"key":"api-key","secret":"0x0102"},"secondary":secondary})
+                .to_string()
+        };
+        let (mut signer, ids) = LocalSigner::from_json_with_policy(
+            setup(serde_json::json!({"key":"read-key","signingFromPrimary":true})),
+            hex_policy(KeyEncoding::Hex),
+        )
+        .unwrap();
+        let (primary, secondary) = (ids.primary.unwrap(), ids.secondary.unwrap());
+        assert_eq!(secondary.signing, primary.signing);
+        assert_eq!(secondary.credential, KeyRef("secondary.credential".into()));
+        assert!(
+            !signer
+                .keys
+                .contains_key(&KeyRef("secondary.signing".into()))
+        );
+        assert_eq!(signer.key(&secondary.signing).unwrap(), [1, 2]);
+        // One copy, one revocation point for both slots.
+        signer.remove(&secondary.signing);
+        assert!(signer.key(&primary.signing).is_err());
+        for (secondary, policy) in [
+            // A declared encoding mismatch is refused, not reinterpreted.
+            (
+                serde_json::json!({"key":"read-key","signingFromPrimary":true}),
+                hex_policy(KeyEncoding::Utf8),
+            ),
+            // Own material and an alias together are ambiguous.
+            (
+                serde_json::json!({"key":"read-key","secret":"0x03","signingFromPrimary":true}),
+                hex_policy(KeyEncoding::Hex),
+            ),
+        ] {
+            assert!(matches!(
+                LocalSigner::from_json_with_policy(setup(secondary), policy),
+                Err(SignError::InvalidRequest)
+            ));
+        }
+        // The primary cannot alias, and an alias needs primary signing material.
+        for input in [
+            r#"{"primary":{"key":"k","secret":"00","signingFromPrimary":true}}"#,
+            r#"{"primary":{"key":"k"},"secondary":{"key":"r","signingFromPrimary":true}}"#,
+            r#"{"secondary":{"key":"r","signingFromPrimary":true}}"#,
+            // A prefix-only hex key decodes to nothing.
+            r#"{"primary":{"key":"k","secret":"0x"},"secondary":{"key":"r","signingFromPrimary":true}}"#,
+        ] {
+            assert!(matches!(
+                LocalSigner::from_json_with_policy(input.into(), hex_policy(KeyEncoding::Hex)),
+                Err(SignError::InvalidRequest)
+            ));
+        }
+    }
+
+    #[test]
     fn opaque_policy_checks_presence_while_optional_empty_material_stays_explicit() {
         let (signer, mut ids) = LocalSigner::from_json(
             r#"{"primary":{"key":"key","secret":"secret","passphrase":""}}"#.into(),
@@ -767,6 +894,11 @@ mod tests {
             ("utf8", secret.to_owned()),
             ("base64", base64.clone()),
             ("hex", crate::hex(secret.as_bytes())),
+            ("hex", format!("0x{}", crate::hex(secret.as_bytes()))),
+            (
+                "hex",
+                format!("0X{}", crate::hex(secret.as_bytes()).to_uppercase()),
+            ),
             ("pem", pem("PRIVATE KEY", &base64)),
         ] {
             let (signer, identities) = LocalSigner::from_json(
@@ -894,6 +1026,9 @@ mod tests {
             ("base64", "not base64!".to_owned()),
             ("hex", "123".to_owned()),
             ("hex", "0g".to_owned()),
+            ("hex", "0x123".to_owned()),
+            ("hex", "0x0x00".to_owned()),
+            ("hex", "x00".to_owned()),
             (
                 "pem",
                 pem("PRIVATE KEY", "AQ==").replace("END PRIVATE KEY", "END EC PRIVATE KEY"),
@@ -1240,5 +1375,56 @@ mod tests {
             signer.sign_now(&zklink_request(key, payload)),
             Err(SignError::Unsupported)
         );
+    }
+
+    #[test]
+    fn capability_mirrors_installed_roles_and_compiled_arms_without_signing() {
+        let (seed, _, _) = zklink_case();
+        let (signer, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let primary = ids.primary.unwrap();
+        let seed_ref = primary.extra[&ExtraKey::ZklinkSeed].clone();
+        let zklink = if cfg!(feature = "zklink") {
+            Capability::Supported
+        } else {
+            Capability::Unsupported
+        };
+        for (key, algorithm, expected) in [
+            (
+                &primary.signing,
+                Algorithm::HmacSha256,
+                Capability::Supported,
+            ),
+            (
+                &primary.signing,
+                Algorithm::HmacSha512,
+                Capability::Supported,
+            ),
+            (
+                &primary.signing,
+                Algorithm::Sha256SecretSuffix,
+                Capability::Supported,
+            ),
+            (&seed_ref, Algorithm::ZkLinkContract, zklink),
+            // Role binding: neither ref crosses into the other's algorithm.
+            (&seed_ref, Algorithm::HmacSha256, Capability::Unsupported),
+            (
+                &primary.signing,
+                Algorithm::ZkLinkContract,
+                Capability::Unsupported,
+            ),
+            (
+                &primary.signing,
+                Algorithm::Ed25519,
+                Capability::Unsupported,
+            ),
+            (
+                &KeyRef("absent".into()),
+                Algorithm::HmacSha256,
+                Capability::Unsupported,
+            ),
+        ] {
+            assert_eq!(signer.can_sign(key, algorithm), expected, "{algorithm:?}");
+        }
     }
 }
