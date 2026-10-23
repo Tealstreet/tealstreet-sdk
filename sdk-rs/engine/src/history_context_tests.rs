@@ -28,6 +28,8 @@ struct Pending {
 struct Fixture {
     timer: Option<Pending>,
     retired: Option<ReadCompletion>,
+    held_root: Option<Context>,
+    foreign: Option<Context>,
 }
 fn policy() -> Policy {
     Policy {
@@ -85,12 +87,26 @@ impl Venue for Fixture {
     fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
     fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, _: TimerId) {
-        let pending = self.timer.take().unwrap();
+        let mut pending = self.timer.take().unwrap();
         assert!(
             pending.history.validate_delivery(cx, &pending.leg).is_err(),
             "timer cannot borrow a previous physical delivery"
         );
-        pending.history.finish(cx, Ok(())).unwrap();
+        // The completion root remains logical authority at a timer, even
+        // after its original physical issuance bound expires. It grants no data.
+        let owner = ReadCompletion::from_context(cx, 7, pending.root.clone()).unwrap();
+        assert!(owner.validate_delivery(cx, &pending.leg).is_err());
+        if pending.profile == "live-timer" {
+            pending.leg = cx.http_leg_context(&pending.root, policy()).unwrap();
+            pending.second = true;
+            queue(cx, pending);
+        } else {
+            assert!(
+                cx.http_leg_context(&pending.root, policy()).is_err(),
+                "an expired root's timer cannot issue the next leg"
+            );
+            pending.history.finish(cx, Ok(())).unwrap();
+        }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, _: &str) {
         // A native failed leg also has exact managed delivery authority, but
@@ -130,15 +146,62 @@ impl Venue for Fixture {
         else {
             return;
         };
-        let root = cx.http_context(Scope::Command(command), policy()).unwrap();
+        let root = if matches!(
+            kind.as_deref(),
+            Some("constructor" | "constructor-mixed" | "capture-root")
+        ) {
+            cx.admit_http_command(policy()).unwrap()
+        } else {
+            cx.http_context(Scope::Command(command), policy()).unwrap()
+        };
         if let Some(mut retired) = self.retired.take() {
             assert_ne!(
                 retired.root().owner(),
                 root.owner(),
                 "reused id must have a fresh generation"
             );
+            assert!(
+                ReadCompletion::from_context(cx, command, retired.root().clone()).is_err(),
+                "constructor cannot bind an old generation to the reused command"
+            );
             retired.incomplete("old generation must stay silent");
             assert!(retired.finish(cx, Ok("[999]".into())).is_err());
+        }
+        if kind.as_deref() == Some("capture-root") {
+            self.held_root = Some(root);
+            return;
+        }
+        if matches!(kind.as_deref(), Some("constructor" | "constructor-mixed")) {
+            assert!(matches!(
+                ReadCompletion::from_context(cx, command + 1, root.clone()),
+                Err(ContextError::Invalid)
+            ));
+            let child = cx.http_leg_context(&root, policy()).unwrap();
+            assert!(ReadCompletion::from_context(cx, command, child).is_err());
+            let background = cx.http_context(Scope::Background, policy()).unwrap();
+            assert!(ReadCompletion::from_context(cx, command, background).is_err());
+            if let Some(foreign) = &self.foreign {
+                assert!(ReadCompletion::from_context(cx, command, foreign.clone()).is_err());
+            }
+            if kind.as_deref() == Some("constructor-mixed") {
+                let mut mutation_policy = policy();
+                mutation_policy.operation = Operation::Mutation;
+                mutation_policy.retry = RetryPolicy::Never;
+                let mutation = cx
+                    .http_context(Scope::Command(command), mutation_policy)
+                    .unwrap();
+                assert!(ReadCompletion::from_context(cx, command, mutation.clone()).is_err());
+                assert!(ReadCompletion::from_context(cx, command, root).is_err());
+                cx.fail_context(&mutation, VenueError::new("proper mutation owner"))
+                    .unwrap();
+            } else {
+                let owner = ReadCompletion::from_context(cx, command, root.clone()).unwrap();
+                let duplicate = ReadCompletion::from_context(cx, command, root.clone()).unwrap();
+                owner.finish(cx, Ok("[]".into())).unwrap();
+                assert!(ReadCompletion::from_context(cx, command, root).is_err());
+                assert!(duplicate.finish(cx, Ok("[999]".into())).is_err());
+            }
+            return;
         }
         let owner = first_root_owner(command, root.clone());
         if kind.as_deref() == Some("early-reject") {
@@ -313,8 +376,12 @@ impl Venue for Fixture {
                     .unwrap()
                     .advance(page(next));
             }
-            if pending.profile == "timer" {
-                cx.set_timer(120.);
+            if matches!(pending.profile.as_str(), "timer" | "live-timer") {
+                cx.set_timer(if pending.profile == "timer" {
+                    120.
+                } else {
+                    10.
+                });
                 self.timer = Some(pending);
                 return;
             }
@@ -461,7 +528,7 @@ impl Venue for Fixture {
         }
     }
 }
-fn engine() -> Engine<Fixture> {
+fn engine_with(fixture: Fixture, seed: u64) -> Engine<Fixture> {
     fn source(mut state: u64) -> crate::entropy::Fill {
         Box::new(move |bytes| {
             for byte in bytes {
@@ -473,10 +540,13 @@ fn engine() -> Engine<Fixture> {
             Ok(())
         })
     }
-    let entropy = crate::entropy::Entropy::new(source(13), source(29));
-    let mut engine = Engine::new(Fixture::default(), Some(entropy)).unwrap();
+    let entropy = crate::entropy::Entropy::new(source(13 + seed), source(29 + seed));
+    let mut engine = Engine::new(fixture, Some(entropy)).unwrap();
     engine.set_log_level(Level::Error);
     engine
+}
+fn engine() -> Engine<Fixture> {
+    engine_with(Fixture::default(), 0)
 }
 fn query(profile: &str) -> Event<'_> {
     Event::Command(Command::Query {
@@ -746,5 +816,57 @@ fn a_new_physical_attempt_on_the_same_leg_drops_failed_identity_staging() {
 fn new_physical_attempt_must_not_admit_the_previous_attempts_staged_page() {
     let notices = run("physical-binding");
     assert_eq!(notices.len(), 1);
+    assert_done(&notices);
+}
+
+#[test]
+fn public_constructor_binds_only_the_matching_live_original_read_root() {
+    let mut foreign_engine = engine_with(Fixture::default(), 100);
+    foreign_engine.handle(0., query("capture-root"));
+    let foreign = foreign_engine.venue().held_root.clone().unwrap();
+    let mut engine = engine_with(
+        Fixture {
+            foreign: Some(foreign),
+            ..Fixture::default()
+        },
+        0,
+    );
+    engine.handle(0., query("constructor"));
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(actions.len(), 1, "constructor checks emit no I/O or marker");
+    assert!(
+        matches!(&actions[0], Action::Notice(Notice::CommandDone { command: 7, result }) if result == "[]")
+    );
+}
+#[test]
+fn public_constructor_refuses_mutation_root_and_read_root_with_mutation_sibling() {
+    let mut engine = engine();
+    engine.handle(0., query("constructor-mixed"));
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(actions.len(), 1);
+    assert!(
+        matches!(&actions[0], Action::Notice(Notice::CommandFailed { command: 7, error })
+        if error.message == "proper mutation owner")
+    );
+}
+
+#[test]
+fn a_live_logical_timer_can_issue_the_next_leg_but_cannot_admit_data() {
+    let mut engine = engine();
+    engine.handle(0., query("live-timer"));
+    let request = prepare(&mut engine, 1.);
+    deliver(&mut engine, request, 3.);
+    let timer = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(13., Event::TimerFired { timer });
+    let request = prepare(&mut engine, 14.);
+    deliver(&mut engine, request, 16.);
+    let notices = notices(&mut engine);
+    assert_eq!(notices.len(), 2);
     assert_done(&notices);
 }

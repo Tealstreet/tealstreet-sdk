@@ -1,7 +1,7 @@
 mod support;
 
 use safe_cex_engine::book::Book;
-use safe_cex_engine::history::{Completion, HistoryRows};
+use safe_cex_engine::history::{HistoryRows, ReadCompletion, ReadHistoryRows};
 use safe_cex_engine::log::code;
 use safe_cex_engine::request_context::{
     Claim, Context, HttpAction, Operation, Policy, Prepared, RetryPolicy, Scope,
@@ -14,8 +14,8 @@ use safe_cex_engine::{
 struct Pending {
     root: Context,
     leg: Context,
-    rows: HistoryRows<String>,
-    duplicate: Completion,
+    rows: ReadHistoryRows<String>,
+    duplicate: ReadCompletion,
     profile: String,
     mutation: Option<Context>,
 }
@@ -32,11 +32,10 @@ fn policy() -> Policy {
     }
 }
 
-// Original source seam: the real managed root/leg are retained below, but
-// numeric Completion cannot carry their terminal or companion authority.
-// The corrected implementation changes this construction/admission seam only.
-fn owner(_cx: &Cx<'_, Pending>, command: u32, _context: Context) -> Completion {
-    Completion::new(command)
+// Corrected construction/admission seam. The original committed controls used
+// numeric Completion here, while retaining the same genuine root and delivery.
+fn owner(cx: &Cx<'_, Pending>, command: u32, context: Context) -> ReadCompletion {
+    ReadCompletion::from_context(cx, command, context).expect("matching original Read root")
 }
 
 impl Venue for Fixture {
@@ -105,21 +104,33 @@ impl Venue for Fixture {
             cx.validate_read_http_delivery(&pending.root, &pending.leg)
                 .expect("fixture uses the exact live original root/current managed leg");
         }
-        pending.rows.stage("1".into());
-        pending.rows.accept_page();
-        pending.rows.stage("999".into());
-        pending
-            .rows
-            .finish(cx, Err(VenueError::new("later page failed")));
         if let Some(mutation) = pending.mutation {
+            assert!(pending.rows.admit(cx, &pending.leg).is_err());
+            assert!(
+                pending
+                    .rows
+                    .finish(cx, Err(VenueError::new("later page failed")))
+                    .is_err()
+            );
             // A read cannot consume the sibling write's journal. Its proper
             // owner must still be able to issue the sole terminal failure.
             cx.fail_context(&mutation, VenueError::new("proper mutation owner"))
                 .expect("history must leave mixed write authority untouched");
+            return;
         }
+        {
+            let mut page = pending.rows.admit(cx, &pending.leg).unwrap();
+            page.stage("1".into());
+            page.accept_page();
+            page.stage("999".into());
+        }
+        pending
+            .rows
+            .finish(cx, Err(VenueError::new("later page failed")))
+            .unwrap();
         if pending.profile == "duplicate" {
             pending.duplicate.incomplete("duplicate must stay silent");
-            pending.duplicate.finish(cx, Ok("[999]".into()));
+            assert!(pending.duplicate.finish(cx, Ok("[999]".into())).is_err());
         }
     }
 }

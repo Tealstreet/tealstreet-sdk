@@ -2,7 +2,7 @@
 //! account diagnostics have an explicit scope and never claim a query owner.
 use crate::log::code;
 use crate::paging::{CursorPage, CursorStep, CursorWalk, PageRow, RangeWalk, Stall, Step};
-use crate::request_context::{Attempt, Context, Error as ContextError};
+use crate::request_context::{Attempt, Context, Error as ContextError, Owner};
 use crate::{CommandId, Cx, ErrorKind, Level, Value, VenueError};
 
 /// Missing coverage in automatic account reconciliation, not a user query.
@@ -801,6 +801,30 @@ impl<T> RangeHistory<T, LegacyAuthority> {
 }
 
 impl ReadCompletion {
+    /// Bind the matching command's exact original engine-issued Read root.
+    /// This read-only check allocates no work or send rights. Duplicate bindings
+    /// are allowed; only the first valid context terminal can complete the owner.
+    /// Plan/observer handles and physical child legs are not original roots.
+    pub fn from_context<P>(
+        cx: &Cx<'_, P>,
+        command: CommandId,
+        root: Context,
+    ) -> Result<Self, ContextError> {
+        cx.validate_read_root_context(&root)?;
+        if !matches!(root.owner(), Owner::Command { id, .. } if id == command) {
+            return Err(ContextError::Invalid);
+        }
+        Ok(Self {
+            command,
+            incomplete: None,
+            authority: ReadAuthority {
+                root: Box::new(root),
+                page: None,
+                identities: PageIdentities::default(),
+            },
+        })
+    }
+
     pub fn root(&self) -> &Context {
         &self.authority.root
     }

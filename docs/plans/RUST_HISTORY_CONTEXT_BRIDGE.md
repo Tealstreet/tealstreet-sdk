@@ -292,3 +292,22 @@ and publication await the owner's single announced composed #1830 pin, after
 which integration and verification must bind that exact source. No final CI,
 native two-venue receipt, public constructor readiness or merge is claimed by
 this local checkpoint.
+
+Canonical #1830 66cb32e89588e60bd736d3ff121f5ce52bfc4f3b is genuinely
+integrated at a4aa803eb63. All incoming unowned source is exact; registry differs
+only by the separately reviewed crate-private physical-attempt accessor. The
+CALLERS conflict retains the incoming full-file prefix and this bridge's added
+section verbatim once. The public from_context(cx, command, root) constructor
+now delegates validate_read_root_context and checks the exact command id before
+retaining the immutable root. It grants no send rights or exclusive reservation.
+
+The three original numeric regression assertions pass after changing only owner
+construction, guarded admission and contextual terminal handling. Eighteen core
+controls separately cover the public constructor's wrong id, child, foreign,
+background, mutation/mixed and post-terminal denials, duplicate binding, stale
+reused generation, logical completion after physical expiry and live versus
+expired timer-issued next legs. The public constructor tests use genuine engine
+admit_http_command entry. The older private wrapper remains solely a core-test
+fixture, not constructor proof. Two actual venue consumer receipts and agreed
+Plan/observer authority remain distinct readiness gates; this single-Read-root
+bridge cannot cast or consume opaque Plan slots.
