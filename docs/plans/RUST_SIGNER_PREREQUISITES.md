@@ -294,12 +294,27 @@ agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
   - Hyperliquid deactivating spot;
   - TxFlow refusing a key that does not parse.
 
-  The expected value is never replaced by the actual one. GRVT warns on a
-  stale `signer_address` and continues, signing `Signature.s` with the
-  actual address (`trading.rs:784/987`). HL `account_start` compares `key.or(user)`
-  and emits Warn/`CONFIG_INVALID`, then continues. Standalone private spot
-  requires `key` and emits Error/`AUTH_REJECTED`, then deactivates and
-  returns before discovery. Both comparisons are case-insensitive.
+  The expected value is never replaced or filled by the actual one. Each
+  check runs at start against the actual value: fetched for a local
+  provider, the bound metadata for host/remote. Both comparisons below are
+  case-insensitive. A local fetch failure maps to the family's
+  "underivable key" outcome today, never a setup refusal.
+  - HL `account_start` compares the actual value with `key.or(user)` and
+    emits Warn/`CONFIG_INVALID`, then continues. A fetch failure gives the
+    same warning (today's `map_or(true)`).
+  - HL standalone private spot emits Error/`AUTH_REJECTED`, then deactivates
+    and returns before `spot_meta`. It does so when the signing ref or the
+    declared `key` is absent, when the fetch fails, or on a mismatch.
+    Spot never fills `key`.
+  - GRVT warns (Warn/`CONFIG_INVALID`, interpolating the actual address) only
+    when the secret ref and `signer_address` exist and the fetch succeeds.
+    A fetch failure is silent at start, and the order fails at
+    `trading.rs:784` as today. Orders sign `Signature.s` with the actual
+    address (`trading.rs:784/987`), so a stale `signer_address` warns and
+    continues.
+  - Host/remote: the start checks use bound metadata, so HL spot still
+    deactivates at start on a mismatch or missing metadata. Per-dispatch
+    recovery is a second gate on the actual signature, not a replacement.
 - **Host and remote providers.** The value must be declared. Where the
   family's signature is recoverable (EIP-712/191 for Hyperliquid, TxFlow,
   GRVT and Polymarket), dispatch recovers the signer and compares it with
@@ -347,6 +362,9 @@ APIs are labelled as such, not REDs):
   Hyperliquid and GRVT admission.
 - GRVT, local and host/remote: a stale expected `signer_address` warns and
   orders still sign and send with the actual address.
+- Local fetch failure: HL perps warns, HL spot deactivates, GRVT stays
+  silent at start and fails the order. Nothing refuses setup.
+- HL with no `key`: perps compares with `user()`, and spot deactivates.
 - HL: the agent, main wallet and vault stay distinct. This extends the
   existing `spot_local_signer_identity_is_separate_from_main_wallet_and_vault`
   control to refs and host metadata.
