@@ -289,7 +289,7 @@ caller follow-up reviews find the added fixture changes clean. Native codec,
 protocol bodies, public routing and all existing classifier behavior stay intact.
 CI and the overseer's merge window remain separate gates.
 
-## Next slice: local margin and position settings
+## Next slice: local history completions and validation
 
 Plan checkpoint,2026-10-24, on actual landing
 `c473342d48363a057c98c59292abb957462f3590`. This appendix supersedes the
@@ -298,8 +298,9 @@ inventory change is included in this checkpoint.
 
 ### Inventory and collision refresh
 
-The complete fingerprint/destination mapping above remains the family map;
-the pinned manifest is the exact remaining multiset. Current path counts are:
+The fingerprint/destination mapping above remains the family map with the
+following recorded changes; the pinned manifest is the exact remaining multiset.
+Current path counts are:
 
 | Remaining path under `venues/paradex/src/` | Count | Destination |
 | --- | ---: | --- |
@@ -311,9 +312,11 @@ the pinned manifest is the exact remaining multiset. Current path counts are:
 | `trading.rs` | 21 | NOIO/TRADE/LEVERAGE |
 | Total | 55 | |
 
-Previously mapped occurrences already removed are account public-system seed
-`5c28b0ebae1f2a54f344d52c2c422801c8e82381c7fd8ad95d13cd549e88ddec`:1;
-depth sender `7277348e8c2d96d515028483928e715a3e9c014072f494e18fd2e527dc2f360b`:1
+The account orders SNAPSHOT fingerprint was rebound, count-neutral, from
+`5c28b0ebae1f2a54f344d52c2c422801c8e82381c7fd8ad95d13cd549e88ddec`:1 to
+`29a6633fa3f6e05f04f534c0e675690014adde1e8a26e93c3769e8618602c13c`:1.
+Previously mapped occurrences already removed are depth numeric success
+`7277348e8c2d96d515028483928e715a3e9c014072f494e18fd2e527dc2f360b`:1
 and one of its two `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa`
 failures; history public sender
 `a876e5300951dc42d8c9828d78f0d32d52e42b439cbaf763cc6cdd6b63174865`:1;
@@ -333,97 +336,113 @@ held by #1857/#1914/#1923 despite #1877 landing. Own #1935 holds Lighter
 lists before source or test edits. Shared documents and inventory permit
 append-only updates and own-venue pruning under the standing integration rule.
 
-Choose the four fixed-mode terminal occurrences in `Trading::command`,
-currently lines650,656,666,671. They require no HTTP, credentials, signer,
-Plan, observer or history authority. The larger candle family has two native
-GET routes with a klines-to-TradingView fallback and polling owners; it needs
-a separate Plan/authority audit. This smaller slice uses an already landed
-command-entry seam. The adjacent generic unsupported-command branch mixes
-Read and Mutation callers, including book/account variants intercepted by
-`lib.rs`, and stays a separate caller audit. Paradex signing remains untouched
-while the remote Stark payload-signer option is being decided.
+The first plan checkpoint considered the four fixed-mode trading terminals.
+Independent source review found that the proposed Mutation Context plus
+`done_context` cannot preserve the two no-op `[]` successes: issuance declares
+Mutation writes, and an empty CommandWrites journal rejects success. That
+proposal is superseded. Shared engine owner was asked for a genuine no-op
+Mutation completion capability; no fabricated accepted write, Read relabeling
+or venue finalizer may bypass it. All four settings remain unchanged here.
+
+Select instead four synchronous Read terminal occurrences at
+`History::query` lines289,308,326,330. They need neither physical requests nor
+Plan/history-walk authority. The larger candle family has two native GET
+routes with klines-to-TradingView fallback and polling owners, requiring its
+own Plan/authority audit. Paradex signing remains untouched while the remote
+Stark payload-signer option is being decided.
 
 ### Native behavior and shared admission
 
-`lib.rs::on_command` routes these settings through `public_command` into
-`Trading::command`. The two arms precede credential checks and ignore their
-symbol argument. Preserve that precedence on production/testnet and both
-public-only and private-enabled construction, including an unknown symbol.
+`lib.rs::on_command` routes Query through `public_command` into
+`History::query`. Preserve its ordered decisions before creating a private
+legacy History Request:
 
-| Command | Native reply before admission changes |
-| --- | --- |
-| `SetMarginType { isolated:false, .. }` | Exact JSON `[]`; no Store change |
-| `SetMarginType { isolated:true, .. }` | Unsupported/NotSent: `Paradex isolated account routing is unsupported` |
-| `SetPositionMode { hedged:false, .. }` | Exact JSON `[]`; no Store change |
-| `SetPositionMode { hedged:true, .. }` | Unsupported/NotSent: `Paradex supports one-way mode only` |
+1. PublicTrades always dispatches to the already-managed public consumer first,
+   on either public-only or private-enabled construction. It must not be caught
+   by a new local completion path.
+2. Public-only non-PublicTrades returns exact `[]`, or exact
+   `{"found":false,"definitive":false}` for OrderByClientId. This precedes client
+   ID and time-range validation, so even invalid private queries retain their
+   existing empty/non-definitive result when admission succeeds.
+3. On private-enabled construction, OrderByClientId with empty ID, more than64
+   Unicode scalar values, CR or LF fails with exact `invalid Paradex client
+   order ID`, no financial outcome and no added error kind.
+4. Fills/OrderHistory/Income rejects an explicitly non-finite or negative bound,
+   or from greater than to, with exact `invalid Paradex history time range`,
+   no financial outcome and no added error kind. Valid zero/equal bounds remain
+   valid. This precedes the no-symbol Fills branch.
+5. Private-enabled Fills without a symbol returns exact `[]` after bounds
+   validation, before credential checks. It also works before authentication.
+6. All other queries enter the existing private History Request unchanged;
+   do not admit an otherwise unused root ahead of that branch.
 
-At the start of each of these existing arms, before publishing its reply,
-call `Cx::admit_http_command(Policy)` with `Operation::Mutation`, no credential,
-20,000ms timeout, no pacing and `RetryPolicy::Never`. Admission borrows the
-genuine initial callback; do not pass a command ID, manufacture a Context,
-queue a request or create a venue completion wrapper. On either entry error,
-return handled immediately: Rejected already emitted the one correlated
-engine denial and Revoked gives no completion authority. Use `done_context`
-for `[]`, or `fail_context` with the existing typed unsupported/NotSent error;
-handle the returned Result without unwrap or numeric fallback. The engine
-owns custody, issuance, finalization and retirement. No codec or write-fact
-table is needed because these branches never release a venue operation.
+Inside each selected local branch, before result/error publication, call
+`Cx::admit_http_command(Policy)` with Operation::Read, no credential,20,000ms,
+no pacing and RetryPolicy::Never. It borrows the genuine initial callback;
+do not pass an ID, manufacture a Context, queue a request, construct a history
+owner or create a venue completion wrapper. Entry failure returns immediately:
+Rejected already emitted exactly one correlated engine denial; Revoked has no
+completion authority. Use `done_context` or `fail_context` with the existing
+native string. Handle the Result without unwrap or numeric fallback. Shared
+entry and terminal APIs own capacity, custody and retirement.
 
-Caller-visible change: the current unconditional local reply now requires
-available genuine command authority and valid clock policy. At capacity it
-produces one engine-owned failure, `Engine request capacity reached`; invalid
-clock admission produces the shared InvalidInput error. Both are Mutation
-NotSent. Successful admission preserves all four native replies and leaves
-Store, order receipts, account, timers and outbound traffic untouched. Do not
-change another command's credential, market validation, wire or signer path.
+Caller-visible change: these unconditional local results or validation errors
+now require genuine command authority and valid clock policy. At capacity the
+single engine-owned failure is `Engine request capacity reached`; invalid clock
+admission gives the shared InvalidInput error. Read failures have no financial
+outcome. With successful admission preserve the ordered decisions, exact JSON,
+messages and metadata above. No Store/row/error-marker/account mutation,
+outbound HTTP/sign/WS operation or command-specific timer is introduced.
 
 ### Original REDs, implementation and proof gates
 
-1. Commit this plan before tests. In a separate test-only commit add
-   `tests/request_context_local_settings.rs`, using real Engine command entry
-   and the existing support fixtures without changing them. Pin native controls
-   for all four replies, both networks, public/private construction, absent or
-   unknown symbols and Store/frame equality. Retain the existing unsupported
-   position-mode control in `tests/trading.rs` unchanged.
-2. Fill the shared bound with256 genuine parked managed book Reads at one
-   unchanged clock; first assert every Prepare exists and none is claimed.
-   Each of the four settings must fail with exactly one correlated shared
-   capacity error and Mutation NotSent, never its old success/unsupported
-   reply. Record these four original assertion REDs against unchanged source.
-   Add invalid-clock admission controls with the engine's exact current policy
-   semantics. Keep successful native controls passing on that same source;
-   a fixture setup failure is not a valid RED.
-3. Add peer-isolation and recovery controls: all parked peers remain live;
-   retire one genuine Read, run each setting, verify its native reply and no
-   new HTTP/sign/WS/timer action, then prove the freed slot remains available.
-   Exercise300 sequential settings and command-ID reuse after completion to
-   expose leaked retained owners. An ID currently owned by a parked Read
-   must not terminalize that Read. Keep ordinary account/book/public-trades
-   and representative private trading behavior in the native suite.
-4. Independently review the original RED commit, then adopt only the two
-   setting arms in `src/trading.rs`. Re-run the same assertions without
-   weakening them. Prune exactly these fingerprints in that path:
+1. Commit the reviewed plan before tests. Separately add
+   `tests/request_context_local_history.rs` with real Engine command entry and
+   existing support fixtures, without editing those fixtures. Both networks,
+   public-only/private-enabled and pre-authentication construction are covered.
+   Native controls pin all five Query variants and the precedence matrix above;
+   compare raw JSON, exact error message/kind/outcome and Store/frame effects.
+   Include64/65-character Unicode IDs, CR/LF, NaN/infinite/negative/reversed
+   bounds, zero/equal bounds and valid no-symbol Fills.
+2. Fill capacity with256 genuine parked managed book Reads at one unchanged
+   clock; assert every Prepare exists and no request is claimed. Exercise
+   each of the four selected source branches. Each must emit exactly one
+   correlated shared capacity failure, no financial outcome, never the old
+   result/native error. Record four original assertion REDs on unchanged source.
+   Add invalid-clock admission controls using the current engine policy.
+   Native controls must pass on the same source; fixture setup failures do not
+   count as REDs. Independently review that test-only commit before source work.
+3. Retire one real Read and rerun each branch to recover its exact native
+   terminal; confirm parked peers remain live, no new outbound/timer effects
+   appear and the freed slot remains available. Exercise300 sequential local
+   queries and post-completion ID reuse to expose leaked retained owners. An
+   ID owned by a parked Read must not finalize that Read; permit its existing
+   canonical duplicate diagnostic. Preserve the managed PublicTrades tests
+   unchanged, plus valid private history/lookup tests to prove fallthrough.
+4. Change only the four local terminal branches in `src/history.rs`, using
+   existing shared APIs, then run the same assertions unchanged. Prune exactly
+   these path fingerprints, one occurrence each:
 
-   | Full fingerprint | Removed multiplicity |
-   | --- | ---: |
-   | `6a0599e4c3ead752e1fac93edf85bc5bf64ee081d1300d7728344098cd86dd71` | 1 |
-   | `f80a7c4dd74d78d93f9fcaaf73728e8b73decaf64625a69627120abd7e21e2cf` | 1 |
-   | `2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b` | 2 |
+   | Full fingerprint | Native branch |
+   | --- | --- |
+   | `7e6ac08cf11a9f2f3a366e224d2c5df531cef78fd5b215d673548273ddd1fe50` | Public-only result |
+   | `8153debcec98fa16c1dfc5c29c116571f0f4f5735aa73f778c9fafc32448211b` | Invalid client ID |
+   | `55fe601b0e4d079ab998430cfbafaa7ea570dd124789ffb38859d78b00696d10` | Invalid bounds |
+   | `2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b` | No-symbol Fills |
 
-   Expected exact shrink: **Paradex55->51; trading21->17**. Every other
-   manifest key, including foreign venues and the adjacent unsupported branch,
-   remains identical. No inventory edit belongs in the plan or RED commits.
-5. Scoped native verification uses `CARGO_BUILD_JOBS=2 cargo test -p
-   safe-cex-venue-paradex -p safe-cex-venue-binance`, strict all-target Paradex
-   Clippy, scoped cargo fmt, bans, `python3 sdk-rs/scripts/check-request-context.py`
-   and `python3 sdk-rs/scripts/check-request-context.test.py`. First run the new
-   target alone on original source to establish REDs. Full WASM/replay/timing
-   gates run in CI, with only one background120s watcher per PR.
-6. Append the landed caller behavior to CALLERS and the exact native/RED/ratchet
-   receipts to AUDITS/QUALITY and this plan. Independent source/adversarial,
-   caller and full-map reviews must all be clean before asking for a train
-   slot. Architecture gate: **No** proposed per-venue cross-cutting mechanism;
-   the adapter only supplies native settings facts to existing engine admission
-   and context terminal APIs. Genuine actual-landing integration, green CI,
-   a fresh separate own-files/own-manifest-keys guard and a head-matched merge
-   remain mandatory. Combo-4 review duty may interrupt this planning slice.
+   Expected exact shrink: **Paradex55->51; history13->9**. Every other manifest
+   path and fingerprint remains identical, including both trading no-op siblings
+   with the same `2b6c` hash. No inventory edit belongs in plan or RED commits.
+5. Scoped checks: `CARGO_BUILD_JOBS=2 cargo test -p safe-cex-venue-paradex -p
+   safe-cex-venue-binance`, strict all-target Paradex Clippy, scoped cargo fmt,
+   bans, `python3 sdk-rs/scripts/check-request-context.py` and
+   `python3 sdk-rs/scripts/check-request-context.test.py`. First execute only the
+   new target on original source to establish REDs. Full WASM/replay/timing
+   gates run in CI; keep only one background120s watcher per PR.
+6. Append landed caller behavior to CALLERS and exact native/RED/ratchet receipts
+   to AUDITS/QUALITY and this plan. Independent source/adversarial, caller and
+   full-map reviews must all be clean. Architecture gate: **No** proposed local
+   cross-cutting mechanism: native Read facts use existing engine command entry
+   and terminal APIs. Genuine actual-landing integration, green CI, an authorized
+   train slot, fresh separate own-files/own-manifest-keys guard and head-matched
+   merge remain mandatory. Combo-4 review duty may interrupt this planning slice.
