@@ -4336,8 +4336,9 @@ Combined and native release builds keep their existing profile selection.
 
 `FetchCandles` retains one engine Read Context from command admission through
 route preparation, binding and final release. Hosts must execute managed HTTP
-preparation/claim actions before sending the unsigned public GET; direct action
-consumers use the shared prepared-actions executor. Preparation time consumes the
+preparation/binding/final claim and handoff before sending the unsigned public
+GET. Native test fixtures use the shared prepared-actions executor. Preparation
+time consumes the
 original 20-second budget. Expiry rejects once, and late/duplicate transport
 callbacks cannot complete a reused numeric command or update HTTP429 pause state.
 Typed route refusals, Network failures and Timeout expiry retain their causes;
