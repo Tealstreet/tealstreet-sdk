@@ -51,12 +51,17 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
    - A family without documentation flips from today's bare-4xx `rejected` to
      `unknown`. That flip is listed per family in Callers.
    - An `unknown` carrying an auth or rate-limit kind must not fan out reconcile
-     reads or hold order locks past the rate window. The engine defers both until
-     `retryAfterMs`, then until the next admitted read.
+     reads or hold order locks past the rate window. The engine defers both by its
+     own bounded window: the Retry-After value when present, otherwise a fixed
+     engine default (10 s, capped at the existing 1 h maximum), and then until the
+     next admitted read. This deferral is internal; it never invents a
+     caller-visible `retryAfterMs`.
 6. **2xx whose success envelope or ACK is malformed, incomplete or count-mismatched →
    write `unknown` / `internal`.** The engine enforces the count: each leg
    declares its expected native-ID count at registration, and an `Accepted` with
-   the wrong count is recorded as `Failed`/`unknown`. For a read, a malformed
+   the wrong count is recorded as `Failed`/`unknown`. The engine derives a minimum
+   from the intent (a Place leg needs at least one ID per caller order), so a
+   venue cannot declare 0 to make an empty ACK pass. For a read, a malformed
    reply is an `internal` failure.
 7. **`Satisfied` → `Accepted { order_ids: [] }` for one cancel, amend or setting
    intent only.** It is never a placement and never a read. It proves "not open
@@ -73,8 +78,17 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
 9. **Fact recording and aggregation are engine-only.**
    - `Cx::http_write_result` accepts only `Accepted`. `Rejected`, `KnownPartial`
      and `Failed` are constructed only inside the engine, from a verdict (rules 3–8).
+   - An attempt that was never released, such as a Binance signing failure
+     (`trading.rs:952`), is recorded through `cx.http_write_not_sent(&context,
+     error)`. The engine refuses it with `Error::State` once the attempt has
+     been released.
    - Batch ACKs go through `http_write_batch`. The engine computes per-item
      verdicts, the accepted-ID join, KnownPartial versus Rejected, and the count check.
+     - Items must arrive in caller-order position. The first non-accepted position
+       becomes `failed_index`, and the engine rejects an item count that differs
+       from `expected`.
+     - A cancel row counts as proven only when it echoes the requested native ID.
+       Its ID then joins `order_ids` as cancellation evidence.
    - `CommandWrites::fail` keeps the `notSent`/`rejected`/`unknown`/partial
      projections. Venues never pick the command outcome or demote it after an effect.
 10. **Reads never claim money effects.** `ReadFailure` carries a kind, native
@@ -88,6 +102,10 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
       applies only when the read's Context carries a credential: public reads
       never produce credential evidence, even with auth-looking codes such as
       Crypto.com 40101.
+    - `account_auth_outcome` gains a `credentialed: bool` argument. The engine
+      fills it from the delivery Context on managed reads; on legacy reads it comes
+      from the venue's existing pending credential slot. `auth_outcome(table,
+      credentialed, native)` returns `None` whenever `credentialed` is false.
 
 `kind` comes from the verdict. `retryAfterMs` is set only when a Retry-After header
 is actually present. A new `startup::retry_after_ms(&Response) -> Option<f64>`
@@ -101,7 +119,12 @@ The engine reaction to an `unknown` seal also replaces the per-venue
 uncertain-write reconcile triggers: OKX `trade_lost`, Lighter submission
 uncertainty, and the Orderly −1007 gap (#24). It reuses the existing
 order-lock/reconcile fence. This needs coordinating with codex-uufub4 and is
-scheduled as phase 2b.
+scheduled as phase 2b. Design sketch: on an `unknown` mutation seal the engine
+already keeps the order-lock fence (`finish_command` skips `managed_resolved`).
+It will additionally call one new hook, `Venue::reconcile_uncertain(symbol)`,
+once per seal, after the rule 5 deferral. The venue implements only the read. A
+fresh read that `orders_reconciled` accepts clears the fence. The detailed design
+is reviewed with codex-uufub4 before phase 2b.
 
 ## Code-table API (published to venue lanes before implementation)
 
@@ -132,7 +155,7 @@ impl CodeTable {
     pub fn verdict(&self, native: &Native<'_>, intent: Intent) -> Verdict; // WS login, startup
 }
 pub fn decode_int(token: &str) -> Option<i64>;            // strict integer, rule 4
-pub fn auth_outcome(table: &CodeTable, context: &Context, native: &Native<'_>)
+pub fn auth_outcome(table: &CodeTable, credentialed: bool, native: &Native<'_>)
     -> Option<AuthOutcome>;                               // rule 10, credentialed only
 pub fn assert_table(table: &CodeTable);                   // venue table tests
 
@@ -140,10 +163,12 @@ pub fn assert_table(table: &CodeTable);                   // venue table tests
 cx.http_write_failure(&context, &TABLE, intent, &response, native)
     -> (Verdict, Option<ResendGrant>);
 cx.http_write_unproven(&context, message);                // rule 6
+cx.http_write_not_sent(&context, error);                  // unreleased attempt only
 cx.http_write_batch(&context, &TABLE, intent, expected,
     items: impl Iterator<Item = Result<&str /* native id */, Native<'_>>>) -> BatchVerdict;
 cx.http_read_failure(&context, &TABLE, &response, native) -> ReadFailure;
 pub struct ReadFailure { pub error: VenueError, pub retry: Option<ReadRetry> } // no Outcome
+pub enum ReadRetry { NativeResend(ResendGrant), After(f64 /* ms */), ReadFailure }
 
 // Legacy, unmanaged venues (transitional; see below):
 pub enum Released<'a> { No, Transport, Status(&'a Response<'a>) }
@@ -174,6 +199,9 @@ pub fn write(table: &CodeTable, intent: Intent, released: Released<'_>, native: 
     `on_request_failed(&str)` (#26).
   - `Seal::Legacy` still passes the venue's aggregation through, so this path
     alone never closes a P0 row. P0 rows close only with RequestContext write adoption.
+  - The legacy path issues no `ResendGrant`. The legacy resend rows (#5–#8b)
+    therefore close only by adoption, and they are listed as adoption blockers
+    for their families.
   - The legacy path is deleted with the transitional bridge, as a master-merge
     blocker (RUST_MASTER_MERGE_BLOCKERS.md).
 
@@ -279,9 +307,10 @@ before fixing it, because other lanes may have landed it already.
    plug into the existing `CommandWrites`/`ResponseProof` path.
    `http_write_result` is narrowed to `Accepted` and gains an expected-count check.
    `RetryEvidence::DefinitiveRefusal` becomes grant-only, with a one-shot flag per
-   leg. Add `retry_after_ms` and `auth_outcome`. Binance's existing
-   `http_write_result` and retry callers move in the same PR, because that is
-   the only managed venue.
+   leg. Add `retry_after_ms` and `auth_outcome`. Binance is the only managed
+   venue, so its `http_write_result` callers, its signing `not_sent` path and
+   its batch projection (`trading.rs:945-985`) move to `http_write_batch` in the
+   same PR. The narrowed API therefore never breaks a caller.
    - Pure precedence tests first: rules 1–10, a code on 408/5xx, a non-JSON 4xx
      with and without a status row, `f64`-lookalike codes, code-over-status
      (KuCoin 401+400002), intent-scoped `Satisfied`, a forged or second resend
@@ -293,8 +322,8 @@ before fixing it, because other lanes may have landed it already.
      rate-window deferral.
 3. **Proof through two venues, each with a failing test before the passing one.**
    - **Binance (managed):** replace `trading.rs:1847 failure`, `account.rs:311
-     venue_error`, the special codes and the batch projection
-     (`trading.rs:945-985`) with `BINANCE: CodeTable` and `http_write_batch`.
+     venue_error` and the special codes with `BINANCE: CodeTable`. This sits on
+     the phase 2 branch, which already moved the batch projection.
      RED test: a non-JSON 429/418 on a write currently reports `unknown` with no
      kind (#36). It must report `rejected` + `rateLimited` from Binance's
      documented status rows, with `retryAfterMs` when the header is present.
@@ -305,6 +334,8 @@ before fixing it, because other lanes may have landed it already.
      - #13 only closes through the write journal, so this proof includes KuCoin's
        RequestContext write adoption. Before starting it, confirm with claude-ddi2il
        that no venue lane owns KuCoin; if one does, use that lane's adoption instead.
+     - This is the largest PR in the plan and may become its own lane, as
+       claude-ddi2il decides.
 4. **Fan-out, one family per PR, in P0 order.** Venues with open PRs touching
    their source wait for those PRs or go through the owning lane. Each venue lane
    adopting RequestContext writes must use the table plus rule 9, which closes
