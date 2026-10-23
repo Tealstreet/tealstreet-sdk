@@ -59,3 +59,21 @@ all-feature strict Clippy, formatting and bans. Publish a draft PR with caller
 docs and reviewed API head. Final CI/proof must integrate current landing/build
 inputs and preserve required raw outputs/gates under the standing evidence rules.
 Announce before the separately authorized guard and head-matched merge.
+
+## Reviewed checkpoint
+
+The original HL and GRVT fixture compilations each fail solely because the new
+entry point is absent; unrelated prototype fixture errors are retained separately.
+The additive implementation then passes 1,009 focused engine/HL/GRVT native
+tests, all-target/all-feature strict Clippy, formatting and bans. The ban scan
+initially matched a new test name containing its reserved map-order token; the
+test is renamed and passes again, with the scanner unchanged.
+
+Both independent source readers recover the original lifecycle file byte for
+byte after reversing the enum/API/header-selection additions. The complete
+context/credential/capacity checks and all code from atomic namespace preflight
+onward are unchanged. Actual native serializer tests cover HL candle POST and
+GRVT live/testnet book POST intent through Prepare, Bind, final claim and response
+delivery, while retaining every existing native assertion. These fixtures prove
+the shared header contract; production venue ownership stays with the consumer
+lane and is not claimed as migrated here.
