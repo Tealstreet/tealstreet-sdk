@@ -211,6 +211,7 @@ impl<P> Cx<'_, P> {
 }
 
 impl<V: Venue> Engine<V> {
+    #[inline]
     pub(in crate::engine) fn flush_preflight_readiness(&mut self, now: f64) {
         if self.io.request_contexts.preflight_ready.is_empty() {
             return;
