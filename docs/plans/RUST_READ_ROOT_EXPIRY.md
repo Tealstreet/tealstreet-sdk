@@ -207,6 +207,16 @@ passes):
 - **Reused ids.** A reused command id gets a new generation and a new receipt.
   A stale index entry or timer never touches it.
 - **Isolation.** Cleanup never completes, re-admits or retries another owner.
+- **Consumer handoff.** An adopting venue's `read_root_retired` must:
+  - release any venue-local queue or busy bookkeeping that its failure
+    callbacks used to own;
+  - drop the returned `Pending`s and the parked continuations for that exact
+    `Owner`;
+  - never finalize numerically.
+
+  Adopting-venue tests show the shared native queue continuing for a live,
+  unrelated query after an expiry. This is per-venue cleanup; it grants no
+  Store rights.
 - **Known gap.** This PR does not close a gap that predates it: numeric
   `cx.done/fail(id)` after an owner is removed publishes through
   `Seal::Legacy`. Adopting venues must use their root authority only.
@@ -221,9 +231,14 @@ and records which command each INCOMPLETE marker belongs to.
 
 1. **Parked root.** A tracked root parked with no HTTP reaches its deadline.
    There is exactly one `CommandFailed` with kind Timeout and outcome None. The
-   finalizer count is 0, and there are no markers for that command. Run at the
-   deadline exactly and at a fractional remainder (deadline - 0.5 ms
-   expires). (Today: no terminal at all.)
+   finalizer count is 0, and there are no markers for that command. (Today: no
+   terminal at all.)
+1b. **Fractional deadline.** A root whose absolute deadline is fractional keeps
+   it exactly. At `deadline - 0.5 ms` an already-admitted root is still live:
+   there is no root Timeout, and leg-only accepted-only recovery stays
+   allowed. At equality the result is a strict Timeout with no finalizer and no
+   marker, in both timer orders. The sub-millisecond `Expired` rule belongs
+   only to Fresh initial capture (RED 10). It never retires a live root early.
 2. **Released leg in flight, root deadline equals the leg deadline.**
    - Both delivery orders: the leg `TimerFired` and the deadline sweep.
    - One strict Timeout, with the earlier accepted page unpublished and a
@@ -255,8 +270,10 @@ and records which command each INCOMPLETE marker belongs to.
    - a plain `handle` at `f64::MAX`;
    - an exhausted sequence;
    - a duplicate of a live legacy id (whose original stamp is preserved).
-10. **Expired at admission.** `admit_caller_read_root` returns Revoked with no
-    effect, then `reject_expired_command(Read)` gives one Timeout.
+10. **Expired at admission.** With under 1 ms left, or at or past the
+    deadline, `admit_caller_read_root` returns Revoked with no effect and the
+    entry stays Fresh. `reject_expired_command(Read)` is then the only route,
+    and it gives one Timeout.
 11. **Plain Read only.** A Mutation sibling, a replacement or a conversion on
     a tracked owner is refused before any id or journal change. The root
     still expires normally.
