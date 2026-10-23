@@ -178,20 +178,7 @@ impl Credentials {
     }
 
     fn signature(&self, definition: &str, values: &[Felt]) -> Result<String, String> {
-        let mut fields = vec![selector(definition).map_err(|_| "Invalid Paradex signing type")?];
-        fields.extend_from_slice(values);
-        let domain = hash_elements(&[
-            selector("StarkNetDomain(name:felt,chainId:felt,version:felt)").expect("ASCII type"),
-            short_string("Paradex").expect("short string"),
-            self.chain_id,
-            Felt::ONE,
-        ]);
-        let hash = hash_elements(&[
-            short_string("StarkNet Message").expect("short string"),
-            domain,
-            self.address_felt,
-            hash_elements(&fields),
-        ]);
+        let hash = typed_hash(self.chain_id, self.address_felt, definition, values)?;
         let Some(key) = self.key.as_ref() else {
             return Ok(format!("{hash:#x}"));
         };
@@ -275,43 +262,175 @@ impl Credentials {
         price: Option<&str>,
         id: Option<&str>,
     ) -> Result<OrderSignature, String> {
-        let side = match side {
-            "BUY" => Felt::ONE,
-            "SELL" => Felt::TWO,
-            _ => return Err("Invalid Paradex order side".into()),
-        };
-        let size = quantum(size)?;
-        let price = if order_type == "MARKET" || price.is_none_or(str::is_empty) {
-            "0".into()
-        } else {
-            quantum(price.expect("price is present"))?
-        };
-        let mut values = [
-            Felt::from(now_ms),
-            word(market)?,
-            side,
-            word(order_type)?,
-            felt(&size)?,
-            felt(&price)?,
-            Felt::ZERO,
-        ];
-        if let Some(id) = id {
-            values[6] = word(id)?;
-        }
-        let signature = self.signature(
-            if id.is_some() {
-                "ModifyOrder(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt,id:felt)"
-            } else {
-                "Order(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt)"
-            },
-            &values[..if id.is_some() { 7 } else { 6 }],
-        )?;
+        let (definition, values) =
+            order_message(now_ms, market, side, order_type, size, price, id)?;
+        let signature = self.signature(definition, &values)?;
         Ok(OrderSignature {
             signature,
             signature_timestamp: now_ms,
         })
     }
 }
+
+/// StarkNet typed-data message hash over the Paradex domain, account and struct.
+fn typed_hash(
+    chain_id: Felt,
+    account: Felt,
+    definition: &str,
+    values: &[Felt],
+) -> Result<Felt, String> {
+    let mut fields = vec![selector(definition).map_err(|_| "Invalid Paradex signing type")?];
+    fields.extend_from_slice(values);
+    let domain = hash_elements(&[
+        selector("StarkNetDomain(name:felt,chainId:felt,version:felt)").expect("ASCII type"),
+        short_string("Paradex").expect("short string"),
+        chain_id,
+        Felt::ONE,
+    ]);
+    Ok(hash_elements(&[
+        short_string("StarkNet Message").expect("short string"),
+        domain,
+        account,
+        hash_elements(&fields),
+    ]))
+}
+
+/// The `Order` / `ModifyOrder` struct the local signer and `paradex.order.1` share.
+#[allow(clippy::too_many_arguments)]
+fn order_message(
+    now_ms: u64,
+    market: &str,
+    side: &str,
+    order_type: &str,
+    size: &str,
+    price: Option<&str>,
+    id: Option<&str>,
+) -> Result<(&'static str, Vec<Felt>), String> {
+    let side = match side {
+        "BUY" => Felt::ONE,
+        "SELL" => Felt::TWO,
+        _ => return Err("Invalid Paradex order side".into()),
+    };
+    let size = quantum(size)?;
+    let price = if order_type == "MARKET" || price.is_none_or(str::is_empty) {
+        "0".into()
+    } else {
+        quantum(price.expect("price is present"))?
+    };
+    let mut values = vec![
+        Felt::from(now_ms),
+        word(market)?,
+        side,
+        word(order_type)?,
+        felt(&size)?,
+        felt(&price)?,
+    ];
+    Ok(match id {
+        Some(id) => {
+            values.push(word(id)?);
+            (
+                "ModifyOrder(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt,id:felt)",
+                values,
+            )
+        }
+        None => (
+            "Order(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt)",
+            values,
+        ),
+    })
+}
+
+/// Order types the venue places; anything else is refused remotely.
+const ORDER_TYPES: &[&str] = &[
+    "LIMIT",
+    "MARKET",
+    "STOP_LIMIT",
+    "STOP_MARKET",
+    "STOP_LOSS_LIMIT",
+    "STOP_LOSS_MARKET",
+    "TAKE_PROFIT_LIMIT",
+    "TAKE_PROFIT_MARKET",
+];
+
+/// `paradex.order.1`: Stark signature over the `Order`/`ModifyOrder` typed-data
+/// hash, carried as the 32-byte big-endian digest. Auth requests are not covered.
+pub struct OrderRecipe;
+impl safe_cex_engine::signing_remote::RemoteRecipe for OrderRecipe {
+    fn id(&self) -> &'static str {
+        "paradex.order.1"
+    }
+    fn algorithm(&self) -> safe_cex_engine::signing::Algorithm {
+        safe_cex_engine::signing::Algorithm::StarkDigest
+    }
+    fn role(&self) -> Option<safe_cex_engine::signing::ExtraKey> {
+        None
+    }
+    fn canonicalize(
+        &self,
+        inputs: &serde_json::Value,
+    ) -> Result<Vec<u8>, safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError::Refused;
+        let object = inputs.as_object().ok_or(Refused)?;
+        const FIELDS: &[&str] = &[
+            "chainId",
+            "account",
+            "timestamp",
+            "market",
+            "side",
+            "orderType",
+            "size",
+            "price",
+            "id",
+        ];
+        if object.keys().any(|key| !FIELDS.contains(&key.as_str())) {
+            return Err(Refused);
+        }
+        let text = |name: &str| match object.get(name) {
+            None => Ok(None),
+            Some(value) => value.as_str().map(Some).ok_or(Refused),
+        };
+        let required = |name: &str| text(name)?.filter(|v| !v.is_empty()).ok_or(Refused);
+        let timestamp = required("timestamp")?;
+        if timestamp.len() > 16 || !timestamp.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(Refused);
+        }
+        let order_type = required("orderType")?;
+        if !ORDER_TYPES.contains(&order_type) {
+            return Err(Refused);
+        }
+        let market = required("market")?;
+        if !market
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err(Refused);
+        }
+        let account = felt(required("account")?).map_err(|_| Refused)?;
+        if account == Felt::ZERO {
+            return Err(Refused);
+        }
+        let (definition, values) = order_message(
+            timestamp.parse().map_err(|_| Refused)?,
+            market,
+            required("side")?,
+            order_type,
+            required("size")?,
+            text("price")?,
+            text("id")?,
+        )
+        .map_err(|_| Refused)?;
+        let hash = typed_hash(
+            chain_id(required("chainId")?).map_err(|_| Refused)?,
+            account,
+            definition,
+            &values,
+        )
+        .map_err(|_| Refused)?;
+        Ok(hash.to_bytes_be().to_vec())
+    }
+}
+pub static ORDER: OrderRecipe = OrderRecipe;
+pub static REMOTE_RECIPES: &[&dyn safe_cex_engine::signing_remote::RemoteRecipe] = &[&ORDER];
 
 fn word(input: &str) -> Result<Felt, String> {
     if input.is_empty() {
@@ -492,6 +611,110 @@ fn derive_ethereum(key: &str, config: &SystemConfig) -> Result<(Felt, Felt, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn recipe_config() -> SystemConfig {
+        SystemConfig {
+            starknet_chain_id: "PRIVATE_SN_POTC_SEPOLIA".into(),
+            l1_chain_id: None,
+            paraclear_account_hash: None,
+            paraclear_account_proxy_hash: None,
+        }
+    }
+    const ACCOUNT: &str = "0x0129f5ed7e7e3b5a8c9a3e2f1d0c4b6a7e8f9d0c1b2a39485766554433221100";
+    fn recipe_inputs(id: Option<&str>) -> serde_json::Value {
+        let mut inputs = serde_json::json!({
+            "chainId": "PRIVATE_SN_POTC_SEPOLIA", "account": ACCOUNT, "timestamp": "1700000000123",
+            "market": "BTC-USD-PERP", "side": "BUY", "orderType": "LIMIT",
+            "size": "0.25", "price": "64000.5"
+        });
+        if let Some(id) = id {
+            inputs["id"] = id.into();
+        }
+        inputs
+    }
+
+    #[test]
+    fn order_recipe_digest_is_the_local_signers_typed_hash() {
+        use safe_cex_engine::signing_remote::RemoteRecipe;
+        // Delegated credentials hold no key and return the bare typed hash.
+        let hashed = Credentials::delegated("0x1", ACCOUNT, "0x2", &recipe_config()).unwrap();
+        for id in [None, Some("1700000000000201")] {
+            let expected = match id {
+                None => hashed.order(
+                    1700000000123,
+                    "BTC-USD-PERP",
+                    "BUY",
+                    "LIMIT",
+                    "0.25",
+                    Some("64000.5"),
+                ),
+                Some(id) => hashed.modify(
+                    1700000000123,
+                    "BTC-USD-PERP",
+                    "BUY",
+                    "LIMIT",
+                    "0.25",
+                    "64000.5",
+                    id,
+                ),
+            }
+            .unwrap()
+            .signature;
+            let digest = ORDER.canonicalize(&recipe_inputs(id)).unwrap();
+            assert_eq!(digest.len(), 32);
+            assert_eq!(
+                format!("{:#x}", Felt::from_bytes_be_slice(&digest)),
+                expected
+            );
+        }
+        // Signing that digest gives the venue's own signature bytes.
+        let key = format!("0x{}5", "0".repeat(63));
+        let signer = Credentials::new(&key, ACCOUNT, "0x2", &recipe_config()).unwrap();
+        let signed = signer
+            .order(
+                1700000000123,
+                "BTC-USD-PERP",
+                "BUY",
+                "LIMIT",
+                "0.25",
+                Some("64000.5"),
+            )
+            .unwrap()
+            .signature;
+        let digest = ORDER.canonicalize(&recipe_inputs(None)).unwrap();
+        let (r, s) =
+            starknet::sign(&Felt::from_bytes_be_slice(&digest), &felt(&key).unwrap()).unwrap();
+        assert_eq!(
+            signed,
+            format!(
+                "[\"{}\",\"{}\"]",
+                U256::from_be_bytes(r.to_bytes_be()),
+                U256::from_be_bytes(s.to_bytes_be())
+            )
+        );
+    }
+
+    #[test]
+    fn order_recipe_refuses_inputs_outside_its_allowlist() {
+        use safe_cex_engine::signing::SignError::Refused;
+        use safe_cex_engine::signing_remote::RemoteRecipe;
+        for (field, value) in [
+            ("orderType", serde_json::json!("TWAP")),
+            ("side", serde_json::json!("HOLD")),
+            ("market", serde_json::json!("BTC/USD")),
+            ("timestamp", serde_json::json!("17e11")),
+            ("account", serde_json::json!("0x0")),
+            ("size", serde_json::json!("lots")),
+            ("chainId", serde_json::json!("")),
+            ("price", serde_json::json!(1)),
+            ("subject", serde_json::json!("0x3")),
+        ] {
+            let mut inputs = recipe_inputs(None);
+            inputs[field] = value;
+            assert_eq!(ORDER.canonicalize(&inputs), Err(Refused), "{field}");
+        }
+        assert_eq!(REMOTE_RECIPES[0].id(), "paradex.order.1");
+    }
 
     #[derive(Deserialize)]
     struct TextVector {
