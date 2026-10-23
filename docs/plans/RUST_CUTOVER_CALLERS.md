@@ -4604,3 +4604,20 @@ its returned rows as partial coverage. An absent or refused managed result does
 not establish complete history. Existing native row shapes and result shaping
 remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
 and [owned history](RUST_OWNED_HISTORY.md).
+
+## BloFin PublicTrades managed history
+
+PublicTrades uses prepared public HTTP and the original 20-second command Read
+owner. A response must match the released, claimed physical attempt before trade
+rows or identities enter the shared history owner. Expired, unreleased or stale
+responses cannot publish results. Preparation refusals retain their typed kind
+and notSent outcome; released transport failures retain network and expiry
+retains timeout. Failed first pages publish neither a staged prefix nor an
+incompleteness warning.
+
+The native unsigned GET, ordered query parameters, empty headers, default and
+clamped wire limit, millisecond timestamps and trade result fields are preserved.
+The wire limit does not truncate returned rows. Known cross-market rows, native
+row order, unknown-market identity consumption, numeric defaults, contract-size
+quantities and side conversion retain their existing behavior. Private history
+and signing paths keep their existing lifecycle.

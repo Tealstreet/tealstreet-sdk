@@ -2078,3 +2078,17 @@ error-classification policy is duplicated. Exact source inventory remains 84
 occurrences: the original shared streamed helper still serves unmigrated candles,
 so this area justifies no ratchet prune or zero-legacy claim. The complete venue
 inventory and remaining prerequisites are committed in PR #1819.
+
+## BloFin PublicTrades history authority
+
+The PublicTrades owner now adopts shared ReadCompletion/ReadCursorHistory,
+managed HTTP delivery and borrowed page admission. Exact physical delivery is
+checked before row mutation or page acceptance; typed shared terminals own both
+preflight and asynchronous cleanup. The adapter supplies only its native wire
+codec and result shaping. Independent source/adversarial, caller and full-map
+reviews answer the architecture gate No.
+
+The legacy inventory remains 24 BloFin occurrences: the shared private-history
+dispatcher and conservative query macro matches remain inventoried. This slice
+adds no exemption and makes no zero-legacy claim. Signed/private history, trading
+and the existing candle entry refusal remain separately tracked.

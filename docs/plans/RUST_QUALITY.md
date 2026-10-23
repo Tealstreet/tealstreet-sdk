@@ -587,3 +587,18 @@ so 20-second expiry cannot conceal missing retirement. Native startup/valuation,
 broker, secondary identity and socket-policy assertions retain their original
 payloads, using the shared prepared transport fixture. The real WASM boundary
 fixture explicitly supplies that same existing test transport preparation contract.
+
+## BloFin PublicTrades managed history regressions
+
+The native test-first controls exercise preparation/binding/claim, unreleased
+responses, original-deadline expiry, typed preparation and released transport
+failures, duplicate commands and stale responses. Fixed-clock repetition beyond
+the 256-owner bound covers preflight, success and immediate managed-queue
+refusal, so elapsed time cannot conceal missing terminal retirement.
+
+Compatibility controls assert every Trade field, native row order, cross-market
+rows, identity consumption before unknown-market skipping, timestamp precedence
+and milliseconds, numeric defaults, signed quantities and the wire-only limit.
+Malformed or refused first pages discard their streamed prefix without an
+incomplete marker. Six original-source assertion failures preceded production;
+five native compatibility controls already passed that original source.
