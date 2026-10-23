@@ -543,7 +543,7 @@ fn the_old_root_timer_is_inert_after_a_same_id_arrival() {
     let old_timer = e
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == 1_000. => Some(timer),
+            Action::SetTimer { timer, at_ms: 1_000. } => Some(timer),
             _ => None,
         })
         .expect("one engine root timer");
