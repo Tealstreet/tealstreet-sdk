@@ -7,20 +7,33 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveTransportRouting } from '../../transport/registry';
+import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
+import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import { LogSeverity, OrderStatus, OrderType } from '../../types';
 import { subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_PRIVATE_URL, BASE_WS_PRIVATE_UTA_URL, ORDER_STATUS } from './bitget.types';
 
+/** Login refusals about where the connection comes from: 40018 key bound to other IPs, 40024 restricted location. */
+const BITGET_EGRESS_REFUSAL_CODES = new Set(['40018', '40024']);
+
 export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
-  private messageCount = 0;
-  private useFallbackUrl = false;
-  private lastMessageCount = 0;
-  private connectionAttempts = 0;
-  private readonly MAX_ATTEMPTS = 2;
+  protected directFallback = new WsDirectFallback();
+  /** Tunnel sockets that opened but closed before a successful login, in a row. */
+  private unauthenticatedTunnelCloses = 0;
+  private readonly MAX_UNAUTHENTICATED_TUNNEL_CLOSES = 2;
+  /** Tunnel connects that failed before opening, in a row: an outage also does this, so the bar is higher. */
+  private failedTunnelConnects = 0;
+  private readonly MAX_FAILED_TUNNEL_CONNECTS = 6;
+  private openedThisConnection = false;
+  /** The venue answered this connection's login; its close says nothing about the route. */
+  private loginAnsweredThisConnection = false;
+  private routeHasTealstreetEgress = false;
   private lastPrivateStreamRecoveryAt = 0;
   private readonly privateStreamRecoveryCooldownMs = 30_000;
+  private loggedIn = false;
+  private hasReportedErrorEvent = false;
   private lastPositionFetchTime = 0;
   private positionFetchThrottleMs = 500;
   private positionFetchScheduled = false;
@@ -161,39 +174,106 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
 
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
-      // Check if we need to switch to fallback URL
-      if (this.lastMessageCount === 0 && this.messageCount === 0) {
-        this.connectionAttempts++;
-        if (this.connectionAttempts >= this.MAX_ATTEMPTS) {
-          this.useFallbackUrl = true;
-        }
-      }
-      this.lastMessageCount = this.messageCount;
-      this.messageCount = 0; // Reset message counter on new connection
-
       const useUtaRouting = this.parent.usesUtaRouting;
-      // Only a transport that declares a fallback host has one to switch to.
-      const fallbackUrl = resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate.fallback;
-      const useFallbackUrl = !useUtaRouting && this.useFallbackUrl && !!fallbackUrl;
-      const url = useFallbackUrl
-        ? fallbackUrl
-        : useUtaRouting
-          ? BASE_WS_PRIVATE_UTA_URL
-          : BASE_WS_PRIVATE_URL;
-      if (useFallbackUrl) {
+      const routing = resolveTransportRouting(this.parent.name, this.parent.options);
+      // A UTA account never takes the v2 route; without a declared UTA route it dials v3 direct.
+      const route = (useUtaRouting ? routing.wsPrivateUta : routing.wsPrivate) ?? { tunnelled: false };
+      const directUrl = useUtaRouting ? BASE_WS_PRIVATE_UTA_URL : BASE_WS_PRIVATE_URL;
+      const primary = route.tunnelled && route.host ? route.host : directUrl;
+      // The relay is not gated on `isWsRelayEnabled`: Bitget checks the key's bound
+      // IP on login (40018), and the relay is the egress a user binds for REST.
+      const url = this.directFallback.resolveUrl(
+        primary,
+        route.relay,
+        route.fallback !== primary ? route.fallback : undefined,
+      );
+      if (url !== directUrl) {
         try {
-          this.parent.emitter.emit('grafana-info', 'Using tealstreet bitget proxy (private)');
+          this.parent.emitter.emit(
+            'grafana-info',
+            `Using tealstreet bitget private ${url === route.relay ? 'relay' : 'proxy'}`,
+          );
         } catch (_e) {}
       }
+      this.routeHasTealstreetEgress = route.tunnelled || !!route.relay || !!route.fallback;
       this.ws = this.createWebsocket(url);
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
       this.ws.addEventListener('close', this.onClose);
+      this.ws.addEventListener('close', this.onTunnelClose);
     }
+  };
+
+  /**
+   * A tunnel socket (ws-proxy or relay) reconnects inside ReconnectingWebSocket, so
+   * `connectAndSubscribe` — and the route choice — never runs again on its own. A
+   * route that keeps closing before login is unusable: move to the next one.
+   */
+  private onTunnelClose = () => {
+    const wasLoggedIn = this.loggedIn;
+    const opened = this.openedThisConnection;
+    const loginAnswered = this.loginAnsweredThisConnection;
+    this.loggedIn = false;
+    this.openedThisConnection = false;
+    this.loginAnsweredThisConnection = false;
+    if (this.isDisposed || !(this.ws instanceof ReconnectingWebSocket)) return;
+    if (wasLoggedIn) {
+      this.unauthenticatedTunnelCloses = 0;
+      this.failedTunnelConnects = 0;
+      return;
+    }
+    if (opened) {
+      this.failedTunnelConnects = 0;
+      // A login Bitget rejected (bad key, skew) reached the venue: the route works.
+      if (loginAnswered) return;
+      if (++this.unauthenticatedTunnelCloses < this.MAX_UNAUTHENTICATED_TUNNEL_CLOSES) return;
+    } else if (++this.failedTunnelConnects < this.MAX_FAILED_TUNNEL_CONNECTS) {
+      return;
+    }
+    if (this.directFallback.rejectCurrent()) {
+      this.parent.log('Bitget private WS route keeps closing before login; trying the next route', LogSeverity.Warning);
+      this.switchRoute();
+    } else {
+      this.unauthenticatedTunnelCloses = 0;
+      this.failedTunnelConnects = 0;
+    }
+  };
+
+  /** Replace the socket on the route `directFallback` now points at. */
+  private switchRoute = () => {
+    if (this.isDisposed) return;
+    if (!(this.ws instanceof ReconnectingWebSocket)) {
+      // A native socket's own close path reconnects through connectAndSubscribe.
+      this.reconnect();
+      return;
+    }
+    if (this.pingTimeoutId) {
+      clearTimeout(this.pingTimeoutId);
+      this.pingTimeoutId = undefined;
+    }
+    if (this.pongMissTimeoutId) {
+      clearTimeout(this.pongMissTimeoutId);
+      this.pongMissTimeoutId = undefined;
+    }
+    const old = this.ws;
+    old.removeEventListener('open', this.onOpen);
+    old.removeEventListener('message', this.onMessage);
+    old.removeEventListener('close', this.onClose);
+    old.removeEventListener('close', this.onTunnelClose);
+    old.close();
+    this.ws = undefined;
+    this.loggedIn = false;
+    this.openedThisConnection = false;
+    this.loginAnsweredThisConnection = false;
+    this.unauthenticatedTunnelCloses = 0;
+    this.failedTunnelConnects = 0;
+    this.connectAndSubscribe();
   };
 
   onOpen = () => {
     if (!this.isDisposed) {
+      this.loggedIn = false;
+      this.openedThisConnection = true;
       this.auth();
       this.ping();
       if (ENABLE_RECONNECTING_WEBSOCKET) {
@@ -221,19 +301,12 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     }
     this.lastPrivateStreamRecoveryAt = now;
 
-    const hasFallback = !!resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate.fallback;
-    if (!this.parent.usesUtaRouting && !this.useFallbackUrl && hasFallback) {
-      this.useFallbackUrl = true;
-      this.parent.log(
-        `Bitget private WS received no authenticated stream payloads after a write; switching to Tealstreet fallback route. Reason: ${reason}`,
-        LogSeverity.Warning,
-      );
-    } else {
-      this.parent.log(
-        `Bitget private WS received no authenticated stream payloads after a write; reconnecting current route. Reason: ${reason}`,
-        LogSeverity.Warning,
-      );
-    }
+    // Route changes are driven by evidence about the route (40018, closes before
+    // login, silent connects); a quiet stream after a write only reconnects.
+    this.parent.log(
+      `Bitget private WS received no authenticated stream payloads after a write; reconnecting current route. Reason: ${reason}`,
+      LogSeverity.Warning,
+    );
 
     this.reconnect();
   };
@@ -249,8 +322,8 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         return;
       }
 
-      this.messageCount++; // Count non-heartbeat frames for fallback routing.
     }
+    this.directFallback.onMessage();
 
     const json = jsonParse<Record<string, any>>(data);
     if (!json) return;
@@ -259,10 +332,21 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
 
     if (json?.event === 'login') {
       if (`${json.code}` === '0') {
+        this.loggedIn = true;
+        this.unauthenticatedTunnelCloses = 0;
+        this.hasReportedErrorEvent = false;
         this.subscribe();
       } else if (json.msg || json.code) {
         this.emitAndLogError(`Bitget private WS login failed: ${json.msg || json.code}`);
       }
+      return;
+    }
+
+    // Bitget reports a failed login (and a refused subscribe) as `event: 'error'`,
+    // never `event: 'login'`. Unhandled, the socket kept answering pings with no
+    // subscriptions: healthy by every liveness check, and silent.
+    if (json?.event === 'error') {
+      this.handleErrorEvent(json);
       return;
     }
 
@@ -306,6 +390,39 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       this.recordMessageHandlerStats('account');
       this.handleAccountTopic(json);
       return;
+    }
+  };
+
+  private handleErrorEvent = (json: Record<string, any>) => {
+    const failedLogin = !this.loggedIn;
+    if (failedLogin) this.loginAnsweredThisConnection = true;
+    // 40018: the key is bound to other IPs. Try the next egress before reporting;
+    // report (and stop reconnecting) only once every route has been refused.
+    if (failedLogin && BITGET_EGRESS_REFUSAL_CODES.has(`${json.code}`)) {
+      if (this.directFallback.rejectCurrent()) {
+        this.parent.log(
+          'Bitget private WS login refused this egress IP (40018); trying the next route',
+          LogSeverity.Warning,
+        );
+        this.switchRoute();
+        return;
+      }
+      if (!this.hasReportedErrorEvent) {
+        this.hasReportedErrorEvent = true;
+        const detail = [json.code, json.msg].filter((part) => part !== undefined && part !== '').join(' ');
+        const scope = this.routeHasTealstreetEgress ? "none of Tealstreet's WebSocket egress IPs" : 'this IP';
+        this.emitAndLogError(`Bitget private WS login rejected: ${detail} — the API key's IP whitelist allows ${scope}`);
+      }
+      return;
+    }
+    // Once per streak: a rejected login repeats on every reconnect.
+    if (!this.hasReportedErrorEvent) {
+      this.hasReportedErrorEvent = true;
+      const detail = [json.code, json.msg].filter((part) => part !== undefined && part !== '').join(' ');
+      this.emitAndLogError(`Bitget private WS ${failedLogin ? 'login' : 'subscription'} rejected: ${detail}`);
+    }
+    if (failedLogin) {
+      this.reconnect();
     }
   };
 
