@@ -20,7 +20,14 @@ while creating a fresh 20s/Never child for each native history page.
 Following consumers need the new boundary: OKX #1950, Bitget history, and the
 reviewed BloFin/Bitunix history routes. Their native codecs, ordering, raw-page
 cursor progression, accepted-row recovery and page limits remain consumer work.
-They must neither reselect a key per page nor use retry() to create a new page.
+They must neither reselect a key per page nor use same-leg retry() to create a
+new page. A native re-send after a failed/discarded page IS permitted: its
+existing eligible dequeue derives a fresh root.leg, including when the cursor
+is unchanged. Bitget's native 250/500/750ms retries and 40085 discard/re-queue
+therefore retain one original root/snapshot while receiving new physical legs.
+This is distinct from http_retry_context's same-leg physical resend; ReadLeg
+exposes no retry(). Native budgets/classification/eligibility remain existing
+shared/caller policy, not a new helper timer or retry loop.
 Degraded-read policy, when applicable, is chosen ONCE before root admission;
 later account-state changes cannot swap Primary/Secondary midway through a walk.
 This helper supplies no Plan/Slot history authority or mixed-leg Plan binding.
@@ -28,7 +35,11 @@ Consumers retaining Plan ownership must wait for that owner's opaque seam.
 
 First scope: signed plain command Read roots and physical children. Background,
 Session, Execution and Plan roots are not admitted by this new constructor.
-Standalone command/background single-leg APIs remain unchanged.
+Standalone command/background single-leg APIs remain unchanged. Unsigned and
+public history is OUT OF SCOPE: Bitget/OKX public candles and BloFin PublicTrades
+have no selected Identity and keep plain admit_http_command plus
+http_leg_context under their existing shared Read/history APIs. Do not route a
+public read through command_root(Err(CredentialUnavailable)) or LocalRefusal.
 
 ## Dependencies and collision map
 
@@ -188,6 +199,12 @@ controls (assertions reviewed before implementation):
    root-expiry operation, denies queued/late child work. Calling
    finish_http_context(root) is explicitly NOT this operation. Neither child
    cleanup nor losing a Rust wrapper is a command retirement primitive.
+   Deliver a native re-detection answer (Bitget40085), discard its staged page,
+   retire that child's attempt/leg, and re-queue through the existing native
+   timer/eligibility path. Its next dequeue mints a fresh root.leg with the SAME
+   selected snapshot and root deadline. Inject a late old response: no old rows
+   publish, and during a genuine newer-leg delivery root.validate_delivery on
+   the retained retired-leg wrapper refuses it. No fabricated delivery callback.
 7. Streaming and non-streamed pages retain raw native row order, exact URL/body/
    ordered headers, selected provider refs and physical delivery identity.
    Early prefix, stale/duplicate data, cross-generation/late stream staging and
@@ -223,3 +240,9 @@ Core review at c06c is bounded direction/API-fit only. The exact constructor
 signature must compose fe7's reviewed receipt/root-expiry seam before source;
 new-contract tests proceed only at that reviewed dependency pin. Wrapper privacy
 and borrowed low-level Context authority are separate claims.
+
+Consumer review at c06c (4yjlw0): signature direction fits Bitget's Request{root}
+plus pending leg and query_item streaming. The subsequent native re-send,
+unsigned-history boundary and 40085 discard/re-queue controls above refine the
+proposal; core/consumer review of the exact final dependency composition remains
+required. No runtime or new-contract execution follows from that review alone.
