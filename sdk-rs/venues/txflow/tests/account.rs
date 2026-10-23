@@ -913,3 +913,163 @@ fn owned_position_on_unlisted_asset_holds_until_discovery_settles() {
             && m == "TxFlow skipped position on unlisted asset 7")
     );
 }
+
+fn reporter_state_rows(rows: serde_json::Value, time: f64) -> String {
+    let mut state: serde_json::Value = serde_json::from_str(STATE).unwrap();
+    state["data"]["time"] = time.into();
+    state["data"]["assetPositions"] = rows;
+    state.to_string()
+}
+fn reporter_state_cycle(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_txflow::TxFlow>,
+    timer: &mut safe_cex_engine::TimerId,
+    now: &mut f64,
+    rows: serde_json::Value,
+    stale: bool,
+) -> Vec<(safe_cex_engine::Level, String)> {
+    use safe_cex_engine::{Action, Notice};
+    *now += 5_000.;
+    e.handle(*now, Event::TimerFired { timer: *timer });
+    let mut reads = vec![];
+    let mut next = None;
+    for action in e.drain_actions() {
+        match action {
+            Action::Http(r) => reads.push(r),
+            Action::SetTimer { timer, at_ms } if at_ms == *now + 5_000. => next = Some(timer),
+            _ => (),
+        }
+    }
+    *timer = next.expect("native account refresh");
+    for r in reads {
+        match kind(&r).as_str() {
+            "clearinghouseState" => reply_at(
+                e,
+                &r,
+                *now,
+                200,
+                &reporter_state_rows(rows.clone(), if stale { NOW - 1. } else { *now }),
+            ),
+            "frontendOpenOrders" => {
+                reply_at(e, &r, *now, 200, r#"{"success":true,"code":0,"data":[]}"#)
+            }
+            _ => (),
+        }
+    }
+    e.drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::ROW_SKIPPED =>
+            {
+                Some((event.level, event.message))
+            }
+            _ => None,
+        })
+        .collect()
+}
+fn reporter_position() -> serde_json::Value {
+    serde_json::from_str::<serde_json::Value>(STATE).unwrap()["data"]["assetPositions"][0].clone()
+}
+#[test]
+fn reporter_composite_and_unlisted_keys_survive_single_leg_mapping_until_clean_read() {
+    let (mut e, _, reads, mut timer) = bootstrap();
+    answer(&mut e, reads);
+    e.drain_actions().for_each(drop);
+    let mut now = NOW + 25.;
+    let valid = reporter_position();
+    let mut composite = valid.clone();
+    composite["position"]["szi"] = "bad".into();
+    let mut unlisted = valid.clone();
+    unlisted["position"]["asset"] = "7".into();
+    let bad = serde_json::json!([composite, {}, unlisted]);
+    let first = reporter_state_cycle(&mut e, &mut timer, &mut now, bad.clone(), false);
+    assert_eq!(first.len(), 3);
+    assert_eq!(
+        first[0].1,
+        "TxFlow skipped malformed position BTC-USDC:long, BTC-USDC:short"
+    );
+    assert_eq!(
+        first[1].1,
+        "TxFlow skipped malformed position without an asset"
+    );
+    assert_eq!(first[2].1, "TxFlow skipped position on unlisted asset 7");
+    assert!(
+        reporter_state_cycle(
+            &mut e,
+            &mut timer,
+            &mut now,
+            serde_json::json!([valid, {}, unlisted]),
+            false
+        )
+        .is_empty()
+    );
+    // Forgetting the mapped long ID does not split/forget the composite label.
+    assert!(reporter_state_cycle(&mut e, &mut timer, &mut now, bad.clone(), false).is_empty());
+    reporter_state_cycle(&mut e, &mut timer, &mut now, serde_json::json!([]), false);
+    assert_eq!(
+        reporter_state_cycle(&mut e, &mut timer, &mut now, bad, false).len(),
+        3
+    );
+}
+#[test]
+fn reporter_rest_mapping_rearms_exact_leg_even_when_snapshot_time_is_stale() {
+    let (mut e, _, reads, mut timer) = bootstrap();
+    answer(&mut e, reads);
+    e.drain_actions().for_each(drop);
+    let mut now = NOW + 25.;
+    let valid = reporter_position();
+    let mut bad = valid.clone();
+    bad["position"]["leverage"]["value"] = 0.into();
+    let rejected = serde_json::json!([bad, {}]);
+    assert_eq!(
+        reporter_state_cycle(&mut e, &mut timer, &mut now, rejected.clone(), false).len(),
+        2
+    );
+    let mut mapped = valid.clone();
+    mapped["position"]["szi"] = "9".into();
+    assert!(
+        reporter_state_cycle(
+            &mut e,
+            &mut timer,
+            &mut now,
+            serde_json::json!([mapped, {}]),
+            true
+        )
+        .is_empty()
+    );
+    assert_eq!(e.store().positions()[0].contracts, 2.);
+    let logs = reporter_state_cycle(&mut e, &mut timer, &mut now, rejected, false);
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].1, "TxFlow skipped malformed position BTC-USDC:long");
+}
+#[test]
+fn reporter_zero_quantity_does_not_forget_and_once_does_not_upgrade_severity() {
+    let (mut e, _, reads, mut timer) = bootstrap();
+    answer(&mut e, reads);
+    e.drain_actions().for_each(drop);
+    let mut now = NOW + 25.;
+    let valid = reporter_position();
+    let mut bad = valid.clone();
+    bad["position"]["leverage"]["value"] = 0.into();
+    let rejected = serde_json::json!([bad, {}]);
+    let first = reporter_state_cycle(&mut e, &mut timer, &mut now, rejected.clone(), false);
+    assert_eq!(first.len(), 2);
+    assert!(
+        first
+            .iter()
+            .all(|(level, _)| *level == safe_cex_engine::Level::Warn)
+    );
+    let mut zero = valid.clone();
+    zero["position"]["szi"] = "0".into();
+    assert!(
+        reporter_state_cycle(
+            &mut e,
+            &mut timer,
+            &mut now,
+            serde_json::json!([zero, {}]),
+            false
+        )
+        .is_empty()
+    );
+    e.store_mut().set_positions(vec![]);
+    assert!(reporter_state_cycle(&mut e, &mut timer, &mut now, rejected, false).is_empty());
+}

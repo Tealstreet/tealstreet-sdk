@@ -882,6 +882,12 @@ mod request_context_registry;
 #[path = "http_lifecycle.rs"]
 mod http_lifecycle;
 
+/// A delivered response whose bytes the engine cannot hand to a codec. The
+/// venue answered, so this is never transport loss.
+fn malformed_body(message: &str) -> VenueError {
+    VenueError::new(message).kind(ErrorKind::Internal)
+}
+
 fn observe_account_auth<V: Venue>(
     venue: &V,
     pending: &PendingHttp<V::Pending>,
@@ -2435,8 +2441,11 @@ pub trait Venue {
         pending: Self::Pending,
         error: &str,
     );
-    /// A request that may have reached the venue failed without a response.
-    /// `error.kind` is `Timeout` for engine deadline expiry, else `Network`.
+    /// A request that may have reached the venue failed without a usable
+    /// response. `error.kind` is `Timeout` for engine deadline expiry,
+    /// `Internal` for a whole delivered body (or managed write reply) the engine
+    /// cannot decode, else `Network`. Streams that break mid-array still use
+    /// `on_stream_malformed`.
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -3450,11 +3459,8 @@ impl<V: Venue> Engine<V> {
             let body = match std::str::from_utf8(outside) {
                 Ok(body) => body,
                 Err(_) => {
-                    self.venue.on_request_failed(
-                        &mut cx,
-                        pending.value,
-                        "stream envelope is not UTF-8",
-                    );
+                    let failure = malformed_body("stream envelope is not UTF-8");
+                    self.venue.on_http_failed(&mut cx, pending.value, failure);
                     return;
                 }
             };
@@ -3494,8 +3500,8 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_response(&mut cx, pending.value, response);
             }
             Err(_) => {
-                self.venue
-                    .on_request_failed(&mut cx, pending.value, "response body is not UTF-8")
+                let failure = malformed_body("response body is not UTF-8");
+                self.venue.on_http_failed(&mut cx, pending.value, failure);
             }
         }
     }
