@@ -193,3 +193,21 @@ profile metrics are not an isolated Store-only CPU experiment. Both named runs
 report2883584 high-water WASM bytes; process-heap noise prevents attributing their
 retainedBytes difference to the index. Fresh CI owns the performance, memory and
 size verdict, and the >=1.20x median target remains unproven until those results.
+
+
+## Full CI receipt on the shared index source
+
+Normal PR Rust run `39956093410` and normal dispatch `39956712962` both
+completed successfully for source `83b548ac513`. The normal PR build used merge
+`fccacfae38c448635127a6510575738c93e47f83`, whose parents are actual landing
+`9aef6bca90b` and the source head; its whole tree equals the source head. All
+replay, memory and size gates pass. The dispatch also passed browser cold start;
+the normal PR browser job was skipped by its workflow policy.
+
+The unchanged landing's nine-pair KuCoin Spot medians were TS 328.739 ms and
+Rust 297.450 ms (1.10519x). The candidate's nine-pair medians were TS 198.921 ms
+and Rust 156.951 ms (1.26741x), exceeding the 1.20x objective. Runners differ,
+so these are within-run TS/Rust ratios, not an absolute cross-run speedup claim.
+The native allocation tradeoff and per-account scaling are documented in CALLERS.
+Aster's standalone Node WASM shrank from 1,335,801 to 1,320,171 bytes (-15,630).
+The complete 28-family artifact comparison is recorded in the PR receipt.
