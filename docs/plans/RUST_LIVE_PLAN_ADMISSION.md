@@ -137,9 +137,13 @@ An expired or failed Mutation call may settle only its normalized Failed journal
 fact through failure-only authority, then continue already-reserved independent
 steps if native policy permits. It grants no effects, retry or successful DATA
 credit. An unrecovered/exhausted Read failure is terminal for this phase; declared
-proof-gated Read retries remain legal. Root expiry and an unproven
-408/5xx response abort the whole owner under the shared response-proof policy.
-Do not make every physical failure an unconditional whole-Plan abort.
+proof-gated Read retries remain legal under the same owner and immutable root.
+Root expiry aborts the whole owner. For a Mutation, an unproven 408/5xx response
+aborts the whole owner under the shared write response-proof policy. A retryable
+Read response is not Mutation uncertainty and does not abort before its declared
+retry is selected. Do not make every physical failure an unconditional whole-Plan
+abort. Aster's native GET retry set stays 429 and 500..599 plus transport failures;
+408 is not added. Refusal and retry waiting never count as validated DATA progress.
 
 One owner timer multiplexes the plan root and declared step eligibility. Raw
 expiry wins at equality. Early, stale and duplicate wakeups cannot replay work.
@@ -225,3 +229,26 @@ completion, native retry-wait wakeups, and genuine entry with immutable egress
 are separate coordinated extensions. Preserve the reviewed shared credential,
 header, session and classification seams when those land; never duplicate them
 inside a venue adapter.
+
+
+## Actual classifier composition (#1837)
+
+Compose actual `e0322577e35` before source freeze. Capture the trusted dispatch
+intent when the same owner is first admitted in the genuine entry callback, and
+retain intent, generation and per-leg declarations through the in-place phase
+transition. Never infer intent from a venue-supplied error or default an owner
+issued outside trusted dispatch into financial write authority.
+
+Production writes use the shared `CodeTable`, `classify_write`,
+`http_write_fact`/batch/failure APIs. `http_write_result` remains engine-test only.
+Generic Plan retry rejects `DefinitiveRefusal`. A dedicated Plan resend consumes
+`ResendGrant` through the unchanged shared `http_resend_context`, then uses the
+same private reserved-slot selection body and existing journal retry. It adds no
+new resend counter, grant implementation or code table. Read native resends use
+shared `classify::read` evidence under the declared Read budget, never write grants.
+
+Per-leg intent narrowing must precede the first journal registration, including
+for reserved Plan calls. Reserve backing before IDs and reuse shared narrowing
+validation; do not weaken the incoming registered-attempt refusal or duplicate
+its allowed-intent policy in a Plan adapter. Retain all incoming grant/intent
+negative controls while adapting old test fixtures to the new evidence contract.
