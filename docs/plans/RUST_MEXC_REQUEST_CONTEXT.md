@@ -274,3 +274,29 @@ pass. Both request-context checks pass with13 adversarial controls. Independent
 source/adversarial and full-map reviews are clean (architecture No); caller
 review's additional controls are included. CI supplies the remaining WASM/replay/
 size/timing gates after publication; no merge permission is implied.
+
+## Genuine candle command-entry follow-up
+
+Phase one #1834 landed at `bc91dc15d705f7d388ab3df46fa8c3ffb9395822`.
+This follow-up consumes actual #1830 `0001c78eeb2` through
+`Cx::admit_http_command(Policy)` inside the genuine FetchCandles callback,
+before validation or I/O. Keep the same unsigned Read policy, original20s
+budget and Never retry. Both Rejected and Revoked return without an adapter
+terminal: the engine owns initial rejection publication and grants no custody
+on Revoked. Delete Scope and the last candle pre-Context numeric failure.
+
+Before the adapter move, separately commit two original-source RED controls:
+nonfinite command time emits one InvalidInput initial rejection with no write
+outcome/no I/O/auth evidence, then a valid reused ID succeeds; the 257th root
+emits one Internal rejection without stealing any of the existing256 owners,
+and the first parked read still prepares, claims and completes. Preserve all
+nine existing lifecycle controls and native fixtures unchanged.
+
+Prune only the now-removed generic lib.rs numeric-failure fingerprint, reducing
+MEXC41 to40 occurrences and39 to38 entries. All other venue/path maps remain
+exact. Append the initial read error contract to CALLERS and audit/quality
+ledgers. Account #1786 and history #1793 remain excluded. Full MEXC+Binance
+native tests, scoped fmt/strict Clippy, both ratchets and independent source,
+caller and full-map reviews precede readiness. Architecture No: this adapter
+consumes shared entry ownership rather than duplicating it. Actual #1820
+integration and fresh CI will be required after the current merge freeze.
