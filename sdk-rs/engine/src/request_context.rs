@@ -441,11 +441,11 @@ impl Permit {
 }
 
 fn token_attempt(request: u64, generation: u64) -> Result<Attempt, Error> {
-    if request == 0 || generation == 0 {
+    if request == 0 || request > crate::resource_ids::MAX_RESOURCE_ID || generation == 0 {
         return Err(Error::Invalid);
     }
     Ok(Attempt {
-        request: RequestId(u32::try_from(request).map_err(|_| Error::Invalid)?),
+        request: RequestId(request),
         generation,
     })
 }

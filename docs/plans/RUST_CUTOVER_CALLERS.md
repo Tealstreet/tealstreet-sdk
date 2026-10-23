@@ -4056,9 +4056,7 @@ retains bounded Once, coin/order namespaces (including empty order identity),
 admitted-versus-rejected stale balance behavior and the different REST/WS mapped
 identity filters. No SDK call/result, order/position/FILLS shape, health policy,
 financial or snapshot authority, signing, HTTP/WS lifecycle or caller migration
-changes. The 126 final native account compatibility tests pass on unchanged
-pre-migration production, including eleven new controls; this is no defect-RED
-claim. Full CI and a fresh current-head raw proof remain the merge gates.
+changes.
 ## Static public headers during managed HTTP preparation
 
 Trusted Rust `SignStep` implementations can declare static noncredential HTTP
@@ -4262,6 +4260,17 @@ malformed/mismatched identity evidence. Retain Store/ownership and physical-send
 assertions. This reference does not migrate Hyro, history/session work or any
 legacy-provenance request and does not establish NX integration or cutover.
 
+
+### WOO measured CPU-margin build policy
+
+Standalone WOO WASM family builds use the throughput defaults for the shared
+host, engine and inherited dependencies, alongside the AsterDEX and KuCoin Spot
+exceptions. The common serde_json level-3 policy and WOO's existing explicit
+venue profile continue to apply. This is a build-profile selection: callers use
+the same loader, API, request/signing contracts and public/private row shapes.
+Other family selections, the combined engine and native build profiles retain
+their existing policy.
+
 ## Managed paired-read publication and companion authority
 
 Rust adapters can use `Cx.validate_read_http_delivery(root, leg)` before
@@ -4282,6 +4291,36 @@ transport contract changes. NX adapters that adopt these helpers keep the exact
 root/leg handles, publish and complete without yielding, and discard invalid
 or stale callback data rather than falling back to numeric command completion.
 Joined-read execution/observer ownership remains a separate shared capability.
+## Host-safe physical engine resource IDs
+
+Physical socket, HTTP request, signing-attempt and timer IDs use exact numeric
+identities through `2^53 - 1`, without wrapping at the former u32 boundary.
+Host integrations must preserve the complete integer and must not truncate it to
+32 bits. Command IDs, millisecond durations and lossless decimal managed
+preparation/permit tokens retain their existing contracts. Resource identities
+are opaque correlation values, not permission to send or publish state.
+
+Managed admission reserves complete resource groups atomically and reports typed
+capacity refusal without partial preparation or I/O. Replacement-context child
+identities use the same complete-range reservation and remain exact above the
+former 32-bit boundary; a refused range admits no child or journal supersession.
+A fatal legacy allocation exhaustion permanently retires the engine: hosts report a terminal engine failure,
+dispose it and require reconstruction. No partially queued callback actions or
+previously bound HTTP permit can release after that retirement. Prior-sent write
+uncertainty remains subject to the existing reconciliation contract; terminal
+engine failure never proves that a write was not sent.
+
+
+WASM resource-ID ingress rejects nonfinite, negative, fractional and unsafe
+integers before parsing a response or advancing clocks. Zero remains the shared
+public-socket identity. Custom host adapters preserve numbers above `2^32` without
+bitwise coercion. Workers retire flush intervals and notify connected clients
+through typed `startupFailed` on terminal failure. Already-owned write errors
+retain unknown-outcome/reconciliation text even across host replacement; stale
+successes and diagnostics stay suppressed. Native account streams settle owned
+waiters as Internal/Unknown once and answer later joins with the terminal notice
+without constructing a snapshot from the failed engine. Recreate the engine to
+resume work; neither adapter restarts it automatically.
 ### BingX native dispatch signing and refusal ownership
 
 BingX HTTP signing and listen-key API-key presentation use the shared
