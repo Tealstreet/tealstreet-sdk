@@ -200,3 +200,30 @@ a valid HTTP packet followed by an unsafe timer must expose neither; unsafe
 nested SignedOutbound socket IDs must be checked before dispatch can silently
 discard their wrapper; managed Cancel.signing IDs obey the same bound. All 525
 existing all-feature engine tests pass while these three new assertions fail.
+
+
+## Host numeric and outbound checkpoint
+
+The shared engine validates the complete outbound batch before yielding any
+item, including nested signed actions and managed preparation/cancel identities.
+Validation is iterative and checks both sticky allocators after callbacks. A
+callback that catches exhaustion cannot resume dispatch or expose its earlier
+queued HTTP action. All four outbound custody regressions pass with zero exposed
+actions; all 529 all-feature engine tests and strict Clippy pass.
+
+All sixteen WASM physical-ID ingress methods now validate through the shared
+numeric decoder before parsing payloads or changing clocks/state. Resource IDs
+serialize as safe numeric u64 values while command/capture IDs, durations and
+opaque decimal managed tokens keep their existing contracts. Nineteen native
+WASM unit controls, strict Clippy, SDK typecheck and 191 JS host tests pass. JS
+checks sticky state before invocation and after a normal return, never querying
+Rust after a trap, and stops detached batches after disposal. Two independent
+correctness/adversarial reviews found no blocker in this bounded implementation.
+The historical actual-WASM 98-control original-RED fixture still awaits a matching
+CI-built module for GREEN; no local release build or old-package relabel occurred.
+
+Native terminal handling is a separate next checkpoint: two compiled original
+regressions fail because startup and drain traps currently escape the host task
+instead of closing resources and emitting one typed terminal StartupFailed.
+Native/Workers lifecycle completion, all-host checks and current-input CI proof
+remain required before a ready PR.

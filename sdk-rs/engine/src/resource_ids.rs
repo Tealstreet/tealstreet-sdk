@@ -57,8 +57,11 @@ impl ResourceIds {
         if let Some(range) = self.reserve(count) {
             return range;
         }
+        self.invalidate();
+    }
+    pub(crate) fn invalidate(&mut self) -> ! {
         self.fatal = true;
-        panic!("engine resource identities exhausted");
+        panic!("engine resource identities exhausted or invalid");
     }
     pub fn failed(&self) -> bool {
         self.fatal
@@ -80,6 +83,51 @@ impl ResourceIds {
             ceiling,
             ..Self::default()
         }
+    }
+}
+
+/// Rust tuple construction cannot bypass the shared host-safe wire boundary.
+pub(crate) fn action_ids_safe(mut action: &crate::Action) -> bool {
+    use crate::{Action, request_context::HttpAction};
+    let safe = |id: u64| id <= MAX_RESOURCE_ID;
+    loop {
+        return match action {
+            Action::WsConnect { socket, .. }
+            | Action::WsSend { socket, .. }
+            | Action::WsClose { socket } => safe(socket.0),
+            Action::Http(request) => safe(request.id.0),
+            Action::Sign { attempt, .. } => safe(attempt.0),
+            Action::SignPayload { request, .. } => safe(request.0),
+            Action::SetTimer { timer, .. } | Action::ClearTimer { timer } => safe(timer.0),
+            Action::SignedOutbound { attempt, outbound } => {
+                if !safe(attempt.0) {
+                    return false;
+                }
+                action = outbound;
+                continue;
+            }
+            Action::ManagedHttp(action) => match action.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => safe(preparation.attempt().request.0) && safe(request.id.0),
+                HttpAction::Bind {
+                    preparation,
+                    permit,
+                    request,
+                } => {
+                    safe(preparation.attempt().request.0)
+                        && safe(permit.attempt().request.0)
+                        && safe(request.id.0)
+                }
+                HttpAction::Cancel {
+                    preparation,
+                    signing,
+                } => safe(preparation.attempt().request.0) && signing.is_none_or(|id| safe(id.0)),
+            },
+            Action::Notice(_) => true,
+        };
     }
 }
 

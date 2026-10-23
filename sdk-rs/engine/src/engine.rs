@@ -938,10 +938,43 @@ mod resource_identity_regressions {
         socket: Option<SocketId>,
         received: usize,
         exhaust: bool,
+        catch_sign_failure: bool,
+        caught: bool,
+    }
+    struct Refused;
+    impl crate::SignStep for Refused {
+        fn prepare(
+            &mut self,
+            _: &mut Action,
+            _: &crate::DispatchContext<'_>,
+        ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
+            Err(crate::signing::SignError::Refused)
+        }
+        fn apply(
+            &mut self,
+            _: &mut Action,
+            _: &crate::signing::SignResult,
+        ) -> Result<(), crate::signing::SignError> {
+            unreachable!()
+        }
+        fn freshness_ms(&self) -> f64 {
+            1_000.
+        }
     }
     impl Venue for Probe {
         type Pending = ();
         fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            if self.catch_sign_failure {
+                let request = cx.request(
+                    Method::Get,
+                    "https://venue.test/read".into(),
+                    vec![],
+                    None,
+                    (),
+                );
+                cx.sign_http(request, Box::new(Refused));
+                return;
+            }
             self.socket = Some(cx.connect("wss://venue.test/private".to_owned()));
             if self.exhaust {
                 cx.set_timer(1.);
@@ -957,6 +990,17 @@ mod resource_identity_regressions {
         fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
         fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
         fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_sign_error(&mut self, cx: &mut Cx<'_, ()>, _: (), _: VenueError) {
+            use std::panic::{AssertUnwindSafe, catch_unwind};
+            cx.request(
+                Method::Get,
+                "https://venue.test/recover".into(),
+                vec![],
+                None,
+                (),
+            );
+            self.caught = catch_unwind(AssertUnwindSafe(|| cx.set_timer(1.))).is_err();
+        }
         fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
         fn book(&self, _: &str) -> Option<&Book> {
             None
@@ -1093,18 +1137,40 @@ mod resource_identity_regressions {
         let mut engine = crate::test_support::seeded_engine(Probe::default());
         // A valid first packet must not escape before the unsafe later action.
         engine.io.actions.push(Action::Http(HttpRequest {
-            id: RequestId(4), method: Method::Get, route: None, timeout_ms: None,
-            url: "https://venue.test/read".into(), headers: vec![], signer_headers: vec![], body: None,
+            id: RequestId(4),
+            method: Method::Get,
+            route: None,
+            timeout_ms: None,
+            url: "https://venue.test/read".into(),
+            headers: vec![],
+            signer_headers: vec![],
+            body: None,
         }));
         engine.io.actions.push(unsafe_action);
-        assert!(catch_unwind(AssertUnwindSafe(|| engine.drain_actions().collect::<Vec<_>>())).is_err());
-        assert!(engine.failed(), "unsafe output must use the sticky terminal path");
+        let mut exposed = 0;
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| {
+                for _ in engine.drain_actions() {
+                    exposed += 1;
+                }
+            }))
+            .is_err()
+        );
+        assert_eq!(
+            exposed, 0,
+            "the entire batch must be checked before yielding its first action"
+        );
+        assert!(
+            engine.failed(),
+            "unsafe output must use the sticky terminal path"
+        );
     }
 
     #[test]
     fn unsafe_timer_id_retires_whole_batch_before_any_packet_is_exposed() {
         assert_unsafe_batch_retires(Action::SetTimer {
-            timer: TimerId(crate::resource_ids::MAX_RESOURCE_ID + 1), at_ms: 1.,
+            timer: TimerId(crate::resource_ids::MAX_RESOURCE_ID + 1),
+            at_ms: 1.,
         });
     }
 
@@ -1113,17 +1179,49 @@ mod resource_identity_regressions {
         assert_unsafe_batch_retires(Action::SignedOutbound {
             attempt: RequestId(1),
             outbound: Box::new(Action::WsSend {
-                socket: SocketId(crate::resource_ids::MAX_RESOURCE_ID + 1), text: "".into(),
+                socket: SocketId(crate::resource_ids::MAX_RESOURCE_ID + 1),
+                text: "".into(),
             }),
         });
     }
 
     #[test]
     fn unsafe_managed_cancel_signing_id_uses_the_same_terminal_boundary() {
-        assert_unsafe_batch_retires(Action::ManagedHttp(Box::new(crate::request_context::HttpAction::Cancel {
-            preparation: crate::request_context::Preparation::from_wire("p1:1:1:0").unwrap(),
-            signing: Some(RequestId(crate::resource_ids::MAX_RESOURCE_ID + 1)),
-        })));
+        assert_unsafe_batch_retires(Action::ManagedHttp(Box::new(
+            crate::request_context::HttpAction::Cancel {
+                preparation: crate::request_context::Preparation::from_wire("p1:1:1:0").unwrap(),
+                signing: Some(RequestId(crate::resource_ids::MAX_RESOURCE_ID + 1)),
+            },
+        )));
+    }
+
+    #[test]
+    fn callback_catching_allocation_panic_cannot_publish_its_normal_return_actions() {
+        use crate::resource_ids::{MAX_RESOURCE_ID, ResourceIds};
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+        let mut engine = crate::test_support::seeded_engine(Probe {
+            catch_sign_failure: true,
+            ..Probe::default()
+        });
+        engine.start(0.);
+        // A failure callback may queue one valid final request, then catch an
+        // exhausted timer allocation itself instead of propagating the panic.
+        engine.io.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
+        let mut exposed = 0;
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| {
+                for _ in engine.drain_actions() {
+                    exposed += 1;
+                }
+            }))
+            .is_err()
+        );
+        assert!(
+            engine.venue.caught,
+            "the callback returned normally after catching exhaustion"
+        );
+        assert!(engine.failed());
+        assert_eq!(exposed, 0);
     }
 }
 
@@ -1403,6 +1501,34 @@ impl<P> Io<P> {
         self.next_id.reserve(count)
     }
 
+    fn assert_action_safe(&mut self, action: &Action) {
+        assert!(
+            !self.next_id.failed() && !self.signing.failed(),
+            "engine resource identities exhausted"
+        );
+        if !crate::resource_ids::action_ids_safe(action) {
+            self.next_id.invalidate();
+        }
+    }
+
+    fn assert_actions_safe(&mut self) {
+        assert!(
+            !self.next_id.failed() && !self.signing.failed(),
+            "engine resource identities exhausted"
+        );
+        if self
+            .actions
+            .iter()
+            .any(|a| !crate::resource_ids::action_ids_safe(a))
+            || self
+                .signing_admission
+                .iter()
+                .any(|(a, _)| !crate::resource_ids::action_ids_safe(a))
+        {
+            self.next_id.invalidate();
+        }
+    }
+
     /// Splits the poll registry from the timer state it writes to.
     fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
         (
@@ -1669,6 +1795,7 @@ impl<P> Cx<'_, P> {
     }
 
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
+        self.io.assert_action_safe(&outbound);
         let attempt = self.io.signing.next_id();
         // Exhaustion is handled through the same asynchronous failure event.
         let timer = if self.io.signer.as_ref().is_some_and(|s| s.immediate()) {
@@ -3433,6 +3560,7 @@ impl<V: Venue> Engine<V> {
         queued: &mut std::collections::VecDeque<Action>,
         emitted: usize,
     ) {
+        self.assert_live();
         for action in self.io.actions.split_off(emitted).into_iter().rev() {
             queued.push_front(action);
         }
@@ -3442,10 +3570,13 @@ impl<V: Venue> Engine<V> {
         use crate::signing_dispatch::Completion;
         for (outbound, error) in std::mem::take(&mut self.io.signing_admission) {
             self.sign_failed(now, outbound, error);
+            self.assert_live();
         }
         let mut queued = std::collections::VecDeque::from(std::mem::take(&mut self.io.actions));
         loop {
+            self.assert_live();
             while let Some(action) = queued.pop_front() {
+                self.io.assert_action_safe(&action);
                 match action {
                     Action::SignedOutbound { attempt, outbound } => {
                         match self.io.signing.release(
@@ -3561,6 +3692,7 @@ impl<V: Venue> Engine<V> {
                     action => self.io.actions.push(action),
                 }
             }
+            self.assert_live();
             if let Some(action) = self.io.signing.take_plain() {
                 queued.push_back(action);
                 continue;
@@ -3584,6 +3716,7 @@ impl<V: Venue> Engine<V> {
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
         self.assert_live();
+        self.io.assert_actions_safe();
         self.dispatch_actions(self.io.dispatch_now);
         if self.store.take_rejected_empty_catalogue() {
             push_event(
@@ -3598,6 +3731,7 @@ impl<V: Venue> Engine<V> {
                 },
             );
         }
+        self.io.assert_actions_safe();
         self.io.actions.drain(..)
     }
 
