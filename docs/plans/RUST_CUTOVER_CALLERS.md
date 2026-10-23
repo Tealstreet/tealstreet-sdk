@@ -4322,6 +4322,16 @@ waiters as Internal/Unknown once and answer later joins with the terminal notice
 without constructing a snapshot from the failed engine. Recreate the engine to
 resume work; neither adapter restarts it automatically.
 
+## Bitget family WASM speed profile (option A)
+
+Bitget and Bitget USDC family artifacts use the shared speed defaults for the
+host, engine and inherited dependencies, alongside the common serde_json
+throughput setting. Consumers download a larger WASM module; the fixed family
+size budget still applies. SDK construction, commands, transports, payloads and
+row shapes keep their existing contracts. CPU objectives and all strict
+correctness checks retain their existing thresholds and known-failure policies.
+Combined and native release builds keep their existing profile selection.
+
 
 ## AsterDEX, GRVT and TxFlow row-reporting adoption (2026-10-23)
 
