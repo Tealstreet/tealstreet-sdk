@@ -237,3 +237,13 @@ StartupFailed remaining nonterminal. Tests require no frame or HTTP escape and
 closed transport ingress before exactly one Internal/Unknown terminal notice.
 Two independent reviews confirmed the RED paths; active-resource and FrameServer
 pending-write disposal controls are required alongside the implementation.
+
+
+Workers original-RED checkpoint: the existing 26 Workers unit controls pass,
+while five new assertions reproduce sticky death during start/flush, failure of
+already-owned commands across replacement, old queued ticks touching a new host,
+and join-time snapshot death. The fixtures use the real EngineHost with a native
+sticky-state double and deterministic interval capture; no WASM build or load
+loop is involved. The terminal path uses the existing startupFailed envelope and
+EngineDeadError; success/diagnostic delivery remains tied to the current host,
+while genuine captured-host terminal rejections retain their original owner.
