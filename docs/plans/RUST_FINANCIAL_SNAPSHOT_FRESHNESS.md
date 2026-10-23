@@ -361,3 +361,44 @@ staged, while Paradex's stateful evidence decisions remain sequential inside the
 admitted callback. Original focused engine/Backpack/Paradex/Binance baseline
 passes1157 tests across59 groups before production edits. Native RED hypotheses
 remain hypotheses until their bounded controls reproduce the asserted effect.
+
+Inventory re-expression detail: the Orders pending field changes the exact
+request-site hash even though the HTTP method/URL/body/headers/route stay the
+same. Use the checker's existing exact full-map transition pattern for these
+reviewed Backpack/Paradex rebindings, with literal before/after maps and negative
+controls for growth, unrelated map changes and independently pruned parents.
+This adds the existing checker and its test to the bounded scope if required;
+it does not exempt a path/site kind or bypass the shrinking constraints. Record
+all changed hashes and equal counts in the PR body under the owner's standing
+same-site rehash rule. All other inventory maps remain byte-equivalent.
+
+### Follow-on implementation evidence
+
+Backpack and Paradex use only the existing Store token API. Two Backpack native
+correctness defects were proven separately before repair: discarded reads changed
+accepted trigger relabel memory (stale-only and failed-current controls), and
+accepted Pair ACKs failed to supersede older reads (stored and absent-row cases).
+The exact final current-fixture original run records four intended native REDs,
+a malformed-Pair GREEN, a Paradex native-ACK GREEN and two distinct Paradex API
+adoption REDs. The latter are new contract controls, not original product bugs.
+Receipt `95ebc65eecbd8e231407715231058a93bd6662737d124f3e2eeae3ead5b2f2af`
+binds all four original source blobs, three current test files, four result logs
+and exact restoration of migrated source. Earlier fixture-only failures and
+superseded original receipts stay historical; none is counted as product RED.
+
+Only one legacy map changes: Paradex account.rs retains10 sites, with hash
+`5c28b0ebae1f2a54f344d52c2c422801c8e82381c7fd8ad95d13cd549e88ddec`
+re-expressed as
+`29a6633fa3f6e05f04f534c0e675690014adde1e8a26e93c3769e8618602c13c`
+(count1). Total1253 sites and every other full map remain unchanged. The existing
+literal full-map rebind table and negative tests preserve independent parent
+shrinking; no checker algorithm or path/site-kind exemption is introduced.
+Backpack's generic signed request renderer keeps its existing fingerprints.
+
+Final local checks pass1167 focused native tests across59 groups on the final
+fixture bytes, strict all-target Clippy, scoped fmt, bans (including14 provenance
+controls), root44 typecheck and28 lint (cached). Both independent source, test,
+caller-contract and full-map reviews are CLEAN. The scope is fourteen paths:
+four native source modules, three existing native test files, three exact-site
+inventory/checker files and four existing plan/caller docs. Draft CI and a fresh
+complete current-head raw proof remain required; queue order is unchanged.

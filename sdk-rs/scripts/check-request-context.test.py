@@ -81,6 +81,43 @@ class RequestContextBan(unittest.TestCase):
         # Bootstrap only establishes the reviewed initial inventory.
         self.assertFalse(ban.check(one, one, []))
 
+    def test_snapshot_pending_rebind_is_exact_and_cannot_allow_regrowth(self):
+        path = 'venues/paradex/src/account.rs'
+        before, after = ban.HISTORY_BOOTSTRAPS[path]
+        old, current = {path: dict(before)}, {path: dict(after)}
+        self.assertEqual(sum(before.values()), 10)
+        self.assertEqual(sum(after.values()), 10)
+        self.assertEqual(hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest(),
+                         '2533bbc9d874e500f4a9a6c47b47f0c36770957f564cc9d8523629f0e4b1af2c')
+        self.assertEqual(hashlib.sha256(json.dumps(after, sort_keys=True).encode()).hexdigest(),
+                         '6318d427aca63f36566df341d8ed3facc9b9f49b68a0d08f4d774567b83df9a9')
+        original = ban.git('show', '848924471635eee7a0c61c64407a861c3aea37f3:sdk-rs/' + path)
+        current_source = (ban.ROOT / path).read_text()
+        self.assertEqual(dict(ban.fingerprints(original)), before)
+        self.assertEqual(dict(ban.fingerprints(current_source)), after)
+        self.assertEqual(set(before) - set(after), {
+            '5c28b0ebae1f2a54f344d52c2c422801c8e82381c7fd8ad95d13cd549e88ddec'})
+        self.assertEqual(set(after) - set(before), {
+            '29a6633fa3f6e05f04f534c0e675690014adde1e8a26e93c3769e8618602c13c'})
+        self.assertFalse(ban.check(current, current, [('old', old)]))
+        self.assertFalse(ban.check(current, current, [('landed', current)]))
+        extra = {path: {**after, 'f' * 64: 1}}
+        self.assertTrue(ban.check(extra, extra, [('old', old)]))
+        increased = {path: {**after}}
+        increased[path][next(iter(after))] += 1
+        self.assertTrue(ban.check(increased, increased, [('old', old)]))
+        pruned = {path: {**after}}
+        del pruned[path][next(iter(after))]
+        self.assertTrue(ban.check(current, current, [('old', old), ('parent', pruned)]))
+        altered_old = {path: {**before}}
+        del altered_old[path][next(iter(before))]
+        self.assertTrue(ban.check(current, current, [('altered', altered_old)]))
+        unrelated = {**current, 'venues/other/src/account.rs': dict(after)}
+        self.assertTrue(ban.check(unrelated, unrelated, [('old', old)]))
+        mismatch = {path: {**after}}
+        del mismatch[path][next(iter(after))]
+        self.assertTrue(ban.check(mismatch, current, [('old', old)]))
+
     def test_exact_landed_bootstrap_transition_never_allows_regrowth(self):
         path = ban.BOOTSTRAP_PATH
         old = {path: dict(ban.BOOTSTRAP_OLD)}
@@ -190,7 +227,8 @@ class RequestContextBan(unittest.TestCase):
             'venues/cryptocom/src/history.rs': (15, 10, '8c08399ee9544d819511127584929ff3a4d532831d64ffc1886424efb4842b0c', '0716d0d13befbecad3402c21949f8d88fa30f02b9a761b1d3dbeae65570526f6'),
             'venues/grvt/src/history.rs': (13, 11, 'f97e2d042aad67c83cb7b67fd2e18fe2ea1911d39bee4928b4bfcd29a53a9173', '10b79560bfa80b935be2f78f7f6a3fb2e7b44436372c89a588a15d558c07fa3e'),
         }
-        self.assertEqual(set(expected) | {'venues/hyperliquid/src/history.rs'}, set(ban.HISTORY_BOOTSTRAPS))
+        self.assertEqual(set(expected) | {'venues/hyperliquid/src/history.rs',
+                                          'venues/paradex/src/account.rs'}, set(ban.HISTORY_BOOTSTRAPS))
         for path, (before, after, old_hash, landed_hash) in expected.items():
             with self.subTest(path=path):
                 old, landed = ban.HISTORY_BOOTSTRAPS[path]
