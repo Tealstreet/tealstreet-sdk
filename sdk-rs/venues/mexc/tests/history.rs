@@ -319,3 +319,202 @@ fn a_limited_wide_read_returns_the_newest_rows_not_the_oldest_window() {
     // Completing after the first page means no older window was requested.
     assert!(result(&mut e).unwrap().contains("newest"));
 }
+
+fn owned_terminal(
+    e: &mut TestEngine,
+    command: u32,
+    partial: bool,
+) -> Result<String, safe_cex_engine::VenueError> {
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let markers: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        markers.len(),
+        usize::from(partial),
+        "one owner warning for accepted-only recovery"
+    );
+    for marker in markers {
+        assert_eq!(marker.level, safe_cex_engine::Level::Warn);
+        assert!(marker.fields.iter().any(|(k, v)| *k == "command"
+            && matches!(v,safe_cex_engine::Value::Num(n) if *n == f64::from(command))));
+    }
+    let mut terminals = actions.into_iter().filter_map(|a| match a {
+        Action::Notice(Notice::CommandDone {
+            command: id,
+            result,
+        }) if id == command => Some(Ok(result)),
+        Action::Notice(Notice::CommandFailed { command: id, error }) if id == command => {
+            Some(Err(error))
+        }
+        _ => None,
+    });
+    let result = terminals.next().expect("one command terminal");
+    assert!(terminals.next().is_none());
+    result
+}
+fn full_page() -> String {
+    format!(
+        r#"{{"success":true,"code":0,"data":[{}]}}"#,
+        vec![EXEC; 100].join(",")
+    )
+}
+fn fail_read(e: &mut TestEngine, r: &safe_cex_engine::HttpRequest, failure: u8) {
+    match failure {
+        0 => response(
+            e,
+            r,
+            r#"{"success":false,"code":510,"message":"busy","data":[]}"#,
+        ),
+        1 => e.handle(
+            100.0,
+            Event::HttpFailed {
+                request: r.id,
+                error: "offline",
+            },
+        ),
+        2 => response(e, r, r#"{"success":true,"code":0,"data":{}}"#),
+        _ => {
+            let fresh = EXEC.replace("739113577038255616", "739113577038255618");
+            response(
+                e,
+                r,
+                &format!(r#"{{"success":true,"code":0,"data":[{fresh},{{"bad":true}}]}}"#),
+            );
+        }
+    }
+}
+#[test]
+fn owned_first_and_filtered_only_failures_are_typed_without_a_partial_marker() {
+    for filtered in [false, true] {
+        for failure in 0..4 {
+            let mut e = ready();
+            let q = if filtered {
+                Query::Fills {
+                    symbol: Some("BTCUSDT".into()),
+                    order_id: None,
+                    from_ms: None,
+                    to_ms: Some(1700000000000.0),
+                    limit: Some(101),
+                }
+            } else {
+                fills(Some(101))
+            };
+            let mut r = query(&mut e, q);
+            if filtered {
+                response(&mut e, &r, &full_page());
+                r = requests(&mut e).remove(0);
+            }
+            fail_read(&mut e, &r, failure);
+            let err = owned_terminal(&mut e, 99, false).unwrap_err();
+            assert_eq!(err.kind, Some(safe_cex_engine::ErrorKind::Internal));
+        }
+    }
+}
+#[test]
+fn owned_later_failure_discards_current_prefix_and_keeps_only_accepted_rows() {
+    for failure in 0..4 {
+        let mut e = ready();
+        let r = query(&mut e, fills(Some(101)));
+        response(&mut e, &r, &full_page());
+        let r = requests(&mut e).remove(0);
+        fail_read(&mut e, &r, failure);
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(&owned_terminal(&mut e, 99, true).unwrap()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], "739113577038255616");
+    }
+}
+#[test]
+fn owned_funding_page_failure_retains_only_validated_prior_ledger() {
+    let mut e = ready();
+    let r = query(
+        &mut e,
+        Query::Income {
+            symbol: Some("BTCUSDT".into()),
+            kind: Some("FUNDING_FEE".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(10),
+        },
+    );
+    response(
+        &mut e,
+        &r,
+        r#"{"success":true,"code":0,"data":{"currentPage":1,"totalPage":2,"resultList":[{"id":1,"symbol":"BTC_USDT","funding":0.1,"settleTime":1700000000123}]}}"#,
+    );
+    let r = requests(&mut e).remove(0);
+    // Valid row prefix, invalid native page metadata: none of page two is admitted.
+    response(
+        &mut e,
+        &r,
+        r#"{"success":true,"code":0,"data":{"currentPage":9,"totalPage":2,"resultList":[{"id":2,"symbol":"BTC_USDT","funding":0.2,"settleTime":1700000000124}]}}"#,
+    );
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&owned_terminal(&mut e, 99, true).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["tranId"], "1");
+}
+#[test]
+fn owned_window_transition_retains_accepted_rows_on_older_window_failure() {
+    let mut e = ready();
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(1.0),
+            to_ms: Some(1700000001000.0),
+            limit: Some(1000),
+        },
+    );
+    response(
+        &mut e,
+        &r,
+        &format!(r#"{{"success":true,"code":0,"data":[{EXEC}]}}"#),
+    );
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.contains("page_num=1"));
+    fail_read(&mut e, &r, 0);
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&owned_terminal(&mut e, 99, true).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+}
+#[test]
+fn owned_terminal_page_thousand_succeeds_and_continuation_cap_stays_strict() {
+    for needs_more in [false, true] {
+        let mut e = ready();
+        let mut r = query(&mut e, fills(Some(101)));
+        let full = full_page();
+        for number in 1..1000 {
+            response(&mut e, &r, &full);
+            r = requests(&mut e).remove(0);
+            assert!(r.url.contains(&format!("page_num={}&", number + 1)));
+        }
+        response(
+            &mut e,
+            &r,
+            if needs_more {
+                &full
+            } else {
+                r#"{"success":true,"code":0,"data":[]}"#
+            },
+        );
+        let output = owned_terminal(&mut e, 99, false);
+        if needs_more {
+            assert!(output.unwrap_err().message.contains("pagination limit"));
+        } else {
+            let rows: Vec<serde_json::Value> = serde_json::from_str(&output.unwrap()).unwrap();
+            assert_eq!(rows.len(), 1);
+        }
+    }
+}
