@@ -352,3 +352,63 @@ create fallback, and this plan adds none.
 Architecture gate: both are shared signer, provider, host and session choke
 points. No family code holds keys or imported secrets; a venue contributes
 canonicalization and an import field declaration only.
+
+## P6b implementation plan (Sam decision 9, 2026-10-23)
+
+Owner claude-19pt8s. One PR, stacked on #1839 for `ExtraKey` and on the
+reviewed session-core heads #1832 and #1842; it is retargeted as they land.
+Polymarket must not derive anything from the L1 private key in the venue:
+every L1 use goes through provider refs, and the derived L2 key is imported.
+
+**Phases.** Each phase is a commit with focused tests.
+
+1. **Schema** (codex-uufub4; claude-m26ps4 for credential semantics).
+   - `ExtraKey::L1Wallet`: a secp256k1 32-byte key, declared hex, required
+     for private use, role-bound to `Secp256k1Digest` and `PublicAddress`.
+   - `Operation::PublicAddress { key }`: a non-secret output, the checksummed
+     EVM address of a secp256k1 ref (P4). The venue reads the wallet address
+     from it and never derives it.
+2. **Import seam (engine).**
+   - `Cx::request_import(context, method, url, step, ImportSpec)` accepts
+     only a live session-owned Read context; Command and Background contexts
+     are `Invalid`.
+   - `ImportSpec` declares the JSON fields and their roles, and the
+     non-secret fields to echo.
+   - Response routing:
+     - the exact Context, attempt and generation are checked before routing;
+     - a 2xx body goes to `Signer::import` and is zeroized after handoff;
+     - `Venue::on_import(pending, Result<ImportReceipt, VenueError>)` replaces
+       `on_response` for import attempts only;
+     - transport loss still goes to `on_request_failed`;
+     - the body never reaches the venue, logs or evidence.
+3. **Provider.**
+   - `Signer::import` and `drop_imported` (default `Unsupported`).
+   - The local provider parses within bounds and installs atomically, with
+     names that embed the generation. `secret` is decoded as base64url.
+   - Installed refs are bound to (slot, generation) beside the L1 identity.
+   - A duplicate or late receipt is fenced.
+   - `drop_imported` is idempotent. Host providers receive
+     `Action::DropImported { generation }`. claude-55ao7t calls it from
+     `retire_session` and on dispose.
+4. **Polymarket recipes** (`venues/polymarket/src/sign.rs` only).
+   - ClobAuth: an EIP-712 digest with the `l1Wallet` role, using the address
+     from `PublicAddress`.
+   - Order EIP-712 V2 and ERC-7739 signatures with `l1Wallet`.
+   - L2 HMAC over imported refs (base64url output).
+   - The WS frame presents the imported key, secret and passphrase as
+     `Present` fields.
+   - codex-hcmq3f's managed conversion wires these and turns the #1882 REDs
+     green.
+5. **Tests.**
+   - A canary: the venue never sees body, secret or passphrase bytes.
+   - Atomic install and partial-install refusal.
+   - Duplicate and late-after-retire receipts.
+   - Stale-generation refusal before sending.
+   - `PublicAddress` matches the ethers vector.
+   - ClobAuth, order and L2 vectors match the existing upstream vectors
+     through provider refs.
+   - Hosted/keyless import is refused.
+
+**Coordination.** claude-m26ps4's credential conditions and claude-55ao7t's
+session conditions are recorded above. codex-hcmq3f receives the pin for
+#1882. No merge without a window.
