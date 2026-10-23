@@ -25,6 +25,9 @@ pub struct IdentitySetupPolicy {
     pub secret_encoding: Option<KeyEncoding>,
     /// The only extra signing ref trusted setup may install for this slot.
     pub extra: Option<ExtraKeyPolicy>,
+    /// Declares the signing ref an asymmetric key of this algorithm; only a
+    /// declared ref answers public operations, so no secret is fingerprinted.
+    pub signing_algorithm: Option<Algorithm>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -307,6 +310,11 @@ pub enum Operation {
     },
     /// Credential value for an outbound header/body/upgrade field, not storage.
     Present { key: KeyRef },
+    /// Non-secret 20-byte Ethereum address of a ref declared `Secp256k1Digest`.
+    PublicAddress { key: KeyRef },
+    /// Non-secret public key of a ref declared for exactly `algorithm`:
+    /// `Ed25519` 32 bytes, `StarkDigest` the 32-byte big-endian felt.
+    PublicKey { algorithm: Algorithm, key: KeyRef },
 }
 
 /// Context is advisory; providers may optionally refuse it. No enforcement core.
@@ -404,6 +412,11 @@ impl SignRequest {
             .map(|operation| match operation {
                 Operation::Present { .. } => None,
                 Operation::Sha256 { .. } => Some(32),
+                Operation::PublicAddress { .. } => Some(20),
+                // `validate` refuses an algorithm without a public form first.
+                Operation::PublicKey { algorithm, .. } => {
+                    Some(public_key_len(*algorithm).unwrap_or(usize::MAX))
+                }
                 Operation::Sign { algorithm, .. } => Some(match algorithm {
                     Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => 32,
                     Algorithm::HmacSha512
@@ -444,6 +457,14 @@ impl SignRequest {
                 Operation::Sign { key, .. } if !valid_key_ref(key) => {
                     return Err(SignError::InvalidRequest);
                 }
+                Operation::PublicAddress { key } if !valid_key_ref(key) => {
+                    return Err(SignError::InvalidRequest);
+                }
+                Operation::PublicKey { algorithm, key }
+                    if !valid_key_ref(key) || public_key_len(*algorithm).is_none() =>
+                {
+                    return Err(SignError::InvalidRequest);
+                }
                 Operation::Sign { payload, .. } | Operation::Sha256 { payload } => {
                     if payload.len() > 256 {
                         return Err(SignError::InvalidRequest);
@@ -470,6 +491,14 @@ impl SignRequest {
             }
         }
         Ok(())
+    }
+}
+
+/// Algorithms with a public form; consumers exist only for these two.
+fn public_key_len(algorithm: Algorithm) -> Option<usize> {
+    match algorithm {
+        Algorithm::Ed25519 | Algorithm::StarkDigest => Some(32),
+        _ => None,
     }
 }
 
