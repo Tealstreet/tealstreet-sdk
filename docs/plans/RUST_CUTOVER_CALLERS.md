@@ -5387,6 +5387,47 @@ The cost occurs per Store, not per message, and grows with symbol count/string
 length and hash-table capacity steps. These are native index-only measurements;
 actual process/browser/WASM costs include allocator and memory-page effects.
 
+## Engine socket lifecycle: OKX
+
+OKX authentication state, socket epochs, reconnect permission, subscription
+replay and retirement use the shared Engine lifecycle. Native venue codecs
+provide login/subscription payloads and Store invalidation through the existing
+socket actions and events. Retired or expired frames and timers cannot restore
+authentication, replay interests, advance private health or publish a parked
+signing result. Permanent OKX private/business credential refusal revokes both
+retry authorities before callbacks; reconnectable loss retains native recovery.
+
+Current desired book/candle interests survive reconnect. Retirement clears only
+the retiring feed's owned public depth before retry; account/history/settings
+freshness fences remain unchanged. Physical IDs retain the shared host-safe
+integer boundary and signing/remote-signing wire contracts remain unchanged.
+
+Bitunix and all other venue families retain their existing socket adapters.
+Bitunix keeps its native pre-ACK reads, first-pong idle activation and shard
+pacing. The temporary managed-sockets feature remains until every legacy family
+has adopted the shared lifecycle; its inventory includes Bitunix explicitly.
+
+Initial HTTP command admission precedes any managed socket side effect. Socket
+registration, retirement, closure and queued work spend a fresh command-entry
+loan even when no new transport identity is allocated.
+
+
+## Declared mutation terminal API (#1894)
+
+An opted-in engine Plan may declare a native conditional terminal before any
+release. `done_mutation_plan_after_data` consumes only its exact current
+released DATA anchor and retires unissued remainder; it does not manufacture
+Accepted facts or renew the native root. A valid terminal whose earlier writes
+are uncertain still emits the common journal's failure projection with known
+IDs retained. An undeclared anchor, Read Plan, foreign/old/expired delivery or
+another issued call refuses without consuming current authority.
+
+The shared seal prepares projection/report storage before commit and keeps one
+Cx terminal funnel for the forthcoming execution-observer integration. Native
+codecs still prove when their conditional native work is finished. ApeX #1891
+is a separate consumer obligation; this engine API alone does not migrate its
+writes, provider presentation, remote zkLink, startup or session paths. No TS
+caller shape or native result bytes change until an adapter adopts it.
 
 ## Retained command readiness
 
