@@ -200,7 +200,7 @@ No production source, test or inventory changes are claimed by this checkpoint.
 ## Unsigned candle command slice
 
 Pinned landing7c5e706e410 after Crypto.com #1818. Current source/test claims
-exclude history #1795 only; HMAC owner claude-4yjlw0 confirms lib.rs is clear.
+exclude history #1790/#1795/#1796/#1797; HMAC owner claude-4yjlw0 confirms lib.rs is clear.
 Unsigned candles are selected only when BOTH constructed primary and secondary
 credential containers are absent. `public_data_only` alone is not that test:
 optional credentials still select the exact legacy signed request branch.
@@ -240,3 +240,15 @@ shared signer/selection prerequisites exist. Both ratchets must match incoming
 exactly. Full Phemex+Binance native tests, scoped fmt/strict Clippy and independent
 source/adversarial, caller and full-map reviews are required before CI/readiness.
 Architecture No: native codecs consume shared command/lifecycle authority.
+
+### Unsigned candle verification checkpoint
+
+Six separately committed lifecycle controls fail on original production while
+credentialed primary/secondary/dual compatibility passes. The managed path
+passes all9 new controls plus14 unchanged public test assertions, including a
+native error/malformed-row/missing-list comparison against the signed path and
+late429 suppression. Full Phemex+Binance suites pass475 tests across38 targets;
+scoped fmt and strict all-target Clippy pass. Independent source/adversarial,
+caller and full-map reviews are clean, architecture No. The exact scanner and
+manifest remain unchanged; current landing integration/ratchets and CI precede
+merge readiness. Credentialed migration remains explicitly outstanding.

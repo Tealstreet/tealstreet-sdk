@@ -661,3 +661,16 @@ completion. Another fixed-clock control runs270 market refusals,270 interval
 refusals and270 successes with stale previous-response probes. Existing native
 candle mapping, validation precedence and preparation/expiry assertions remain.
 This closes the earlier pre-Context numeric refusal gap using the shared seam.
+
+## Phemex unsigned candle request regressions
+
+Committed plan05988416603 precedes separate original-source tests2a1a008bc7c:
+six lifecycle regressions fail and primary/secondary/dual signing compatibility
+already passes. Controls cover preparation/binding/one release, parked and
+released expiry, stale callbacks with ID reuse, typed setup/network failures,
+genuine invalid-time admission and native sorted output. Additional native
+error/malformed-row/missing-list comparisons match the credentialed path, and
+an expired429 reply cannot pause another read. Existing public assertions are
+retained with the shared prepared fixture; only the daily response clock moves
+forward to its command's timestamp. No scanner/manifest change or credentialed
+signer migration is included.

@@ -344,3 +344,91 @@ fn primary_secondary_and_dual_credentials_keep_the_existing_signed_branch() {
         );
     }
 }
+
+#[test]
+fn native_errors_malformed_rows_and_missing_lists_match_the_signed_read() {
+    for (status, body) in [
+        (
+            200,
+            r#"{"code":10002,"msg":"venue refused","data":{"rows":[]}}"#,
+        ),
+        (200, r#"{"code":10002,"msg":"venue refused"}"#),
+        (
+            200,
+            r#"{"code":0,"data":{"rows":[[60,60,0,"100","110","90","105","2",0],["bad"]]}}"#,
+        ),
+        (200, r#"{"code":0,"data":{}}"#),
+        (503, "<html>busy</html>"),
+    ] {
+        let mut errors = vec![];
+        for signed in [false, true] {
+            let mut e = engine(Options {
+                public_data_only: true,
+                key: signed.then(|| "primary".into()),
+                secret: signed.then(|| "replay-secret".into()),
+                ..Options::default()
+            });
+            let packet = released(&mut e, 1_000., 14);
+            e.handle(
+                1_001.,
+                Event::HttpResponse {
+                    request: packet.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            let actions: Vec<_> = e.drain_actions().collect();
+            let failures: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 14, error }) => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(failures.len(), 1, "{signed} {status} {body}");
+            errors.push(failures[0].message.clone());
+            assert!(!actions.iter().any(|a| matches!(
+                a,
+                Action::Http(_)
+                    | Action::Sign { .. }
+                    | Action::Notice(Notice::CommandDone { .. } | Notice::AccountAuth { .. })
+            )));
+            assert!(!actions.iter().any(|a| matches!(a,
+                Action::ManagedHttp(action) if matches!(action.as_ref(),
+                    HttpAction::Prepare { .. } | HttpAction::Bind { .. }))));
+            assert!(reply(&mut e, 1_002., &packet).is_empty());
+        }
+        assert_eq!(errors[0], errors[1], "{status} {body}");
+    }
+}
+
+#[test]
+fn expired_rate_limit_reply_cannot_pause_a_new_read() {
+    let mut e = public();
+    let packet = released(&mut e, 1_000., 15);
+    e.handle(
+        21_000.,
+        Event::HttpResponse {
+            request: packet.id,
+            response: Response {
+                status: 429,
+                headers: "x-ratelimit-retry-after-contract: 60",
+                body: r#"{"code":10002,"msg":"limited"}"#,
+            },
+        },
+    );
+    failure(
+        &e.drain_actions().collect::<Vec<_>>(),
+        15,
+        ErrorKind::Timeout,
+    );
+    let next = released(&mut e, 21_001., 16);
+    assert!(
+        reply(&mut e, 21_002., &next)
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 16, .. })))
+    );
+}
