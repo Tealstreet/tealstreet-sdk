@@ -382,18 +382,43 @@ impl<P> Io<P> {
 
     /// A sealed physical Plan owner: clear its timer and unsent work.
     #[cfg(feature = "http-plans")]
-    pub(super) fn retire_http_owner(&mut self, owner: Owner) {
+    /// The physical owner's live requests, listed and their cleanup actions
+    /// reserved before its seal (each: clear, cancel, timer rearm).
+    pub(super) fn prepare_owner_retirement(
+        &mut self,
+        owner: Owner,
+    ) -> Result<Vec<RequestId>, crate::request_context::Error> {
+        let capacity = crate::request_context::Error::Capacity;
+        let count = self
+            .managed_http
+            .values()
+            .filter(|managed| managed.lifecycle.context().owner() == owner)
+            .count();
+        let mut requests = Vec::new();
+        requests.try_reserve_exact(count).map_err(|_| capacity)?;
+        requests.extend(
+            self.managed_http
+                .iter()
+                .filter(|(_, managed)| managed.lifecycle.context().owner() == owner)
+                .map(|(request, _)| *request),
+        );
+        let actions = count
+            .checked_mul(4)
+            .and_then(|n| n.checked_add(1))
+            .ok_or(capacity)?;
+        self.actions.try_reserve(actions).map_err(|_| capacity)?;
+        Ok(requests)
+    }
+
+    #[cfg(feature = "http-plans")]
+    /// A sealed physical Plan owner: clear its timer and the requests listed
+    /// before the seal (one already settled since then is simply skipped).
+    pub(super) fn retire_http_owner(&mut self, owner: Owner, requests: Vec<RequestId>) {
         if let Some(timer) = self.request_contexts.physical_plan_timer(owner) {
             self.timers.remove(&timer);
             self.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
             self.actions.push(Action::ClearTimer { timer });
         }
-        let requests = self
-            .managed_http
-            .iter()
-            .filter(|(_, managed)| managed.lifecycle.context().owner() == owner)
-            .map(|(request, _)| *request)
-            .collect::<Vec<_>>();
         for request in requests {
             self.discard_managed(request);
         }

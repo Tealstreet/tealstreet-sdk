@@ -20,6 +20,8 @@ pub(super) struct PreparedPlanSeal {
     pub fanout: Vec<(Result<String, VenueError>, Vec<String>)>,
     /// Reserved for exactly those observers' seals.
     pub sealed: Vec<crate::execution_group::Sealed>,
+    /// The physical owner's live requests, listed before the seal.
+    pub retired: Vec<RequestId>,
 }
 
 pub(super) fn terminal_ordinals(

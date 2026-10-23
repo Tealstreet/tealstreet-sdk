@@ -180,6 +180,7 @@ impl ContextRegistry {
             reports,
             fanout: Vec::new(),
             sealed: Vec::new(),
+            retired: Vec::new(),
         })
     }
 
@@ -935,6 +936,7 @@ impl<P> Cx<'_, P> {
                 .actions
                 .try_reserve(notices)
                 .map_err(|_| Error::Capacity)?;
+            prepared.retired = self.io.prepare_owner_retirement(plan.owner())?;
             for _ in 0..observers {
                 let mut reports = Vec::new();
                 if projection.is_err() {
@@ -959,11 +961,12 @@ impl<P> Cx<'_, P> {
     ) -> Result<(), Error> {
         let fanout = std::mem::take(&mut prepared.fanout);
         let sealed = std::mem::take(&mut prepared.sealed);
+        let retired = std::mem::take(&mut prepared.retired);
         let (owner, seal) = self.io.request_contexts.commit_plan_seal(plan, prepared);
         let Owner::Command { id, .. } = owner else {
             // The physical owner has no command: its observers take the
             // terminals and storage prepared above, moved without allocation.
-            self.finish_physical_plan(owner);
+            self.finish_physical_plan(owner, retired);
             self.seal_planned_execution(plan, fanout, sealed);
             return Ok(());
         };
