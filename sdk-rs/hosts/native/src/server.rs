@@ -353,7 +353,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
         mut inbox: mpsc::Receiver<Control>,
         mut shutdown: watch::Receiver<bool>,
     ) {
-        self.host.engine.start((self.host.clock)());
+        self.host.turn(|host| host.engine.start((host.clock)()));
         self.execute();
         let mut flush = tokio::time::interval(self.config.flush_every);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -367,9 +367,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     Some(Control::Command { client, command }) => self.command(client, command),
                     Some(Control::PollScaleChanged { client, scale, ceiling_ms }) => {
                         if self.peers.contains_key(&client) {
-                            let now = (self.host.clock)();
-                            self.host.engine.handle(now, Event::PollCeilingChanged { ceiling_ms });
-                            self.host.engine.handle(now, Event::PollScaleChanged { scale });
+                            self.host.turn(|host| {
+                                let now = (host.clock)();
+                                host.engine.handle(now, Event::PollCeilingChanged { ceiling_ms });
+                                host.engine.handle(now, Event::PollScaleChanged { scale });
+                            });
                         }
                     }
                     Some(Control::Leave(client)) => self.leave(client),
@@ -403,9 +405,14 @@ impl<V: Venue, T: Transport> Account<V, T> {
         // Snapshot and registration share this actor turn. Existing peers
         // establish the same baseline before a new peer takes its snapshot.
         self.flush();
-        let snapshot: Arc<[u8]> = self.host.engine.snapshot_frame((self.host.clock)()).into();
-        if snapshot.len() > self.config.max_frame_bytes
-            || outgoing.try_send(Outgoing::Frame(snapshot)).is_err()
+        let snapshot = self
+            .host
+            .turn(|host| Arc::<[u8]>::from(host.engine.snapshot_frame((host.clock)())));
+        self.execute();
+        if let Some(snapshot) = snapshot
+            && self.host.terminal.is_none()
+            && (snapshot.len() > self.config.max_frame_bytes
+                || outgoing.try_send(Outgoing::Frame(snapshot)).is_err())
         {
             return Err("snapshot exceeds connection limits");
         }
@@ -429,6 +436,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
     fn execute(&mut self) {
         let mut notices = Vec::new();
         self.host.execute(&mut |notice| notices.push(notice));
+        self.host
+            .report_terminal(&mut |notice| notices.push(notice));
         for notice in notices {
             match notice {
                 Notice::CommandDone { command, result } => {
@@ -571,6 +580,26 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 }
             }
         }
+        if let Some(error) = self.host.terminal.clone() {
+            // A released command may have reached the venue, even when the
+            // fatal callback's output was withheld. Settle every owned waiter
+            // once without fabricating a NotSent result or a new engine turn.
+            let pending: Vec<_> = self.pending.drain().map(|(_, pending)| pending).collect();
+            for pending in pending {
+                if let Some(client) = pending.client {
+                    let text = encode_notice(ServerNotice::Done {
+                        command: pending.original,
+                        result: None,
+                        error: Some(error.legacy_text().into()),
+                        detail: Some(&error),
+                    });
+                    self.send(
+                        client,
+                        Outgoing::Text(self.bounded_done(pending.original, text)),
+                    );
+                }
+            }
+        }
     }
 
     /// Log notices never disconnect peers: an oversized one is cut to fit, and
@@ -621,8 +650,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
     }
 
     fn flush(&mut self) {
-        if let Some(frame) = self.host.engine.take_frame((self.host.clock)()) {
-            let frame: Arc<[u8]> = frame.into();
+        let frame = self.host.turn(|host| {
+            host.engine
+                .take_frame((host.clock)())
+                .map(Arc::<[u8]>::from)
+        });
+        if let Some(Some(frame)) = frame {
             self.broadcast(Outgoing::Frame(frame));
         }
     }
@@ -785,11 +818,22 @@ impl<V: Venue, T: Transport> Account<V, T> {
 
     fn handle(&mut self, command: Command) {
         self.host
-            .engine
-            .handle((self.host.clock)(), Event::Command(command));
+            .turn(|host| host.engine.handle((host.clock)(), Event::Command(command)));
     }
 
     fn command(&mut self, client: u64, mut command: Command) {
+        if let Some(error) = self.host.terminal.clone() {
+            if let Some(command) = command_id(&mut command) {
+                let text = encode_notice(ServerNotice::Done {
+                    command: *command,
+                    result: None,
+                    error: Some(error.legacy_text().into()),
+                    detail: Some(&error),
+                });
+                self.send(client, Outgoing::Text(self.bounded_done(*command, text)));
+            }
+            return;
+        }
         if !self.subscription_allowed(client, &command) {
             self.send(
                 client,
@@ -811,10 +855,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     if *count == 1 {
                         self.handle(command);
                     } else {
-                        self.host.engine.request_book_resync(symbol);
+                        self.host
+                            .turn(|host| host.engine.request_book_resync(symbol));
                     }
                 } else {
-                    self.host.engine.request_book_resync(symbol);
+                    self.host
+                        .turn(|host| host.engine.request_book_resync(symbol));
                 }
                 return;
             }
@@ -1433,7 +1479,23 @@ mod tests {
         }
         fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
         fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
-        fn on_command(&mut self, _: &mut Cx<'_, ()>, command: Command) {
+        fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
+            if matches!(&command, Command::FetchLeverage {symbol, ..} if symbol == "fatal") {
+                cx.send(
+                    SocketId(safe_cex_engine::resource_ids::MAX_RESOURCE_ID + 1),
+                    "unsafe",
+                );
+                return;
+            }
+            if matches!(&command, Command::CancelSymbolOrders { .. }) {
+                cx.request(
+                    safe_cex_engine::Method::Post,
+                    "https://fixture/cancel".into(),
+                    vec![],
+                    None,
+                    (),
+                );
+            }
             self.0.borrow_mut().push(command);
         }
         fn book(&self, _: &str) -> Option<&Book> {
@@ -1454,10 +1516,17 @@ mod tests {
     fn event_actor(
         max_frame_bytes: usize,
     ) -> (Account<Stub, NoTransport>, Vec<mpsc::Receiver<Outgoing>>) {
+        event_actor_with(max_frame_bytes, NoTransport)
+    }
+
+    fn event_actor_with<T: Transport>(
+        max_frame_bytes: usize,
+        transport: T,
+    ) -> (Account<Stub, T>, Vec<mpsc::Receiver<Outgoing>>) {
         let mut actor = Account::new(
             Host::new(
                 safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
-                NoTransport,
+                transport,
             ),
             ServerConfig {
                 max_frame_bytes,
@@ -1540,6 +1609,138 @@ mod tests {
             Some(77.0)
         );
         assert!(receivers[0].try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn terminal_engine_failure_settles_pending_commands_and_late_joins_without_frames() {
+        struct Recorded(Rc<RefCell<Vec<safe_cex_engine::Method>>>);
+        impl Transport for Recorded {
+            fn connect(&self, _: SocketId, _: String, _: Events) -> mpsc::UnboundedSender<String> {
+                panic!("no new sockets")
+            }
+            fn request(&self, request: HttpRequest, _: Events) {
+                self.0.borrow_mut().push(request.method);
+            }
+        }
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let (mut actor, mut receivers) = event_actor_with(4096, Recorded(sent.clone()));
+        // A real physical POST precedes the resource fault. The failure must
+        // retain Unknown even though the next action batch never leaves Rust.
+        actor.command(
+            1,
+            Command::CancelSymbolOrders {
+                command: 88,
+                symbol: "BTC-USD".into(),
+            },
+        );
+        actor.execute();
+        assert_eq!(*sent.borrow(), [safe_cex_engine::Method::Post]);
+        let timer = tokio::spawn(std::future::pending::<()>());
+        actor.host.timers.insert(TimerId(80), timer.abort_handle());
+        let signing = tokio::spawn(std::future::pending::<()>());
+        actor.host.signing_tasks.insert(
+            safe_cex_engine::RequestId(81),
+            crate::managed_http::Task(signing.abort_handle()),
+        );
+        let (outgoing, mut socket) = mpsc::unbounded_channel();
+        actor.host.sockets.insert(SocketId(82), outgoing);
+        let events = actor.host.event_sender();
+        // The next callback queues an invalid resource after the POST has
+        // physically left. The common engine guard must withhold its batch.
+        actor.host.engine.handle(
+            1.,
+            Event::Command(Command::FetchLeverage {
+                command: 99,
+                symbol: "fatal".into(),
+            }),
+        );
+        actor.execute();
+        assert!(actor.host.engine.failed());
+        assert!(events.is_closed());
+        assert!(
+            actor.host.timers.is_empty()
+                && actor.host.signing_tasks.is_empty()
+                && actor.host.sockets.is_empty()
+        );
+        assert!(timer.await.unwrap_err().is_cancelled());
+        assert!(signing.await.unwrap_err().is_cancelled());
+        assert!(socket.recv().await.is_none());
+        for (index, receiver) in receivers.iter_mut().enumerate() {
+            let first = receive_notice(receiver);
+            assert_eq!(first["type"], "startupFailed");
+            assert_eq!(first["detail"]["kind"], "internal");
+            assert_eq!(first["detail"]["outcome"], "unknown");
+            let expected = if index == 0 { vec![77, 88] } else { vec![77] };
+            let mut commands = Vec::new();
+            for _ in &expected {
+                let done = receive_notice(receiver);
+                assert_eq!(done["type"], "done");
+                assert_eq!(done["detail"]["kind"], "internal");
+                assert_eq!(done["detail"]["outcome"], "unknown");
+                commands.push(done["command"].as_u64().unwrap());
+            }
+            commands.sort();
+            assert_eq!(commands, expected);
+            assert!(receiver.try_recv().is_err());
+        }
+        assert!(actor.pending.is_empty());
+        actor.execute();
+        actor.flush();
+        actor.host.dispatch(HostEvent::Timer(TimerId(80)));
+        assert!(
+            receivers
+                .iter_mut()
+                .all(|receiver| receiver.try_recv().is_err())
+        );
+        let (outgoing, mut messages) = mpsc::channel(4);
+        actor
+            .join(7, outgoing, watch::channel(false).0, false)
+            .unwrap();
+        let failure = receive_notice(&mut messages);
+        assert_eq!(failure["type"], "startupFailed");
+        assert!(
+            messages.try_recv().is_err(),
+            "dead engine cannot generate a snapshot"
+        );
+        actor.command(
+            7,
+            Command::FetchLeverage {
+                command: 55,
+                symbol: "BTC-USD".into(),
+            },
+        );
+        let done = receive_notice(&mut messages);
+        assert_eq!(done["type"], "done");
+        assert_eq!(done["command"], 55);
+        assert_eq!(done["detail"]["outcome"], "unknown");
+        assert!(actor.pending.is_empty());
+        assert_eq!(*sent.borrow(), [safe_cex_engine::Method::Post]);
+    }
+
+    #[tokio::test]
+    async fn terminal_failure_during_join_drain_withholds_the_saved_snapshot() {
+        let (mut actor, _) = event_actor(4096);
+        actor.host.engine.handle(
+            1.,
+            Event::Command(Command::FetchLeverage {
+                command: 99,
+                symbol: "fatal".into(),
+            }),
+        );
+        assert!(
+            !actor.host.engine.failed(),
+            "fault is still queued before join"
+        );
+        let (outgoing, mut messages) = mpsc::channel(4);
+        actor
+            .join(7, outgoing, watch::channel(false).0, false)
+            .unwrap();
+        assert!(actor.host.engine.failed());
+        assert_eq!(receive_notice(&mut messages)["type"], "startupFailed");
+        assert!(
+            messages.try_recv().is_err(),
+            "a saved pre-failure frame cannot escape after drain fails"
+        );
     }
 
     #[test]

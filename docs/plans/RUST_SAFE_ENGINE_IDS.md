@@ -247,3 +247,35 @@ sticky-state double and deterministic interval capture; no WASM build or load
 loop is involved. The terminal path uses the existing startupFailed envelope and
 EngineDeadError; success/diagnostic delivery remains tied to the current host,
 while genuine captured-host terminal rejections retain their original owner.
+
+
+## Native and Workers terminal checkpoint
+
+One shared native guarded-turn adapter recognizes only the engine's sticky
+resource-fatal state; unrelated panics propagate with their original payload.
+Startup, event dispatch, managed handoff, action collection and frame production
+use it. It closes ingress and cancels sockets/timers/managed routes/providers
+before one typed terminal StartupFailed. FrameServer settles original pending
+command owners Internal/Unknown exactly once, including a recorded CancelSymbol
+POST that physically preceded failure. Late ingress cannot send; dead joins
+receive only the cached failure and no snapshot. A separate queued-unsafe join
+regression prevents a saved pre-failure snapshot escaping after drain fails.
+Native standalone frame delivery owns a copy before invoking user callbacks so
+the post-return sticky-state check happens before any consumer sees the frame;
+this deliberately adds one copy per emitted standalone native frame.
+
+Workers use EngineHost's existing EngineDeadError and a private captured-lifetime
+error record. Only the matching host death clears current intervals/host/cache;
+queued old ticks cannot flush a replacement. Genuine original pending terminal
+errors keep their owner after replacement, retaining write uncertainty; old
+successes/events and departed clients stay suppressed. Snapshot death during a
+join returns one terminal notice without leaking membership or replaying it twice.
+
+Both independent native correctness/adversarial reviews and the independent
+Workers ownership review are CLEAR. All 50 native unit controls, strict native
+all-target Clippy, 32 Workers controls, 191 host controls and native workspace
+all-target compilation pass. The bans check currently reports only newer landed
+Backpack/Bitrue/KuCoin history inventory removals absent from this branch; queued
+actual-history integration is required before final bans/CI proof. No ratchet
+exception or inventory edits were added for this checkpoint. Actual matching-WASM
+98-control GREEN, final integration/CI/package proof and merge remain outstanding.

@@ -4129,3 +4129,15 @@ dispose it and require reconstruction. No partially queued callback actions or
 previously bound HTTP permit can release after that retirement. Prior-sent write
 uncertainty remains subject to the existing reconciliation contract; terminal
 engine failure never proves that a write was not sent.
+
+
+WASM resource-ID ingress rejects nonfinite, negative, fractional and unsafe
+integers before parsing a response or advancing clocks. Zero remains the shared
+public-socket identity. Custom host adapters preserve numbers above `2^32` without
+bitwise coercion. Workers retire flush intervals and notify connected clients
+through typed `startupFailed` on terminal failure. Already-owned write errors
+retain unknown-outcome/reconciliation text even across host replacement; stale
+successes and diagnostics stay suppressed. Native account streams settle owned
+waiters as Internal/Unknown once and answer later joins with the terminal notice
+without constructing a snapshot from the failed engine. Recreate the engine to
+resume work; neither adapter restarts it automatically.

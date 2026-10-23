@@ -21,7 +21,7 @@ pub use transport::{
 };
 
 use safe_cex_engine::{
-    Action, Command, Engine, Event, Notice, RequestId, SocketId, TimerId, Venue,
+    Action, Command, Engine, Event, Notice, RequestId, SocketId, TimerId, Venue, VenueError,
 };
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -81,6 +81,29 @@ pub fn production_entropy() -> safe_cex_engine::entropy::Entropy {
     safe_cex_engine::entropy::Entropy::new(Box::new(fill), Box::new(fill))
 }
 
+/// Only the engine's sticky resource failure changes a panic into a terminal
+/// host result. Venue, transport and consumer bugs retain their panic behavior.
+fn engine_turn<S, R>(
+    state: &mut S,
+    operation: impl FnOnce(&mut S) -> R,
+    failed: impl Fn(&S) -> bool,
+) -> Result<R, VenueError> {
+    fn terminal() -> VenueError {
+        VenueError::new("Engine resource identities exhausted or invalid; recreate the engine")
+            .kind(safe_cex_engine::ErrorKind::Internal)
+            .outcome(safe_cex_engine::Outcome::Unknown)
+    }
+    if failed(state) {
+        return Err(terminal());
+    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(state))) {
+        Ok(value) if !failed(state) => Ok(value),
+        Ok(_) => Err(terminal()),
+        Err(_) if failed(state) => Err(terminal()),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
 pub struct Host<V: Venue, T: Transport> {
     engine: Engine<V>,
     transport: T,
@@ -91,6 +114,8 @@ pub struct Host<V: Venue, T: Transport> {
     managed_http: managed_http::Requests,
     signing_tasks: HashMap<RequestId, managed_http::Task>,
     clock: fn() -> f64,
+    terminal: Option<VenueError>,
+    terminal_reported: bool,
 }
 
 impl<V: Venue, T: Transport> Host<V, T> {
@@ -106,6 +131,8 @@ impl<V: Venue, T: Transport> Host<V, T> {
             managed_http: Default::default(),
             signing_tasks: HashMap::new(),
             clock: now_ms,
+            terminal: None,
+            terminal_reported: false,
         }
     }
 
@@ -148,30 +175,64 @@ impl<V: Venue, T: Transport> Host<V, T> {
         mut on_frame: impl FnMut(&[u8]),
         mut on_notice: impl FnMut(Notice),
     ) -> Engine<V> {
-        self.engine.start((self.clock)());
+        self.turn(|host| host.engine.start((host.clock)()));
         self.execute(&mut on_notice);
         let mut flush = tokio::time::interval(flush_every);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
+        while self.terminal.is_none() {
             tokio::select! {
                 Some(event) = self.inbox.recv() => self.dispatch(event),
                 command = commands.recv() => match command {
-                    Some(command) => self.engine.handle((self.clock)(), Event::Command(command)),
+                    Some(command) => { self.turn(|host| host.engine.handle((host.clock)(), Event::Command(command))); },
                     None => break,
                 },
                 _ = flush.tick() => {
-                    if let Some(frame) = self.engine.take_frame((self.clock)()) {
-                        on_frame(frame);
-                    }
+                    self.frame(&mut on_frame);
                 }
             }
             self.execute(&mut on_notice);
         }
-        if let Some(frame) = self.engine.take_frame((self.clock)()) {
-            on_frame(frame);
+        if self.terminal.is_none() {
+            self.frame(&mut on_frame);
         }
         self.stop();
+        self.report_terminal(&mut on_notice);
         self.engine
+    }
+
+    fn turn<R>(&mut self, operation: impl FnOnce(&mut Self) -> R) -> Option<R> {
+        if self.terminal.is_some() {
+            return None;
+        }
+        match engine_turn(self, operation, |host| host.engine.failed()) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                self.terminal = Some(error);
+                self.stop();
+                None
+            }
+        }
+    }
+
+    fn report_terminal(&mut self, on_notice: &mut impl FnMut(Notice)) {
+        if !self.terminal_reported
+            && let Some(error) = &self.terminal
+        {
+            self.terminal_reported = true;
+            // Deliberately outside the panic classifier: consumer failures are
+            // never disguised as another engine terminal result.
+            on_notice(Notice::StartupFailed {
+                error: error.clone(),
+            });
+        }
+    }
+
+    fn frame(&mut self, on_frame: &mut impl FnMut(&[u8])) {
+        // Own the result before calling application code, outside the guard.
+        let frame = self.turn(|host| host.engine.take_frame((host.clock)()).map(Vec::from));
+        if let Some(Some(frame)) = frame {
+            on_frame(&frame);
+        }
     }
 
     fn stop(&mut self) {
@@ -185,6 +246,10 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     fn dispatch(&mut self, event: HostEvent) {
+        self.turn(|host| host.dispatch_inner(event));
+    }
+
+    fn dispatch_inner(&mut self, event: HostEvent) {
         let now = (self.clock)();
         let engine = &mut self.engine;
         match event {
@@ -280,10 +345,17 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     fn execute_batch(&mut self, on_notice: &mut impl FnMut(Notice)) -> bool {
-        self.engine.prepare_dispatch((self.clock)());
-        let actions: Vec<Action> = self.engine.drain_actions().collect();
+        let Some(actions) = self.turn(|host| {
+            host.engine.prepare_dispatch((host.clock)());
+            host.engine.drain_actions().collect::<Vec<Action>>()
+        }) else {
+            return false;
+        };
         let had_actions = !actions.is_empty();
         for action in actions {
+            if self.terminal.is_some() {
+                break;
+            }
             match action {
                 Action::WsConnect {
                     binary,
@@ -314,7 +386,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     self.sockets.remove(&socket);
                 }
                 Action::Http(request) => self.transport.request(request, self.events.clone()),
-                Action::ManagedHttp(action) => self.execute_managed_http(*action),
+                Action::ManagedHttp(action) => {
+                    self.turn(|host| host.execute_managed_http(*action));
+                }
                 Action::SignedOutbound { .. } => {
                     unreachable!("engine drain unwraps signed outbound")
                 }

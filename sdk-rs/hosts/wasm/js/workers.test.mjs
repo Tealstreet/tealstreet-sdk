@@ -844,6 +844,8 @@ test('Workers terminal commands keep their original owners after host replacemen
       const done = received.filter((message) => message.op === 'done');
       assert.deepEqual(done.map((message) => message.id).sort(), index === 0 ? [77, 88] : [77]);
       assert.ok(done.every((message) => message.error.includes('engine stopped')));
+      if (index === 0) assert.match(done.find((message) => message.id === 88).error,
+        /outcome is unknown.*Reconcile before retrying/);
       assert.equal(received.filter((message) => message.op === 'startupFailed').length, 1);
     }
   } finally { for (const client of r.clients) r.object.leave(client); }
@@ -883,5 +885,21 @@ test('Workers join snapshot death returns one terminal notice without leaking th
     assert.equal(r.object.clients.has(joined), false);
     assert.equal(r.engines[0].freed, 1);
     assert.equal(r.intervals.size, 0);
+  } finally { for (const client of [...r.object.clients]) r.object.leave(client); }
+});
+
+
+test('Workers terminal errors stay silent after their original client departs', async (t) => {
+  const r = terminalWorkers(t);
+  try {
+    await r.start();
+    const pending = r.object.receive(r.clients[0], '{"op":"command","id":77,"command":{"op":"fetchFills"}}');
+    const fatal = r.object.receive(r.clients[1], '{"op":"command","id":88,"command":{"op":"placeOrders","orders":[]}}');
+    r.object.leave(r.clients[0]);
+    await Promise.all([pending, fatal]);
+    assert.equal(r.messages[0].filter((message) => message.op === 'done').length, 0);
+    const done = r.messages[1].filter((message) => message.op === 'done');
+    assert.deepEqual(done.map((message) => message.id), [88]);
+    assert.match(done[0].error, /outcome is unknown.*Reconcile before retrying/);
   } finally { for (const client of [...r.object.clients]) r.object.leave(client); }
 });
