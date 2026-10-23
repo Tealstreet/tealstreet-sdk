@@ -587,3 +587,11 @@ so 20-second expiry cannot conceal missing retirement. Native startup/valuation,
 broker, secondary identity and socket-policy assertions retain their original
 payloads, using the shared prepared transport fixture. The real WASM boundary
 fixture explicitly supplies that same existing test transport preparation contract.
+
+## MEXC initial candle admission regressions
+
+Two separately committed original-source RED controls require initial read
+rejection to have no write outcome, no transport/signing or auth evidence, and
+exactly one typed terminal. They prove valid ID reuse after invalid time and
+continued prepare/claim/completion of an existing read after the256-owner limit.
+The nine prior candle lifecycle controls and native fixture assertions remain.
