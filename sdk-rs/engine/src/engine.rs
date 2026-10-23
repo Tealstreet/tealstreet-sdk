@@ -1541,6 +1541,8 @@ impl<P> Io<P> {
     #[cfg(feature = "order-locks")]
     fn queue_reconcile(&mut self, symbols: Option<Vec<String>>, at: f64) {
         const RECONCILE_QUEUE: usize = 64;
+        // A seal at a non-finite clock is due at the next drain.
+        let at = if at.is_finite() { at } else { 0. };
         if self.reconcile_due.len() < RECONCILE_QUEUE {
             self.reconcile_due.push((symbols, at));
             return;
@@ -2228,6 +2230,8 @@ impl<P> Cx<'_, P> {
                 .is_some_and(|error| error.outcome == Some(crate::Outcome::Unknown));
             // Every uncertain seal asks again, even for an already-uncertain
             // symbol: an earlier in-flight read may predate this write.
+            // A managed write the lock never held still reconciles: a full read.
+            let scope = scope.or_else(|| (write_sealed && unknown).then_some(None));
             if let Some(scope) = scope.filter(|_| unknown || !marked.is_empty()) {
                 // A rate limit or credential refusal must not fan out reads now.
                 let delay = match result.as_ref().err().and_then(|error| error.kind) {
@@ -2241,6 +2245,7 @@ impl<P> Cx<'_, P> {
                     ) => crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS,
                     _ => 0.,
                 };
+                let delay = delay.clamp(0., crate::startup::MAX_RATE_LIMIT_PAUSE_MS);
                 self.io.queue_reconcile(scope, self.now + delay);
             }
             self.io.active_commands.remove(&command);
@@ -2989,6 +2994,8 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
@@ -2998,6 +3005,8 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
             return;
         }
         #[cfg(feature = "order-locks")]
@@ -3005,7 +3014,12 @@ impl<V: Venue> Engine<V> {
             && self.reconcile_timer.is_some_and(|(own, _)| own == *timer)
         {
             self.reconcile_timer = None;
-            self.reconcile_uncertain(now);
+            // The full end-of-event path: deferred commands, the reconcile
+            // drain itself and shared tickers.
+            self.finish_event_scope(now);
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
             return;
         }
         if let Event::TimerFired { timer } = &event
@@ -3456,7 +3470,7 @@ impl<V: Venue> Engine<V> {
         }
         let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.io.reconcile_due)
             .into_iter()
-            .partition(|(_, at)| *at <= now);
+            .partition(|(_, at)| *at <= now || !now.is_finite());
         self.io.reconcile_due = later;
         if !due.is_empty() {
             let mut all = false;

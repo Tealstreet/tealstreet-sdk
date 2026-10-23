@@ -2759,6 +2759,49 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn unlocked_uncertain_writes_full_read_and_waits_are_bounded() {
+        // A managed write the order lock never held still reconciles in full.
+        let (mut engine, _) = start(Probe::default());
+        let (context, token, _) = mutation(&mut engine, 7, 0.);
+        let permit = bind(&mut engine, token, 1.);
+        engine.claim_http(1., permit).unwrap();
+        Cx {
+            now: 6.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .fail_context(&context, VenueError::new("lost"))
+        .unwrap();
+        engine.finish_event_scope(6.);
+        assert_eq!(engine.venue.reconciles, vec![None]);
+
+        // A venue-supplied wait is capped at the engine maximum.
+        let (mut engine, _) = start(Probe::default());
+        let (context, token, _) = mutation(&mut engine, 7, 0.);
+        let permit = bind(&mut engine, token, 1.);
+        engine.claim_http(1., permit).unwrap();
+        let huge = VenueError::new("slow down")
+            .kind(crate::ErrorKind::RateLimited)
+            .retry_after_ms(1e12);
+        Cx {
+            now: 6.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .fail_context(&context, huge)
+        .unwrap();
+        engine.finish_event_scope(6.);
+        let (_, at) = engine.reconcile_timer.unwrap();
+        assert_eq!(at, 6. + crate::startup::MAX_RATE_LIMIT_PAUSE_MS);
+
+        // A non-finite seal time is due at the next drain, never wedged.
+        engine.io.queue_reconcile(None, f64::NAN);
+        engine.finish_event_scope(7.);
+        assert_eq!(engine.venue.reconciles, vec![None]);
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn an_overflowing_reconcile_queue_never_cuts_a_wait_short() {
         let btc = || Some(vec!["BTCUSDT".to_owned()]);
         // 64 deferred entries with unequal waits, then one immediate entry.
