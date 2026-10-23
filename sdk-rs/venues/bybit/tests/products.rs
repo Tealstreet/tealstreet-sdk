@@ -1122,3 +1122,153 @@ fn unsupported_order_memory_is_separate_and_persistent_across_product_swaps() {
     }
     assert_eq!(h.logs.iter().filter(|m| m.as_str() == expected).count(), 2);
 }
+
+// Slice 4a original REDs: option commands run on the ordinary Plan path.
+
+const EXISTING_OPTION: &str = r#"{"topic":"order","data":[{"category":"option","symbol":"BTC-25DEC26-100000-C-USDT","orderId":"existing-option","orderType":"Limit","orderStatus":"New","qty":"0.2","price":"1000","side":"Buy"}]}"#;
+
+fn failed(h: &Harness, command: u32) -> safe_cex_engine::VenueError {
+    h.notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed { command: id, error } if *id == command => {
+                Some(error.clone())
+            }
+            _ => None,
+        })
+        .expect("one typed failure")
+}
+
+/// O1: an option create is one admitted Plan call with its native window.
+#[test]
+fn option_orders_run_on_the_ordinary_plan_with_a_native_window() {
+    let mut h = ready(true);
+    let mut opts = order(OPTION, 0.12);
+    opts.implied_volatility = Some(0.6);
+    opts.client_order_id = Some("option-plan".into());
+    h.command(Command::PlaceOrders {
+        command: 81,
+        orders: vec![opts],
+    });
+    let create = h.take("/v5/order/create");
+    assert_eq!(create.timeout_ms, Some(20_000), "a managed Plan call");
+    assert!(create.body.unwrap().contains("\"category\":\"option\""));
+}
+
+/// O2 (D4): independent option creates keep the accepted one's ID when a
+/// later one is refused, as ordinary batches do.
+#[test]
+fn a_partially_refused_option_batch_fails_known_partial() {
+    let mut h = ready(true);
+    let mut put = order("ETH-25DEC26-3000-P-USDT", 0.1);
+    put.client_order_id = Some("option-put".into());
+    let mut call = order(OPTION, 0.12);
+    call.client_order_id = Some("option-call".into());
+    h.command(Command::PlaceOrders {
+        command: 82,
+        orders: vec![call, put],
+    });
+    let first = h.take("/v5/order/create");
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"option-accepted","orderLinkId":"option-call"},"retExtInfo":{},"time":1}"#,
+    );
+    let second = h.take("/v5/order/create");
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"Insufficient available balance","result":{},"retExtInfo":{},"time":1}"#,
+    );
+    let error = failed(&h, 82);
+    assert_eq!(
+        error.partial.as_ref().map(|p| p.order_ids.clone()),
+        Some(vec!["option-accepted".to_owned()])
+    );
+    assert_ne!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+}
+
+/// O3: an option amend acknowledgement must name the order it amended.
+#[test]
+fn an_option_amend_acknowledging_another_order_is_unknown() {
+    let mut h = ready(true);
+    h.message("/private", EXISTING_OPTION);
+    h.command(Command::AmendOrder {
+        command: 83,
+        id: "existing-option".into(),
+        price: Some(1005.0),
+        amount: None,
+    });
+    let amend = h.take("/v5/order/amend");
+    assert!(amend.body.unwrap().contains("\"category\":\"option\""));
+    h.reply(
+        amend.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"some-other-order","orderLinkId":""},"retExtInfo":{},"time":1}"#,
+    );
+    assert_eq!(
+        failed(&h, 83).outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+}
+
+/// O4 (D2): an absent option cancels nothing locally; one fresh read decides.
+#[test]
+fn an_absent_option_cancel_fences_and_reads_instead_of_cancelling_locally() {
+    let mut h = ready(true);
+    h.message("/private", EXISTING_OPTION);
+    h.command(Command::CancelOrders {
+        command: 84,
+        ids: vec!["existing-option".into()],
+    });
+    let cancel = h.take("/v5/order/cancel-batch");
+    h.reply(
+        cancel.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"category":"option","symbol":"BTC-25DEC26-100000-C-USDT","orderId":"","orderLinkId":""}]},"retExtInfo":{"list":[{"code":110001,"msg":"order not exists or too late to cancel"}]},"time":1}"#,
+    );
+    assert_eq!(
+        h.engine.store().order("existing-option").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open,
+        "no local Cancelled transition"
+    );
+    assert!(h.has_request("/v5/order/realtime"), "one reconcile read");
+}
+
+/// O5: an option has no leverage setting, and the refusal says so.
+#[test]
+fn option_leverage_is_refused_as_an_option_setting() {
+    let mut h = ready(true);
+    h.command(Command::SetLeverage {
+        command: 85,
+        symbol: OPTION.into(),
+        leverage: 2.0,
+        side: None,
+    });
+    let error = failed(&h, 85);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert!(error.message.contains("option"), "{}", error.message);
+    assert!(!error.message.contains("spot"), "{}", error.message);
+}
+
+/// A disabled option product refuses a trade command as the account's
+/// configuration, as it does for reads.
+#[test]
+fn a_disabled_option_product_refuses_trading_as_invalid_input() {
+    let mut h = Harness::started(Options {
+        variant: Variant::Linear,
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Options::default()
+    });
+    h.command(Command::SetLeverage {
+        command: 86,
+        symbol: OPTION.into(),
+        leverage: 2.0,
+        side: None,
+    });
+    let error = failed(&h, 86);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    assert!(h.requests.iter().all(|r| !r.url.contains("/v5/position")));
+}

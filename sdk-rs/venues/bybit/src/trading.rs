@@ -359,10 +359,12 @@ impl BybitLinear {
                 | Command::SetPositionMode { command, .. } => *command,
                 _ => return None,
             };
-            return Some((
-                id,
-                Err("Bybit spot has no derivative position settings".into()),
-            ));
+            let message = if self.category == Category::Option {
+                "Bybit options have no leverage, margin or position-mode settings"
+            } else {
+                "Bybit spot has no derivative position settings"
+            };
+            return Some((id, Err(message.into())));
         }
         if self.variant.is_hyro() {
             match command {
@@ -427,7 +429,7 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if self.ordinary_command(cx.store, &command) {
+        if self.ordinary_command(&command) {
             self.start_ordinary(cx, command);
             return;
         }
