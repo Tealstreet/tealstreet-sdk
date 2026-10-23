@@ -2125,3 +2125,83 @@ PASS. Both independent source reviews and final adversarial/tests/caller-doc
 reviews are CLEAN, including the unchanged native bounded upsert and legacy
 signing-provenance seam. No local release WASM/full replay/size/timing run. Draft
 CI and actual queued shared dependencies still require fresh source-bound proof.
+
+## Explicit owned coverage for non-pageable history stubs (2026-10-23)
+
+Plan-first from requested actual landing #1792
+`8e53b1bd39e0fd03534ffa4453349390251e4585`. One small PR for Kraken Spot,
+BreakoutProp and Hyperliquid Spot. #1774 TS-freeze plan remains untouched. No
+new REST capability, endpoint, fallback, cache-backed history, native pager,
+account/signing change or managed Context claim; no guard/merge before #1789.
+
+Read-only overlap inventory checked all 24 open PRs via GitHub and their complete
+file lists (including pagination where needed). No target source/test overlap.
+#1788 owns only WOO/Crypto account/trading/account-test regions; #1785/#1786
+reporters and #1787 tokens likewise have no target files. Its author explicitly
+confirmed all three stub scopes clear; old Kraken reporter #1782 is landed.
+Shared AUDITS/QUALITY/CALLERS appendices overlap only under the standing
+incoming-first/verbatim-once rule. Retain later actual shared dependencies for
+final CI/proof; initial green artifacts are not final-proof relabeling inputs.
+
+Source scope: Kraken src/spot/trading.rs's existing Command::Query arm only;
+BreakoutProp src/history.rs's query function; Hyperliquid src/history.rs's
+self.spot branch only. Keep all surrounding trading/account/native request logic
+and Hyperliquid perpetual history byte-identical. Tests stay in existing
+kraken/tests/spot_trading.rs, breakoutprop/tests/history.rs and
+hyperliquid/tests/spot.rs. Plus pure legacy inventory prune and the four shared
+OWNED_HISTORY/AUDITS/QUALITY/CALLERS appendices. No engine API, catalog,
+capability schema, SDK/host, dependency or workflow change.
+
+Existing native facts: these three adapters perform no history read for fills,
+order history or income and immediately return []. Therefore they cannot prove
+complete absence, even if live Store rows exist. Use existing engine
+Completion/HistoryRows explicitly: create one Completion for the query, record a
+venue-specific reason with Completion.incomplete(), and finish an empty
+HistoryRows<()> through its owner. No row is staged or admitted; serialization is
+the existing array shape. The emitted Warn history.incomplete event has exactly
+fields.command and precedes CommandDone([]), including at log level Error.
+One local construction of existing primitives per adapter; no copied marker
+emitter, local completeness boolean, custom result envelope or new engine helper.
+
+This is an explicit incomplete empty result, not a validated empty native read.
+Keep [] for payload compatibility while making absence of coverage observable.
+Do not manufacture a complete state from missing credentials, public-only mode,
+unknown symbols, live WS/account caches or an empty Store. No HTTP/socket/timer,
+signing work, Store publication or native lookup is introduced by the query.
+Existing argument/admission behavior and all unrelated commands are unchanged.
+
+PublicTrades retains its exact existing refusal message but completes through
+Completion with ErrorKind::Unsupported and no added write outcome. It emits no
+result or incomplete marker. OrderByClientId retains the exact nondefinitive
+miss JSON (found:false, definitive:false), delivered through Completion in the
+stub branches with no unrelated history marker. Hyperliquid's existing earlier
+local cache hit and invalid-client/missing-user shortcuts remain unchanged;
+spot misses must never become definitive and perpetual lookup/history remains
+separate. No new numeric completion fallback or legacy HTTP site.
+
+CALLERS in the same PR must state: historical list payload remains [], but each
+unsupported fills/orders/income read now has one owned incomplete warning before
+completion; callers must correlate fields.command, gate coverage and avoid
+treating [] as authoritative absence. Public-trade errors now have Unsupported
+kind with unchanged text/no write outcome. Lookup shape and live Store/cache
+access stay separate. State behavior only (no draft/proof/merge status), and do
+not claim NX integration or closure. Native unsupported capabilities remain
+unsupported; no production-request success is inferred from a stub response.
+
+Verification plan: run existing three test binaries before source edits. Commit
+original-source assertion-RED tests for one command-owned Warn per history list,
+marker-before-Done and log-level Error retention for each adapter, typed public
+trade refusal and no marker on failure. Add compatibility controls for [] shape,
+no HTTP/socket/timer/sign work, Store/cache unchanged, nondefinitive lookup and
+consecutive command IDs never sharing warnings. Preserve existing broader
+history/lookup/settings tests; no timeout/dependency changes or new network use.
+
+Then implement only the three narrow branches, run focused engine/three-family
+native tests (four Cargo jobs/test threads), strict all-target/all-feature Clippy,
+fmt/bans/request-context checker and all negative controls, source-preservation
+and map checks. Legacy inventory may only prune the exact removed done/fail
+sites in the three files; every other full map/checker remains identical. Any
+fingerprint growth stops rather than adding a bootstrap. Independent plan review
+must be CLEAN before implementation; independent source/caller/map review before
+the draft. Corepack Yarn only, never bare/Volta yarn, npx or account-policy. No
+local release WASM/full replay/timing matrix. Keep #1796 CI watch active.
