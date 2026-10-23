@@ -127,3 +127,17 @@ private data and retains that open's queued refresh reads, preserving causal
 order rather than treating a duplicate open as a reconnect. The #1788 owner
 cleared this bounded fixture repair and requires actual reconnect transitions
 when composing its later token controls.
+
+## Independent ordering and fixture review
+
+The independent paired baseline/candidate probe passes both dynamic/reconnect
+subscription-before-HTTP controls on original 0768 and fails both on 27bc. Keep
+combined-action assertions, rather than filtering socket frames, as mandatory
+adoption gates. WOO waits for the shared socket release-order correction; no
+venue-local deferred queue or manual subscription sender replaces that boundary.
+
+The rejected-algo snapshot classification fixture must start its read after the
+known native classification, so a newer-WS fence cannot mask metadata staging.
+Establish and load the first stream, admit the classification, then use a real
+close/reconnect/new open to start the tested snapshot. Keep every original
+financial assertion and shift response times relative to the actual reconnect.

@@ -241,6 +241,7 @@ fn reconnect_replays_book_interest_and_keeps_native_seed_buffer_fences() {
     assert_ne!(next, socket);
     engine.handle(retry_at + 1., Event::WsOpened { socket: next });
     let actions: Vec<_> = engine.drain_actions().collect();
+    assert_book_subscription_before_seed(&actions, next);
     let replay: Vec<_> = actions
         .iter()
         .filter_map(|action| match action {
@@ -368,4 +369,37 @@ fn malformed_auth_retires_without_releasing_private_interests() {
         );
         assert!(frames(&mut engine, socket).is_empty());
     }
+}
+
+fn assert_book_subscription_before_seed(actions: &[Action], socket: SocketId) {
+    let subscribe = actions.iter().position(|action| matches!(action,
+        Action::WsSend { socket: owner, text } if *owner == socket && text == r#"{"event":"subscribe","topic":"PERP_BTC_USDT@orderbookupdate"}"#
+    )).expect("book subscription");
+    let seed = actions
+        .iter()
+        .position(|action| {
+            matches!(action,
+                Action::Http(request) if request.url.contains("/orderbook/")
+            )
+        })
+        .expect("book HTTP seed");
+    assert!(
+        subscribe < seed,
+        "book HTTP seed preceded subscription release: subscribe={subscribe}, seed={seed}"
+    );
+}
+
+#[test]
+fn dynamic_book_subscription_is_released_before_its_http_seed() {
+    use safe_cex_engine::Command;
+    let (mut engine, socket) = support::started();
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        40.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert_book_subscription_before_seed(&actions, socket);
 }

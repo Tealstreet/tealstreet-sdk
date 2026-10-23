@@ -861,18 +861,46 @@ fn invalid_second_page_metadata_cannot_publish_a_successful_prefix() {
 #[test]
 fn rejected_algo_snapshot_cannot_change_later_amend_classification() {
     for failed_second_page in [false, true] {
-        let (mut e, socket, mut reads, _) = start();
+        let (mut e, socket, mut reads, _) = established_stream();
         load(&mut e, &mut reads);
-        e.handle(64.0, Event::WsOpened { socket });
         ws(
             &mut e,
             socket,
             65.0,
             r#"{"topic":"algoexecutionreportv2","data":{"symbol":"PERP_BTC_USDT","algoOrderId":92,"rootAlgoOrderId":92,"algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","quantity":0.01,"triggerPrice":58000,"totalExecutedQuantity":0,"reduceOnly":true}}"#,
         );
+        e.drain_actions().for_each(drop);
+        e.handle(66., Event::WsClosed { socket, code: 1006 });
+        let (timer, retry_at) = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if (816. ..=1_066.).contains(&at_ms) => {
+                    Some((timer, at_ms))
+                }
+                _ => None,
+            })
+            .expect("private reconnect timer");
+        e.handle(retry_at, Event::TimerFired { timer });
+        let replacement = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::WsConnect {
+                    socket,
+                    channel: Some(safe_cex_engine::SocketChannel::Private),
+                    ..
+                } => Some(socket),
+                _ => None,
+            })
+            .expect("replacement private socket");
+        e.handle(
+            retry_at + 1.,
+            Event::WsOpened {
+                socket: replacement,
+            },
+        );
         let mut reads = requests(&mut e);
         let regular = take(&mut reads, "/v1/orders?");
-        response(&mut e, &regular, 80.0, &page(""));
+        response(&mut e, &regular, retry_at + 10., &page(""));
         let algo = take(&mut reads, "/v3/algo/orders?");
         let reclassified = ALGO.replace("\"algoOrderId\":43", "\"algoOrderId\":92");
         let body = if failed_second_page {
@@ -882,11 +910,11 @@ fn rejected_algo_snapshot_cannot_change_later_amend_classification() {
         } else {
             algos(&reclassified).replace("\"current_page\":1", "\"current_page\":2")
         };
-        response(&mut e, &algo, 90.0, &body);
+        response(&mut e, &algo, retry_at + 20., &body);
         if failed_second_page {
             let mut reads = requests(&mut e);
             let second = take(&mut reads, "/v3/algo/orders?");
-            response(&mut e, &second, 100.0, &algos(""));
+            response(&mut e, &second, retry_at + 30., &algos(""));
         }
         assert_eq!(
             e.store().order("92").unwrap().parent_id.as_deref(),
@@ -894,7 +922,7 @@ fn rejected_algo_snapshot_cannot_change_later_amend_classification() {
         );
         e.drain_actions().for_each(drop);
         e.handle(
-            110.0,
+            retry_at + 40.,
             Event::Command(Command::AmendOrder {
                 command: 92,
                 id: "92".into(),
