@@ -683,6 +683,7 @@ impl<V: Venue> Engine<V> {
             return true;
         }
         if managed.lifecycle.release().is_some() {
+            let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Timeout);
             self.handle_event(
                 now,
                 Event::HttpFailed {
@@ -690,6 +691,7 @@ impl<V: Venue> Engine<V> {
                     error: "HTTP request timed out",
                 },
             );
+            self.io.http_failure_kind = kind;
             self.io.discard_managed(request);
         } else {
             self.http_preparation_failed(

@@ -1394,6 +1394,9 @@ impl Polls {
 struct Io<P> {
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
+    // Typed cause of the HttpFailed being delivered: Network from the host,
+    // Timeout when the engine expires a released request at its deadline.
+    http_failure_kind: ErrorKind,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
     http_responses: crate::request_context::ReconciliationResponses,
@@ -1444,6 +1447,7 @@ impl<P> Default for Io<P> {
         Self {
             request_contexts: Default::default(),
             http_delivery: None,
+            http_failure_kind: ErrorKind::Network,
             http_responses: Default::default(),
             http_write_revision: 0,
             managed_http: HashMap::new(),
@@ -2409,6 +2413,16 @@ pub trait Venue {
         pending: Self::Pending,
         error: &str,
     );
+    /// A request that may have reached the venue failed without a response.
+    /// `error.kind` is `Timeout` for engine deadline expiry, else `Network`.
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        self.on_request_failed(cx, pending, &error.message);
+    }
     fn on_poll_scale(&mut self, _cx: &mut Cx<'_, Self::Pending>, _scale: f64) {}
     /// Revalue account-derived state after host-owned public prices change.
     fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
@@ -2939,7 +2953,7 @@ impl<V: Venue> Engine<V> {
             let _ = self.io.request_contexts.result(
                 delivery,
                 crate::request_context::WriteResult::Failed(
-                    VenueError::new(*error).kind(ErrorKind::Network),
+                    VenueError::new(*error).kind(self.io.http_failure_kind),
                 ),
             );
         }
@@ -3155,7 +3169,8 @@ impl<V: Venue> Engine<V> {
                 cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
                     cx.io.health.count(log_code::HTTP_FAILED);
-                    self.venue.on_request_failed(&mut cx, pending.value, error);
+                    let failure = VenueError::new(error).kind(cx.io.http_failure_kind);
+                    self.venue.on_http_failed(&mut cx, pending.value, failure);
                 }
             }
             Event::TimerFired { timer } => {
