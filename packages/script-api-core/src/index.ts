@@ -132,6 +132,7 @@ export {
 /** The portable `CoreAdapter` body and the host seam it is written against.
  *  A runtime supplies `HostBindings`; it does not implement `CoreAdapter`. */
 export { createCoreAdapter } from './adapter/createCoreAdapter';
+export { ScriptBatchOrderError } from './adapter/ScriptBatchOrderError';
 export { bySymbol } from './adapter/HostBindings';
 export type { HostAccount, HostBindings, HostExchange, HostWriteEvent } from './adapter/HostBindings';
 export { ScriptValidationError } from './order/ScriptValidationError';
