@@ -60,6 +60,132 @@ impl ContextRegistry {
         })
     }
 
+    /// The engine-issued Owner::Execution root for a validated group bound.
+    fn execution_root(
+        &mut self,
+        identity: u64,
+        policy: &Policy,
+        deadline: f64,
+        now: f64,
+    ) -> Result<Context, Error> {
+        self.contexts.retain(|_, old| old.deadline() > now);
+        if self.contexts.len() >= CAPACITY {
+            return Err(Error::Capacity);
+        }
+        if self.contexts.contains_key(&identity) {
+            return Err(Error::Duplicate);
+        }
+        Context::new(
+            Owner::Execution {
+                generation: identity,
+            },
+            identity,
+            Operation::Read,
+            policy.credential.clone(),
+            now,
+            deadline,
+            policy.pacing,
+        )?
+        .with_retry(policy.retry)
+    }
+
+    fn commit_root(&mut self, mut root: Context, execution: Execution) -> Context {
+        root.bind_issuer(&self.issuer);
+        self.contexts.insert(root.leg(), root.clone());
+        self.executions.roots.insert(root.leg(), execution);
+        root
+    }
+
+    /// A live background read becomes the root of a read execution. It keeps
+    /// its own publication rights; command observers receive projections only.
+    pub(in crate::engine) fn begin_background_execution(
+        &mut self,
+        identity: u64,
+        background: &Context,
+        policy: Policy,
+        window: Window,
+        now: f64,
+    ) -> Result<Context, Error> {
+        if policy.operation != Operation::Read
+            || background.operation() != Operation::Read
+            || !matches!(background.owner(), Owner::Background { .. })
+            || policy.timeout_ms == 0
+            || !now.is_finite()
+        {
+            return Err(Error::Invalid);
+        }
+        self.validate(background, now)?;
+        let deadline = background
+            .deadline()
+            .min(now + f64::from(policy.timeout_ms));
+        let root = self.execution_root(identity, &policy, deadline, now)?;
+        let (execution, _) = self.executions.groups.begin(
+            Root::Background {
+                deadline: background.deadline(),
+            },
+            Operation::Read,
+            window,
+            policy.timeout_ms,
+            now,
+        )?;
+        debug_assert_eq!(self.executions.groups.deadline(execution), Some(deadline));
+        Ok(self.commit_root(root, execution))
+    }
+
+    /// The next read of the same background root adopts owners that joined
+    /// after the previous read was released. Returns any already expired.
+    pub(in crate::engine) fn begin_successor_execution(
+        &mut self,
+        identity: u64,
+        previous: &Context,
+        background: &Context,
+        policy: Policy,
+        now: f64,
+    ) -> Result<(Context, Vec<Sealed>), Error> {
+        if policy.operation != Operation::Read
+            || !matches!(background.owner(), Owner::Background { .. })
+            || background.operation() != Operation::Read
+            || policy.timeout_ms == 0
+            || !now.is_finite()
+        {
+            return Err(Error::Invalid);
+        }
+        if !previous.issued_by(&self.issuer) {
+            return Err(Error::Revoked);
+        }
+        let Some(old) = self
+            .execution_of(previous)
+            .filter(|old| self.executions.groups.deadline(*old).is_some())
+        else {
+            // Nothing queued survives a retired read: begin afresh.
+            let root = self.begin_background_execution(
+                identity,
+                background,
+                policy,
+                Window::BeforeRelease,
+                now,
+            )?;
+            return Ok((root, Vec::new()));
+        };
+        self.validate(background, now)?;
+        let deadline = background
+            .deadline()
+            .min(now + f64::from(policy.timeout_ms));
+        let root = self.execution_root(identity, &policy, deadline, now)?;
+        let (execution, sealed) = self.executions.groups.begin_successor(
+            old,
+            background.deadline(),
+            policy.timeout_ms,
+            now,
+        )?;
+        let root = self.commit_root(root, execution);
+        let groups = &self.executions.groups;
+        self.executions
+            .roots
+            .retain(|_, execution| groups.deadline(*execution).is_some());
+        Ok((root, sealed))
+    }
+
     pub(in crate::engine) fn begin_execution(
         &mut self,
         identity: u64,
@@ -74,27 +200,9 @@ impl ContextRegistry {
             return Err(Error::Invalid);
         }
         let member = self.observer_member(founder, key, now)?;
-        self.contexts.retain(|_, old| old.deadline() > now);
-        if self.contexts.len() >= CAPACITY {
-            return Err(Error::Capacity);
-        }
-        if self.contexts.contains_key(&identity) {
-            return Err(Error::Duplicate);
-        }
         // Validate the root before committing any group state.
         let deadline = founder.deadline().min(now + f64::from(policy.timeout_ms));
-        let mut root = Context::new(
-            Owner::Execution {
-                generation: identity,
-            },
-            identity,
-            Operation::Read,
-            policy.credential,
-            now,
-            deadline,
-            policy.pacing,
-        )?
-        .with_retry(policy.retry)?;
+        let root = self.execution_root(identity, &policy, deadline, now)?;
         let command = member.command;
         let (execution, observer) = self.executions.groups.begin(
             Root::Command(member),
@@ -104,9 +212,7 @@ impl ContextRegistry {
             now,
         )?;
         debug_assert_eq!(self.executions.groups.deadline(execution), Some(deadline));
-        root.bind_issuer(&self.issuer);
-        self.contexts.insert(identity, root.clone());
-        self.executions.roots.insert(identity, execution);
+        let root = self.commit_root(root, execution);
         self.executions
             .observers
             .insert(command, observer.expect("command-rooted execution"));

@@ -35,8 +35,6 @@ pub(crate) struct Member {
 pub(crate) enum Root {
     Command(Member),
     /// An existing background read Context keeps its own publication rights.
-    #[cfg_attr(not(test), allow(dead_code))]
-    // Background roots and writes: Bitrue/Hyro phases.
     Background {
         deadline: f64,
     },
@@ -264,7 +262,6 @@ impl Groups {
     }
 
     /// The next read of the same background root adopts its queued joiners.
-    #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
     pub(crate) fn begin_successor(
         &mut self,
         previous: Execution,
