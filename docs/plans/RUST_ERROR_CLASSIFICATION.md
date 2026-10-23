@@ -103,8 +103,9 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
       never produce credential evidence, even with auth-looking codes such as
       Crypto.com 40101.
     - `account_auth_outcome` gains a `credentialed: bool` argument. The engine
-      fills it from the delivery Context on managed reads; on legacy reads it comes
-      from the venue's existing pending credential slot. `auth_outcome(table,
+      fills it from the delivery Context on managed reads, and on legacy reads from
+      its own per-request credential record (`PendingHttp.auth`). The venue never
+      supplies it. `auth_outcome(table,
       credentialed, native)` returns `None` whenever `credentialed` is false.
 
 `kind` comes from the verdict. `retryAfterMs` is set only when a Retry-After header
@@ -121,7 +122,7 @@ uncertainty, and the Orderly −1007 gap (#24). It reuses the existing
 order-lock/reconcile fence. This needs coordinating with codex-uufub4 and is
 scheduled as phase 2b. Design sketch: on an `unknown` mutation seal the engine
 already keeps the order-lock fence (`finish_command` skips `managed_resolved`).
-It will additionally call one new hook, `Venue::reconcile_uncertain(symbol)`,
+It will additionally call one new hook, `Venue::reconcile_uncertain(symbols)`, where `symbols` is a list or `None` for a full read (cancel-all, multi-symbol commands),
 once per seal, after the rule 5 deferral. The venue implements only the read. A
 fresh read that `orders_reconciled` accepts clears the fence. The detailed design
 is reviewed with codex-uufub4 before phase 2b.
