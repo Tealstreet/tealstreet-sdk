@@ -36,8 +36,10 @@ or private-diagnostic exemption belongs in this PR.
    The arithmetic mean of the two normalized ratios must be <=1 for every CPU
    objective. Never select the better run, mix metrics between runners, average
    mismatched objective categories or ignore non-CPU failures. No third attempt.
-4. The final required suite check certifies only an ordinary strict PASS or a
-   fully verified two-run decision. Missing collectors, missing expected second
+4. The final required suite check accepts an ordinary strict PASS, an existing
+   declared diagnostic result accepted unchanged by the strict manifest policy,
+   or a fully verified two-run CPU decision. Declared public/private FAIL reports
+   remain FAIL and never receive correctness rescue or CPU averaging. Missing collectors, missing expected second
    runs, skipped/failed jobs, rerun ambiguity, invalid uploads and incomplete
    cases fail closed. Preserve existing required check names and every workload.
    Existing private diagnostics remain strict, declared diagnostic results.
