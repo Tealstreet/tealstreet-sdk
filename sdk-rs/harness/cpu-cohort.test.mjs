@@ -124,6 +124,93 @@ test('artifact CDN receives no token; immutable original bytes retained', async 
   assert.deepEqual(reader.snapshots().logs[0].raw, raw);
 });
 
+const socketClosure = () => new TypeError('fetch failed', { cause: { code: 'UND_ERR_SOCKET' } });
+
+test('immutable binary read recovers one socket closure and caches only complete bytes', async () => {
+  for (const failBody of [false, true]) {
+    const calls = [], raw = Buffer.from('original immutable evidence');
+    const reader = createGithubReader({ repository: 'org/repo', fetch: async (url, options) => {
+      calls.push({ url, options });
+      if (calls.length === 1) {
+        if (!failBody) throw socketClosure();
+        return { status: 200, arrayBuffer: async () => { throw socketClosure(); } };
+      }
+      return new Response(raw);
+    } });
+    assert.deepEqual(await reader.getArtifactBytes(700), raw);
+    assert.deepEqual(await reader.getArtifactBytes(700), raw);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[0], calls[1]);
+    assert.equal(reader.snapshots().responses.length, 1);
+    assert.deepEqual(reader.snapshots().responses[0].raw, raw);
+  }
+});
+
+test('immutable binary closure retry fails closed on exhaustion and never retries HTTP refusal', async () => {
+  let calls = 0;
+  const permanent = createGithubReader({ repository: 'org/repo', fetch: async () => { calls++; throw socketClosure(); } });
+  await assert.rejects(permanent.getArtifactBytes(700), /fetch failed/);
+  assert.equal(calls, 2);
+  assert.equal(permanent.snapshots().responses.length, 0);
+  for (const status of [403, 404, 429, 503]) {
+    calls = 0;
+    const refused = createGithubReader({ repository: 'org/repo', fetch: async () => { calls++; return new Response('refused', { status }); } });
+    await assert.rejects(refused.getArtifactBytes(700), error => error.message === `CPU cohort: GitHub evidence unavailable (${status})`);
+    assert.equal(calls, 1);
+  }
+});
+
+test('metadata and active-job log socket failures are never retried', async () => {
+  const calls = [];
+  const reader = createGithubReader({ repository: 'org/repo', fetch: async url => {
+    calls.push(url);
+    if (url.endsWith('actions/jobs/5')) return jsonResponse({ id: 5, status: 'in_progress', conclusion: null });
+    throw socketClosure();
+  } });
+  await assert.rejects(reader.getRun(1000), /fetch failed/);
+  assert.equal(calls.length, 1);
+  await reader.getJob(5);
+  await assert.rejects(reader.getLog(5), /fetch failed/);
+  assert.equal(calls.filter(url => url.endsWith('actions/jobs/5/logs')).length, 1);
+});
+
+test('only a completed physical log may recover one socket closure', async () => {
+  let logCalls = 0;
+  const raw = Buffer.from('original completed physical log');
+  const reader = createGithubReader({ repository: 'org/repo', fetch: async url => {
+    if (url.endsWith('actions/jobs/5')) return jsonResponse({ id: 5, status: 'completed', conclusion: 'success', completed_at: at(29) });
+    logCalls++;
+    if (logCalls === 1) throw socketClosure();
+    return new Response(raw);
+  } });
+  await reader.getJob(5);
+  assert.deepEqual(await reader.getLog(5), raw);
+  assert.deepEqual(await reader.getLog(5), raw);
+  assert.equal(logCalls, 2);
+  let calls = 0;
+  const otherError = createGithubReader({ repository: 'org/repo', fetch: async () => { calls++; throw new TypeError('different failure', { cause: { code: 'OTHER' } }); } });
+  await assert.rejects(otherError.getArtifactBytes(700), /different failure/);
+  assert.equal(calls, 1);
+});
+
+test('immutable CDN recovery repeats the same authority and never forwards its credential', async () => {
+  const calls = [], raw = Buffer.from('original ZIP');
+  const reader = createGithubReader({ repository: 'org/repo', token: 'fixture-token', fetch: async (url, options) => {
+    calls.push({ url, options });
+    if (url.startsWith('https://api.github.com/')) return new Response(null, { status: 302, headers: { location: 'https://fixture.blob.core.windows.net/archive' } });
+    if (calls.length === 2) throw socketClosure();
+    return new Response(raw);
+  } });
+  assert.deepEqual(await reader.getArtifactBytes(700), raw);
+  assert.equal(calls.length, 4);
+  assert.deepEqual(calls[0], calls[2]);
+  for (const index of [1, 3]) {
+    assert.equal(calls[index].options.headers, undefined);
+    assert.equal(calls[index].options.redirect, 'error');
+  }
+  assert.equal(reader.snapshots().responses.length, 1);
+});
+
 test('artifact execution wrapper fixes first/second/plan/final job and upload name pairs', () => {
   for (const [jobName, artifactName, stepName] of [
     ['Rust / replay measurement (bitget)', 'cpu-cohort-bitget', CPU_COHORT_STEPS.first],
