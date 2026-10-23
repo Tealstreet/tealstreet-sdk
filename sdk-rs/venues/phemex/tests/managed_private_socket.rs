@@ -299,3 +299,54 @@ fn malformed_snapshot_cannot_discharge_native_snapshot_deadline() {
     h.advance(NOW + 20_000.);
     assert_eq!(h.closed, [socket]);
 }
+
+#[test]
+fn positions_or_accounts_only_snapshot_does_not_complete_orders_snapshot_barrier() {
+    for body in [
+        r#"{"type":"snapshot","sequence":1,"positions_p":[]}"#,
+        r#"{"type":"snapshot","sequence":1,"accounts_p":[]}"#,
+    ] {
+        let mut h = Harness::new();
+        let socket = h.socket();
+        h.advance(NOW + 4_000.);
+        h.open();
+        h.message(AUTHED);
+        h.message(body);
+        for delta in [8_000., 12_000., 16_000., 19_999.] {
+            h.advance(NOW + delta);
+            h.message(PONG);
+        }
+        assert!(h.closed.is_empty());
+        h.advance(NOW + 20_000.);
+        assert_eq!(
+            h.closed,
+            [socket],
+            "non-orders snapshot cannot discharge the native barrier: {body}"
+        );
+    }
+}
+
+#[test]
+fn accepted_revision_conflicted_orders_snapshot_preserves_newer_order_and_completes_barrier() {
+    let mut h = Harness::new();
+    h.advance(NOW + 4_000.);
+    h.open();
+    h.message(AUTHED);
+    h.message(&snapshot(1).replace("snapshot", "incremental"));
+    assert!(h.e.store().order("one").is_some());
+    h.now = NOW + 4_001.;
+    h.message(r#"{"type":"snapshot","sequence":2,"orders_p":[]}"#);
+    assert!(
+        h.e.store().order("one").is_some(),
+        "accepted conflicting snapshot preserves the newer native order"
+    );
+    for delta in [8_000., 12_000., 16_000., 20_000., 24_000.] {
+        h.advance(NOW + delta);
+        h.message(PONG);
+    }
+    assert!(
+        h.closed.is_empty(),
+        "native accepted orders snapshot ends the bound despite revision conflict"
+    );
+    assert_eq!(h.e.store().order("one").unwrap().price, 69000.);
+}

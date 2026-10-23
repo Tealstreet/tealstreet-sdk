@@ -53,8 +53,10 @@ startup policy or an HTTP fallback. The credential/signing recipe stays exact.
 
 The 20s snapshot bound is measured from CONNECT, including time before open.
 Auth ACK, pong and incremental data do not finish or renew this bound. Only
-an AOP snapshot accepted by the existing account row/sequence/revision checks
-ends it. A malformed/rejected snapshot cannot end the bound or gain publication
+the accepted orders_p snapshot branch in account.rs (original1074-1079)
+ends it. Positions/accounts-only snapshots do not. An accepted orders snapshot
+with safe_snapshot=false from a newer order_revision still ends the barrier
+while preserving newer financial state; revision equality is not required. A malformed/rejected snapshot cannot end the bound or gain publication
 authority. Keep account REST clocks, all financial state and native staged
 snapshot/fill/terminal proofs exact. Current accepted snapshots and later valid
 increments retain their financial results; stale/expired epochs cannot publish.
@@ -155,3 +157,14 @@ independent login and snapshot facts; exact current-message epoch custody
 discharges the barrier only after native validation, with equality expiry
 before publication. Stale/borrowed/duplicate completion is inert; pongs remain
 independent liveness. Ownership/API ruling is requested before source.
+
+## Native completion-hook precision controls
+
+Bounded REST-owner review identified the exact native orders_p snapshot hook;
+the plan now names it instead of treating every AOP snapshot as completion.
+Two additional real-engine working controls run on the SAME native861462
+archive: positions/accounts-only snapshots retain connect-origin expiry; an
+accepted revision-conflicted empty orders snapshot preserves the newer order
+and ends the barrier, allowing pongs/current state beyond connect+20s.
+Expanded receipt:12 executed,6 original assertion RED,6 working GREEN,0ignored.
+The original ten-control receipt remains identifiable at81fc6001a6b.
