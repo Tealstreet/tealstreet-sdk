@@ -56,8 +56,11 @@ cx.done_mutation_plan_after_data(&plan, &slot, &context, result)
 ```
 
 The old `admit_plan` is equivalent to an empty terminal declaration list and
-keeps its source/behavior compatibility. Both entry points call the same
-internal admission transaction. A terminal declaration never grants a Context,
+keeps its source/behavior compatibility. Both entry points construct the SAME internal admission declaration
+`{ steps, policy, terminals }` and call one internal admission transaction.
+`begin_planned_execution` must pass that same declaration through its one atomic
+Preflight/Plan/execution/founder transition; it cannot add terminals afterward
+or call a separate constructor. A terminal declaration never grants a Context,
 retry, ID, signing operation or completion by itself.
 
 For the first implementation, a terminal anchor is one top-level serial step
@@ -88,7 +91,10 @@ Before any mutation, the operation must establish all of the following:
    only issued/queued/selected/in-flight call. Every call retired by this
    terminal is still unissued, including its unselected fallback descendants.
    A prepared-but-unreleased suffix still counts as issued and blocks early
-   terminal; it is never treated as a harmless no-op.
+   terminal; it is never treated as a harmless no-op. A declared reconciliation
+   continuation over any earlier unproven mutation also counts as live prior
+   work until it settles. Its read or resend grant cannot be discarded as an
+   unissued suffix, even if no physical read has yet been selected.
 4. The anchor has a journal fact accepted by existing housekeeping rules.
    The adapter must record native success/refusal/uncertainty through the
    classifier first. Structural terminal selection never manufactures an
@@ -97,7 +103,13 @@ Before any mutation, the operation must establish all of the following:
    `plan_seal`/CommandWrites projection used by ordinary completion. Any
    recoverable validation, allocation or evidence-budget refusal leaves Plan,
    journal, reservations, actions, timers and IDs unchanged. Once committed,
-   settlement/retirement is a single no-fail terminal transaction.
+   settlement/retirement is a single no-fail terminal transaction. The parent
+   `plan_seal` is not already a pure preparation primitive: it seals the journal
+   and then allocates report collection. Refactor that central boundary into
+   shared checked preparation and commit before adding this operation. Prepare
+   all report storage and the projection before mutating the journal's sealed
+   flag. A private synchronous prepared result is bound to the exact owner,
+   generation and terminal custody; it is not a new public bearer capability.
 
 The successful transaction settles the anchor, retires the unissued suffix and
 its reserved resources exactly once, invalidates future slot/readiness access,
@@ -128,10 +140,15 @@ unresolved ledger facts exactly once at seal/retirement; dropping an unissued
 suffix cannot drop an unresolved earlier fact or restore a consumed grant.
 
 A founder/observer cannot gain new completion rights from the declaration.
-The shared execution seals once and existing `finish_command_as` projects for
-each observer. Owner review must settle the internal hook boundary before the
-conditional operation is exposed to execution Plans. No new observer API or
-cross-owner settlement cast is introduced here.
+The execution hook belongs inside the ONE central seal/retirement path reached
+by `done_plan`, `fail_plan`, expiry and conditional completion, not in the public
+`done_plan` wrapper. That hook seals the execution once and projects through
+existing `finish_command_as` for every observer. Conditional completion never
+calls `finish_command` or owner cleanup directly. Successful suffix retirement
+releases reservations; it does not emit the per-slot pre-send denial used when
+the final observer leaves. All observers see the one sealed journal projection.
+Owner review must settle the internal hook boundary before execution Plans are
+exposed. No new observer API or cross-owner settlement cast is introduced here.
 
 ## Original REDs and controls
 
@@ -153,9 +170,17 @@ Negative controls independently snapshot state/IDs/actions before the attempt:
 undeclared/wrong anchor, another Plan/slot/owner/generation/attempt, cross-engine
 handle, wrong operation, absent/failed/late/expired/nonfinite delivery, replay
 after settlement, parallel anchor, issued/prepared/in-flight suffix, live sibling,
-missing anchor fact, unresolved/refused prior fact, and capacity/projection
-refusal. Refusal must not partially settle, release credits or publish Store
-changes. Late/duplicate DATA and old readiness/timer tokens cannot resurrect the
+missing anchor fact, live unresolved reconciliation continuation, and
+capacity/projection-preparation refusal. Structural/custody refusal must not
+partially settle, release credits or publish Store changes.
+
+A VALID conditional terminal whose earlier journal contains unresolved,
+refused or partial facts is a different control: the terminal transaction
+commits once, projects command failure through the same central seal, retires
+once and preserves IDs/Unknown/consumed grants. It must NOT return a structural
+refusal and leave the owner stranded. This distinguishes a still-live
+reconciliation continuation (blocks retirement) from a settled structural call
+whose journal fact remains uncertain (must project terminal Unknown). Late/duplicate DATA and old readiness/timer tokens cannot resurrect the
 retired suffix or finalize a reused command. A mutation may never call the
 Read-only early-terminal API as a fallback.
 
@@ -182,3 +207,22 @@ appendix is added with runtime implementation, not before.
 Architecture gate: this is the shared engine choke point for declared mutation
 terminal retirement, not a per-venue completion or outcome policy. No merge
 without explicit overseer GO and the PR's own window/green evidence.
+
+
+## Independent plan audit, 2026-10-23
+
+Source/adversarial, caller and full-map audits inspected both child commits
+against exact reviewed #1873. They confirmed the shared architecture and
+original RED feasibility; no builds or runtime readiness were inferred. The
+conditional plan's one finding was contradictory test wording for prior
+unresolved/refused facts. Corrected above: custody/structural rejection is
+unchanged-state refusal; a valid terminal with unsuccessful journal projection
+is one committed failure/retirement retaining IDs and uncertainty. The source
+audit also identified that the parent seal mutates before report allocation;
+the shared preparation/commit refactor is now an explicit prerequisite.
+
+claude-fe7lgm's C1-C4 composition conditions are explicit above: one central
+seal hook, one admission declaration including terminals, live reconciliation
+continuations block early retirement, and successful suffix release is not a
+per-slot pre-send denial. These are plan requirements pending source controls,
+not a claim that the composed journal is already available.
