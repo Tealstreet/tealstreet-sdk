@@ -7,7 +7,6 @@ use std::collections::HashMap;
 
 pub(crate) const MAX_OBSERVERS: usize = 64;
 const MAX_MEMBERS: usize = 256;
-const MAX_EXECUTIONS: usize = 256;
 const MAX_PROGRESS: usize = 256;
 const MAX_KEY: usize = 128;
 
@@ -68,6 +67,8 @@ pub(crate) struct Sealed {
 
 #[derive(Clone)]
 struct Entry {
+    /// The execution the owner joined; kept across successor adoption.
+    token: Execution,
     command: CommandId,
     generation: u64,
     deadline: f64,
@@ -85,6 +86,8 @@ struct Group {
     observers: Vec<Entry>,
     pending: Vec<Entry>,
     progress: Vec<OrderIdentityReceipt>,
+    /// Retained progress overflowed, so a late joiner could miss identities.
+    truncated: bool,
 }
 
 #[derive(Default)]
@@ -95,14 +98,15 @@ pub(crate) struct Groups {
 }
 
 impl Entry {
-    fn new(member: Member, cap: f64, now: f64) -> Result<Self, Error> {
+    fn new(member: Member, token: Execution, cap: f64, now: f64) -> Result<Self, Error> {
         if !now.is_finite() || !member.deadline.is_finite() || member.key.len() > MAX_KEY {
             return Err(Error::Invalid);
         }
-        if member.deadline <= now {
+        if member.deadline.min(cap) <= now {
             return Err(Error::TimedOut);
         }
         Ok(Self {
+            token,
             command: member.command,
             generation: member.generation,
             deadline: member.deadline.min(cap),
@@ -116,12 +120,13 @@ impl Group {
         self.observers.len() + self.pending.len()
     }
 
-    /// Message and kind come from the caller. A released write's outcome
-    /// belongs to the shared journal alone.
-    fn seal(&self, entry: Entry, result: Result<String, VenueError>) -> Sealed {
+    /// Message and kind come from the caller. A write outcome belongs to the
+    /// shared journal unless this seal proves nothing was or will be sent.
+    fn seal(&self, entry: Entry, result: Result<String, VenueError>, settled: bool) -> Sealed {
         let journal = self.operation == Operation::Mutation;
+        let unsent = settled && !self.released && self.legs == 0;
         let result = result.map_err(|mut error| {
-            if journal && self.released {
+            if journal && !unsent {
                 error.outcome = None;
             }
             error
@@ -207,7 +212,8 @@ impl Groups {
                 if member.operation != operation {
                     return Err(Error::Invalid);
                 }
-                let entry = Entry::new(member.clone(), bound, now)?;
+                // The token is fixed below once the identity is issued.
+                let entry = Entry::new(member.clone(), Execution(0), bound, now)?;
                 self.admit(&member)?;
                 (entry.deadline, Some(entry), false)
             }
@@ -221,11 +227,12 @@ impl Groups {
                 (deadline.min(bound), None, true)
             }
         };
-        if self.groups.len() >= MAX_EXECUTIONS {
-            return Err(Error::Capacity);
-        }
         let id = self.issue()?;
         let execution = Execution(id);
+        let founder = founder.map(|entry| Entry {
+            token: execution,
+            ..entry
+        });
         let observer = founder.as_ref().map(|entry| {
             self.members.insert(entry.command, (id, entry.generation));
             Observer {
@@ -247,6 +254,7 @@ impl Groups {
                 observers: founder.into_iter().collect(),
                 pending: Vec::new(),
                 progress: Vec::new(),
+                truncated: false,
             },
         );
         Ok((execution, observer))
@@ -264,6 +272,9 @@ impl Groups {
         if !old.background {
             return Err(Error::Invalid);
         }
+        if !old.released {
+            return Err(Error::State);
+        }
         let window = old.window;
         let (execution, _) = self.begin(
             Root::Background {
@@ -280,10 +291,7 @@ impl Groups {
         let mut sealed = Vec::new();
         for mut entry in queued {
             if entry.deadline <= now {
-                sealed.push(group.seal(
-                    entry,
-                    Err(VenueError::new("Execution deadline expired").kind(ErrorKind::Timeout)),
-                ));
+                sealed.push(group.seal(entry, Err(group.timeout()), false));
                 continue;
             }
             entry.deadline = entry.deadline.min(group.deadline);
@@ -328,10 +336,10 @@ impl Groups {
         } else {
             group.deadline
         };
-        let entry = Entry::new(member.clone(), cap, now)?;
+        let entry = Entry::new(member.clone(), execution, cap, now)?;
         self.admit(&member)?;
         let group = self.groups.get_mut(&execution.0).expect("open above");
-        if group.live() >= MAX_OBSERVERS {
+        if group.live() >= MAX_OBSERVERS || (!pending && group.truncated) {
             return Err(Error::Capacity);
         }
         self.members
@@ -402,6 +410,9 @@ impl Groups {
     }
 
     pub(crate) fn expire(&mut self, execution: Execution, now: f64) -> Vec<Sealed> {
+        if !now.is_finite() {
+            return Vec::new();
+        }
         let Some(group) = self.groups.get_mut(&execution.0) else {
             return Vec::new();
         };
@@ -418,22 +429,15 @@ impl Groups {
             .into_iter()
             .partition(|entry| entry.deadline <= now);
         group.pending = kept;
-        if closes {
+        if closes || (!group.background && group.observers.is_empty()) {
             group.terminal = true;
         }
+        let settled = group.terminal;
         for entry in expired {
-            sealed.push(group.seal(entry, Err(timeout.clone())));
+            sealed.push(group.seal(entry, Err(timeout.clone()), settled));
         }
         for entry in expired_pending {
-            sealed.push(Sealed {
-                command: entry.command,
-                generation: entry.generation,
-                result: Err(VenueError::new("Execution deadline expired").kind(ErrorKind::Timeout)),
-                journal: false,
-            });
-        }
-        if !group.background && group.observers.is_empty() && group.legs == 0 {
-            group.terminal = true;
+            sealed.push(group.seal(entry, Err(timeout.clone()), false));
         }
         self.release_members(&sealed);
         self.retire(execution.0);
@@ -455,26 +459,19 @@ impl Groups {
         let found = |entries: &mut Vec<Entry>| {
             entries
                 .iter()
-                .position(|entry| entry.command == observer.command)
+                .position(|entry| {
+                    entry.command == observer.command && entry.token == observer.execution
+                })
                 .map(|at| entries.remove(at))
         };
         let (entry, queued) = match found(&mut group.observers) {
             Some(entry) => (entry, false),
             None => (found(&mut group.pending).ok_or(Error::Revoked)?, true),
         };
-        let sealed = if queued {
-            Sealed {
-                command: entry.command,
-                generation: entry.generation,
-                result: Err(error),
-                journal: false,
-            }
-        } else {
-            group.seal(entry, Err(error))
-        };
-        if !group.background && group.observers.is_empty() {
+        if !queued && !group.background && group.observers.is_empty() {
             group.terminal = true;
         }
+        let sealed = group.seal(entry, Err(error), !queued && group.terminal);
         self.members.remove(&observer.command);
         self.retire(id);
         Ok(sealed)
@@ -492,7 +489,7 @@ impl Groups {
             .into_iter()
             .map(|entry| {
                 let result = project(&entry.key);
-                group.seal(entry, result)
+                group.seal(entry, result, true)
             })
             .collect();
         self.release_members(&sealed);
@@ -514,10 +511,12 @@ impl Groups {
         receipts: Vec<OrderIdentityReceipt>,
     ) -> Result<Vec<(CommandId, u64, Vec<OrderIdentityReceipt>)>, Error> {
         let group = self.open(execution)?;
-        if group.progress.len() + receipts.len() > MAX_PROGRESS {
-            return Err(Error::Capacity);
+        // Live owners always receive identities; only late-join replay is bounded.
+        if group.truncated || group.progress.len() + receipts.len() > MAX_PROGRESS {
+            group.truncated = true;
+        } else {
+            group.progress.extend(receipts.iter().cloned());
         }
-        group.progress.extend(receipts.iter().cloned());
         Ok(group
             .observers
             .iter()

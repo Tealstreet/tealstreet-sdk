@@ -265,31 +265,6 @@ fn owners_of(fanned: &[(CommandId, u64, Vec<OrderIdentityReceipt>)]) -> Vec<(Com
 }
 
 #[test]
-fn progress_capacity_refusal_is_atomic() {
-    let mut groups = Groups::default();
-    let (execution, _) = groups
-        .begin(
-            Root::Command(write(1, 10, 900.)),
-            Operation::Mutation,
-            Window::UntilTerminal,
-            1_000,
-            0.,
-        )
-        .unwrap();
-    let many = (0..MAX_PROGRESS).map(|i| receipt(&i.to_string())).collect();
-    groups.progress(execution, many).unwrap();
-    assert_eq!(
-        groups.progress(execution, vec![receipt("over")]),
-        Err(Error::Capacity)
-    );
-    let (_, joined) = groups.join(execution, write(2, 20, 900.), 1.).unwrap();
-    let Joined::Live(replay) = joined else {
-        panic!("live join")
-    };
-    assert_eq!(replay.len(), MAX_PROGRESS);
-}
-
-#[test]
 fn reused_command_id_cannot_borrow_an_old_observer_generation() {
     let mut groups = Groups::default();
     let (first, old) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
@@ -519,4 +494,238 @@ fn leg_accounting_rejects_unissued_or_unknown_legs() {
     assert_eq!(groups.leg_retired(execution), Err(Error::State));
     groups.complete(execution, |_| Ok("ok".into())).unwrap();
     assert_eq!(groups.leg_issued(execution), Err(Error::Revoked));
+}
+
+fn write_execution(groups: &mut Groups, founder: Member) -> (Execution, Observer) {
+    let (execution, observer) = groups
+        .begin(
+            Root::Command(founder),
+            Operation::Mutation,
+            Window::UntilTerminal,
+            1_000,
+            0.,
+        )
+        .unwrap();
+    (execution, observer.unwrap())
+}
+
+fn background(groups: &mut Groups, deadline: f64, now: f64) -> Execution {
+    groups
+        .begin(
+            Root::Background { deadline },
+            Operation::Read,
+            Window::BeforeRelease,
+            1_000,
+            now,
+        )
+        .unwrap()
+        .0
+}
+
+#[test]
+fn progress_beyond_retained_capacity_reaches_live_observers_and_closes_late_joins() {
+    let mut groups = Groups::default();
+    let (execution, _) = write_execution(&mut groups, write(1, 10, 900.));
+    let many = (0..MAX_PROGRESS).map(|i| receipt(&i.to_string())).collect();
+    groups.progress(execution, many).unwrap();
+    let fanned = groups.progress(execution, vec![receipt("over")]).unwrap();
+    assert_eq!(fanned, [(1, 10, vec![receipt("over")])]);
+    assert_eq!(
+        groups.join(execution, write(2, 20, 900.), 1.),
+        Err(Error::Capacity)
+    );
+    assert_eq!(groups.member(2), None);
+}
+
+#[test]
+fn expired_last_observer_with_a_leg_in_flight_cannot_be_revived() {
+    let mut groups = Groups::default();
+    let (execution, founder) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
+    groups.join(execution, member(2, 20, 80., "b"), 1.).unwrap();
+    groups.leg_issued(execution).unwrap();
+    groups
+        .detach(founder, VenueError::new("cancelled"))
+        .unwrap();
+    assert_eq!(owners(&groups.expire(execution, 80.)), [(2, 20)]);
+    assert!(!groups.may_publish(execution));
+    assert_eq!(
+        groups.join(execution, member(3, 30, 900., "c"), 81.),
+        Err(Error::Revoked)
+    );
+    assert!(!groups.may_publish(execution));
+    groups.leg_retired(execution).unwrap();
+    assert_eq!(groups.deadline(execution), None);
+}
+
+#[test]
+fn a_stale_token_cannot_detach_a_newer_membership_of_the_same_generation() {
+    let mut groups = Groups::default();
+    let (first, old) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
+    groups.complete(first, |_| Ok("ok".into())).unwrap();
+    let (second, _) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
+    assert_eq!(
+        groups.detach(old, VenueError::new("old")),
+        Err(Error::Revoked)
+    );
+    assert_eq!(groups.member(1), Some((second, 10)));
+    assert!(groups.may_publish(second));
+}
+
+#[test]
+fn a_mutation_observer_never_projects_not_sent_while_shared_work_may_still_send() {
+    let mut groups = Groups::default();
+    let (issued, _) = write_execution(&mut groups, write(1, 10, 900.));
+    groups.join(issued, write(2, 20, 50.), 1.).unwrap();
+    groups.leg_issued(issued).unwrap();
+    let sealed = groups.expire(issued, 50.);
+    assert_eq!(owners(&sealed), [(2, 20)]);
+    assert_eq!(sealed[0].result.as_ref().unwrap_err().outcome, None);
+
+    let (idle, founder) = write_execution(&mut groups, write(3, 30, 900.));
+    groups.join(idle, write(4, 40, 900.), 1.).unwrap();
+    let not_sent = VenueError::new("cancelled").outcome(Outcome::NotSent);
+    let sealed = groups.detach(founder, not_sent.clone()).unwrap();
+    assert_eq!(sealed.result.unwrap_err().outcome, None);
+    let sealed = groups.abort(idle, not_sent).unwrap();
+    assert_eq!(owners(&sealed), [(4, 40)]);
+    assert_eq!(
+        sealed[0].result.as_ref().unwrap_err().outcome,
+        Some(Outcome::NotSent)
+    );
+}
+
+#[test]
+fn joins_after_the_execution_deadline_time_out() {
+    let mut groups = Groups::default();
+    let (execution, _) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
+    groups.leg_issued(execution).unwrap();
+    assert_eq!(
+        groups.join(execution, member(2, 20, 5_000., "b"), 950.),
+        Err(Error::TimedOut)
+    );
+    assert_eq!(groups.member(2), None);
+}
+
+#[test]
+fn non_finite_expiry_changes_nothing() {
+    let mut groups = Groups::default();
+    let (execution, _) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
+    assert!(groups.expire(execution, f64::INFINITY).is_empty());
+    assert!(groups.expire(execution, f64::NAN).is_empty());
+    assert_eq!(groups.member(1), Some((execution, 10)));
+    assert_eq!(groups.timer(execution), Some(900.));
+}
+
+#[test]
+fn a_successor_needs_a_released_background_previous() {
+    let mut groups = Groups::default();
+    let (command, _) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
+    command_leg(&mut groups, command);
+    assert_eq!(
+        groups.begin_successor(command, 900., 1_000, 1.),
+        Err(Error::Invalid)
+    );
+    let unreleased = background(&mut groups, 900., 0.);
+    assert_eq!(
+        groups.begin_successor(unreleased, 900., 1_000, 1.),
+        Err(Error::State)
+    );
+    groups.complete(unreleased, |_| Ok(String::new())).unwrap();
+    assert_eq!(
+        groups.begin_successor(unreleased, 900., 1_000, 1.),
+        Err(Error::Revoked)
+    );
+}
+
+fn command_leg(groups: &mut Groups, execution: Execution) {
+    groups.leg_issued(execution).unwrap();
+    groups.leg_released(execution).unwrap();
+}
+
+#[test]
+fn pending_joiners_keep_their_token_survive_abort_and_skip_progress() {
+    let mut groups = Groups::default();
+    let first = background(&mut groups, 900., 0.);
+    command_leg(&mut groups, first);
+    let (queued, _) = groups.join(first, member(1, 10, 5_000., "a"), 1.).unwrap();
+    let (dropped, _) = groups.join(first, member(2, 20, 5_000., "b"), 1.).unwrap();
+    groups.join(first, member(3, 30, 150., "c"), 1.).unwrap();
+    assert!(
+        groups
+            .abort(first, VenueError::new("read failed"))
+            .unwrap()
+            .is_empty()
+    );
+    let sealed = groups
+        .detach(dropped, VenueError::new("cancelled"))
+        .unwrap();
+    assert!(!sealed.journal);
+    assert_eq!(groups.member(2), None);
+    groups.leg_retired(first).unwrap();
+
+    let (next, sealed) = groups.begin_successor(first, 5_000., 1_000, 100.).unwrap();
+    assert!(sealed.is_empty());
+    assert_eq!(
+        groups
+            .join(next, member(1, 10, 5_000., "a"), 101.)
+            .unwrap()
+            .1,
+        Joined::Already
+    );
+    // An earlier own deadline keeps its timer; later ones are clamped to the bound.
+    assert_eq!(groups.timer(next), Some(150.));
+    assert_eq!(owners(&groups.expire(next, 150.)), [(3, 30)]);
+    assert_eq!(groups.timer(next), Some(1_100.));
+    groups.detach(queued, VenueError::new("cancelled")).unwrap();
+    assert_eq!(groups.member(1), None);
+}
+
+#[test]
+fn adopted_pending_owner_past_its_deadline_is_sealed_at_adoption() {
+    let mut groups = Groups::default();
+    let first = background(&mut groups, 900., 0.);
+    command_leg(&mut groups, first);
+    groups.join(first, member(1, 10, 50., "a"), 1.).unwrap();
+    groups.complete(first, |_| Ok(String::new())).unwrap();
+    let (_, sealed) = groups.begin_successor(first, 900., 1_000, 60.).unwrap();
+    assert_eq!(owners(&sealed), [(1, 10)]);
+    assert_eq!(groups.member(1), None);
+}
+
+#[test]
+fn completion_with_a_leg_in_flight_retires_only_after_the_leg() {
+    let mut groups = Groups::default();
+    let (execution, _) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
+    groups.leg_issued(execution).unwrap();
+    groups.complete(execution, |_| Ok("ok".into())).unwrap();
+    assert_eq!(groups.deadline(execution), Some(900.));
+    groups.leg_retired(execution).unwrap();
+    assert_eq!(groups.deadline(execution), None);
+    assert_eq!(groups.leg_retired(execution), Err(Error::Revoked));
+}
+
+#[test]
+fn member_capacity_refusal_is_atomic_for_begin_and_join() {
+    let mut groups = Groups::default();
+    let mut executions = Vec::new();
+    for command in 0..MAX_MEMBERS as CommandId {
+        executions.push(read(&mut groups, member(command, 1, 900., "a"), 1_000).0);
+    }
+    let over = MAX_MEMBERS as CommandId;
+    assert!(
+        groups
+            .begin(
+                Root::Command(member(over, 1, 900., "a")),
+                Operation::Read,
+                Window::UntilTerminal,
+                1_000,
+                0.,
+            )
+            .is_err()
+    );
+    assert_eq!(
+        groups.join(executions[0], member(over, 1, 900., "a"), 1.),
+        Err(Error::Capacity)
+    );
+    assert_eq!(groups.member(over), None);
 }
