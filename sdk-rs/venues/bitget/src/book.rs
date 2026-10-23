@@ -1,5 +1,6 @@
 use crate::wire::Depth;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::checksum::Crc32;
 use std::borrow::Cow;
 
 #[derive(Default)]
@@ -123,27 +124,18 @@ fn parse_level(pair: &[Cow<'_, str>; 2]) -> Result<(f64, f64), &'static str> {
 }
 
 fn checksum(bids: &[Level], asks: &[Level]) -> i32 {
-    let mut crc = !0u32;
+    let mut crc = Crc32::new();
     let mut first = true;
     for i in 0..25 {
         for level in [bids.get(i), asks.get(i)].into_iter().flatten() {
             for text in [&level.price_text, &level.amount_text] {
                 if !first {
-                    crc_byte(&mut crc, b':');
+                    crc.update_byte(b':');
                 }
                 first = false;
-                for byte in text.bytes() {
-                    crc_byte(&mut crc, byte);
-                }
+                crc.update(text.as_bytes());
             }
         }
     }
-    (!crc) as i32
-}
-
-fn crc_byte(crc: &mut u32, byte: u8) {
-    *crc ^= u32::from(byte);
-    for _ in 0..8 {
-        *crc = (*crc >> 1) ^ (0xedb8_8320 & 0u32.wrapping_sub(*crc & 1));
-    }
+    crc.finish() as i32
 }

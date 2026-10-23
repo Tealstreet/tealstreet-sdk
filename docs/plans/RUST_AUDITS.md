@@ -2155,3 +2155,15 @@ Context. The remaining discovery error fallback accepts only Markets/Tickers.
 No venue admission policy or finalizer is introduced. The exact own inventory
 shrinks 24 to23 occurrences (20 to19 hash rows, five to four files); account,
 closed/private history and trading remain tracked with their original owners.
+
+## Shared book checksum accumulator
+
+Bitget and Kraken Spot use the engine `checksum::Crc32` byte stream instead of
+two reflected IEEE CRC32 loops. Venue serialization remains native: Bitget
+interleaves top-25 bid/ask decimal strings with colons and checks signed i32;
+Kraken Spot concatenates normalized ask-then-bid digits for top 10 per side.
+This resolves the duplicate accumulator finding from `RUST_BITGET_PUBLIC_CPU`
+without asserting a previous wrong-checksum bug or a measured CPU improvement.
+The existing sequence, missing-checksum, cache retention and mismatch recovery
+policies are preserved. Checksum-bearing native controls are necessary because
+the diagnostic Bitget public replay contains no checksummed books.

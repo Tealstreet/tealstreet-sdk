@@ -2,6 +2,7 @@
 pub mod backoff;
 pub mod book;
 pub mod capabilities;
+pub mod checksum;
 pub mod classify;
 pub mod command;
 pub mod coverage;

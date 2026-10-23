@@ -4884,3 +4884,13 @@ authority. The call shape and success value (`null`) are unchanged.
 No tealstreet-next caller matches on the old timeout text (the review grepped
 the tealstreet-sdk TS packages; `rust.market-refresh.test.ts` checks neither
 text nor kind). Callers branching on `kind === 'timeout'` need no change.
+
+## Shared Bitget and Kraken Spot book CRC32
+
+Both public book adapters use the engine IEEE CRC32 accumulator. Bitget keeps
+its original decimal strings, bid/ask interleaving, top-25 cutoff, separators and
+signed checksum comparison. Kraken Spot keeps ask-before-bid normalized digits,
+trailing zeros and top-10 cutoff. A checksum mismatch continues to invalidate
+the book and require a fresh snapshot under the native recovery policy. No
+caller API, payload format, callback, transport, timing policy or build-profile
+migration is required for this accumulator standardization.

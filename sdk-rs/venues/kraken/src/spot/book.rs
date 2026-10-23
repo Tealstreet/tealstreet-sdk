@@ -1,6 +1,7 @@
 //! Kraken v2 CRCs use the original decimal digits, including trailing zeros.
 use super::wire::Level;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::checksum::Crc32;
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -39,20 +40,16 @@ impl Checksum {
         let Some(expected) = expected else {
             return true;
         };
-        let mut crc = !0u32;
+        let mut crc = Crc32::new();
         for (levels, rows) in [(book.asks(), &self.asks), (book.bids(), &self.bids)] {
             for (price, _) in levels.iter().take(10) {
                 let Some((price, quantity)) = rows.get(&price.to_bits()) else {
                     return false;
                 };
-                for byte in price.bytes().chain(quantity.bytes()) {
-                    crc ^= byte as u32;
-                    for _ in 0..8 {
-                        crc = (crc >> 1) ^ (0xedb88320u32 & (0u32.wrapping_sub(crc & 1)));
-                    }
-                }
+                crc.update(price.as_bytes());
+                crc.update(quantity.as_bytes());
             }
         }
-        !crc == expected
+        crc.finish() == expected
     }
 }

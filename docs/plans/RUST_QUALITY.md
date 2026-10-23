@@ -661,3 +661,15 @@ completion. Another fixed-clock control runs270 market refusals,270 interval
 refusals and270 successes with stale previous-response probes. Existing native
 candle mapping, validation precedence and preparation/expiry assertions remain.
 This closes the earlier pre-Context numeric refusal gap using the shared seam.
+
+## Shared CRC32 compatibility boundaries
+
+The engine owns CRC32 initialization, byte updates and final complement. Native
+Bitget/Kraken Spot controls pin independent fixed CRCs, decimal trailing zeros,
+signed high-bit output, unequal sides, 25/26 and 10/11 level cutoffs, deletion,
+unchecked updates followed by checksummed updates, rejection and fresh-snapshot
+recovery. Engine vectors cover empty/default, standard and binary inputs, every
+split and all prefix states against a test-only independent bitwise reference.
+The missing-shared-API compile REDs establish adoption only; they do not certify
+a pre-existing checksum defect. Replay equality and CI CPU/size measurements
+remain distinct evidence from those native checksum controls.
