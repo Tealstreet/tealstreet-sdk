@@ -133,6 +133,11 @@ function collect(root, roots, blob, anchors = []) {
 function validateEntries(entries, roots, label, anchors = []) {
   if (!Array.isArray(entries) || !entries.length) fail(`empty ${label} entries`);
   const map = new Map();
+  const selectedPaths = new Set(roots), parentPaths = new Set();
+  for (const root of [...roots, ...anchors]) {
+    const parts = root.split('/');
+    for (let i = 1; i <= parts.length; i++) parentPaths.add(parts.slice(0, i).join('/'));
+  }
   for (const entry of entries) {
     relative(entry.path);
     const fields = ['path', 'type', 'mode'];
@@ -144,8 +149,12 @@ function validateEntries(entries, roots, label, anchors = []) {
     if (entry.type === 'file' && (!Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || !SHA.test(entry.sha256))) fail('invalid file metadata');
     if (entry.type === 'symlink' && (typeof entry.target !== 'string' || !entry.target || entry.target.includes('\0') || entry.target.includes('\\'))) fail('invalid link target');
     if (map.has(entry.path)) fail('duplicate entry path');
-    const selected = roots.some((r) => within(entry.path, r));
-    const parent = [...roots, ...anchors].some((r) => within(r, entry.path));
+    let selected = selectedPaths.has(entry.path), ancestor = entry.path;
+    while (!selected && ancestor.includes('/')) {
+      ancestor = ancestor.slice(0, ancestor.lastIndexOf('/'));
+      selected = selectedPaths.has(ancestor);
+    }
+    const parent = parentPaths.has(entry.path);
     if (!selected && (!parent || entry.type !== 'directory')) fail(`unselected ${label} entry ${entry.path}`);
     map.set(entry.path, entry);
   }

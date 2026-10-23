@@ -189,3 +189,10 @@ Verify the authentic manifest retains its exact fingerprint and add sparse-root,
 near-prefix and ancestor-poisoning controls. Measure this verifier operation only;
 change no replay timing, thresholds, fixtures or workflow timeouts. Fresh CI
 remains the integration proof; incomplete cohorts cannot certify.
+
+On the same retained manifest, indexed validation takes1.64seconds versus19.57
+and returns the exact original fingerprint. Fifty runtime/collection/coordinator/
+request-budget controls pass, including sparse file roots, directory descendants,
+adjacent names and poisoned ancestor metadata. This is verifier overhead only;
+no venue performance result follows from it. Independent review and corrected
+source CI qualify the implementation separately from preserved timing cohorts.
