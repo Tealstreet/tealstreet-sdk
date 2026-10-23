@@ -208,7 +208,11 @@ const CASES: Case[] = [
     async (id) => {
       const exchange = create(PhemexExchange, 'phemex');
       vi.spyOn(exchange, 'getOrFetchPositionsForSymbol').mockResolvedValue([]);
-      return (await exchange.formatCreateOrder(limit({ clientOrderId: id })))[0];
+      const get = recorder({ data: { positions: [] } });
+      exchange.xhr = { get };
+      const payload = (await exchange.formatCreateOrder(limit({ clientOrderId: id })))[0];
+      expect(get).not.toHaveBeenCalled();
+      return payload;
     },
   ],
   [
