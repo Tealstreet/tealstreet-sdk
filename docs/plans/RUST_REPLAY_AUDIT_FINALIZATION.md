@@ -41,3 +41,21 @@ protocol failures remain failures; interim diagnostic reads confer no success.
 Carry the caller-visible reporting change in CALLERS. Send the frozen head and
 fresh run to the auditor for standalone placement after #1902; no merge without
 that window and its separate guard.
+
+## Fresh declaration evidence
+
+Frozen `2a046154796` / Rust run `40008675562`, WOO physical job
+`120603063447` attempt 1, exercises current private tape
+`9d71837d4fc35be11d2b84fccb60c036880aa5d930f7d675469ca7302cbfb687`.
+Both correctness raw outputs have empty `protocolErrors`; every one of the eight
+TS/Rust protocol keys is absent from the fresh gate. The other 554 failures
+remain identical and sorted; private status remains FAIL. Strict artifact
+`12525516902` and package `12526035440` are authenticated against physical
+uploads, source/tree and payload hashes. Independent per-entry evidence receipt:
+`/tmp/codex-replay-audit-1944-woo/audit-review.json`, SHA256
+`b6b11dd93245b0e33706d4141adddb5d08923350ee74906f80634952c938c2bb`.
+
+Remove only that exact tape's eight now-unobserved protocol declarations, as one
+complete diagnostic group. Preserve all other manifest bytes, including the
+historical `72a4ee4e` WOO tape and separate public book-presence keys. This is a
+reporting correction, not complete private financial parity.

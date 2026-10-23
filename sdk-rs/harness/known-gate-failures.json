@@ -53120,19 +53120,6 @@
           ]
         },
         {
-          "divergence": "Private protocol/authentication/stream coverage is incomplete in this fixture; this known FAIL is not authenticated lifecycle or complete private parity evidence.",
-          "keys": [
-            "rust: WOO private authentication never completed",
-            "rust: WOO socket has no heartbeat wss://wss.woox.io/v2/ws/private/stream/undefined",
-            "rust: missing WOO subscription algoexecutionreportv2",
-            "rust: missing WOO subscription executionreport",
-            "ts: WOO private authentication never completed",
-            "ts: WOO socket has no heartbeat wss://wss.woox.io/v2/ws/private/stream/undefined",
-            "ts: missing WOO subscription algoexecutionreportv2",
-            "ts: missing WOO subscription executionreport"
-          ]
-        },
-        {
           "divergence": "Protective parent/child identity is absent or differs between implementations.",
           "keys": [
             "checkpoint 3 account.orders[1].parentId",
