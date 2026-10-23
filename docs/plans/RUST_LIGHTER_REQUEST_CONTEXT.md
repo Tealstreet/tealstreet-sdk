@@ -342,3 +342,10 @@ shared entry owner without affecting the original command. Private trading,
 auth/nonce, history and multi-request paths remain dependent on their owning
 shared seams. Architecture gate: this is a consumer of the shared admission
 choke point, not a per-venue admission implementation.
+
+Plan-review correction: initial admission can also reject a nonfinite raw clock
+or invalid computed deadline. The shared denial is `Invalid request context`,
+`InvalidInput`, outcome `None`, replacing the same generic adapter error. Add a
+one-terminal/no-I/O control for NaN and both infinities on a genuine command
+callback, plus a later finite-clock admission to prove no retained owner.
+This is shared policy validation; native candle parameter validation is unchanged.
