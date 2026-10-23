@@ -1692,7 +1692,14 @@ impl Venue for KucoinSpot {
 impl KucoinSpot {
     fn query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         if self.credentials.is_none() {
-            cx.fail(command, "KuCoin Spot requires credentials");
+            let Ok(context) = cx.admit_http_command(crate::local_read_command_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                crate::wire::not_sent("KuCoin Spot requires credentials")
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput),
+            );
             return;
         }
         match query {
@@ -1704,7 +1711,11 @@ impl KucoinSpot {
                 limit,
             } => {
                 let Some(symbol) = symbol else {
-                    cx.done(command, "[]".into());
+                    let Ok(context) = cx.admit_http_command(crate::local_read_command_policy())
+                    else {
+                        return;
+                    };
+                    let _ = cx.done_context(&context, "[]".into());
                     return;
                 };
                 let mut path = format!("/api/v1/hf/fills?symbol={symbol}");
@@ -1748,14 +1759,19 @@ impl KucoinSpot {
                         found: bool,
                         order: &'a Order,
                     }
-                    cx.done(
-                        command,
-                        serde_json::to_string(&Found {
-                            found: true,
-                            order: o,
-                        })
-                        .unwrap(),
-                    );
+                    let result = serde_json::to_string(&Found {
+                        found: true,
+                        order: o,
+                    })
+                    .unwrap();
+                    let Ok(context) = cx.admit_http_command(crate::local_read_command_policy())
+                    else {
+                        return;
+                    };
+                    if cx.validate_read_root_context(&context).is_err() {
+                        return;
+                    }
+                    let _ = cx.done_context(&context, result);
                 } else {
                     self.page(
                         cx,
@@ -1771,11 +1787,22 @@ impl KucoinSpot {
                     );
                 }
             }
-            Query::PublicTrades { .. } => cx.fail(
-                command,
-                "KuCoin Spot public trades are not implemented in TS",
-            ),
-            Query::OrderHistory { .. } | Query::Income { .. } => cx.done(command, "[]".into()),
+            Query::PublicTrades { .. } => {
+                let Ok(context) = cx.admit_http_command(crate::local_read_command_policy()) else {
+                    return;
+                };
+                let _ = cx.fail_context(
+                    &context,
+                    crate::wire::not_sent("KuCoin Spot public trades are not implemented in TS")
+                        .kind(safe_cex_engine::ErrorKind::Unsupported),
+                );
+            }
+            Query::OrderHistory { .. } | Query::Income { .. } => {
+                let Ok(context) = cx.admit_http_command(crate::local_read_command_policy()) else {
+                    return;
+                };
+                let _ = cx.done_context(&context, "[]".into());
+            }
         }
     }
 }
