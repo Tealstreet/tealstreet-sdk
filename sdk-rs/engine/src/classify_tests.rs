@@ -36,15 +36,22 @@ const ROWS: &[Row] = &[
         verdict: Verdict::Refused(ErrorKind::Rejected),
         only: None,
     },
-    Row {
+];
+
+const PREFIX: CodeTable = CodeTable {
+    rows: &[Row {
         key: Key::MessagePrefix("Order was never placed"),
         verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
         only: Some(Intent::Cancel),
-    },
-];
+    }],
+    success: &[],
+    unlisted: Verdict::Refused(ErrorKind::Rejected),
+    status: &[],
+};
 
 const TABLE: CodeTable = CodeTable {
     rows: ROWS,
+    success: &[Key::Int(0)],
     unlisted: Verdict::Unknown(None),
     status: &[(429, Verdict::Refused(ErrorKind::RateLimited))],
 };
@@ -155,12 +162,44 @@ fn intent_scoped_rows_win_and_satisfied_never_leaks_to_another_intent() {
         code: NativeCode::None,
         message: "Order was never placed, already canceled, or filled.",
     };
+    let on = |status, native: &Native<'_>, intent| {
+        verdict(
+            &PREFIX,
+            intent,
+            Released::Response(&response(status)),
+            Some(native),
+        )
+    };
     assert_eq!(
-        classify(200, Some(&prefix), Intent::Cancel),
+        on(200, &prefix, Intent::Cancel),
         Verdict::Satisfied(SatisfiedIntent::Cancel)
     );
+    // No row for Amend: the code-less envelope is no evidence, so a 2xx stays malformed.
     assert_eq!(
-        classify(200, Some(&prefix), Intent::Amend),
+        on(200, &prefix, Intent::Amend),
+        Verdict::Unknown(Some(ErrorKind::Internal))
+    );
+    assert_table(&PREFIX);
+}
+
+#[test]
+fn success_codes_and_codeless_envelopes_never_become_refusals() {
+    // A venue handing its success code to the classifier proves nothing.
+    assert_eq!(
+        classify(200, Some(&int(0)), Intent::Place),
+        Verdict::Unknown(Some(ErrorKind::Internal))
+    );
+    // A code-less, unmatched envelope falls through to the status rules.
+    let bare = Native {
+        code: NativeCode::None,
+        message: "<html>",
+    };
+    assert_eq!(
+        classify(429, Some(&bare), Intent::Place),
+        Verdict::Refused(ErrorKind::RateLimited)
+    );
+    assert_eq!(
+        classify(400, Some(&bare), Intent::Place),
         Verdict::Unknown(None)
     );
 }
@@ -286,6 +325,7 @@ fn assert_table_rejects_unpartitioned_overlaps() {
     ];
     assert_table(&CodeTable {
         rows: BAD,
+        success: &[],
         unlisted: Verdict::Unknown(None),
         status: &[],
     });
@@ -301,6 +341,7 @@ fn assert_table_rejects_satisfied_without_its_intent() {
     }];
     assert_table(&CodeTable {
         rows: BAD,
+        success: &[],
         unlisted: Verdict::Unknown(None),
         status: &[],
     });
@@ -311,6 +352,7 @@ fn assert_table_rejects_satisfied_without_its_intent() {
 fn assert_table_rejects_unproven_status_rows() {
     assert_table(&CodeTable {
         rows: &[],
+        success: &[],
         unlisted: Verdict::Unknown(None),
         status: &[(503, Verdict::Refused(ErrorKind::VenueUnavailable))],
     });
@@ -354,7 +396,21 @@ fn batch_projection_owns_count_ids_and_the_fact_kind() {
         panic!("any unknown item makes the batch unknown");
     };
     assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert_eq!(error.partial.unwrap().order_ids, ["a"]);
+    let partial = error.partial.unwrap();
+    assert_eq!(partial.order_ids, ["a"]);
+    assert_eq!(partial.failed_index, Some(0), "first non-accepted position");
+    let five = batch(
+        &TABLE,
+        Intent::Place,
+        &response(503),
+        1,
+        &[BatchItem::Accepted("a")],
+        "x",
+    );
+    assert!(
+        matches!(five, Ok(WriteResult::Failed(_))),
+        "a 5xx batch acknowledgement proves nothing"
+    );
 }
 
 #[test]
@@ -400,4 +456,38 @@ fn satisfied_cancel_items_are_effects_without_ids() {
         cancel(&[gone, BatchItem::Native(int(-1111))]),
         WriteResult::KnownPartial(_)
     ));
+}
+
+#[test]
+#[should_panic(expected = "only for code-less venues")]
+fn assert_table_rejects_message_rows_beside_codes() {
+    const BAD: &[Row] = &[
+        Row {
+            key: Key::Int(1),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::MessagePrefix("x"),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+    ];
+    assert_table(&CodeTable {
+        rows: BAD,
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    });
+}
+
+#[test]
+#[should_panic(expected = "cannot be Satisfied or RefusedResend")]
+fn assert_table_rejects_resend_without_a_native_code() {
+    assert_table(&CodeTable {
+        rows: &[],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[(429, Verdict::RefusedResend(ErrorKind::RateLimited))],
+    });
 }

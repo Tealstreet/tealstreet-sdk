@@ -79,6 +79,9 @@ pub struct Row {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CodeTable {
     pub rows: &'static [Row],
+    /// The venue's success codes. Handed to the classifier they prove nothing,
+    /// so a success code on a failure path is a malformed acknowledgement.
+    pub success: &'static [Key],
     /// Documented default for codes the table does not list.
     pub unlisted: Verdict,
     /// Documented pre-execution 4xx answers without a native code, each cited.
@@ -137,18 +140,22 @@ impl Key {
 impl CodeTable {
     /// Exact-intent rows first, then rows for every intent, then `unlisted`.
     pub fn verdict(&self, native: &Native<'_>, intent: Intent) -> Verdict {
+        if self.success.iter().any(|key| key.matches(native)) {
+            return Verdict::Unknown(Some(ErrorKind::Internal));
+        }
+        let verdict = self
+            .row(native, intent)
+            .map_or(self.unlisted, |row| row.verdict);
+        scoped(verdict, intent)
+    }
+
+    fn row(&self, native: &Native<'_>, intent: Intent) -> Option<&Row> {
         let scoped = |only: Option<Intent>| {
             self.rows
                 .iter()
                 .find(|row| row.only == only && row.key.matches(native))
         };
-        let verdict = scoped(Some(intent))
-            .or_else(|| scoped(None))
-            .map_or(self.unlisted, |row| row.verdict);
-        match verdict {
-            Verdict::Satisfied(satisfied) if satisfied.intent() != intent => Verdict::Unknown(None),
-            verdict => verdict,
-        }
+        scoped(Some(intent)).or_else(|| scoped(None))
     }
 
     fn status_verdict(&self, status: u16) -> Option<Verdict> {
@@ -156,6 +163,14 @@ impl CodeTable {
             .iter()
             .find(|(documented, _)| *documented == status)
             .map(|(_, verdict)| *verdict)
+    }
+}
+
+/// A `Satisfied` verdict only ever applies to its own intent.
+fn scoped(verdict: Verdict, intent: Intent) -> Verdict {
+    match verdict {
+        Verdict::Satisfied(satisfied) if satisfied.intent() != intent => Verdict::Unknown(None),
+        verdict => verdict,
     }
 }
 
@@ -181,17 +196,26 @@ pub fn verdict(
         Released::Transport => return Verdict::Unknown(Some(ErrorKind::Network)),
         Released::Response(response) => response,
     };
-    match response.status {
-        408 => return Verdict::Unknown(Some(ErrorKind::Timeout)),
-        500.. => return Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
-        _ => {}
+    if let Some(verdict) = unproven(response) {
+        return verdict;
     }
+    // A code-less envelope that matches no message row is no native evidence.
+    let native = native
+        .filter(|native| native.code != NativeCode::None || table.row(native, intent).is_some());
     if let Some(native) = native {
         return table.verdict(native, intent);
     }
     match table.status_verdict(response.status) {
-        Some(verdict) if !(200..300).contains(&response.status) => verdict,
+        Some(verdict) if !(200..300).contains(&response.status) => scoped(verdict, intent),
         _ => Verdict::Unknown(status_kind(response.status)),
+    }
+}
+
+/// Rule 3, shared with the managed-write guard: 408 and 5xx prove nothing.
+fn unproven(response: &Response<'_>) -> Option<Verdict> {
+    match crate::request_context::ResponseProof::from_status(response.status) {
+        crate::request_context::ResponseProof::Unproven(kind) => Some(Verdict::Unknown(Some(kind))),
+        crate::request_context::ResponseProof::NativeCodec => None,
     }
 }
 
@@ -276,6 +300,10 @@ pub(crate) fn batch(
         return Err(crate::request_context::Error::Invalid);
     }
     let released = Released::Response(response);
+    if let Some(verdict) = unproven(response) {
+        let error = self::error(verdict, intent, released, None, message);
+        return Ok(WriteResult::Failed(error));
+    }
     let ids: Vec<String> = items
         .iter()
         .filter_map(|item| match item {
@@ -310,7 +338,10 @@ pub(crate) fn batch(
     };
     let failures: Vec<_> = std::iter::once(first).chain(failures).collect();
     let effected = failures.len() < items.len();
-    let (index, native, verdict) = failures
+    // The first non-accepted position is the failed index; an unknown item
+    // anywhere supplies the error kind and text.
+    let index = first.0;
+    let (_, native, verdict) = failures
         .iter()
         .find(|(_, _, verdict)| matches!(verdict, Verdict::Unknown(_)))
         .copied()
@@ -372,17 +403,42 @@ pub fn assert_table(table: &CodeTable) {
         }
     }
     assert!(
-        !matches!(table.unlisted, Verdict::Satisfied(_)),
-        "unlisted codes cannot be Satisfied"
+        !matches!(
+            table.unlisted,
+            Verdict::Satisfied(_) | Verdict::RefusedResend(_)
+        ),
+        "unlisted codes cannot be Satisfied or RefusedResend"
     );
-    for (status, verdict) in table.status {
+    let prefixes = table
+        .rows
+        .iter()
+        .filter(|row| matches!(row.key, Key::MessagePrefix(_)))
+        .count();
+    assert!(
+        prefixes == 0 || prefixes == table.rows.len(),
+        "MessagePrefix rows are only for code-less venues"
+    );
+    assert!(
+        !table
+            .rows
+            .iter()
+            .any(|row| matches!(row.key, Key::MessagePrefix(""))),
+        "an empty MessagePrefix matches every message"
+    );
+    for (index, (status, verdict)) in table.status.iter().enumerate() {
         assert!(
             (400..500).contains(status) && *status != 408,
             "status row {status}: only documented 4xx other than 408"
         );
         assert!(
-            !matches!(verdict, Verdict::Satisfied(_)),
-            "status row {status} cannot be Satisfied"
+            matches!(verdict, Verdict::Refused(_) | Verdict::Unknown(_)),
+            "status row {status} cannot be Satisfied or RefusedResend"
+        );
+        assert!(
+            !table.status[..index]
+                .iter()
+                .any(|(other, _)| other == status),
+            "duplicate status row {status}"
         );
     }
 }

@@ -397,15 +397,35 @@ impl ContextRegistry {
             .result(delivery.attempt.request, result)
     }
 
+    pub(super) fn latest_write(&self, context: &Context) -> Result<Option<RequestId>, Error> {
+        let Owner::Command { id, generation } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        let owner = self
+            .commands
+            .get(&id)
+            .filter(|owner| context.issued_by(&self.issuer) && owner.generation == generation)
+            .ok_or(Error::Revoked)?;
+        Ok(owner
+            .writes
+            .as_ref()
+            .and_then(|writes| writes.latest(context.leg())))
+    }
+
+    /// One classified resend per logical leg: a refused resend is final.
     pub(super) fn grant_resend(&mut self, delivery: &Delivery) -> Result<(), Error> {
         if delivery.context.operation() != Operation::Mutation {
             return Err(Error::Invalid);
         }
-        self.command_mut(&delivery.context)?
+        let writes = self
+            .command_mut(&delivery.context)?
             .writes
             .as_mut()
-            .ok_or(Error::State)?
-            .grant_resend(delivery.attempt.request)
+            .ok_or(Error::State)?;
+        if writes.leg_attempts(delivery.context.leg()) > 1 {
+            return Err(Error::RetryForbidden);
+        }
+        writes.grant_resend(delivery.attempt.request)
     }
 
     pub(super) fn unproven_result(
@@ -828,18 +848,28 @@ impl<P> Cx<'_, P> {
         let released = Released::Response(response);
         let verdict = classify::verdict(table, intent, released, native);
         let error = classify::error(verdict, intent, released, native, message);
-        let result = match verdict {
-            Verdict::Refused(_) | Verdict::RefusedResend(_) => WriteResult::Rejected(error),
-            Verdict::Unknown(_) => WriteResult::Failed(error),
-            Verdict::Satisfied(_) => WriteResult::Accepted {
-                order_ids: Vec::new(),
-            },
+        let (result, reports) = match verdict {
+            Verdict::Refused(_) | Verdict::RefusedResend(_) => {
+                (WriteResult::Rejected(error), reports)
+            }
+            Verdict::Unknown(_) => (WriteResult::Failed(error), reports),
+            // Accepted facts carry no rejection reports.
+            Verdict::Satisfied(_) => (
+                WriteResult::Accepted {
+                    order_ids: Vec::new(),
+                },
+                None,
+            ),
         };
         self.record_write(&delivery, result, reports)?;
         if !matches!(verdict, Verdict::RefusedResend(_)) {
             return Ok((verdict, None));
         }
-        self.io.request_contexts.grant_resend(&delivery)?;
+        match self.io.request_contexts.grant_resend(&delivery) {
+            Ok(()) => {}
+            Err(Error::RetryForbidden) => return Ok((verdict, None)),
+            Err(error) => return Err(error),
+        }
         Ok((
             verdict,
             Some(ResendGrant {
@@ -889,8 +919,10 @@ impl<P> Cx<'_, P> {
         context: &Context,
         grant: ResendGrant,
     ) -> Result<Context, Error> {
-        let _ = grant.attempt;
         self.io.request_contexts.validate(context, self.now)?;
+        if self.io.request_contexts.latest_write(context)? != Some(grant.attempt) {
+            return Err(Error::Revoked);
+        }
         context.retry(RetryEvidence::DefinitiveRefusal, self.now)
     }
 

@@ -1108,6 +1108,7 @@ mod tests {
                             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
                             only: None,
                         }],
+                        success: &[],
                         unlisted: Verdict::Unknown(None),
                         status: &[],
                     };

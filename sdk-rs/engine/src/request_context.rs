@@ -231,7 +231,7 @@ impl Context {
 
     /// Native refusal evidence comes from a venue codec, never HTTP status or
     /// exception text. The engine still checks the previous physical attempt.
-    pub fn retry(&self, evidence: RetryEvidence, now: f64) -> Result<Self, Error> {
+    pub(crate) fn retry(&self, evidence: RetryEvidence, now: f64) -> Result<Self, Error> {
         if !now.is_finite() {
             return Err(Error::Invalid);
         }
@@ -1080,6 +1080,10 @@ impl CommandWrites {
                 None => return false,
             }
         }
+    }
+
+    pub(crate) fn leg_attempts(&self, leg: u64) -> usize {
+        self.attempts.iter().filter(|a| a.leg == leg).count()
     }
 
     pub(crate) fn latest(&self, leg: u64) -> Option<RequestId> {
