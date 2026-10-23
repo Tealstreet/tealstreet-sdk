@@ -4364,3 +4364,12 @@ before binding completion authority or publishing a no-I/O completion companion.
 A same-owner child, foreign issuer, mutation-bearing owner or sealed generation
 is refused. This check retains completion expiry semantics and grants no new
 send, retry, publication or joined-observer authority.
+
+A successfully admitted initial command retains its completion generation until
+typed terminal cleanup, including native single-owner WebSocket reads with no
+managed HTTP attempt. Unrelated work and deadline expiry cannot erase it or
+reuse its command ID; NX receives the original native timeout once. Only the
+issued Context can complete that generation. An expired root still grants no
+send or publication rights, and unparented siblings cannot extend its bound.
+Outstanding owners count toward the existing 256-owner capacity until cleanup;
+adapters must finalize them through their existing native terminal callbacks.

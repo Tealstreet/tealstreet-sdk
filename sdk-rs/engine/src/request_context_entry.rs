@@ -86,7 +86,10 @@ impl<P> Cx<'_, P> {
         self.io.command_entry.as_mut().unwrap().state = State::Bound;
         let operation = policy.operation;
         match self.http_context(Scope::Command(command), policy) {
-            Ok(context) => Ok(context),
+            Ok(context) => {
+                self.io.request_contexts.retain_command_entry(&context);
+                Ok(context)
+            }
             Err(reason) => {
                 // Typed issuance errors occur before owner insertion. Never
                 // erase a previous owner or leave opaque work runnable.
