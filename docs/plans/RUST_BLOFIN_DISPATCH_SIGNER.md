@@ -273,6 +273,55 @@ Gates:
 - Provider refusals are NotSent; mixed writes stay Unknown or partial.
 - Closed-position preparation refusal is strict.
 
+## Owner decisions and shared prerequisites (2026-10-24)
+
+Decided by claude-ddi2il, codex-9czdjh (venue review) and codex-uufub4 (core):
+
+- **Stacking:** no separate window. This PR stacks on #1865's reviewed head
+  and re-integrates #1865's actual landing. S3-S6 land as consecutive
+  commits in ONE PR (23 -> 0); no staging.
+- **P1 and P2 are this PR's,** as SHARED declarations like #1915, reviewed by
+  claude-19pt8s: hex-base64 hosted HTTP encoding (Rust signing_policy,
+  codegen and the TS host half) and a declared millisNonce WS-login codec.
+- **Hedged leverage:** one mutation command with two concurrent Plan calls,
+  not execution groups. Verify is a sequential Secondary Read inside that
+  mutation Plan, keeping the exact canceled/native-ID/filled equality fences.
+- **History hits:** the six `matches!(request.query…)` fingerprints are pruned
+  only by real path conversion, never by binding renames.
+- **Selection:** a shared signed-read Selection helper is mandatory before S3;
+  no local `slot_for(method)`.
+
+Shared prerequisites with no reviewed pin at 632da7717e2 (confirmed by core):
+
+| Gate | Prerequisite | Owner | Blocks |
+| --- | --- | --- | --- |
+| G1 | Generation-bound background Plan admission (engine root, not command entry) | codex-hcmq3f (after #1894/#1896); uufub4 API fit | S4 |
+| G2 | Immutable admission-time mixed-leg declarations with trusted per-leg credential binding (no runtime policy override) | codex-hcmq3f; uufub4 API fit | S5 Verify leg, hedged leverage |
+| G3 | Opaque Plan/Slot history admission and settlement (no Read-root cast) | codex-cxxyqr, after #1848 | S6 |
+
+S1/S2 (test-only recipes and REDs) stay independent of G1-G3.
+
+Native requirements the shared designs must preserve (9czdjh audit):
+
+- **Orders refresh is one aggregate:** a single `orders_busy` traversal across
+  pending, tpsl and algo. There is one final Store/source/reconcile
+  publication after all three, gated on `orders_revision`. Per-family Plans
+  must not publish or reconcile independently.
+- **Paging:** every nonempty page continues, even a short one. Max 50 responses
+  per family; an unchanged cursor or a nonempty page 49 fails. The whole
+  traversal gets 3 attempts with 1s/2s delays.
+- **No fixed lifetime:** startup settings retries and perpetual polling are
+  unbounded, so there is no invented whole-lifetime bound. Legacy
+  `reject_startup` clears retry, poll and socket, but does not cancel pending
+  HTTP, busy flags or debounce; retirement needs a deliberate shared contract.
+- **P0 in S5:** legacy mixed placement failure has no structured Partial.
+  Preserving accepted IDs is a P0 fix. S5 REDs: accepted IDs dropped (#12),
+  unlisted codes map to None (#35), and account-substring auth. Use a shared
+  const BloFin CodeTable, not a local effective ladder.
+- **No pre-POST fence today:** there is no universal native pre-POST settings
+  revision fence. Signer-release race handling is new and explicit, not
+  claimed as existing behaviour.
+
 ## Open questions for the owner
 
 1. Will the overseer grant a narrow `lib.rs` window before #1865 lands (Options,
