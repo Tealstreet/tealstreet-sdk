@@ -1,7 +1,7 @@
 # Bitunix public REST Read authority
 
 Owner: codex-9czdjh. Frozen inventory/source: `749a5677d0e9067e3ee58ae76893446f37dfd39c`.
-Status: plan only; no runtime change, inventory prune or executed RED claimed.
+Status: refreshed plan on actual `9447ee542cb7af2a62d30794d4ffc093a66720d5`; no runtime change, inventory prune or executed RED claimed.
 
 ## Selection and collision audit
 
@@ -248,3 +248,21 @@ retry-evidence gating, fixed-clock Background retirement and the two native
 envelope codecs. Exact inventory and append-only index checks pass. Neither
 original RED execution nor production adoption is claimed. Actual #1923 is an
 explicit prerequisite; both source owners cleared the selected regions.
+
+## Current source-branch refresh
+
+Branch feat/rust-bitunix-public-managed-reads starts from actual
+`9447ee542cb7af2a62d30794d4ffc093a66720d5`, after actual #1923
+`f489a0a0a3775d30bc35aa6c9552dca1bf75be45` and the independent #1903 prune.
+The target public lib/account code is unchanged from the frozen inventory pin;
+current totals are18 occurrences /16 rows /three files, and this slice removes
+exactly eight occurrences /seven rows to leave10 /nine /two. Actual #1923 now
+satisfies the public-auth-health prerequisite; no local suppression is added.
+
+A fresh open-PR file map has no Bitunix source/test collision; both prior source
+owners explicitly cleared these regions. The overseer approved this branch and
+18->10 scope before any test/source coding. WebSocket behavior stays legacy,
+including its existing Supervisor; no managed-socket migration or test-only
+engine shortcut is included. Original assertion REDs are next, on this pinned
+production, before any runtime change; historical plan review receipts do not
+claim execution on the new pin. #1865 and #1922 heads remain frozen.
