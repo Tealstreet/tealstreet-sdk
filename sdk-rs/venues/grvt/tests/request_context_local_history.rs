@@ -404,6 +404,17 @@ fn finite_native_precedence_in_both_deployments() {
 }
 #[test]
 fn native_bound_errors_and_range_before_lookup_syntax_are_preserved() {
+    let mut authenticated = engine(Local::Bounds, false);
+    native(
+        &ask_query(
+            &mut authenticated,
+            NOW,
+            699,
+            fills("UNKNOWN", Some(""), Some(-1.), Some(1.)),
+        ),
+        699,
+        Local::Market,
+    );
     for value in [
         f64::NAN,
         f64::INFINITY,
