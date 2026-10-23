@@ -2406,9 +2406,6 @@ impl Venue for BybitLinear {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.refresh_timer(cx, timer) {
-            return;
-        }
         if self
             .environment_probe
             .as_ref()
