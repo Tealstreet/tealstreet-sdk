@@ -141,6 +141,10 @@ impl Supervisor {
         }
     }
 
+    pub(crate) fn idle_enabled(&self) -> bool {
+        self.idle_enabled
+    }
+
     /// Activate receive supervision only after the declared liveness proof.
     /// Existing callers start enabled. Repeated activation does not refresh
     /// the receive timestamp; traffic admission remains a separate operation.

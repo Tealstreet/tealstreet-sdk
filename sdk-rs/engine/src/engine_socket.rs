@@ -1,6 +1,6 @@
 //! Managed socket boundaries. HTTP dispatch and physical ID allocation are unchanged.
 use super::*;
-use crate::socket_driver::{Driver, Effect};
+use crate::socket_driver::{ControlWork, Driver, Effect};
 use crate::socket_lifecycle::{
     Admission, Control, ControlPolicy, EncodedBatch, Epoch, FeedId, FeedPolicy, Ingress, Interest,
     LifecycleEvent, MAX_FEEDS, MAX_INTEREST_BYTES, MAX_INTERESTS, RetireReason, SocketError,
@@ -492,9 +492,25 @@ impl<V: Venue> Engine<V> {
             Event::WsClosed { socket, .. } => (*socket, Ingress::Close),
             _ => return false,
         };
-        let result = self.socket_mutate(now, |d, cx| d.ingress(cx, socket, kind));
-        self.socket_enqueue(now, result.effects);
-        let Admission::Current(epoch) = result.admission else {
+        let admission = if kind == Ingress::Message {
+            self.assert_live();
+            let admission = self.io.socket_driver.admit_ingress(now, socket, kind);
+            self.assert_live();
+            if matches!(admission, Admission::Expired(..)) {
+                let result = self.socket_mutate(now, |d, cx| d.finish_ingress(cx, admission, kind));
+                self.socket_enqueue(now, result.effects);
+            } else if self.io.socket_effects.len() > MAX_EFFECTS {
+                // Empty publication still owns exhaustion cleanup at this
+                // exact boundary, before health or native classification.
+                self.socket_enqueue(now, Vec::new());
+            }
+            admission
+        } else {
+            let result = self.socket_mutate(now, |d, cx| d.ingress(cx, socket, kind));
+            self.socket_enqueue(now, result.effects);
+            result.admission
+        };
+        let Admission::Current(epoch) = admission else {
             self.process_socket_work(now);
             return true;
         };
@@ -522,8 +538,19 @@ impl<V: Venue> Engine<V> {
                 };
                 let other = matches!(control, Control::Other);
                 let ready = self.venue.socket_startup_ready(&self.store);
-                let effects = self.socket_mutate(now, |d, cx| d.control(cx, epoch, control, ready));
-                self.socket_enqueue(now, effects);
+                self.assert_live();
+                let work = self.io.socket_driver.observe_control(now, epoch, &control);
+                self.assert_live();
+                if matches!(work, ControlWork::Complete) {
+                    if self.io.socket_effects.len() > MAX_EFFECTS {
+                        self.socket_enqueue(now, Vec::new());
+                    }
+                } else {
+                    let effects = self.socket_mutate(now, |d, cx| {
+                        d.finish_control(cx, epoch, control, ready, work)
+                    });
+                    self.socket_enqueue(now, effects);
+                }
                 self.process_socket_work(now);
                 if other && self.io.socket_driver.state.current(epoch) {
                     let mut cx = Cx {
@@ -929,6 +956,102 @@ mod tests {
                 queries + 128
             );
         }
+    }
+
+    #[test]
+    fn ordinary_message_keeps_overfull_effect_cleanup_before_codec_delivery() {
+        for controls in [ControlPolicy::Native, ControlPolicy::None] {
+            let mut e = crate::test_support::seeded_engine(Probe {
+                controls,
+                ..Probe::default()
+            });
+            e.start(0.);
+            let socket = e
+                .drain_actions()
+                .find_map(|action| match action {
+                    Action::WsConnect { socket, .. } => Some(socket),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(0., Event::WsOpened { socket });
+            e.drain_actions().for_each(drop);
+            let epoch =
+                e.io.socket_driver
+                    .state
+                    .epoch(e.venue.feed.unwrap())
+                    .unwrap();
+            e.venue.events.clear();
+            e.io.socket_effects
+                .extend(std::iter::repeat_n(Effect::Ping(epoch), MAX_EFFECTS + 1));
+            // Seed after the common ingress prelude: it normally processes
+            // queued effects before this managed publication boundary.
+            e.io.dispatch_now = 100.;
+            assert!(e.handle_managed_socket(
+                100.,
+                &Event::WsMessage {
+                    socket,
+                    text: "ordinary-data",
+                },
+            ));
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert!(e.io.socket_failed);
+            assert_eq!(e.venue.messages, 0);
+            assert!(
+                !e.venue
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, LifecycleEvent::Ping(_)))
+            );
+            assert_eq!(
+                e.venue
+                    .events
+                    .iter()
+                    .filter(|event| matches!(event, LifecycleEvent::Retired { .. }))
+                    .count(),
+                1
+            );
+            assert_eq!(actions.iter().filter(|action| matches!(action, Action::WsClose { socket: closed } if *closed == socket)).count(), 1);
+            assert!(e.io.socket_effects.is_empty());
+        }
+    }
+
+    #[test]
+    fn retained_retirements_keep_both_empty_publication_capacity_checks() {
+        let (mut e, socket) = engine();
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        let retired = {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            let neighbor = cx.register_socket_feed(policy()).unwrap();
+            cx.connect_socket(neighbor, "wss://neighbor.test").unwrap();
+            cx.with_socket_driver(|driver, cx| {
+                driver
+                    .retire(cx, neighbor, RetireReason::Stopped, false)
+                    .unwrap()
+            })
+        };
+        // Retired effects survive exhaustion cleanup. The current feed is
+        // stopped at the first boundary; the denied control observation must
+        // still perform the second empty-publication capacity check.
+        e.io.socket_effects
+            .extend(std::iter::repeat_n(retired, MAX_EFFECTS + 1));
+        e.io.dispatch_now = 100.;
+        assert!(e.handle_managed_socket(
+            100.,
+            &Event::WsMessage {
+                socket,
+                text: "ordinary-data"
+            }
+        ));
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(e.io.socket_failed);
+        assert_eq!(e.venue.messages, 0);
+        assert_eq!(e.venue.control_calls.get(), 1);
+        assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.message == "Managed socket effect capacity exhausted")).count(), 2);
     }
 
     #[test]

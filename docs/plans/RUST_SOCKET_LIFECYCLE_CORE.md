@@ -1186,3 +1186,18 @@ runner. Target most of the remaining 5.48 ms; no savings claim comes from code
 inspection. Significant remaining cost requires further profile investigation.
 Same-runner WASM measurement and fresh full CI follow sufficient improvement;
 no threshold/profile change or gate waiver is part of this work.
+
+Phase J source verification: both independent plan and source/order reviews
+are CLEAR. The original ingress transition match and complete auth transition
+body remain byte-identical. engine.rs, http_lifecycle.rs, socket_lifecycle.rs
+and signing_dispatch.rs are unchanged. Both cold helpers are inline-never to
+keep transition machinery outside ordinary observation. Two semantic capacity
+controls cover the initial empty-publication boundary and the second denied
+control boundary while retired effects remain overfull. The initial test seeded
+work before the common prelude and correctly failed its Ping assertion; the
+corrected fixture directly targets managed ingress without changing production
+ordering. All 17 focused socket tests and 1,458 four-crate all-target/all-feature
+native tests pass, with strict Clippy, formatting, bans and ratchets. These
+checks establish behavior preservation, not a CPU improvement. A new isolated
+measurement will compare immediate pre-change d8dcb8e against this source and
+the same fixed landing7641650 before any performance claim.

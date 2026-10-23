@@ -40,6 +40,14 @@ pub(crate) struct IngressResult {
     pub effects: Vec<Effect>,
 }
 
+/// Immediate continuation of a fresh message observation; never retained or
+/// exposed as permission for another ingress.
+pub(crate) enum ControlWork {
+    Complete,
+    Expired(Retirement, crate::socket::Timeout),
+    Transition { refresh: bool, receive: bool },
+}
+
 /// Immutable arithmetic bounds, not a cached clock or admission decision.
 /// Rounded addition is monotonic: if both extreme positive delays advance a
 /// finite raw time without overflow, all delays in this fixed policy do too.
@@ -295,16 +303,38 @@ impl Driver {
         socket: SocketId,
         ingress: Ingress,
     ) -> IngressResult {
+        let admission = self.admit_ingress(cx.now, socket, ingress);
+        self.finish_ingress(cx, admission, ingress)
+    }
+
+    /// Fresh lookup and time/expiry check at each ingress boundary. Expiry
+    /// revokes the epoch here; its owned retirement must be finished at once.
+    #[inline(always)]
+    pub(crate) fn admit_ingress(
+        &mut self,
+        now: f64,
+        socket: SocketId,
+        ingress: Ingress,
+    ) -> Admission {
         let runtimes = &self.runtimes;
-        let admission = self.state.admit_checked(socket, ingress, |epoch| {
+        self.state.admit_checked(socket, ingress, |epoch| {
             let runtime = runtimes
                 .get(epoch.feed().index())
                 .ok_or(SocketError::InvalidTime)?;
-            if !runtime.time.valid(cx.now) {
+            if !runtime.time.valid(now) {
                 return Err(SocketError::InvalidTime);
             }
-            Ok(runtime.supervisor.expired(cx.now))
-        });
+            Ok(runtime.supervisor.expired(now))
+        })
+    }
+
+    #[inline(never)]
+    pub(crate) fn finish_ingress<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        admission: Admission,
+        ingress: Ingress,
+    ) -> IngressResult {
         let mut effects = Vec::new();
         match admission {
             Admission::Expired(retirement, timeout) => {
@@ -335,6 +365,7 @@ impl Driver {
 
     /// Control evidence comes from the pure native codec after ingress. Recheck
     /// expiry here too, before any auth or receive-time mutation.
+    #[cfg(test)]
     pub(crate) fn control<P>(
         &mut self,
         cx: &mut Cx<'_, P>,
@@ -342,24 +373,73 @@ impl Driver {
         control: Control,
         startup_ready: bool,
     ) -> Vec<Effect> {
-        let admitted = self.ingress(cx, epoch.socket(), Ingress::Message);
-        if admitted.admission != Admission::Current(epoch) {
-            return admitted.effects;
+        let work = self.observe_control(cx.now, epoch, &control);
+        self.finish_control(cx, epoch, control, startup_ready, work)
+    }
+
+    /// Ordinary current traffic stays in place. Scheduling/activation and auth
+    /// still require the original context before receive/auth transitions.
+    pub(crate) fn observe_control(
+        &mut self,
+        now: f64,
+        epoch: Epoch,
+        control: &Control,
+    ) -> ControlWork {
+        let admission = self.admit_ingress(now, epoch.socket(), Ingress::Message);
+        if admission != Admission::Current(epoch) {
+            return match admission {
+                Admission::Expired(retirement, timeout) => {
+                    ControlWork::Expired(retirement, timeout)
+                }
+                _ => ControlWork::Complete,
+            };
         }
         let traffic = self
             .state
             .policy(epoch.feed())
             .expect("current feed")
             .traffic;
-        let pong = matches!(control, Control::Pong);
-        let refresh = self.state.traffic(epoch, true, pong);
+        let refresh = self
+            .state
+            .traffic(epoch, true, matches!(control, Control::Pong));
+        let receive = refresh || traffic == TrafficPolicy::TextAfterFirstPong;
+        let runtime = self.runtime_mut(epoch.feed());
+        if matches!(control, Control::Auth(_)) || refresh && !runtime.supervisor.idle_enabled() {
+            return ControlWork::Transition { refresh, receive };
+        }
+        if receive {
+            runtime.supervisor.received(now);
+        }
+        ControlWork::Complete
+    }
+
+    #[inline(never)]
+    pub(crate) fn finish_control<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        epoch: Epoch,
+        control: Control,
+        startup_ready: bool,
+        work: ControlWork,
+    ) -> Vec<Effect> {
+        let (refresh, receive) = match work {
+            ControlWork::Complete => return Vec::new(),
+            ControlWork::Expired(retirement, timeout) => {
+                return self
+                    .finish_ingress(
+                        cx,
+                        Admission::Expired(retirement, timeout),
+                        Ingress::Message,
+                    )
+                    .effects;
+            }
+            ControlWork::Transition { refresh, receive } => (refresh, receive),
+        };
         let runtime = self.runtime_mut(epoch.feed());
         if refresh {
             runtime.supervisor.set_idle_enabled(cx, true);
         }
-        // Native Bitunix current text observes stable backoff even before the
-        // first pong. Disabled idle keeps this from activating its watchdog.
-        if refresh || traffic == TrafficPolicy::TextAfterFirstPong {
+        if receive {
             runtime.supervisor.received(cx.now);
         }
         let Control::Auth(evidence) = control else {
