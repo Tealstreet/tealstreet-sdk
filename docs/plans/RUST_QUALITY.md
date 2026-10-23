@@ -508,6 +508,18 @@ only computes raw displacement after owner More; no second pagination authority
 or venue marker emitter is introduced. Original-source assertion RED controls
 cover the changed contracts; native shape/filter/units/request order, eager
 non-fill diagnostics and strict setup remain. NX coverage/runtime proof stay open.
+
+## ApeX bounded history owner adoption
+
+ApeX bounded execution reads use existing engine HistoryRows/Completion for the
+selected terminal result. Four original-source assertion-RED groups prove that
+all-native, missing-list/malformed and exhausted transport failures must reject
+rather than return background-cache/empty success. Controls preserve successful
+cache selection (including mixed alternatives and filtered nonempty primary),
+bounded duplicate replacement after eviction, two/four candidate requests,
+signature reset, concurrent owners and persistent live cache. Native endpoint
+selection/upsert facts remain local; no new owner/pager/marker policy or shared
+signing-provenance implementation is copied into the venue.
 ## Draft Engine socket lifecycle references
 
 OKX and Bitunix adopt one Engine registry/driver for epoch admission, typed auth,

@@ -4202,6 +4202,34 @@ There is no history Store publication or new SDK argument/row shape. Callers mus
 ingest command-scoped incomplete-query warnings, gate coverage accordingly and
 handle typed rejection as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
 
+### ApeX Omni bounded fills: typed rejection after every REST alternative fails
+
+Execution history now uses the engine HistoryRows/Completion owner. If every
+native/display-symbol attempt on both fills and historical-order routes actually
+fails, the query rejects with kind `internal` and the final terminal message.
+It no longer returns background WS-cache rows or complete `[]` after those
+failures. The cache was not fetched by this command; callers can continue to
+consume their live cache separately. No write outcome or partial marker is
+invented. Error handling must accept this rejection instead of treating the
+unavailable history as a complete response.
+
+Validated successful selection is preserved. A nonempty native primary response
+stops further REST alternatives, including when every row filters out; that case
+may still select matching cached rows. Any validated empty alternative likewise
+retains the existing cache path if later alternatives fail. Eligible nonempty
+REST output stays authoritative and never merges cache rows. Successful empty
+history remains distinct from all-actual-failure exhaustion.
+
+The original owner survives candidate moves and signature/transport resets.
+Native bounded upsert/top-limit eviction, exact IDs/raw times, output shape,
+filters, signing bytes, query bounds, two-versus-four alternative count and
+retry policy remain unchanged. Initial consuming signing refusal and existing
+wrapper-to-history error-message flattening retain their separate legacy paths;
+this slice does not claim new typed signing provenance. Unsupported axes and
+public-only/missing-market empty admission remain unchanged. No live Store
+publication, SDK argument or managed Context migration is added. Callers must
+handle rejected history as unavailable and consume live cache separately when
+needed. [Scope](RUST_OWNED_HISTORY.md).
 ## Host-safe physical engine resource IDs
 
 Physical socket, HTTP request, signing-attempt and timer IDs use exact numeric
