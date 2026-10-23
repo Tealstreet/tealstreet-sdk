@@ -571,7 +571,7 @@ fn a_deferred_cancel_all_keeps_its_own_receipt_through_the_lock() {
     deliver(
         &mut e,
         1.,
-        r#"{"op":"fetchStpMode","command":2,"timeoutMs":50000}"#,
+        r#"{"op":"fetchAccount","command":2,"timeoutMs":50000}"#,
     );
     assert_eq!(deadline(&e, 2), Some(1_000.), "the duplicate kept no stamp");
     // The placement ends; the deferred cancel-all re-enters past its wait.

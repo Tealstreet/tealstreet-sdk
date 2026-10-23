@@ -589,24 +589,24 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
 /// The envelope's optional `timeoutMs`: absent is `None`; a present `null`,
 /// non-integer or value outside 1..=MAX_COMMAND_WAIT_MS is an error.
 fn decode_wait(json: &str) -> Result<Option<u32>, serde_json::Error> {
-    fn present<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<serde_json::Value>, D::Error> {
-        serde_json::Value::deserialize(deserializer).map(Some)
+    // A present field must hold an integer; `null` is not absence.
+    fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {
+        u64::deserialize(deserializer).map(Some)
     }
     #[derive(Deserialize)]
     struct Wait {
         #[serde(default, rename = "timeoutMs", deserialize_with = "present")]
-        timeout: Option<serde_json::Value>,
+        timeout: Option<u64>,
     }
-    let Some(value) = serde_json::from_str::<Wait>(json)?.timeout else {
-        return Ok(None);
-    };
-    match value.as_u64() {
+    let wait = serde_json::from_str::<Wait>(json).map_err(|_| {
+        serde::de::Error::custom("timeoutMs must be a positive integer no greater than 2147483647")
+    })?;
+    match wait.timeout {
+        None => Ok(None),
         Some(ms) if (1..=u64::from(crate::MAX_COMMAND_WAIT_MS)).contains(&ms) => {
             Ok(Some(ms as u32))
         }
-        _ => Err(serde::de::Error::custom(
+        Some(_) => Err(serde::de::Error::custom(
             "timeoutMs must be a positive integer no greater than 2147483647",
         )),
     }
