@@ -552,11 +552,37 @@ its code table, strict ACK DTOs (`trading/acknowledgement.rs`) and classified
 
 ### Status
 
-**Blocked on #1873 landing** and the Plan/execution composition API with
-uufub4. The Bybit reconciliation codec (dazzy3's ordinary adoption) is a hard
-prerequisite: the default codec refuses release, and `execution_registry.rs`
-refuses Mutation today. Until then, the REDs stay committed on
-`feat/rust-hyro-execution` and nothing merges.
+Updated 2026-10-24. Done or owned:
+- #1873 (Plan core) landed `632da7717e2`.
+- Planned executions are #1919, reviewed CLEAN and READY: the Plan is owned
+  by an `Owner::Execution`, the founder is an observer, and the early
+  observer projection is in.
+- The Bybit receipt-expiry producer is #1927 (claude-dazzy3): REST
+  `http_work` sets `expiry_ms = stamp_ms + recv_window` when the window is a
+  positive integer, otherwise none.
+
+Still blocking adoption:
+- **Bybit codec and hooks.** dazzy3's ordinary Bybit Plan child (#1914, D5
+  split) must land the reconciliation codec and the four `hyro.rs` hooks.
+- **Reconciliation runtime (follow-ups 1+2), held for uufub4 API fit.**
+  - Absence proof is fenced in protocol time on one clock revision: anchor
+    `expiry_ms` <= the earliest read release `protocol_ms`, with equal
+    `ReleaseTime.revision`. Missing expiry or a revision change grants nothing.
+  - Open (uufub4): conservatively bound the venue's last possible acceptance
+    against server clock skew, with no arbitrary SKEW constant. A candidate
+    is evidence from the shared protocol clock's measured offset and error at
+    release; that needs a reviewed clock-error API.
+  - Open (Hyro): verify that the HyroTrader proxy forwards the signed
+    `X-BAPI-TIMESTAMP`/`recv_window` and that Bybit enforces them for proxied
+    creates. Without that, #1927's expiry is not proof for Hyro and Hyro
+    absence never grants.
+- **Ledger and continuity.**
+  - The intent ledger and imported journal facts (follow-up 3).
+  - Continuity provenance: typed `(session_version, orders_snapshot_version)`
+    with no packed u64, plus a full trusted signer/provider identity.
+
+Until these land, the two REDs stay committed on `feat/rust-hyro-execution`
+and nothing merges.
 
 Architecture gate: No, conditionally. Hyro reuses the Plan core's code table,
 strict ACKs and resend grants, plus the shared execution groups. The intent
