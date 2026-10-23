@@ -96,6 +96,11 @@ impl Waits {
     }
 
     #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.stamps.len()
+    }
+
+    #[cfg(test)]
     pub(super) fn exhaust_receipts(&mut self) {
         self.receipts = u64::MAX;
     }

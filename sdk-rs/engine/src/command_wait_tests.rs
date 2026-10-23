@@ -67,6 +67,11 @@ impl Venue for Probe {
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
         self.borrowed.push(wait(cx));
+        // A late legacy terminal from a callback, outside any command entry.
+        if let Some(command) = text.strip_prefix("fail:") {
+            cx.fail(command.parse().expect("command id"), "late");
+            return;
+        }
         let mut order = crate::model::Order {
             id: text.into(),
             parent_id: None,
@@ -471,4 +476,59 @@ fn a_held_command_keeps_its_own_receipt_past_a_same_id_arrival() {
         "the original reads its own receipt; the duplicate has none"
     );
     assert_eq!(deadline(&e, 2), None, "the original's terminal cleared it");
+}
+
+#[test]
+fn a_held_original_keeps_its_wait_past_a_same_id_late_terminal() {
+    let mut e = engine(Probe::default());
+    deliver(
+        &mut e,
+        0.,
+        r#"{"op":"placeOrders","command":1,"orders":[]}"#,
+    );
+    deliver(&mut e, 0., &cancel(2_000, "7", Some(300_000)));
+    // A same-id duplicate left unanswered, then failed from a callback.
+    assert!(handle_with(
+        &mut e,
+        1.,
+        Command::FetchStpMode { command: 2_000 },
+        None
+    ));
+    e.handle(
+        2.,
+        Event::WsMessage {
+            socket: SocketId(1),
+            text: "fail:2000",
+        },
+    );
+    assert_eq!(deadline(&e, 2_000), Some(300_000.), "held receipt kept");
+    e.handle(
+        3.,
+        Event::WsMessage {
+            socket: SocketId(1),
+            text: "7",
+        },
+    );
+    assert_eq!(
+        observed(&e, 2_000),
+        [None, Some(Wait::Remaining(299_997))],
+        "the duplicate had no wait; the original keeps its own"
+    );
+}
+
+#[test]
+fn waits_a_venue_never_answers_stay_bounded() {
+    let mut e = engine(Probe {
+        ignore_high: true,
+        ..Default::default()
+    });
+    for command in 1_000..6_000 {
+        deliver(&mut e, 0., &cancel(command, "x", Some(1_000)));
+    }
+    deliver(&mut e, 2_000., &cancel(7_000, "x", Some(1_000)));
+    assert_eq!(
+        e.io.command_waits.len(),
+        1,
+        "expired waits no command still carries are dropped"
+    );
 }
