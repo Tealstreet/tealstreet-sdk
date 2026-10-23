@@ -187,17 +187,15 @@ fn public_candle_network_read_retries_three_times_and_settles() {
                 error: "reset",
             },
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
         if attempt < 3 {
-            let timer = actions
+            let next = actions
                 .into_iter()
                 .find_map(|a| match a {
-                    Action::SetTimer { timer, .. } => Some(timer),
+                    Action::Http(request) => Some(request),
                     _ => None,
                 })
                 .unwrap();
-            e.handle(NOW, Event::TimerFired { timer });
-            let next = requests(&mut e).pop().unwrap();
             assert_eq!(request.url, next.url);
             request = next;
         } else {
