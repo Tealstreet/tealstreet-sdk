@@ -35,6 +35,8 @@ compile_error!(
     "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
+#[cfg(feature = "asterdex")]
+mod asterdex_setup;
 mod construction;
 #[cfg(feature = "dispatch-signing")]
 pub mod hosted_signing;
@@ -216,7 +218,7 @@ fn breakoutprop_rules(options: &EngineOptions) -> Result<(), VenueError> {
     Ok(())
 }
 
-#[cfg(any(feature = "polymarket", feature = "asterdex"))]
+#[cfg(feature = "polymarket")]
 fn hex_of(value: &str, digits: usize) -> bool {
     value.len() == digits && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -293,26 +295,6 @@ fn orderly_rules(options: &EngineOptions) -> Result<(), VenueError> {
 /// The message names the Main Wallet Address field; the app routes on its first sentence.
 #[cfg(feature = "asterdex")]
 const ASTERDEX_MAIN_WALLET_REQUIRED: &str = "Aster API Wallet/vault keys require the Main Wallet Address. Fill Main Wallet Address with your login wallet — do not replace the main wallet with the API/vault wallet.";
-
-#[cfg(feature = "asterdex")]
-fn asterdex_rules(options: &EngineOptions) -> Result<(), VenueError> {
-    // V3 wallet credentials under the V1 API mean the user put the API wallet where the main wallet goes.
-    let key = options.key.as_deref().unwrap_or_default();
-    let secret = options.secret.as_deref().unwrap_or_default();
-    if !options.public_data_only
-        && options.aster_api_version() != safe_cex_venue_asterdex::sign::Version::V3
-        && key
-            .strip_prefix("0x")
-            .is_some_and(|address| hex_of(address, 40))
-        && hex_of(secret.strip_prefix("0x").unwrap_or(secret), 64)
-        && [&options.asterdex.user_address, &options.application_id]
-            .iter()
-            .all(|value| value.as_deref().is_none_or(|text| text.trim().is_empty()))
-    {
-        return Err(invalid(ASTERDEX_MAIN_WALLET_REQUIRED));
-    }
-    Ok(())
-}
 
 /// Whether this build constructs `venue`.
 pub fn supported(venue: &str) -> bool {
@@ -440,18 +422,7 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
         };
     }
     let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
-    // AsterDEX V3 signs with its wallet private key, which TS resolves from auth or the secret.
-    #[cfg(feature = "asterdex")]
-    let signer = if venue == "asterdex" {
-        [&options.asterdex.private_key, &options.secret]
-            .iter()
-            .any(|value| value.as_deref().is_some_and(|text| !text.trim().is_empty()))
-    } else {
-        present(&options.secret)
-    };
-    #[cfg(not(feature = "asterdex"))]
-    let signer = present(&options.secret);
-    if !present(&options.key) || !signer {
+    if !present(&options.key) || !present(&options.secret) {
         return Err(invalid(
             "Rust engine private accounts require a local API key and secret; remote signing is unsupported",
         ));
@@ -486,11 +457,13 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
-    prepare_local_signer_with_policy(
-        options,
-        construction::signer_setup_policy(venue),
-        public_data_only,
-    )
+    let policy = construction::signer_setup_policy(venue);
+    #[cfg(feature = "asterdex")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Asterdex) {
+        let setup = asterdex_setup::local_setup(options, public_data_only)?;
+        return local_signer_from_setup(setup, policy, public_data_only);
+    }
+    prepare_local_signer_with_policy(options, policy, public_data_only)
 }
 
 #[cfg(feature = "dispatch-signing")]
@@ -505,7 +478,7 @@ fn prepare_local_signer_with_policy(
     ),
     VenueError,
 > {
-    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, Secret};
     let primary =
         if options.key.is_some() || options.secret.is_some() || options.passphrase.is_some() {
             Some(LocalIdentity {
@@ -526,12 +499,28 @@ fn prepare_local_signer_with_policy(
             passphrase: read.passphrase.take().map(Secret::new),
             ..Default::default()
         });
-    let (signer, identities) = LocalSigner::from_setup_with_policy_and_mode(
-        LocalSetup { primary, secondary },
-        policy,
-        public_data_only,
-    )
-    .map_err(|_| invalid("Invalid local signer setup"))?;
+    local_signer_from_setup(LocalSetup { primary, secondary }, policy, public_data_only)
+}
+
+#[cfg(feature = "dispatch-signing")]
+fn local_signer_from_setup(
+    setup: safe_cex_crypto::signer::LocalSetup,
+    policy: safe_cex_engine::signing::CredentialSetupPolicy,
+    public_data_only: bool,
+) -> Result<
+    (
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    let (signer, identities) =
+        safe_cex_crypto::signer::LocalSigner::from_setup_with_policy_and_mode(
+            setup,
+            policy,
+            public_data_only,
+        )
+        .map_err(|_| invalid("Invalid local signer setup"))?;
     Ok((std::sync::Arc::new(signer), identities))
 }
 /// Separate trusted JS/native provider setup, with fixed parse failures.
@@ -741,10 +730,7 @@ pub fn build_with_signer<T: Visit>(
         feature = "okx"
     ))]
     local_signing_rules(venue, &options)?;
-    // AsterDEX's read agent travels in `asterdex.readKey`/`readSecret`; it ignores these.
-    if let Some(read) = &options.read_credentials
-        && venue != "asterdex"
-    {
+    if let Some(read) = &options.read_credentials {
         read.validate().map_err(invalid)?;
     }
     #[cfg(feature = "kraken")]
@@ -952,31 +938,46 @@ pub fn build_with_signer<T: Visit>(
         ),
         #[cfg(feature = "asterdex")]
         "asterdex" => {
-            asterdex_rules(&options)?;
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    AsterDex::new(AsterOptions {
-                        testnet: options.testnet,
-                        public_data_only: options.public_data_only,
-                        key: options.key.take(),
-                        secret: options.secret.take(),
-                        application_id: options.application_id.take(),
-                        auth_user_address: options.asterdex.user_address.take(),
-                        auth_signer_address: options.asterdex.signer_address.take(),
-                        auth_private_key: options.asterdex.private_key.take(),
-                        api_version: options.asterdex.api_version,
-                        builder_address: options.asterdex.builder_address.take(),
-                        builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker.take(),
-                        builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker.take(),
-                        read_key: options.asterdex.read_key.take(),
-                        read_secret: options.asterdex.read_secret.take(),
-                    }),
-                    entropy,
-                )?,
-            )
+            let present = |value: &Option<String>| value.as_ref().is_some_and(|s| !s.is_empty());
+            if present(&options.key)
+                || present(&options.secret)
+                || present(&options.asterdex.private_key)
+                || options.asterdex.read_key.is_some()
+                || options.asterdex.read_secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "AsterDEX credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
+                AsterDex::new(AsterOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    credentials: identities.primary,
+                    read_credentials: identities.secondary,
+                    api_version: options.asterdex.api_version,
+                    user_address: options
+                        .asterdex
+                        .user_address
+                        .take()
+                        .filter(|text| !text.trim().is_empty())
+                        .or(options.application_id.take()),
+                    signer_address: options.asterdex.signer_address.take(),
+                    read_signer_address: options.asterdex.read_signer_address.take(),
+                    builder_address: options.asterdex.builder_address.take(),
+                    builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker.take(),
+                    builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker.take(),
+                }),
+                entropy,
+            )?;
+            engine.set_signer(signer)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "orderly")]
         "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
@@ -1144,6 +1145,7 @@ pub fn build_with_signer<T: Visit>(
                 ));
             }
             let identities = options.signing.take().unwrap_or_default();
+            let registered = identities.clone();
             if let Some(read) = &identities.secondary {
                 read.validate().map_err(invalid)?;
             }
@@ -1170,6 +1172,7 @@ pub fn build_with_signer<T: Visit>(
                 entropy,
             )?;
             engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "kucoinspot")]
@@ -1296,6 +1299,7 @@ pub fn build_with_signer<T: Visit>(
                 ));
             }
             let identities = options.signing.take().unwrap_or_default();
+            let registered = identities.clone();
             if let Some(identity) = &identities.secondary {
                 identity.validate().map_err(invalid)?;
             }
@@ -1330,6 +1334,7 @@ pub fn build_with_signer<T: Visit>(
             options.validate().map_err(|error| invalid(&error))?;
             let mut engine = Engine::new(BybitLinear::new(options), entropy)?;
             engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "bitget")]
@@ -1794,6 +1799,8 @@ pub struct AsterConfig {
     pub builder_fee_rate_taker: Option<String>,
     pub read_key: Option<String>,
     pub read_secret: Option<String>,
+    /// V3 read agent wallet; trusted setup defaults it to the read key.
+    pub read_signer_address: Option<String>,
 }
 #[cfg(feature = "asterdex")]
 impl AsterConfig {

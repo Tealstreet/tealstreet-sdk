@@ -3,10 +3,22 @@ use crate::{Kucoin, Pending};
 use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, WindowOrder};
-use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId, VenueError};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, Query, TimerId, VenueError};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, VecDeque};
+
+// These returning branches perform no transport or private remote read.
+pub(crate) fn local_read_policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
 
 const DAY: u64 = 86_400_000;
 /// Requests per read, and windows per range, before a read is refused.
@@ -253,7 +265,15 @@ impl Kucoin {
         }
         let (kind, symbol, order, filter, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(command, "Client ID query is not supported by this venue");
+                let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                    return;
+                };
+                let _ = cx.fail_context(
+                    &context,
+                    VenueError::new("Client ID query is not supported by this venue")
+                        .kind(ErrorKind::Unsupported)
+                        .outcome(Outcome::NotSent),
+                );
                 return;
             }
             Query::Fills {
@@ -287,27 +307,67 @@ impl Kucoin {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
         }) {
-            cx.fail(command, "Invalid KuCoin order ID");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Invalid KuCoin order ID")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         }
         if kind != Kind::Trades && self.credentials.is_none() {
-            cx.fail(command, "KuCoin credentials required");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("KuCoin credentials required")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         }
         if let Some(s) = &symbol
             && cx.store.market(s).is_none()
         {
-            cx.fail(command, format!("Unknown KuCoin market {s}"));
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new(format!("Unknown KuCoin market {s}"))
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         }
         let end = to.unwrap_or_else(|| cx.now.floor());
         let start = from.unwrap_or((end - DAY as f64).max(0.0));
         let (Some(start), Some(end)) = (millis(start), millis(end)) else {
-            cx.fail(command, "Invalid KuCoin query time range");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Invalid KuCoin query time range")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         };
         if start > end {
-            cx.fail(command, "Invalid KuCoin query time range");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Invalid KuCoin query time range")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         }
         let explicit_range = from.is_some() && to.is_some();
@@ -329,7 +389,15 @@ impl Kucoin {
             WindowOrder::NewestFirst,
             MAX_REQUESTS as usize,
         ) else {
-            cx.fail(command, "Invalid KuCoin query time range");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Invalid KuCoin query time range")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         };
         let mut windows: VecDeque<(u64, u64)> = tiles
@@ -367,7 +435,10 @@ impl Kucoin {
             window_count: 0,
         };
         if request.limit == 0 {
-            cx.done(command, "[]".into());
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.done_context(&context, "[]".into());
             return;
         }
         self.history_schedule(cx, request);

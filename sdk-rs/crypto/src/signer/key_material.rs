@@ -6,16 +6,7 @@ use zeroize::Zeroizing;
 
 const LIMIT: usize = 1024 * 1024;
 
-#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum KeyEncoding {
-    #[default]
-    Utf8,
-    Base64,
-    Hex,
-    /// PKCS8/SEC1 envelope decoding; algorithm validation occurs when signing.
-    Pem,
-}
+pub use safe_cex_engine::signing::KeyEncoding;
 
 fn base64(input: &[u8]) -> Result<Zeroizing<Vec<u8>>, SignError> {
     // Decode into an initialized guarded buffer: partial error output is wiped.
@@ -38,7 +29,21 @@ pub(super) fn decode(
     match encoding {
         KeyEncoding::Utf8 => Ok(input),
         KeyEncoding::Base64 => base64(&input),
+        KeyEncoding::Base64Text => {
+            // Encode into one initialized guarded buffer; nothing reallocates.
+            let mut output = Zeroizing::new(vec![0; input.len().div_ceil(3) * 4]);
+            let length = STANDARD
+                .encode_slice(&*input, &mut output)
+                .map_err(|_| SignError::InvalidRequest)?;
+            output.truncate(length);
+            Ok(output)
+        }
         KeyEncoding::Hex => {
+            // Wallet keys are commonly pasted 0x-prefixed; the prefix is optional.
+            let input = match input.as_slice() {
+                [b'0', b'x' | b'X', body @ ..] => body,
+                body => body,
+            };
             if !input.len().is_multiple_of(2) {
                 return Err(SignError::InvalidRequest);
             }

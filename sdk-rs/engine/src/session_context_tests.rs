@@ -28,6 +28,7 @@ struct Probe {
     responses: Vec<(Owner, String)>,
     failures: Vec<Owner>,
     preparation_failures: Vec<(Error, Option<crate::Outcome>)>,
+    reconciles: usize,
 }
 
 impl Default for Probe {
@@ -45,6 +46,7 @@ impl Default for Probe {
             responses: vec![],
             failures: vec![],
             preparation_failures: vec![],
+            reconciles: 0,
         }
     }
 }
@@ -155,6 +157,9 @@ impl Venue for Probe {
         panic!("engine timer leaked to venue");
     }
     fn on_command(&mut self, _: &mut Cx<'_, Pending>, _: Command) {}
+    fn reconcile_uncertain(&mut self, _: &mut Cx<'_, Pending>, _: Option<&[String]>) {
+        self.reconciles += 1;
+    }
     fn book(&self, _: &str) -> Option<&Book> {
         None
     }
@@ -839,6 +844,30 @@ fn session_writes_supply_no_legacy_placement_evidence() {
         !engine.io.order_locks.uncertain(""),
         "a keepalive is not a placement write"
     );
+}
+
+#[cfg(feature = "order-locks")]
+#[test]
+fn an_absent_order_answer_to_a_session_write_never_fences_or_reconciles() {
+    use crate::classify::{Key, Row, SatisfiedIntent, Verdict};
+    // Even an unrestricted absent-order row cannot make a setting a cancel.
+    const ABSENT: crate::classify::CodeTable = crate::classify::CodeTable {
+        rows: &[Row {
+            key: Key::Int(-2015),
+            verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+            only: None,
+        }],
+        ..refusing(Verdict::Refused(crate::ErrorKind::Rejected))
+    };
+    let mut engine = engine();
+    engine.venue.refusal = Some(&ABSENT);
+    let session = open(&mut engine, false);
+    let token = session_write(&mut engine, &session, 1.);
+    let request = release(&mut engine, token, 2.);
+    respond(&mut engine, request, 3., "{\"code\":-2015}");
+    assert_eq!(engine.venue.facts.len(), 1);
+    assert!(!engine.io.order_locks.uncertain(""), "no order fence");
+    assert_eq!(engine.venue.reconciles, 0, "no reconcile queued");
 }
 
 #[test]

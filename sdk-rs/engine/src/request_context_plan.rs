@@ -84,6 +84,13 @@ impl CallWindow {
     }
 }
 
+/// A predeclared terminal after one top-level serial step. This is bounded
+/// declaration data, not an execution handle or permission to skip a call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MutationTerminalBound {
+    pub after_step: usize,
+}
+
 /// One logical call. `attempts` includes the initial attempt; all attempts count
 /// against journal capacity even when they share one deadline. An optional
 /// fallback follows the complete parent attempt chain once, never per retry.
