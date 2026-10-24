@@ -191,18 +191,18 @@ fn identity_rejects_incomplete_saved_read_credentials_without_primary_fallback()
     let mut e =
         safe_cex_engine::test_support::seeded_engine(Bingx::new(safe_cex_venue_bingx::Options {
             credentials: Some(safe_cex_engine::signing::Identity {
-                extra: Default::default(),
                 credential: safe_cex_engine::signing::KeyRef("ref:owned-primary".into()),
                 signing: safe_cex_engine::signing::KeyRef("ref:owned-primary-signing".into()),
                 passphrase: None,
                 stable_id: None,
+                extra: Default::default(),
             }),
             read_credentials: Some(safe_cex_engine::signing::Identity {
-                extra: Default::default(),
                 credential: safe_cex_engine::signing::KeyRef("ref:owned-read".into()),
                 signing: safe_cex_engine::signing::KeyRef(String::new()),
                 passphrase: None,
                 stable_id: None,
+                extra: Default::default(),
             }),
             ..Default::default()
         }));

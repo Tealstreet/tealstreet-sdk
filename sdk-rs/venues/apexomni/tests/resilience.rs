@@ -14,13 +14,61 @@ fn list(rows: &[&str]) -> String {
     format!(r#"{{"code":0,"data":[{}]}}"#, rows.join(","))
 }
 fn engine(seed: &str) -> TestEngine {
-    safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
+    use safe_cex_crypto::signer::{
+        LocalExtra, LocalExtras, LocalIdentity, LocalSetup, LocalSigner, Secret,
+    };
+    use safe_cex_engine::signing::{
+        CredentialSetupPolicy, ExtraFieldPolicy, ExtraKey, ExtraKeyPolicy, IdentitySetupPolicy,
+        KeyEncoding,
+    };
+    let mut extra = LocalExtras::default();
+    if safe_cex_venue_apexomni::sign::validate_seed(seed).is_ok() {
+        extra.0.insert(
+            ExtraKey::ZklinkSeed,
+            LocalExtra {
+                value: Secret::new(seed.into()),
+                encoding: KeyEncoding::Hex,
+            },
+        );
+    }
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(LocalIdentity {
+                key: Secret::new("key".into()),
+                secret: Secret::new("secret".into()),
+                passphrase: Some(Secret::new("passphrase".into())),
+                extra,
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                secret_encoding: Some(KeyEncoding::Base64Text),
+                extra: Some(ExtraKeyPolicy {
+                    key: ExtraKey::ZklinkSeed,
+                    field: ExtraFieldPolicy::Optional,
+                    encoding: Some(KeyEncoding::Hex),
+                }),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+    )
+    .unwrap();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
         omni_key_seed: Some(seed.into()),
+        identity: identities.primary.clone(),
         ..Default::default()
-    }))
+    }));
+    engine.set_identities(identities).unwrap();
+    engine
+        .set_signer(Some(std::sync::Arc::new(provider)))
+        .unwrap();
+    engine
 }
 fn seeded(e: &mut TestEngine, markets: &str) -> (Option<SocketId>, Vec<HttpRequest>, Vec<Action>) {
     e.start(0.0);
@@ -85,7 +133,7 @@ fn heal_orders(e: &mut TestEngine, socket: SocketId, at: f64, body: &str) {
 }
 fn command(e: &mut TestEngine, at: f64, command: Command) {
     e.handle(at, Event::Command(command));
-    let write = requests(e).remove(0);
+    let write = prepared_requests(e, at).remove(0);
     response(e, &write, at + 10.0, ACK);
 }
 fn order_ids(e: &TestEngine) -> Vec<&str> {
@@ -400,7 +448,7 @@ fn invalid_omni_seed_keeps_read_only_monitoring_and_rejects_placement() {
     assert!(actions.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandFailed { command: 4, error })
-            if error.message.contains("OmniKey seed")
+            if error.kind == Some(safe_cex_engine::ErrorKind::InvalidInput) && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
     )));
 }
 

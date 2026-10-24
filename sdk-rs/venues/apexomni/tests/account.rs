@@ -14,13 +14,35 @@ const ORDERS: &str = r#"{"code":0,"data":[{"id":"parent","symbol":"BTC-USDT","st
 const BALANCE: &str = r#"{"code":0,"data":{"totalEquityValue":"1000","availableBalance":"800","initialMargin":"100","maintenanceMargin":"20"}}"#;
 
 fn seeded() -> (TestEngine, SocketId, Vec<HttpRequest>) {
+    let (provider, identities) = safe_cex_crypto::signer::LocalSigner::from_setup_with_policy(
+        safe_cex_crypto::signer::LocalSetup {
+            primary: Some(safe_cex_crypto::signer::LocalIdentity {
+                key: safe_cex_crypto::signer::Secret::new("key".into()),
+                secret: safe_cex_crypto::signer::Secret::new("secret".into()),
+                passphrase: Some(safe_cex_crypto::signer::Secret::new("passphrase".into())),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+        safe_cex_engine::signing::CredentialSetupPolicy {
+            primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+    )
+    .unwrap();
     let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
         omni_key_seed: Some("11".repeat(65)),
+        identity: identities.primary.clone(),
         ..Default::default()
     }));
+    e.set_identities(identities).unwrap();
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
@@ -884,7 +906,7 @@ fn acknowledged_leverage_survives_older_snapshot_and_cached_position_heal() {
             side: None,
         }),
     );
-    let write = requests(&mut e).remove(0);
+    let write = prepared_requests(&mut e, 1200.).remove(0);
     assert!(write.url.ends_with("/v3/set-initial-margin-rate"));
     response(&mut e, &write, 1210.0, r#"{"code":0,"data":{}}"#);
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);

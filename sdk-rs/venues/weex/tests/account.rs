@@ -1261,11 +1261,11 @@ fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
     let mut e =
         safe_cex_engine::test_support::seeded_engine(WeexFutures::new(support::NativeOptions {
             credentials: Some(safe_cex_engine::signing::Identity {
-                extra: Default::default(),
                 credential: safe_cex_engine::signing::KeyRef("primary.credential".into()),
                 signing: safe_cex_engine::signing::KeyRef("primary.signing".into()),
                 passphrase: None,
                 stable_id: None,
+                extra: Default::default(),
             }),
             ..Default::default()
         }));
