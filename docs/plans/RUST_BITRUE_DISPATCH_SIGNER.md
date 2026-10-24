@@ -58,8 +58,9 @@ continuations. No rename/move may be claimed as a genuine request-site prune.
 ## Native canonical bytes and atomic recipe
 
 Actual source: sign.rs:12-18 signature; lib.rs:269-340 send/issue;
-lib.rs:839-853 response resend and920-948 streamed-failure resend/transport retry;
-account.rs:534 listen POST,814 keepalive PUT,1755-1804 token acceptance/retirement.
+lib.rs:839-854 response resend and920-949 streamed-failure resend/transport retry;
+account.rs:531-540 listen POST,811-820 keepalive PUT,1762-1802 token acceptance.
+Token retirement is local generation/key cleanup at account.rs:542-553.
 
 One SignRequest and one receipt per physical preparation:
 1. Present the selected Identity.credential API-key ref.
@@ -94,7 +95,10 @@ refused provider output must release no partially signed request.
 ## Trusted selection and native ordering
 
 Ordinary private GETs use secondary only when primary key+secret are present;
-without a read key they use primary. Writes/DELETE/listen POST+PUT use primary.
+without a read key they use primary. Actual writes and listen POST+PUT use primary.
+There is NO native DELETE: cancellations are POST /fapi/v2/cancel and listen-key
+retirement is local. Trade-owned lookup GETs after writes and myTrades still use
+secondary; do not promote them solely because a mutation initiated them.
 Catalogues are explicitly PrimaryRead(Catalog), even though GET; this is an
 operation declaration, not a new method-based selector. Use shared Slots and
 SelectedRead for eligible plain command/background reads. Root/page consumers
@@ -127,11 +131,17 @@ Managed production must use one Bitrue CodeTable and the shared classifier facts
 only an eligible RefusedResend permits resend;408/5xx/transport remain unknown,
 not a local status ladder. Keep accepted IDs as structured journal Partial;
 malformed2xx is unproven/Unknown, not None (classification rows8/21/22).
+Existing native mappings to move into that table: trading.rs:1183-1189 proves
+-1022/-1102/-1121/-2017 refusal only at200..499 excluding408;1515-1522 maps
+401/403/429,408/5xxUnknown and -1022AuthInvalid after the single signature retry.
+Keyless catalogue -1022 currently gets one unsigned reissue as well; preserve its
+eligible native read behavior without fabricating an Identity or signing authority.
 Move existing parsing solely to native-code/message extraction, never classification
 from engine-formatted strings. Negative controls pin -1022+HTTP500 emits no resend.
 
-For each eligible resend native uses max(nonnegative now, previous timestamp+1),
-including a fixed/backward clock. Each attempt needs a NEW atomic preparation,
+For EVERY request re-issue, both eligible signature resend AND eligible transport
+retry, native uses max(nonnegative now, previous timestamp+1), including a fixed/
+backward clock (lib.rs:946). Each attempt needs a NEW atomic preparation,
 fresh receipt and MAC, never cached headers. A previous value must come from the
 exact genuine shared SigningRelease receipt for the released attempt, with original
 selection/account/generation/egress retained. Existing DispatchContext.stamp_ms
@@ -140,7 +150,8 @@ minimum-stamp API needs shared clock/dispatcher review before production; do not
 implement a venue-owned timestamp allocator or infer retry permission from metadata.
 
 Native retry flags are independent: one signature resend and up to3transport
-retries for eligible NON-market GETs or listen POST only. Catalogues explicitly
+retries for eligible NON-market GETs or listen POST at its EXACT full LISTEN_URL
+only; the signature floor applies to these transport reissues too. Catalogues explicitly
 skip that immediate branch and retain startup backoff. Malformed-list/UTF-8 failures
 and a second parsed -1022 do not enter transport retry. No generic uncertain
 write/PUT replay is added. The two budgets do not reset one another. Native
@@ -206,3 +217,16 @@ The five-physical-attempt observation applies only to eligible non-market chains
 Those exceptions and exact source anchors are corrected before test implementation.
 Full-map review CLEAR confirms all20baseline fingerprints, source holds and the
 unapproved-only candidate transition. No production source is authorized.
+
+## HMAC owner review corrections
+
+claude-4yjlw0 confirmed preimage, header order, selection and listen endpoints.
+The two Medium corrections are explicit: receipt-floor custody covers transport
+retries as well as signature refusals, and exact native retry exclusions remain.
+Source anchors, absence of DELETE, local listen retirement, existing error mapping
+and the keyless unsigned signature-refusal reissue are recorded. Registry recvWindow
+normalization was independently rechecked at registry/src/lib.rs:1140-1144.
+The overseer assigned the shared receipt-floor prerequisite to claude-m26ps4.
+Its proposed StampFloor from SigningRelease and DispatchContext::stamp_after is
+consumer-fit CLEAR in direction only; no reviewed source pin exists. The native
+negative-to-zero initial stamp boundary remains an explicit shared-fit question.
