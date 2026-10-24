@@ -76,6 +76,7 @@ impl Venue for Probe {
                 &preflight,
                 &STEPS,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Mutation,
                     credential: Some(credential),
                     pacing: None,

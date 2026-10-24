@@ -180,6 +180,7 @@ impl Venue for Fixture {
                 &preflight,
                 &STEPS,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Read,
                     credential: None,
                     pacing: None,
