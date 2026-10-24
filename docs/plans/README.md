@@ -322,6 +322,14 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Polymarket/Kraken fixed settings | LocalSetting adoption | Before changing the two held keyless fixed-setting success sites. | [RUST_FIXED_SETTING_ADOPTION.md](RUST_FIXED_SETTING_ADOPTION.md) |
 | OKX reported closed-position Read custody | Implemented; native/strict/reviews clear, CI pending | Before migrating request_closed_page from legacy Completion/list to the caller-root/history bridge. | [RUST_OKX_CLOSED_HISTORY_CONTEXT.md](RUST_OKX_CLOSED_HISTORY_CONTEXT.md) |
+
+
+| Native socket snapshot barrier | Shared prerequisite API plan | Before separating login acceptance from a connect-origin native snapshot completion; no venue timer or second reducer. | [RUST_SOCKET_SNAPSHOT_BARRIER.md](RUST_SOCKET_SNAPSHOT_BARRIER.md) |
+| Whole Phemex managed sockets | Whole-family adoption plan | Before changing public/private transport, auth or accepted snapshot expiry; preserves the parked public controls and REST-owner boundaries. | [RUST_PHEMEX_MANAGED_SOCKETS.md](RUST_PHEMEX_MANAGED_SOCKETS.md) |
+
+
+
+| Phemex dispatch HMAC custody | Full cutover reviewed; folds into #1974 after #1970 | Before changing Phemex REST/WS canonical signing, provider setup or reconciliation expiry | [RUST_PHEMEX_DISPATCH_SIGNING.md](RUST_PHEMEX_DISPATCH_SIGNING.md) |
 | MEXC unsigned discovery and depth ownership | Managed adoption under review | Before adopting the two public Background Read send sites. | [RUST_MEXC_PUBLIC_BACKGROUND_CONTEXT.md](RUST_MEXC_PUBLIC_BACKGROUND_CONTEXT.md) |
 
 | Hyperliquid spot candle custody | Managed adoption; focused controls pass, review and CI pending | Before changing standalone or merged spot candles; reuses the existing perps Context and wire path. | [RUST_HYPERLIQUID_SPOT_CANDLES_CONTEXT.md](RUST_HYPERLIQUID_SPOT_CANDLES_CONTEXT.md) |
@@ -331,10 +339,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Orderly initial history refusals | Implemented; bounded reviews and CI pending | Before converting the three initial history refusals; excludes combo-5b signer/source work. | [RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md](RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md) |
 
-
-| Native socket snapshot barrier | Shared prerequisite API plan | Before separating login acceptance from a connect-origin native snapshot completion; no venue timer or second reducer. | [RUST_SOCKET_SNAPSHOT_BARRIER.md](RUST_SOCKET_SNAPSHOT_BARRIER.md) |
-| Whole Phemex managed sockets | Whole-family adoption plan | Before changing public/private transport, auth or accepted snapshot expiry; preserves the parked public controls and REST-owner boundaries. | [RUST_PHEMEX_MANAGED_SOCKETS.md](RUST_PHEMEX_MANAGED_SOCKETS.md) |
-
-
-
-| Phemex dispatch HMAC custody | Full cutover reviewed; folds into #1974 after #1970 | Before changing Phemex REST/WS canonical signing, provider setup or reconciliation expiry | [RUST_PHEMEX_DISPATCH_SIGNING.md](RUST_PHEMEX_DISPATCH_SIGNING.md) |
+| Kraken Futures public candle custody | Managed adoption; focused controls pass, source review/CI pending | Before changing caller-root pages or subscription candle polling. | [RUST_KRAKEN_FUTURES_CANDLE_CONTEXT.md](RUST_KRAKEN_FUTURES_CANDLE_CONTEXT.md) |

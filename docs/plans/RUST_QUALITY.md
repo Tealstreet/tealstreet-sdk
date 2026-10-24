@@ -1632,6 +1632,16 @@ and advance each native100ms page clock. Capacity uses genuine retained peers;
 reuse controls now reach and pass their stale-timer/DATA assertions. Family
 WASM/replay/CPU/memory certification remains CI's responsibility.
 
+### Phemex full signer cutover evidence
+
+Original signer test checkpoint17b9ee461cb had6GREEN/16assertionRED/0ignored.
+All22 are now GREEN with the same assertions, plus2 malformed-provider controls
+and the trusted-setup security control. Native256 and extended signer24/security2,
+registry3 and SDK constructor5 pass; strict Phemex Clippy passes. The exact
+combined staging map is17F/18O ->16F/16O, with one temporary sign_http; trading
+stays4F/4O via its approved release-metadata re-expression. No checker predicate
+or negative assertion is weakened. Actual #1970/#1974 and final CI remain gates.
+
 ## MEXC unsigned Background Read verification
 
 Plan3690a27236f precedes original controlsc58c123d68c:18 executed controls,
@@ -1712,12 +1722,18 @@ reviews are CLEAR at a9282a7e787. Refreshed scoped suite: 165 tests/16 targets,
 zero ignored; strict all-target Clippy passes. Actual landing integration retains
 all incoming foreign changes and only the discovery singleton inventory prune.
 
-### Phemex full signer cutover evidence
+### Kraken Futures candle custody controls
 
-Original signer test checkpoint17b9ee461cb had6GREEN/16assertionRED/0ignored.
-All22 are now GREEN with the same assertions, plus2 malformed-provider controls
-and the trusted-setup security control. Native256 and extended signer24/security2,
-registry3 and SDK constructor5 pass; strict Phemex Clippy passes. The exact
-combined staging map is17F/18O ->16F/16O, with one temporary sign_http; trading
-stays4F/4O via its approved release-metadata re-expression. No checker predicate
-or negative assertion is weakened. Actual #1970/#1974 and final CI remain gates.
+Twenty-eight isolated controls pin command/background Prepare before HTTP, exact
+fractional caller deadline, original-root and live-root child expiry, stuck
+Prepare/Bind under a longer live root, typed metadata and inert late completion,
+second-page strict failure with no prefix/third page, duplicate/clock/capacity
+refusal and exact surviving-peer recovery. Native working controls cover wire,
+codec/default bounds, sorting/duplicates, ten-page/no-progress limits, empty
+success, five-second polling, stale subscription generations and validation
+precedence. All28 and47 unchanged native controls pass; strict/fmt and inventory
+checks are scoped locally, with full workspace/WASM/replay proof delegated to CI.
+
+The CI unit-fixture correction changes only the secondary probe's pending
+constructor fields, preserving every original assertion. Scoped unit tests and
+all-target Clippy now cover this constructor as well as integration targets.
