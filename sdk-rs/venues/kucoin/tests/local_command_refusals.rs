@@ -488,7 +488,7 @@ fn native_futures_errors_precede_credentials_and_preserve_store() {
 }
 #[cfg(feature = "spot")]
 #[test]
-fn native_spot_errors_preserve_order_and_store() {
+fn native_spot_errors_keep_validation_precedence_and_store() {
     native(
         spot(false),
         &[
