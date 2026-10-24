@@ -249,7 +249,7 @@ The mapping JSON lists each drop. The self-helper drops are intentional: they
 occur only where the caller's Cx does not escape, and the helper body stays
 inventoried.
 
-## Tightened escape rule (ruling claude-ddi2il, with claude-4yjlw0's addendum)
+## Tightened escape rule (ruling claude-ddi2il, with claude-4yjlw0's addendum); superseded by the allowlist below
 
 - **Clause (1).** A call carrying a possibly-Cx argument is analysed only when
   that argument is the sole non-literal argument, or when the callee resolves
@@ -279,3 +279,43 @@ Rebaseline at `49f7d1857b6` (712 entries):
 - There are no self-helper drops left. The engine's own `Cx::request`/`fail`
   share those helper names with a non-Cx first parameter, so helper calls no
   longer resolve unambiguously.
+
+## Final allowlist (ruling claude-ddi2il, with claude-4yjlw0's addenda)
+
+A call carrying a possibly-Cx value is analysed only if all of these hold.
+Everything else carrying a Cx escapes.
+- The callee is a bare identifier, or a method on `self` or on a concretely
+  typed non-Cx parameter. Path-qualified calls (`std::mem::replace`, `Self::`,
+  `crate::`) never resolve.
+- A bare identifier is not bound locally. A fn or closure parameter, or any
+  earlier non-call occurrence in its function (`let`, `if let`, tuple, `for`
+  or closure-parameter patterns), makes it a binding.
+- The file has no `use` naming that identifier and no glob `use` at all.
+- Every same-named fn, method or trait method in the workspace
+  (`sdk-rs/*/**/src`) takes a Cx-typed parameter at that position. `self` is
+  excluded, and methods resolve only against methods and free calls only
+  against free fns.
+- No such definition is itself escaping. `escape_index` settles this to a
+  fixpoint over the workspace: a fn whose Cx parameter escapes in its body is
+  never an analysed callee. That covers `apply(cx, mk(&mut v))` where `apply`
+  calls `g(cx)` on a closure parameter.
+- The call is a whole statement, block tail or returned value.
+
+The sole-non-literal-argument branch is removed.
+
+REDs: in `test_only_an_allowlisted_resolved_callee_is_analysed`, 9 of the 10
+cases fail against the `743f27dc20e` checker and all pass now:
+- if-let, tuple and for-bound closures, and a fn-parameter closure;
+- the escaping relay `apply`;
+- a path call beside a namesake method;
+- a `use .. as` rename, a named import and a glob import.
+
+The tenth, a let-bound closure that shadows a fn item, was already caught and
+stays as a control. Sole-argument calls to unresolved names now escape; both
+such cases fail against `743f27dc20e`.
+
+Rebaseline at `49f7d1857b6` (712 entries):
+- Kept byte-identical: 645 in prod and 12 in test.
+- Dropped: 55 (macro 44, field read 8, other member 2, qualified 1).
+
+The check now runs the workspace fixpoint, about 20 s locally.
