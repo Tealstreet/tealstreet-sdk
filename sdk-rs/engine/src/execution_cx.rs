@@ -181,6 +181,16 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Publish order identities to every live observer, in the exact delivery
+    /// callback of one of this execution's legs; late joiners replay them.
+    pub fn execution_progress(
+        &mut self,
+        _execution: &ExecutionHandle,
+        _receipts: Vec<OrderIdentityReceipt>,
+    ) -> Result<(), Error> {
+        Err(Error::State)
+    }
+
     /// Seal every live observer with one error, outside any delivery or in
     /// one of this execution's own deliveries.
     pub fn abort_execution(

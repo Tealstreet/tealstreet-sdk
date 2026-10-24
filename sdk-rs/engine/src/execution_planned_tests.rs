@@ -84,6 +84,8 @@ mod planned_execution {
         reject_first: bool,
         /// The only write is definitively refused and the Plan completes.
         reject_only: bool,
+        /// Each accepted write publishes its identity to the observers.
+        progress: bool,
     }
 
     impl Shared {
@@ -185,6 +187,11 @@ mod planned_execution {
                 .unwrap();
             }
             self.founder = founder;
+            if self.progress {
+                // Identities are published only from one of the execution's deliveries.
+                self.refusals
+                    .push(cx.execution_progress(&execution, Vec::new()).unwrap_err());
+            }
             if self.probe_handle {
                 self.refusals
                     .push(cx.abort_execution(&execution, "direct").unwrap_err());
@@ -299,6 +306,15 @@ mod planned_execution {
             )
             .unwrap();
             cx.validate_http_write_effects(&context).unwrap();
+            if self.progress {
+                let receipt = crate::OrderIdentityReceipt {
+                    symbol: "BTC-USD".into(),
+                    kind: crate::OrderIdentityKind::ClientOrderId,
+                    identity: format!("native-{}", self.delivered),
+                };
+                cx.execution_progress(self.execution.as_ref().unwrap(), vec![receipt])
+                    .unwrap();
+            }
             cx.finish_plan_call(&plan, &slot, &context).unwrap();
             if self.two_steps && self.delivered == 1 {
                 self.queue_next(cx);
@@ -959,5 +975,60 @@ mod planned_execution {
                 "owner {owner}"
             );
         }
+    }
+
+    /// Q2: an accepted write's identities reach every live observer as
+    /// progress, and a later joiner replays them; outside a delivery they are
+    /// refused.
+    #[test]
+    fn execution_progress_reaches_every_observer_and_late_joiners_replay_it() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            progress: true,
+            two_steps: true,
+            ..Shared::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., FOLLOWER);
+        assert_eq!(e.venue.refusals, vec![Error::Revoked]);
+        let tokens = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, tokens[0], 0.);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            1_000.,
+            Event::HttpResponse {
+                request: tokens[0].attempt().request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "{}",
+                },
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let receipt = crate::OrderIdentityReceipt {
+            symbol: "BTC-USD".into(),
+            kind: crate::OrderIdentityKind::ClientOrderId,
+            identity: "native-1".into(),
+        };
+        for owner in [FOUNDER, FOLLOWER] {
+            let progress: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandProgress { command, receipts })
+                        if *command == owner =>
+                    {
+                        Some(receipts.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(progress, vec![vec![receipt.clone()]], "owner {owner}");
+        }
+        command(&mut e, 1_000., LATE);
+        assert_eq!(
+            e.venue.joined.last(),
+            Some(&Ok(crate::engine::Joined::Live(vec![receipt])))
+        );
     }
 }
