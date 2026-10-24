@@ -1,4 +1,4 @@
-#![cfg(feature = "test-support")]
+#![cfg(all(feature = "test-support", feature = "dispatch-nonce"))]
 use safe_cex_engine::book::Book;
 use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::nonce::{KRAKEN, NonceClaim};

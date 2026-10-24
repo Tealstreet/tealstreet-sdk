@@ -1,3 +1,4 @@
+#![cfg(feature = "dispatch-nonce")]
 use safe_cex_engine::signing::SignReceipt;
 
 #[test]

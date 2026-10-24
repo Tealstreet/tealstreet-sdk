@@ -6,6 +6,7 @@ mod identity;
 mod income;
 mod public_candles;
 mod public_trades;
+mod read_owners;
 mod sign;
 pub use sign::dispatch as dispatch_signing;
 mod socket_codec;
@@ -34,7 +35,7 @@ pub struct Options {
 }
 
 pub enum Pending {
-    Identity(CommandId),
+    Identity(Box<identity::Read>),
     Markets(Vec<Market>, bool),
     Tickers(Vec<Ticker>, bool),
     Depth {
@@ -51,8 +52,8 @@ pub enum Pending {
         rows: Vec<Candle>,
         invalid: bool,
     },
-    Account(account::Request),
-    Orders(account::OrdersRead),
+    Account(read_owners::Background<account::Request>),
+    Orders(read_owners::Background<account::OrdersRead>),
     Trade(trading::Request),
     History(history::Request),
     Income(income::Request),
@@ -92,6 +93,7 @@ pub struct PhemexPerpetuals {
     options: Options,
     credentials: Option<safe_cex_engine::signing::Identity>,
     read_credentials: Option<safe_cex_engine::signing::Identity>,
+    read_slots: safe_cex_engine::credential_selection::Slots<safe_cex_engine::signing::Identity>,
     public: Connection,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, Interval), u32>,
@@ -114,11 +116,13 @@ impl PhemexPerpetuals {
             .as_ref()
             .filter(|identity| identity.validate().is_ok())
             .cloned();
-        let read_credentials = options.read_credentials.clone();
+        let (read_credentials, read_slots) =
+            read_owners::read_slots(credentials.clone(), options.read_credentials.clone());
         Self {
             options,
             credentials,
             read_credentials,
+            read_slots,
             public: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -181,8 +185,7 @@ impl PhemexPerpetuals {
         stream: Option<ArrayAt>,
     ) {
         // A definitive lookup must query the account that placed the order.
-        let primary = matches!(&pending, Pending::History(request) if request.is_lookup())
-            || matches!(&pending, Pending::Orders(_));
+        let primary = matches!(&pending, Pending::History(request) if request.is_lookup());
         let credentials = if matches!(method, Method::Get) && !primary {
             self.read_credentials.as_ref().or(self.credentials.as_ref())
         } else {
@@ -300,8 +303,8 @@ impl PhemexPerpetuals {
     fn fail(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Identity(command) => self.identity_failed(cx, command, error),
-            Pending::Account(r) => self.account_failed(cx, r, error),
-            Pending::Orders(r) => self.orders_read_failed(cx, r, error),
+            Pending::Account(r) => self.account_read_failed(cx, r, error),
+            Pending::Orders(r) => self.orders_background_failed(cx, r, error),
             Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Unknown),
             Pending::History(r) => self.history_failed(cx, r, error),
             Pending::PublicTrades(read) => {
@@ -566,7 +569,11 @@ impl Venue for PhemexPerpetuals {
                     *invalid = true;
                 }
             }
-            Pending::Account(r) => self.account_item(cx, r, item),
+            Pending::Account(r) => {
+                if self.currency_read_delivery(cx, r).is_ok() {
+                    self.account_item(cx, &mut r.native, item);
+                }
+            }
             Pending::History(r) => self.history_item(cx, r, item),
             Pending::PublicTrades(read) => read.item(cx, item),
             Pending::Income(r) => self.income_item(cx, r, item),
@@ -577,6 +584,16 @@ impl Venue for PhemexPerpetuals {
         if let Pending::PublicTrades(read) = &p
             && !read.valid_delivery(cx)
         {
+            return;
+        }
+        let delivery = match &p {
+            Pending::Identity(read) => read.validate_delivery(cx),
+            Pending::Account(read) => self.currency_read_delivery(cx, read),
+            Pending::Orders(read) => self.orders_read_delivery(cx, read),
+            _ => Ok(()),
+        };
+        if let Err(error) = delivery {
+            self.on_http_failed(cx, p, error.read_venue_error());
             return;
         }
         if r.status == 429 {
@@ -598,7 +615,7 @@ impl Venue for PhemexPerpetuals {
         {
             match p {
                 Pending::Trade(p) if e.error.is_none() => self.trade_response(cx, p, r),
-                Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
+                Pending::Orders(read) => self.orders_background_response(cx, read, r.body),
                 p => self.fail(cx, p, &format!("Phemex {} {}", e.code.unwrap_or(-1), e.msg)),
             }
             return;
@@ -672,8 +689,8 @@ impl Venue for PhemexPerpetuals {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
             }
-            Pending::Account(p) => self.account_response(cx, p, r),
-            Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
+            Pending::Account(p) => self.account_read_response(cx, p, r),
+            Pending::Orders(read) => self.orders_background_response(cx, read, r.body),
             Pending::Trade(p) => self.trade_response(cx, p, r),
             Pending::History(p) => self.history_response(cx, p, r),
             Pending::PublicTrades(read) => self.public_trades_response(cx, *read, r),
@@ -716,6 +733,7 @@ impl Venue for PhemexPerpetuals {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Identity(read) => self.identity_failed(cx, read, error),
             Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
             Pending::PublicCandles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));

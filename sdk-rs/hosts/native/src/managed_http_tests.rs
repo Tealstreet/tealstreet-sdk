@@ -559,4 +559,5 @@ async fn parked_resources_stop_control(fatal: bool) {
 }
 
 #[path = "managed_http_nonce_tests.rs"]
+#[cfg(feature = "dispatch-nonce")]
 mod nonce_tests;

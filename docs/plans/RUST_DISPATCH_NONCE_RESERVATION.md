@@ -395,3 +395,58 @@ Spot form fields keep native order: nonce is appended last when other fields
 exist. Reference MAC computations alone, recipe-only probes, stub engines and
 native host controls do not establish actual-family WASM adoption. The proof
 receipt must identify its exact source, module hash, commands and scope.
+
+## Nonce feature isolation after the first draft size gate
+
+The first draft run `40129055938`, head `7cfb791b1f9`, builds every family but
+fails optimized size gates: Bitget/USDC is 1,374,035 against 1,363,968 bytes;
+Bybit is 1,345,189 against 1,343,488. Replay jobs stop at the same budget gate;
+their missing replay/capsule outputs are consequences, not independent CPU
+failures. No budget, throughput profile or CI policy may be changed to fix this.
+
+Add a non-default `safe-cex-engine/dispatch-nonce` Cargo feature. Only the Kraken
+venue dependency enables it in production; Kraken Spot shares that family and
+dependency. Registry/combined builds acquire it only when Kraken is included.
+Bybit, Bitget/USDC, Aster and every other standalone family must leave it off.
+The native host exposes an explicit forwarding feature for its nonce controls;
+ordinary native/engine builds do not opt in implicitly through test-support.
+
+Keep public receipt fields, opaque types, recipe signatures and ordinary selected
+queues source-compatible. Feature-off builds refuse nonce mint/reservation before
+IDs/provider/I/O and cannot acquire a nonce claim; a declared or invented nonce
+at prepare/Claim still fails closed. Compile-time guards at mint, prepare and
+Claim remove reservation, global released-floor access and nonce repair machinery
+from unrelated families. The legacy queue-time nonce allocator used by other
+venues remains independent and unchanged. Nonce-free receipts keep their exact
+schema; only feature-on builds admit the canonical decimal nonce field. The Rust
+field remains source-compatible, while feature-off wire nonce fields refuse.
+
+Feature-on behavior retains the exact trusted snapshot, receipt binding, atomic
+release ordering, independent StampFloor and eight-repair contract. It introduces
+no nonce fallback, new reservation seam, namespace migration or native adoption.
+Existing nonce-specific tests run explicitly with dispatch-nonce enabled, retaining
+their assertions. Add a feature-off control that refuses trusted mint/reserve
+before recipe/provider/I/O and preserves ordinary stamp-only signing.
+
+Before implementation, obtain 9czdjh's consumer/API feature-map review at an
+immutable plan pin. Then measure optimized modules with the existing build.sh
+profiles and Binaryen 132: exact landed baseline versus feature-off candidate for
+Bybit and Bitget/USDC, plus Aster after actual `9cc6eac669c` composition. Record
+bytes/hashes and any remaining difference; all fixed budgets must pass. Verify
+Cargo feature trees show dispatch-nonce absent for those families and present for
+Kraken. Run the feature-on nonce/selected-read/native/receipt/JS controls, feature-off
+controls, formatting, strict checks, workspace all-target check and normal ratchets.
+Re-run the existing engine+actual-recipe WASM proof with the explicit feature.
+Only after these gates and bounded source review: one freeze push and one
+PR-triggered run. The stacked recipe draft waits for that exact immutable head.
+
+The feature-off receipt validator is emitted out of line to share its unchanged
+strict checks across ordinary dispatch paths. This is a function-level outlining
+choice, with no compiler-profile or feature-on behavior change; pinned Bitget
+measurement recovers another 478 bytes. Final receipts report residual public
+API compatibility cost against the pre-nonce baseline rather than byte equality.
+
+The seeded CI feature-mode dictionary also names an explicit dispatch-nonce OFF
+control (`http-plans,order-locks,test-support`), alongside the existing seeds and
+the explicit nonce ON control. This runs ordinary selected reads and strict
+feature-off refusal without depending on family closure feature unification.
