@@ -243,3 +243,13 @@ Aster/Binance native run supplies the existing financial/dispatch checks. The
 manifest preserves incoming ordering and changes only the three selected hashes;
 no foreign entries or checker allowances are edited. Independent implementation
 reviews and fresh CI, including exact family bytes, follow this source checkpoint.
+
+Verification at immutable runtime `b31d4e7deef`: all499 scoped Aster/Binance
+native tests pass across36 targets (two zero-test doc targets), including the
+unchanged33 local-refusal controls. Strict all-target/all-feature Clippy and
+scoped fmt pass. Both request-context checks (15 checker controls) and full
+bans pass; inventory changes only3 selected singleton hashes in Aster trading.
+Three independent bounded implementation reviews are CLEAR at that pin, with
+no findings; architecture gate No. Accepted placement now performs a second
+bounded acknowledgement scan to keep planning immutable; fresh CI owns size
+and performance certification, with no adoption-byte forecast from review.
