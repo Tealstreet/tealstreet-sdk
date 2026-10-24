@@ -6558,3 +6558,15 @@ capacity and reused ownership produce one engine refusal without a financial
 outcome. Both Lighter and Robinhood, on mainnet/testnet, keep the same contract.
 Remote history requests, pagination, authentication and byte-level query/codec
 behavior are unchanged; this slice issues no remote-fallthrough Context.
+
+## Polymarket and Kraken fixed settings (2026-10-24)
+
+Polymarket SetLeverage/SetMarginType/SetPositionMode and Kraken Futures
+SetPositionMode(false) adopt actual #1989 done_local_setting. They remain
+keyless Store no-ops with exact `[]` and `null` results, respectively, and no
+I/O. Success is confined to genuine Setting entry and now honors its receipt;
+an invalid clock produces typed InvalidInput/NotSent instead of numeric
+success. No Context, credential, physical attempt or signer readiness is
+created. Kraken true-mode refusal is unchanged. Inventory shrinks by two
+occurrences. See RUST_FIXED_SETTING_ADOPTION.md for the native compatibility
+and NEW-CONTRACT refusal controls.
