@@ -299,7 +299,79 @@ const ASTERDEX_MAIN_WALLET_REQUIRED: &str = "Aster API Wallet/vault keys require
 /// Backpack's provider copy of the configured key and Ed25519 seed (option B).
 /// A probe signature refuses a malformed or non-32-byte seed before startup.
 #[cfg(feature = "backpack")]
-fn backpack_provider(
+struct BackpackSignerSetup {
+    provider: Option<safe_cex_engine::signing::Provider>,
+    identities: safe_cex_engine::signing::Identities,
+    read_status: Option<Result<(), safe_cex_venue_backpack::sign::ReadCredentialsError>>,
+}
+
+#[cfg(feature = "backpack")]
+fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, VenueError> {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::signing::{Algorithm, Identities, KeyEncoding, Operation, PayloadPart};
+    let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
+    // Validation metadata survives public-only setup; no signing material does.
+    let read_status = options.read_credentials.as_ref().map(|read| {
+        safe_cex_venue_backpack::sign::validate_read_credentials(read.validate(), &read.secret)
+    });
+    if options.public_data_only {
+        return Ok(BackpackSignerSetup {
+            provider: None,
+            identities: Identities::default(),
+            read_status,
+        });
+    }
+    let undecodable = || invalid("Invalid Backpack base64 seed");
+    let wrong_width = || invalid("Backpack Ed25519 seed must be 32 bytes");
+    let primary = (present(&options.key) && present(&options.secret)).then(|| LocalIdentity {
+        key: Secret::new(options.key.clone().unwrap_or_default()),
+        secret: Secret::new(options.secret.clone().unwrap_or_default()),
+        secret_encoding: KeyEncoding::Base64,
+        ..Default::default()
+    });
+    let secondary = options
+        .read_credentials
+        .as_ref()
+        .filter(|_| matches!(read_status, Some(Ok(()))))
+        .map(|read| LocalIdentity {
+            key: Secret::new(read.key.clone()),
+            secret: Secret::new(read.secret.clone()),
+            secret_encoding: KeyEncoding::Base64,
+            ..Default::default()
+        });
+    if primary.is_none() && secondary.is_none() {
+        return Ok(BackpackSignerSetup {
+            provider: None,
+            identities: Identities::default(),
+            read_status,
+        });
+    }
+    let (signer, identities) =
+        LocalSigner::from_setup(LocalSetup { primary, secondary }).map_err(|_| undecodable())?;
+    if let Some(primary) = identities.primary.as_ref() {
+        let probe = safe_cex_engine::signing::SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::Ed25519,
+                key: primary.signing.clone(),
+                payload: vec![PayloadPart::Bytes { bytes: Vec::new() }],
+            }],
+        };
+        signer.sign_now(&probe).map_err(|_| wrong_width())?;
+    }
+    Ok(BackpackSignerSetup {
+        provider: Some(std::sync::Arc::new(signer)),
+        identities,
+        read_status,
+    })
+}
+
+/// BloFin's one provider setup from the configured strings. The adopted
+/// FetchLeverage Read signs through it; unadopted paths keep the raw fields
+/// until the family cutover. Passphrase refs mirror native `headers` exactly.
+#[cfg(feature = "blofin")]
+fn blofin_signer(
     options: &EngineOptions,
 ) -> Result<
     (
@@ -309,34 +381,37 @@ fn backpack_provider(
     VenueError,
 > {
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
-    use safe_cex_engine::signing::{Algorithm, Identities, KeyEncoding, Operation, PayloadPart};
     let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
     if options.public_data_only || !present(&options.key) || !present(&options.secret) {
-        return Ok((None, Identities::default()));
+        return Ok((None, Default::default()));
     }
-    let undecodable = || invalid("Invalid Backpack base64 seed");
-    let wrong_width = || invalid("Backpack Ed25519 seed must be 32 bytes");
+    // Native: no Primary passphrase refuses any slot; an absent Secondary
+    // passphrase inherits Primary's; an empty effective one (including an
+    // explicit empty Secondary, which never falls back) is refused.
+    let passphrase = |read: Option<&String>| {
+        options
+            .passphrase
+            .as_ref()
+            .map(|primary| read.unwrap_or(primary).clone())
+            .filter(|value| !value.is_empty())
+            .map(Secret::new)
+    };
     let setup = LocalSetup {
         primary: Some(LocalIdentity {
             key: Secret::new(options.key.clone().unwrap_or_default()),
             secret: Secret::new(options.secret.clone().unwrap_or_default()),
-            secret_encoding: KeyEncoding::Base64,
+            passphrase: passphrase(None),
             ..Default::default()
         }),
-        secondary: None,
+        secondary: options.read_credentials.as_ref().map(|read| LocalIdentity {
+            key: Secret::new(read.key.clone()),
+            secret: Secret::new(read.secret.clone()),
+            passphrase: passphrase(read.passphrase.as_ref()),
+            ..Default::default()
+        }),
     };
-    let (signer, identities) = LocalSigner::from_setup(setup).map_err(|_| undecodable())?;
-    let primary = identities.primary.as_ref().ok_or_else(undecodable)?;
-    let probe = safe_cex_engine::signing::SignRequest {
-        receipt: Default::default(),
-        context: Default::default(),
-        operations: vec![Operation::Sign {
-            algorithm: Algorithm::Ed25519,
-            key: primary.signing.clone(),
-            payload: vec![PayloadPart::Bytes { bytes: Vec::new() }],
-        }],
-    };
-    signer.sign_now(&probe).map_err(|_| wrong_width())?;
+    let (signer, identities) =
+        LocalSigner::from_setup(setup).map_err(|_| invalid("Invalid BloFin signer setup"))?;
     Ok((Some(std::sync::Arc::new(signer)), identities))
 }
 
@@ -1433,10 +1508,12 @@ pub fn build_with_signer<T: Visit>(
             // Transitional dual custody (RUST_BACKPACK_SIGNER_ADMISSION.md, option
             // B): managed trading signs through this provider, while unadopted
             // account reads and private WS auth keep the raw fields. Remove before master.
-            let (provider, identities) = backpack_provider(&options)?;
+            let setup = backpack_provider(&options)?;
             let mut engine = Engine::new(
                 Backpack::new(BackpackOptions {
-                    identity: identities.primary.clone(),
+                    identity: setup.identities.primary.clone(),
+                    read_identity: setup.identities.secondary.clone(),
+                    read_credentials_status: setup.read_status,
                     read_credentials: options.read_credentials.take(),
                     public_data_only: options.public_data_only,
                     key: options.key.take(),
@@ -1445,16 +1522,14 @@ pub fn build_with_signer<T: Visit>(
                 }),
                 entropy,
             )?;
-            engine.set_signer(provider)?;
-            engine.set_identities(identities)?;
+            engine.set_signer(setup.provider)?;
+            engine.set_identities(setup.identities)?;
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "blofin")]
-        "blofin" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "blofin" => {
+            let (provider, identities) = blofin_signer(&options)?;
+            let mut engine = Engine::new(
                 Blofin::new(BlofinOptions {
                     broker_attribution: options.broker_attribution,
                     read_credentials: options.read_credentials.take(),
@@ -1463,10 +1538,14 @@ pub fn build_with_signer<T: Visit>(
                     key: options.key.take(),
                     secret: options.secret.take(),
                     passphrase: options.passphrase.take(),
+                    identities: identities.clone(),
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(provider)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "mexc")]
         "mexc" => finish(
             visitor,
