@@ -245,16 +245,46 @@ pub struct Credentials {
     pub window: u32,
 }
 
+fn decode_seed(secret: &str) -> Result<zeroize::Zeroizing<Vec<u8>>, &'static str> {
+    let seed = zeroize::Zeroizing::new(
+        STANDARD
+            .decode(secret)
+            .map_err(|_| "Invalid Backpack base64 seed")?,
+    );
+    if seed.len() != 32 {
+        return Err("Ed25519 seed must be 32 bytes");
+    }
+    Ok(seed)
+}
+
+pub fn validate_seed(secret: &str) -> Result<(), &'static str> {
+    decode_seed(secret).map(drop)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ReadCredentialsError {
+    Configuration(&'static str),
+    Seed(&'static str),
+}
+impl ReadCredentialsError {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Configuration(message) | Self::Seed(message) => message,
+        }
+    }
+}
+
+pub fn validate_read_credentials(
+    read: &safe_cex_engine::ReadCredentials,
+) -> Result<(), ReadCredentialsError> {
+    read.validate()
+        .map_err(ReadCredentialsError::Configuration)?;
+    validate_seed(&read.secret).map_err(ReadCredentialsError::Seed)
+}
+
 impl Credentials {
     pub fn new(key: String, secret: &str) -> Result<Self, String> {
-        let seed = zeroize::Zeroizing::new(
-            STANDARD
-                .decode(secret)
-                .map_err(|_| "Invalid Backpack base64 seed")?,
-        );
-        if seed.len() != 32 {
-            return Err("Ed25519 seed must be 32 bytes".into());
-        }
+        let seed = decode_seed(secret).map_err(str::to_owned)?;
         Ok(Self {
             key,
             seed,

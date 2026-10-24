@@ -284,20 +284,40 @@ fn local_identity_refusal_releases_id_for_reuse() {
 }
 fn live() -> Driver {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    engine(Options {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    let secret = STANDARD.encode([8u8; 32]);
+    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
+        primary: None,
+        secondary: Some(LocalIdentity {
+            key: Secret::new("read-key".into()),
+            secret: Secret::new(secret.clone()),
+            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+            ..Default::default()
+        }),
+    })
+    .unwrap();
+    let mut e = engine(Options {
+        read_identity: identities.secondary.clone(),
         read_credentials: Some(safe_cex_engine::ReadCredentials {
             key: "read-key".into(),
-            secret: STANDARD.encode([8u8; 32]),
+            secret,
             passphrase: None,
         }),
         ..Default::default()
-    })
-}
-fn identity_request(e: &mut Driver) -> safe_cex_engine::HttpRequest {
-    let mut requests = ask(e, 7, 1000.).into_iter().filter_map(|a| match a {
-        Action::Http(r) => Some(r),
-        _ => None,
     });
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
+    e
+}
+
+fn identity_request(e: &mut Driver) -> safe_cex_engine::HttpRequest {
+    e.handle(1000., Event::Command(Command::FetchAccount { command: 7 }));
+    let mut requests = safe_cex_engine::test_support::prepared_actions(e, 1000.)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        });
     let request = requests
         .next()
         .expect("original native signed identity request");
