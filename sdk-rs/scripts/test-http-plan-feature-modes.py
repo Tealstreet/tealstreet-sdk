@@ -32,6 +32,8 @@ def modes():
     # No family links session-bearer yet; its tests run only here.
     grouped[('http-mutation-barriers', 'http-plans', 'session-bearer', 'test-support')] = [
         'session-bearer control']
+    # session-bearer OFF control: Session bindings are refused (session_bearer_off.rs).
+    grouped.setdefault(('http-plans', 'test-support'), []).append('session-bearer OFF control')
     for family in families:
         tree = subprocess.check_output([
             'cargo', 'tree', '--locked', '--target', 'wasm32-unknown-unknown',
