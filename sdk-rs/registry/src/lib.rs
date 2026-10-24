@@ -1439,36 +1439,44 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "bitget")]
         "bitget" | "bitgetusdc" | "bitgetinverse" => {
-            if !options.public_data_only
-                && options.key.as_ref().is_some_and(|s| !s.is_empty())
-                && options.secret.as_ref().is_some_and(|s| !s.is_empty())
-                && options.passphrase.as_ref().is_none_or(|s| s.is_empty())
+            if options.key.as_ref().is_some_and(|value| !value.is_empty())
+                || options
+                    .secret
+                    .as_ref()
+                    .is_some_and(|value| !value.is_empty())
+                || options.passphrase.is_some()
+                || options.read_credentials.is_some()
             {
-                return Err(invalid("Bitget requires a passphrase"));
+                return Err(invalid(
+                    "Bitget credentials belong in signer setup, not engine options",
+                ));
             }
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    BitgetFutures::new(BitgetOptions {
-                        read_credentials: options.read_credentials.take(),
-                        testnet: options.testnet,
-                        public_data_only: options.public_data_only,
-                        key: options.key.take(),
-                        secret: options.secret.take(),
-                        passphrase: options.passphrase.take(),
-                        product: if venue == "bitgetinverse" {
-                            Product::Inverse
-                        } else if venue == "bitgetusdc" {
-                            Product::Usdc
-                        } else {
-                            Product::Usdt
-                        },
-                    }),
-                    entropy,
-                )?,
-            )
+            let identities = options.signing.take().unwrap_or_default();
+            if let Some(read) = &identities.secondary {
+                read.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
+                BitgetFutures::new(BitgetOptions {
+                    read_credentials: identities.secondary,
+                    credentials: identities.primary,
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    product: if venue == "bitgetinverse" {
+                        Product::Inverse
+                    } else if venue == "bitgetusdc" {
+                        Product::Usdc
+                    } else {
+                        Product::Usdt
+                    },
+                }),
+                entropy,
+            )?;
+            engine.set_signer(signer)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "cryptocom")]
         "cryptocom" => finish(
