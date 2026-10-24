@@ -3514,6 +3514,8 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         cx.sweep_executions();
+        #[cfg(feature = "http-plans")]
+        cx.fail_orphaned_plans();
     }
 
     /// Dispatch held cancellations whose acknowledged ids are now stored, or
