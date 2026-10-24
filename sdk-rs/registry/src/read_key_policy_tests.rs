@@ -1,5 +1,5 @@
-//! Declared read-key policy (docs/plans/RUST_READ_KEY_POLICY.md). No venue
-//! declares a policy yet, so these drive the policy explicitly.
+//! Declared read-key policy (docs/plans/RUST_READ_KEY_POLICY.md). Crypto.com
+//! activates ValidateOnly; synthetic controls exercise the other policy paths.
 use super::construction::ReadCredentialsPolicy::{Install, PublicRead, ValidateOnly};
 use super::*;
 
@@ -236,8 +236,17 @@ fn the_bridge_record_carries_the_policy_only_when_declared() {
             "{declared}"
         );
     }
-    // Every compiled family is undeclared until its consumer activates a row.
-    for venue in ["cryptocom", "backpack", "krakenspot", "kraken", "weex"] {
+    assert_eq!(
+        construction::read_credentials_policy("cryptocom"),
+        ValidateOnly
+    );
+    let crypto = construction::bridge("cryptocom", &options("{}"));
+    assert_eq!(
+        serde_json::to_value(crypto).unwrap()["readCredentials"],
+        "validateOnly"
+    );
+    // Other consumers must pin their own activation explicitly.
+    for venue in ["backpack", "krakenspot", "kraken", "weex"] {
         assert_eq!(
             construction::read_credentials_policy(venue),
             Install,
