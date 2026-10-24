@@ -27,14 +27,18 @@ verdict and cascades into the certification wrappers.
 ## Proposed shared boundary
 
 Change only `sdk-rs/harness/cpu-ci.mjs`, with scoped Node controls and this
-plan/CALLERS. No workflow, policy threshold, fixture/tape, venue, engine,
+plan/CALLERS. No workflow, policy threshold, replay fixture/tape, venue, engine,
 measurement-attempt, or artifact format change.
 
-Before `authenticatedBundle` downloads/binds an artifact, resolve its unique
+Before `authenticatedBundle` authenticates/binds an artifact, resolve its unique
 producer from the complete inventory. A producer must already be the original
 successful completed job. Require the requested upload step to exist exactly
 once. Missing/duplicate producers or upload steps, failed/cancelled jobs,
 wrong source/runner/run, and any attempt other than1 fail immediately.
+Artifact retrieval retains its existing order and bounded byte checks. A
+download is not accepted as authority until producer convergence and all
+existing authentication checks pass. Require its full artifact metadata to
+remain identical in the refreshed inventory too.
 
 If any producer step has a nonterminal status or null conclusion, wait for
 metadata convergence. All steps must have `status: completed` and a non-null
@@ -51,8 +55,13 @@ The budget is shared across suites/artifact bindings, not multiplied by32.
 Do not poll the active planner itself. Do not retry HTTP refusals, malformed
 responses, failed provenance checks, or measurement jobs.
 
-Pin the producer's entire non-step record and run identity before waiting.
-Recheck them, unique job name/id and attempt1 on every refresh. Replaced jobs,
+Pin explicit producer identity fields before waiting: `id`, `run_id`,
+`run_attempt`, `runner_id`, `name`, `head_sha`, `head_branch`, `status`,
+`conclusion`, `started_at`. Pin run `id`, `run_number`, `run_attempt`,
+`workflow_id`, `path`, `head_sha`, `head_branch`, `event`. This is dazzy3's C2
+choice; late `completed_at`/labels may settle, but the final strict validator
+still requires valid completion timestamps and exact whole-record bindings.
+Recheck identity, unique job name/id and attempt1 on every refresh. Replaced jobs,
 duplicate/attempt2 aliases or changed identity fail, including the aliases
 observed after #2076's retry. Replace the complete cached inventory with each
 fresh snapshot; never splice fields from different observations. Retain every
@@ -101,3 +110,24 @@ controls, then get dazzy3's bounded review. Production follows that review.
 After implementation: run scoped cpu-ci/cohort/artifact/request-budget tests,
 independent source review, fresh full CI and auditor placement. Never merge
 without a window. Backpack history work remains behind this priority fix.
+
+## Implementation and review conditions
+
+dazzy3 independently reproduced originals2839777933c as3 assertion REDs and6
+GREEN, then cleared implementation with C1–C5 conditions. Production adds one
+shared `terminalProducer` boundary. The original upload/checkout/digest/ZIP
+authenticators and `evidenceEndCheck` are unchanged. A cached accepted bundle
+keeps its original record; a later binding of the same producer may not
+substitute a different whole job record.
+
+GREEN-stage controls cover refresh-only attempt2 aliases, same-name duplicate
+producers, changed job/runner IDs, two producers sharing six refreshes total,
+late descriptive fields, active planner/certifier exclusion, immutable earlier
+bindings with final drift rejection, completed/null convergence, skipped
+unrelated steps, and preservation of both raw API observations. Exhaustion
+assertions include run1000, job100 and the pending step name/status/conclusion.
+
+Scoped execution:65/65 PASS,0 skipped across the producer originals/hostile
+controls and existing cpu-ci/cohort/artifact/request-budget tests. This is not
+fresh CI, a real CPU replay run, or merge clearance. CI's existing
+`rust:test-harness` glob includes the new control file without workflow edits.

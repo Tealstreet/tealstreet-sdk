@@ -7669,3 +7669,16 @@ Entry admission refusal precedes a native local reply. Stale generations and
 late timers cannot settle reused IDs or alter unrelated live queries. No signer
 or credential-auth evidence is introduced. Legacy TypeScript/AWS behavior stays
 on its existing path until the Rust implementation is selected.
+
+
+### CPU producer step metadata convergence
+
+CPU artifact authentication now waits for every step in its exact completed,
+successful attempt1 producer to become terminal. The command shares at most
+six complete metadata inventory refreshes, five seconds apart, across all
+artifact bindings. Exhaustion reports the run, physical job and pending steps;
+HTTP refusals, changed identity and retry aliases fail closed. This is an API
+metadata wait, not a replay/measurement retry or a new timing sample. Exact
+upload/checkout windows, ZIP/digest checks, raw observations and final
+provenance validation remain enforced. No venue policy or legacy non-Rust
+production changes. Plan: RUST_CPU_PRODUCER_STEP_METADATA.md.
