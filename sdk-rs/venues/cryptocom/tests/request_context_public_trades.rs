@@ -1,5 +1,5 @@
 //! Original real-venue controls for the unsigned one-page public history read.
-use safe_cex_engine::request_context::{HttpAction, Preparation, RoutingIntent};
+use safe_cex_engine::request_context::{Error, HttpAction, Preparation, RoutingIntent};
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Query, Response,
     TimerId, VenueError,
@@ -522,4 +522,94 @@ fn native_public_trades_missing_stream_array_uses_transport_retry() {
         terminals(&e.drain_actions().collect::<Vec<_>>(), 29),
         vec![Ok("[]".into())]
     );
+}
+
+#[test]
+fn native_public_trades_other_code_with_40101_text_retries_once() {
+    let mut e = engine(false);
+    start(&mut e, NOW, 30, None, Some(1));
+    let first = packet(&prepared(&mut e, NOW));
+    let refused = r#"{"code":40001,"message":"native text 40101 collision","result":{"data":[]}}"#;
+    reply(&mut e, &first, NOW + 1., 200, refused);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(terminals(&actions, 30).is_empty());
+    let due = timer(&actions, NOW + 1001.);
+    e.handle(NOW + 1001., Event::TimerFired { timer: due });
+    let retry = packet(&prepared(&mut e, NOW + 1001.));
+    reply(&mut e, &retry, NOW + 1002., 200, refused);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(terminals(&actions, 30).len(), 1);
+    assert!(terminals(&actions, 30)[0].is_err());
+    assert!(!actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    assert_eq!(e.health().auth_failures, 0);
+}
+
+#[test]
+fn native_public_trades_transport_40101_text_has_only_one_retry() {
+    let mut e = engine(false);
+    start(&mut e, NOW, 31, None, Some(1));
+    let first = packet(&prepared(&mut e, NOW));
+    e.handle(
+        NOW + 1.,
+        Event::HttpFailed {
+            request: first.id,
+            error: "transport 40101 collision",
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(terminals(&actions, 31).is_empty());
+    let due = timer(&actions, NOW + 1001.);
+    e.handle(NOW + 1001., Event::TimerFired { timer: due });
+    let retry = packet(&prepared(&mut e, NOW + 1001.));
+    e.handle(
+        NOW + 1002.,
+        Event::HttpFailed {
+            request: retry.id,
+            error: "transport 40101 collision",
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(terminals(&actions, 31).len(), 1);
+    assert!(terminals(&actions, 31)[0].is_err());
+    assert!(!actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+}
+
+#[test]
+fn public_trades_physical_timeout_retries_under_a_live_root() {
+    let mut e = engine(false);
+    start(&mut e, NOW, 32, Some(50_000), Some(1));
+    let actions = prepared(&mut e, NOW);
+    let first = packet(&actions);
+    let deadline = timer(&actions, NOW + 20_000.);
+    e.handle(NOW + 20_000., Event::TimerFired { timer: deadline });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(terminals(&actions, 32).is_empty());
+    let retry_at = timer(&actions, NOW + 21_000.);
+    e.handle(NOW + 21_000., Event::TimerFired { timer: retry_at });
+    let retry = packet(&prepared(&mut e, NOW + 21_000.));
+    assert_ne!(first.id, retry.id);
+    reply(&mut e, &retry, NOW + 21_001., 200, &body(ROW));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(terminals(&actions, 32).len(), 1);
+    assert!(terminals(&actions, 32)[0].is_ok());
+}
+
+#[test]
+fn public_trades_preparation_refusal_is_strict_and_does_not_retry() {
+    let mut e = engine(false);
+    let preparation = parked(&mut e, 33);
+    e.http_preparation_failed(
+        NOW + 1.,
+        preparation,
+        Error::State,
+        VenueError::new("fixture route refusal").kind(ErrorKind::Internal),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let results = terminals(&actions, 33);
+    assert_eq!(results.len(), 1);
+    let error = results[0].as_ref().unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(error.message, "fixture route refusal");
+    assert!(!actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    no_send(&actions);
 }

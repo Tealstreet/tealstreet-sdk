@@ -6,13 +6,21 @@ by claude-ddi2il. This checkpoint contains no production changes.
 
 ## Exact inventory and ownership
 
-The real checker fingerprints the sole unsigned history GET at
-venues/cryptocom/src/history.rs as
-073a9daacf5c0553bfb2650ddc8db7b942b5f6a0c8125261daff7479814953b7 (one occurrence).
-Remove that singleton only. At the base, Crypto.com has 12 fingerprints and
-13 occurrences; #2052 removes the discovery singleton, leaving 11/12. This
-slice then leaves 10/11. History itself goes from 4 fingerprints/5 occurrences
-to 3/4. Its remaining lexical witnesses belong to private paging, not this read.
+The real checker records four fingerprints/five occurrences in history.rs:
+
+| Fingerprint | Occurrences | Owner and removal |
+| --- | ---: | --- |
+| 073a9daacf5c0553bfb2650ddc8db7b942b5f6a0c8125261daff7479814953b7 | 1 | Unsigned PublicTrades request_streamed sender; managed submission removes it. |
+| 7698d5bd23a40574165507b4b54b5d093fb00701512d29250192f1345e4da553 | 1 | PublicTrades URL format macro with the old request binding; extract into the exclusive public request path. |
+| d702253b3d082dc8c7278bfe17bdb876eeda775fedd004ebaaeea6cdd16f24ad | 2 | Trades-kind checks in send and response; separate public authority removes both shared branches. |
+| dfb17bdf89f16befd8bb7566ac05d0bddf2980c6627b642f20e1f1b5a4859508 | 1 | Private paging boolean witness; retain unchanged. |
+
+Expected removal is three fingerprints/four occurrences, not just the direct
+sender singleton originally reported. Do not retain dead public legacy branches
+or two completion authorities to preserve counts. At the base Crypto.com has
+12F/13O; after #2052 discovery it has 11F/12O, and this extraction leaves 8F/8O.
+History itself becomes 1F/1O. The actual scanner decides the removal-only delta
+after implementation; do not add or grow any fingerprint.
 
 Open-PR file audit at the base: only own #2052 touches Crypto.com lib.rs and
 shared test preparation; no other Crypto source claim. Original controls use a
@@ -104,7 +112,7 @@ working native controls. Never claim compile failures as RED evidence.
    10ms queue cadence, transport four-attempt schedule and prefix reset,
    unsigned 40101 one-retry/no-auth, other native refusal/no retry.
 
-After review, implementation is a separate checkpoint. Prune only the singleton;
+After review, implementation is a separate checkpoint. Prune only the three public fingerprints/four occurrences;
 run scoped Crypto.com tests and strict Clippy sequentially with CARGO_BUILD_JOBS=4,
 fmt, request checker/test pair and bans. No local workspace/WASM/replay sweep.
 Independent source/adversarial, caller and full-map reviews are required. Push a
@@ -163,3 +171,48 @@ landing advanced past this intentionally unchanged original base. The manifest,
 all Crypto production and existing fixtures remain exact 1e2458b1c98; no checker
 override or foreign prune is used. Integrate the actual tip and reviewed #2052
 only after recording this original checkpoint, then rerun normal checks.
+
+
+## Review findings and native text-collision boundary
+
+Source/API review is CLEAR at 0028d33a2a8 with two explicit adoption gates:
+real physical-child Timeout under a live root must retire/reset and retry;
+real preparation refusal must terminate strictly without entering native
+transport retry. Added original controls for both (preparation is necessarily
+gated first by absent route preparation in unchanged production).
+
+Caller review found native history_failed tests error.contains("40101") before
+transport policy. Thus code40001/message containing40101 retries once, and a
+transport message containing40101 gets one retry rather than three. Added
+original controls pin both cases. They are baseline evidence, not an instruction
+to copy substring routing into the new managed branch. Production is held for
+an explicit retry-policy ruling: shared native-code-only classification versus
+preserving that legacy projection. Neither may silently change. Private history
+continues unchanged. This also qualifies the earlier broad statement that other
+HTTP/native errors never retry: it excludes this legacy text collision.
+
+Full-map review verified exact one-site shrink and untouched production; its
+README blank-line finding is fixed by appending the row directly to the table.
+
+
+## Review closure and overseer ruling
+
+The larger removal-only map (3F/4O) is approved. README now appends its row
+directly without splitting the table. No scope beyond the exclusive public
+authority is added; private cursor and signer behavior stays unchanged.
+
+Retry ruling: preserve legacy counts exactly, including both text-collision
+cases. Use typed native code/message and typed transport/preparation distinction.
+Where those fields cannot express the legacy decision without text matching,
+retain only that minimum compatibility check, name it as a known CALLERS
+follow-up, and never infer auth health from it. No copied status/text ladder or
+changed retry count is authorized. Preparation remains strict and native released
+transport/physical-child Timeout remains retryable while the root is live.
+
+The expanded original target executes 21 controls: 10 assertion RED / 11 GREEN /
+zero ignored. Added REDs are preparation refusal (first gate is the absent
+preparation path) and the absent engine-owned physical-child deadline. The
+physical-child case intentionally fails at its missing 20s engine timer on
+legacy source; after adoption it drives that actual typed expiry and recovery,
+not a synthetic HttpFailed. Two added native text-collision controls pass.
+The initial 17-control receipt remains historical and is not overwritten.
