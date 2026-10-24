@@ -7866,3 +7866,8 @@ Only genuine Network/physical Timeout callbacks spend native transport budgets.
 The separately documented native40101 response/list-error compatibility retains
 its minimal text check and shared counters; typed integrity failures never enter
 that compatibility path. Old contexts retire before successor reads are minted.
+
+The native build API refuses a caller-preset readCredentialsValid result as
+"Unexpected read credential validation result" (InvalidInput, no outcome).
+Trusted host setup may carry its computed false result, which retains the
+native secondary-credentials validation error before venue construction.
