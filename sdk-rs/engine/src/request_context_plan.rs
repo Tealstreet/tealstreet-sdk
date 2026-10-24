@@ -91,6 +91,12 @@ pub struct MutationTerminalBound {
     pub after_step: usize,
 }
 
+/// Immutable all-Mutation preparation barrier for one top-level parallel step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MutationBarrierBound {
+    pub step: usize,
+}
+
 /// One logical call. `attempts` includes the initial attempt; all attempts count
 /// against journal capacity even when they share one deadline. An optional
 /// fallback follows the complete parent attempt chain once, never per retry.
