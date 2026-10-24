@@ -181,6 +181,33 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Publish order identities to every live observer, in the exact delivery
+    /// callback of one of this execution's legs; late joiners replay them.
+    pub fn execution_progress(
+        &mut self,
+        execution: &ExecutionHandle,
+        receipts: Vec<OrderIdentityReceipt>,
+    ) -> Result<(), Error> {
+        if self
+            .io
+            .http_delivery
+            .as_ref()
+            .is_none_or(|delivery| delivery.context.owner() != execution.0.owner())
+        {
+            return Err(Error::Revoked);
+        }
+        // Owners already past their deadline time out before any progress.
+        self.sweep_executions();
+        let observers = self
+            .io
+            .request_contexts
+            .execution_progress(&execution.0, receipts)?;
+        for (command, _, receipts) in observers {
+            self.command_progress(command, receipts);
+        }
+        Ok(())
+    }
+
     /// Seal every live observer with one error, outside any delivery or in
     /// one of this execution's own deliveries.
     pub fn abort_execution(
