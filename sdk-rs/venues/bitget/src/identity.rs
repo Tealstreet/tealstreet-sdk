@@ -1,6 +1,7 @@
 //! Account ownership is reported by the spot identity route for every product.
-use crate::{BitgetFutures, Pending};
-use safe_cex_engine::{CommandId, Cx, Method, Response};
+use crate::{BitgetFutures, Pending, paths, sign};
+use safe_cex_engine::request_context::Context;
+use safe_cex_engine::{Cx, Method, Response, Venue, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -76,58 +77,77 @@ fn parse(response: Response<'_>) -> Result<Identity, String> {
         affiliate_id: data.inviter_id.filter(Id::truthy).and_then(Id::value),
     })
 }
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
-    let result = result
-        .and_then(|identity| serde_json::to_string(&identity).map_err(|error| error.to_string()));
+fn finish(cx: &mut Cx<'_, Pending>, root: &Context, result: Result<Identity, VenueError>) {
+    let result = result.and_then(|identity| {
+        serde_json::to_string(&identity).map_err(|error| VenueError::new(error.to_string()))
+    });
     match result {
-        Ok(data) => cx.done(command, data),
+        Ok(data) => {
+            if cx.validate_read_http_delivery(root, root).is_ok() {
+                let _ = cx.done_context(root, data);
+            }
+        }
         Err(error) => {
-            cx.command_error(command, &error);
-            cx.fail(command, error);
+            if cx.command_error_context(root, &error.message).is_ok() {
+                let _ = cx.fail_context(root, error);
+            }
         }
     }
 }
 impl BitgetFutures {
-    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        if let Some(read) = &self.options.read_credentials
+    pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>) {
+        const PATH: &str = "/api/v2/spot/account/info";
+        let refusal = if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            finish(cx, command, Err(error.into()));
+            Some(VenueError::new(error))
+        } else if !self.private_enabled() {
+            Some(VenueError::new(
+                "Bitget account identity requires credentials",
+            ))
+        } else {
+            None
+        };
+        let (credential, identity) = if refusal.is_none() {
+            self.read_selection(PATH)
+        } else {
+            (None, None)
+        };
+        // A rejected admission already published the command's typed failure.
+        let Ok(root) = cx.admit_http_command(crate::read_policy(credential)) else {
+            return;
+        };
+        if let Some(error) = refusal {
+            finish(cx, &root, Err(error));
             return;
         }
-        if !self.private_enabled() {
-            finish(
-                cx,
-                command,
-                Err("Bitget account identity requires credentials".into()),
-            );
-            return;
-        }
-        const PATH: &str = "/api/v2/spot/account/info";
-        self.send(
-            cx,
+        let recipe = sign::Http::new(identity, PATH.into());
+        if let Err((pending, reason)) = cx.request_signed_managed(
+            root.clone(),
             Method::Get,
-            PATH,
-            crate::Payload::Body(None),
-            true,
-            Pending::Identity(command),
-        );
+            format!("{}{PATH}", paths::REST),
+            None,
+            Box::new(recipe),
+            Pending::Identity(root),
+        ) {
+            self.on_sign_error(cx, pending, reason.venue_error());
+        }
     }
 
     pub(crate) fn identity_response(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        root: &Context,
         response: Response<'_>,
     ) {
-        finish(cx, command, parse(response));
+        finish(cx, root, parse(response).map_err(VenueError::new));
     }
     pub(crate) fn identity_failed(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        error: &str,
+        root: &Context,
+        error: VenueError,
     ) {
-        finish(cx, command, Err(error.into()));
+        finish(cx, root, Err(error));
     }
 }

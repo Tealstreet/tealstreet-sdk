@@ -687,9 +687,17 @@ fn owned_first_actual_failures_are_typed_and_never_empty_success() {
             }
             let a = owned_actions(&mut e, 91);
             assert_eq!(a.len(), 1);
-            assert!(
-                matches!(&a[0],Action::Notice(Notice::CommandFailed{command:91,error}) if error.kind==Some(safe_cex_engine::ErrorKind::Internal))
-            );
+            if matches!(q, Query::PublicTrades { .. }) && failure == 0 {
+                assert!(
+                    matches!(&a[0], Action::Notice(Notice::CommandFailed { command: 91, error })
+                    if error.kind == Some(safe_cex_engine::ErrorKind::Network)
+                    && error.message == "Kraken history failed: lost before acceptance")
+                );
+            } else {
+                assert!(
+                    matches!(&a[0],Action::Notice(Notice::CommandFailed{command:91,error}) if error.kind==Some(safe_cex_engine::ErrorKind::Internal))
+                );
+            }
         }
     }
 }
