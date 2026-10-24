@@ -457,3 +457,11 @@ secondary refusal, keyed public-only catalogue signing and provider-only REST
 custody. Do not change shared Slot selection, route policy or the signing recipe.
 The banned-patterns failure separately reports unrelated incoming Lighter and
 Paradex prunes; re-integrate the real landing rather than relaxing the checker.
+
+Original registry checkpoint3befa38efb4 reproduces one assertion RED (zero
+catalogue requests instead of one) with three existing controls GREEN. The
+corrected boundary treats only empty credential/signing refs as incomplete;
+other complete malformed identities remain typed refusals. Secondary validation
+keeps its original priority. The refreshed isolated Bitrue registry target
+passes five controls, including malformed stable-id and oversized-ref rejection.
+No shared selection/recipe mechanism or other family constructor changes.

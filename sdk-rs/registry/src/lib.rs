@@ -1140,13 +1140,13 @@ pub fn build_with_signer<T: Visit>(
             identities.primary = identities.primary.filter(|identity| {
                 !identity.credential.0.is_empty() && !identity.signing.0.is_empty()
             });
+            if let Some(read) = &identities.secondary {
+                read.validate().map_err(invalid)?;
+            }
             if let Some(primary) = &identities.primary {
                 primary.validate().map_err(invalid)?;
             }
             let registered = identities.clone();
-            if let Some(read) = &identities.secondary {
-                read.validate().map_err(invalid)?;
-            }
             if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
             {
                 return Err(invalid("Engine signing provider is required"));

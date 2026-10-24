@@ -127,3 +127,34 @@ fn explicit_empty_primary_keeps_the_native_unsigned_catalogue() {
         );
     }
 }
+
+#[test]
+fn malformed_complete_primary_is_refused_instead_of_made_anonymous() {
+    use safe_cex_crypto::signer::LocalSigner;
+    let (provider, identities) = LocalSigner::from_json(
+        r#"{"primary":{"key":"fixture-key","secret":"fixture-material"}}"#.into(),
+    )
+    .unwrap();
+    let provider = std::sync::Arc::new(provider);
+    for invalid_stable_id in [true, false] {
+        let mut identities = identities.clone();
+        let primary = identities.primary.as_mut().unwrap();
+        if invalid_stable_id {
+            primary.stable_id = Some("\n".into());
+        } else {
+            primary.signing.0 = "x".repeat(257);
+        }
+        let mut options: EngineOptions =
+            serde_json::from_str(r#"{"publicDataOnly":true}"#).unwrap();
+        options.signing = Some(identities);
+        let error = build_with_signer(
+            "bitrue",
+            options,
+            entropy(),
+            Some(provider.clone()),
+            Catalogue,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    }
+}
