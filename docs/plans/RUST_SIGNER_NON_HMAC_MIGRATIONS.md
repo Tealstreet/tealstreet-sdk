@@ -285,7 +285,7 @@ V1-only Aster PR) before its migrated construction path is enabled.
 | 8 | Hyperliquid + TxFlow | codex-zs5e83 (HL); codex-hcmq3f (TxFlow), coordinating the joint nonce/action-hash proof | P2, P4, P5, P8 | nonce stamp; none | Digest recipes; the nonce is drawn at preparation. |
 | 9 | GRVT | codex-zs5e83 | P2, P4, P6, P8 | none; +1 h | Signs at release, including amend replacements. Re-login re-prepares and never resends the stale signed body. #1785-1788 own `account.rs`. |
 | 10 | Paradex | codex-zs5e83 | P2 Stark, P4, P6 | auth `exp` +300 s; order ms stamp (half 2 on the existing `stark` payloadSigner) | Map the payloadSigner contract onto the shared provider and hosted adapter. Delete the Paradex-only engine path (`Cx::sign_request`, `PendingSignature`, `SignatureTarget`, `engine.rs:145-155,1715`) in the same PR. #1787 owns account/trading files. |
-| 11 | Lighter | codex-zs5e83 | P3 Schnorr, P4, P5, P8 | none; auth +60 s, tx +10 min | The auth token is minted per use at release. Nonce reuse follows the P5 rule. |
+| 11 | Lighter | claude-m26ps4 (P3 Schnorr recipe, [plan](RUST_LIGHTER_SCHNORR_RECIPE.md)); codex-zs5e83 (venue P4/P5/P8 integration) | P3 Schnorr, P4, P5, P8 | none; auth +60 s, tx +10 min | The auth token is minted per use at release. Nonce reuse follows the P5 rule. |
 | 12 | Polymarket | codex-hcmq3f | P0, P1, P2, P4, P6b, P8 | L2 seconds; none | Blocked on the P6b owner decision. The raw-credential WS frame becomes `Present` fields. |
 | 13 | BreakoutProp | codex-hcmq3f | P6 | none | Password `Present` into the login body; the token follows P6. |
 
