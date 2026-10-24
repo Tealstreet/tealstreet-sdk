@@ -1,10 +1,43 @@
 //! Sequenced trading jobs; preflight and signatures complete before any placement.
 use crate::{ApexOmni, Pending, sign};
+use safe_cex_engine::classify::{
+    CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact,
+};
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::plan::{
+    CallBound, MutationTerminalBound, RetryWindow, Slot, StepBound,
+};
+use safe_cex_engine::request_context::{
+    Context, Credential, HttpOwnerRetirement, Operation, Plan, PlanPolicy, Preflight,
+    PreflightPolicy, PreflightPurpose, RetryPolicy, UnprovenEvidence,
+};
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Outcome, Response, TimerId, VenueError, num,
+    Command, CommandId, CredentialSlot, Cx, ErrorKind, Outcome, Response, VenueError, num,
 };
 use serde::Deserialize;
+
+const APEX: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Int(20016),
+            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(401),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(429),
+            verdict: Verdict::Refused(ErrorKind::RateLimited),
+            only: None,
+        },
+    ],
+    success: &[Key::Int(0)],
+    unlisted: Verdict::Unknown(None),
+    status: &[],
+};
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Clone)]
@@ -18,7 +51,12 @@ enum Accepted {
 enum Step {
     Build(Vec<PlaceOrderOpts>),
     Amend(String, Option<f64>, Option<f64>),
-    Write(sign::Request, Accepted, Vec<OrderIdentityReceipt>),
+    Write(
+        sign::Request,
+        Accepted,
+        Vec<OrderIdentityReceipt>,
+        Vec<[u8; 36]>,
+    ),
     Delay,
 }
 struct Job {
@@ -26,12 +64,25 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     placements: bool,
-    /// A step took effect, so a later rejection cannot mean nothing happened.
-    effective: bool,
+    preflight: Preflight,
+    plan: Option<Plan>,
+    amending: bool,
 }
 pub struct Request {
     command: CommandId,
     accepted: Accepted,
+    plan: Plan,
+    slot: Slot,
+    context: Context,
+    unsigned: sign::Request,
+    contracts: Vec<[u8; 36]>,
+    legacy: bool,
+    late: LateTrade,
+}
+#[derive(serde::Serialize, Deserialize)]
+struct LateTrade {
+    cancel_ids: Vec<String>,
+    clients: Vec<String>,
 }
 struct Amendment {
     id: String,
@@ -47,7 +98,6 @@ struct Amendment {
     terminal: bool,
     default_amount: bool,
     started: f64,
-    prepared: Vec<Step>,
 }
 impl Amendment {
     fn observe(&mut self) {
@@ -68,7 +118,6 @@ pub struct Trading {
     queue: VecDeque<Job>,
     active: Option<Job>,
     waiting: bool,
-    timer: Option<TimerId>,
     amendment: Option<Amendment>,
 }
 
@@ -295,12 +344,6 @@ impl ApexOmni {
         order: &PlaceOrderOpts,
         issued: &mut HashSet<String>,
     ) -> Result<Vec<Step>, String> {
-        let seed = self
-            .options
-            .omni_key_seed
-            .as_deref()
-            .ok_or("Invalid OmniKey seed")?;
-        sign::validate_seed(seed)?;
         if !self.account.initialized {
             return Err("ApeX Omni account signing state is unavailable".into());
         }
@@ -366,8 +409,7 @@ impl ApexOmni {
             }];
             let size = num::format(amount);
             let price_text = num::format(price);
-            let signature = sign::contract_signature(
-                seed,
+            let mut contracts = vec![sign::contract_payload(
                 &id,
                 &self.account.account_id,
                 config.pair_id,
@@ -376,7 +418,8 @@ impl ApexOmni {
                 &self.account.maker_fee,
                 &self.account.taker_fee,
                 order.side == OrderSide::Buy,
-            )?;
+            )?];
+            let signature = sign::zk_placeholder(0);
             let mut fields = vec![
                 pair("symbol", market.id.clone()),
                 pair("side", side(order.side)),
@@ -466,8 +509,8 @@ impl ApexOmni {
                     kind: OrderIdentityKind::ClientOrderId,
                     identity: leg_id.clone(),
                 });
-                let signature = sign::contract_signature(
-                    seed,
+                let signature = sign::zk_placeholder(contracts.len());
+                contracts.push(sign::contract_payload(
                     &leg_id,
                     &self.account.account_id,
                     config.pair_id,
@@ -476,7 +519,7 @@ impl ApexOmni {
                     &self.account.maker_fee,
                     &self.account.taker_fee,
                     opposite == OrderSide::Buy,
-                )?;
+                )?);
                 fields.push(pair(
                     if prefix == "tp" {
                         "isSetOpenTp"
@@ -517,6 +560,7 @@ impl ApexOmni {
                 sign::Request::raw("/v3/order", sign::query(&fields)),
                 Accepted::Place,
                 receipts,
+                contracts,
             ));
         }
         Ok(steps)
@@ -527,11 +571,45 @@ impl ApexOmni {
         cx: &mut Cx<'_, Pending>,
         command: Command,
     ) -> Result<(), Command> {
+        let read_only = matches!(
+            &command,
+            Command::SetMarginType { .. }
+                | Command::SetPositionMode { .. }
+                | Command::FetchLeverage { .. }
+        );
+        if !read_only
+            && !matches!(
+                &command,
+                Command::PlaceOrders { .. }
+                    | Command::AmendOrder { .. }
+                    | Command::CancelOrders { .. }
+                    | Command::CancelSymbolOrders { .. }
+                    | Command::SetLeverage { .. }
+            )
+        {
+            return Err(command);
+        }
+        let credential = self.options.identity.as_ref().map(|identity| Credential {
+            slot: CredentialSlot::Primary,
+            reference: identity.credential.clone(),
+        });
+        let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
+            purpose: if read_only {
+                PreflightPurpose::ReadOnly
+            } else {
+                PreflightPurpose::WriteAfterReads
+            },
+            read_credential: None,
+            write_credential: if read_only { None } else { credential },
+        }) else {
+            return Ok(());
+        };
         let (command, steps, placements) = match command {
             Command::PlaceOrders { command, orders } => {
                 if let Err(error) = validate(&orders, cx) {
                     cx.command_error(command, &error);
-                    cx.fail(command, not_sent(error));
+                    let _ = cx
+                        .fail_preflight(&preflight, not_sent(error).kind(ErrorKind::InvalidInput));
                     return Ok(());
                 }
                 (command, vec![Step::Build(orders)], true)
@@ -543,8 +621,8 @@ impl ApexOmni {
                 amount,
             } => {
                 if price.is_none() && amount.is_none() {
-                    cx.fail(
-                        command,
+                    let _ = cx.fail_preflight(
+                        &preflight,
                         not_sent("ApeX Omni amendment requires a price or amount"),
                     );
                     return Ok(());
@@ -559,7 +637,10 @@ impl ApexOmni {
                     if !valid_id(&id) {
                         let error = "ApeX Omni cancel requires an order ID".to_owned();
                         cx.command_error(command, &error);
-                        cx.fail(command, not_sent(error));
+                        let _ = cx.fail_preflight(
+                            &preflight,
+                            not_sent(error).kind(ErrorKind::InvalidInput),
+                        );
                         return Ok(());
                     }
                     if unique.insert(id.clone()) {
@@ -570,6 +651,7 @@ impl ApexOmni {
                             sign::Request::form("/v3/delete-order", vec![pair("id", id.clone())]),
                             Accepted::Cancel(vec![id]),
                             Vec::new(),
+                            Vec::new(),
                         ));
                     }
                 }
@@ -577,8 +659,8 @@ impl ApexOmni {
             }
             Command::CancelSymbolOrders { command, symbol } => {
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.fail(
-                        command,
+                    let _ = cx.fail_preflight(
+                        &preflight,
                         not_sent(format!("ApeX Omni market {symbol} not found")),
                     );
                     return Ok(());
@@ -592,6 +674,7 @@ impl ApexOmni {
                         ),
                         Accepted::CancelSymbol(symbol),
                         Vec::new(),
+                        Vec::new(),
                     )],
                     false,
                 )
@@ -603,15 +686,15 @@ impl ApexOmni {
                 side: _,
             } => {
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.fail(
-                        command,
+                    let _ = cx.fail_preflight(
+                        &preflight,
                         not_sent(format!("ApeX Omni market {symbol} not found")),
                     );
                     return Ok(());
                 };
                 if !positive(leverage) {
-                    cx.fail(
-                        command,
+                    let _ = cx.fail_preflight(
+                        &preflight,
                         not_sent("ApeX Omni leverage must be finite and positive"),
                     );
                     return Ok(());
@@ -631,215 +714,416 @@ impl ApexOmni {
                         ),
                         Accepted::Leverage(symbol, leverage),
                         Vec::new(),
+                        Vec::new(),
                     )],
                     false,
                 )
             }
             Command::SetMarginType {
-                command, isolated, ..
+                command: _,
+                isolated,
+                ..
             } => {
                 if isolated {
                     let error = not_sent("ApeX Omni supports cross margin only");
-                    cx.fail(command, error.kind(ErrorKind::Unsupported));
+                    let _ = cx.fail_preflight(&preflight, error.kind(ErrorKind::Unsupported));
                 } else {
-                    cx.done(command, "null".into());
+                    let _ = cx.done_preflight(&preflight, "null".into());
                 }
                 return Ok(());
             }
             Command::SetPositionMode {
-                command,
+                command: _,
                 hedged,
                 symbol: _,
             } => {
                 if hedged {
-                    cx.done(command, "null".into());
+                    let _ = cx.done_preflight(&preflight, "null".into());
                 } else {
                     let error = not_sent("ApeX Omni supports hedged position mode only");
-                    cx.fail(command, error.kind(ErrorKind::Unsupported));
+                    let _ = cx.fail_preflight(&preflight, error.kind(ErrorKind::Unsupported));
                 }
                 return Ok(());
             }
-            Command::FetchLeverage { command, symbol } => {
+            Command::FetchLeverage { command: _, symbol } => {
                 let result: Result<String, String> = cx
                     .store
                     .setting(&symbol)
                     .map(|s| num::format(s.leverage))
                     .ok_or_else(|| "ApeX Omni leverage is unavailable".into());
                 match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                    Ok(data) => {
+                        let _ = cx.done_preflight(&preflight, data);
+                    }
+                    Err(error) => {
+                        let _ = cx.fail_preflight(&preflight, error);
+                    }
                 };
                 return Ok(());
             }
             command => return Err(command),
         };
-        if self.options.public_data_only
-            || self.options.key.as_deref().is_none_or(str::is_empty)
-            || self.options.secret.as_deref().is_none_or(str::is_empty)
-            || self.options.passphrase.as_deref().is_none_or(str::is_empty)
-        {
-            let error = "ApeX Omni private commands require API credentials".to_owned();
-            cx.command_error(command, &error);
-            cx.fail(command, not_sent(error));
+        if self.options.public_data_only {
+            let _ = cx.fail_preflight(
+                &preflight,
+                not_sent("ApeX Omni private commands require API credentials")
+                    .kind(ErrorKind::AuthInvalid),
+            );
             return Ok(());
         }
-        self.trading.queue.push_back(Job {
-            command,
-            steps: steps.into(),
-            ids: vec![],
-            placements,
-            effective: false,
-        });
-        self.drive_trading(cx);
+        if self.trading.active.is_some() {
+            if let Err(error) = cx.park_preflight(&preflight) {
+                let _ = cx.fail_preflight(&preflight, error.venue_error());
+                return Ok(());
+            }
+            self.trading.queue.push_back(Job {
+                command,
+                steps: steps.into(),
+                ids: vec![],
+                placements,
+                preflight,
+                plan: None,
+                amending: false,
+            });
+        } else {
+            self.trading.active = Some(Job {
+                command,
+                steps: steps.into(),
+                ids: vec![],
+                placements,
+                preflight,
+                plan: None,
+                amending: false,
+            });
+            self.drive_trading(cx);
+        }
         Ok(())
     }
 
-    fn drive_trading(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.trading.waiting || self.trading.timer.is_some() {
-            return;
-        }
-        loop {
-            if self.trading.active.is_none() {
-                self.trading.active = self.trading.queue.pop_front();
-            }
-            let Some(mut job) = self.trading.active.take() else {
-                return;
-            };
-            let Some(step) = job.steps.pop_front() else {
-                let result = if job.placements {
-                    serde_json::to_string(&job.ids).unwrap()
-                } else {
-                    "[]".into()
-                };
-                cx.done(job.command, result);
-                continue;
-            };
+    fn prepare_trading(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        job: &mut Job,
+    ) -> Result<(), VenueError> {
+        let mut prepared = VecDeque::new();
+        while let Some(step) = job.steps.pop_front() {
             match step {
-                Step::Amend(id, price, amount) => {
-                    let result = replacement(cx, &id, price, amount).and_then(|order| {
-                        validate(std::slice::from_ref(&order), cx)?;
-                        let mut issued = cx
-                            .store
-                            .orders()
-                            .iter()
-                            .filter_map(|o| o.client_order_id.clone())
-                            .collect();
-                        let prepared = self.prepare_order(cx, &order, &mut issued)?;
-                        let parent = cx.store.order(parent_id(&id)).unwrap();
-                        Ok(Amendment {
-                            id: parent.id.clone(),
-                            order,
-                            total_amount: parent.amount,
-                            baseline_filled: parent.filled,
-                            filled: parent.filled,
-                            fill_total: 0.0,
-                            fills: Vec::new(),
-                            reported: parent.filled,
-                            reported_at: cx.now,
-                            overflow: false,
-                            terminal: false,
-                            default_amount: amount.is_none(),
-                            started: cx.now,
-                            prepared,
-                        })
-                    });
-                    let amendment = match result {
-                        Ok(amendment) => amendment,
-                        Err(error) => {
-                            cx.command_error(job.command, &error);
-                            cx.fail(job.command, not_sent(error));
-                            continue;
-                        }
-                    };
-                    job.steps.push_front(Step::Write(
-                        sign::Request::form(
-                            "/v3/delete-order",
-                            vec![pair("id", amendment.id.clone())],
-                        ),
-                        Accepted::AmendCancel,
-                        Vec::new(),
-                    ));
-                    self.trading.amendment = Some(amendment);
-                    self.trading.active = Some(job);
-                }
                 Step::Build(orders) => {
-                    let mut prepared = Vec::new();
-                    let mut issued: HashSet<_> = cx
+                    let mut issued = cx
                         .store
                         .orders()
                         .iter()
                         .filter_map(|o| o.client_order_id.clone())
                         .chain(orders.iter().filter_map(|o| o.client_order_id.clone()))
                         .collect();
-                    let result = orders.iter().try_for_each(|o| {
-                        self.prepare_order(cx, o, &mut issued)
-                            .map(|steps| prepared.extend(steps))
+                    for order in orders {
+                        prepared.extend(
+                            self.prepare_order(cx, &order, &mut issued)
+                                .map_err(not_sent)?,
+                        );
+                    }
+                }
+                Step::Amend(id, price, amount) => {
+                    job.amending = true;
+                    let order = replacement(cx, &id, price, amount).map_err(not_sent)?;
+                    validate(std::slice::from_ref(&order), cx).map_err(not_sent)?;
+                    let mut issued = cx
+                        .store
+                        .orders()
+                        .iter()
+                        .filter_map(|o| o.client_order_id.clone())
+                        .collect();
+                    let replacement = self
+                        .prepare_order(cx, &order, &mut issued)
+                        .map_err(not_sent)?;
+                    let parent = cx
+                        .store
+                        .order(parent_id(&id))
+                        .expect("replacement validated parent");
+                    prepared.push_back(Step::Write(
+                        sign::Request::form(
+                            "/v3/delete-order",
+                            vec![pair("id", parent.id.clone())],
+                        ),
+                        Accepted::AmendCancel,
+                        vec![],
+                        vec![],
+                    ));
+                    prepared.extend(replacement);
+                    self.trading.amendment = Some(Amendment {
+                        id: parent.id.clone(),
+                        order,
+                        total_amount: parent.amount,
+                        baseline_filled: parent.filled,
+                        filled: parent.filled,
+                        fill_total: 0.0,
+                        fills: vec![],
+                        reported: parent.filled,
+                        reported_at: cx.now,
+                        overflow: false,
+                        terminal: false,
+                        default_amount: amount.is_none(),
+                        started: cx.now,
                     });
-                    if let Err(error) = result {
-                        cx.command_error(job.command, &error);
-                        cx.fail(job.command, not_sent(error));
-                        continue;
-                    }
-                    for step in prepared.into_iter().rev() {
-                        job.steps.push_front(step);
-                    }
-                    self.trading.active = Some(job);
                 }
-                Step::Write(request, accepted, receipts) => {
-                    let command = job.command;
-                    self.trading.active = Some(job);
-                    self.trading.waiting = true;
-                    cx.command_progress(command, receipts);
-                    if let Err(error) = self.signed(
-                        cx,
-                        request,
-                        Pending::Trade(Request { command, accepted }),
-                        None,
-                    ) {
-                        self.fail_trading(cx, not_sent(error));
-                    }
-                    return;
-                }
-                Step::Delay => {
-                    self.trading.active = Some(job);
-                    self.trading.timer = Some(cx.set_timer(1000.0));
-                    return;
-                }
+                step => prepared.push_back(step),
             }
+        }
+        if prepared.is_empty() {
+            cx.done_empty_plan(&job.preflight, "[]".into())
+                .map_err(|e| e.venue_error())?;
+            return Ok(());
+        }
+        let needs = if job.placements {
+            sign::CONTRACT_NEEDS
+        } else {
+            sign::REST_NEEDS
+        };
+        cx.can_sign(CredentialSlot::Primary, needs)
+            .map_err(|error| error.venue_error())?;
+        let identity = self
+            .options
+            .identity
+            .as_ref()
+            .expect("preflight requires credential");
+        let mut waits = Vec::new();
+        let mut wait = 0;
+        for step in &prepared {
+            match step {
+                Step::Delay => wait = 1000,
+                Step::Write(..) => {
+                    waits.push(wait);
+                    wait = 0;
+                }
+                _ => unreachable!("native preparation expanded"),
+            }
+        }
+        let calls: Vec<_> = waits
+            .iter()
+            .map(|_| {
+                [CallBound {
+                    timeout_ms: 20_000,
+                    attempts: 2,
+                    retry_window: RetryWindow::FreshAttempt,
+                    after_refusal: &[],
+                }]
+            })
+            .collect();
+        let steps: Vec<_> = calls
+            .iter()
+            .zip(waits)
+            .map(|(calls, wait_ms)| StepBound { wait_ms, calls })
+            .collect();
+        let terminals: Vec<_> = if self.trading.amendment.is_some() {
+            (0..steps.len())
+                .map(|after_step| MutationTerminalBound { after_step })
+                .collect()
+        } else {
+            vec![]
+        };
+        let plan = cx
+            .admit_plan_with_terminals(
+                &job.preflight,
+                &steps,
+                PlanPolicy {
+                    operation: Operation::Mutation,
+                    credential: Some(Credential {
+                        slot: CredentialSlot::Primary,
+                        reference: identity.credential.clone(),
+                    }),
+                    pacing: None,
+                    retry: RetryPolicy::DefinitiveRefusal,
+                },
+                &terminals,
+            )
+            .map_err(|error| error.venue_error())?;
+        prepared.retain(|step| !matches!(step, Step::Delay));
+        job.steps = prepared;
+        job.plan = Some(plan);
+        Ok(())
+    }
+
+    pub(crate) fn drive_trading(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.trading.waiting {
+            return;
+        }
+        let Some(mut job) = self.trading.active.take() else {
+            return;
+        };
+        if job.plan.is_none() {
+            if let Err(error) = self.prepare_trading(cx, &mut job) {
+                let _ = cx.fail_preflight(&job.preflight, error);
+                self.trading.active = Some(job);
+                return;
+            }
+            if job.plan.is_none() {
+                self.trading.active = Some(job);
+                return;
+            }
+        }
+        let plan = job.plan.as_ref().unwrap().clone();
+        let slot = match cx.plan_slots(&plan) {
+            Ok(slots) => slots.into_iter().next(),
+            Err(error) => {
+                let _ = cx.fail_plan(&plan, error.venue_error());
+                self.trading.active = Some(job);
+                return;
+            }
+        };
+        let Some(slot) = slot else {
+            self.trading.active = Some(job);
+            return;
+        };
+        let Some(Step::Write(unsigned, accepted, receipts, contracts)) = job.steps.pop_front()
+        else {
+            self.trading.active = Some(job);
+            let _ = cx.fail_plan(
+                &plan,
+                VenueError::new("ApeX Omni native plan has no next request")
+                    .kind(ErrorKind::Internal),
+            );
+            return;
+        };
+        let intent = match &accepted {
+            Accepted::Place => Intent::Place,
+            Accepted::Cancel(_) | Accepted::CancelSymbol(_) => Intent::Cancel,
+            Accepted::AmendCancel => Intent::Amend,
+            Accepted::Leverage(..) => Intent::Setting,
+        };
+        let context = match cx.plan_leg_context_with_intent(&plan, &slot, intent) {
+            Ok(context) => context,
+            Err(error) => {
+                self.trading.active = Some(job);
+                let _ = cx.fail_plan(&plan, error.venue_error());
+                return;
+            }
+        };
+        let cancel_ids = match &accepted {
+            Accepted::Cancel(ids) => ids.clone(),
+            Accepted::AmendCancel => self
+                .trading
+                .amendment
+                .as_ref()
+                .map(|amendment| vec![amendment.id.clone()])
+                .unwrap_or_default(),
+            Accepted::CancelSymbol(symbol) => cx
+                .store
+                .orders()
+                .iter()
+                .filter(|order| &order.symbol == symbol)
+                .map(|order| parent_id(&order.id).to_owned())
+                .collect(),
+            _ => vec![],
+        };
+        let late = LateTrade {
+            cancel_ids,
+            clients: receipts
+                .iter()
+                .map(|receipt| receipt.identity.clone())
+                .collect(),
+        };
+        cx.command_progress(job.command, receipts);
+        let delivery = Request {
+            command: job.command,
+            accepted,
+            plan,
+            slot,
+            context,
+            unsigned,
+            contracts,
+            legacy: false,
+            late,
+        };
+        self.trading.active = Some(job);
+        self.send_trading(cx, delivery);
+    }
+
+    fn send_trading(&mut self, cx: &mut Cx<'_, Pending>, delivery: Request) {
+        let identity = self
+            .options
+            .identity
+            .as_ref()
+            .expect("admitted identity")
+            .clone();
+        let query = sign::query(&delivery.unsigned.params);
+        let url = format!(
+            "{}{}{}{}",
+            self.rest,
+            delivery.unsigned.path,
+            if query.is_empty() { "" } else { "?" },
+            query
+        );
+        let recipe = sign::Http::with_contracts(
+            identity,
+            delivery.unsigned.clone(),
+            delivery.legacy,
+            delivery.contracts.clone(),
+        );
+        self.trading.waiting = true;
+        if let Err((Pending::Trade(delivery), error)) = cx.request_signed_managed(
+            delivery.context.clone(),
+            delivery.unsigned.method,
+            url,
+            None,
+            Box::new(recipe),
+            Pending::Trade(delivery),
+        ) {
+            self.trading_failed(cx, delivery, error.venue_error());
         }
     }
 
-    fn fail_trading(&mut self, cx: &mut Cx<'_, Pending>, mut error: VenueError) {
-        self.trading.waiting = false;
-        self.trading.amendment = None;
-        if let Some(job) = self.trading.active.take() {
-            // A later refusal after a step took effect cannot mean nothing happened.
-            if job.effective && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-            {
-                error.outcome = None;
-            }
-            cx.command_error(job.command, &error.message);
-            cx.fail(job.command, error);
-        }
-        self.drive_trading(cx);
-    }
     pub(crate) fn trading_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        _request: Request,
+        delivery: Request,
         error: VenueError,
     ) {
-        self.fail_trading(cx, error);
+        let _ = cx.fail_plan(&delivery.plan, error);
     }
-    pub(crate) fn trading_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.trading.timer == Some(timer) {
-            self.trading.timer = None;
+
+    pub(crate) fn trading_retired(&mut self, owner: &HttpOwnerRetirement) -> Option<Preflight> {
+        self.trading
+            .queue
+            .retain(|job| !owner.matches_preflight(&job.preflight));
+        if self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|job| owner.matches_preflight(&job.preflight))
+        {
+            self.trading.active = None;
+            self.trading.waiting = false;
+            self.trading.amendment = None;
+            return self.trading.queue.front().map(|job| job.preflight.clone());
+        }
+        None
+    }
+
+    pub(crate) fn trading_plan_ready(&mut self, cx: &mut Cx<'_, Pending>, plan: &Plan) {
+        if self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|job| job.plan.as_ref())
+            .is_some_and(|active| active.owner() == plan.owner())
+        {
             self.drive_trading(cx);
-            true
-        } else {
-            false
         }
     }
+
+    pub(crate) fn trading_ready(&mut self, cx: &mut Cx<'_, Pending>, preflight: &Preflight) {
+        if self.trading.active.is_none()
+            && self
+                .trading
+                .queue
+                .front()
+                .is_some_and(|job| job.preflight.owner() == preflight.owner())
+        {
+            self.trading.active = self.trading.queue.pop_front();
+            self.drive_trading(cx);
+        }
+    }
+
     pub(crate) fn trading_order_progress(
         &mut self,
         id: &str,
@@ -881,15 +1165,74 @@ impl ApexOmni {
     pub(crate) fn trading_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        request: Request,
+        delivery: Request,
         response: Response<'_>,
     ) {
+        if cx
+            .validate_plan_delivery(&delivery.plan, &delivery.context)
+            .is_err()
+        {
+            return;
+        }
         if !self
             .trading
             .active
             .as_ref()
-            .is_some_and(|job| job.command == request.command)
+            .is_some_and(|job| job.command == delivery.command)
         {
+            return;
+        }
+        let envelope = serde_json::from_str::<crate::Envelope<'_>>(response.body).ok();
+        let code = envelope
+            .as_ref()
+            .and_then(|e| e.code.as_ref())
+            .and_then(strict_code);
+        if code != Some(0) || !(200..300).contains(&response.status) {
+            let native = envelope.as_ref().map(|e| Native {
+                code: code.map_or(NativeCode::None, NativeCode::Int),
+                message: e.msg.as_ref(),
+            });
+            let message = envelope
+                .as_ref()
+                .map_or("ApeX Omni malformed write response", |e| e.msg.as_ref());
+            let message = format!(
+                "ApeX Omni request failed [{}]: {}",
+                code.unwrap_or(i64::from(response.status)),
+                message
+            );
+            let Ok(fact) = cx.classify_write(&delivery.context, &APEX, native.as_ref(), message)
+            else {
+                return;
+            };
+            let error = fact.error().clone();
+            let grant = cx.http_write_fact(
+                &delivery.context,
+                WriteFact::Failed {
+                    fact,
+                    known_effects: false,
+                },
+                None,
+            );
+            if let Ok(Some(grant)) = grant {
+                match cx.plan_resend_context(
+                    &delivery.plan,
+                    &delivery.slot,
+                    &delivery.context,
+                    grant,
+                ) {
+                    Ok(context) => {
+                        let mut delivery = delivery;
+                        delivery.context = context;
+                        delivery.legacy = true;
+                        self.send_trading(cx, delivery);
+                    }
+                    Err(_) => {
+                        let _ = cx.fail_plan(&delivery.plan, error);
+                    }
+                }
+            } else {
+                let _ = cx.fail_plan(&delivery.plan, error);
+            }
             return;
         }
         #[derive(Deserialize)]
@@ -900,25 +1243,55 @@ impl ApexOmni {
         struct Data {
             id: String,
         }
-        match request.accepted {
+        let placed = if matches!(delivery.accepted, Accepted::Place) {
+            serde_json::from_str::<Envelope>(response.body)
+                .ok()
+                .and_then(|e| e.data)
+                .filter(|d| !d.id.is_empty())
+                .map(|d| d.id)
+        } else {
+            None
+        };
+        if matches!(delivery.accepted, Accepted::Place) && placed.is_none() {
+            let message = "ApeX Omni placement response has no order ID";
+            let _ = cx.http_write_unproven(&delivery.context, message);
+            let _ = cx.fail_plan(
+                &delivery.plan,
+                VenueError::new(message).kind(ErrorKind::Internal),
+            );
+            return;
+        }
+        if cx
+            .http_write_fact(
+                &delivery.context,
+                WriteFact::Accepted {
+                    order_ids: if matches!(delivery.accepted, Accepted::Place) {
+                        placed.iter().cloned().collect()
+                    } else {
+                        delivery.late.cancel_ids.clone()
+                    },
+                },
+                None,
+            )
+            .is_err()
+        {
+            return;
+        }
+        match delivery.accepted.clone() {
             Accepted::Place => {
-                let parsed = serde_json::from_str::<Envelope>(response.body)
-                    .ok()
-                    .and_then(|e| e.data)
-                    .filter(|d| !d.id.is_empty());
-                let Some(data) = parsed else {
-                    self.fail_trading(cx, unknown("ApeX Omni placement response has no order ID"));
-                    return;
-                };
-                if let Some(job) = self.trading.active.as_mut() {
-                    job.ids.push(data.id);
-                }
+                self.trading
+                    .active
+                    .as_mut()
+                    .unwrap()
+                    .ids
+                    .push(placed.unwrap());
                 self.heal_orders(cx);
             }
             Accepted::Cancel(ids) => self.note_cancel(cx, &ids),
             Accepted::AmendCancel => {
                 let Some(mut amendment) = self.trading.amendment.take() else {
-                    self.fail_trading(cx, "ApeX Omni amendment state is unavailable".into());
+                    let _ =
+                        cx.fail_plan(&delivery.plan, "ApeX Omni amendment state is unavailable");
                     return;
                 };
                 if let Some(parent) = cx.store.order(&amendment.id) {
@@ -929,7 +1302,7 @@ impl ApexOmni {
                 self.note_cancel(cx, &[amendment.id]);
                 if amendment.overflow {
                     let error = "ApeX Omni amendment exceeded the observed fill limit";
-                    self.fail_trading(cx, error.into());
+                    let _ = cx.fail_plan(&delivery.plan, error);
                     return;
                 }
                 if amendment.default_amount {
@@ -956,19 +1329,28 @@ impl ApexOmni {
                             self.prepare_order(cx, &amendment.order, &mut issued)
                         })
                     } else {
-                        Ok(amendment.prepared)
+                        Ok(self
+                            .trading
+                            .active
+                            .as_mut()
+                            .unwrap()
+                            .steps
+                            .drain(..)
+                            .collect())
                     };
                     match prepared {
                         Ok(prepared) => {
                             if let Some(job) = self.trading.active.as_mut() {
-                                job.steps.extend(prepared);
+                                job.steps = prepared.into();
                             }
                         }
                         Err(error) => {
-                            self.fail_trading(cx, error.into());
+                            let _ = cx.fail_plan(&delivery.plan, error);
                             return;
                         }
                     }
+                } else if let Some(job) = self.trading.active.as_mut() {
+                    job.steps.clear();
                 }
             }
             Accepted::CancelSymbol(symbol) => {
@@ -999,15 +1381,81 @@ impl ApexOmni {
                 self.refresh_positions(cx);
             }
         }
-        if let Some(job) = self.trading.active.as_mut() {
-            job.effective = true;
-        }
         self.trading.waiting = false;
-        self.drive_trading(cx);
+        let job = self.trading.active.as_ref().unwrap();
+        if job.steps.is_empty() {
+            let result = if job.placements {
+                serde_json::to_string(&job.ids).unwrap()
+            } else {
+                "[]".into()
+            };
+            if job.amending {
+                let _ = cx.done_mutation_plan_after_data(
+                    &delivery.plan,
+                    &delivery.slot,
+                    &delivery.context,
+                    result,
+                );
+            } else if cx
+                .finish_plan_call(&delivery.plan, &delivery.slot, &delivery.context)
+                .is_ok()
+            {
+                let _ = cx.done_plan(&delivery.plan, result);
+            }
+        } else if cx
+            .finish_plan_call(&delivery.plan, &delivery.slot, &delivery.context)
+            .is_ok()
+        {
+            self.drive_trading(cx);
+        }
     }
 }
 
-/// A failed ApeX Omni request: transport, a gateway status or a coded reply.
+pub(crate) fn capture_reconciliation(
+    delivery: &Request,
+) -> Result<
+    safe_cex_engine::request_context::ReconciliationData,
+    safe_cex_engine::request_context::Error,
+> {
+    let data = serde_json::to_string(&delivery.late)
+        .map_err(|_| safe_cex_engine::request_context::Error::Invalid)?;
+    safe_cex_engine::request_context::ReconciliationData::new(data)
+}
+pub(crate) fn capture_unproven(
+    delivery: &Request,
+    response: Response<'_>,
+    evidence: &mut UnprovenEvidence,
+) {
+    if let Ok(envelope) = serde_json::from_str::<crate::Envelope<'_>>(response.body) {
+        if let Some(code) = envelope.code.as_ref().and_then(strict_code) {
+            evidence.venue_code(&code.to_string());
+        }
+        evidence.venue_message(envelope.msg.as_ref());
+    }
+    if matches!(delivery.accepted, Accepted::Place) {
+        #[derive(Deserialize)]
+        struct Envelope {
+            data: Option<Data>,
+        }
+        #[derive(Deserialize)]
+        struct Data {
+            id: String,
+        }
+        if let Ok(Envelope { data: Some(data) }) = serde_json::from_str(response.body) {
+            evidence.order_id(&data.id);
+        }
+    }
+}
+
+fn strict_code(code: &crate::Code) -> Option<i64> {
+    match code {
+        crate::Code::Integer(value) => Some(*value),
+        crate::Code::Text(value) => safe_cex_engine::classify::decode_int(value),
+        _ => None,
+    }
+}
+
+/// A failed ApeX Omni delivery: transport, a gateway status or a coded reply.
 /// No ApeX code table is documented, so other codes stay unclassified.
 pub(crate) fn failure(code: Option<i64>, status: u16, message: String) -> VenueError {
     let error = VenueError::new(message);
@@ -1036,7 +1484,7 @@ pub(crate) fn unknown(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
 
-/// Refused before any request was sent.
+/// Refused before any delivery was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }
