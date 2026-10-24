@@ -1449,6 +1449,33 @@ impl Polls {
 #[path = "engine_socket.rs"]
 mod managed_sockets;
 
+/// The undrained action queue. Actions the host never drained may hold a
+/// Bearer or signed packet, so the engine wipes its own copies on drop; a
+/// drained action is the host's to dispose of.
+#[derive(Default)]
+struct Actions(Vec<Action>);
+
+impl std::ops::Deref for Actions {
+    type Target = Vec<Action>;
+    fn deref(&self) -> &Vec<Action> {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Actions {
+    fn deref_mut(&mut self) -> &mut Vec<Action> {
+        &mut self.0
+    }
+}
+
+impl Drop for Actions {
+    fn drop(&mut self) {
+        for action in &mut self.0 {
+            crate::signing_dispatch::wipe(action);
+        }
+    }
+}
+
 struct Io<P> {
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
@@ -1488,7 +1515,7 @@ struct Io<P> {
     order_read_tokens: HashMap<RequestId, u64>,
     #[cfg(feature = "order-locks")]
     order_response_token: Option<u64>,
-    actions: Vec<Action>,
+    actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
     execution_timer: Option<(TimerId, f64)>,
@@ -1587,7 +1614,7 @@ impl<P> Default for Io<P> {
             order_read_tokens: HashMap::new(),
             #[cfg(feature = "order-locks")]
             order_response_token: None,
-            actions: Vec::new(),
+            actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
             read_roots: Vec::with_capacity(256),
@@ -2623,8 +2650,9 @@ pub trait Venue {
         crate::request_context::SessionBearer::NotReady
     }
 
-    /// The claim-time fence: the current revision only, or `None` when not
-    /// ready. It must not touch, clone or allocate the token.
+    /// The current revision only, or `None` when not ready: the claim-time
+    /// fence, and the signed path's readiness check before provider work. It
+    /// must not touch, clone or allocate the token.
     fn session_bearer_revision(&self, _generation: u64) -> Option<u64> {
         None
     }
@@ -4563,7 +4591,7 @@ impl<V: Venue> Engine<V> {
             self.sign_failed(now, outbound, error);
             self.assert_live();
         }
-        let mut queued = std::collections::VecDeque::from(std::mem::take(&mut self.io.actions));
+        let mut queued = std::collections::VecDeque::from(std::mem::take(&mut *self.io.actions));
         loop {
             self.assert_live();
             while let Some(action) = queued.pop_front() {

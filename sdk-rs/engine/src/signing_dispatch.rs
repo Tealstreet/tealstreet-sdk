@@ -522,16 +522,11 @@ impl Dispatch {
 pub(crate) fn wipe(action: &mut Action) {
     use zeroize::Zeroize;
     match action {
-        Action::Http(http) => {
-            http.url.zeroize();
-            for (_, value) in &mut http.headers {
-                value.zeroize();
-            }
-            for (_, value) in &mut http.signer_headers {
-                value.zeroize();
-            }
-            if let Some(body) = &mut http.body {
-                body.zeroize();
+        Action::Http(http) => wipe_http(http),
+        // A Bind may carry the Session Bearer, the engine's one token copy.
+        Action::ManagedHttp(managed) => {
+            if let crate::request_context::HttpAction::Bind { request, .. } = &mut **managed {
+                wipe_http(request);
             }
         }
         Action::WsSend { text, .. } => text.zeroize(),
@@ -542,6 +537,19 @@ pub(crate) fn wipe(action: &mut Action) {
             }
         }
         _ => {}
+    }
+}
+fn wipe_http(http: &mut crate::HttpRequest) {
+    use zeroize::Zeroize;
+    http.url.zeroize();
+    for (_, value) in &mut http.headers {
+        value.zeroize();
+    }
+    for (_, value) in &mut http.signer_headers {
+        value.zeroize();
+    }
+    if let Some(body) = &mut http.body {
+        body.zeroize();
     }
 }
 struct Plain;

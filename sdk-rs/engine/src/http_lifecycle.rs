@@ -2306,6 +2306,38 @@ mod tests {
         assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { request, .. } if request.timeout_ms == Some(40) && request.url == "https://venue.test/read" && request.body.as_deref() == Some("{}")))));
     }
 
+    /// The Bind packet's Bearer copy is wiped with the packet: on a signed
+    /// refusal, and for any action the host never drained when the engine drops.
+    #[test]
+    fn bind_wipe_zeroizes_the_bearer_copy() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            ..Probe::default()
+        });
+        let mut bind = route(&mut engine, tokens[0], 10.)
+            .into_iter()
+            .find(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. })))
+            .expect("bind");
+        let Action::ManagedHttp(managed) = &mut bind else {
+            unreachable!()
+        };
+        let HttpAction::Bind { request, .. } = managed.as_mut() else {
+            unreachable!()
+        };
+        request
+            .headers
+            .insert(0, ("Authorization", "Bearer jwt-secret".into()));
+        crate::signing_dispatch::wipe(&mut bind);
+        let Action::ManagedHttp(managed) = &bind else {
+            unreachable!()
+        };
+        let HttpAction::Bind { request, .. } = managed.as_ref() else {
+            unreachable!()
+        };
+        assert!(request.headers.iter().all(|(_, value)| value.is_empty()));
+        assert!(request.url.is_empty());
+    }
+
     #[test]
     fn physical_window_default_timeout_keeps_existing_signing_diagnostic() {
         let (mut engine, tokens) = start(Probe {
