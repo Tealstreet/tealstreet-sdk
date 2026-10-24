@@ -424,6 +424,20 @@ mod planned_execution {
     }
 
     #[test]
+    fn a_released_execution_write_is_journaled_for_reconciliation() {
+        let (e, token, _) = shared_write(&[FOLLOWER]);
+        let request = token.attempt().request;
+        assert!(matches!(
+            e.io.managed_http.get(&request).unwrap().lifecycle.context().owner(),
+            crate::request_context::Owner::Execution { .. }
+        ));
+        assert!(
+            e.io.http_responses.contains(request),
+            "a physical execution write keeps its reconciliation record"
+        );
+    }
+
+    #[test]
     fn followers_receive_the_founders_one_write_and_single_projection() {
         let (mut e, token, _) = shared_write(&[FOLLOWER]);
         assert_eq!(
