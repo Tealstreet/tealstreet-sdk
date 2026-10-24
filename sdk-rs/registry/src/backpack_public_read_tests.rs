@@ -176,7 +176,9 @@ fn public_only_never_decodes_a_primary() {
     assert!(setup.identities.primary.is_none() && setup.identities.secondary.is_some());
 }
 
-/// No hosted admission, and no private signing work at startup.
+/// Guard, not proof: hosted admission ignores options and public-only startup
+/// queues only the unsigned markets read, so this also passed before the seam.
+/// It pins that installing the read-only provider does not change either.
 #[test]
 fn public_only_read_provider_grants_no_hosted_or_startup_authority() {
     let _declared = test_policy::declare("backpack", PublicRead);

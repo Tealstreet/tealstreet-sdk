@@ -100,3 +100,16 @@ Results:
 - Mutation check: allowing the primary in public-only mode fails 4 tests.
 - Read-scoped evidence for managed history is a control in codex-mxb4mq's
   history adoption, where the read actually issues.
+
+Independent review: CLEAR, no P1/P2, with three P3 notes.
+- **Duplicated rule.** It answered yes to "per-venue fix of a cross-cutting
+  concern?": Backpack restated the shared PublicRead primary rule. Now one
+  helper, `public_read_excludes_primary`, serves both the shared setup and
+  `backpack_provider`. Backpack passes its resolved `public_data_only`, the
+  same flag its venue arm reads. Backpack's own provider remains until its
+  dual custody is removed; then it moves to `prepare_local_signer_with_policy`.
+- **Startup test.** It is a guard, not proof (it passed before the seam), and
+  is labelled so.
+- **Signature oracle.** It uses the same Ed25519 primitive, so it proves the
+  installed key material, not the curve code. That is acceptable for its
+  purpose.
