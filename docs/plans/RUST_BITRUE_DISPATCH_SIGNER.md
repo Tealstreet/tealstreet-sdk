@@ -465,3 +465,11 @@ other complete malformed identities remain typed refusals. Secondary validation
 keeps its original priority. The refreshed isolated Bitrue registry target
 passes five controls, including malformed stable-id and oversized-ref rejection.
 No shared selection/recipe mechanism or other family constructor changes.
+
+
+Post-5b C4 inventory composition: actual219d introduces the credential-selection
+ratchet. The reviewed Bitrue lib cutover naturally removes ReadCredentials once
+and read_credentials once: own lib term counts6->4 (remaining read_credentials4).
+Prune only that exact key; every foreign entry, order and runtime blob stays
+incoming/reviewed. This is original source adoption, not a rename or a new
+bootstrap. Other ratchets pass unchanged after combining Phemex and Bitrue sets.
