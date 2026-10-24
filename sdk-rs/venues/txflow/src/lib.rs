@@ -1,5 +1,6 @@
 //! TxFlow testnet perpetuals, using separate node and API-service feeds.
 mod account;
+mod candle_read;
 mod history;
 mod local_context;
 pub mod sign;
@@ -15,8 +16,7 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{FeedId, SocketError};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    Venue,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -67,7 +67,7 @@ pub enum Pending {
         asset: u32,
     },
     Candles {
-        command: CommandId,
+        read: candle_read::Read,
         rows: Vec<Candle>,
         valid: bool,
     },
@@ -598,16 +598,9 @@ impl TxFlow {
             },
         })
         .unwrap();
-        self.info(
-            cx,
-            body,
-            ArrayAt::Field("data"),
-            Pending::Candles {
-                command,
-                rows: Vec::new(),
-                valid: true,
-            },
-        );
+        if let Some(read) = candle_read::Read::new(cx, command) {
+            read.queue(cx, body);
+        }
     }
 }
 impl Venue for TxFlow {
@@ -702,6 +695,11 @@ impl Venue for TxFlow {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if let Pending::Account(request) = &pending
             && !self.account_delivery_live(cx, request)
+        {
+            return;
+        }
+        if let Pending::Candles { read, .. } = &pending
+            && !read.validate(cx)
         {
             return;
         }
@@ -881,20 +879,13 @@ impl Venue for TxFlow {
                 };
                 self.ticker_timer = Some(cx.set_timer(25.0));
             }
-            Pending::Candles {
-                command,
-                rows,
-                valid,
-            } => {
+            Pending::Candles { read, rows, valid } => {
                 let result: Result<String, String> = if valid && Header::valid(response.body) {
                     Ok(serde_json::to_string(&rows).unwrap())
                 } else {
                     Err("Invalid TxFlow candle response".into())
                 };
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
-                }
+                read.finish(cx, result);
             }
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, Ok(response)),
@@ -911,10 +902,15 @@ impl Venue for TxFlow {
                     safe_cex_engine::startup::skipped_row(cx);
                 }
             },
-            Pending::Candles { rows, valid, .. } => match serde_json::from_str::<CandleRow>(item) {
-                Ok(row) => rows.push(row.candle()),
-                Err(_) => *valid = false,
-            },
+            Pending::Candles { read, rows, valid } => {
+                if !read.validate(cx) {
+                    return;
+                }
+                match serde_json::from_str::<CandleRow>(item) {
+                    Ok(row) => rows.push(row.candle()),
+                    Err(_) => *valid = false,
+                }
+            }
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::History(request) => self.history_item(cx, request, item),
             _ => {}
@@ -927,7 +923,10 @@ impl Venue for TxFlow {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        self.on_http_failed(cx, pending, error);
+        match pending {
+            Pending::Candles { read, .. } => read.failed(cx, error),
+            pending => self.on_sign_error(cx, pending, error),
+        }
     }
     fn on_http_failed(
         &mut self,
@@ -935,7 +934,10 @@ impl Venue for TxFlow {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        self.on_request_failed(cx, pending, &error.message);
+        match pending {
+            Pending::Candles { read, .. } => read.failed(cx, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
@@ -948,7 +950,9 @@ impl Venue for TxFlow {
                 self.discovery.failed(cx, Some(asset));
                 self.ticker_timer = Some(cx.set_timer(25.0));
             }
-            Pending::Candles { command, .. } => cx.fail(command, error),
+            Pending::Candles { read, .. } => {
+                read.failed(cx, safe_cex_engine::VenueError::new(error))
+            }
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, *request, error),

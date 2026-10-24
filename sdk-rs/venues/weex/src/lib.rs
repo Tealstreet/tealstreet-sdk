@@ -207,6 +207,33 @@ pub struct WeexFutures {
     discovery: safe_cex_engine::startup::Backoff<bool>,
     seed_generation: u32,
 }
+fn refuse_leverage_query(cx: &mut Cx<'_, Pending>, error: impl Into<safe_cex_engine::VenueError>) {
+    use safe_cex_engine::CommandWait;
+    use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+
+    let remaining = match cx.command_wait() {
+        Some(CommandWait::Remaining(remaining)) => remaining,
+        Some(CommandWait::Expired) => {
+            let _ = cx.reject_expired_command(Operation::Read);
+            return;
+        }
+        None => {
+            let _ = cx.reject_unstamped_command(Operation::Read);
+            return;
+        }
+    };
+    let Ok(context) = cx.admit_http_command(Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: remaining.min(20_000),
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }) else {
+        return;
+    };
+    let _ = cx.fail_context(&context, error);
+}
+
 impl WeexFutures {
     pub fn new(options: Options) -> Self {
         let complete = |identity: &safe_cex_engine::signing::Identity| {
@@ -394,16 +421,16 @@ impl WeexFutures {
     /// A fresh symbol configuration read, as the TS adapter's leverage query does.
     fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, symbol: String) {
         let Some(market_id) = cx.store.market(&symbol).map(|m| m.id.clone()) else {
-            cx.fail(command, format!("unknown market {symbol}"));
+            refuse_leverage_query(cx, format!("unknown market {symbol}"));
             return;
         };
         if cx.now < self.paused_until {
-            cx.fail(command, String::from("WEEX account reads are rate limited"));
+            refuse_leverage_query(cx, "WEEX account reads are rate limited");
             return;
         }
         let selected = SelectedRead::select(&self.slots, ReadRole::Read { scope: None });
         if selected.is_err() {
-            cx.fail(command, String::from("WEEX leverage requires credentials"));
+            refuse_leverage_query(cx, "WEEX leverage requires credentials");
             return;
         }
         let revision = self.account.settings_revision();

@@ -14,6 +14,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | BreakoutProp options refusal (unreachable arm deleted) | One-site prune; engine pre-entry refusal pinned by a control | Before changing BreakoutProp options handling or its capability flags. | [RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md) |
 | BingX local candle refusal custody | Draft conversion; source review/CI pending | Before replacing the three synchronous candle refusals; remote/key-selection paths excluded. | [RUST_BINGX_LOCAL_CANDLE_CONTEXT.md](RUST_BINGX_LOCAL_CANDLE_CONTEXT.md) |
 | WEEX candle query Read custody | Draft source; scoped controls pass | Before managing candle HTTP/completions or interpreting caller deadline and streamed failure changes. | [RUST_WEEX_CANDLE_CONTEXT.md](RUST_WEEX_CANDLE_CONTEXT.md) |
+| WEEX local leverage refusal custody | Draft conversion; source review/CI pending | Before replacing three synchronous FetchLeverage refusals; selection and signed read remain unchanged. | [RUST_WEEX_LOCAL_LEVERAGE_CONTEXT.md](RUST_WEEX_LOCAL_LEVERAGE_CONTEXT.md) |
 | BingX history paging custody | Implementation under native/source review | Before moving native fill/range pages and signature resends onto one caller-wait Read root. | [RUST_BINGX_HISTORY_CONTEXT.md](RUST_BINGX_HISTORY_CONTEXT.md) |
 | WEEX public depth-query custody | Original assertions reviewed; production conversion | Before managing command-owned unsigned order-book snapshots and their four numeric terminals. | [RUST_WEEX_DEPTH_QUERY_CONTEXT.md](RUST_WEEX_DEPTH_QUERY_CONTEXT.md) |
 | Polymarket public read custody | Draft adoption; local checks pass | Before adopting public books/candles and local completion or pruning their inventory. | [RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md](RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md) |
@@ -44,6 +45,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Backpack signer admission | Option B approved; implemented | Before changing Backpack registry identity, signer setup or the custody of Backpack key material. | [RUST_BACKPACK_SIGNER_ADMISSION.md](RUST_BACKPACK_SIGNER_ADMISSION.md) |
 | Selected signed reads | Plan; draft PR | Before adding or changing a venue's managed signed-read adapter, read-key slot choice or Read policy wrapper (BingX, WEEX, OKX, Bitget, KuCoin). | [RUST_SELECTED_SIGNED_READ.md](RUST_SELECTED_SIGNED_READ.md) |
 | Lighter Schnorr signer recipe | Part 1 implemented (#1967); signer-owner review clear | Before changing Lighter signing, the SchnorrDigest contract, or Lighter public-key or remote recipes. | [RUST_LIGHTER_SCHNORR_RECIPE.md](RUST_LIGHTER_SCHNORR_RECIPE.md) |
+| Declared read-key policy | Plan; REDs next; consumers Crypto.com and Backpack | Before ignoring, validating-only or public-mode-installing a venue's read key, or changing how read-key material reaches the provider. | [RUST_READ_KEY_POLICY.md](RUST_READ_KEY_POLICY.md) |
 | Credential selection and nonce authority | Active shared-core plan; review pending | Before choosing a credential slot, read key, account subject, auth evidence tag or signing nonce in venue code. | [RUST_CREDENTIAL_SELECTION.md](RUST_CREDENTIAL_SELECTION.md) |
 | Error classification | Active engine standardization plan; inventory ranked | Before classifying venue errors, native code tables, status-to-outcome rules, partial batch failures or error-driven resends. | [RUST_ERROR_CLASSIFICATION.md](RUST_ERROR_CLASSIFICATION.md) |
 | HTTP command entry | Planned shared pre-authority rejection seam | Before removing numeric failure when initial Context issuance can refuse. | [RUST_HTTP_COMMAND_ENTRY.md](RUST_HTTP_COMMAND_ENTRY.md) |
@@ -373,5 +375,15 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | OKX history selected identity | Implemented; scoped checks pass, review pending | Before removing the closed/history credential-selection legacy sites. | [RUST_OKX_HISTORY_SELECTED_IDENTITY.md](RUST_OKX_HISTORY_SELECTED_IDENTITY.md) |
 
 - [Polymarket midpoint seed custody](RUST_POLYMARKET_MIDPOINT_READ_CONTEXT.md): one unsigned Background Read site; plan and original controls before production.
+
+| GRVT fixed local settings | Shared local terminal adoption under review | Before changing the three synchronous pre-credential settings terminals or their exact inventory prune. | [RUST_GRVT_LOCAL_SETTINGS_CONTEXT.md](RUST_GRVT_LOCAL_SETTINGS_CONTEXT.md) |
+
+| GRVT initial leverage Read refusals | Shared local terminal adoption under review | Before changing the two pre-issuance leverage refusals or their exact account inventory prune. | [RUST_GRVT_LOCAL_LEVERAGE_REFUSALS.md](RUST_GRVT_LOCAL_LEVERAGE_REFUSALS.md) |
+
+
+| GRVT unsigned instrument catalog custody | Managed implementation; source review and CI pending | Before changing startup/refresh publication, the new 20-second bound or the dead options-arm deletion. | [RUST_GRVT_CATALOG_CONTEXT.md](RUST_GRVT_CATALOG_CONTEXT.md) |
+
+| TxFlow command candle snapshot | Managed source under review; 19 dedicated controls pass | Before managing the unsigned command candle read; excludes initial local refusals, discovery and account. | [RUST_TXFLOW_CANDLE_CONTEXT.md](RUST_TXFLOW_CANDLE_CONTEXT.md) |
+| BloFin managed HMAC dispatch recipe | Plan and original native controls | Before preparing the signing-entropy nonce and opaque Secondary-or-Primary GET recipe for FetchLeverage. | [RUST_BLOFIN_HMAC_DISPATCH_RECIPE.md](RUST_BLOFIN_HMAC_DISPATCH_RECIPE.md) |
 
 | TxFlow unsigned account-setting poll custody | Managed source reviewed; scoped controls pass, fresh CI pending | Before managing activeAssetData; preserve private routing, native cadence and financial revision fences. | [RUST_TXFLOW_ACCOUNT_SETTING_CONTEXT.md](RUST_TXFLOW_ACCOUNT_SETTING_CONTEXT.md) |
