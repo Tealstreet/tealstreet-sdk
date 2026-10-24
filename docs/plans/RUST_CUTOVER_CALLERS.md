@@ -7809,6 +7809,16 @@ Credentials, selection, signers, login, private queues and financial reducers
 retain their existing implementations.
 
 
+Backpack FetchAccount owns one genuine selected Read root and a single leg
+clipped to its original caller receipt and 20-second maximum. Exact managed DATA
+custody precedes native account-ID decoding and its one correlated terminal;
+identity reads do not publish live account state. Registry setup supplies the
+real optional secondary identity and one stored native configuration/seed
+validation result, including public-only error precedence. Secondary GET uses
+the primary native window; mutations retain Primary selection. Unadopted account
+and socket paths retain their documented dual credential custody.
+
+
 ## GRVT remaining local Unsupported command custody
 
 The reachable CancelOrdersWithSymbols, FetchMaxLeverage, FetchStpMode and
