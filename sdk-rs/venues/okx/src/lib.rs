@@ -78,7 +78,7 @@ pub enum Pending {
         reopened: bool,
     },
     Account(account::Request),
-    History(history::Request),
+    History(Box<history::Request>),
     Closed(closed::Request),
     Trade(trading::Request),
     Markets {
@@ -722,7 +722,7 @@ impl Okx {
         } else if let Pending::Trade(request) = pending {
             self.trade_lost(cx, request, error);
         } else if let Pending::History(request) = pending {
-            self.history_failed(cx, request, error);
+            self.history_failed(cx, *request, error);
         } else if let Pending::Closed(request) = pending {
             Self::closed_failed(cx, request, error);
         } else if let Pending::Candles { root, .. } = pending {
@@ -1130,6 +1130,11 @@ impl Venue for Okx {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::History(read) = &pending
+            && !read.valid_delivery(cx)
+        {
+            return;
+        }
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
             let _ = cx.finish_http_context(context);
         }
@@ -1144,7 +1149,7 @@ impl Venue for Okx {
         }
         let pending = match pending {
             Pending::History(request) if request.is_lookup() => {
-                self.history_lookup_response(cx, request, response);
+                self.history_lookup_response(cx, *request, response);
                 return;
             }
             other => other,
@@ -1178,7 +1183,7 @@ impl Venue for Okx {
             Pending::SocketRefresh { .. } => (),
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, response),
-            Pending::History(request) => self.history_response(cx, request, response),
+            Pending::History(request) => self.history_response(cx, *request, response),
             Pending::Closed(request) => self.closed_response(cx, request),
             Pending::Markets {
                 kind,
@@ -1412,9 +1417,17 @@ impl Venue for Okx {
             Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);
             }
-            Pending::History(history::Request { command, .. }) => cx.fail(command, error),
+            Pending::History(read) => Self::history_sign_failed(cx, *read, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
+    }
+
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.retire_history(owner);
     }
 
     /// The managed leverage read keeps the engine's typed failure, e.g. Timeout.
@@ -1425,6 +1438,7 @@ impl Venue for Okx {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::History(read) => self.history_failed(cx, *read, error),
             Pending::Account(account::Request::Leverage { context, .. }) => {
                 let _ = cx.fail_context(&context, error);
             }

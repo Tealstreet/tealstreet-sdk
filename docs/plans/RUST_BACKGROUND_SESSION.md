@@ -197,6 +197,140 @@ owns *when* to acquire and retire, and the import primitive owns
   and #1842. The retire-all-on-dispose and `drop_imported` calls are owned
   here.
 
+### AsterDEX listenKey (stacked on #1832 and #1893 `981f8d7156c`)
+
+claude-m26ps4 pinned #1893 for this stack and owns its signer and dispatch.
+This PR changes only the listen-key region.
+
+**Original REDs** (`asterdex/tests/listen_key_session.rs`; both fail on the
+legacy source):
+- The create carries the engine-owned 20 s raw bound.
+- A hung keepalive (PUT) is retried at its bound when the host reports
+  nothing. Every due timer fires in real order and pings are answered, so no
+  watchdog closes the stream first.
+
+**Shape.**
+- **Dispatch.** `dispatch_signed` sends listen-key work as a session Mutation
+  through `request_signed_managed`. It uses the same `SessionAuth` selection
+  and dispatch-time `sign::Recipe`, plus the selection's credential.
+- **Session.** Each create (POST) retires the old session and opens a new
+  repeat-safe generation; keepalives reuse the live one.
+  - Repeat-safe on the cited fact above: Aster returns the active key on
+    create and extends it on keepalive.
+  - `close_private` retires the session, so a stale create or keepalive
+    answer never reaches the account reducers.
+  - **Stale epochs are never sent.** A parked create or keepalive retry from
+    a closed stream's `key_epoch` is dropped at dispatch. The reducer would
+    ignore its answer, and sending it would rotate the session of the
+    reconnect's current create (review of #1916).
+- **Retries.** The existing V1 signature resend, timestamp resync and
+  network/status retries (1/2/3 s) each become a new session operation.
+  - `is_read`'s `/listenKey` path test is replaced by an explicit rule:
+    listen-key session writes. The path alone grants nothing.
+- **Facts.** A 2xx answer without a negative code records `Accepted`. Any
+  other outcome is left unproven, which is harmless for a repeat-safe session.
+
+**Inventory.** No call site is removed: the shared `dispatch_signed` sender
+stays. The rewritten read-policy unit test drops three `assert!(request(…))`
+fingerprints that the checker counted inside `request.rs`'s test module.
+Aster `request.rs` goes **32→29** against #1893.
+
+**Original REDs, continued.**
+`a_closed_streams_create_retry_cannot_rotate_the_current_session` reproduces
+the review scenario: a create retry is parked across the 10 s connect watchdog
+and fires after the reconnect's create. The retry must not be sent, and the
+current create must open the stream. Without the epoch guard it fails.
+
+**Fixture.** `late_listen_key_response_after_connect_deadline_*` picked "the
+last timer" as the connect watchdog. It now takes the earliest timer the
+reconnect armed (the watchdog precedes the create's 20 s bound); its
+assertions are unchanged. On #1893's source only the three REDs fail.
+
+**Follow-up (claude-m26ps4).** The open/retire, context, rollback and fact
+glue now repeats in Binance #1851 and AsterDEX #1916. Lift it into one engine
+listen-key helper before a third adopter.
+
+### Unsigned private egress (owner assignment, 2026-10-23)
+
+**Problem.** A Context's routing intent comes only from its credential:
+keyless means `RoutingIntent::Public`, which the SDK may send via the
+public/CORS route. Three flows are unsigned yet must use the account's private
+egress:
+- GRVT `/auth/api_key/login` carries the API key in its body.
+- BreakoutProp `/login` carries the account login fields in its body, and
+  later requests carry the DXtrade session token in a header.
+- KuCoin keyless `bullet-public` must keep forced Primary egress.
+
+Moving any of them onto managed HTTP today would route them Public. RED
+(`a_keyless_login_carrying_credentials_in_its_body_must_not_route_public`):
+a keyless session login is prepared with `Public`.
+
+**API (agreed with claude-m26ps4; ruled by claude-ddi2il; codex-uufub4
+reviews the rule).** The seam reuses #1833's issuance-time egress
+(`Context.egress`, `ContextRegistry::issue_with_egress`). Legs, replacements
+and retries inherit it. There is no second Context field.
+- **`Egress::Session(SessionEgress)`** is an unsigned request carrying a
+  session's login or token on the primary private egress.
+  - `SessionEgress {generation}` is opaque: the session core alone mints it.
+    `http_context_with_egress` refuses it, so a venue cannot forge one.
+  - It is Primary only. #1833 restricts unsigned secondary-proxy routing, so
+    a keyless request never takes the read key's egress.
+  - Allowed for Read and Mutation, only with no credential: no `KeyRef`, no
+    signer, and the signer-iff-credential rule is untouched.
+    Primary/PublicCors/Direct stay unsigned-Read-only.
+  - `routing_intent()` is Primary, and `route()` is `None`.
+  - It is routing only. It never grants write, signing or session authority:
+    a Background mutation is still refused.
+- **Session side:**
+  - `SessionPolicy.private_egress: Option<PrivateEgress>`. The grant is
+    opaque: only `Selection::session_egress()` creates it, and only for a
+    primary `SessionAuth` selection. Only a keyless session may declare it.
+  - `session_context` stamps the egress on every session context and leg.
+  - `session_scoped_context(&session, scope, policy)` lets command or
+    background work that carries the session token ride the same egress,
+    under its own owner.
+- **Retirement fence.** `validate_send` refuses a context whose session
+  generation is retired. It guards issuance (legs, replacements, retries,
+  resends) and every physical send step: queue, prepare, sign completion,
+  claim and re-preparation. A fenced send fails typed (NotSent).
+  - Plain `validate` keeps delivery, streaming and write facts for an attempt
+    sent earlier. A sent write's outcome is never lost, and a stream already
+    sent keeps delivering.
+- **Regressions** (`session_context_tests.rs`):
+  - The original RED now passes.
+  - Negative controls:
+    - forged egress, a foreign session or engine context, and a session
+      leg or child crossing into another session's egress
+    - a stale generation: issuance, leg, queue, prepared send, bound claim
+      and retry
+    - Background mutation, signed work, and a signed session declaring egress
+    - non-`SessionAuth` selections, which grant nothing
+  - Riding the egress exempts no write. A command write keeps its journal and
+    write revision. A session write keeps the one-unresolved-write gate.
+  - After retirement, the public `http_write_fact` path still records a
+    command write sent earlier.
+  - Keyless sessions without declared egress still route Public.
+- **Not included:** no inference from method, URL or body, and no fallback
+  to Public when the private route is unavailable (preparation fails typed).
+- **Session callbacks settle waiters.** A session delivery is no command's
+  completion authority, so its callbacks settle like a delivery-less (socket
+  or timer) callback. They do not bind waiters to the session.
+  - They may complete commands through a live Context the venue holds, or
+    legacy commands numerically (the GRVT login fails its `account.waiting`
+    reads).
+  - Unchanged: issuer, generation and journal checks still apply, managed
+    writes are never sealed numerically, and a session Context is never
+    command authority.
+  - Background and execution deliveries keep the exact-owner check.
+  - Before this, numeric and Context completion were refused inside any
+    managed delivery. A failed managed login left its waiters hanging until
+    their own deadlines.
+  - RED/regression: `a_session_callback_settles_the_commands_waiting_on_it`.
+
+**Adoptions (stacked):** GRVT login (codex-zs5e83) and BreakoutProp login
+(codex-hcmq3f) as session Mutations behind the #1842 gate. Then KuCoin
+`bullet-public` as a session Read (codex-9czdjh, after its header use).
+
 ### Cadence and socket linkage (Phase C, after #1771 merges)
 
 The keepalive interval, failure backoff and expiry-driven recreation are

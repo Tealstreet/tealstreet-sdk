@@ -62,6 +62,8 @@ pub enum KeyEncoding {
     Pem,
     /// Key bytes are the ASCII of standard padded base64 of the input bytes.
     Base64Text,
+    /// Bitcoin-alphabet base58 (Orderly ed25519 seeds); no prefix is stripped.
+    Base58,
 }
 
 /// Closed vocabulary of additional per-identity signing material. These refs
@@ -73,12 +75,26 @@ pub enum KeyEncoding {
 pub enum ExtraKey {
     /// ApeX Omni zkLink seed: the exact 65-byte packed Ethereum signature.
     ZklinkSeed,
+    /// Polymarket L1 wallet: the raw 32-byte secp256k1 scalar; primary only.
+    L1Wallet,
 }
 impl ExtraKey {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ZklinkSeed => "zklinkSeed",
+            Self::L1Wallet => "l1Wallet",
         }
+    }
+    /// The one algorithm a role ref serves, for `Sign` and public operations.
+    pub const fn algorithm(self) -> Algorithm {
+        match self {
+            Self::ZklinkSeed => Algorithm::ZkLinkContract,
+            Self::L1Wallet => Algorithm::Secp256k1Digest,
+        }
+    }
+    /// The L1 wallet derives the session identity, which is primary only.
+    pub const fn primary_only(self) -> bool {
+        matches!(self, Self::L1Wallet)
     }
 }
 
@@ -109,6 +125,9 @@ impl CredentialSetupPolicy {
             (identities.secondary.as_ref(), self.secondary, false),
         ] {
             let declared = policy.and_then(|policy| policy.extra);
+            if !primary && declared.is_some_and(|declared| declared.key.primary_only()) {
+                return Err(SignError::InvalidRequest);
+            }
             let Some(identity) = identity else { continue };
             if identity
                 .extra
@@ -264,7 +283,8 @@ pub enum Algorithm {
     Secp256k1Digest,
     /// Stark over a 32-byte big-endian field digest; 32-byte big-endian r || s.
     StarkDigest,
-    /// Reserved: Schnorr curve/hash contract requires definition before provider support.
+    /// Lighter ECgFp5 Schnorr over Goldilocks Poseidon2. 40-byte canonical LE
+    /// scalar key; message is 32 entropy bytes then LE u64 words; 80-byte s || e.
     SchnorrDigest,
     /// zkLink Rescue/MuSig over an exact 36-byte contract; 65-byte seed key;
     /// raw 64-byte packed signature. Deterministic: no entropy or nonce state.
@@ -388,6 +408,17 @@ pub fn hmac_sha256_work(
     }
 }
 
+/// Login preimage `seconds + method + path` as three typed byte parts. The shape
+/// keeps it distinct from an HTTP capture of identical bytes; the remote wire
+/// decodes it only against the family's declared `secondsSuffix`.
+pub fn seconds_suffix_payload(seconds: &str, method: &str, path: &str) -> Vec<PayloadPart> {
+    [seconds, method, path]
+        .map(|part| PayloadPart::Bytes {
+            bytes: part.as_bytes().to_vec(),
+        })
+        .into()
+}
+
 impl SignRequest {
     /// Validate provider output against this exact atomic request. Dispatch and
     /// signing-only capture share receipt, result-count and byte-shape policy.
@@ -423,9 +454,9 @@ impl SignRequest {
                     | Algorithm::Ed25519
                     | Algorithm::Es256
                     | Algorithm::StarkDigest
-                    | Algorithm::SchnorrDigest
                     | Algorithm::ZkLinkContract => 64,
                     Algorithm::Secp256k1Digest => 65,
+                    Algorithm::SchnorrDigest => 80,
                 }),
             })
             .collect()
@@ -788,7 +819,8 @@ mod setup_field_policy_tests {
         assert!(json.contains(r#""extra":{"zklinkSeed":"primary.extra.zklinkSeed"}"#));
         assert_eq!(serde_json::from_str::<Identity>(&json).unwrap(), seeded);
         assert!(
-            serde_json::from_str::<Identity>(&json.replace("zklinkSeed\"", "l1Wallet\"")).is_err()
+            serde_json::from_str::<Identity>(&json.replace("zklinkSeed\"", "unknownRole\""))
+                .is_err()
         );
         let mut invalid = seeded.clone();
         invalid
@@ -858,6 +890,33 @@ mod setup_field_policy_tests {
     }
 
     #[test]
+    fn schnorr_digest_results_are_exactly_eighty_bytes() {
+        // Lighter's ECgFp5 Schnorr signature is s(40) || e(40).
+        let request = SignRequest {
+            receipt: SignReceipt::default(),
+            context: Context::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::SchnorrDigest,
+                key: KeyRef("primary.signing".into()),
+                payload: vec![PayloadPart::Bytes { bytes: vec![0; 40] }],
+            }],
+        };
+        assert_eq!(request.expected_result_lengths(), vec![Some(80)]);
+        request
+            .validate_result(&SignResult::new(vec![vec![1; 80]], SignReceipt::default()))
+            .unwrap();
+        for length in [64, 79, 81] {
+            assert_eq!(
+                request.validate_result(&SignResult::new(
+                    vec![vec![1; length]],
+                    SignReceipt::default()
+                )),
+                Err(SignError::InvalidResult)
+            );
+        }
+    }
+
+    #[test]
     fn zklink_contract_result_shape_and_setup_vocabulary_are_exact() {
         let request = SignRequest {
             receipt: SignReceipt::default(),
@@ -888,8 +947,30 @@ mod setup_field_policy_tests {
                 .secret_encoding,
             Some(KeyEncoding::Base64Text)
         );
-        assert!(
-            serde_json::from_str::<IdentitySetupPolicy>(r#"{"secretEncoding":"base58"}"#).is_err()
+        assert_eq!(
+            serde_json::from_str::<IdentitySetupPolicy>(r#"{"secretEncoding":"base58"}"#)
+                .unwrap()
+                .secret_encoding,
+            Some(KeyEncoding::Base58)
         );
+        assert!(
+            serde_json::from_str::<IdentitySetupPolicy>(r#"{"secretEncoding":"base32"}"#).is_err()
+        );
+    }
+
+    #[test]
+    fn seconds_suffix_payload_keeps_three_exact_parts_for_each_family() {
+        for (method, path) in [("GET", "/users/self/verify"), ("GET", "/user/verify")] {
+            let parts = seconds_suffix_payload("1700000000", method, path);
+            assert!(
+                parts
+                    == [
+                        b"1700000000".to_vec(),
+                        method.as_bytes().to_vec(),
+                        path.as_bytes().to_vec()
+                    ]
+                    .map(|bytes| PayloadPart::Bytes { bytes })
+            );
+        }
     }
 }

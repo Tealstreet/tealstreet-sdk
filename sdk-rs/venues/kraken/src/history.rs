@@ -354,9 +354,10 @@ impl Kraken {
         };
         let (read, symbol, order, kind, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(
-                    *command,
-                    "Kraken does not support caller client order IDs or their lookup",
+                crate::public_context::local(
+                    cx,
+                    safe_cex_engine::request_context::Operation::Read,
+                    Err("Kraken does not support caller client order IDs or their lookup".into()),
                 );
                 return true;
             }
@@ -422,9 +423,13 @@ impl Kraken {
             || to < from
             || to > 253_402_300_799_999.0
         {
-            cx.fail(
-                *command,
-                "Kraken history range must contain valid milliseconds in ascending order",
+            crate::public_context::local(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err(
+                    "Kraken history range must contain valid milliseconds in ascending order"
+                        .into(),
+                ),
             );
             return true;
         }
