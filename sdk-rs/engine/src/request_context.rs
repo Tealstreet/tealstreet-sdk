@@ -1050,6 +1050,10 @@ impl PreparedWriteSeal {
     pub(crate) fn is_failure(&self) -> bool {
         self.failure.is_some()
     }
+
+    pub(crate) fn failure(&self) -> Option<&VenueError> {
+        self.failure.as_ref()
+    }
 }
 impl CommandWrites {
     /// Prepare the full declared journal before plan admission. Logical legs
