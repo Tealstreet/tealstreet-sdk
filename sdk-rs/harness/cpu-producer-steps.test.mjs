@@ -174,6 +174,19 @@ test('refresh control: two lagging producers share six refreshes rather than twe
   assert.equal(value.context.bundles.size, 1);
 });
 
+test('refresh control: concurrent bindings cannot overspend the shared refresh budget', async t => {
+  const suites = ['bitget', 'bybit', 'binance', 'woo', 'okx', 'backpack', 'weex'];
+  const value = fixture([() => {}], { extraProducers: suites.slice(1), mutateJobs: (rows, read) => {
+    if (read === 0) for (const row of rows) row.steps[2] = pending(CPU_COHORT_STEPS.strict);
+  } });
+  const result = await settle(t, () => Promise.allSettled(suites.map(value.readSuite)));
+  assert.ifError(result.error);
+  assert.equal(result.value.filter(row => row.status === 'fulfilled').length, 6);
+  assert.equal(result.value.filter(row => row.status === 'rejected').length, 1);
+  assert.equal(value.context.producerStepRefreshes, 6);
+  assert.equal(value.calls.jobs, 7);
+});
+
 test('refresh control: descriptive fields may settle without changing physical identity', async t => {
   const value = fixture([job => {
     job.steps[2] = pending(CPU_COHORT_STEPS.strict); job.completed_at = null; job.labels = ['old'];

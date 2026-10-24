@@ -121,13 +121,13 @@ keeps its original record; a later binding of the same producer may not
 substitute a different whole job record.
 
 GREEN-stage controls cover refresh-only attempt2 aliases, same-name duplicate
-producers, changed job/runner IDs, two producers sharing six refreshes total,
+producers, changed job/runner IDs, two producers sharing six refreshes total, concurrent bindings unable to overspend,
 late descriptive fields, active planner/certifier exclusion, immutable earlier
 bindings with final drift rejection, completed/null convergence, skipped
 unrelated steps, and preservation of both raw API observations. Exhaustion
 assertions include run1000, job100 and the pending step name/status/conclusion.
 
-Scoped execution:65/65 PASS,0 skipped across the producer originals/hostile
+Scoped execution:66/66 PASS,0 skipped across the producer originals/hostile
 controls and existing cpu-ci/cohort/artifact/request-budget tests. This is not
 fresh CI, a real CPU replay run, or merge clearance. CI's existing
 `rust:test-harness` glob includes the new control file without workflow edits.

@@ -193,8 +193,8 @@ async function terminalProducer(context, jobName, stepName) {
     insist(context.producerStepRefreshes < PRODUCER_STEP_REFRESH_LIMIT,
       `producer steps not terminal after ${PRODUCER_STEP_REFRESH_LIMIT} refreshes: run ${run.id}, job ${job.id} ${job.name}; ` +
       pending.map(step => `${step.name} [${step.status}/${step.conclusion}]`).join(', '));
-    await new Promise(resolve => setTimeout(resolve, PRODUCER_STEP_REFRESH_MS));
     context.producerStepRefreshes++;
+    await new Promise(resolve => setTimeout(resolve, PRODUCER_STEP_REFRESH_MS));
     inventory = await evidenceInventory(context, true);
   }
 }
