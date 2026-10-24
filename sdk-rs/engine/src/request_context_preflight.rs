@@ -100,8 +100,8 @@ impl ContextRegistry {
         match (state.policy.purpose, error) {
             (PreflightPurpose::ReadOnly, error) => Ok(Seal::Legacy(error)),
             (PreflightPurpose::WriteAfterReads, Some(error)) => {
-                // The same empty-journal projection as a Context mutation
-                // refused before registration bounds text/IDs and proves NotSent.
+                // The same empty-journal projection as a Context mutation refused
+                // before registration bounds text/IDs; NotSent unless inherited.
                 let error = CommandWrites::new(CAPACITY)?
                     .inheriting(owner.inherited_uncertain)
                     .fail(error)?;
@@ -260,14 +260,16 @@ impl<P> Cx<'_, P> {
 
     /// Record that an earlier attempt of this intent may have reached the venue.
     /// Monotonic: every later failure of this command projects at least Unknown.
-    /// It grants no send, resend, renewal, import or success authority.
+    /// It grants no send, resend, renewal, import or success authority; the
+    /// resulting Unknown follows the existing Unknown reconciliation.
     pub fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
         self.io
             .request_contexts
             .inherit_preflight_uncertainty(preflight)
     }
 
-    /// Failure before any plan was admitted proves no write reached the venue.
+    /// Failure before any plan was admitted proves this command sent no write;
+    /// an inherited maybe-sent fact still projects Unknown.
     /// Expiry cannot turn this handle into success, retry or send authority.
     pub fn fail_preflight(
         &mut self,

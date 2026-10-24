@@ -35,7 +35,11 @@ One monotonic owner fact, `inherited_uncertain`, on the command owner:
 - Success is unchanged. A retry that proves the outcome by a successful
   terminal seals Success.
 - The fact grants nothing. It never grants a resend, resolves uncertainty,
-  imports facts, renews a deadline or changes a budget. It can only make a
+  imports facts, renews a deadline or changes a budget. The resulting Unknown
+  terminal follows the existing Unknown path; under order-locks that queues
+  the one reconcile read (`engine.rs` command failure). H2 must treat a
+  monotonic Unknown after a proven-absent, definitively rejected resend as
+  no grounds for another resend, and must fail (not done) a mixed Plan. It can only make a
   failure projection more conservative, so a caller cannot misuse it to hide
   sent effects.
 
