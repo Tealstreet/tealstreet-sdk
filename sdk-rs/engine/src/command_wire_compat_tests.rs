@@ -781,6 +781,11 @@ fn corpus() -> Vec<String> {
     out
 }
 
+/// Outer fields, the nested payload key, its inner fields, and whether the
+/// inner object is the first element of an array.
+type Nest = (Fields, &'static str, Fields, bool);
+type Fields = Vec<(&'static str, &'static str)>;
+
 /// The same per-field mutations one level down: inside the first element of a
 /// payload array, or inside a payload object.
 fn nested_corpus(values: &[&str]) -> Vec<String> {
@@ -794,7 +799,7 @@ fn nested_corpus(values: &[&str]) -> Vec<String> {
         ("timeInForce", r#""GoodTillCancel""#),
     ];
     #[allow(unused_mut)]
-    let mut nests: Vec<(Vec<(&str, &str)>, &str, Vec<(&str, &str)>, bool)> = vec![(
+    let mut nests: Vec<Nest> = vec![(
         vec![("op", r#""placeOrders""#), ("command", "2")],
         "orders",
         order,
