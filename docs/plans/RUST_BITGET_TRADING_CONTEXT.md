@@ -50,8 +50,10 @@ engine PR; this plan invents no names. Bitget-specific:
    selection>, write Primary)`. Native signs every in-job GET (Metadata,
    ResolveAmend) with the Read role, the Secondary read key when configured
    (`signing_identity`, account.rs:181-202), and mutations with Primary.
-   In-job reads must keep that key; signing them under the mutation
-   credential would move read traffic onto Primary (asked of fe7lgm). The job's metadata, position and amend-identity reads run as
+   A serial Read call signs with the Preflight's read credential, never the
+   write credential (fe7lgm `f391db8bf5e`, serial RED17). The Read role is
+   static for in-job paths (ACCOUNT, SETTINGS, ORDER_DETAIL): only BALANCE and
+   UTA_ASSETS switch to PrimaryRead while degraded (account.rs:162-168). The job's metadata, position and amend-identity reads run as
    preflight reads or as read calls of the same streamed owner (gate 2).
 2. Keep native entry precedence (`trade_command`, :247-277): missing
    credentials refuse first, then input validation (`preflight`) refuses,
@@ -92,7 +94,8 @@ is measured first (gate 5).
 - **Position read.** Not a job call: the job calls the account cycle's
   `refresh_positions` and parks (`waiting_positions`, :450-457) until that
   borrowed Background read lands, with no native bound (:426-433). It maps to
-  an unbounded condition wait before admission.
+  `park_preflight` (None) before admission and the serial None wait mid-job,
+  released from the account-cycle read.
 - **Reads in the job.** Both retry at most three times at 250·n ms
   (`retry_read`, :2245-2252), with different triggers:
   - Metadata retries a transport failure only (:1536-1544). An HTTP non-200
