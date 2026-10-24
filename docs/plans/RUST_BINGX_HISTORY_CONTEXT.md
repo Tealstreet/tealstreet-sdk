@@ -176,3 +176,11 @@ The unchanged native history target passes 20/20 and local-history custody
 passes 5/5. The new target passes strict all-feature Clippy and workspace fmt.
 Only this plan/index and the new integration target differ from the source pin;
 all production, shared engine, checker and inventory blobs remain byte-identical.
+
+Native original-evidence review at `dc299373024` is independently CLEAR from
+claude-4yjlw0 (archive run reproduces 7 RED / 3 GREEN). Its three readiness
+notes remain required: explicitly exercise Primary fallback without a read key;
+pin zero legacy and one Prepare/Claim on both page-2 and signature resend after
+conversion; use a separate refusal-aware host driver for deferred claim-refusal
+controls, since the original evidence drain intentionally asserts Released.
+Do not change the original expected values to disguise these missing controls.
