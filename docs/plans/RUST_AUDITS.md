@@ -3201,3 +3201,12 @@ projected only inside the prepared commit closure. All three exits retain native
 order before trade_plan, credentials, builders and queues. Only trading8->5 is
 pruned; every foreign inventory byte and retained hash count stays unchanged.
 Valid trading, queued revalidation, signing and private lifecycle are excluded.
+
+## GRVT initial leverage refusal authority
+
+The unknown-market and missing-authenticated-account FetchLeverage branches now
+admit genuine keyless Read owners before fail_context. Native market-before-account
+precedence, exact strings and kind/outcome/code/hint None are retained. Only the
+two account singletons disappear (11->9); all retained and foreign inventory
+bytes/order stay exact. Valid private body/issuance, account/login Sessions,
+callbacks, signing/selection, reconciliation and queues are excluded.
