@@ -29,7 +29,8 @@ contains `2e921890` and the already-retired `b1761cde`.
 
 This section is the interim shared consumer pattern for OKX and Bitget. The
 canonical streamed engine contract will be fe7lgm's plan on
-`feat/rust-plan-serial-stream`; its constructor names and source pin are pending.
+`feat/rust-plan-serial-stream`; proposed API plan pin is `5eab0dc0b3a`, with
+the reviewed source pin still pending.
 Earlier bounded `admit_plan(&preflight, &steps, ...)` clearance does not grant
 clearance for that new primitive. The current direction is:
 
@@ -42,11 +43,15 @@ clearance for that new primitive. The current direction is:
    ready callback, never a replayed numeric command.
 3. Admit one command-owned streamed serial Plan. It has no declared step count
    or step cap: the engine owns one root and one active call at a time. The
-   proposed receipt cap is not native parity (see the wall-clock gate below).
+   root has no whole-chain wall-clock, as the latest overseer ruling requires.
    Each call has a 20000 ms window, attempts one, Never, and no refusal
    fallback or added wait. Continue only from the previous step's exact DATA
    custody, under the same root. Do not simulate streaming with repeated Plan
-   admission. Exact constructors await the shared owner; do not invent names.
+   admission. The proposed constructors are `admit_serial_plan(preflight,
+   SerialCall { operation: Mutation, timeout_ms: 20000, attempts: 1 },
+   SerialPolicy { credential: primary, pacing: None, refusals_complete })`
+   and `continue_serial_plan(plan, slot, context, next)`. They await the shared
+   source review. Empty native jobs use `done_empty_plan`, no dummy first call.
 4. Only after successful admission apply native optimistic status changes.
    Obtain each call from the reviewed streamed engine API, then send through
    `request_signed_managed` with the existing OKX Primary dispatch recipe.
@@ -90,8 +95,7 @@ The OKX crate must opt into `http-plans` explicitly at implementation time.
 1. **Streamed serial primitive:** the current ruling is **no step cap**.
    The earlier 2048/2049 ruling and tests are superseded and removed. fe7lgm
    owns the shared primitive: exact-DATA continuation, O(1) resources per active
-   step, one Context, and incremental full IDs. Its overall wall-clock policy
-   must preserve the native behavior pinned below or obtain an explicit ruling.
+   step, one Context, no root deadline, and incremental full IDs.
    One plain input order permits 10000 split lots, or 500 twenty-row calls;
    both protections make 30000 calls (entry, stop, take-profit per lot).
    Important: that bound is per input order. `CommandIn::PlaceOrders.orders`
@@ -122,8 +126,9 @@ The OKX crate must opt into `http-plans` explicitly at implementation time.
    A real `handle_command(5, ..., Some(1))` bracket continues and finishes at
    time 7, after its receipt deadline 6, with all three IDs. Physical requests
    retain their own 20 s timeouts. The proposed streamed receipt-capped root
-   would stop native work and is not consumer-CLEAR until the shared owner
-   resolves that policy. No venue-synthesized deadline or renewal is authorized.
+   would stop native work. The overseer has now ruled no root clock, and the
+   shared plan removes it: caller-wait expiry alone is not a serial terminal.
+   No venue-synthesized deadline or renewal is authorized.
 
 For sizing, if plain inputs yield P unprotected lots, protected inputs yield
 L_i lots with b_i enabled protections (one or two), and there are A standalone
