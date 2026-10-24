@@ -880,6 +880,8 @@ impl WasmEngine {
         #[cfg(feature = "dispatch-signing")]
         let mut options = options;
         let dispatch_signing = options.construction(venue).bridge.dispatch_signing;
+        // A false read-key result outranks any provider setup failure, as natively.
+        safe_cex_venues::read_key_preflight(venue, &options).map_err(construction_error)?;
         let external_signer = options.signing.is_some() && signer_setup_json.is_none();
         #[cfg(feature = "dispatch-signing")]
         let signer = if let Some(mut input) = signer_setup_json {

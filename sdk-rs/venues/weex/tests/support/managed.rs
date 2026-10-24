@@ -34,6 +34,9 @@ pub fn drain<V: Venue>(engine: &mut Engine<V>, now: f64) -> Vec<Action> {
                     ));
                     output.push(Action::Http(request));
                 }
+                HttpAction::BindGroup { .. } => {
+                    panic!("WEEX fixture declares no Mutation barriers")
+                }
                 HttpAction::Cancel { .. } => {}
             },
             action => output.push(action),
