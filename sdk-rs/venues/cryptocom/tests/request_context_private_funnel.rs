@@ -428,6 +428,60 @@ fn account_provider_refusal_schedules_one_poll_without_transport_retries() {
         1
     );
 }
+
+#[test]
+fn account_preparation_refusal_schedules_one_poll_without_provider_work() {
+    use safe_cex_engine::request_context::{Error, HttpAction};
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut e = engine(options());
+    e.set_signer(Some(Arc::new(CountingRefused(calls.clone()))))
+        .unwrap();
+    e.start(NOW);
+    let catalogue = http(&actions(&mut e, NOW), "public/get-instruments");
+    e.handle(
+        NOW,
+        Event::HttpResponse {
+            request: catalogue.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: support::INSTRUMENTS,
+            },
+        },
+    );
+    let preparation = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if request.url.contains("private/get-positions") => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("native first account stage before provider work");
+    e.http_preparation_failed(
+        NOW,
+        preparation,
+        Error::Invalid,
+        VenueError::new("fixture route refused"),
+    );
+    let failed = actions(&mut e, NOW);
+    no_private_http(&failed);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(
+        failed
+            .iter()
+            .filter(
+                |action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == NOW + 10000.)
+            )
+            .count(),
+        1
+    );
+}
 #[test]
 fn private_ws_auth_waits_for_provider_at_native_ready_boundary() {
     let (options, signer) = support::fixture::setup(options());
