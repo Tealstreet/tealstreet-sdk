@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Request-context inventory precision | Implementation and rebaseline; review pending | Before changing `check-request-context.py`, its manifests, or what counts as a legacy `Cx` call. | [RUST_REQUEST_CONTEXT_PRECISION.md](RUST_REQUEST_CONTEXT_PRECISION.md) |
 | BreakoutProp options refusal (unreachable arm deleted) | One-site prune; engine pre-entry refusal pinned by a control | Before changing BreakoutProp options handling or its capability flags. | [RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md) |
 | BingX local candle refusal custody | Draft conversion; source review/CI pending | Before replacing the three synchronous candle refusals; remote/key-selection paths excluded. | [RUST_BINGX_LOCAL_CANDLE_CONTEXT.md](RUST_BINGX_LOCAL_CANDLE_CONTEXT.md) |
 | WEEX candle query Read custody | Draft source; scoped controls pass | Before managing candle HTTP/completions or interpreting caller deadline and streamed failure changes. | [RUST_WEEX_CANDLE_CONTEXT.md](RUST_WEEX_CANDLE_CONTEXT.md) |
@@ -47,7 +48,8 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Backpack signer admission | Option B approved; implemented | Before changing Backpack registry identity, signer setup or the custody of Backpack key material. | [RUST_BACKPACK_SIGNER_ADMISSION.md](RUST_BACKPACK_SIGNER_ADMISSION.md) |
 | Selected signed reads | Plan; draft PR | Before adding or changing a venue's managed signed-read adapter, read-key slot choice or Read policy wrapper (BingX, WEEX, OKX, Bitget, KuCoin). | [RUST_SELECTED_SIGNED_READ.md](RUST_SELECTED_SIGNED_READ.md) |
 | Lighter Schnorr signer recipe | Part 1 implemented (#1967); signer-owner review clear | Before changing Lighter signing, the SchnorrDigest contract, or Lighter public-key or remote recipes. | [RUST_LIGHTER_SCHNORR_RECIPE.md](RUST_LIGHTER_SCHNORR_RECIPE.md) |
-| Session-fenced venue Bearer | Phase 1 and phase 2 parts 1-2 implemented and CLEAR; header bundle CLEAR; phase 3 (NotReady park, header order) implemented and CLEAR; draft stacked on #2037 | Before attaching a venue session token (Bearer/JWT) to managed requests, or fencing requests to a Session generation. | [RUST_SESSION_BEARER_HOOK.md](RUST_SESSION_BEARER_HOOK.md) |
+| Backpack public-only read provider | Plan and REDs, local; stacked on #2078 and #2073 | Before changing what Backpack installs in public-only mode, or how its history signs with a saved read key. | [RUST_BACKPACK_PUBLIC_READ_PROVIDER.md](RUST_BACKPACK_PUBLIC_READ_PROVIDER.md) |
+| Session-fenced venue Bearer | Phase 1 and phase 2 parts 1-2 implemented and CLEAR; header bundle CLEAR; phase 3 (NotReady park, header order), phase 4 (post-6b refresh) and phase 5 (session-bearer feature gate) implemented and CLEAR; draft stacked on #2037 | Before attaching a venue session token (Bearer/JWT) to managed requests, or fencing requests to a Session generation. | [RUST_SESSION_BEARER_HOOK.md](RUST_SESSION_BEARER_HOOK.md) |
 | Declared read-key policy | Plan; REDs next; consumers Crypto.com and Backpack | Before ignoring, validating-only or public-mode-installing a venue's read key, or changing how read-key material reaches the provider. | [RUST_READ_KEY_POLICY.md](RUST_READ_KEY_POLICY.md) |
 | Credential selection and nonce authority | Active shared-core plan; review pending | Before choosing a credential slot, read key, account subject, auth evidence tag or signing nonce in venue code. | [RUST_CREDENTIAL_SELECTION.md](RUST_CREDENTIAL_SELECTION.md) |
 | Error classification | Active engine standardization plan; inventory ranked | Before classifying venue errors, native code tables, status-to-outcome rules, partial batch failures or error-driven resends. | [RUST_ERROR_CLASSIFICATION.md](RUST_ERROR_CLASSIFICATION.md) |
@@ -379,6 +381,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | TxFlow immediate local command custody | Draft adoption; original controls green | Before migrating local history/candle/trading completion or composing with the ticker CPU slice. | [RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md](RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md) |
 | OKX history selected identity | Implemented; scoped checks pass, review pending | Before removing the closed/history credential-selection legacy sites. | [RUST_OKX_HISTORY_SELECTED_IDENTITY.md](RUST_OKX_HISTORY_SELECTED_IDENTITY.md) |
+| Order-lock capacity refusal | Implemented; scoped checks pass, source review pending | Before changing order-lock entry refusals or the 64-scope cap. | [RUST_ORDER_LOCK_CAPACITY.md](RUST_ORDER_LOCK_CAPACITY.md) |
 
 - [Polymarket midpoint seed custody](RUST_POLYMARKET_MIDPOINT_READ_CONTEXT.md): one unsigned Background Read site; plan and original controls before production.
 
@@ -399,3 +402,15 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | AsterDEX local Read custody and lane remainder | Implementation under review | Before converting Aster synchronous history/leverage/candle refusals or selecting the next lane legacy-site slice. | [RUST_ASTERDEX_LOCAL_READ_CONTEXT.md](RUST_ASTERDEX_LOCAL_READ_CONTEXT.md) |
 | AsterDEX local trading refusal custody | Implemented; native/strict/reviews clear, CI pending | Before converting the three shared Read/Mutation refusals or moving acknowledged cleanup behind admission. | [RUST_ASTERDEX_LOCAL_TRADE_REFUSALS.md](RUST_ASTERDEX_LOCAL_TRADE_REFUSALS.md) |
 | Phemex identity and recurring account read owners | Implemented on actual combo-5b; source review and CI pending | Before SelectedRead identity, Background currency cycles or Primary order reconciliation. | [RUST_PHEMEX_READ_OWNERS.md](RUST_PHEMEX_READ_OWNERS.md) |
+
+| Managed socket authentication progress | Plan before original REDs; runtime pending review | Before Kraken challenge progress renews auth without granting readiness; whole-family consumer remains held. | [RUST_SOCKET_AUTH_PROGRESS.md](RUST_SOCKET_AUTH_PROGRESS.md) |
+
+| TxFlow unsigned ticker seed custody | Local plan and original-control checkpoint | Before managing the activeAssetCtx seed sender; preserve native seed cadence, keyed retry and CPU cache. | [RUST_TXFLOW_TICKER_SEED_CONTEXT.md](RUST_TXFLOW_TICKER_SEED_CONTEXT.md) |
+
+
+| GRVT remaining local command terminals | Managed local refusal and dead dispatch deletion; review/CI pending | Before changing generic Unsupported custody, Mutation outcome metadata or dead private-phase coverage. | [RUST_GRVT_LOCAL_COMMAND_TAIL.md](RUST_GRVT_LOCAL_COMMAND_TAIL.md) |
+
+| PublicExchangeFactory native startup fixture | Fixture corrected; scoped native/unit checks pass, review pending | Before changing the native server-adapter timeout fixture or its preservation assertions. | [RUST_PUBLIC_FACTORY_STARTUP_TEST.md](RUST_PUBLIC_FACTORY_STARTUP_TEST.md) |
+
+| CPU evidence transport retrieval retry | Plan and originals | Before changing GitHub evidence retrieval retries; provenance and CPU verdicts stay exact. | [RUST_CPU_EVIDENCE_TRANSPORT_RETRY.md](RUST_CPU_EVIDENCE_TRANSPORT_RETRY.md) |
+| Coinbase local command custody | Draft adoption; ten sites and original controls pass | Before adopting immediate local completions or distinguishing deferred/queued public-read gates. | [RUST_COINBASE_LOCAL_CONTEXT.md](RUST_COINBASE_LOCAL_CONTEXT.md) |

@@ -335,6 +335,18 @@ impl Grvt {
             }
         }
     }
+    fn unsupported_command(cx: &mut Cx<'_, Pending>, operation: Operation) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        let _ = cx.fail_context(&context, "Unsupported GRVT command");
+    }
     fn fetch_markets(&mut self, cx: &mut Cx<'_, Pending>) {
         let context = match cx.http_context(
             Scope::Background,
@@ -1398,27 +1410,25 @@ impl Venue for Grvt {
             } => {
                 self.fetch_candles(cx, symbol, timeframe, limit, from_ms, to_ms);
             }
-            Command::PlaceOrders { command, .. }
-            | Command::CancelOrders { command, .. }
-            | Command::AmendOrder { command, .. }
-            | Command::CancelSymbolOrders { command, .. }
-            | Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. }
-            | Command::FetchLeverage { command, .. }
-            | Command::Query { command, .. } => cx.fail(command, "GRVT private phase pending"),
-            Command::CancelOrdersWithSymbols { command, .. }
-            | Command::FetchMaxLeverage { command, .. }
-            | Command::AmendOrderWithSymbol { command, .. }
-            | Command::FetchStpMode { command }
-            | Command::SetStpMode { command, .. }
-            | Command::FetchAccount { command }
-            | Command::FetchOrderBook { command, .. }
-            | Command::FetchOptionChain { command, .. }
-            | Command::FetchOptionExpiries { command, .. }
-            | Command::FetchAccountGreeks { command } => {
-                cx.fail(command, "Unsupported GRVT command")
-            }
+            Command::FetchMaxLeverage { .. }
+            | Command::FetchStpMode { .. }
+            | Command::FetchAccount { .. }
+            | Command::FetchOrderBook { .. }
+            | Command::FetchLeverage { .. }
+            | Command::Query { .. }
+            | Command::FetchOptionChain { .. }
+            | Command::FetchOptionExpiries { .. }
+            | Command::FetchAccountGreeks { .. } => Self::unsupported_command(cx, Operation::Read),
+            Command::CancelOrdersWithSymbols { .. }
+            | Command::AmendOrderWithSymbol { .. }
+            | Command::SetStpMode { .. }
+            | Command::PlaceOrders { .. }
+            | Command::CancelOrders { .. }
+            | Command::AmendOrder { .. }
+            | Command::CancelSymbolOrders { .. }
+            | Command::SetLeverage { .. }
+            | Command::SetMarginType { .. }
+            | Command::SetPositionMode { .. } => Self::unsupported_command(cx, Operation::Mutation),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {
