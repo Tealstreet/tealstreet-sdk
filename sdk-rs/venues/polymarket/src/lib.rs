@@ -778,6 +778,11 @@ impl Venue for Polymarket {
             self.book_response(cx, read, &token, limit, response);
             return;
         }
+        if let Pending::Candles { read, .. } = &pending
+            && !read.validate(cx)
+        {
+            return;
+        }
         if let Err(e) = success(response) {
             self.on_request_failed(cx, pending, &e);
             return;
@@ -960,9 +965,6 @@ impl Venue for Polymarket {
                 to_ms,
                 invalid,
             } => {
-                if !read.validate(cx) {
-                    return;
-                }
                 if invalid {
                     read.finish(cx, Err("Invalid Polymarket price history".into()));
                     return;

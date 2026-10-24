@@ -154,3 +154,11 @@ Final integrated focused run on ba3d7da1d3a plus this slice passes 142 tests
 across nine targets (including the doc test), zero failures or ignored tests.
 The ten-control target, strict all-target Clippy and package fmt pass after the
 last receipt guard. Full CI/replay/WASM/size remain pending for the draft.
+
+
+Core review at f6a93 found one ordering correction: the candle response must
+validate its exact DATA/root before the shared success/envelope decoder, including
+error envelopes. The guard now precedes that decoder; typed failure-only hooks
+remain separate and do not apply a DATA validator to Timeout. No unowned reducer
+or private/discovery path changes. Earlier source review receipts are historical;
+this narrow correction is sent back to core before final CLEAR.
