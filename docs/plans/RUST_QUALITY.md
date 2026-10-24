@@ -1369,3 +1369,22 @@ regressions are committed: 5 RED with 16 working controls. The observed
 metadata/log/ordinary bounds, 4 GiB overflow, empty response recovery/exhaustion,
 mixed socket/empty budgets and CDN credential stripping remain explicit controls.
 Routing tests cover every registered suite and reject unknown runtime names.
+
+## MEXC local write admission controls
+
+Original test-only checkpoint2c0755b5607 executes13 actual-Engine controls on
+unchanged production: nine behavioral assertion REDs plus four working native
+positives, zero ignored. A diagnostic-fixture mismatch was corrected before
+qualifying REDs. The same13 controls pass after source conversion.
+
+Both reachable branches are exercised at invalid clock and full256-peer capacity;
+additional placement shapes prove UUID entropy ran before validation/key refusal.
+Controls retain every real peer preparation, unchanged Store snapshot and exact
+recovery after one real peer failure, duplicate-ID isolation,300 ID/lock reuses,
+exact diagnostic/terminal order and validation-before-key precedence. A supported
+private Mode command still emits its native legacy POST/body. Credential-free
+AuthInvalid keeps its fields but supplies zero auth-health evidence.
+508 MEXC/Binance native tests across43 targets, strict all-target/all-feature
+Clippy, scoped fmt, full bans and both provenance checks (15 checker tests) pass.
+No existing financial/identity/signature assertion changes. CI remains the
+WASM/replay/CPU/size/memory authority; no performance/readiness claim here.

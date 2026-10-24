@@ -130,3 +130,15 @@ controls pin exact error/diagnostic order,300 synchronous ID reuses, duplicate
 managed-owner isolation and the exact accepted legacy private Mode POST/body.
 The ninth RED records the intentional shared credential-free auth-health change.
 No production/manifest edit belongs to this checkpoint.
+
+## Runtime checkpoint
+
+The two reachable refusal branches now directly admit Mutation/None/20000/Never
+and complete through the exact Context. Validation emits command_error_context
+only after admission. The unreachable second Err arm is removed; the successful
+Job literal and advance_trade call are unchanged. No accepted command issues a
+Context here. Exact manifest delta is three deleted lines in trading.rs only.
+All13 original controls pass, including entropy-prefix Fresh-entry cases and
+credential-free auth-health. Native508 tests/43 targets, strict Clippy/fmt, full
+bans and both provenance checks pass. Independent runtime source/adversarial,
+caller and full-map review follows on the committed checkpoint.
