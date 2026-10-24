@@ -95,3 +95,14 @@ shared entry shim, with no venue workaround. No merge without an explicit window
 - SELECTED `venues/coinbase/src/trading.rs:1147` — `414b9feff64a0a0bcbcc856631dcf20976a5797d25a40a434f3b710206300bee`: cx.fail(id, not_sent("Coinbase account is not ready for trading"))
 - SELECTED `venues/coinbase/src/trading.rs:1152` — `d6aab93d8c0593f58c17fbc2fba81bb939f0d498ba488ca2bac1d11287e68324`: cx.fail(id, not_sent("Coinbase trading queue is full"))
 - SELECTED `venues/coinbase/src/trading.rs:1160` — `2f0770d2ea5f5246cd2ddcd35b614bce738e564c2d95193ff5a84eb8479811e5`: cx.fail(id, not_sent(error))
+
+## Refreshed original-source receipt
+
+At plan/fixture merge `620df9f954c` on actual `77f12408947`, Coinbase production
+is byte-identical to the landing. The original `local_context` target executes
+five assertion REDs and two working GREENs, zero ignored. Invalid-clock entry
+still reaches native portfolio/history/startup refusals or unsupported Mutation;
+cached leverage emits a success instead of the expected InvalidInput refusal.
+The two finite-clock controls preserve exact native JSON/error metadata,
+settled command-ID reuse, and the real 256-entry startup warning/capacity path.
+This is an executed assertion failure, not a missing API or build failure.
