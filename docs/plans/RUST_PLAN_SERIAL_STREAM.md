@@ -30,8 +30,8 @@ previous call's exact DATA custody. There is no declared length.
 ```rust
 impl<P> Cx<'_, P> {
     /// Admit a streamed serial write Plan with its first call. Requires a
-    /// WriteAfterReads Preflight with a write credential. The Plan root's
-    /// deadline is the caller's receipt deadline.
+    /// WriteAfterReads Preflight with a write credential and a receipt bound at
+    /// genuine entry. The Plan root's deadline is that bound receipt.
     pub fn admit_serial_plan(
         &mut self,
         preflight: &Preflight,
@@ -64,8 +64,10 @@ pub struct SerialPolicy {
 Everything else is the existing Plan surface, unchanged:
 `plan_leg_context(plan, slot)` issues the call; the venue queues it through
 `request_signed_managed`; `validate_plan_delivery` gates DATA; write facts go
-through `http_write_result` and `classify_write`; and the Plan ends with
-`done_plan` or `fail_plan`. `finish_plan_call` ends the last call.
+through `classify_write` with `http_write_fact` or `http_write_batch`; and the
+Plan ends with `done_plan` or `fail_plan`. `finish_plan_call` ends the last
+call. A native job with nothing to send ends through the existing
+`done_empty_plan(preflight, result)`: no serial Plan and no dummy first call.
 
 ### Invariants
 
@@ -75,7 +77,10 @@ through `http_write_result` and `classify_write`; and the Plan ends with
 - **Continuation is custody, not renewal.** `continue_serial_plan` requires:
   - the current call's exact released delivery, validated as by
     `validate_plan_delivery`;
-  - its write fact recorded and definitive (Accepted or Rejected);
+  - its write fact recorded and definitive: Accepted, Rejected, or a
+    KnownPartial batch (every row's outcome proven, mixed accepted and
+    refused, as `classify_write` returns for a definitive mixed batch).
+    PartialUnknown and unproven Failed stop the chain;
   - the root still live;
   - no uncertain fact anywhere in the journal.
   It spends the next call's IDs (three, plus one signing ID) at that moment.
@@ -98,8 +103,19 @@ through `http_write_result` and `classify_write`; and the Plan ends with
   acquires or releases its own fence.
 - **Nonces per call.** Each continuation reserves its nonce at Bind, like a
   declared leg. A refused continue reserves none.
-- **Wall-clock.** The root deadline is the caller's receipt deadline, captured
-  at admission and never extended. This is native parity only if native's
+- **Receipt capture at genuine entry.** Today `begin_preflight` leaves the
+  receipt unbound, and `begin_preflight_with_command_wait` accepts only
+  ReadOnly. Shared change: `begin_preflight_with_command_wait` also accepts
+  WriteAfterReads and binds the exact caller receipt at genuine entry, with
+  the existing refusals (missing receipt: the shared typed refusal; expired at
+  entry: Revoked, no effects). `admit_serial_plan` reads that bound cap, in
+  genuine entry or later ready custody (after reads, parks or Session waits),
+  and never re-captures or rebases it. An unbound Preflight is Invalid; an
+  expired cap at admission is TimedOut, spending nothing. A Preflight admits
+  at most one Plan, so a second admission is State. Declared mutation Plans
+  keep refusing a bound receipt, as at the base.
+- **Wall-clock.** The root deadline is that bound receipt deadline, never
+  extended. This is native parity only if native's
   whole funnel is bounded by the same receipt. Open, for consumers: OKX and
   Bitget must confirm native's overall bound for a 30,000-call input before the
   REDs freeze. If native has none, this invariant refuses real orders, as the
@@ -137,7 +153,9 @@ Evidence budgets for serial Plans:
   until the text budget is spent, after which a total refusal count and the
   existing truncation marker stand for the rest. Each refusal is visible in
   full to the venue in that call's DATA custody, which is where per-row
-  diagnostics belong.
+  diagnostics belong. Refusal evidence is stream-and-retire: memory for an
+  all-refused chain is constant once the budget is spent, never linear in
+  calls.
 
 - Memory is linear in accepted IDs, as native's own result already is, and
   O(1) in calls. There is no `ID_COUNT` truncation for serial Plans.
@@ -154,8 +172,8 @@ always projects a failure.
 
 With `SerialPolicy.refusals_complete = true`, declared at admission:
 
-- `done_plan(plan, result)` succeeds when every journal fact is Accepted or
-  Rejected, with nothing Unknown, unreleased or unsettled. Rejected means a
+- `done_plan(plan, result)` succeeds when every journal fact is Accepted,
+  Rejected or a definitive KnownPartial, with nothing Unknown, unreleased or unsettled. Rejected means a
   released call whose venue reply `classify_write` reads as a definitive
   refusal. A NotSent fact (precommit, provider or credential refusal) is not
   Rejected: it forces the failure projection, so an all-NotSent chain never
@@ -217,6 +235,19 @@ fails at an assertion.
     with the journal intact and nothing reserved.
 11. An accepted reply with an ID over `ID_FIELD` makes that fact Unknown; the
     chain stops and the fence is armed.
+12. A definitive mixed batch (KnownPartial) continues to the next call, then
+    `done_plan` succeeds under `refusals_complete`, with that batch's accepted
+    IDs in order and its refusals counted. A PartialUnknown batch refuses
+    continuation and projects Unknown.
+13. Receipt binding: WriteAfterReads `begin_preflight_with_command_wait` binds
+    the entry receipt. Controls: missing receipt; expired at entry; an
+    unbound Preflight refused at admission; expired at admission is TimedOut;
+    a second admission from the same Preflight is State; admission in ready
+    custody after a park uses the original cap exactly.
+14. A 60,000-call all-refused chain: retained refusal evidence stops growing
+    at `TEXT_BYTES`, the count is exact, and `done_plan("[]")` succeeds.
+15. An empty native job ends through `done_empty_plan` with no Plan, Context
+    or attempt.
 9. A max-size control for CPU: 30,000 continued calls (one bracketed max input)
    with per-call work O(1). Time is reported on the PR as the CPU
    certification input, not asserted.
