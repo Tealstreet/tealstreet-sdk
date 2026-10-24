@@ -182,11 +182,13 @@ removal of test-only algorithm support must not leave Kraken Unsupported.
 m26ps4 reviewed setup/roles; 4yjlw0 reviewed HMAC/native bytes. Setup declares
 Base64 per slot and preserves both CONFIG_INVALID texts in order: "Kraken secret
 must be nonempty valid base64", then "Kraken secondary secret must be nonempty
-valid base64" with return on the latter. The low-level Futures selector can use Secondary without Primary
-(secondary_requires_primary=false), but native account_start/account_refresh
-require a primary signer: read-only configuration does NOT start the private
-account or socket. Preserve that gate independently of selector capability.
-Spot ignores read.
+valid base64" with return on the latter. Futures declares SlotPolicy{secondary_requires_primary:true}; every reachable
+native secondary read requires a primary configuration. Native low-level
+signed_parts could select a read signer without Primary, but all account and
+command callers gate that path. Preserve the lifecycle's silent skip through
+Slots::has_primary()/Missing, not a second material-bearing signer field. The
+read-only no-private-account/provider control pins this native behavior. Spot
+uses Slots(primary,None) and ignores read credentials.
 Trusted setup supplies identical caller-assigned stable_id for identities sharing
 one API-key nonce subject; each retains its own signing ref and secret. The engine
 mints NonceSubject/NonceClaim; no venue key comparison, secret digest or fallback.
@@ -253,3 +255,14 @@ not invent a nonce constructor or reservation fixture. Missing/malformed subject
 shared taxonomy and eight-repair proposal are documented requirements, not an
 executed native consumer migration. Production remains held for exact nonce and
 session fit, original review, and actual dependency integration.
+
+
+### Bounded review follow-up
+
+m26ps4 reviewed d1add97ba85 CLEAR on setup/roles/native originals, with the
+secondary_requires_primary:true correction above. HMAC review remains separate.
+The 20-control original run is 9 assertion RED / 11 GREEN / zero ignored; strict
+Clippy on only the new target passes. No production or dependency is pulled into
+this plan branch. Actual5b219 is landed now, but nonce and session API review
+remain production gates; the source-order paragraph is historical, not a claim
+that the dispatch nonce seam has landed.
