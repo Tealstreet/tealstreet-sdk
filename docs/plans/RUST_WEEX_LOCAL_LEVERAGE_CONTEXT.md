@@ -1,6 +1,6 @@
 # WEEX local leverage refusal custody
 
-Status: plan and original assertion evidence; production held.
+Status: production conversion and scoped controls; draft source review and CI pending.
 Base: actual `557de7ae7fbf6d2a00fdd3cbf1d0a962bd7fc570`.
 
 ## Scope and ownership
@@ -137,3 +137,32 @@ execution gates. Shared expired/deferred-callback behavior and managed protocol
 counts are not new native injection proofs in this checkpoint. Scoped target
 Clippy and rustfmt pass; no broad build or CI dispatch was run. Production,
 engine, maps, checker, selection, account and trading source remain base-exact.
+
+## Production conversion and scoped receipt
+
+Both native and core bounded plan/original-evidence reviews were CLEAR. The core
+review independently reproduced five assertion REDs and six GREENs from exact
+`0487af668c0`; native review was read-only. The overseer then authorized runtime.
+The branch plainly integrates actual BookQuery landing `46cb0941346`; runtime
+merges automatically. FetchLeverage's Selection call and valid signed suffix
+remain byte-identical to that incoming source.
+
+The conversion adds one private refuse_leverage_query helper and replaces only
+the three numeric local failures. The source-derived inventory diff removes the
+three named digests only, without key/foreign inventory changes. CALLERS names
+the cause-aware receipt and capacity precedence, preserving native absent
+metadata and the immediate pause refusal. No shared engine/API, account,
+trading, signing or #1747 metadata ownership change is introduced.
+
+All eleven original test bodies remain an exact file prefix. They now pass,
+including each capacity recovery suffix. Five appended controls add private and
+keyless NaN refusal followed by a finite same-ID local re-ask, and primary plus
+secondary-only exact native signature-oracle and published-setting assertions.
+The local target passes 16/16; the existing selected_signed_read_wire target
+passes 1/1 across its key configurations. Tests use seeded setup without Start;
+no full startup or private-socket handshake proof is claimed.
+
+Scoped strict Clippy, rustfmt and bans/ratchets pass before pushing.
+Native/core source review and full CI remain separate readiness gates. Missing
+or expired deferred callback coverage remains shared API/source evidence: the
+private helper has only the three genuine synchronous command callers.

@@ -402,3 +402,106 @@ fn valid_signed_leverage_read_remains_managed_and_preserves_native_output() {
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
     );
 }
+
+fn invalid_clock_then_fresh_local(private: bool, refusal: Refusal) {
+    let mut e = engine(private);
+    let a = leverage(&mut e, f64::NAN, COMMAND, refusal.symbol());
+    assert_eq!(
+        failure(&a, COMMAND),
+        &safe_cex_engine::request_context::Error::Revoked.read_venue_error()
+    );
+    let a = leverage(&mut e, AT, COMMAND, refusal.symbol());
+    assert_eq!(failure(&a, COMMAND), &refusal.error());
+}
+#[test]
+fn private_invalid_clock_refuses_unknown_market_then_allows_fresh_id_reuse() {
+    invalid_clock_then_fresh_local(true, Refusal::UnknownMarket);
+}
+#[test]
+fn keyless_invalid_clock_refuses_unknown_market_then_allows_fresh_id_reuse() {
+    invalid_clock_then_fresh_local(false, Refusal::UnknownMarket);
+}
+#[test]
+fn keyless_invalid_clock_refuses_missing_credentials_then_allows_fresh_id_reuse() {
+    invalid_clock_then_fresh_local(false, Refusal::Credentials);
+}
+fn signed_wire_and_settings(secondary_only: bool) {
+    let mut e = if secondary_only {
+        let mut e = setup::with_venue(
+            Options {
+                read_credentials: Some(safe_cex_engine::ReadCredentials {
+                    key: "read-key".into(),
+                    secret: "read-secret".into(),
+                    passphrase: Some("read-pass".into()),
+                }),
+                ..Default::default()
+            },
+            |venue| Probe {
+                venue,
+                roots: vec![],
+            },
+        );
+        e.store_mut().set_markets(vec![market()]);
+        e
+    } else {
+        engine(true)
+    };
+    let a = leverage(&mut e, AT, COMMAND, "BTCUSDT");
+    let requests: Vec<_> = a
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(requests.len(), 1);
+    let request = requests[0];
+    let (key, secret, passphrase) = if secondary_only {
+        ("read-key", "read-secret", "read-pass")
+    } else {
+        ("key", "secret", "passphrase")
+    };
+    assert_eq!(request.method, Method::Get);
+    assert_eq!(request.body, None);
+    assert_eq!(
+        request.url,
+        "https://api-contract.weex.com/capi/v3/account/symbolConfig?symbol=BTCUSDT"
+    );
+    assert_eq!(
+        request.headers,
+        setup::oracle(
+            key,
+            secret,
+            passphrase,
+            Method::Get,
+            "/capi/v3/account/symbolConfig?symbol=BTCUSDT",
+            "",
+            "1002"
+        )
+    );
+    e.handle(AT + 1., Event::HttpResponse { request: request.id, response: Response {
+        status: 200, headers: "", body: r#"[{"symbol":"BTCUSDT","marginType":"ISOLATED","separatedType":"SEPARATED","crossLeverage":"20","isolatedLongLeverage":"7","isolatedShortLeverage":"9"}]"#,
+    }});
+    let a = safe_cex_engine::test_support::prepared_actions(&mut e, AT + 1.);
+    assert_eq!(a.iter().filter(|a| matches!(a,
+        Action::Notice(Notice::CommandDone { command: COMMAND, result }) if result == r#"{"buyLeverage":7.0,"sellLeverage":9.0,"marginType":"isolated"}"#)).count(), 1);
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
+    let setting = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(7.));
+    assert_eq!(setting.sell_leverage, Some(9.));
+    assert_eq!(
+        setting.margin_type,
+        Some(safe_cex_engine::model::MarginType::Isolated)
+    );
+}
+#[test]
+fn primary_signed_read_preserves_exact_oracle_signature_and_published_settings() {
+    signed_wire_and_settings(false);
+}
+#[test]
+fn secondary_only_signed_read_preserves_exact_oracle_signature_and_published_settings() {
+    signed_wire_and_settings(true);
+}
