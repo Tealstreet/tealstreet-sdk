@@ -4,6 +4,7 @@ use crate::{BreakoutProp, Operation, Pending, not_sent};
 use safe_cex_engine::model::{
     Market, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, StopTriggerType,
 };
+use safe_cex_engine::request_context::Operation as RequestOperation;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, OrderIdentityKind, OrderIdentityReceipt, Outcome,
     Store, VenueError, num,
@@ -523,15 +524,21 @@ impl BreakoutProp {
                 price,
                 amount,
             } => (command, self.plan_amend(cx, &id, price, amount)),
-            Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. }
-            | Command::SetStpMode { command, .. }
-            | Command::FetchStpMode { command } => {
-                cx.fail(
-                    command,
-                    not_sent("Breakout Prop uses fixed one-way cross accounts; this setting is unsupported")
-                        .kind(ErrorKind::Unsupported),
+            setting @ (Command::SetLeverage { .. }
+            | Command::SetMarginType { .. }
+            | Command::SetPositionMode { .. }
+            | Command::SetStpMode { .. }
+            | Command::FetchStpMode { .. }) => {
+                let operation = if matches!(setting, Command::FetchStpMode { .. }) {
+                    RequestOperation::Read
+                } else {
+                    RequestOperation::Mutation
+                };
+                crate::local_context::complete(
+                    cx,
+                    operation,
+                    Err(not_sent("Breakout Prop uses fixed one-way cross accounts; this setting is unsupported")
+                        .kind(ErrorKind::Unsupported)),
                 );
                 return true;
             }
@@ -546,7 +553,9 @@ impl BreakoutProp {
                 self.trading.jobs.insert(id, job);
                 self.advance_trade(cx, id);
             }
-            Err(error) => cx.fail(id, not_sent(error)),
+            Err(error) => {
+                crate::local_context::complete(cx, RequestOperation::Mutation, Err(not_sent(error)))
+            }
         }
         true
     }
