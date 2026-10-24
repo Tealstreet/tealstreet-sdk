@@ -70,3 +70,7 @@ before production. Source follows the standing rule after CLEAR, with a draft
 freeze candidate and one PR-triggered Rust run in parallel with exact committed
 source review. No WIP push or explicit duplicate dispatch. Scoped crate/tests
 only, CARGO_BUILD_JOBS=4 sequentially; CI owns workspace/feature/size/performance.
+
+Original fixture compile correction: the first build matched HttpAction::Prepare
+as a tuple variant. It is a struct variant; the pattern is now `{ .. }`. No
+assertion or runtime changed. That compile failure is excluded from RED counts.
