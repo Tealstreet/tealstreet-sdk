@@ -48,7 +48,7 @@ impl Rig {
         })
     }
     pub fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             match &action {
                 Action::Http(r) => self.receipt_trace.push(ReceiptTrace::Http(r.id)),
                 Action::Notice(Notice::CommandProgress { command, receipts }) => self
