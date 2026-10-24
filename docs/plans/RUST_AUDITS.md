@@ -2999,3 +2999,14 @@ timer or numeric terminal fallback. Native accepted-prefix provider/physical
 recovery remains separate from strict root/local refusal. Shared list/sign
 consumer deletion is deferred to the remaining account/discovery/write owners;
 this conversion does not remove or relax any staging/checker inventory row.
+
+## MEXC unsigned discovery and depth Context adoption
+
+The public catalogue/ticker streamed sender and subscription-depth GET sender
+now use existing Background Read issuance and managed HTTP. Exact delivery is
+validated before row decoding, metadata edits and publication; native generation,
+response and financial checks remain. Failure-only retirement permits expired
+current cleanup without DATA or newer-owner authority. The exact removal-only
+manifest delta is two MEXC lib fingerprints/occurrences,18 to16 in the venue.
+No private signer, account/history/trading reducer, scheduler or engine code
+changes in this slice. Family performance/size evidence remains a CI gate.
