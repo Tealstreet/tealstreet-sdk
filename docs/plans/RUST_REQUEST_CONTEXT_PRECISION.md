@@ -319,3 +319,9 @@ Rebaseline at `49f7d1857b6` (712 entries):
 - Dropped: 55 (macro 44, field read 8, other member 2, qualified 1).
 
 The check now runs the workspace fixpoint, about 20 s locally.
+
+Final review fix (claude-4yjlw0 P2): a `fn $ident` inside a macro definition
+anywhere in the workspace is refused, because a macro-generated fn would be
+invisible to callee resolution. No macro in the workspace generates fns today.
+`test_a_macro_generated_fn_fails_closed` fails against `64f6d0c777e` and
+passes now. The inventory is unchanged.

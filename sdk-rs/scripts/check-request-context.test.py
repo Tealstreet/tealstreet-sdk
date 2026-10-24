@@ -299,6 +299,12 @@ class PrecisionRed(unittest.TestCase):
                 self.assertGreaterEqual(sum(self.prod(source).values()), 1)
                 self.assertIn(ban.fingerprints('h.done(1);').popitem()[0], self.prod(source))
 
+    def test_a_macro_generated_fn_fails_closed(self):
+        source = ('macro_rules! gen { ($n:ident) => { fn $n<T>(t: T, v: &mut Vec<T>) { v.push(t) } } } gen!(keep); '
+                  "fn keep(cx: &mut Cx<'_, P>, n: u8) {} " + in_cx_fn('keep(cx, &mut v); v[0].request(1);'))
+        with self.assertRaises(ValueError):
+            ban.context_fingerprints(source)
+
     def test_closure_escapes_taint_the_enclosing_function(self):
         unrelated = ' h.done(1);'
         for body in ['let mut g = |c| v.push(c); g(cx); v[0].request(1);',
