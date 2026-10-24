@@ -77,7 +77,7 @@ fn passphrase_venues_refuse_private_accounts_without_one() {
         (&["weex"][..], "Invalid local signer setup"),
         (
             &["bitget", "bitgetusdc", "bitgetinverse"][..],
-            "Bitget requires a passphrase",
+            "Invalid local signer setup",
         ),
         (
             &["okx", "okxeu", "okxdemo", "okxeudemo"][..],
@@ -759,6 +759,9 @@ fn migrated_opaque_refs_require_an_injected_provider_before_construction() {
         "okxeu",
         "okxdemo",
         "okxeudemo",
+        "bitget",
+        "bitgetusdc",
+        "bitgetinverse",
         "binance",
         "binancepm",
         "binanceinverse",

@@ -31,26 +31,13 @@ pub enum Product {
     Inverse,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Options {
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    pub read_credentials: Option<safe_cex_engine::signing::Identity>,
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-    pub passphrase: Option<String>,
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
     pub product: Product,
-}
-safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        safe_cex_crypto::secrets::erase(&mut self.passphrase);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
 }
 
 pub enum Pending {
@@ -101,7 +88,7 @@ impl Default for Connection {
 }
 
 pub struct BitgetFutures {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     discovery: PublicRetries,
     account: account::Account,
     trading: trading::Trading,
@@ -126,6 +113,12 @@ fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
     )
 }
 
+/// A private send's body, or the array its streamed response decodes.
+pub(crate) enum Payload {
+    Body(Option<String>),
+    Stream(ArrayAt),
+}
+
 impl BitgetFutures {
     fn public_failed(
         &mut self,
@@ -146,7 +139,6 @@ impl BitgetFutures {
     }
 
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             discovery: Default::default(),
@@ -240,6 +232,37 @@ impl BitgetFutures {
             vec![("X-CHANNEL-API-CODE", "Tealstreet".into())],
             ArrayAt::Envelope(&[&["data"]]),
             pending,
+        );
+    }
+
+    /// Owner-approved staging: every private send and its signing step, until
+    /// the shared Plan/history bridge owns them. Remove before master.
+    pub(crate) fn send(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        method: Method,
+        path: &str,
+        payload: Payload,
+        signed: bool,
+        pending: Pending,
+    ) {
+        let url = format!("{}{path}", paths::REST);
+        let id = match payload {
+            Payload::Stream(at) => cx.request_streamed(method, url, vec![], at, pending),
+            Payload::Body(body) => cx.request(method, url, vec![], body, pending),
+        };
+        if !signed {
+            return;
+        }
+        if self.primary_balance_read(path) {
+            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
+        }
+        cx.sign_http(
+            id,
+            Box::new(sign::Http::new(
+                self.signing_identity(method, path).cloned(),
+                path.into(),
+            )),
         );
     }
 
@@ -594,9 +617,13 @@ impl Venue for BitgetFutures {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read
-                .validate()
-                .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
+            && let Err(error) = read.validate().and_then(|_| {
+                read.passphrase
+                    .as_ref()
+                    .filter(|key| !key.0.is_empty())
+                    .map(|_| ())
+                    .ok_or("Bitget secondary signing credentials require a passphrase")
+            })
         {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             self.account.startup_rejected = true;
@@ -903,6 +930,34 @@ impl Venue for BitgetFutures {
             );
         }
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Identity(command) | Pending::Candles { command, .. } => {
+                cx.fail(command, error)
+            }
+            Pending::History(request) => {
+                let command = request.command;
+                self.on_sign_error(cx, Pending::Identity(command), error)
+            }
+            Pending::Trade(request) => self.trade_sign_failed(cx, *request, error),
+            Pending::Account {
+                generation,
+                request,
+            } => {
+                if generation == self.account.generation {
+                    self.account_sign_failed(cx, request, &error.message);
+                    self.resume_trading(cx);
+                }
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Identity(command) = pending {
             self.identity_failed(cx, command, error);
