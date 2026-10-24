@@ -12,7 +12,7 @@ mod wire;
 
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
-use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
+use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
@@ -377,11 +377,7 @@ impl Okx {
         let url = format!("{}{path}", self.rest());
         let stream = ArrayAt::EnvelopeField("data");
         if private {
-            let slots = Slots::new(
-                self.credentials.clone(),
-                self.options.read_credentials.clone(),
-                SlotPolicy::default(),
-            );
+            let slots = self.read_slots(SlotPolicy::default());
             let selected = SelectedRead::select(&slots, ReadRole::Read { scope: None });
             let read = match SelectedRead::background(cx, selected, discovery_read_policy()) {
                 Ok(read) => read,
@@ -519,17 +515,21 @@ impl Okx {
         );
     }
 
+    /// Both keys behind one role-based selection; each caller passes its native gate.
+    pub(crate) fn read_slots(&self, policy: SlotPolicy) -> Slots<Identity> {
+        Slots::new(
+            self.credentials.clone(),
+            self.options.read_credentials.clone(),
+            policy,
+        )
+    }
+
     /// Private reads prefer the read-only key; the primary key is the fallback.
     pub(crate) fn read_credential(&self) -> Option<Credential> {
-        let (identity, slot) = match (&self.options.read_credentials, &self.credentials) {
-            (Some(read), _) => (read, CredentialSlot::Secondary),
-            (None, Some(primary)) => (primary, CredentialSlot::Primary),
-            (None, None) => return None,
-        };
-        Some(Credential {
-            slot,
-            reference: identity.credential.clone(),
-        })
+        self.read_slots(SlotPolicy::default())
+            .select(CredentialRole::Read { scope: None })
+            .ok()
+            .map(|(selection, identity)| selection.credential(identity.credential.clone()))
     }
 
     /// One signed private GET under engine-issued Read authority. A queue
