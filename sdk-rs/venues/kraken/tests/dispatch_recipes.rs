@@ -49,6 +49,11 @@ impl Signer for Provider {
                     3 => result.values[2].truncate(63),
                     4 => result.headers.push(("Injected".into(), "bad".into())),
                     5 => result.values[0] = b"bad\r\nkey".to_vec(),
+                    7 => {
+                        result.values.pop();
+                    }
+                    8 => result.values.push(vec![]),
+                    9 => result.values[1].truncate(31),
                     _ => {}
                 }
                 result
@@ -390,7 +395,7 @@ fn declared_base64_rejects_invalid_material_and_preserves_untrimmed_key() {
 }
 #[test]
 fn provider_refusal_and_tampering_never_release_http() {
-    for tamper in 1..=5 {
+    for tamper in [1, 2, 3, 4, 5, 7, 8, 9] {
         let (p, ids) = provider(&format!("recipe-tamper-{tamper}"), false, tamper);
         let (actions, errors) = run_case(
             p.clone(),

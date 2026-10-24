@@ -7,7 +7,7 @@ use safe_cex_engine::signing::{
     Algorithm, Context, Encoding, Identities, Identity, Operation, PayloadPart, SignError,
     SignReceipt, SignRequest, SignResult,
 };
-use safe_cex_engine::{Action, DispatchContext, HttpRequest, Method, SignStep};
+use safe_cex_engine::{Action, CredentialSlot, DispatchContext, HttpRequest, Method, SignStep};
 
 const FORM: &str = "application/x-www-form-urlencoded";
 const FUTURES_HEADERS: &[(&str, &str)] = &[("Content-Type", FORM)];
@@ -61,6 +61,11 @@ impl Selected {
         let canonical = path.strip_prefix("/derivatives").unwrap_or(path);
         if !(canonical.starts_with("/api/v3/") || canonical.starts_with("/api/history/"))
             || path.contains('?')
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        if self.selection.slot() == CredentialSlot::Secondary
+            && (method != Method::Get || canonical.starts_with("/api/history/"))
         {
             return Err(SignError::InvalidRequest);
         }

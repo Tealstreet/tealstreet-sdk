@@ -490,3 +490,35 @@ foreign source files and the entire manifest are byte-exact to2814b7d08de, and
 the ratchet against that exact composed prerequisite passes. No all-workspace,
 WASM/hosted, CI, nonce-core certification or native adoption claim. The existing
 23 native-adoption originals remain untouched; no legacy-site prune is claimed.
+
+### Bounded recipe review corrections
+
+HMAC reviewer4y at3c45 found a real missing restriction: an opaque Secondary
+selection could be passed to non-GET or /api/history/. Native only serves
+non-history GETs with the read signer. Original control6a6a3520fa0 failed at the
+real constructor assertion before correction. futures_http now refuses those
+Secondary combinations using the canonical stripped path; selection is still
+made by the declared role, never inferred or changed by the recipe. The same
+control retains a valid PrimaryRead history sibling. Wrong short/extra provider
+value counts and a short SHA digest now join the existing tamper controls.
+All14 recipe controls and scoped strict Clippy pass after this correction.
+
+m26's role/setup review clears Futures and requires the declared ValidateOnly
+read-key policy for Spot constructor adoption. secondary:None in a setup policy
+only shapes metadata; it does not discard supplied read material. Consume
+feat/rust-read-key-validate-only / RUST_READ_KEY_POLICY.md and declare bridge
+readCredentials=validateOnly at the actual cutover: validate once with the
+native construction error, wipe, and never install or transmit the read key.
+Until that dependency is reviewed/available, no Spot provider setup is wired to
+receive raw secondary material. These policy factories are recipe prerequisites,
+not a constructor/credential-capsule migration receipt.
+
+Hard adoption gates remain unchanged: equal-key/different-secret identities
+need the trusted shared stable subject; caller-supplied unequal subjects cannot
+be inferred or repaired from key/secret bytes. Legacy secret-digest counters and
+new stable-subject counters are separate namespaces. Every private caller for
+a key must move coherently, or consume a separately reviewed continuity bridge;
+never activate selected account reads beside legacy private sends and claim
+nonce continuity. Registry/WASM dispatch-signing feature admission and real
+hosted decimal-nonce forwarding remain future cutover/certification gates.
+No native caller, socket, inventory, constructor or nonce dispatcher changed.
