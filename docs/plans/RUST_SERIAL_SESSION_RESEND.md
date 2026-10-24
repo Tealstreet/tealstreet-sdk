@@ -24,23 +24,27 @@ The serial Plan cannot express it:
 - a separate refresh call or a new logical write would change native's
   attempt count and journal, and is not native.
 
-## Design: the same call's second attempt, parked on a login Session
+## Design: the same call's second attempt, seeded on the refused revision
+
+The wait itself is #2069 phase 3 (claude-m26ps4, `e04cf305e87`). An unreleased
+managed call whose Bind read is NotReady, or Ready at a revision no newer than
+its `seen`, parks inside its own window. It re-prepares the same call when
+`session_ready` announces a newer revision. A pub(crate) minimum-revision seed
+sets `seen`. This PR adds no Session park of its own.
 
 ```rust
 impl<P> Cx<'_, P> {
     /// From the current serial call's exact DATA custody, after an
-    /// authentication refusal: park its one remaining attempt on `session`.
-    /// When the Session is ready, the same call resumes as attempt 2 with a
-    /// fresh window and fresh credentials. Nothing is spent while parked.
+    /// authentication refusal: issue the same call's second attempt now,
+    /// seeded with the refused attempt's bundle revision. Its Bind parks (#2069)
+    /// until a newer revision, so it never goes out with the refused bundle.
     pub fn serial_plan_session_resend(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
         evidence: SessionResend,
-        session: &Session,
-        pending: P,
-    ) -> Result<(), (P, Error)>;
+    ) -> Result<Context, Error>;
 }
 
 pub enum SessionResend {
@@ -51,59 +55,50 @@ pub enum SessionResend {
 }
 ```
 
-- **Same logical call.** Resuming is attempt 2 of the call that was refused,
-  within `SerialCall.attempts = 2` reserved at that call's admission. There is
-  no new logical write, no new journal leg, and no fake Read. The venue
-  rebuilds its native body; the identical body is the venue's to keep.
-- **Authority.** A Mutation needs the resend grant that `classify_write` returned
-  for this exact attempt, so the existing journal gate holds: never after
-  Unknown, 408 or 5xx. A Read needs only its own validated DATA. A call with
-  `attempts: 1`, or one already resent, is refused with RetryForbidden.
-- **Resume.** This is the existing Session-ready resume shape (a parked Slot is
-  issued as a fresh leg under the same root), delivered through
-  `on_http_plan_ready`. The Plan keeps its one reserved Context, and there is
-  no live call while parked.
-- **Ending a park (ruling).** If re-login fails or the Session retires,
-  `on_plan_session_wait_ended` arrives in failure custody. The venue fails
-  there with native's error and outcome; there is no re-park and never a
-  second resend. A declining hook seals once. A resend answered with code
-  1000 again fails the same way. The stops (revoke and the rest) end a parked
-  Plan at once.
-- **Bound.** A park has no wall-clock of its own, like the serial root. It
-  ends through the Session (ready, failure or retirement) or a stop. A
-  Session login has its own engine bound.
-- **Exclusive.** It excludes a delayed continuation and a condition wait: one
-  park per Plan at a time.
+- **Same logical call.** The returned Context is attempt 2 of the refused call,
+  within `SerialCall.attempts = 2` reserved at admission. The venue queues it
+  through `request_signed_managed` or `request_managed` as for any attempt.
+  There is no new logical write, no new journal leg and no fake Read. The
+  venue rebuilds its identical native body.
+- **Seed.** Attempt 2 carries `seen = r`, the bundle revision the refused
+  attempt bound with. If Bind still reads Ready at `r` (the venue has not yet
+  cleared its cache), the call parks rather than sending the refused bundle.
+  It wakes on a revision newer than `r`. One counter is shared with #2069.
+- **Authority.** A Mutation needs the RefusedResend grant `classify_write`
+  returned for this exact attempt; the GRVT codec declares parsed code 1000 at
+  any status (ruling below). A Read needs only its own validated DATA. A call
+  with `attempts: 1`, or one whose second attempt is already spent, is
+  RetryForbidden.
+- **While parked.** Attempt 2 is the Plan's one live call (unreleased), so the
+  chain cannot continue, and a delayed continuation or condition wait cannot
+  be armed. The order lock stays held.
+- **Endings (ruling: never a second resend).** Each of these is #2069's
+  existing outcome for an unreleased call:
+  - the window expires while parked: Timeout, NotSent;
+  - the Session retires: Revoked, NotSent;
+  - attempt 2 answered with code 1000 again: terminal with native's error,
+    since there is no third attempt.
+  The serial Plan then stops as for any unreleased or definitive failure, with
+  the streamed IDs and no fence (nothing was released by the parked attempt).
+- **No separate wait or cleanup.** Because the only park is #2069's, there is
+  no Session waiter entry, no `on_plan_session_wait_ended` path and no Pending
+  hand-back for this API. `plan_session_wait` and `plan_retry_session_wait` on
+  a serial slot stay State.
 
 ## Review pins (claude-dazzy3)
 
-- **Read with two attempts (changes the serial source on this branch).**
-  `validate_call` today refuses `attempts > 1` for a Read, and
-  `retry_policy` maps 2 attempts to DefinitiveRefusal. Here a Read may declare
-  `attempts: 2` with RetryPolicy Never. Its second attempt is reachable only
-  through `serial_plan_session_resend`. `plan_resend_context` needs a write
-  grant, so it refuses a Read. The Read-failure retry through
-  `continue_serial_plan_after` admits a new call, never attempt 2.
+- **Read with two attempts (changes the serial source on this branch).** A Read
+  may declare `attempts: 2` with RetryPolicy Never. Its second attempt is
+  reachable only through `serial_plan_session_resend`. `plan_resend_context`
+  needs a write grant, and the Read-failure continuation admits a new call,
+  never attempt 2.
 - **One second attempt per call.** Attempt 2 is spent by either the immediate
-  resend (Bitget 40009) or the Session resend, never both. After either, the
-  other is RetryForbidden.
-- **Write proof.** The engine trusts only the RefusedResend grant, so the
-  venue codec must classify GRVT code 1000 through `classify_write` as a
-  definitive refusal with nothing executed. When attempt 2 succeeds, attempt
-  1's refusal is history: absent from `rejections()` and from the
-  `refusals_complete` accounting.
-- **Credential generation.** The resumed attempt binds to the Session's
-  post-login generation, so it cannot reuse a stale cookie or account ID. A
-  ready from an older Session generation is refused.
-- **Session state at park.** The Session must be login-pending or ready when
-  parking; an idle Session that never started is Invalid. Parking on a ready
-  Session resumes in the same flush, after the current callback returns
-  (no re-entry).
-- **Existing guards.** `plan_session_wait` and `plan_retry_session_wait` on a
-  serial slot stay State (serial RED19b). This API is the only exception.
-- **Cleanup.** After a stop or a login failure while parked, the Session's
-  waiters hold nothing for the Plan, and the parked Pending is handed back
-  exactly once.
+  resend (Bitget 40009) or the Session resend, never both.
+- **Write proof.** When attempt 2 succeeds, attempt 1's refusal is history:
+  absent from `rejections()` and from the `refusals_complete` accounting.
+- **Credential generation.** Attempt 2 binds the bundle its Bind reads, which
+  #2069's revision fence guards: a claim-time revision move is Stale, then
+  re-prepare.
 
 ## GRVT native facts (codex-zs5e83, `bcaaa4acc56`)
 
@@ -141,71 +136,53 @@ pub enum SessionResend {
   with no resend. Ruled (b), scoped to the GRVT codec; the shared policy is not
   loosened, and Bitget and others keep the strict grant.
 - **Wait for a newer header revision, not merely Ready.** GRVT's refresh keeps
-  the same engine Session Ready and only moves the header revision (#2069).
-  The park records the revision the refused attempt used, and resumes only
-  when `SessionBearer::Ready` carries a newer one. A Ready Session with the old
-  or no revision does not resume it. New calls admitted mid-refresh wait at
-  Bind through #2069's NotReady wait (proposed to claude-m26ps4), not here.
+  the same engine Session Ready and only moves the header revision. #2069
+  phase 3 owns the wait for every call (the Bind park), and this PR seeds
+  attempt 2 with the refused revision.
 - **Journal owns the terminal.** The shared write journal projects the
   terminal even where native `trade_finish` strips fields.
 
 ## REDs (before source)
 
-1. A Mutation refused with code 1000 (a RefusedResend grant) parks on a
-   Session. Login completes, the same call resumes as attempt 2 with fresh
-   signing, is accepted, and the chain continues. The journal has one leg with
-   two attempts, and the IDs appear once.
-2. A Read whose DATA is an authentication refusal parks the same way and
-   resumes as attempt 2. The Read leaves no write fact.
-3. A second authentication refusal on attempt 2 cannot park again
-   (RetryForbidden). The venue fails with the native message.
-4. Refusals that spend nothing: no grant; an Unknown, 408 or 5xx fact; a
-   foreign or stale delivery; `attempts: 1`; a delayed continuation or
-   condition wait already armed; a non-login Session.
-5. Login failure, and Session retirement, while parked: each delivers
-   `on_plan_session_wait_ended` in failure custody. The venue's `fail_plan`
-   projects native's error with the streamed IDs. A re-park attempt there is
-   refused (no second resend). A declining hook seals once.
-6. A stop while parked ends the Plan with one terminal, the streamed IDs and
-   no fence (nothing is live).
+Written against #2069 phase 3 (its park and seed), stacked after it.
+
+1. A Mutation refused with code 1000 (RefusedResend): `serial_plan_session_resend`
+   returns attempt 2, seeded with `r`. It binds while the bundle is still Ready
+   at `r`, so it parks with nothing sent. `session_ready` announces `r+1`, it
+   re-prepares, sends the identical body with the new bundle, is accepted, and
+   the chain continues. The journal has one leg with two attempts, and the IDs
+   appear once. Attempt 1 was a definitive refusal and is absent from
+   `rejections()` and `refusals_complete` accounting.
+2. The same for a Read (validated DATA). The Read leaves no write fact.
+3. Attempt 2 answered with code 1000 again: terminal with native's error;
+   a further `serial_plan_session_resend` is RetryForbidden.
+4. Refusals that spend nothing: no grant; an Unknown fact; a foreign or stale
+   delivery; `attempts: 1`; an already spent second attempt.
+5. Window expiry while parked: Timeout, NotSent, and the chain stops with the
+   streamed IDs and no fence.
+6. Session retirement while parked: Revoked, NotSent, and the chain stops.
 7. The order lock is held through the park.
-8. A Read with `attempts: 2` is admitted. Its second attempt cannot come from
-   `plan_resend_context` or from a `continue_serial_plan_after` failure
-   retry; only the Session resend reaches it.
-9. One second attempt per call: after an immediate resend, a Session resend
-   is RetryForbidden, and after a Session resend, an immediate resend is
-   RetryForbidden.
-10. The resumed attempt carries the Session's post-login generation, and a
-    ready from an older generation is refused.
-11. Parking on an idle Session is Invalid. Parking on a ready Session resumes
-    in the same flush, after the parking callback returns.
-12. Control: `plan_session_wait` and `plan_retry_session_wait` on a serial slot
+8. A Read with `attempts: 2` is admitted; `plan_resend_context` and the
+   Read-failure continuation cannot reach its second attempt.
+9. One second attempt per call: after an immediate resend a Session resend is
+   RetryForbidden, and the reverse.
+10. Control: `plan_session_wait` and `plan_retry_session_wait` on a serial slot
     stay State.
-13. After a stop or a login failure while parked, the Session holds no waiter
-    for the Plan, and the Pending is handed back exactly once.
-
-14. An immediate Read-failure continuation: a released Read failure, then
-    `continue_serial_plan` with a Read `next`, issues at once in that failure
-    custody (no timer). A Mutation `next`, an unreleased failure, or a
-    Mutation call's failure is refused, spending nothing. Six chained
-    immediate retries then succeed.
-
-15. Ruling controls (GRVT codec, venue-declared, disclosed in CALLERS):
-    - 408 with parsed code 1000, and 503 with parsed code 1000, each resend once
-      and are accepted;
-    - a 408 or 503 with an unparsed body or a non-1000 code is Unknown for a
-      Mutation (fence and reconcile) and refuses the resend;
-    - a second code 1000 on attempt 2 is terminal with native's error.
-    The shared grant policy is unchanged.
-16. Revision gate: parking while the Session is Ready on the refused
-    attempt's revision does not resume it; a newer revision resumes it once.
-
-RED1 also asserts that attempt 1's fact is a definitive refusal (not Unknown)
-and that, once attempt 2 succeeds, it is absent from `rejections()` and the
-`refusals_complete` accounting.
+11. An immediate Read-failure continuation: a released Read failure, then
+    `continue_serial_plan` with a Read `next`, issues at once (no timer). A
+    Mutation `next`, an unreleased failure, or a Mutation call's failure is
+    refused, spending nothing. Six chained immediate retries then succeed.
+12. Ruling controls (GRVT codec, venue-declared, disclosed in CALLERS): 408 and
+    503 with parsed code 1000 each resend once and are accepted; a 408 or 503
+    with an unparsed body or a non-1000 code is Unknown for a Mutation and
+    refuses the resend; a second code 1000 is terminal. The shared grant policy
+    is unchanged.
+13. Seed gate: attempt 2 does not send while Ready at `r`, and an announce at the
+    same `r` does not wake it.
 
 ## Gates
 
 Engine-focused tests under `http-plans` and `http-plans,order-locks`; clippy
 `-D warnings`; fmt. Plan review, then REDs, then source. WASM bytes reported.
-The API is additive.
+The API is additive. It depends on #2069 phase 3 (the Bind park and the
+minimum-revision seed), so it stacks after it.
