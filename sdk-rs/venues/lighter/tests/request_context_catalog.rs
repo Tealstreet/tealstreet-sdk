@@ -329,6 +329,11 @@ fn released_timeout_and_late_response_cannot_replace_fresh_fallback() {
     let fresh = release(&mut e, NOW + 20002., p);
     reply_at(&mut e, NOW + 20003., &fresh, 200, META);
     snapshot(&e);
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. })),
+        "fresh catalog completed native startup"
+    );
     reply_at(&mut e, NOW + 20004., &old, 500, r#"{"code":500}"#);
     assert!(e.drain_actions().next().is_none());
     snapshot(&e);
