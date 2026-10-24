@@ -576,3 +576,14 @@ I/O/Store changes, duplicate-owner delivery, reuse and WS diagnostics remain
 GREEN. Exactly the planned one-count lib.rs fingerprint is removed; all other
 inventory and key-selection sites/maps remain unchanged. Fresh CI and exact
 committed source preservation review follow in parallel; no READY is claimed.
+
+Scoped verification on the applied source: 166 Backpack tests PASS, zero failures,
+with the same one pre-existing ignored account/background repair test. The six
+new controls are unchanged from their original-source commit and all PASS.
+CARGO_BUILD_JOBS=4 is used for the scoped native and all-target strict Clippy
+runs, one build at a time. Clippy, scoped fmt, bans and inventory scanner/ratchet
+controls PASS. The complete lib.rs blob equals the prepared d704 artifact;
+relative to actual db6fa, exactly five own paths differ and the complete manifest
+equals incoming minus only the planned one-count fingerprint. Production still
+changes no key-selection or combo-5b source. Exact committed source/caller/map
+review and fresh Rust CI run in parallel; #1870/#2044 retain their frozen heads.
