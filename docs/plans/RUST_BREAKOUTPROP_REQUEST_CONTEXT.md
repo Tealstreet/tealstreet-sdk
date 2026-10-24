@@ -116,3 +116,120 @@ Source SHA256: `f323b17f16f472354cd1b23bb393133af40fda007ad79cefc0b1e13c8d068795
 | `836d00ef1198446d8fde0e17e23ca7554316c975f03f9e2d91ff3f64a84aad98` | 1 | 673 `advance_trade` → WRITE | `cx.done(id, serde_json::to_string(&job.ids).unwrap_or_default())` |
 | `ea0ff1d0bf1689d0410b0bcc1cbbeedc2fa1bec60349440b50760648369edf0e` | 1 | 680 `advance_trade` → WRITE | `cx.fail(id, error)` |
 | `28d8459bbb564da129b874b0c4cb9e3d79277650ae1212feca90a9f832a9b3e2` | 2 | 737 `on_trade_response` → LEXICAL + WRITE; 860 `on_trade_failed` → LEXICAL + WRITE | `matches!(request.step, Step::Place { .. })` |
+
+
+## P0 write adoption, classifier pin 2026-10-23
+
+Reverified actual `258c880656f9714f14b498e046b8ee52658e702a`; venue
+production source matches the earlier 6741c1c audit. Plans and tests only.
+
+| Audit row | Reverified native path | Required caller contract |
+| --- | --- | --- |
+| #18 | `trading.rs::advance_trade` drops job.ids on failure and locally clears a later Rejected/NotSent after effects. | Preserve each accepted native orderId in structured Partial; shared journal chooses the whole-command outcome. |
+| #31 | `lib.rs::on_response` special-cases login 401/403 with an untyped error; `fail_operation` therefore emits REQUEST_FAILED and queued dependents receive flattened text. | Preserve AuthInvalid/AuthPermission through the session failure and dependent unsent-work error; emit AUTH_REJECTED without credentials/body leakage. |
+
+No current DXtrade finite error-code classifier exists in venue source:
+`http_failure` is a status ladder, while validated native order/update IDs are
+success facts. Do not invent meanings for fixture errorCode 2/33. Start one
+family CodeTable with conservative unlisted Unknown and only independently
+verified existing code/status rows; an empty native refusal list is preferable
+to converting all 4xx into effects-free refusal. Strict numeric decoding may
+preserve errorCode as evidence without claiming it proves execution refused.
+Complete orderId/updateOrderId and native cancel proof remain codec duties;
+HTTP success alone is not Accepted. Missing/malformed acknowledgements remain
+Unknown and never authorize replacement.
+
+### Landed classifier and write-journal boundary
+
+Use actual #1837 (`e0322577e354739dde6d7e5011e74ab660145885`), not the
+older draft signatures. Declare one family `classify::CodeTable` with `rows`,
+`success`, explicit `unlisted: Verdict::Unknown(None)` and evidence-backed
+`status` entries only. `Key::Message` is exact and code-less; never mix message
+and code rows or introduce substring/prefix inference. Decode integer codes
+strictly via the native codec / `classify::decode_int`, never through f64.
+Engine precedence owns transport, 408/5xx, native evidence, status and malformed
+success. A native code or 2xx alone never proves successful execution.
+
+A genuine command Context uses the actual command entry and real credential;
+managed signed HTTP carries it through Pending. At the exact delivered attempt,
+`classify_write(&ctx, &TABLE, native, message)` creates the failure Fact.
+`http_write_fact(&ctx, WriteFact::Failed { fact, known_effects }, reports)`
+records it; `http_write_failure` is the whole-failure shortcut. Complete native
+success reports `WriteFact::Accepted { order_ids }`; malformed success uses
+`http_write_unproven`. A real batch acknowledgement uses `http_write_batch`
+with caller-ordered items and the native expected count. The codec proves
+identity/uniqueness and correlation; preserve individually known IDs as
+reconciliation evidence without invented caller counts on an incomplete reply.
+
+Only the engine's opaque resend grant may feed `http_resend_context`, retaining
+the original root, deadline and one-shot budget. Use `http_write_leg_intent`
+only for permitted intent narrowing before release. Finish once through
+`done_context`/`fail_context`; CommandWrites owns aggregation, partial IDs and
+whole-command demotion. Do not use private engine-test-only `http_write_result`,
+transitional unmanaged `classify::write`, local status/outcome ladders or a
+numeric completion fallback. A preparation refusal's local NotSent fact is
+valid, but prior released siblings still determine the whole-command outcome.
+
+No runtime conversion is authorized in this plan/tests slice. Missing reusable
+signing, session, Plan/CallWindow or reconciliation ownership remains a shared
+prerequisite; no per-venue replacement. On adoption, reverify actual seam pins,
+remove RED ignore markers while retaining behavior assertions, prune only the
+venue's genuinely removed legacy fingerprints, and add a landed CALLERS
+appendix. Plan/tests preparation neither prunes inventory nor closes P0 rows.
+
+### Session boundary, phases and original RED controls
+
+Update (claude-55ao7t, 2026-10-23): the login transport and the 401/403 typed
+waiter controls are adopted on the session core, stacked on this PR. The SESSION
+provider-presentation and remote-readiness obligations remain OPEN. See
+[BreakoutProp password login](RUST_BACKGROUND_SESSION.md).
+
+Every current feed/write depends on password login, selected FULL_TRADING
+account and a session generation. claude-55ao7t owns login/acquisition/refresh
+Context authority; claude-19pt8s owns credential/provider presentation. Login
+is a session mutation, not Place and not Background Read. Its 401/403 typed
+auth diagnostics and startup/deactivation behavior must survive the shared
+session failure path. Dependent foreground work never released may be NotSent;
+that is not evidence that a prior trading command never executed. Keep secret
+redaction and one-time 401 recovery bound to the original session generation;
+a late old-session rejection cannot retire a newer one.
+
+Single native create/cancel/edit follows actual session/signing ownership;
+place-many, cancel batches, cancellation/fill confirmation and replacement need
+shared Plan admission. Retain DXtrade's exact rolling five requests per1000ms
+and queued retry semantics through the shared scheduler; a fixed200ms minimum
+gap is not equivalent. Preserve account routing, If-Match, native orderCode/
+orderId distinction, replacement IDs, fill/version fences and reduction sizing.
+#1797 currently owns history source/tests; leave those paths untouched.
+
+Append four explicitly ignored controls to unoccupied
+`tests/trading_contract.rs`, reusing private Rig and default startup fixtures:
+first create accepts orderId46073148, next create loses transport or receives
+409 -> one failure retaining that ID, no replay, and Unknown on transport.
+Separate 401 and403 login controls queue FetchCandles before login completes;
+require one typed dependent failure (AuthInvalid/AuthPermission), AUTH_REJECTED,
+deactivation, no second login, and no leaked password/response sentinel.
+Run `cargo test -p safe-cex-venue-breakoutprop --test trading_contract p0_write_
+-- --ignored --nocapture`. All four must compile and fail original behavior
+assertions with no prospective API or credential requirements.
+
+Future GREEN controls: conflicting/missing native IDs cannot accept; known
+cancel effects survive later replacement failure; arbitrary 4xx is uncertain;
+408/5xx override native refusal; local NotSent after prior effects is not the
+whole-command result; duplicate, late, stale-session and wrong-attempt receipts
+cannot send/finalize twice. Retain exact rolling-window admission, original
+deadline, cancellation proof and one-time session recovery. Remove `effective`
+demotion only with full journal adoption, never as a standalone local patch.
+
+Recheck the full inventory above at implementation; this slice prunes nothing,
+closes no P0 row and adds no CALLERS landed claim. Gates for adoption: venue +
+Binance, scoped strict Clippy/fmt, bans, both ratchets, three clean independent
+reviews and exact-head CI. Architecture gate: No. Session, scheduling, signing,
+classification and journal ownership stay at shared choke points.
+
+Local plan/test evidence: 4 original-source controls compile and fail
+by the intended behavior assertions; normal venue suites pass
+(113 tests, 4 explicit ignored RED controls).
+Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
+pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
+controls expose defects; they are not GREEN adoption or P0 closure evidence.

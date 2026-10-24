@@ -14,7 +14,8 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId, num,
+    Command, CommandId, Cx, Fill, Method, OrderSnapshotToken, Response, SocketChannel, SocketId,
+    TimerId, num,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -131,6 +132,7 @@ pub(crate) struct AlgoMeta {
     pub positional: bool,
 }
 struct OrdersJoin {
+    token: OrderSnapshotToken,
     generation: u64,
     revision: u64,
     regular: Vec<Order>,
@@ -651,9 +653,18 @@ impl Woo {
         if self.account.orders.is_some() {
             return;
         }
+        let Some(token) = cx.store.begin_orders_snapshot() else {
+            cx.notice(
+                Level::Error,
+                code::SNAPSHOT_DISCARDED,
+                "WOO order snapshot authority exhausted; preserving orders",
+            );
+            return;
+        };
         self.account.generation += 1;
         let generation = self.account.generation;
         self.account.orders = Some(OrdersJoin {
+            token,
             generation,
             revision: self.account.revision,
             regular: vec![],
@@ -1428,48 +1439,54 @@ impl Woo {
                 }
                 if join.algo_done && join.regular_done {
                     let join = self.account.orders.take().unwrap();
-                    for (id, positional) in join.classifications {
-                        if self.account_revision(&id) <= join.revision {
-                            self.account.algos.insert(id, AlgoMeta { positional });
-                        }
-                    }
-                    let mut combined = join.regular;
-                    combined.extend(join.algo);
-                    for old in cx.store.orders() {
-                        if (join.unidentified || join.skipped.contains(&old.id))
-                            && !combined.iter().any(|r| r.id == old.id)
-                        {
-                            combined.push(old.clone());
-                        }
-                    }
-                    for old in cx.store.orders() {
-                        if self.account_revision(&old.id) > join.revision {
-                            combined.retain(|r| r.id != old.id);
-                            combined.push(old.clone());
-                        }
-                    }
-                    for row in &mut combined {
-                        if let Some(old) = cx.store.order(&row.id) {
-                            row.filled = row.filled.max(old.filled);
-                            row.remaining = (row.amount - row.filled).max(0.0);
-                            if matches!(old.status, OrderStatus::Closed | OrderStatus::Canceled) {
-                                row.status = old.status;
+                    let admitted = cx.store.commit_orders_snapshot([join.token], |current| {
+                        for (id, positional) in join.classifications {
+                            if self.account_revision(&id) <= join.revision {
+                                self.account.algos.insert(id, AlgoMeta { positional });
                             }
                         }
-                        if let Some((status, _)) = self.account.terminal.get(&row.id) {
-                            row.status = *status;
+                        let mut combined = join.regular;
+                        combined.extend(join.algo);
+                        for old in current {
+                            if (join.unidentified || join.skipped.contains(&old.id))
+                                && !combined.iter().any(|r| r.id == old.id)
+                            {
+                                combined.push(old.clone());
+                            }
                         }
-                    }
-                    if !self.account.orders_seeded {
-                        for order in &combined {
-                            self.account
-                                .execution_cumulative
-                                .entry(order.id.clone())
-                                .or_insert(order.filled);
+                        for old in current {
+                            if self.account_revision(&old.id) > join.revision {
+                                combined.retain(|r| r.id != old.id);
+                                combined.push(old.clone());
+                            }
                         }
-                        self.account.orders_seeded = true;
+                        for row in &mut combined {
+                            if let Some(old) = current.iter().find(|old| old.id == row.id) {
+                                row.filled = row.filled.max(old.filled);
+                                row.remaining = (row.amount - row.filled).max(0.0);
+                                if matches!(old.status, OrderStatus::Closed | OrderStatus::Canceled)
+                                {
+                                    row.status = old.status;
+                                }
+                            }
+                            if let Some((status, _)) = self.account.terminal.get(&row.id) {
+                                row.status = *status;
+                            }
+                        }
+                        if !self.account.orders_seeded {
+                            for order in &combined {
+                                self.account
+                                    .execution_cumulative
+                                    .entry(order.id.clone())
+                                    .or_insert(order.filled);
+                            }
+                            self.account.orders_seeded = true;
+                        }
+                        combined
+                    });
+                    if !admitted {
+                        return;
                     }
-                    cx.store.set_orders(combined);
                     self.account_metadata(cx);
                     // A read built before the ticker seed skipped its stops; once
                     // prices exist, re-read at once instead of at the next poll.

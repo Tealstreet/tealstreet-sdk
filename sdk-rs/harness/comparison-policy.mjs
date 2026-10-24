@@ -86,7 +86,7 @@ export const captureCheckpoint = (point, capture) => structuredClone({ ...point,
 // Flat rows also carry economic state. Preserve actual reported PnL even when
 // the ordinary position view represents zero-size rows through settings.
 export const flatPositionPnl = (positions) => positions
-  .filter((position) => position.contracts === 0 && position.realizedPnl != null)
+  .filter((position) => position.contracts === 0 && finiteOrNull(position.realizedPnl) !== null)
   .map((position) => ({ symbol: position.symbol, side: position.side,
     positionMode: position.positionMode ?? null, realizedPnl: finiteOrNull(position.realizedPnl) }))
   .sort((a, b) => a.symbol.localeCompare(b.symbol) || String(a.side).localeCompare(String(b.side)) || String(a.positionMode).localeCompare(String(b.positionMode)));
