@@ -83,6 +83,8 @@ struct Shared {
     placement: SessionPlacement,
     /// Unsigned recipe headers without Content-Type.
     recipe_accept: bool,
+    /// Reads are paced in `GROUP`.
+    paced: bool,
     /// Token the venue caches for the generation it opens on retire.
     next_generation_token: Option<&'static str>,
     bearer: bool,
@@ -165,6 +167,7 @@ impl Shared {
             wait_command: None,
             placement: SessionPlacement::First,
             recipe_accept: false,
+            paced: false,
             next_generation_token: None,
             bearer: true,
             bind_retired: false,
@@ -334,7 +337,14 @@ fn write_policy() -> Policy {
         retry: RetryPolicy::DefinitiveRefusal,
     }
 }
+const GROUP: safe_cex_engine::request_context::Pacing = safe_cex_engine::request_context::Pacing {
+    group: 7,
+    minimum_gap_ms: 1_000.,
+};
 fn policy(retry: bool, signed: bool) -> Policy {
+    paced_policy(retry, signed, false)
+}
+fn paced_policy(retry: bool, signed: bool, paced: bool) -> Policy {
     Policy {
         operation: Operation::Read,
         credential: signed.then(|| Credential {
@@ -342,7 +352,7 @@ fn policy(retry: bool, signed: bool) -> Policy {
             reference: KeyRef(KEY.into()),
         }),
         timeout_ms: 20_000,
-        pacing: None,
+        pacing: paced.then_some(GROUP),
         retry: if retry {
             RetryPolicy::ReadFailure
         } else {
@@ -594,6 +604,9 @@ impl Probe {
 }
 impl Venue for Probe {
     type Pending = Pending;
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        &[GROUP]
+    }
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             account: AccountLookup::Query,
@@ -700,6 +713,7 @@ impl Venue for Probe {
             self.preflight(cx);
             return;
         }
+        let paced = self.shared.borrow().paced;
         let (retry, sibling, signed, egress, scoped) = {
             let shared = self.shared.borrow();
             let scoped = shared
@@ -715,13 +729,19 @@ impl Venue for Probe {
             )
         };
         let root = match (scoped, egress) {
-            (Some(session), _) => {
-                cx.session_scoped_context(&session, Scope::Command(command), policy(retry, signed))
+            (Some(session), _) => cx.session_scoped_context(
+                &session,
+                Scope::Command(command),
+                paced_policy(retry, signed, paced),
+            ),
+            (None, Some(egress)) => cx.http_context_with_egress(
+                Scope::Command(command),
+                paced_policy(retry, signed, paced),
+                egress,
+            ),
+            (None, None) => {
+                cx.http_context(Scope::Command(command), paced_policy(retry, signed, paced))
             }
-            (None, Some(egress)) => {
-                cx.http_context_with_egress(Scope::Command(command), policy(retry, signed), egress)
-            }
-            (None, None) => cx.http_context(Scope::Command(command), policy(retry, signed)),
         }
         .unwrap();
         if self.shared.borrow().wait_command == Some(command) {
@@ -2376,4 +2396,25 @@ fn o4_placement_keeps_collision_and_limit_refusals() {
         assert_eq!(shared.failures.len(), 1);
         assert_eq!(shared.failures[0].outcome, Some(Outcome::NotSent));
     }
+}
+
+/// B2 pacing: pacing is consumed only at claim, so a woken paced call
+/// releases at its first claim right after the wake: neither the park nor the
+/// wake re-prepare takes a pacing slot.
+#[test]
+fn p1_paced_call_woken_from_a_park_releases_without_a_fresh_pacing_wait() {
+    let (mut e, shared) = engine(|shared| {
+        shared.token = None;
+        shared.paced = true;
+    });
+    let issued = ask(&mut e, 1);
+    parks(&mut e, &shared, NOW + 1., issued[0].0);
+    shared.borrow_mut().refresh(Some("A"));
+    let woken = prepare_actions(announce(&mut e, &shared, NOW + 2.));
+    assert_eq!(woken.len(), 1);
+    let (permit, _) = prepared(&mut e, NOW + 3., woken[0].0).expect("bound packet");
+    assert!(
+        matches!(e.claim_http(NOW + 4., permit), Ok(Claim::Released(_))),
+        "the woken call waited on a pacing slot it never used"
+    );
 }
