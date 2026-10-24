@@ -466,7 +466,14 @@ Source-stage controls must cover both trap and untrapped-exhaustion entry paths.
 Healthy borrowed and owned hosts both retire; ownsEngine controls free only.
 A required production retirement hook cannot be silently skipped in the healthy
 case. Cleanup must attempt every remaining host resource release if retirement,
-command settlement or another resource release throws. Direct healthy cleanup
+command settlement or another resource release throws. A RuntimeError or
+RangeError thrown BY the retirement export must set deadError immediately before
+any later engine-property lookup/export/free; later cleanup is host-only. This
+fatal catch is local to the private cleanup boundary: retirement bypasses invoke
+and disposed is already true, so failEngine's current disposed early return
+cannot be its only fatal catch. Separate controls cover RuntimeError, RangeError
+and an ordinary Error from retirement; an ordinary Error still attempts healthy
+free and later host releases, while either fatal error forbids all engine access. Direct healthy cleanup
 must also establish the public fence and respect the group guard; disposed alone
 is not its once-only guard. No captured Rust callback after poison is retained.
 
@@ -617,3 +624,10 @@ throwing-retirement entry, and final seal). The throwing-retirement spy is not
 executed yet, so continuation after an actual retirement exception remains a
 source-stage assertion. Group preclaim/first-dispatch controls and native
 owned/retained/cancelled/panic controls still require exact owner-reviewed hooks.
+
+Core re-review adds a distinct fatal-retirement gate: a trap produced by the
+retirement export itself changes the cleanup branch before any further engine
+property lookup or free. This is separate from a trap in an ordinary engine
+call, and from an ordinary Error thrown during retirement. The fatal controls
+must preserve Unknown and caller IDs and release every host-owned resource;
+they do not claim the absent retirement hook already executes.
