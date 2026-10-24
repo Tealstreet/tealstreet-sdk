@@ -89,7 +89,8 @@ call. A native job with nothing to send ends through the existing
 - **One live call.** At most one call is issued and not yet settled. The Plan
   holds exactly one reserved registry Context for its whole life. That counts
   as one against `CAPACITY`, whatever the number of calls.
-- **Continuation is custody, not renewal.** `continue_serial_plan` requires:
+- **Continuation is custody, not renewal.** For a Mutation call,
+  `continue_serial_plan` requires (Read calls: see Read calls):
   - the current call's exact released delivery, validated as by
     `validate_plan_delivery`;
   - its write fact recorded and definitive: Accepted, Rejected, or a
@@ -120,10 +121,12 @@ call. A native job with nothing to send ends through the existing
   declared leg. A refused continue reserves none.
 - **No root wall-clock (ruling, claude-ddi2il).** Native has no whole-job
   bound, so the serial root has no deadline and the caller receipt never caps
-  it. Each call is bounded by `now + timeout_ms`, a new bound that native does
-  not set, disclosed in CALLERS. The chain advances only from DATA (or the
-  single-use delayed-continuation callback), so every interval is bounded and
-  the Plan always terminates.
+  it. Each call is bounded by `now + timeout_ms`. That replaces native's own
+  physical request timeout (OKX 20 s; none on Bitget's legacy funnel), and the
+  bound now also covers preparation and queue time. Each consumer's CALLERS
+  discloses the coverage it actually changes. The chain advances only from
+  custody (below), so every interval is bounded. Termination comes from the
+  native job being finite and from the stops, not from the per-call bound.
 - **Caller-wait expiry mid-chain.** Receipt expiry is not a Plan terminal and
   emits no Timeout. The chain keeps sending, the command reads
   `CommandWait::Expired` as a held command does today, and the order lock and
@@ -153,12 +156,25 @@ call. A native job with nothing to send ends through the existing
   reserved at Bind, and never replays bytes. A third attempt is refused.
 - **Read calls.** A Read `SerialCall` (amend resolve, metadata and position
   re-reads) never enters the write journal, the accepted IDs or the
-  `refusals_complete` accounting. A failed Read stops or retries as native
-  does, with no write side effects.
+  `refusals_complete` accounting. Its two transitions:
+  - *Success.* From the Read call's exact validated DATA custody,
+    `continue_serial_plan` or `continue_serial_plan_after` continues with no
+    write fact required; the DATA itself is the evidence.
+  - *Failure retry.* From the Read call's own failure callback
+    (`on_request_failed` for the current call's exact failed delivery, after a
+    transport or HTTP failure), only `continue_serial_plan_after` is allowed,
+    and only with a Read `next`. That fresh Read is the native retry, and the
+    venue counts native's 3 tries. The failed call is settled by the
+    transition; no DATA or fact is invented. These are refused, spending
+    nothing: a stale or another call's failure; a failure of a Mutation call;
+    a provider, signing, credential or local refusal (the call never reached
+    the venue, so it stops as a NotSent failure); and a Mutation `next`.
 - **Delayed continuation.** `continue_serial_plan_after` arms the Plan's one
-  timer, which has no other user. It is refused while any fact is uncertain,
-  and that is re-checked when it fires. Its callback custody is single-use and
-  exclusive with a live call. It has the same check-all-then-commit rule.
+  timer, which has no other user. When it fires, the venue receives the
+  existing `on_http_plan_ready(plan)` and issues the next call from
+  `plan_slots` there. It is refused while any fact is uncertain, and that is
+  re-checked when it fires. Its custody is single-use and exclusive with a
+  live call. It has the same check-all-then-commit rule.
 - **Replan.** A serial Plan declares no calls. So a replan (Bitget 40085
   promotion) is just the next continuation with different calls: nothing is
   sealed and there is no second admission or root.
@@ -337,7 +353,11 @@ fails at an assertion.
     stamp and a new nonce at Bind, with no replayed bytes. A Read fact leaves the journal,
     the IDs and the refusal count unchanged. A delayed continuation is refused
     while uncertain and when it fires after an uncertain fact, and its
-    callback cannot be used twice.
+    callback cannot be used twice. A Read failure (HttpFailed), then a 250 ms
+    Plan timer, then a fresh Read in `on_http_plan_ready`; the same from a
+    stale failure, from another call's failure, from a Mutation failure, from
+    a provider or local refusal, or with a Mutation `next` is refused,
+    spending nothing.
 18. Caller-wait expiry mid-chain: no terminal or Timeout at
     expiry, later calls are still accepted, and the command's single terminal
     is the Plan's.
