@@ -205,11 +205,17 @@ Bitget venue WASM, engine at size defaults since #2099 (`31176dfe121`):
 - **`http-plans`:** about **+39.6 KB** on Bitget. This is measured, but across
   two nearby bases, so it is approximate. It leaves about **14.4 KB** of
   Bitget headroom for everything else.
-- **`serial-plans` + `condition-waits`:** **unmeasured**. #2092 and #2094 add
-  roughly 2.5k and 4.3k engine lines, tests included. Ask: fe7lgm reports the
-  Bitget-family and combined deltas of each feature from those PRs' builds.
-  If together they cost more than about 10 KB on Bitget, slice 3 does not fit
-  the override even with zero venue cost. That is the main size risk.
+- **`serial-plans` + `condition-waits`, no venue use:** about **+2.7 KB**.
+  fe7lgm measured this before the feature gate, when the code compiled
+  unconditionally, so it is an older base: the serial Plan cost Bitget
+  +2 747 bytes (`003501960b1` to `d4efb3f6b15`), and condition waits added +0
+  on top (`d4ef` to `fbddb4851f7`). fe7lgm's exact enabled-no-use build on
+  the current tip is to follow.
+- **Engine paths kept alive by use:** `admit_serial_plan`,
+  `continue_serial_plan(_after)`, `serial_plan_condition_wait`,
+  `park_preflight_for` and the streamed journal (about 300 + 240 source
+  lines) keep their bodies once Bitget calls them. Estimate: **+3 to +6 KB**,
+  measurable only on the adoption build.
 - **Venue code:** an estimated **+2 to +4 KB** (about +200 / -120 lines in
   `trading.rs`, minus the `send` body branch and the `Pending::Trade`
   sign-error arm). Calibration: slice 2 cost +2 461 bytes before its trim and
@@ -224,9 +230,15 @@ Combined bundle (all features unioned):
   whichever adopter links them first. If OKX's ordered-write consumer
   (codex-ih35js) lands first, they cost Bitget about 0 on combined.
 - **Venue code:** about +2 to +4 KB, the same as on the Bitget family.
-- **Expected combined delta:** (serial-plans + condition-waits, unless already
-  linked) + about 2-4 KB. It is positive, so slice 3 lands only after the
-  combined budget clears, or once trims elsewhere make room.
+- **Expected Bitget total:** about 39.6 + 2.7 + (3 to 6) + (2 to 4), so
+  **+47 to +52 KB** against 53.8 KB of headroom. It fits, but only with about
+  2 to 7 KB of margin, so the adoption build must be measured before freeze.
+- **Expected combined delta:** enabling the features for Bitget turns them on
+  for the whole combined build through Cargo feature unification. So: about
+  +2.7 KB for the features (about 0 if OKX adopts them first) + 3 to 6 KB of
+  kept-alive engine paths + 2 to 4 KB of venue code, for about **+8 to +13 KB**.
+  It is positive, so slice 3 lands only after the combined budget clears, or
+  once trims elsewhere make room.
 
 Measure at the implementation head with one PR run, paired against the tip.
 No local WASM builds while the machine is shared.
