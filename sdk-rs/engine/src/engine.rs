@@ -3918,21 +3918,29 @@ impl<V: Venue> Engine<V> {
                     }
                     if (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements())
-                        && let Err(id) = cx.io.order_locks.acquire(
+                        && let Err(refusal) = cx.io.order_locks.acquire(
                             &command,
                             cx.store,
                             self.venue.fence_uncertain_cancel_all(),
                         )
                     {
-                        let error = match &command {
-                            Command::CancelSymbolOrders { symbol, .. }
+                        let error = match (refusal, &command) {
+                            (
+                                crate::order_locks::Refusal::Capacity(_),
+                                Command::PlaceOrders { .. },
+                            ) => VenueError::new(crate::order_locks::CAPACITY_REACHED)
+                                .kind(ErrorKind::Internal)
+                                .outcome(crate::Outcome::NotSent),
+                            (_, Command::CancelSymbolOrders { symbol, .. })
                                 if self.venue.fence_uncertain_cancel_all()
                                     && cx.io.order_locks.uncertain(symbol) =>
                             {
-                                "Placement outcome is uncertain; reconcile before cancel-all"
+                                "Placement outcome is uncertain; reconcile before cancel-all".into()
                             }
-                            _ => "Order amendment or cancellation is already in flight",
+                            _ => "Order amendment or cancellation is already in flight".into(),
                         };
+                        let (crate::order_locks::Refusal::Conflict(id)
+                        | crate::order_locks::Refusal::Capacity(id)) = refusal;
                         cx.refuse_before_entry(id, error);
                         return;
                     }

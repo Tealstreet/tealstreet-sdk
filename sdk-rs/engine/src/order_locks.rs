@@ -38,6 +38,19 @@ fn native(id: &str) -> &str {
     .unwrap_or(id)
 }
 
+/// Concurrent order-command scopes; a scope conflict is reported first.
+pub(crate) const ACTIVE_SCOPES: usize = 64;
+/// A new placement refused only by `ACTIVE_SCOPES`; nothing was sent.
+pub(crate) const CAPACITY_REACHED: &str =
+    "Order command capacity reached: 64 order commands are in flight; retry after one finishes";
+
+/// Why entry refused an order command's scope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    Conflict(CommandId),
+    Capacity(CommandId),
+}
+
 impl OrderLocks {
     pub fn contains(&self, command: CommandId) -> bool {
         self.active.iter().any(|(id, _)| *id == command)
@@ -49,7 +62,7 @@ impl OrderLocks {
         command: &Command,
         store: &Store,
         fence_uncertain: bool,
-    ) -> Result<(), CommandId> {
+    ) -> Result<(), Refusal> {
         let mut scope = Scope {
             ids: Vec::new(),
             symbols: Vec::new(),
@@ -128,7 +141,6 @@ impl OrderLocks {
                 .all_symbol
                 .as_deref()
                 .is_some_and(|symbol| self.uncertain(symbol))
-            || self.active.len() >= 64
             || self.active.iter().any(|(_, held)| {
                 scope.ids.iter().any(|id| held.ids.contains(id))
                     || scope
@@ -141,7 +153,10 @@ impl OrderLocks {
                         .is_some_and(|s| overlaps_symbol(s, &scope))
             })
         {
-            return Err(command);
+            return Err(Refusal::Conflict(command));
+        }
+        if self.active.len() >= ACTIVE_SCOPES {
+            return Err(Refusal::Capacity(command));
         }
         self.active.push((command, scope));
         Ok(())
