@@ -16,6 +16,9 @@ use std::collections::VecDeque;
 
 const CAPACITY: usize = 256;
 
+#[path = "local_setting.rs"]
+mod local_setting;
+
 #[path = "session_context.rs"]
 pub(super) mod session;
 
@@ -70,6 +73,7 @@ struct CommandOwner {
 }
 
 enum CommandPhase {
+    LocalSetting,
     Context {
         root: Context,
         entry_owned: bool,
@@ -133,6 +137,7 @@ impl CommandOwner {
     fn context_root(&self) -> Option<&Context> {
         match &self.phase {
             CommandPhase::Context { root, .. } => Some(root),
+            CommandPhase::LocalSetting => None,
             #[cfg(feature = "http-plans")]
             _ => None,
         }
@@ -141,6 +146,7 @@ impl CommandOwner {
     fn retained(&self) -> bool {
         match &self.phase {
             CommandPhase::Context { entry_owned, .. } => *entry_owned,
+            CommandPhase::LocalSetting => true,
             #[cfg(feature = "http-plans")]
             CommandPhase::Preflight(_) | CommandPhase::Planned(_) | CommandPhase::Retiring(_) => {
                 true
@@ -321,10 +327,10 @@ impl ContextRegistry {
             CommandPhase::Context {
                 root, entry_owned, ..
             } => (root, entry_owned),
-            #[cfg(feature = "http-plans")]
             _ => panic!("command entry must retain a Context root"),
         };
-        assert_eq!(root, context);
+        // Plain comparisons: release WASM carries no Debug for Context or Owner.
+        assert!(root == context, "command entry retains its own root");
         assert!(!*entry_owned, "command entry already retained");
         *entry_owned = true;
     }
@@ -1417,7 +1423,7 @@ impl ContextRegistry {
                 }
                 #[cfg(feature = "http-plans")]
                 CommandPhase::Retiring(_) => return false,
-                CommandPhase::Context { .. } => {}
+                CommandPhase::Context { .. } | CommandPhase::LocalSetting => {}
             }
         }
         self.forget_observer(command);

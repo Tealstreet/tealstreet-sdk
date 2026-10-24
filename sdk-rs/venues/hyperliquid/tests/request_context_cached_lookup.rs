@@ -70,7 +70,11 @@ fn lookup(
             },
         }),
     );
-    engine.drain_actions().collect()
+    if now.is_finite() {
+        safe_cex_engine::test_support::prepared_actions(engine, now)
+    } else {
+        engine.drain_actions().collect()
+    }
 }
 fn local(engine: &mut Engine<Hyperliquid>, now: f64, owner: u32, read: Local) -> Vec<Action> {
     lookup(
@@ -274,7 +278,7 @@ fn missing_identity_rejects_full_context_capacity() {
     capacity(Local::Anonymous);
 }
 #[test]
-fn public_only_uncached_refusal_is_unchanged_even_when_contexts_are_full() {
+fn public_only_uncached_refusal_requires_caller_root_capacity() {
     let mut engine = started(false, true);
     for full in [false, true] {
         if full {
@@ -283,12 +287,33 @@ fn public_only_uncached_refusal_is_unchanged_even_when_contexts_are_full() {
             }
         }
         let actions = local(&mut engine, NOW, 601, Local::Anonymous);
-        assert_eq!(actions.len(), 1);
         let result = terminal(&actions, 601);
+        assert_eq!(result.len(), 1);
         let error = result[0].as_ref().unwrap_err();
-        assert_eq!(error.message, "Hyperliquid account identity is missing");
-        assert_eq!(error.kind, None);
         assert_eq!(error.outcome, None);
+        if full {
+            assert_eq!(actions.len(), 1);
+            assert_eq!(error.message, "Engine request capacity reached");
+            assert_eq!(error.kind, Some(ErrorKind::Internal));
+        } else {
+            assert_eq!(error.message, "Hyperliquid account identity is missing");
+            assert_eq!(error.kind, None);
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::SetTimer { .. }))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::ClearTimer { .. }))
+                    .count(),
+                1
+            );
+            assert_eq!(actions.len(), 3);
+        }
     }
 }
 #[test]
@@ -336,7 +361,7 @@ fn uncached_valid_identity_retains_private_perps_rest_and_spot_local_miss() {
             Action::Http(request) => Some(request),
             _ => None,
         })
-        .expect("native legacy private lookup remains HTTP");
+        .expect("managed private lookup reaches prepared physical HTTP");
     assert_eq!(
         request.body.as_deref(),
         Some(&format!(r#"{{"type":"orderStatus","user":"{IDENTITY}","oid":"{VALID}"}}"#)[..])
