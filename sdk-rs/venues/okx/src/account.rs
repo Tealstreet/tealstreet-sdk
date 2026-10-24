@@ -3,7 +3,7 @@ use crate::wire::*;
 use crate::{Okx, Pending, scaled, usd};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
-use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
+use safe_cex_engine::credential_selection::SlotPolicy;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{
@@ -387,11 +387,7 @@ impl Okx {
     /// read key when configured, else the primary key. A refused admission or
     /// queue is a pre-send failure on the native path.
     fn account_read(&mut self, cx: &mut Cx<'_, Pending>, path: &str, request: Request) {
-        let slots = Slots::new(
-            self.credentials.clone(),
-            self.options.read_credentials.clone(),
-            SlotPolicy::default(),
-        );
+        let slots = self.read_slots(SlotPolicy::default());
         let selected = SelectedRead::select(&slots, ReadRole::Read { scope: None });
         let read = match SelectedRead::background(
             cx,
