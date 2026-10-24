@@ -185,7 +185,7 @@ impl SignStep for Http {
             .ok()
             .filter(|key| !key.is_empty() && !key.contains(['\r', '\n']))
             .ok_or(SignError::InvalidResult)?;
-        let mac = |index| {
+        let mac = |index: usize| {
             safe_cex_crypto::encode(&result.values[index], safe_cex_crypto::Encoding::Base64)
         };
         let Action::Http(http) = outbound else {
