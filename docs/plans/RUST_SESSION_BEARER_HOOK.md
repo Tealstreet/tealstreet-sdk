@@ -617,8 +617,13 @@ fix belongs at Bind, once, for every owner kind.
    existing `reprepare_http` when that is Some(r) and either `seen` is None or
    r > `seen`; otherwise the call stays parked. Re-prepare spends no attempt,
    needs no ResendGrant, touches no auth ledger, opens no login and resets no
-   attempt counter. Parked calls re-prepare before the drain's venue waiters
-   are handed back, so a parked call is never overtaken by one issued later.
+   attempt counter. Order is FIFO among parked calls only (zs5e83 P2). The
+   wake drains after the venue callback returns, so a waiter that same
+   `session_ready` hands back may issue and Prepare first. The engine gives no
+   cross-owner order today (host Prepare completion is unordered) and does not
+   claim one here; each owner sequences its own calls (a serial Plan has one
+   live call, GRVT's FIFO queue one write at a time). A mixed control pins the
+   observed behaviour.
 4. Bind side effects. Re-prepare is today's Stale reprepare. The old signing
    attempt is cancelled and a fresh one is allocated at the next Bind; a nonce
    reservation is released exactly as a Stale reprepare releases it. No new
@@ -638,10 +643,15 @@ fix belongs at Bind, once, for every owner kind.
 9. Typed cause. None is added. NotReady never reaches the venue. Retired and
    header refusals keep their existing non-auth kinds (InvalidInput). No
    `VenueError` field and no accessor.
-10. Serial composition (fe7lgm). One counter: a call's `seen` is the latest
-    revision it read at Bind. A serial attempt 2 that parks in this mechanism
-    wakes only on a revision newer than its own `seen`. fe7lgm's attempt-2 park
-    keys on the refused attempt's revision, which is that attempt's `seen`.
+10. Serial composition (fe7lgm P2). One counter: a call's `seen` is the
+    latest revision it read at Bind. A pub(crate) minimum-revision seed lets an
+    engine owner issue a call with `seen` preset. At Bind, a Ready read whose
+    revision is <= `seen` parks exactly like NotReady, with the same wake rule.
+    The serial resend issues attempt 2 at once, seeded with the refused
+    attempt's revision r. If the venue has not yet cleared its cache, attempt 2
+    parks instead of leaving with the stale bundle, which closes the race. This
+    is then the only Session park: the serial resend adds no wait path of its
+    own. The seed is not public; venues cannot set it.
 
 Venue obligations (documented, not engine-enforced): the revision moves on
 every change to any bundle value; `session_bearer` and
@@ -661,13 +671,14 @@ shape (OPEN for dazzy3/fe7lgm):
   It is a shared assembly rule, not a venue insertion.
 - Signed recipes declare it through a defaulted `SignStep` method (default
   `First`, so no existing recipe changes). Unsigned managed requests take it
-  through an additive `request_managed_with_headers` variant; the existing
-  entry points keep `First`.
+  through an additive entry point named for what it adds
+  (`request_managed_placed`); the existing entry points keep `First`.
 - Collision, limit and wipe rules are unchanged: placement runs inside
   `attach_session_headers`.
 - Consumers: GRVT `After("Content-Type")`, BreakoutProp `After("Content-Type")`
-  (restoring native), Paradex `First`, each pinned by a native-wire test in its
-  own slice.
+  (restoring native), Paradex `First`. Each is pinned by a native-wire test in
+  its own slice; moving BreakoutProp is a native-restoring wire change that
+  needs its slice owner and that RED in the same PR.
 
 ### REDs (`session_bearer.rs`, written before source)
 
@@ -685,7 +696,16 @@ shape (OPEN for dazzy3/fe7lgm):
   on wake.
 - P9 barriers: no parked call carries a group (R11 refusal still holds).
 - P10 still-Ready announce: `session_ready` on a Ready Session with no parked
-  calls and no waiters is a no-op.
+  calls and no waiters is a no-op; one announcing the SAME revision
+  re-prepares nothing.
+- P11 seeded (fe7lgm): a call seeded with `seen` = r that binds while the hook
+  is still Ready at r parks, then wakes and binds at r+1. No attempt is spent
+  beyond the seeded call itself.
+- P12 mixed order (zs5e83): parked call A; the same `session_ready` returns
+  waiter B, whose callback queues B. Both prepare and bind on the new
+  revision, and A keeps its attempt. The control records the observed
+  Prepare order and asserts no cross-owner guarantee beyond FIFO among
+  parked calls.
 - R4 is rewritten: NotReady at Bind parks, then times out (the old immediate
   failure is gone).
 - Order: O1 `After("Content-Type")` puts the bundle after Content-Type
