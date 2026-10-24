@@ -32,12 +32,19 @@ One optional per-family field in `construction-rules.json`, beside
 "backpack":  {"readCredentials": "publicRead"}
 ```
 
+(These rows are the consumers' to add; see below.)
+
 - Absent means today's behaviour: a complete read key is installed as the
   secondary in private mode and nothing in public-only mode.
 - It is compiled into the Rust rule table (`build_support.rs`), so an unknown
   value fails the build. It is reported in `BridgeConstruction` as
   `readCredentials`, and the TS `construction.ts` evaluator reads the same JSON.
   The existing construction parity check compares the two.
+- **This PR declares no venue.** The `cryptocom` and `backpack` rows are
+  activated by their consumer PRs, atomically with each venue's
+  constructor/startup cutover (codex-ih35js composition gate). On landing every
+  construction is byte-identical, and controls drive the policy through
+  explicit-policy seams and a synthetic construction record.
 - It is not `SetupMapping`, which maps Aster's account fields. It is not a
   per-venue branch either: any later family with an unused or public-read key
   reuses the declaration.
