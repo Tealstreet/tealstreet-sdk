@@ -7339,6 +7339,16 @@ It grants no account-auth evidence or mutation rights. Public 40101 errors
 retain typed/native metadata without changing auth health. Private history,
 signing, account/trading reducers and credential selection are unchanged.
 
+
+Backpack FetchAccount owns one genuine selected Read root and a single leg
+clipped to its original caller receipt and 20-second maximum. Exact managed DATA
+custody precedes native account-ID decoding and its one correlated terminal;
+identity reads do not publish live account state. Registry setup supplies the
+real optional secondary identity and one stored native configuration/seed
+validation result, including public-only error precedence. Secondary GET uses
+the primary native window; mutations retain Primary selection. Unadopted account
+and socket paths retain their documented dual credential custody.
+
 ## Breakout immediate local command custody
 
 Local candle validation, leverage results, unsupported commands, fixed-account
