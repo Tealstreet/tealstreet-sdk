@@ -119,9 +119,6 @@ impl Bearer {
     fn new(_: u64) -> Option<Self> {
         None
     }
-    fn generation(&self) -> u64 {
-        match *self {}
-    }
     fn bound_revision(&self) -> Option<u64> {
         match *self {}
     }
@@ -797,6 +794,7 @@ impl<P> Io<P> {
         }
     }
 
+    #[cfg(feature = "session-bearer")]
     fn bearer_bound_mut(&mut self, generation: u64) -> Option<&mut Vec<RequestId>> {
         self.bearer_bound
             .iter_mut()
@@ -826,6 +824,7 @@ impl<P> Io<P> {
             .map_err(|_| Error::Capacity)
     }
 
+    #[cfg(feature = "session-bearer")]
     fn drop_empty_bearer_bound(&mut self, generation: u64) {
         self.bearer_bound
             .retain(|(bound, requests)| *bound != generation || !requests.is_empty());
@@ -859,6 +858,7 @@ impl<P> Io<P> {
         let managed = self.managed_http.remove(&request)?;
         #[cfg(feature = "session-bearer")]
         self.bearer_parked.retain(|(_, parked)| *parked != request);
+        #[cfg(feature = "session-bearer")]
         if let Some(bearer) = managed.bearer
             && let Some(bound) = self.bearer_bound_mut(bearer.generation())
         {
@@ -1363,6 +1363,11 @@ impl<V: Venue> Engine<V> {
     /// Hold an unreleased call whose bundle is NotReady (or not above its
     /// `floor`) inside its own window. Its timer stays at the call deadline.
     /// A park that cannot reserve its entry fails the call NotSent.
+    /// Unreachable without `session-bearer`: no call is ever bound.
+    #[cfg(not(feature = "session-bearer"))]
+    fn park_bearer(&mut self, _: f64, _: Preparation, _: RequestId) {}
+
+    #[cfg(feature = "session-bearer")]
     fn park_bearer(&mut self, now: f64, token: Preparation, request: RequestId) {
         let Some(managed) = self.io.managed_http.get_mut(&request) else {
             return;

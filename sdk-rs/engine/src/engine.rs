@@ -1533,11 +1533,13 @@ struct Io<P> {
     managed_http: crate::IdMap<RequestId, http_lifecycle::Managed>,
     /// Managed requests bound to each Session generation's Bearer. At most a
     /// few live Sessions, so a scan beats another map type in every build.
+    #[cfg(feature = "session-bearer")]
     bearer_bound: Vec<(u64, Vec<RequestId>)>,
     /// Bound preparations a Session retire fenced, failed after the callback.
     #[cfg(feature = "session-bearer")]
     bearer_fenced: Vec<crate::request_context::Preparation>,
     /// Unreleased Bearer calls parked on (generation, request), in park order.
+    #[cfg(feature = "session-bearer")]
     bearer_parked: Vec<(u64, RequestId)>,
     /// Generations whose venue announced a bundle; drained after the callback.
     #[cfg(feature = "session-bearer")]
@@ -1652,9 +1654,11 @@ impl<P> Default for Io<P> {
             http_responses: Default::default(),
             http_write_revision: 0,
             managed_http: Default::default(),
+            #[cfg(feature = "session-bearer")]
             bearer_bound: Vec::new(),
             #[cfg(feature = "session-bearer")]
             bearer_fenced: Vec::new(),
+            #[cfg(feature = "session-bearer")]
             bearer_parked: Vec::new(),
             #[cfg(feature = "session-bearer")]
             bearer_woken: Vec::new(),
