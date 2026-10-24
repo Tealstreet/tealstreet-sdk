@@ -198,7 +198,7 @@ Generic callees are closed. A generic parameter can call `request`/`fail`
 only through a trait implemented for `Cx`, and such an impl is refused.
 Review must reject the free-function store shape as deliberate evasion.
 
-## Escape fallback (ruling claude-ddi2il, definition pinned with claude-4yjlw0)
+## Escape fallback (ruling claude-ddi2il, definition pinned with claude-4yjlw0); tightened below
 
 Chasing each syntax shape is replaced by one conservative rule. A Cx-typed
 parameter, a Cx-typed closure parameter, or an untyped or `_`-containing
@@ -248,3 +248,34 @@ test, both byte-identical, with 155 drops:
 The mapping JSON lists each drop. The self-helper drops are intentional: they
 occur only where the caller's Cx does not escape, and the helper body stays
 inventoried.
+
+## Tightened escape rule (ruling claude-ddi2il, with claude-4yjlw0's addendum)
+
+- **Clause (1).** A call carrying a possibly-Cx argument is analysed only when
+  that argument is the sole non-literal argument, or when the callee resolves
+  unambiguously. Unambiguous means every same-named fn, method or trait method
+  in the workspace (`sdk-rs/*/**/src`) takes a Cx-typed parameter at that
+  position, with a method's `self` excluded. A generic or non-Cx parameter in
+  any namesake, or an unresolved name, makes the call an escape:
+  - `stash(vr, cx)`, `stash(&mut *vr, cx)` and `stash(v.as_mut(), cx)`
+    escape;
+  - so does a generic `stash<T>` shadowed by a Cx-typed `stash` elsewhere.
+
+  A local closure variable (`let g = ..; g(cx)`) is never an analysed callee.
+  The earlier wrapper, local-receiver and consumed-result conditions still
+  apply.
+- **Clause (2).** An escape of a closure's possibly-Cx parameter, or a closure
+  capturing an outer Cx, also taints the enclosing function. So
+  `let mut g = |c| v.push(c); g(cx)` and `run(cx, |c| v.push(c))` count.
+
+REDs: `test_a_cx_beside_another_non_literal_argument_needs_an_unambiguous_cx_parameter`
+and `test_closure_escapes_taint_the_enclosing_function`. All six cases fail
+against the `d5f5fba5329` checker and pass now.
+
+Rebaseline at `49f7d1857b6` (712 entries):
+- Kept byte-identical: 630 in prod and 12 in test. The test entries are
+  cfg(test) sites whose Cx escapes.
+- Dropped: 70 (macro 57, field read 10, other member 2, qualified 1).
+- There are no self-helper drops left. The engine's own `Cx::request`/`fail`
+  share those helper names with a non-Cx first parameter, so helper calls no
+  longer resolve unambiguously.
