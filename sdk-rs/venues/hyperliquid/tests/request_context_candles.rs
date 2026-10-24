@@ -618,7 +618,7 @@ fn native_preflight_failures_keep_their_messages_and_unclassified_metadata() {
 }
 
 #[test]
-fn merged_spot_candles_remain_on_the_existing_legacy_path() {
+fn merged_spot_and_perps_candles_share_managed_custody() {
     let mut e = boot_modes(false, false, true);
     e.handle(
         NOW,
@@ -632,14 +632,9 @@ fn merged_spot_candles_remain_on_the_existing_legacy_path() {
         }),
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(_))));
-    let request = actions
-        .into_iter()
-        .find_map(|a| match a {
-            Action::Http(r) => Some(r),
-            _ => None,
-        })
-        .expect("held merged spot path stays legacy");
+    let (token, _) = preparation(&actions);
+    let (permit, request) = bind(&mut e, token, NOW);
+    assert!(matches!(e.claim_http(NOW, permit), Ok(Claim::Released(_))));
     assert_eq!(
         request.body.as_deref(),
         Some(
