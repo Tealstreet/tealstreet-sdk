@@ -164,7 +164,9 @@ class RequestContextBan(unittest.TestCase):
 
 # Venue helpers whose matching parameter is unambiguously Cx-typed.
 HELPERS = ("fn request(&mut self, cx: &mut Cx<'_, P>, command: u64) {} "
-           "fn fail(&mut self, cx: &mut Cx<'_, P>, command: u64, error: E) {} ")
+           "fn fail(&mut self, cx: &mut Cx<'_, P>, command: u64, error: E) {} "
+           "fn helper(cx: &mut Cx<'_, P>, n: u32) {} fn other(cx: &mut Cx<'_, P>) {} "
+           "fn bump(&mut self, cx: &mut Cx<'_, P>) {} ")
 
 
 def in_cx_fn(body, name='cx'):
@@ -247,10 +249,10 @@ class PrecisionRed(unittest.TestCase):
             with self.subTest(escape=escape):
                 self.assertEqual(sum(self.prod(in_cx_fn(escape + ' ' + unrelated)).values()), 2)
         # Without an escape the same unrelated references record nothing.
-        for analysed in ['helper(cx, 1);', 'self.helper(cx, 1);', 'account.bump(cx);',
-                         'other(&mut *cx);', 'return helper(cx);', 'let t = cx.now;']:
+        for analysed in ['helper(cx, 1);', 'self.bump(cx);', 'account.bump(cx);',
+                         'other(&mut *cx);', 'return other(cx);', 'let t = cx.now;']:
             with self.subTest(analysed=analysed):
-                self.assertFalse(self.prod(in_cx_fn(analysed + ' ' + unrelated)))
+                self.assertFalse(self.prod(HELPERS + in_cx_fn(analysed + ' ' + unrelated)))
 
     def test_a_cx_beside_another_non_literal_argument_needs_an_unambiguous_cx_parameter(self):
         # ESCAPE clause (1): sole non-literal argument, or every same-named fn takes a Cx there.
@@ -263,11 +265,39 @@ class PrecisionRed(unittest.TestCase):
         # A generic stash shadowed by a Cx-typed stash elsewhere is still ambiguous.
         shadowed = generic + "fn stash(v: &mut Vec<u8>, cx: &mut Cx<'_, P>) {} "
         self.assertEqual(sum(self.prod(shadowed + in_cx_fn('stash(vr, cx);' + unrelated)).values()), 1)
-        # Unresolved names escape; an unambiguous Cx parameter or a sole argument is analysed.
-        self.assertEqual(sum(self.prod(in_cx_fn('unknown(vr, cx);' + unrelated)).values()), 1)
+        # Unresolved names escape, even as the sole argument (allowlist); an
+        # unambiguous Cx parameter is analysed.
+        for body in ['unknown(vr, cx);', 'unknown(cx, 1, "x");', 'unknown(cx);']:
+            with self.subTest(body=body):
+                self.assertEqual(sum(self.prod(in_cx_fn(body + unrelated)).values()), 1)
         typed = "fn record(v: &mut Vec<u8>, cx: &mut Cx<'_, P>) {} "
         self.assertFalse(self.prod(typed + in_cx_fn('record(vr, cx);' + unrelated)))
-        self.assertFalse(self.prod(in_cx_fn('unknown(cx, 1, "x");' + unrelated)))
+
+    def test_only_an_allowlisted_resolved_callee_is_analysed(self):
+        unrelated = ' h.done(1);'
+        sink = 'fn mk<\'a, T>(v: &\'a mut Vec<T>) -> impl FnMut(T) + \'a { move |t| v.push(t) } '
+        relay = "fn apply<F: FnMut(&mut Cx<'_, P>)>(cx: &mut Cx<'_, P>, mut g: F) { g(cx); } "
+        replace = "fn replace(&mut self, cx: &mut Cx<'_, P>) {} "
+        for source in [
+            # Closures however bound (4yjlw0 P1).
+            sink + in_cx_fn('if let Some(mut g) = Some(mk(&mut v)) { g(cx); }' + unrelated),
+            sink + in_cx_fn('let (mut g,) = (mk(&mut v),); g(cx);' + unrelated),
+            sink + in_cx_fn('for mut g in [mk(&mut v)] { g(cx); }' + unrelated),
+            # A resolved callee whose own Cx escapes is no analysed callee.
+            sink + relay + in_cx_fn('apply(cx, mk(&mut v));' + unrelated),
+            # Paths and renames never resolve (P2), even beside a namesake method.
+            replace + in_cx_fn('std::mem::replace(&mut slot, cx);' + unrelated),
+            replace + 'use std::mem::replace as other; ' + HELPERS + in_cx_fn('other(cx);' + unrelated),
+            # A name bound locally shadows the fn item (addendum a).
+            HELPERS + in_cx_fn('let other = |c| v.push(c); other(cx);' + unrelated),
+            HELPERS + "fn f(other: impl FnMut(&mut Cx<'_, P>), cx: &mut Cx<'_, P>) { other(cx);" + unrelated + ' }',
+            # Any import of the name, or any glob, may name something else (addendum b).
+            'use crate::sink::other; ' + HELPERS + in_cx_fn('other(cx);' + unrelated),
+            'use super::*; ' + HELPERS + in_cx_fn('other(cx);' + unrelated),
+        ]:
+            with self.subTest(source=source):
+                self.assertGreaterEqual(sum(self.prod(source).values()), 1)
+                self.assertIn(ban.fingerprints('h.done(1);').popitem()[0], self.prod(source))
 
     def test_closure_escapes_taint_the_enclosing_function(self):
         unrelated = ' h.done(1);'
@@ -303,7 +333,7 @@ class PrecisionRed(unittest.TestCase):
         for body in ['cx.store.done(1);', 'let s = cx.now; s.done(1);', 'if read.request.done { }',
                      'account.bump(cx); account.request(cx, 1);']:
             with self.subTest(body=body):
-                self.assertFalse(self.prod(in_cx_fn(body)))
+                self.assertFalse(self.prod(HELPERS + in_cx_fn(body)))
 
     def test_a_macro_carrying_a_cx_value_taints_its_function(self):
         source = 'macro_rules! id { ($e:expr) => { $e } } ' + in_cx_fn('id!(cx).fail(1, e);')

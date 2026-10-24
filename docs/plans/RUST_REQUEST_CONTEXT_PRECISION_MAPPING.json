@@ -196,11 +196,8 @@
     }
   },
   "venues/backpack/src/trading.rs": {
-    "dropped": {
-      "9ecfe514716e00b34e5c7703e920e8dc9024caab0837bbf2949a3a78d4eb842b": {
-        "count": 1,
-        "reason": "macro"
-      }
+    "kept": {
+      "9ecfe514716e00b34e5c7703e920e8dc9024caab0837bbf2949a3a78d4eb842b": 1
     }
   },
   "venues/binance/src/history.rs": {
@@ -260,16 +257,10 @@
       "4fd69fe1e61d7806268e180e1316430a4f1412b5b180eee8a9d78451ac57c7d9": 1,
       "5a3ecde1bdd5b82ea5d3f97b6da8fa145ee3d7db5f208cc0f5157b22ac098f3c": 1,
       "b8981ba6ded29689d47b26a8a93c34eb801bdbb171693c719f0eef8a920e632c": 1,
-      "f025fc43a750a2590ced1ab109e5ee504164bf8505fdfb4ffec28b246dacd511": 1
+      "f025fc43a750a2590ced1ab109e5ee504164bf8505fdfb4ffec28b246dacd511": 2
     },
     "test": {
       "8907f38dcee7367c011ac797732f8780004c6710d7395d59812584ac876a5ddc": 1
-    },
-    "dropped": {
-      "f025fc43a750a2590ced1ab109e5ee504164bf8505fdfb4ffec28b246dacd511": {
-        "count": 1,
-        "reason": "macro"
-      }
     }
   },
   "venues/bingx/src/lib.rs": {
@@ -293,11 +284,8 @@
     }
   },
   "venues/bitget/src/account.rs": {
-    "dropped": {
-      "82526deadb90ca87ae4b944fb55949a9d323406dbfcc1fff45cc9a5ea16df6a0": {
-        "count": 1,
-        "reason": "macro"
-      }
+    "kept": {
+      "82526deadb90ca87ae4b944fb55949a9d323406dbfcc1fff45cc9a5ea16df6a0": 1
     }
   },
   "venues/bitget/src/history.rs": {
@@ -365,19 +353,10 @@
   "venues/bitrue/src/trading.rs": {
     "kept": {
       "2f0770d2ea5f5246cd2ddcd35b614bce738e564c2d95193ff5a84eb8479811e5": 1,
-      "6d2c051bb24db8acd1986f4e47c2b6dbede5aa9dfff7fb877e64ef194107bd53": 3,
+      "6d2c051bb24db8acd1986f4e47c2b6dbede5aa9dfff7fb877e64ef194107bd53": 4,
+      "afb3c3744f13da9606f5f456bd95797992a932cf227eb74b2fe4405e3c64ee98": 1,
       "b780b823ba70712169e1be98fecae4d2a2655f7ca35f27bea4b99f09bd684696": 1,
       "dcb84cef5dcb71801d2b1b9562fcfc84b0431681917a0b6b9d2314f2e050630e": 1
-    },
-    "dropped": {
-      "6d2c051bb24db8acd1986f4e47c2b6dbede5aa9dfff7fb877e64ef194107bd53": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "afb3c3744f13da9606f5f456bd95797992a932cf227eb74b2fe4405e3c64ee98": {
-        "count": 1,
-        "reason": "macro"
-      }
     }
   },
   "venues/bitunix/src/account.rs": {
@@ -393,14 +372,8 @@
       "5d6691e305370ef1b5e22426e494d28b28936de80d5d5af079e9deae52eb33f2": 1,
       "67b7e6451565bda29255c0f41f9f46bfc8309ec5998b99f6e286840574190e1c": 1,
       "c75a7e2cea8f3da1f10de9b8aa940fb4fcd3c57ddbccaf72faa83ab9c6e6fcdb": 1,
-      "e844b5bdfef1fbcdb97ebe211443d5dd47ca3b0ddd4f3c4d63512b2db77c6f81": 1,
+      "e844b5bdfef1fbcdb97ebe211443d5dd47ca3b0ddd4f3c4d63512b2db77c6f81": 2,
       "f8b99f320746bee1eaad4962337f49532934f311df03900770ee8305e576db60": 1
-    },
-    "dropped": {
-      "e844b5bdfef1fbcdb97ebe211443d5dd47ca3b0ddd4f3c4d63512b2db77c6f81": {
-        "count": 1,
-        "reason": "macro"
-      }
     }
   },
   "venues/blofin/src/account.rs": {
@@ -432,13 +405,8 @@
       "368af85f963a94d4984aa5e5d920f2728ce55064b20be7dea5116c8cde1a251e": 1,
       "3c6e80032656d492647546e807c37c73b3593d225419189ac1d8531e2e16fb1b": 1,
       "604f28d91adfdb4cd0caac06047abd9569f9a6c248b698a784032256d7cf8047": 1,
-      "af0b7f916c07c8f53f3b2731f1c70b01fa5b0253ae68ebc878782fdf2ef51817": 1
-    },
-    "dropped": {
-      "afb3c3744f13da9606f5f456bd95797992a932cf227eb74b2fe4405e3c64ee98": {
-        "count": 1,
-        "reason": "macro"
-      }
+      "af0b7f916c07c8f53f3b2731f1c70b01fa5b0253ae68ebc878782fdf2ef51817": 1,
+      "afb3c3744f13da9606f5f456bd95797992a932cf227eb74b2fe4405e3c64ee98": 1
     }
   },
   "venues/breakoutprop/src/lib.rs": {
@@ -447,14 +415,11 @@
       "5ec25581383dfb245bad7d461dd05d709edcb44ba7364f8155f1ca965621bb4b": 1,
       "a6e5e202ae627122d304a84fc991af3386b3af0c2b063603269df46cb621c442": 1,
       "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-      "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 2
+      "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 2,
+      "e3e2f080f0b64561a5c15c9e68e0079d0f0a4b8470dac3d45e23b81a28d2c6f1": 1
     },
     "dropped": {
       "684e58b8d404229727a4e3de4ace4062432fcfddb0988492e5d1fdf763a83436": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "e3e2f080f0b64561a5c15c9e68e0079d0f0a4b8470dac3d45e23b81a28d2c6f1": {
         "count": 1,
         "reason": "macro"
       }
@@ -463,15 +428,9 @@
   "venues/breakoutprop/src/trading.rs": {
     "kept": {
       "00d25809332a0d94366c69ef735773a6dfd0085c08be94fdbac8a23f299b3e48": 1,
-      "28d8459bbb564da129b874b0c4cb9e3d79277650ae1212feca90a9f832a9b3e2": 1,
+      "28d8459bbb564da129b874b0c4cb9e3d79277650ae1212feca90a9f832a9b3e2": 2,
       "836d00ef1198446d8fde0e17e23ca7554316c975f03f9e2d91ff3f64a84aad98": 1,
       "ea0ff1d0bf1689d0410b0bcc1cbbeedc2fa1bec60349440b50760648369edf0e": 1
-    },
-    "dropped": {
-      "28d8459bbb564da129b874b0c4cb9e3d79277650ae1212feca90a9f832a9b3e2": {
-        "count": 1,
-        "reason": "macro"
-      }
     }
   },
   "venues/bybit/src/hyro.rs": {
@@ -684,13 +643,8 @@
   },
   "venues/hyperliquid/src/account.rs": {
     "kept": {
+      "0d24dec8fa74e4810d472aca9a0aaf81f2d338e73e475d69a163f5168cbb0c2d": 2,
       "3eb26e27ee804a373b24beefa2c8b24dd136f301503a8403319508106f46ab60": 1
-    },
-    "dropped": {
-      "0d24dec8fa74e4810d472aca9a0aaf81f2d338e73e475d69a163f5168cbb0c2d": {
-        "count": 2,
-        "reason": "field"
-      }
     }
   },
   "venues/hyperliquid/src/lib.rs": {
@@ -758,13 +712,7 @@
     "kept": {
       "29a69618a4d60ba5b2b3e3872f6ab2e1c20013d981a27fb056e9a0d633b3ceb6": 1,
       "3ca5b7c3e3f6d4be96de522ae9a17db768465c99cadb29ec2198961b73f6f929": 1,
-      "6aa843b32406cb28ef9b16bd489f69dd2529f140fa9642a7f09ccc62943ef76d": 1
-    },
-    "dropped": {
-      "6aa843b32406cb28ef9b16bd489f69dd2529f140fa9642a7f09ccc62943ef76d": {
-        "count": 1,
-        "reason": "macro"
-      }
+      "6aa843b32406cb28ef9b16bd489f69dd2529f140fa9642a7f09ccc62943ef76d": 2
     }
   },
   "venues/kraken/src/spot/trading.rs": {
@@ -777,14 +725,8 @@
     "kept": {
       "06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3": 1,
       "604f28d91adfdb4cd0caac06047abd9569f9a6c248b698a784032256d7cf8047": 1,
-      "9584979d6cce6bf6576093402c85d6195493ed09a64ba6f72927c8f53bf61847": 1,
+      "9584979d6cce6bf6576093402c85d6195493ed09a64ba6f72927c8f53bf61847": 2,
       "ca37246cf8052b21b57e7f1400b1026f755a6bdaadfe661eb481c929ddcc2d68": 1
-    },
-    "dropped": {
-      "9584979d6cce6bf6576093402c85d6195493ed09a64ba6f72927c8f53bf61847": {
-        "count": 1,
-        "reason": "macro"
-      }
     }
   },
   "venues/kucoin/src/account.rs": {
@@ -1212,23 +1154,13 @@
   "venues/weex/src/account.rs": {
     "kept": {
       "081836d9c7754374dd638220175c8309762a6051bf903c4086657abeaa132928": 1,
-      "1780f5566f27a646218b3f4bd05ca0105232d2564f706a1a1b073bd62617aa6b": 1,
+      "1780f5566f27a646218b3f4bd05ca0105232d2564f706a1a1b073bd62617aa6b": 2,
       "66e350394c2f8827347498da5d2d080b56a08e9d8fb58e6643810b8b6868353f": 1,
       "7b3506f07b5fc4e26ae133a6f96e0e77d2c65bd80f117982dad67dfd800a3c7c": 1,
-      "ad97274a8e870ff3a426895727bd6f3c1a3b32db2a5a53000851ed27da09b3b5": 3,
+      "ad97274a8e870ff3a426895727bd6f3c1a3b32db2a5a53000851ed27da09b3b5": 4,
       "bbe154e63f6392afb4e62ef9d8cd214a20497c58bcffd3f4811ae22309ede175": 2,
       "f0ba50adb6e075b899a05e5cc6033e2e9fd34b68771a89d5c56c393c88ef362c": 1,
       "f647ab9388bbdecfb96530a66f5c9c87a6cd014cbd48e17f4263f7c00d3447e8": 1
-    },
-    "dropped": {
-      "1780f5566f27a646218b3f4bd05ca0105232d2564f706a1a1b073bd62617aa6b": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "ad97274a8e870ff3a426895727bd6f3c1a3b32db2a5a53000851ed27da09b3b5": {
-        "count": 1,
-        "reason": "macro"
-      }
     }
   },
   "venues/weex/src/history.rs": {

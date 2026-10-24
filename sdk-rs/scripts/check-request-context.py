@@ -374,16 +374,9 @@ def enclosing_call(stream, index):
     return None
 
 
-LITERAL = re.compile(r'(?:b|c|r#*|br#*)?["\'0-9]|(?:true|false)$')
-
-
-def literal(part):
-    part = part[1:] if part[:1] == ['-'] else part
-    return len(part) == 1 and LITERAL.match(part[0]) is not None
-
-
 def signatures(stream):
-    """{name: [(has_self, Cx-typed parameter indices)]} for this source's fn items."""
+    """{name: [definition]} for this source's fn items, each with its Cx-typed
+    parameter positions (self excluded) and body; `escapes` is filled later."""
     found = collections.defaultdict(list)
     for i, token in enumerate(stream):
         if token != 'fn' or i + 2 >= len(stream) or not IDENT.fullmatch(stream[i + 1]):
@@ -393,56 +386,83 @@ def signatures(stream):
             j = group_end(stream, j)
         if stream[j] != '(':
             continue
-        parts = split_top(stream[j + 1:group_end(stream, j) - 1])
+        params_end = group_end(stream, j)
+        parts = split_top(stream[j + 1:params_end - 1])
         has_self = bool(parts) and 'self' in parts[0] and (':' not in parts[0] or parts[0][0] == 'self')
         params = parts[1:] if has_self else parts
-        cx = frozenset(k for k, part in enumerate(params)
-                       if ':' in part and cx_type(part[part.index(':') + 1:], 0) is not None)
-        found[stream[i + 1]].append((has_self, cx))
+        k = params_end
+        while k < len(stream) and stream[k] not in {'{', ';'}:
+            k = group_end(stream, k) if stream[k] in {'(', '['} else k + 1
+        body = (k, group_end(stream, k)) if k < len(stream) and stream[k] == '{' else None
+        found[stream[i + 1]].append({
+            'self': has_self, 'body': body, 'escapes': False,
+            'cx': frozenset(n for n, part in enumerate(params)
+                            if ':' in part and cx_type(part[part.index(':') + 1:], 0) is not None)})
     return found
 
 
-def cx_parameter(index, callee, position, method):
-    """Every workspace fn named `callee` takes a Cx at this argument position."""
-    candidates = index.get(callee, [])
-    def takes(has_self, cx):
+def cx_parameter(index_of, callee, position, method):
+    """Every same-named workspace fn takes a non-escaping Cx at this argument position."""
+    candidates = index_of.get(callee, [])
+
+    def takes(definition):
+        if definition['escapes']:
+            return False
         if method:
-            return has_self and position in cx
-        return (position - 1 in cx) if has_self else (position in cx)
-    return bool(candidates) and all(takes(*candidate) for candidate in candidates)
+            return definition['self'] and position in definition['cx']
+        return not definition['self'] and position in definition['cx']
+    return bool(candidates) and all(takes(definition) for definition in candidates)
 
 
-def local_binding(stream, name, before):
-    """`let name` (a local closure or value) earlier in the same function."""
-    return any(stream[k] == 'let' and name in stream[k + 1:k + 3] for k in range(max(0, before - 4000), before))
+def imports(stream):
+    """Names a non-glob `use` brings in, and whether any `use` is a glob."""
+    names, glob = set(), False
+    for i, token in enumerate(stream):
+        if token == 'use':
+            end = i + stream[i:].index(';')
+            names |= {t for t in stream[i + 1:end] if IDENT.fullmatch(t)}
+            glob = glob or '*' in stream[i + 1:end]
+    return names, glob
 
 
-def analysed_argument(stream, found, index, index_of):
-    """A plain argument the callee analyses: not a store, wrapper or consumed result."""
+def bound_locally(stream, found, name, at, bodies):
+    """`name` is a parameter, or appears as a non-call earlier in its function."""
+    if innermost(found, name, at) is not None:
+        return True
+    enclosing = [start for start, end in bodies if start <= at < end]
+    start = max(enclosing, default=0)
+    return any(stream[k] == name and stream[k + 1:k + 2] != ['('] and stream[k - 1] not in {'.', '::'}
+               for k in range(start, at))
+
+
+def analysed_argument(stream, found, index, context):
+    """Allowlist (ruling claude-ddi2il): the Cx goes to a bare fn or a method on self
+    or a concrete non-Cx parameter, resolving to a non-escaping Cx-typed parameter;
+    the call is a whole statement, tail or return. Everything else escapes."""
+    index_of, bodies, (imported, glob) = context
     if not call_argument(stream, index):
         return False
     opening = enclosing_call(stream, index)
     callee = stream[opening - 1]
-    if not IDENT.fullmatch(callee) or callee[0].isupper():
-        return False  # A constructor or wrapper holds the Cx.
-    method = stream[opening - 2:opening - 1] == ['.']
-    if not method and stream[opening - 2:opening - 1] != ['::'] and local_binding(stream, callee, opening):
-        return False  # A local closure variable is not an analysed callee.
-    close = group_end(stream, opening)
-    parts = list(arguments(stream, opening, close))
-    position = next(k for k, (start, part) in enumerate(parts) if start <= index < start + len(part))
-    others = [part for k, (_, part) in enumerate(parts) if k != position and not literal(part)]
-    # Sole non-literal argument, or a resolved Cx-typed parameter (ruling claude-ddi2il).
-    if others and not cx_parameter(index_of, callee, position, method):
-        return False
-    if opening >= 2 and stream[opening - 2] == '.':
+    prefix = stream[opening - 2] if opening >= 2 else ''
+    if not IDENT.fullmatch(callee) or prefix == '::':
+        return False  # Paths (std::mem::replace, renames) and non-identifier callees escape.
+    method = prefix == '.'
+    if method:
         try:
             root = receiver_start(stream, opening - 1)
         except ValueError:
             return False
         binding = innermost(found, stream[root], root) if IDENT.fullmatch(stream[root]) else None
-        if stream[root] not in {'self', 'Self'} and (binding is None or binding[0] != 'other'):
+        if stream[root] != 'self' and (binding is None or binding[0] != 'other'):
             return False  # A local receiver may store it (v.push(cx), h.set(cx)).
+    elif glob or callee in imported or bound_locally(stream, found, callee, opening, bodies):
+        return False  # A local closure, an import or a glob may name something else.
+    close = group_end(stream, opening)
+    position = next(k for k, (start, part) in enumerate(arguments(stream, opening, close))
+                    if start <= index < start + len(part))
+    if not cx_parameter(index_of, callee, position, method):
+        return False
     after = close
     while stream[after:after + 1] == ['?']:
         after += 1
@@ -485,6 +505,7 @@ def tainted_scopes(stream, found, declarations, index_of):
     tainted = set()
     closures = closure_bodies(stream)
     bodies = function_bodies(stream)
+    context = (index_of, bodies, imports(stream))
     for i, token in enumerate(stream):
         if not IDENT.fullmatch(token) or i in declarations or (i and stream[i - 1] in {'.', '::'}):
             continue
@@ -494,7 +515,7 @@ def tainted_scopes(stream, found, declarations, index_of):
         member = stream[i + 1:i + 2] == ['.'] and stream[i + 2:i + 3] != ['.']
         # A closure capturing the Cx may be stored or returned with it.
         captured = any(start <= i < end and binding[1] < start for start, end in closures)
-        if captured or not (member or analysed_argument(stream, found, i, index_of)):
+        if captured or not (member or analysed_argument(stream, found, i, context)):
             tainted.add((binding[1], binding[2]))
             if binding[0] == 'closure' or any(start <= binding[1] < end for start, end in closures):
                 # A closure may store into its enclosing function's locals.
@@ -502,6 +523,28 @@ def tainted_scopes(stream, found, declarations, index_of):
                 if enclosing:
                     tainted.add(min(enclosing, key=lambda body: body[1] - body[0]))
     return sorted(tainted)
+
+
+def escape_index(streams):
+    """Workspace signatures with `escapes` settled to a fixpoint: a fn whose Cx
+    parameter escapes in its body is no analysed callee for its own callers."""
+    index_of = collections.defaultdict(list)
+    analysed = []
+    for stream in streams:
+        own = signatures(stream)
+        for name, definitions in own.items():
+            index_of[name] += definitions
+        found, declarations, _ = bindings(stream)
+        analysed.append((stream, found, declarations, [d for ds in own.values() for d in ds if d['cx']]))
+    changed = True
+    while changed:
+        changed = False
+        for stream, found, declarations, definitions in analysed:
+            tainted = set(tainted_scopes(stream, found, declarations, index_of))
+            for definition in definitions:
+                if not definition['escapes'] and definition['body'] in tainted:
+                    definition['escapes'] = changed = True
+    return index_of
 
 
 def function_bodies(stream):
@@ -548,7 +591,7 @@ def context_fingerprints(source, index_of=None):
     `index_of` maps fn names to their workspace signatures; the source's own by default."""
     stream = tokens(source)
     if index_of is None:
-        index_of = signatures(stream)
+        index_of = escape_index([stream])
     definitions = []
     for i, token in enumerate(stream):
         if token == 'macro_rules' and stream[i + 1:i + 2] == ['!']:
@@ -666,11 +709,8 @@ def request_sites():
     test_files = reachable([child for links in children.values() for child, is_test in links if is_test],
                            True) - reachable(roots, False)
     # Clause (1) resolves a callee against every same-named fn in the workspace.
-    index_of = collections.defaultdict(list)
-    for path in sorted(ROOT.glob('*/**/src/**/*.rs')):
-        if 'target' not in path.relative_to(ROOT).parts:
-            for name, found in signatures(tokens(path.read_text())).items():
-                index_of[name] += found
+    index_of = escape_index([tokens(path.read_text()) for path in sorted(set(ROOT.glob('*/**/src/**/*.rs')))
+                             if 'target' not in path.relative_to(ROOT).parts])
     prod, test = {}, {}
     for path, source in sources.items():
         relative = str(path.relative_to(root))
