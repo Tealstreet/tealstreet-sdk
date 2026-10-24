@@ -19,7 +19,7 @@ fn engine() -> Engine<WeexFutures> {
 }
 fn command(e: &mut Engine<WeexFutures>, query: Query) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::Query { command: 7, query }));
-    e.drain_actions().collect()
+    support::managed::drain(e, NOW)
 }
 fn request(actions: &[Action], path: &str) -> HttpRequest {
     actions
@@ -42,7 +42,7 @@ fn response(e: &mut Engine<WeexFutures>, now: f64, id: RequestId, body: &str) ->
             },
         },
     );
-    e.drain_actions().collect()
+    support::managed::drain(e, now)
 }
 fn result(actions: &[Action]) -> Result<String, String> {
     actions
@@ -85,15 +85,16 @@ fn no_completion(actions: &[Action]) {
 fn advance(e: &mut Engine<WeexFutures>, now: &mut f64, actions: Vec<Action>) -> Vec<Action> {
     let (timer, at) = actions
         .iter()
-        .find_map(|a| match a {
+        .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
             _ => None,
         })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
         .expect("paced history timer");
     assert!(at >= *now + 100.0);
     *now = at;
     e.handle(*now, Event::TimerFired { timer });
-    e.drain_actions().collect()
+    support::managed::drain(e, *now)
 }
 fn income(from: Option<f64>, to: Option<f64>) -> Query {
     Query::Income {
@@ -210,7 +211,7 @@ fn failed_income_page(e: &mut Engine<WeexFutures>, req: HttpRequest, mode: u8) -
         }
         _ => unreachable!(),
     }
-    e.drain_actions().collect()
+    support::managed::drain(e, NOW)
 }
 fn full_income_page() -> String {
     format!(
@@ -329,7 +330,7 @@ fn owned_income_partial_cannot_mark_or_complete_a_pending_neighbour() {
             query: income(None, None),
         }),
     );
-    let neighbour = request(&e.drain_actions().collect::<Vec<_>>(), "/account/income");
+    let neighbour = request(&support::managed::drain(&mut e, now), "/account/income");
     let actions = failed_income_page(&mut e, req, 0);
     owned_income_partial(&actions, 100);
     assert!(!actions.iter().any(|a| matches!(
@@ -593,7 +594,7 @@ fn failed_algo_history_retains_valid_normal_rows_with_owned_incompleteness() {
             error: "connection reset",
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = support::managed::drain(&mut e, NOW);
     owned_income_partial(&actions, 1);
 }
 #[test]
@@ -746,7 +747,7 @@ fn ban(e: &mut Engine<WeexFutures>) {
             },
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = support::managed::drain(e, NOW);
     e.handle(
         NOW,
         Event::HttpResponse {
@@ -922,7 +923,7 @@ fn later_income_failure_emits_native_owned_fixture_before_partial_success_at_err
             query: income(Some(NOW), Some(NOW + 1000.0)),
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = support::managed::drain(&mut e, NOW);
     let req = request(&actions, "/account/income");
     let actions = response(&mut e, NOW, req.id, &full_income_page());
     let mut now = NOW;
@@ -935,7 +936,7 @@ fn later_income_failure_emits_native_owned_fixture_before_partial_success_at_err
             error: "page reset",
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = support::managed::drain(&mut e, NOW);
     owned_incomplete(&actions, 1);
     let event = actions
         .iter()
@@ -969,7 +970,18 @@ fn later_income_failure_emits_native_owned_fixture_before_partial_success_at_err
 fn lifetime_income_budget_marker_is_owned_before_retained_rows_finish() {
     let mut e = engine();
     let mut now = NOW;
-    let mut actions = command(&mut e, income(Some(NOW), Some(NOW + 5001.0 * 100.0 * DAY)));
+    // Exercise the native 10,000-request budget with an explicit caller wait
+    // large enough for the unchanged 100 ms page/chunk pacing.
+    e.handle_command(
+        NOW,
+        Command::Query {
+            command: 7,
+            query: income(Some(NOW), Some(NOW + 5001.0 * 100.0 * DAY)),
+        },
+        Some(2_000_000),
+    )
+    .unwrap();
+    let mut actions = support::managed::drain(&mut e, NOW);
     let mut requests = 0;
     loop {
         if actions
@@ -1048,7 +1060,7 @@ fn list_failure(e: &mut Engine<WeexFutures>, r: HttpRequest, mode: u8) -> Vec<Ac
                 error: "list reset",
             },
         );
-        return e.drain_actions().collect();
+        return support::managed::drain(e, NOW);
     }
     if mode == 1 {
         e.handle(
@@ -1062,7 +1074,7 @@ fn list_failure(e: &mut Engine<WeexFutures>, r: HttpRequest, mode: u8) -> Vec<Ac
                 },
             },
         );
-        return e.drain_actions().collect();
+        return support::managed::drain(e, NOW);
     }
     let (prefix, algo) = if r.url.contains("allAlgoOrders") {
         (
@@ -1360,7 +1372,7 @@ fn missing_fill_identity_warning_is_per_query_across_windows_and_other_queries_s
             query: identity_fills(None, None),
         }),
     );
-    let other: Vec<_> = e.drain_actions().collect();
+    let other: Vec<_> = support::managed::drain(&mut e, NOW);
     let other = request(&other, "/userTrades");
     let body = format!(
         "[{},{}]",
@@ -1468,7 +1480,7 @@ fn empty_fill_identity_semantic_marker_survives_error_only_logging_before_succes
             query: identity_fills(None, None),
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = support::managed::drain(&mut e, NOW);
     let r = request(&actions, "/userTrades");
     let body = format!(
         "[{},{}]",
