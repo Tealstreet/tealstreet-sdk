@@ -137,6 +137,12 @@ lineage are preserved: nothing is consumed while parked.
   `failure_projection`, so prior released attempts and #2016's inherited fact
   stay Unknown.
 
+**Outcome wording.** "Timeout/NotSent" here describes only the unissued
+attempt and the pending bookkeeping. The command terminal always comes from
+the common projection: a Read has no financial outcome, an initial Mutation is
+NotSent, and a prior released attempt or an inherited fact is Unknown. The wait
+never overrides an outcome.
+
 ### Composition with the Bearer hook (m26ps4)
 
 - A parked unit has no packet, so the Bearer hook never runs for it. After
@@ -201,6 +207,12 @@ New-contract REDs follow the API review:
   unreleased leg on the same Session, then retire. The bound failure seals the
   Plan (one terminal), there is no `on_plan_session_wait_ended`, the parked
   pending comes back once via `on_session_wait_expired`, and there is no HTTP.
+- N8b (mirrors Bearer R10b'): the bound failure does not seal, so the Plan
+  survives under its retry policy. `on_plan_session_wait_ended` runs exactly
+  once in ready custody after that failure, and `on_session_wait_expired` does
+  not run. Note that `session_failed` does not fence bound packets (they keep
+  their token unless the revision moves or the hook returns NotReady), so N4
+  only ends parked waits.
 - N7: Preflight. A parked read resumes as a fresh read context under the same
   Preflight generation, with the predecessor equal to the drain delivery.
 
