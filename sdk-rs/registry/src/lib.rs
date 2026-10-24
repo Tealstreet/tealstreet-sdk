@@ -474,6 +474,56 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
     Ok(())
 }
 
+/// Public operations one trusted setup may ask for at once.
+#[cfg(feature = "dispatch-signing")]
+const MAX_PUBLIC_OPERATIONS: usize = 4;
+
+/// Trusted setup only: public values of declared refs from a provider that
+/// answers inline. A host/remote provider gets `Unavailable` and nothing is
+/// scheduled; its values arrive as bound account metadata instead (P4).
+#[cfg(feature = "dispatch-signing")]
+pub fn fetch_public(
+    provider: &safe_cex_engine::signing::Provider,
+    operations: Vec<safe_cex_engine::signing::Operation>,
+) -> Result<Vec<Vec<u8>>, safe_cex_engine::signing::SignError> {
+    use safe_cex_engine::signing::{Operation, SignError, SignRequest};
+    if operations.is_empty()
+        || operations.len() > MAX_PUBLIC_OPERATIONS
+        || !operations.iter().all(|operation| {
+            matches!(
+                operation,
+                Operation::PublicAddress { .. } | Operation::PublicKey { .. }
+            )
+        })
+    {
+        return Err(SignError::InvalidRequest);
+    }
+    let request = SignRequest {
+        receipt: Default::default(),
+        operations,
+        context: Default::default(),
+    };
+    // A malformed request is refused first, whatever provider would answer.
+    request.validate()?;
+    if !provider.immediate() {
+        return Err(SignError::Unavailable);
+    }
+    let mut result = provider
+        .sign_ready(&request)
+        .ok_or(SignError::Unavailable)??;
+    request.validate_result(&result)?;
+    // Widths alone admit off-curve and non-canonical values from any provider.
+    if !request
+        .operations
+        .iter()
+        .zip(&result.values)
+        .all(|(operation, value)| safe_cex_crypto::signer::valid_public_value(operation, value))
+    {
+        return Err(SignError::InvalidResult);
+    }
+    Ok(std::mem::take(&mut result.values))
+}
+
 /// Trusted native/legacy setup. Consume fields once; never pass them to a venue.
 #[cfg(feature = "dispatch-signing")]
 pub fn prepare_local_signer(
@@ -1466,30 +1516,35 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "okx")]
         "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
-            if !options.public_data_only
-                && options.key.as_ref().is_some_and(|s| !s.is_empty())
-                && options.secret.as_ref().is_some_and(|s| !s.is_empty())
-                && options.passphrase.as_ref().is_none_or(|s| s.is_empty())
+            if options.key.as_ref().is_some_and(|s| !s.is_empty())
+                || options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                || options.passphrase.is_some()
+                || options.read_credentials.is_some()
             {
-                return Err(invalid("OKX requires a passphrase"));
+                return Err(invalid(
+                    "OKX credentials belong in signer setup, not engine options",
+                ));
             }
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    Okx::new(OkxOptions {
-                        read_credentials: options.read_credentials.take(),
-                        testnet: options.testnet || venue.ends_with("demo"),
-                        eea: venue.starts_with("okxeu"),
-                        public_data_only: options.public_data_only,
-                        key: options.key.take(),
-                        secret: options.secret.take(),
-                        passphrase: options.passphrase.take(),
-                    }),
-                    entropy,
-                )?,
-            )
+            let identities = options.signing.take().unwrap_or_default();
+            if let Some(identity) = &identities.secondary {
+                identity.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
+                Okx::new(OkxOptions {
+                    read_credentials: identities.secondary,
+                    testnet: options.testnet || venue.ends_with("demo"),
+                    eea: venue.starts_with("okxeu"),
+                    public_data_only: options.public_data_only,
+                    credentials: identities.primary,
+                }),
+                entropy,
+            )?;
+            engine.set_signer(signer)?;
+            finish(visitor, policy, startup, engine)
         }
         other => Err(invalid(format!("unsupported venue: {other}"))),
     }
