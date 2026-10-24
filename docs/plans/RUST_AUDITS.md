@@ -3243,3 +3243,28 @@ retry, paging, signing and write paths stay explicit legacy targets.
 Architecture gate: No. The adapter consumes engine admission, typed refusal and
 terminal authority directly, with one pure policy declaration and no local
 issuer, owner map, timer, retry loop or numeric completion fallback.
+
+## AsterDEX operation-aware local trade refusal custody
+
+Three numeric synchronous trading failures now converge on direct shared entry
+and Context diagnostic/failure. Operation is explicit from the caller, so a
+V1 FetchStpMode plan Err cannot become Mutation. Native credential/plan/capacity
+projection remains pure before entry, and both acknowledgement cleanup paths
+are deferred until successful local admission or native accepted-job dispatch.
+Selected remote jobs retain native custody without an abandoned managed owner.
+Exact removal is3F/3O; no engine, signer, callback, checker or staging exception
+changes. Native state pruning is endpoint policy; lifetime, rejection, terminal
+and credential-evidence authority stay in the engine.
+
+
+## GRVT remaining local refusal custody
+
+Planbc293 precedes originals216142 (8assertion RED/10GREEN). Execution pinned
+native absent Mutation outcome; the overseer approved shared NotSent, explicitly
+superseding only that outcome assertion at7e39 (12assertion RED/6GREEN). Core
+and native original reviews CLEAR. Production admits keyless Read or Mutation
+in genuine command entry, returns on shared rejection and uses fail_context
+with unchanged native text/kind. The provably dead private-phase arm is deleted;
+all earlier handlers and pre-entry refusals remain. Exactly two lib singleton
+hashes disappear; no catalog, account, trading, queue or signer adoption.
+All18 originals, library7 and trading42 pass; source reviews/CI remain separate.

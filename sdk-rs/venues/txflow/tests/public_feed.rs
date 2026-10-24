@@ -41,7 +41,8 @@ impl Rig {
     }
     fn run_until(&mut self, until: f64) {
         for _ in 0..1000 {
-            let actions: Vec<_> = self.engine.drain_actions().collect();
+            let actions =
+                safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now);
             for action in actions {
                 match action {
                     Action::Http(request) => {
