@@ -39,8 +39,13 @@ uses no SelectedRead because the native request is public and unsigned.
   and Timeout, and root expiry use canonical Read errors with outcome None.
   The native transport wrapper previously fabricated Network/NotSent; consuming
   the real typed failure is an intentional caller change to document in CALLERS.
-- Keep the shared 429 pause even when a response is stale. A new query can park
-  until that pause ends; the failed owner never retries. No new pacing or retry.
+- Preserve the native shared 429 pause only after exact live root/leg/attempt
+  admission for BookQuery. Managed ingress/root expiry discards expired or revoked
+  deliveries before the venue callback; their 429 cannot extend the shared pause.
+  This is an intentional change to document in CALLERS and prove with late-429
+  versus unrelated-live-query control. Unrelated discovery/account stale-seed or
+  cycle rate-signal policy remains unchanged. A new query can park until a live
+  response's pause ends; the failed owner never retries. No new pacing or retry.
 
 ## Intended direct cutover
 
@@ -78,7 +83,8 @@ must run before custody assertions. Do not fabricate missing methods or calls.
   without success or book publication. The live-before-deadline control succeeds.
 - A shared rate pause admits no child while parked; receipt expiry before dequeue
   strictly fails once. The stale pause timer cannot later release the request.
-- Live 429 still carries native classification and pause; a within-bound deferred
+- A late/revoked 429 cannot pause an unrelated live query, while a live 429
+  still carries native classification and pause; a within-bound deferred
   query still works. Public response never needs credentials/signing or startup.
 
 Additional source/readiness gates include exact delivery and issuer refusal,
