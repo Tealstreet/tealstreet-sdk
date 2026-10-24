@@ -1,6 +1,6 @@
 # TxFlow unsigned account-setting poll custody
 
-Plan-only next slice, owner codex-hcmq3f, 2026-10-25. Base is actual
+Plan and original controls, owner codex-hcmq3f, 2026-10-25. Base is actual
 `49f7d1857b66fc14f5164c8ca82ce42d48a53c1d`. No production, inventory, Cargo or
 existing fixture changes belong to this checkpoint. The preceding ticker-seed
 slice is draft #2075 at `05878ca91f0`, not an actual landing dependency yet.
@@ -80,5 +80,20 @@ CLEAR before production. Integrate preceding actual TxFlow landings genuinely
 before source or freeze, with exact source-conflict review when necessary.
 Scoped Cargo only, sequential CARGO_BUILD_JOBS=4; no workspace sweep or WIP push.
 
-This checkpoint records sizes and a plan only. No RED execution, runtime
-adoption, review, CI, readiness or landing claim is made.
+The plan precedes the new isolated setting_context.rs target. Against unchanged
+actual49f runtime, ten controls compile and execute: three intended assertion
+REDs and seven GREENs, zero ignored. Separate first assertions pin eager raw
+HTTP, missing pre-Prepare timer and exact-deadline leverage publication. The
+late-data suffix after the failing publication assertion remains gated.
+
+The seven native positives pin unsigned POST/account routing and headers,
+valid leverage without invented positions, foreign user/coin rejection,
+malformed/status failures, the 100ms successor and a fresh minute refresh with
+no aggregate 20s account-poll bound. Existing fixture and all production blobs,
+inventories, key selection, Cargo and shared source remain incoming-exact.
+No fixture correction or compile failure precedes this execution. Scoped strict
+Clippy and package formatting pass with jobs=4. The execution log is retained
+outside Git at /tmp/codex-hcmq3f-txflow-setting-original.log. Capacity, exact
+replacement/retirement, typed failure and generation/revision/hedge controls
+remain source-stage gates; no runtime adoption, source clearance, CI, readiness
+or landing is claimed.
