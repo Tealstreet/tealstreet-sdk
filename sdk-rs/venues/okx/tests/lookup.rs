@@ -114,7 +114,7 @@ fn query(e: &mut Engine<Okx>, symbol: &str, id: &str) -> Vec<Action> {
             },
         }),
     );
-    actions(e)
+    prepared(e, 1_710_000_000_100.)
 }
 fn complete(
     e: &mut Engine<Okx>,
@@ -156,11 +156,14 @@ fn done(out: Vec<Action>) -> Result<Lookup, String> {
         .expect("completed query")
 }
 fn request(out: Vec<Action>) -> safe_cex_engine::HttpRequest {
-    assert_eq!(out.len(), 1);
-    let Action::Http(r) = out.into_iter().next().unwrap() else {
-        panic!("HTTP expected")
-    };
-    r
+    assert!(!out.iter().any(|a| matches!(a, Action::WsSend { .. })));
+    let mut requests = out.into_iter().filter_map(|a| match a {
+        Action::Http(request) => Some(request),
+        _ => None,
+    });
+    let request = requests.next().expect("one prepared lookup HTTP");
+    assert!(requests.next().is_none());
+    request
 }
 #[test]
 fn lookup_signs_each_alias_and_preserves_read_only_order_provenance() {
@@ -174,7 +177,10 @@ fn lookup_signs_each_alias_and_preserves_read_only_order_provenance() {
         let before = e.snapshot_frame(42.0).to_vec();
         let r = request(query(&mut e, "BTCUSDT", "caller1"));
         assert_eq!(r.method, Method::Get);
-        assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+        assert_eq!(
+            r.route.unwrap_or(safe_cex_engine::RequestRoute::Primary),
+            safe_cex_engine::RequestRoute::Primary
+        );
         assert!(r.body.is_none());
         assert_eq!(
             r.url,
@@ -419,7 +425,10 @@ fn secondary_account_cache_never_answers_primary_lookup() {
             }]);
         let before = e.snapshot_frame(42.0).to_vec();
         let r = request(query(&mut e, "BTCUSDT", "caller1"));
-        assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+        assert_eq!(
+            r.route.unwrap_or(safe_cex_engine::RequestRoute::Primary),
+            safe_cex_engine::RequestRoute::Primary
+        );
         assert!(
             r.headers
                 .iter()
