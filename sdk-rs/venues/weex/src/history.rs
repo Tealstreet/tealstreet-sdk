@@ -485,6 +485,12 @@ impl WeexFutures {
         if error == Error::Revoked
             && cx.validate_read_root_context(read.root().context()) == Err(Error::Revoked)
         {
+            if let Some(Read::Income { delay, .. } | Read::List { delay, .. }) =
+                self.history.reads.remove(&command)
+                && let Some(timer) = delay
+            {
+                cx.clear_timer(timer);
+            }
             return;
         }
         if matches!(read, Read::Income { .. }) {
@@ -599,13 +605,6 @@ impl WeexFutures {
         self.history
             .reads
             .retain(|_, read| read.root().context().owner() != owner);
-        self.deferred_gets.retain(|deferred| match &deferred.task {
-            Task::History(page) => !page
-                .leg
-                .as_ref()
-                .is_some_and(|leg| leg.context().owner() == owner),
-            _ => true,
-        });
     }
 
     pub(crate) fn history_query(
@@ -1283,12 +1282,9 @@ impl WeexFutures {
                     return;
                 };
                 let context = leg.context().clone();
-                {
-                    let mut admission = match owner.admit(cx, &context) {
-                        Ok(admission) => admission,
-                        Err(_) => return,
-                    };
-                    match request.rows {
+                let staged = owner
+                    .admit(cx, &context)
+                    .map(|mut admission| match request.rows {
                         Rows::Fills(page) => {
                             for row in page {
                                 if admission.fresh(format!("{}|{}", row.symbol, row.id)) {
@@ -1309,14 +1305,14 @@ impl WeexFutures {
                             }
                         }
                         Rows::Income(_) => unreachable!("list response"),
-                    }
+                    });
+                if let Err(error) = staged {
+                    let _ = cx.finish_http_context(&context);
+                    self.history_admission_failed(cx, command, error);
+                    return;
                 }
                 let count = owner.staged_len();
-                {
-                    let mut admission = match owner.admit(cx, &context) {
-                        Ok(admission) => admission,
-                        Err(_) => return,
-                    };
+                let advanced = owner.admit(cx, &context).map(|mut admission| {
                     let gap = if request.missing_fill_id {
                         Some("WEEX fill history is INCOMPLETE: row missing native fill id".into())
                     } else if has_more {
@@ -1336,6 +1332,11 @@ impl WeexFutures {
                         },
                         gap,
                     );
+                });
+                if let Err(error) = advanced {
+                    let _ = cx.finish_http_context(&context);
+                    self.history_admission_failed(cx, command, error);
+                    return;
                 }
                 let _ = cx.finish_http_context(&context);
                 if !pending.is_empty() && !owner.restart_stage() {
@@ -1366,11 +1367,7 @@ impl WeexFutures {
                             return;
                         };
                         let context = leg.context().clone();
-                        {
-                            let mut admission = match owner.admit(cx, &context) {
-                                Ok(admission) => admission,
-                                Err(_) => return,
-                            };
+                        let accepted_range = owner.admit(cx, &context).map(|mut admission| {
                             for row in page {
                                 let facts = PageRow {
                                     timestamp: row.timestamp,
@@ -1379,6 +1376,11 @@ impl WeexFutures {
                                 admission.stage(row, facts);
                             }
                             admission.accept_page_with_coverage(gap);
+                        });
+                        if let Err(error) = accepted_range {
+                            let _ = cx.finish_http_context(&context);
+                            self.history_admission_failed(cx, command, error);
+                            return;
                         }
                         let _ = cx.finish_http_context(&context);
                         *delay = Some(cx.set_timer(PAGE_DELAY));
@@ -1388,11 +1390,7 @@ impl WeexFutures {
                             return;
                         };
                         let context = leg.context().clone();
-                        {
-                            let mut admission = match owner.admit(cx, &context) {
-                                Ok(admission) => admission,
-                                Err(_) => return,
-                            };
+                        let accepted_single = owner.admit(cx, &context).map(|mut admission| {
                             let count = page.len();
                             for row in page {
                                 admission.stage(row);
@@ -1406,6 +1404,11 @@ impl WeexFutures {
                                 },
                                 gap,
                             );
+                        });
+                        if let Err(error) = accepted_single {
+                            let _ = cx.finish_http_context(&context);
+                            self.history_admission_failed(cx, command, error);
+                            return;
                         }
                         let _ = cx.finish_http_context(&context);
                         self.finish_income(cx, command, Ok(()), false);

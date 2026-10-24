@@ -273,3 +273,9 @@ with no compile/setup failure. Delay cancellation is asserted after that failing
 comparison and is not claimed executed until the fix. Remove the dead History
 deferred_gets cleanup and make any subsequent history-admission refusal retire
 the physical leg and take the strict typed root path instead of waiting for expiry.
+The revocation fix turns that assertion GREEN and reaches the delay-clear and
+stale-timer assertions. All four defensive admission branches now finish the
+physical Context and use strict typed history rejection. The dead deferred_gets
+history filter is removed. The refreshed focused suite passes 84 controls:
+9 unit, 40 native history, 23 custody and 12 local/admission. Exact delta
+re-review and strict/CI gates remain separate.
