@@ -197,9 +197,14 @@ impl MexcFutures {
             symbol,
             generation,
         };
-        if let Err((pending, error)) =
-            cx.request_managed(context, Method::Get, format!("{REST}{path}"), None, pending)
-        {
+        if let Err((pending, error)) = cx.request_managed(
+            context,
+            None,
+            Method::Get,
+            format!("{REST}{path}"),
+            None,
+            pending,
+        ) {
             self.failure(cx, pending, &error.venue_error().message);
         }
     }
@@ -238,7 +243,14 @@ impl MexcFutures {
                 malformed: HashSet::new(),
             }
         };
-        match cx.request_managed(context, Method::Get, format!("{REST}{path}"), None, pending) {
+        match cx.request_managed(
+            context,
+            None,
+            Method::Get,
+            format!("{REST}{path}"),
+            None,
+            pending,
+        ) {
             Ok(request) => cx.stream_response(request, ArrayAt::EnvelopeField("data")),
             Err((pending, error)) => self.failure(cx, pending, &error.venue_error().message),
         }
