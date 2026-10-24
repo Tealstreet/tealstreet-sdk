@@ -291,4 +291,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Lighter synchronous history Read terminals | Plan; original REDs next | Before changing local history validation/empty completion custody or pruning its seven sites. | [RUST_LIGHTER_LOCAL_HISTORY_CONTEXT.md](RUST_LIGHTER_LOCAL_HISTORY_CONTEXT.md) |
 
-| KuCoin Spot fixed-setting completion | Plan; original REDs next | Before changing native keyless fixed-setting successes and their entry refusal custody. | [RUST_KUCOIN_SPOT_LOCAL_SETTINGS.md](RUST_KUCOIN_SPOT_LOCAL_SETTINGS.md) |
+| KuCoin Spot fixed-setting completion | Shared LocalSetting adoption; independent reviews complete | Before changing native keyless fixed-setting successes and their entry refusal custody. | [RUST_KUCOIN_SPOT_LOCAL_SETTINGS.md](RUST_KUCOIN_SPOT_LOCAL_SETTINGS.md) |
