@@ -131,3 +131,34 @@ clearance: no admission, fake identity, raw transport fallback, fresh numeric
 completion or recreated caller receipt may replace the original root. If this
 shape is not supported, the scope waits for a separate owner-reviewed egress
 entry hook. No shared runtime edit is authorized by this plan checkpoint.
+
+## Reviewed implementation and source controls
+
+Uufub4 CLEARed the existing PublicCors geometry and exact two-file source
+preview `1ce6a01bfd74d5e3eb5bc2b2f7b7a2236d4055e20d83595331bd9367a4975ed5`:
+retain the real caller root, issue the bounded physical same-command Read with
+explicit PublicCors immediately in that genuine entry, and finish only the root.
+5c57jl CLEARed native/caller/original controls at `acbb8b95334`. No new core seam
+is needed. The helper captures min(genuine Remaining,20,000) at issuance;
+no later callback or numeric replay may use this construction.
+
+Source commit `a0ed1156966` applies the reviewed preview, plus removal of the
+now-orphaned lib.rs CommandId import caught by the initial strict compile.
+That compile failure is excluded from runtime results. All 14 unchanged
+original controls now PASS, including the previously gated pressure/recovery,
+late Bind and typed precommit suffixes.
+
+Five additive controls pin actual Prepare intent plus PublicCors route/header
+order through Bind/Claim; fractional caller-deadline release and DATA equality;
+unclaimed Bind expiry without renewal; stale preparation/failure/DATA against
+actual command-generation reuse; and full 128-owner completion followed by
+reacquisition of all 256 root+child slots. Original control bytes remain an exact
+prefix; no oracle was relaxed. The combined target passes 19/19, zero ignored.
+
+Scoped adoption verification: all 164 TxFlow native tests pass with zero ignored,
+including the 19 dedicated candle controls. Strict all-target crate Clippy and
+package formatting pass. The pre-existing public candle fixture now collects
+real managed HTTP through `prepared_actions` at the unchanged command clock;
+its wire, body and financial assertions are unchanged. The first native run's
+raw-HTTP collector failure and the formatting-only import wrap are retained in
+the local verification logs; neither is counted as an original RED.

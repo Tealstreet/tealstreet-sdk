@@ -15,8 +15,7 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{FeedId, SocketError};
 use safe_cex_engine::{
-    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    Venue,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};

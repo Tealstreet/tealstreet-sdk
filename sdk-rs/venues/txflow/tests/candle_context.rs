@@ -504,3 +504,210 @@ fn a_host_preparation_refusal_is_typed_not_sent_without_http_or_retry() {
             .any(|action| matches!(action, Action::Http(_)))
     );
 }
+
+fn prepared_packet(
+    actions: Vec<Action>,
+) -> (
+    safe_cex_engine::request_context::Preparation,
+    HttpRequest,
+    safe_cex_engine::request_context::RoutingIntent,
+) {
+    let mut packets = actions.into_iter().filter_map(|action| match action {
+        Action::ManagedHttp(action) => match *action {
+            HttpAction::Prepare {
+                preparation,
+                request,
+                intent,
+            } => Some((preparation, request, intent)),
+            _ => None,
+        },
+        _ => None,
+    });
+    let packet = packets.next().expect("one genuine Prepare");
+    assert!(packets.next().is_none());
+    packet
+}
+
+fn bind(
+    e: &mut Driver,
+    now: f64,
+    preparation: safe_cex_engine::request_context::Preparation,
+) -> (safe_cex_engine::request_context::Permit, HttpRequest) {
+    e.http_prepared(
+        now,
+        preparation,
+        Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    let mut packets = actions.into_iter().filter_map(|action| match action {
+        Action::ManagedHttp(action) => match *action {
+            HttpAction::Bind {
+                permit, request, ..
+            } => Some((permit, request)),
+            _ => None,
+        },
+        _ => None,
+    });
+    let packet = packets.next().expect("one genuine Bind");
+    assert!(packets.next().is_none());
+    packet
+}
+
+#[test]
+fn public_cors_is_captured_on_the_real_prepare_and_bind_packets() {
+    let mut e = ready();
+    let (preparation, prepared, intent) = prepared_packet(issued(&mut e, NOW, 7));
+    assert_eq!(
+        intent,
+        safe_cex_engine::request_context::RoutingIntent::Public
+    );
+    assert_eq!(prepared.route, Some(RequestRoute::PublicCors));
+    assert_eq!(prepared.timeout_ms, Some(20_000));
+    assert_eq!(
+        prepared.headers,
+        [
+            ("Content-Type", "application/json".into()),
+            ("x-api-version", "2026-08-16".into()),
+        ]
+    );
+    let (permit, packet) = bind(&mut e, NOW + 3., preparation);
+    assert_eq!(packet.route, Some(RequestRoute::PublicCors));
+    assert_eq!(packet.body, prepared.body);
+    let Ok(Claim::Released(release)) = e.claim_http(NOW + 3., permit) else {
+        panic!("live unsigned public Read releases once");
+    };
+    assert_eq!(release.deadline, NOW + 20_000.);
+    reply(&mut e, NOW + 4., &packet, 200, ROWS);
+    let _ = result(&e.drain_actions().collect::<Vec<_>>(), 7);
+}
+
+#[test]
+fn fractional_caller_receipt_is_exact_at_claim_and_data_equality() {
+    let start = NOW + 0.25;
+    for elapsed in [36.75, 37.] {
+        let mut e = ready();
+        e.handle_command(start, command(7), Some(37)).unwrap();
+        let actions = e.drain_actions().collect();
+        let (preparation, prepared, _) = prepared_packet(actions);
+        assert_eq!(prepared.timeout_ms, Some(37));
+        let (permit, packet) = bind(&mut e, start + 1., preparation);
+        let Ok(Claim::Released(release)) = e.claim_http(start + 2., permit) else {
+            panic!("the exact capped leg is live before equality");
+        };
+        assert_eq!(release.deadline, start + 37.);
+        reply(&mut e, start + elapsed, &packet, 200, ROWS);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        if elapsed < 37. {
+            let _ = result(&actions, 7);
+        } else {
+            assert_eq!(failure(&actions, 7).kind, Some(ErrorKind::Timeout));
+        }
+    }
+}
+
+#[test]
+fn an_unclaimed_bind_expires_without_renewing_the_original_bound() {
+    let mut e = ready();
+    let (preparation, _, _) = prepared_packet(issued(&mut e, NOW, 7));
+    let (permit, request) = bind(&mut e, NOW + 19_999., preparation);
+    assert!(e.claim_http(NOW + 20_000., permit).is_err());
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(failure(&actions, 7).kind, Some(ErrorKind::Timeout));
+    no_new_http(&actions);
+    reply(&mut e, NOW + 20_001., &request, 200, ROWS);
+    assert!(e.drain_actions().all(|action| !matches!(
+        action,
+        Action::Notice(
+            Notice::CommandDone { command: 7, .. } | Notice::CommandFailed { command: 7, .. }
+        )
+    )));
+}
+
+#[test]
+fn stale_preparation_and_data_cannot_retire_a_reused_command_generation() {
+    let mut e = ready();
+    let (old, old_request, _) = prepared_packet(issued(&mut e, NOW, 7));
+    e.http_preparation_failed(
+        NOW + 1.,
+        old,
+        Error::Invalid,
+        VenueError::new("old route refused"),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(failure(&actions, 7).message, "old route refused");
+    let (current, _, _) = prepared_packet(issued(&mut e, NOW + 2., 7));
+    assert_ne!(old.attempt(), current.attempt());
+    e.http_prepared(
+        NOW + 3.,
+        old,
+        Prepared {
+            id: 99,
+            expires_at: None,
+        },
+    );
+    e.http_preparation_failed(
+        NOW + 3.,
+        old,
+        Error::TimedOut,
+        VenueError::new("stale failure"),
+    );
+    reply(&mut e, NOW + 3., &old_request, 503, "stale body");
+    let stale = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        stale.is_empty(),
+        "stale ingress emits no cleanup or terminal"
+    );
+    assert!(e.http_preparation_pending(current));
+    let (permit, request) = bind(&mut e, NOW + 4., current);
+    assert!(matches!(
+        e.claim_http(NOW + 4., permit),
+        Ok(Claim::Released(_))
+    ));
+    reply(&mut e, NOW + 5., &request, 200, ROWS);
+    let _ = result(&e.drain_actions().collect::<Vec<_>>(), 7);
+}
+
+#[test]
+fn completing_every_parked_read_releases_all_root_and_child_credits() {
+    let mut e = ready();
+    let mut held = Vec::new();
+    for id in 1_000..1_128 {
+        held.push(prepared_packet(issued(&mut e, NOW, id)).0);
+    }
+    assert_eq!(
+        failure(&issued(&mut e, NOW, 2_000), 2_000).kind,
+        Some(ErrorKind::Internal)
+    );
+    let mut completed = std::collections::HashSet::new();
+    for preparation in held {
+        let (permit, request) = bind(&mut e, NOW + 1., preparation);
+        assert!(matches!(
+            e.claim_http(NOW + 1., permit),
+            Ok(Claim::Released(_))
+        ));
+        reply(&mut e, NOW + 2., &request, 200, ROWS);
+        for action in e.drain_actions() {
+            if let Action::Notice(Notice::CommandDone { command, .. }) = action {
+                assert!(completed.insert(command));
+            }
+        }
+    }
+    assert_eq!(completed.len(), 128);
+    assert!((1_000..1_128).all(|id| completed.contains(&id)));
+    for id in 1_000..1_128 {
+        let (_, request, _) = prepared_packet(issued(&mut e, NOW + 3., id));
+        assert_eq!(request.route, Some(RequestRoute::PublicCors));
+    }
+    assert_eq!(
+        failure(&issued(&mut e, NOW + 3., 2_000), 2_000).kind,
+        Some(ErrorKind::Internal)
+    );
+}
