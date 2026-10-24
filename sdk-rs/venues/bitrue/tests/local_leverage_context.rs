@@ -1,11 +1,13 @@
 //! Genuine initial callbacks for local Bitrue leverage refusals; valid account reads stay separate.
+mod support;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Context, Error, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, Method, Notice, Outcome, Response,
     SocketId, TimerId, Venue, VenueError,
 };
-use safe_cex_venue_bitrue::{Bitrue, Options, Pending};
+use safe_cex_venue_bitrue::{Bitrue, Pending};
+use support::Options;
 
 fn policy() -> Policy {
     Policy {
@@ -81,14 +83,18 @@ impl Venue for Probe {
     }
 }
 fn seeded(keyed: bool) -> Engine<Probe> {
+    let (venue, provider, identities) = (Options {
+        key: keyed.then(|| "fixture-key".into()),
+        secret: keyed.then(|| "fixture-secret".into()),
+        ..Options::default()
+    })
+    .build();
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
-        inner: Bitrue::new(Options {
-            key: keyed.then(|| "fixture-key".into()),
-            secret: keyed.then(|| "fixture-secret".into()),
-            ..Options::default()
-        }),
+        inner: venue,
         held: vec![],
     });
+    e.set_signer(Some(provider)).unwrap();
+    e.set_identities(identities).unwrap();
     // Exercise the real query callback without starting unrelated feeds.
     e.store_mut().set_markets(vec![Market {
         id: "E-BTC-USDT".into(),
@@ -131,8 +137,14 @@ fn command(max: bool, symbol: &str) -> Command {
     }
 }
 fn run(e: &mut Engine<Probe>, now: f64, max: bool, symbol: &str) -> Vec<Action> {
-    e.handle(now, Event::Command(command(max, symbol)));
-    e.drain_actions().collect()
+    if now.is_finite() && now >= 0. {
+        e.handle_command(now, command(max, symbol), Some(120_000))
+            .unwrap();
+        safe_cex_engine::test_support::prepared_actions(e, now)
+    } else {
+        e.handle(now, Event::Command(command(max, symbol)));
+        e.drain_actions().collect()
+    }
 }
 fn failure(a: &[Action]) -> &VenueError {
     assert_eq!(a.len(), 1, "one terminal without companion/I/O: {a:?}");
