@@ -467,8 +467,8 @@ fn candle_query_validates_and_streams_documented_envelope() {
             to_ms: Some(120000.0),
         }),
     );
-    let r = e
-        .drain_actions()
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 2000.0)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
