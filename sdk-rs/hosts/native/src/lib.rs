@@ -54,6 +54,8 @@ pub enum HostEvent {
         safe_cex_engine::request_context::Preparation,
         safe_cex_engine::request_context::Permit,
     ),
+    #[cfg(feature = "http-mutation-barriers")]
+    HttpGroupWake(safe_cex_engine::request_context::GroupPermit),
     Signed(
         RequestId,
         Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>,
@@ -259,6 +261,8 @@ impl<V: Venue, T: Transport> Host<V, T> {
             HostEvent::HttpWake(preparation, permit) => {
                 self.wake_http(preparation, permit);
             }
+            #[cfg(feature = "http-mutation-barriers")]
+            HostEvent::HttpGroupWake(permit) => self.claim_http_group_resources(permit),
             HostEvent::PublicFeedUpdate(update) => {
                 if let Err(error) = engine.apply_public_feed(now, update) {
                     // A configuration error is observable through the normal notice path.
