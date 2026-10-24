@@ -1255,25 +1255,47 @@ pub fn build_with_signer<T: Visit>(
             )?,
         ),
         #[cfg(feature = "bitrue")]
-        "bitrue" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "bitrue" => {
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Bitrue credentials belong in signer setup, not engine options",
+                ));
+            }
+            let mut identities = options.signing.take().unwrap_or_default();
+            identities.primary = identities.primary.filter(|identity| {
+                !identity.credential.0.is_empty() && !identity.signing.0.is_empty()
+            });
+            if let Some(read) = &identities.secondary {
+                read.validate().map_err(invalid)?;
+            }
+            if let Some(primary) = &identities.primary {
+                primary.validate().map_err(invalid)?;
+            }
+            let registered = identities.clone();
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
                 Bitrue::new(BitrueOptions {
-                    read_credentials: options.read_credentials.take(),
+                    read_credentials: identities.secondary,
+                    credentials: identities.primary,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                     recv_window: options
                         .recv_window
                         .take()
-                        .unwrap_or(20_000.0)
-                        .clamp(1.0, 60_000.0) as u32,
+                        .unwrap_or(20_000.)
+                        .clamp(1., 60_000.) as u32,
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "bitunix")]
         "bitunix" => finish(
             visitor,
