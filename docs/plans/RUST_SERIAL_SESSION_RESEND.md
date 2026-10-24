@@ -105,6 +105,31 @@ pub enum SessionResend {
   waiters hold nothing for the Plan, and the parked Pending is handed back
   exactly once.
 
+## GRVT native facts (codex-zs5e83, `bcaaa4acc56`)
+
+- **When.** An authentication refresh happens only on a DATA error with
+  `wire::code == 1000` in `on_response`, never on a transport failure. That
+  matches the DATA-custody precondition.
+- **Immediate Read network retries (changes the serial source on this
+  branch).** A GRVT Read retries a transport failure immediately, up to 6
+  attempts (`pending.attempts < 5`). The serial Plan allows a Read-failure
+  continuation only through `continue_serial_plan_after` with a delay greater
+  than 0. Here `continue_serial_plan` (immediate) also accepts the current
+  Read call's own released failure, with a Read `next` under the same checks.
+  No 1 ms delay is invented, and no DATA is fabricated. Each network retry is
+  a new serial call; the 6-attempt count is the venue's ledger.
+- **Separate ledgers.** Native allows one authentication resend per Step
+  (`auth_resent`), carried across transport retries; the network-retry
+  counter is not reset by it. The engine allows at most one Session resend per
+  serial call. A Step spanning several calls (transport retries) keeps
+  `auth_resent` in venue state and never asks for a second Session resend; a
+  second 1000 fails as native does.
+- **Body parity.** The resend keeps the original nonce, expiration, client IDs
+  and digest. Only the cookie and account headers change. The venue's recipe
+  signs the same immutable canonical payload again through the provider:
+  there is no signed-bytes cache and no fabricated grant. The engine's own
+  per-attempt signing reservation does not touch the venue's payload nonce.
+
 ## REDs (before source)
 
 1. A Mutation refused with code 1000 (a RefusedResend grant) parks on a
@@ -139,6 +164,12 @@ pub enum SessionResend {
     stay State.
 13. After a stop or a login failure while parked, the Session holds no waiter
     for the Plan, and the Pending is handed back exactly once.
+
+14. An immediate Read-failure continuation: a released Read failure, then
+    `continue_serial_plan` with a Read `next`, issues at once in that failure
+    custody (no timer). A Mutation `next`, an unreleased failure, or a
+    Mutation call's failure is refused, spending nothing. Six chained
+    immediate retries then succeed.
 
 RED1 also asserts that attempt 1's fact is a definitive refusal (not Unknown)
 and that, once attempt 2 succeeds, it is absent from `rejections()` and the
