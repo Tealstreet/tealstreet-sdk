@@ -316,6 +316,32 @@ These are added with the source.
   the adapter switches to the binding parameter with no static
   `Authorization`, and every outcome assertion stays unchanged.
 
+**claude-fe7lgm's R14 composition pins (session-wait plan `23602296727`):**
+- **Own-unit park.** Inside Plan custody or a Plan/Preflight ready scope,
+  `plan_session_wait`, `plan_retry_session_wait` and `preflight_session_wait`
+  park the owner's own unit on an existing live Session. They succeed, like
+  binding. In the same scope:
+  - `open`, `retire` and `session_context` stay `State`;
+  - `session_ready` / `session_failed` drains stay empty (#1896).
+  R14's success direction is extended to cover this.
+- **Re-login ordering (R10 and R14).** No Session is ever opened inside a ready
+  scope.
+  - The venue opens the replacement Session in the same callback that retires
+    the old one, outside any ready scope.
+  - The queued flush runs after that callback, so `on_plan_session_wait_ended`
+    can re-park on the new Session; with no replacement the venue's only
+    choice is `fail_plan` / `fail_preflight`.
+  - The sequence is: retire the old Session and open the new one in one
+    callback, wait-ended re-parks on the new one, resume, then exactly one
+    HTTP (their N4).
+- **Resume location.** Resume happens through a `session_ready` drain, outside
+  every Plan and Preflight scope; Paradex drains in its login-response
+  callback. The resumed leg is queued there with its Bearer binding, and the
+  hook runs at that packet's `http_prepared`.
+- **Guard.** R2's assertion that the reprepared intent is Primary is the guard:
+  reprepare takes Primary from the packet's binding and never re-reads
+  `context.routing_intent()`.
+
 **Engine facts the source must follow:**
 - **The real prepare point.** `queue_managed` emits `HttpAction::Prepare` at
   issue, with headers snapshotted from static slices (`http_lifecycle.rs:180`).
