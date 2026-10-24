@@ -32,6 +32,7 @@ struct Body {
     initial_custody: bool,
     history_bound: bool,
     history_latest_release: Option<Attempt>,
+    #[cfg(feature = "serial-plans")]
     serial: Option<Box<serial::Serial>>,
 }
 
@@ -383,7 +384,10 @@ impl<P> Cx<'_, P> {
         declaration: AdmissionDeclaration<'_, '_, '_>,
         physical: bool,
     ) -> Result<(Plan, Option<(u64, Context)>), Error> {
-        self.admit_plan_root(preflight, declaration, physical, None)
+        #[cfg(feature = "serial-plans")]
+        return self.admit_plan_root(preflight, declaration, physical, None);
+        #[cfg(not(feature = "serial-plans"))]
+        self.admit_plan_root(preflight, declaration, physical)
     }
 
     /// A serial Plan shares the whole declared admission transaction, with its
@@ -393,7 +397,7 @@ impl<P> Cx<'_, P> {
         preflight: &Preflight,
         declaration: AdmissionDeclaration<'_, '_, '_>,
         physical: bool,
-        serial: Option<serial::Serial>,
+        #[cfg(feature = "serial-plans")] serial: Option<serial::Serial>,
     ) -> Result<(Plan, Option<(u64, Context)>), Error> {
         let extra = if physical { 2 } else { 0 };
         let AdmissionDeclaration {
@@ -429,11 +433,14 @@ impl<P> Cx<'_, P> {
         let barriers = mutation_group::normalize(steps, &policy, barriers, &self.io.http_pacing)?;
         let bound = schedule.bound();
         let native_deadline = bound.deadline(self.now)?;
+        #[cfg(feature = "serial-plans")]
         let deadline = if serial.is_some() {
             serial::ROOT
         } else {
             receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap))
         };
+        #[cfg(not(feature = "serial-plans"))]
+        let deadline = receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap));
         Context::new(
             preflight.owner(),
             1,
@@ -474,6 +481,7 @@ impl<P> Cx<'_, P> {
             entries[index].eligible_at = Some(at);
             entries[index].notified = false;
         }
+        #[cfg(feature = "serial-plans")]
         let writes = match &serial {
             Some(serial) => Some(
                 CommandWrites::new_reserved(serial::JOURNAL_ATTEMPTS, count)?
@@ -483,6 +491,12 @@ impl<P> Cx<'_, P> {
                 Some(CommandWrites::new_reserved(attempts, count)?)
             }
             None => None,
+        };
+        #[cfg(not(feature = "serial-plans"))]
+        let writes = if operation == Operation::Mutation {
+            Some(CommandWrites::new_reserved(attempts, count)?)
+        } else {
+            None
         };
         let mut leg_intents = Vec::new();
         if operation == Operation::Mutation {
@@ -596,6 +610,7 @@ impl<P> Cx<'_, P> {
             initial_custody: self.io.http_delivery.is_none() && self.io.http_plan_ready.is_none(),
             history_bound: false,
             history_latest_release: None,
+            #[cfg(feature = "serial-plans")]
             serial: serial.map(Box::new),
         });
         if let Some(context) = old_read {
@@ -694,6 +709,7 @@ impl<P> Cx<'_, P> {
                 return Err(Error::State);
             }
             let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+            #[cfg(feature = "serial-plans")]
             if body.serial.is_some() {
                 return Err(Error::State);
             }
@@ -762,6 +778,7 @@ impl<P> Cx<'_, P> {
             }
             context.retry(evidence, self.now)?;
             let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+            #[cfg(feature = "serial-plans")]
             if body.serial.is_some() {
                 return Err(Error::State);
             }
@@ -955,6 +972,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         let window = entry.terms.window(self.now, plan.deadline())?;
+        #[cfg(feature = "serial-plans")]
         let (operation, retry, credential) = body.serial.as_ref().map_or_else(
             || {
                 (
@@ -965,6 +983,7 @@ impl<P> Cx<'_, P> {
             },
             |serial| serial.terms(&body.policy.credential),
         );
+        #[cfg(feature = "serial-plans")]
         let mut context = Context::new(
             plan.owner(),
             entry.logical,
@@ -975,6 +994,17 @@ impl<P> Cx<'_, P> {
             body.policy.pacing,
         )?
         .with_retry(retry)?;
+        #[cfg(not(feature = "serial-plans"))]
+        let mut context = Context::new(
+            plan.owner(),
+            entry.logical,
+            body.policy.operation,
+            body.policy.credential.clone(),
+            self.now,
+            window.deadline(),
+            body.policy.pacing,
+        )?
+        .with_retry(body.policy.retry)?;
         context.bind_issuer(&self.io.request_contexts.issuer);
         let mut call = Call {
             context: context.clone(),
@@ -1427,7 +1457,10 @@ impl<P> Cx<'_, P> {
         let timer = body.timer;
         let at_ms = body.next_wake();
         self.io.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+        #[cfg(feature = "serial-plans")]
         self.io.actions.push(serial::wake(timer, at_ms));
+        #[cfg(not(feature = "serial-plans"))]
+        self.io.actions.push(Action::SetTimer { timer, at_ms });
     }
 }
 
@@ -1648,7 +1681,10 @@ impl ContextRegistry {
         if let Ok(body) = io.request_contexts.plan_body(plan) {
             let (timer, at_ms) = (body.timer, body.next_wake());
             io.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            #[cfg(feature = "serial-plans")]
             io.actions.push(serial::wake(timer, at_ms));
+            #[cfg(not(feature = "serial-plans"))]
+            io.actions.push(Action::SetTimer { timer, at_ms });
         }
     }
 }
@@ -1686,7 +1722,7 @@ impl ContextRegistry {
                 })
             })
     }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "serial-plans"))]
     pub(in super::super) fn command_writes(&self, command: CommandId) -> Option<&CommandWrites> {
         self.commands.get(&command)?.writes.as_ref()
     }
@@ -1867,6 +1903,7 @@ impl<P> Cx<'_, P> {
 #[path = "request_context_history_plan.rs"]
 mod history;
 
+#[cfg(feature = "serial-plans")]
 #[path = "request_context_serial_plan.rs"]
 mod serial;
 
