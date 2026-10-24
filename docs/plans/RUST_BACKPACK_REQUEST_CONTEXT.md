@@ -499,3 +499,53 @@ ref-only trusted setup and enables the construction declaration only with actual
 SDK/native acceptance. No new raw-material consumer or permanent fallback is
 allowed under this transition. The remaining inventory and owned repair RED
 continue to track that obligation.
+
+## Next plan/RED slice: unsupported command candle interval, 2026-10-24
+
+Fresh branch `fix/rust-backpack-candle-interval-refusal` starts exactly at actual
+`db6fa45bbb7`. This checkpoint is PLAN + REDs only: no production, CALLERS or
+inventory modification until separately reviewed/authorized. #1870 candles and
+#2044 fixed-setting source remain frozen on their own branches and are not
+stacked here. Before eventual source integration, genuinely include their actual
+landings where required and preserve both existing candle and trading contracts.
+
+Only one legacy occurrence is in scope: the unsupported-interval FetchCandles
+arm in `backpack/src/lib.rs`, fingerprint
+`22c49186907c8c49d8df31f258aba554f02baed35fa741626b157584432ea540`, count one.
+The frozen base has six Backpack source paths, 19 fingerprints/20 occurrences;
+this slice alone would yield six paths, 18 fingerprints/19 occurrences. Generic
+public startup senders, delivered supported candles, identity, account/history,
+signing, trading, inline lexical sites and every other map stay unchanged.
+No key-selection call, inventory entry, refs or selection map is changed while
+combo-5b is pending. Actual `be710..train/combo-5b-be71` touches no Backpack
+source; both plan/RED paths are outside the combo's source map.
+
+Preserve the exact native `interval.unsupported("Backpack")` message for every
+currently unsupported interval, with the existing absent kind and absent write
+outcome on a valid entry. It remains keyless in public/private setup, creates no
+HTTP/managed preparation/socket/signing/timer/Store effect and makes no new
+interval available. Supported native candle wire/stream behavior belongs to
+#1870 and is neither changed nor imported by this checkpoint. Unsupported WS
+subscription diagnostics remain outside scope and get a working control.
+
+Future implementation uses only existing shared command receipt/admission APIs:
+None -> reject_unstamped_command(Read); Expired -> reject_expired_command(Read);
+Remaining -> genuine Read admission (no credential, 20s maximum, no pacing,
+Never retry) then fail_context with the original native message. No missing or
+expired receipt may start a fresh root; no numeric fallback/borrowed completion,
+manual error classifier, new timer policy or credential discovery is allowed.
+Only Rejected has emitted its refusal; Revoked grants no terminal rights.
+No engine/shared-source or combo-5b implementation is proposed.
+
+Commit this plan before separate original assertion controls on unchanged
+production. Working controls pin exact native refusals/no work/Store effects,
+keyless public/private behavior, immediate ID reuse, duplicate prior-owner
+survival through real book delivery, and unchanged unsupported WS diagnostics.
+Hostile controls pin shared InvalidInput/no outcome at an invalid clock and
+Internal/no outcome at the 256-owner capacity bound. Compile errors do not
+count as REDs. Label only assertion failures actually reproduced; do not weaken
+native or ownership assertions to manufacture a result.
+
+Run the single new test file with CARGO_BUILD_JOBS=4 and no concurrent local
+Cargo build. Record the evidence and send plan/control review to hcmq3f; no
+runtime application, manifest pruning or new PR/CI is part of this checkpoint.
