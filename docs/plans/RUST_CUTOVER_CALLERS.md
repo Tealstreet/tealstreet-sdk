@@ -7206,3 +7206,24 @@ claim:**
 
 This slice claims transport and session ownership only.
 [Plan](RUST_BACKGROUND_SESSION.md).
+
+### Kraken Futures managed candle pages
+
+FetchCandles keeps one genuine caller-wait Read root across its native ten-page
+walk. Every eligible page uses a fresh unsigned Read/Never physical child, capped
+at that exact original receipt deadline. Subscription pages use independent
+Background Reads; generation checks still guard both publication and in-flight
+cleanup, with native five-second polling and no logical20s poll-walk cap.
+
+The explicit20s admission-to-expiry page bound is NEW: the old chart packet had
+no request_timeout declaration. It includes route preparation and unclaimed Bind
+waiting, as well as transport. Root expiry is strict engine-owned Timeout with
+no prefix, rows or continuation. Local preparation refusal/timeout preserves
+shared typed fields including localNotSent; released Read failure retains the
+shared projection. No financial effect or new retry is inferred. Existing
+unsigned wire, codec, sorting/duplicate winner, paging budget and validation
+messages remain native. SDK host/outer wait contracts are unchanged.
+
+A walk needs two registry Context slots: root and current physical page. Initial
+root admission reserves only its own slot; if the first child cannot fit, one
+strict typed Capacity/localNotSent terminal retires the root without HTTP.
