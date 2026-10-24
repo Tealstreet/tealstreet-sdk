@@ -2948,3 +2948,12 @@ comparison and declaration-policy checks pass 28 controls. Zero, negative and
 numeric-string PnL remain evidence, genuine PnL changes still fail, and inputs
 remain immutable. Native state and all other comparison fields are untouched.
 The fourteen inverse declaration keys require fresh raw CI proof before pruning.
+
+### Remaining immediately workable public Read sites
+
+Paradex removes two local candle terminals and its numeric book issuance-refusal
+fallback. Lighter's final public lib request becomes a managed Background catalog
+read with exact delivery validation and retirement before fallback/retry. No
+signer, private authority, session or engine policy is changed. Original new
+targets execute seven native controls PASS and15 intended assertion REDs, zero
+ignored. Exact own prune is four singleton occurrences across three keys.

@@ -1584,3 +1584,14 @@ working controls retain real finite PnL, numeric strings, non-flat positions and
 genuine PnL mismatches. Admission now uses the same finite conversion as the
 projection, preserving zero and losses while excluding unavailable sentinels.
 Declaration pruning requires fresh inverse replay evidence for each removed key.
+
+### Public refusal and catalog custody controls
+
+Paradex uses genuine retained peers to pin local candle and book-entry capacity,
+clock/reuse and duplicate custody, with native GET/schema and saturated candle
+fallthrough controls. Lighter pins exact public catalog wire across four hosts,
+spot filtering/precision, endpoint fallback/backoff, real Prepare/Bind/Claim,
+preclaim/released expiry, failed streamed prefixes and inert stale/duplicate work.
+A255-peer registry-pressure control forces each catalog attempt to retire before
+fallback/retry and successful slot reuse; expiry cannot conceal a root leak.
+Existing startup fixtures retain their assertions while using shared preparation.
