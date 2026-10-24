@@ -236,11 +236,17 @@ impl Blofin {
         symbol: String,
     ) {
         let Some(market) = cx.store.market(&symbol) else {
-            cx.fail(command, format!("Unknown market {symbol}"));
+            let Ok(context) = cx.admit_http_command(Self::read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, format!("Unknown market {symbol}"));
             return;
         };
         let Some(margin) = self.account.margin.filter(|_| self.account.mode_loaded) else {
-            cx.fail(command, "BloFin margin mode is not loaded");
+            let Ok(context) = cx.admit_http_command(Self::read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "BloFin margin mode is not loaded");
             return;
         };
         let inst_id = market.id.clone();

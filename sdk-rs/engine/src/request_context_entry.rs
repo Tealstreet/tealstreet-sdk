@@ -156,7 +156,10 @@ enum State {
 }
 
 impl<P> Io<P> {
-    #[cfg(feature = "http-plans")]
+    pub(super) fn command_entry_id(&self) -> Option<CommandId> {
+        self.command_entry.as_ref().map(|entry| entry.command)
+    }
+
     pub(super) fn fresh_command_entry(&self) -> bool {
         self.command_entry.as_ref().is_some_and(|entry| {
             entry.state == State::Fresh

@@ -50,7 +50,16 @@ impl Rig {
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(NOW);
         let mut timers = Timers::new();
-        let meta = requests(&mut engine).pop().unwrap();
+        let meta = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+            .into_iter()
+            .find_map(|a| {
+                if let Action::Http(r) = a {
+                    Some(r)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
         reply(&mut engine, &meta, 200, META);
         let actions = drain(&mut engine, &mut timers);
         let socket = connected(&actions).unwrap_or(SocketId(0));

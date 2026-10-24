@@ -663,12 +663,18 @@ impl Kucoin {
             _ => Ok(()),
         };
         if let Err(error) = validation {
-            cx.fail(id, not_sent(error));
+            let Ok(context) = cx.admit_http_command(crate::local_mutation_command_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, not_sent(error));
             return;
         }
         if self.credentials.is_none() {
-            cx.fail(
-                id,
+            let Ok(context) = cx.admit_http_command(crate::local_mutation_command_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
                 not_sent("KuCoin credentials are required").kind(ErrorKind::AuthInvalid),
             );
             return;

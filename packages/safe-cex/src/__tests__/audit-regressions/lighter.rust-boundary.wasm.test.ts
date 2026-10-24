@@ -9,6 +9,7 @@ import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderType } from '../../types';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 const NOW = 1700000000000;
 const KEY = `01${'00'.repeat(39)}`;
@@ -26,6 +27,7 @@ const recorded = (
   const response = (data: unknown) => ({ status: 200, body: new TextEncoder().encode(JSON.stringify(data)) });
   const transport: Transport = {
     now: () => NOW,
+    prepareHttp: prepareRecordedHttp,
     connect: (_url, handlers) => {
       const subscriptions: string[] = [];
       sockets.push({ subscriptions, message: handlers.onMessage });

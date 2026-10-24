@@ -7,6 +7,7 @@ use safe_cex_engine::{
 mod support;
 use safe_cex_venue_weex::WeexFutures;
 use serde_json::{Value, json};
+use support::PreparedActions;
 use support::setup::Options;
 
 fn engine() -> Engine<WeexFutures> {
@@ -1409,7 +1410,7 @@ fn fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliat
     let socket=import_orders_with_socket(&mut e,json!([{"orderId":"1","symbol":"BTCUSDT","side":"SELL","type":"LIMIT","status":"PARTIALLY_FILLED","origQty":"0.2","executedQty":"0.1","price":"59000","updateTime":1773295700000u64}]),json!([])).unwrap();
     e.handle(1002.0, Event::WsOpened { socket });
     let before_fill: Vec<_> = e
-        .drain_actions()
+        .prepared_actions(1002.)
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -1473,7 +1474,7 @@ fn fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliat
         .unwrap();
     e.handle(3001.0, Event::TimerFired { timer: refresh });
     let fresh = e
-        .drain_actions()
+        .prepared_actions(3001.)
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
