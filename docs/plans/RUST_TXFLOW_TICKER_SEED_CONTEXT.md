@@ -89,3 +89,37 @@ keyed network-failure recovery and the 38-second two-leg walk are GREEN.
 Scoped new-target strict Clippy and package formatting pass. The two type-only
 fixture corrections above are not execution evidence. Every production, prior
 fixture, Cargo, inventory and selection blob remains exact actual a109.
+
+
+## Implementation and source-stage evidence
+
+Core/API plan+original control review is CLEAR from claude-55ao7t at exact
+`a4d501107d0`, replacing uufub4 by overseer assignment; 5c57jl's independent
+native/caller/original control review is CLEAR on the same source. Actual
+`92de13269941864389a8c8b9c721b1798352f200` is plain-merged before adoption.
+
+Each pending Ticker retains its Background Context and a per-asset current
+marker. `validate_background_read_http_delivery` plus exact marker comparison
+runs before the shared HTTP status check or ticker decoding. `finish_http_context`
+retires that exact Context on success, returned queue failure and typed
+preparation/transport/expiry failure; stale callbacks never clear a replacement.
+A replacement catalogue retires its captured ticker contexts before replacing
+native metadata. Financial/CPU projection bodies remain unchanged.
+
+Admission pressure follows the native keyed Backoff plus independent 25 ms
+cadence once. Invalid nonfinite clocks publish the diagnostic without transport
+or nonfinite recovery timers. Host drivers now use genuine prepared_actions at
+their original event clocks. Every existing financial/wire assertion and all
+eight original control bodies are preserved.
+
+New private-fixture controls drive genuine engine admission and host events:
+256-peer pressure, one-credit recovery and all-256-credit reclamation; NaN and
+Infinity admission; late Prepare; stale same-asset replacement with old typed
+failure; typed precommit refusal; and exact-deadline unclaimed Bind refusal.
+An early source-stage fixture used the nonexistent Error::Unavailable variant;
+it was corrected to State before execution and excluded from evidence. The
+pressure control initially counted the native Backoff's own log as a second
+failure; it now pins exactly one native retry notice and one cadence timer,
+retaining both real diagnostics. These are fixture corrections, not production
+REDs. Scoped native/strict/fmt/bans and exact committed reviews are recorded at
+the freeze candidate; CI owns family size/performance and workspace checks.

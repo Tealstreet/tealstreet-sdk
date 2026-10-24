@@ -107,7 +107,7 @@ fn socket_roles_and_control_plane_are_distinct() {
         })
         .unwrap();
     reply(&mut e, &r, 200, META);
-    let startup = e.drain_actions().collect::<Vec<_>>();
+    let startup = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
     let r = startup
         .iter()
         .find_map(|a| {
@@ -618,7 +618,7 @@ fn mismatched_rest_ticker_keeps_seed_unloaded_until_valid_retry() {
         .unwrap();
     reply(&mut e, &r, 200, META);
     assert!(!e.store().loaded().tickers);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
     assert_eq!(
         actions
             .iter()
@@ -664,8 +664,8 @@ fn mismatched_rest_ticker_keeps_seed_unloaded_until_valid_retry() {
     assert!(e.store().tickers().is_empty());
     e.drain_actions().for_each(drop);
     e.handle(2000.0, Event::TimerFired { timer: retry });
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 2000.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -730,7 +730,7 @@ fn book_and_chart_intents_before_metadata_subscribe_once_when_ready() {
         })
         .unwrap();
     reply(&mut e, &r, 200, META);
-    let startup = e.drain_actions().collect::<Vec<_>>();
+    let startup = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
     let r = startup
         .iter()
         .find_map(|a| {
@@ -1246,7 +1246,7 @@ fn late_rest_seed_preserves_supplied_live_context_fields_and_seed_only_statistic
         })
         .unwrap();
     reply(&mut engine, &metadata, 200, META);
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.);
     let node = actions
         .iter()
         .find_map(|action| match action {

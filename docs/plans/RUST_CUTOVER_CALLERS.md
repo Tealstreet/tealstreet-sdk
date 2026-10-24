@@ -7504,3 +7504,18 @@ work retain explicit legacy ownership until their shared owner adoptions; signin
 does not provide Mutation journal/ResendGrant or Plan/history authority. The stable
 legacy request funnel remains a remove-before-master obligation. SDK/NX history
 outer-wait behavior is unchanged by this single command-read adoption.
+
+
+## TxFlow ticker seeds retain per-attempt Read custody
+
+Unsigned activeAssetCtx seeds now wait for managed Prepare/Bind/Claim with
+explicit PublicCors egress and unchanged POST body/header order. Each physical
+attempt has a new 20-second admission-to-expiry bound, including a stalled host;
+there is no aggregate seed-walk deadline. Expired or stale DATA cannot decode or
+publish a seed. Failure cleanup retires only its exact current Context before
+native keyed Backoff and the independent 25 ms successor cadence. Admission
+pressure takes that bounded failure path once; nonfinite clocks cannot create
+HTTP or recovery timers. Complete-seed publication, live overlays, financial
+projection/CPU row hints and private-startup eligibility are preserved. This
+removes only the count-one ticker sender; the shared account/history/metadata
+info sender remains outside this slice.
