@@ -991,13 +991,13 @@ mod planned_execution {
             release(&mut e, token, 0.);
             respond(&mut e, token, 10.);
             let actions = e.drain_actions().collect::<Vec<_>>();
-            for owner in [FOUNDER, FOLLOWER] {
-                assert_eq!(
-                    outcome(&actions, owner),
-                    expected(inherited, crate::Outcome::Rejected),
-                    "owner {owner}"
-                );
-            }
+            // Collect both observers before asserting so each is evidenced.
+            let outcomes = [FOUNDER, FOLLOWER].map(|owner| outcome(&actions, owner));
+            assert_eq!(
+                outcomes,
+                [expected(inherited, crate::Outcome::Rejected); 2],
+                "founder and follower"
+            );
         }
     }
 

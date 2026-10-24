@@ -96,7 +96,11 @@ RED 7, the execution carry, lives on the stacked branch
 `feat/rust-planned-inherited-uncertainty` (#1919 pin `2f4a08b449c` plus this
 PR), with RED `bf2285da325` before the carry `106b267fc6d`:
 - `an_inherited_fact_reaches_every_observer_of_a_rejected_execution`: the
-  founder and a fact-free follower get Unknown, not Rejected.
+  founder and a fact-free follower get Unknown, not Rejected. The original
+  RED asserted the founder first and stopped there. The follower half is
+  evidenced by a later rerun that asserts both outcomes together. With the
+  carry reverse-applied, it gives `[Rejected, Rejected]` instead of
+  `[Unknown, Unknown]`.
 - `an_inherited_founder_leaving_before_release_is_never_told_not_sent`: an
   early-detached sole observer gets Unknown, and no ID is spent.
 - `a_refused_execution_admission_keeps_the_inherited_fact` (control).
