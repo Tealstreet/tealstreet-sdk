@@ -6598,6 +6598,98 @@ The queued trade_next error, native builder/entropy behavior, valid private wire
 and successful SetPositionMode(false) stay unchanged. This does not migrate the
 signer or admit keyless successful settings; that success awaits the shared seam.
 
+
+## Polymarket public reads and local completion (2026-10-24)
+
+Owner codex-hcmq3f; plan RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md. Public `/book`
+and `/prices-history` now use unsigned managed transport, requiring host
+Prepare/Bind/Claim. Their explicit new attempt bound is 20000 ms from selection,
+before preparation; command legs are additionally capped by the original caller
+receipt through landed #1976. Missing/expired receipts use shared typed refusal,
+without a new fallback cap. No retry or pacing is added. Background candle polls
+keep the native five-second schedule and require exact current delivery before
+staging or publishing. Released read failures keep typed kind without a money
+outcome; genuine preparation refusal retains its shared local NotSent fact.
+
+Local read results/refusals and unsupported STP/symbol-amend mutation refusals
+use genuine command entry and Context completion, preserving native JSON/text.
+Keyless mutation refusals now explicitly prove NotSent. Fixed-setting no-op
+SUCCESS is still legacy and remains inventoried pending #1989; no fake write
+fact, credential or Read cast is used. The exact prune is 15 fingerprints /
+20 occurrences. Discovery aggregates (G1), private account/import (P6b), private
+writes/admission/P8 and their legacy inventory remain open.
+
+## Kraken public discovery and local custody (2026-10-24)
+
+Owner codex-hcmq3f; RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md. Futures instruments and
+tickers plus Spot AssetPairs/Ticker now require managed Prepare/Bind/Claim, with
+exact current Background Read delivery before row staging, body decoding or Store
+publication. Spot keeps its existing 20000 ms timeout; Futures adds an explicit
+20000 ms admission-to-attempt-expiry bound, including time held in preparation.
+No retry is added inside an attempt. Existing native discovery backoff schedules
+fresh independent attempts after exact success/failure retirement, and failure
+clears the same attempt's busy state. Stale replies cannot publish or affect a
+new attempt. Background work emits no numeric command terminal or auth evidence.
+
+Selected local Read results/refusals and keyless Mutation refusals use genuine
+command entry and Context completion with native JSON/text/metadata. None or
+expired caller receipts use the cause-aware shared refusal. Fixed-setting
+SetPositionMode(false) SUCCESS stays legacy and inventoried pending #1989.
+Valid signed account/trading/history, separate Spot/Futures nonce domains,
+private sessions, paged Futures candle reads and existing Spot OHLC remain open
+or unchanged. This prune is 17 fingerprints / 19 occurrences; no new signing or
+whole-family custody claim is made.
+
+## GRVT replay protocol coverage at final capture
+
+GRVT replay reports evaluate private-stream coverage at the logical end of the
+lifecycle. An interim observation before authentication acknowledgement does not
+leave missing-stream diagnostics after the valid subscriptions complete. Genuine
+unsubscribed private data, wrong subaccount selectors and missing coverage on an
+active replacement generation remain final failures. Execution identity and
+order/caller-identity differences remain strict account diagnostics.
+
+### Crypto.com replay protocol declaration accuracy
+
+Crypto.com's current private replay no longer declares missing subscription
+errors introduced by observing the audit before the authentication ACK. TS
+requires its four private channels; Rust additionally requires `user.trade`.
+Invalid authentication, subscriptions sent before the ACK and unanswered final
+heartbeats still appear as protocol failures. The remaining execution, hedge
+mode and caller-identity differences retain strict FAIL; this reporting change
+establishes no native financial parity.
+
+### Binance Spot replay acknowledgement diagnostics
+
+Replay checkpoints do not finalize Binance Spot's acknowledgement coverage.
+A signed subscription can therefore be observed before its ACK without creating
+false final missing-subscription or missing-request errors after the actual
+lifecycle completes. Genuine signature, typed-ID correlation and pre-ACK event
+violations remain failures, as do incomplete live replacement generations and
+unanswered final requests. The remaining fill-price, time-in-force, client-ID
+and order-lifecycle differences retain strict FAIL; financial parity is not
+established by protocol reporting.
+
+## MEXC local write refusal custody
+
+Low-level write commands whose native step construction fails retain the same
+CommandError diagnostic followed by the same NotSent failure. Validation still
+precedes missing-key handling. A valid step result without credentials retains
+'MEXC trading needs an API key', AuthInvalid/NotSent, with no diagnostic. These
+two local branches now borrow genuine Mutation entry and settle its Context.
+Successful native queue/sign/async paths remain unchanged.
+
+Invalid clock or full owner capacity produces one canonical typed admission
+refusal (InvalidInput/Internal, NotSent) without the local diagnostic, I/O, timer,
+Store mutation or peer completion. Synchronous settlement releases its own
+capacity/order-lock custody; duplicate live IDs keep the existing shared
+diagnostic and owner. A local missing-key error carries no credential evidence,
+so it no longer increments auth_failures through the legacy untracked-command
+path. This consumes the existing shared custody rule, with no venue counter.
+SDK placeOrder(s), cancellation/amend and setting callers keep existing validation
+and dispatch choices; this entry describes low-level refusal behavior and adds
+no new SDK calls or successful write capability.
+
 ## KuCoin Spot fixed-setting local success
 
 SetLeverage still ignores the requested value and returns `[]` after storing
