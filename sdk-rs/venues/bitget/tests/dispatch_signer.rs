@@ -23,26 +23,55 @@ impl Signer for Gate {
         }
     }
 }
+/// Refuses synchronously, so managed preparation sees it; the immediate
+/// fixture cannot park a managed read's signature.
+struct Refusing {
+    local: Provider,
+    refuse: Arc<AtomicBool>,
+}
+impl Signer for Refusing {
+    fn sign(&self, work: SignRequest) -> SignFuture {
+        self.local.sign(work)
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        if self.refuse.load(Ordering::SeqCst) {
+            Some(Err(SignError::Refused))
+        } else {
+            self.local.sign_ready(work)
+        }
+    }
+}
+fn options() -> FixtureOptions {
+    FixtureOptions {
+        key: Some("key".into()),
+        secret: Some("material".into()),
+        passphrase: Some("pass".into()),
+        ..Default::default()
+    }
+}
 fn configured(parked: Arc<AtomicBool>) -> Harness {
-    Harness::started_configure(
-        FixtureOptions {
-            key: Some("key".into()),
-            secret: Some("material".into()),
-            passphrase: Some("pass".into()),
-            ..Default::default()
-        },
-        false,
-        |engine| {
-            let local = engine.signer().unwrap();
-            engine
-                .set_signer(Some(Arc::new(Gate { local, parked })))
-                .unwrap();
-        },
-    )
+    Harness::started_configure(options(), false, |engine| {
+        let local = engine.signer().unwrap();
+        engine
+            .set_signer(Some(Arc::new(Gate { local, parked })))
+            .unwrap();
+    })
+}
+fn refusing(refuse: Arc<AtomicBool>) -> Harness {
+    Harness::started_configure(options(), false, |engine| {
+        let local = engine.signer().unwrap();
+        engine
+            .set_signer(Some(Arc::new(Refusing { local, refuse })))
+            .unwrap();
+    })
 }
 fn classic() -> (Harness, Arc<AtomicBool>) {
     let parked = Arc::new(AtomicBool::new(false));
     let mut h = configured(parked.clone());
+    load_classic(&mut h);
+    (h, parked)
+}
+fn load_classic(h: &mut Harness) {
     h.load_public();
     h.respond(
         "/account/settings",
@@ -53,7 +82,6 @@ fn classic() -> (Harness, Arc<AtomicBool>) {
     h.respond("/account/accounts", 200, ACCOUNT);
     h.orders(OPEN_ORDER);
     h.login();
-    (h, parked)
 }
 fn staged(out: &[Action]) -> RequestId {
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
@@ -76,10 +104,10 @@ fn refuse(h: &mut Harness, attempt: RequestId) -> Vec<Action> {
 }
 #[test]
 fn provider_refused_probe_does_not_promote_classic_or_open_private_socket() {
-    let parked = Arc::new(AtomicBool::new(false));
-    let mut h = configured(parked.clone());
+    let refuse = Arc::new(AtomicBool::new(false));
+    let mut h = refusing(refuse.clone());
     let catalogue = h.take("/contracts");
-    parked.store(true, Ordering::SeqCst);
+    refuse.store(true, Ordering::SeqCst);
     h.engine.handle(
         h.now,
         Event::HttpResponse {
@@ -91,21 +119,15 @@ fn provider_refused_probe_does_not_promote_classic_or_open_private_socket() {
             },
         },
     );
-    let pending: Vec<_> = h.engine.drain_actions().collect();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
     assert!(
-        !pending
-            .iter()
+        !out.iter()
             .any(|a| matches!(a, Action::Http(http) if http.url.contains("/account/settings")))
     );
-    let id = pending
-        .iter()
-        .find_map(|a| match a {
-            Action::Sign { attempt, .. } => Some(*attempt),
-            _ => None,
-        })
-        .unwrap();
-    let out = refuse(&mut h, id);
-    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    // A refused provider releases no signed request at all.
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(http)
+        if http.headers.iter().any(|(k, _)| k.starts_with("ACCESS-"))
+            || http.signer_headers.iter().any(|(k, _)| k.starts_with("ACCESS-")))));
     assert!(
         !out.iter()
             .any(|a| matches!(a, Action::WsConnect {url,..} if url.ends_with("/private")))
@@ -116,12 +138,13 @@ fn provider_refused_probe_does_not_promote_classic_or_open_private_socket() {
 }
 #[test]
 fn unsent_identity_provider_refusal_is_typed_and_not_an_empty_success() {
-    let (mut h, parked) = classic();
-    parked.store(true, Ordering::SeqCst);
+    let refuse = Arc::new(AtomicBool::new(false));
+    let mut h = refusing(refuse.clone());
+    load_classic(&mut h);
+    refuse.store(true, Ordering::SeqCst);
     h.engine
         .handle(h.now, Event::Command(Command::FetchAccount { command: 43 }));
-    let id = staged(&h.engine.drain_actions().collect::<Vec<_>>());
-    let out = refuse(&mut h, id);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
     assert!(out.iter().any(|a| matches!(a,Action::Notice(Notice::CommandFailed {command:43,error}) if error.outcome==Some(Outcome::NotSent))));
     assert!(!out.iter().any(|a| matches!(
         a,

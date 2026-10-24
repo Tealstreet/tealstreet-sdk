@@ -21,6 +21,7 @@ pub(super) struct Managed {
     response_started: bool,
     signing_attempt: Option<RequestId>,
     recipe: Option<crate::signing_dispatch::Pending>,
+    waiting_route: Option<Prepared>,
 }
 
 impl Managed {
@@ -179,6 +180,9 @@ impl<P> Cx<'_, P> {
         if let Err(error) = self.io.request_contexts.validate_send(&context, self.now) {
             return Err((pending, error));
         }
+        if let Err(error) = self.io.http_pacing.check(context.pacing(), self.now) {
+            return Err((pending, error));
+        }
         if context.credential().is_some() != step.is_some() {
             return Err((pending, Error::Invalid));
         }
@@ -311,6 +315,7 @@ impl<P> Cx<'_, P> {
                 response_started: false,
                 signing_attempt,
                 recipe: None,
+                waiting_route: None,
             },
         );
         self.io.pending.insert(
@@ -536,23 +541,8 @@ impl<V: Venue> Engine<V> {
                 }
                 managed.lifecycle.prepared(token, prepared)
             });
-        if prepared_result.is_ok()
-            && let Some(attempt) = managed.signing_attempt
-        {
-            let ready = managed.lifecycle.begin_signing().and_then(|_| {
-                self.io
-                    .signing
-                    .activate_managed(attempt, managed.lifecycle.deadline())
-                    .map_err(|_| Error::State)
-            });
-            if let Err(error) = ready {
-                self.http_preparation_failed(
-                    now,
-                    token,
-                    error,
-                    VenueError::new("HTTP signing preparation failed"),
-                );
-            }
+        if prepared_result.is_ok() && managed.signing_attempt.is_some() {
+            self.resume_prepared_signing(now, token, prepared);
             return;
         }
         let prepared_result = prepared_result
@@ -578,6 +568,78 @@ impl<V: Venue> Engine<V> {
                 error,
                 VenueError::new("HTTP preparation is no longer valid"),
             ),
+        }
+    }
+
+    fn resume_prepared_signing(&mut self, now: f64, token: Preparation, prepared: Prepared) {
+        let request = token.attempt().request;
+        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+            return;
+        };
+        if managed.lifecycle.preparation() != token {
+            return;
+        }
+        if let Err(error) = managed.validate(&self.io.request_contexts, now) {
+            self.http_preparation_failed(
+                now,
+                token,
+                error,
+                VenueError::new("HTTP signing window expired"),
+            );
+            return;
+        }
+        if prepared.expires_at.is_some_and(|at| now >= at) {
+            self.reprepare_http(now, token);
+            return;
+        }
+        match self
+            .io
+            .http_pacing
+            .check(managed.lifecycle.context().pacing(), now)
+        {
+            Err(error) => {
+                self.http_preparation_failed(
+                    now,
+                    token,
+                    error,
+                    VenueError::new("Invalid HTTP signing pacing"),
+                );
+                return;
+            }
+            Ok(Some(at)) => {
+                managed.waiting_route = Some(prepared);
+                self.io.actions.push(Action::SetTimer {
+                    timer: managed.timer,
+                    at_ms: at
+                        .min(managed.lifecycle.deadline())
+                        .min(prepared.expires_at.unwrap_or(f64::MAX)),
+                });
+                return;
+            }
+            Ok(None) => {}
+        }
+        let was_waiting = managed.waiting_route.take().is_some();
+        let Some(attempt) = managed.signing_attempt else {
+            return;
+        };
+        let ready = managed.lifecycle.begin_signing().and_then(|_| {
+            self.io
+                .signing
+                .activate_managed(attempt, managed.lifecycle.deadline())
+                .map_err(|_| Error::State)
+        });
+        if let Err(error) = ready {
+            self.http_preparation_failed(
+                now,
+                token,
+                error,
+                VenueError::new("HTTP signing preparation failed"),
+            );
+        } else if was_waiting {
+            self.io.actions.push(Action::SetTimer {
+                timer: managed.timer,
+                at_ms: managed.lifecycle.deadline(),
+            });
         }
     }
 
@@ -911,6 +973,12 @@ impl<V: Venue> Engine<V> {
             );
             return;
         }
+        if managed.waiting_route.take().is_some() {
+            self.io.actions.push(Action::SetTimer {
+                timer: managed.timer,
+                at_ms: managed.lifecycle.deadline(),
+            });
+        }
         // Do not advance a lifecycle generation or take its retained recipe
         // unless a fresh signing attempt can also be allocated.
         if managed.signing_attempt.is_some() && !self.io.signing.available_id() {
@@ -982,6 +1050,11 @@ impl<V: Venue> Engine<V> {
         };
         let request = *request;
         if now.is_finite() && now < managed.lifecycle.deadline() {
+            if let Some(prepared) = managed.waiting_route {
+                let token = managed.lifecycle.preparation();
+                self.resume_prepared_signing(now, token, prepared);
+                return true;
+            }
             self.io.actions.push(Action::SetTimer {
                 timer: *timer,
                 at_ms: managed.lifecycle.deadline(),

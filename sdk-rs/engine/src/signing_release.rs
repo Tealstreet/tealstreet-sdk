@@ -2,6 +2,25 @@
 use crate::request_context::{Error, ReleaseTime};
 use crate::signing::SignReceipt;
 
+/// The stamp a resend must exceed: the genuine released receipt's stamp. Only
+/// `SigningRelease::stamp_floor` makes one, so a venue cannot mint it from a
+/// response, a header or a clock. It constrains a stamp and grants nothing.
+/// ```
+/// // Control: the exported type itself is nameable outside the engine.
+/// let none: Option<safe_cex_engine::StampFloor> = None;
+/// assert!(none.is_none());
+/// ```
+/// ```compile_fail
+/// let forged = safe_cex_engine::StampFloor(5.);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StampFloor(f64);
+impl StampFloor {
+    pub(crate) fn millis(self) -> f64 {
+        self.0
+    }
+}
+
 /// Metadata only: neither delivery evidence nor authority to send or retry.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SigningRelease {
@@ -16,6 +35,10 @@ impl SigningRelease {
     }
     pub fn time(&self) -> ReleaseTime {
         self.time
+    }
+    /// The floor for a resend of this release, when its receipt carried a stamp.
+    pub fn stamp_floor(&self) -> Option<StampFloor> {
+        self.receipt.stamp_ms.map(StampFloor)
     }
     /// Uncapped signature expiry in raw time, independent of the HTTP deadline.
     pub fn raw_expiry_ms(&self) -> Option<f64> {
@@ -108,5 +131,105 @@ mod tests {
                 .raw_expiry_ms(),
             None
         );
+    }
+
+    // Receipt-bound stamp floor (RUST_STAMP_FLOOR.md). REDs: StampFloor,
+    // SigningRelease::stamp_floor and DispatchContext::stamp_after are new.
+    fn stamped(stamp_ms: Option<f64>) -> SigningRelease {
+        SigningRelease::new(
+            SignReceipt {
+                stamp_ms,
+                expiry_ms: None,
+            },
+            at(0., 0.),
+        )
+        .unwrap()
+    }
+    fn floor(stamp_ms: f64) -> Option<StampFloor> {
+        stamped(Some(stamp_ms)).stamp_floor()
+    }
+    fn dispatch(now_ms: f64) -> crate::DispatchContext<'static> {
+        crate::DispatchContext::new(now_ms, None)
+    }
+
+    /// R1: without a floor, the current stamp, never negative.
+    #[test]
+    fn stamp_after_without_a_floor_is_the_nonnegative_current_stamp() {
+        assert_eq!(dispatch(1_000.75).stamp_after(None), Ok(1_000.));
+        assert_eq!(dispatch(-1.5).stamp_after(None), Ok(0.));
+    }
+
+    /// R2: a floor holds against fixed and backward clocks, and the clock
+    /// still wins once it passes the floor.
+    #[test]
+    fn stamp_after_a_floor_is_strictly_later_on_fixed_and_backward_clocks() {
+        let floor = floor(1_000.);
+        assert_eq!(dispatch(1_000.4).stamp_after(floor), Ok(1_001.));
+        assert_eq!(dispatch(900.).stamp_after(floor), Ok(1_001.));
+        assert_eq!(dispatch(1_500.).stamp_after(floor), Ok(1_500.));
+        assert_eq!(dispatch(-1.5).stamp_after(self::floor(5.)), Ok(6.));
+    }
+
+    /// R3: floor + 1 must stay a safe integer; it is refused, never rounded.
+    #[test]
+    fn stamp_after_refuses_past_the_safe_integer_edge() {
+        const MAX: f64 = 9_007_199_254_740_991.;
+        assert_eq!(
+            dispatch(0.).stamp_after(floor(MAX)),
+            Err(crate::signing::SignError::InvalidRequest)
+        );
+        assert_eq!(dispatch(0.).stamp_after(floor(MAX - 1.)), Ok(MAX));
+    }
+
+    /// R4: a floor exists exactly when the released receipt carried a stamp.
+    #[test]
+    fn stamp_floor_comes_only_from_a_released_stamp() {
+        assert!(stamped(None).stamp_floor().is_none());
+        assert_eq!(dispatch(0.).stamp_after(floor(42.)), Ok(43.));
+    }
+
+    #[test]
+    fn stamp_after_refuses_an_unsafe_current_clock_with_or_without_floor() {
+        const MAX: f64 = 9_007_199_254_740_991.;
+        for now in [MAX + 1., MAX + 2., f64::MAX] {
+            for selected_floor in [None, floor(42.)] {
+                assert_eq!(
+                    dispatch(now).stamp_after(selected_floor),
+                    Err(crate::signing::SignError::InvalidRequest)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stamp_after_refuses_nonfinite_current_clocks_before_clamping() {
+        for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for selected_floor in [None, floor(42.)] {
+                assert_eq!(
+                    dispatch(now).stamp_after(selected_floor),
+                    Err(crate::signing::SignError::InvalidRequest)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stamp_after_keeps_the_maximum_safe_current_clock() {
+        const MAX: f64 = 9_007_199_254_740_991.;
+        for selected_floor in [None, floor(42.), floor(MAX - 1.)] {
+            assert_eq!(dispatch(MAX).stamp_after(selected_floor), Ok(MAX));
+        }
+    }
+
+    #[test]
+    fn stamp_ms_is_unchanged_by_the_opt_in_floor_helper() {
+        let negative = dispatch(-1.5);
+        assert_eq!(negative.stamp_ms(), -2.);
+        assert_eq!(negative.stamp_after(None), Ok(0.));
+        assert_eq!(negative.stamp_ms(), -2.);
+        let current = dispatch(1_000.75);
+        assert_eq!(current.stamp_ms(), 1_000.);
+        assert_eq!(current.stamp_after(floor(1_000.)), Ok(1_001.));
+        assert_eq!(current.stamp_ms(), 1_000.);
     }
 }
