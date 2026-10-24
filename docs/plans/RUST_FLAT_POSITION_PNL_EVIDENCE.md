@@ -45,3 +45,21 @@ strings and genuine cross-implementation mismatches are mandatory controls.
 Do not alter fixtures, native producers, thresholds, CPU methodology, profiles,
 request inventory or unrelated comparison policy. The open-PR file map at this
 plan's start has no edits to the two scoped harness files.
+
+## Fresh inverse replay evidence
+
+Rust SDK run `40049727100` on `a5d7aea007cb758593d73bbe951302fc85b2b71a`
+produced strict Binance artifact `12542944507` from successful job
+`120739500180`. Its 38,341,978-byte ZIP has SHA-256
+`de148ec5c3c475a2e5989c2ca42195841948190c839c1d10729a97a7de444111`.
+The exact inverse tape above has fourteen fewer diagnostic keys: final-account
+`flatPositionPnl.length` and `[0]`, plus the same two paths for each of the six
+checkpoint comparisons. Both physical raw outputs contain empty flat-PnL arrays
+at every boundary. All 34 unrelated inverse keys remain, and strict status stays
+`FAIL`. Both audit outputs retain three writes, no protocol errors, and zero
+unserved, missing-write, invalid-signature and unused-write counters.
+
+Only those fourteen declarations are removed. This is one fresh correctness
+pair from an explicitly dispatched run, not a determinism or full-matrix parity
+claim. That run's separate banned-patterns job failed on foreign live-tip
+request-inventory drift; no green-cohort qualification is inferred from it.

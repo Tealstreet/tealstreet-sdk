@@ -1291,25 +1291,6 @@
             "checkpoint 4 account.positions[0].contractsNative",
             "checkpoint 5 account.positions[0].contractsNative"
           ]
-        },
-        {
-          "divergence": "Reported flat-position realized PnL differs; zero-size rows must retain their financial evidence.",
-          "keys": [
-            "account flatPositionPnl.length",
-            "account flatPositionPnl[0]",
-            "checkpoint 0 account.flatPositionPnl.length",
-            "checkpoint 0 account.flatPositionPnl[0]",
-            "checkpoint 1 account.flatPositionPnl.length",
-            "checkpoint 1 account.flatPositionPnl[0]",
-            "checkpoint 2 account.flatPositionPnl.length",
-            "checkpoint 2 account.flatPositionPnl[0]",
-            "checkpoint 3 account.flatPositionPnl.length",
-            "checkpoint 3 account.flatPositionPnl[0]",
-            "checkpoint 4 account.flatPositionPnl.length",
-            "checkpoint 4 account.flatPositionPnl[0]",
-            "checkpoint 5 account.flatPositionPnl.length",
-            "checkpoint 5 account.flatPositionPnl[0]"
-          ]
         }
       ]
     },
