@@ -146,12 +146,14 @@ impl Venue for Probe {
     fn on_sign_error(&mut self, _: &mut Cx<'_, Pending>, _: Pending, error: VenueError) {
         self.errors.push(error);
     }
-    fn on_http_release(&mut self, _: &mut Pending, _: &HttpRelease) -> Result<Admission, Error> {
-        self.admissions += 1;
-        Ok(if self.deny_admission {
-            Admission::Denied
-        } else {
-            Admission::Unscheduled
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::Mutable(|this, _, _| {
+            this.admissions += 1;
+            Ok(if this.deny_admission {
+                Admission::Denied
+            } else {
+                Admission::Unscheduled
+            })
         })
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {

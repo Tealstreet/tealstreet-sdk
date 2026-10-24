@@ -823,7 +823,15 @@ impl<V: Venue> Engine<V> {
                 .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
                     signing_release =
                         Some(crate::SigningRelease::new(release.signature, release.time)?);
-                    self.venue.on_http_release(&mut pending.value, release)
+                    match self.http_release {
+                        super::HttpRelease::Mutable(admit) => {
+                            admit(&mut self.venue, &mut pending.value, release)
+                        }
+                        super::HttpRelease::NonceUnscheduled(admit) => {
+                            admit(&self.venue, &pending.value, release)?;
+                            Ok(crate::request_context::Admission::Unscheduled)
+                        }
+                    }
                 });
         if let Ok(Claim::Released(release)) = result {
             if let Some(released) = release_flag {
@@ -1427,16 +1435,14 @@ mod tests {
                 cx.stream_response(request, ArrayAt::Root);
             }
         }
-        fn on_http_release(
-            &mut self,
-            _: &mut Pending,
-            release: &HttpRelease,
-        ) -> Result<Admission, Error> {
-            self.releases.push(*release);
-            Ok(if self.deny {
-                Admission::Denied
-            } else {
-                Admission::Unscheduled
+        fn http_release() -> crate::HttpRelease<Self> {
+            crate::HttpRelease::Mutable(|this, _, release| {
+                this.releases.push(*release);
+                Ok(if this.deny {
+                    Admission::Denied
+                } else {
+                    Admission::Unscheduled
+                })
             })
         }
         fn on_http_preparation_failed(

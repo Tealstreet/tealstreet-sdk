@@ -70,13 +70,11 @@ impl Venue for Probe {
             .unwrap();
         }
     }
-    fn on_http_release(
-        &mut self,
-        _: &mut Pending,
-        release: &HttpRelease,
-    ) -> Result<safe_cex_engine::request_context::Admission, Error> {
-        self.releases.push(*release);
-        Ok(safe_cex_engine::request_context::Admission::Unscheduled)
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::Mutable(|this, _, release| {
+            this.releases.push(*release);
+            Ok(safe_cex_engine::request_context::Admission::Unscheduled)
+        })
     }
     fn on_http_preparation_failed(
         &mut self,
