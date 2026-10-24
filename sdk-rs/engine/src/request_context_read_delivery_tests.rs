@@ -457,7 +457,8 @@ struct MutationRootProbe {
     sibling: Option<Context>,
     foreign_root: Option<Context>,
     socket: Option<SocketId>,
-    data: Vec<[Result<(), Error>; 5]>,
+    data: Vec<[Result<(), Error>; 7]>,
+    after_terminal: Option<Result<(), Error>>,
     socket_authority: Option<Result<(), Error>>,
     failure_authority: Option<Result<(), Error>>,
     publications: usize,
@@ -506,11 +507,19 @@ impl Venue for MutationRootProbe {
             cx.validate_command_read_http_delivery(&root, &leg),
             cx.validate_command_read_http_delivery(&root, self.sibling.as_ref().unwrap()),
             cx.validate_command_read_http_delivery(self.foreign_root.as_ref().unwrap(), &leg),
+            // A physical leg is never a root.
+            cx.validate_command_read_http_delivery(&leg, &leg),
+            {
+                let sibling = self.sibling.clone().unwrap();
+                cx.finish_http_context(&sibling).unwrap();
+                cx.validate_command_read_http_delivery(&root, &sibling)
+            },
         ];
         if checks[2].is_ok() {
             self.publications += 1;
             cx.store.set_hedged(true);
             cx.done_context(&root, "{}".into()).unwrap();
+            self.after_terminal = Some(cx.validate_command_read_http_delivery(&root, &leg));
         }
         self.data.push(checks);
     }
@@ -607,6 +616,21 @@ fn a_read_child_of_a_mutation_root_has_exact_data_authority() {
         "R2: a live sibling is not this delivery"
     );
     assert_eq!(checks[4], Err(Error::Revoked), "R6: another command's root");
+    assert_eq!(
+        checks[5],
+        Err(Error::Revoked),
+        "R8: a physical leg is not a root"
+    );
+    assert_eq!(
+        checks[6],
+        Err(Error::Revoked),
+        "R9: a retired sibling child"
+    );
+    assert_eq!(
+        engine.venue().after_terminal,
+        Some(Err(Error::Revoked)),
+        "R10: a sealed root is no longer the current root"
+    );
     assert_eq!(engine.venue().publications, 1);
     assert_eq!(
         engine
@@ -640,6 +664,30 @@ fn a_mutation_root_read_child_needs_its_own_delivery_and_failure_proves_no_data(
         engine.venue().failure_authority,
         Some(Ok(())),
         "R5: ownership only"
+    );
+    assert_eq!(engine.venue().publications, 0);
+}
+
+/// R7: DATA at the child's exact physical deadline never reaches a callback,
+/// so no validator can publish it.
+#[test]
+fn a_mutation_root_read_child_at_exact_expiry_never_reaches_the_codec() {
+    let (mut engine, request) = released_mutation_root_read();
+    let deadline = engine.venue().delivered.as_ref().unwrap().deadline();
+    engine.handle(
+        deadline,
+        Event::HttpResponse {
+            request,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    assert!(
+        engine.venue().data.is_empty(),
+        "no DATA callback at equality"
     );
     assert_eq!(engine.venue().publications, 0);
 }

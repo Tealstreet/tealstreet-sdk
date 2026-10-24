@@ -102,6 +102,26 @@ returns `Invalid`, so the REDs fail at their assertions, not at compile time.
 - R6: a foreign root (another command's root, or a stale generation) gives
   `Revoked`.
 
+Added after codex-5c57jl's contract review:
+
+- R7: DATA at the child's exact physical deadline never reaches a callback.
+- R8: a physical leg passed as the root gives `Revoked`.
+- R9: a retired (finished) sibling child gives `Revoked`.
+- R10: after the root's own terminal, the same pair gives `Revoked`.
+
+These land with source, on the post-5b fixtures:
+
+- R3: a delivered signed Mutation write leg gives `Invalid`.
+- R11: a Preflight or Plan-phase command gives Invalid/Revoked.
+- R12: a #1919 execution observer gives `Revoked`, and a physical Execution
+  owner gives `Invalid`.
+
+Caller contract: a `TimedOut` or `Revoked` from this validator on a live DATA
+callback is not a terminal. The venue still owns its exact Pending cleanup
+(`finish_http_context` / native job cleanup) and must not return early and
+strand a waiting job. Real Timeout, preparation and provider failures keep
+their own typed paths.
+
 ## Gates
 
 Scoped engine tests (`request_context_read_delivery_tests`), with clippy
