@@ -176,11 +176,7 @@ impl Kraken {
                 };
                 (*command, result)
             }
-            Command::SetPositionMode {
-                command,
-                hedged,
-                symbol: _,
-            } => {
+            Command::SetPositionMode { hedged, .. } => {
                 if *hedged {
                     crate::public_context::local(
                         cx,

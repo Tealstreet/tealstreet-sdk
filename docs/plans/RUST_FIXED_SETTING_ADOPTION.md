@@ -43,3 +43,14 @@ invalid-clock assertion. The cutover changes only the two success calls;
 all assertions are unchanged. Both dedicated controls and the existing
 trading/history targets pass after cutover. Inventory removes exactly one
 occurrence from Polymarket history and one from Kraken Futures trading.
+
+## Actual landing integration
+
+Plain-merged actual `59f50e4f37b` after #1995/#2000 landed. Source resolution
+keeps the landed Polymarket local/physical read adoption and reapplies only the
+fixed-setting call. Kraken removes its now-unused numeric command binding.
+The remaining Polymarket history inventory occurrence reaches zero, so the
+path itself is removed; Kraken trading drops one occurrence. The first merge
+checkpoint incorrectly kept an empty manifest path; a forward fix removes it.
+The checker independently rejects that historical direct-parent checkpoint;
+current manifest validation succeeds, with no checker change or exemption.
