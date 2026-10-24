@@ -1,5 +1,7 @@
 //! Original real-venue controls for the unsigned one-page public history read.
-use safe_cex_engine::request_context::{Error, HttpAction, Preparation, RoutingIntent};
+use safe_cex_engine::request_context::{
+    Claim, Error, HttpAction, Permit, Preparation, Prepared, RoutingIntent,
+};
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Query, Response,
     TimerId, VenueError,
@@ -612,4 +614,161 @@ fn public_trades_preparation_refusal_is_strict_and_does_not_retry() {
     assert_eq!(error.message, "fixture route refusal");
     assert!(!actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
     no_send(&actions);
+}
+
+fn raw_preparation(actions: &[Action]) -> (Preparation, HttpRequest) {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::ManagedHttp(a) => match a.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    intent,
+                } => {
+                    assert_eq!(*intent, RoutingIntent::Public);
+                    Some((*preparation, request.clone()))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("actual unsigned preparation")
+}
+fn bind(e: &mut TestEngine, at: f64, preparation: Preparation) -> (Permit, HttpRequest) {
+    e.http_prepared(
+        at,
+        preparation,
+        Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    e.drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Bind {
+                    permit, request, ..
+                } => Some((permit, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("exact prepared unsigned binding")
+}
+#[test]
+fn managed_public_trades_final_claim_keeps_physical_ten_ms_spacing() {
+    let mut e = engine(false);
+    start(&mut e, NOW, 40, Some(5000), Some(1));
+    let (first, _) = raw_preparation(&e.drain_actions().collect::<Vec<_>>());
+    start(&mut e, NOW + 10., 41, Some(5000), Some(1));
+    let (second, _) = raw_preparation(&e.drain_actions().collect::<Vec<_>>());
+    let (one, r1) = bind(&mut e, NOW + 100., first);
+    let (two, r2) = bind(&mut e, NOW + 100., second);
+    assert!(matches!(
+        e.claim_http(NOW + 100., one),
+        Ok(Claim::Released(_))
+    ));
+    assert_eq!(
+        e.claim_http(NOW + 100., two),
+        Ok(Claim::WaitUntil(NOW + 110.))
+    );
+    assert_eq!(
+        e.claim_http(NOW + 109., two),
+        Ok(Claim::WaitUntil(NOW + 110.))
+    );
+    assert!(matches!(
+        e.claim_http(NOW + 110., two),
+        Ok(Claim::Released(_))
+    ));
+    assert!(e.claim_http(NOW + 111., two).is_err());
+    e.drain_actions().for_each(drop);
+    reply(&mut e, &r1, NOW + 112., 200, EMPTY);
+    reply(&mut e, &r2, NOW + 112., 200, EMPTY);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(terminals(&actions, 40), vec![Ok("[]".into())]);
+    assert_eq!(terminals(&actions, 41), vec![Ok("[]".into())]);
+}
+#[test]
+fn managed_public_trades_late_readiness_after_root_expiry_is_inert() {
+    let mut e = engine(false);
+    let p = parked(&mut e, 42);
+    e.handle(
+        NOW + 50.,
+        Event::TimerFired {
+            timer: TimerId(u64::MAX),
+        },
+    );
+    typed(
+        &e.drain_actions().collect::<Vec<_>>(),
+        42,
+        ErrorKind::Timeout,
+    );
+    assert!(!e.http_preparation_pending(p));
+    e.http_prepared(
+        NOW + 51.,
+        p,
+        Prepared {
+            id: p.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    no_send(&actions);
+    assert!(terminals(&actions, 42).is_empty());
+}
+#[test]
+fn managed_public_trades_expired_old_delivery_cannot_settle_reused_id() {
+    let mut e = engine(false);
+    start(&mut e, NOW, 43, Some(50), Some(1));
+    let old = packet(&prepared(&mut e, NOW));
+    e.handle(
+        NOW + 50.,
+        Event::TimerFired {
+            timer: TimerId(u64::MAX),
+        },
+    );
+    typed(
+        &e.drain_actions().collect::<Vec<_>>(),
+        43,
+        ErrorKind::Timeout,
+    );
+    start(&mut e, NOW + 51., 43, Some(5000), Some(1));
+    let current = packet(&prepared(&mut e, NOW + 51.));
+    reply(&mut e, &old, NOW + 52., 200, &body(ROW));
+    assert!(terminals(&e.drain_actions().collect::<Vec<_>>(), 43).is_empty());
+    reply(&mut e, &current, NOW + 53., 200, EMPTY);
+    assert_eq!(
+        terminals(&e.drain_actions().collect::<Vec<_>>(), 43),
+        vec![Ok("[]".into())]
+    );
+}
+#[test]
+fn managed_public_trades_auth_metadata_stays_public_without_health_evidence() {
+    let mut e = engine(false);
+    start(&mut e, NOW, 44, Some(5000), Some(1));
+    let first = packet(&prepared(&mut e, NOW));
+    let body = r#"{"code":40101,"message":"fixture credential refusal","result":{"data":[]}}"#;
+    reply(&mut e, &first, NOW + 1., 200, body);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let due = timer(&actions, NOW + 1001.);
+    e.handle(NOW + 1001., Event::TimerFired { timer: due });
+    let retry = packet(&prepared(&mut e, NOW + 1001.));
+    reply(&mut e, &retry, NOW + 1002., 200, body);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let results = terminals(&actions, 44);
+    let error = results[0].as_ref().unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(error.outcome, None);
+    assert_eq!(error.venue_code.as_deref(), Some("40101"));
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some("fixture credential refusal")
+    );
+    assert_eq!(e.health().auth_failures, 0);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::AccountAuth { .. })))
+    );
 }

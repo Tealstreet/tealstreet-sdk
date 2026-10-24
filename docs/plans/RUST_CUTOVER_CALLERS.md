@@ -6951,3 +6951,30 @@ The old eager path emitted the ticker HTTP first. Private startup remains
 independent of ticker readiness/success; no venue defer queue restores physical
 ordering. A raw-action parked-route control pins this consequence explicitly;
 the immediate-route fixture proves its own ordering only.
+
+
+## Crypto.com unsigned PublicTrades caller-root ownership
+
+PublicTrades is an unsigned one-response Read with one immutable caller receipt
+root across native 10ms queue eligibility, route preparation and retries. Each
+eligible dequeue mints a fresh child capped at 20s and at that original root;
+late or reused-owner DATA cannot parse/stage/complete. Root expiry is strict
+Timeout with no prefix, INCOMPLETE marker or renewed work. Preparation/local
+submission refusal is strict; a released physical-child Timeout under a live
+root keeps the native retry path. Shared Context pacing additionally preserves
+the native 10ms physical send gap when independent preparations are delayed.
+
+Production/testnet URL, escaping, empty headers/body, default count25, wire
+count clamp150, caller truncation, duplicate row order and native financial
+fields remain unchanged. A failed streamed page is reset before retry; no
+unaccepted prefix is published. Missing-array streams keep native transport
+retry, whereas malformed rows in a valid array reject the whole page.
+
+Native retry counts remain exact: three released transport retries with 1000ms
+waits; the legacy 40101 hint caps at one retry, including code40001/message40101
+and transport-message40101 collisions. Native code/message fields are carried
+through the shared classifier; the minimum 40101 compatibility predicate is a
+known follow-up requiring a separate caller-policy ruling before removal.
+It grants no account-auth evidence or mutation rights. Public 40101 errors
+retain typed/native metadata without changing auth health. Private history,
+signing, account/trading reducers and credential selection are unchanged.

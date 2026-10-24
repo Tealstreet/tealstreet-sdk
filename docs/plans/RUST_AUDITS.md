@@ -3043,3 +3043,14 @@ prefix. Shared Context cleanup is separate from DATA admission: already-admitted
 failure keeps its native retry even after sibling issuance prunes expired
 retirement metadata. Completed catalogue retires before successor admission so
 capacity cannot strand ticker startup. No local issuer/timer/selection algorithm.
+
+
+## Crypto.com PublicTrades authority
+
+The unsigned PublicTrades endpoint now owns an exclusive ReadHistoryRows
+completion rooted at the caller receipt. Shared admission precedes native wait;
+DATA admission precedes codec/staging and final response policy. The public
+legacy cursor branch is removed rather than retained beside a managed terminal.
+Exact-owner retirement drops only its queued work. Private cursor history stays
+legacy; no signer or key-selection migration is claimed. Three public lexical
+fingerprints/four occurrences are removed; history retains its private witness.

@@ -218,3 +218,33 @@ physical-child case intentionally fails at its missing 20s engine timer on
 legacy source; after adoption it drives that actual typed expiry and recovery,
 not a synthetic HttpFailed. Two added native text-collision controls pass.
 The initial 17-control receipt remains historical and is not overwritten.
+
+
+## Managed implementation checkpoint
+
+PublicTrades now has its own module/request/Pending and exclusive
+ReadHistoryRows authority; private Kind::Trades/row/sender branches are removed.
+The shared original caller root is issued before wait, native queue eligibility
+remains separate from shared final-claim pacing, and each 20s child comes from
+that root at dequeue. Matching failure-only callbacks retire the old child and
+reset unaccepted staging before the native retry; preparation refuses strictly.
+The shared classifier supplies read kinds/native fields. The approved minimum
+40101 compatibility predicate keeps both pinned collision counts, is named in
+CALLERS, and supplies no auth-health inference. Original controls are unchanged;
+four extra managed controls pin real delayed claims, expiry/readiness, numeric
+reuse with old DATA and typed public auth metadata without health evidence.
+
+The first compile caught unused legacy imports and a missing state initializer;
+those are corrected, not RED evidence. The first managed run then exposed a
+missing canonical pacing-group declaration; registering the same Context group
+in Venue::http_pacing made all21 original controls pass. No engine source or
+venue release clock/ledger was introduced. Scoped suite/strict and broad CI
+receipts are recorded separately after execution.
+
+
+All25 dedicated controls and the scoped Crypto.com suite216 tests pass. The
+older mixed private/public dispatch fixture now uses real prepared_actions
+before inspecting HTTP; its no-managed-actions assertion remains after actual
+host preparation, and every wire/result assertion is retained. No financial
+assertion was weakened. The extra four managed controls are not original RED
+evidence. Original21 assertion bodies remain exact to the original checkpoint.

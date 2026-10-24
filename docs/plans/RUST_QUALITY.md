@@ -1711,3 +1711,16 @@ independence; CALLERS names the physical-order consequence. All three bounded
 reviews are CLEAR at a9282a7e787. Refreshed scoped suite: 165 tests/16 targets,
 zero ignored; strict all-target Clippy passes. Actual landing integration retains
 all incoming foreign changes and only the discovery singleton inventory prune.
+
+
+## Crypto.com PublicTrades original and managed controls
+
+Plan preceded original compiling controls on actual1e2458b1c98. The expanded
+original checkpoint ran21 controls:10 assertion RED/11 working GREEN/0ignored;
+code/message40101 collisions are pinned separately from transport retry limits.
+The two new failure boundaries drive actual preparation refusal and actual
+physical-child deadline, with their first original failure gates identified.
+Adoption coverage adds delayed prepare/final-claim10ms pacing, expired readiness,
+reused-id late DATA and credential-free typed auth metadata/health isolation.
+All original financial/wire assertions remain. Broad size/CPU/replay gates and
+independent implementation reviews remain CI/review requirements.
