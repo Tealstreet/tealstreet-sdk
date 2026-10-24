@@ -141,3 +141,29 @@ known native classification, so a newer-WS fence cannot mask metadata staging.
 Establish and load the first stream, admit the classification, then use a real
 close/reconnect/new open to start the tested snapshot. Keep every original
 financial assertion and shift response times relative to the actual reconnect.
+
+## Scratch refresh before the snapshot-owner landing
+
+Plain-merged requested actual `77f12408947` into parked `76e868b8846` on local
+branch `feat/rust-woo-socket-preintegration`; merge `2e238aa94ed`. Venue source
+merged without conflict. The four shared docs retain current content plus this
+adapter's suffix once. The socket-family conflict preserves the current complete
+foreign map and removes only WOO; the sites merge removes only the original two
+WOO fingerprints/occurrences. No request inventory or shared-core edit.
+
+Scoped `managed_sockets` executes nine PASS and the same two combined-action
+ordering REDs, zero ignored. The first command used the singular target name and
+ran no tests; the recorded execution uses the actual plural target. Current
+#1943 is available but this refresh intentionally preserves the parked adapter's
+source; it is not handoff adoption or merge readiness. The dynamic/reconnect seed
+must still use the actual shared handoff before final certification. The normal
+socket checker and own-delta whitespace check pass. Whole-integration whitespace
+also reports two unchanged incoming doc lines; their bytes were preserved.
+
+Read-only trial against #1788 frozen `3943134fc60` finds one source conflict in
+account.rs imports: retain the managed imports plus OrderSnapshotToken, without
+restoring retired legacy Supervisor/Config/Tick/SocketChannel imports. All token
+production hunks and appended tests merge automatically; owner review of that
+exact resolution is requested. This trial is not actual #1788 integration or a
+runtime claim for its appended cases. Wait for the actual snapshot-owner landing
+and then recheck that composition without rewriting either frozen head.
