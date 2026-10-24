@@ -70,6 +70,9 @@ struct CommandOwner {
     /// Some Context or declared policy of this owner named a credential; only
     /// then can its auth-kind failure be credential-health evidence.
     credentialed: bool,
+    /// An earlier attempt of this intent may have reached the venue. Every
+    /// journal this owner creates projects its failure at least Unknown.
+    inherited_uncertain: bool,
 }
 
 enum CommandPhase {
@@ -569,6 +572,7 @@ impl ContextRegistry {
                         .map(|(_, intent)| intent),
                     leg_intents: Vec::new(),
                     credentialed: context.credential().is_some(),
+                    inherited_uncertain: false,
                 });
         }
         self.contexts.insert(identity, context.clone());
@@ -815,7 +819,8 @@ impl ContextRegistry {
                     writes.register(request, context.leg())?;
                 }
             } else {
-                let mut writes = CommandWrites::new(CAPACITY)?;
+                let mut writes =
+                    CommandWrites::new(CAPACITY)?.inheriting(owner.inherited_uncertain);
                 writes.register(request, context.leg())?;
                 owner.writes = Some(writes);
             }
@@ -1172,19 +1177,18 @@ impl ContextRegistry {
         {
             return Seal::Stale;
         }
-        let declared = self
-            .commands
-            .get(&command)
-            .is_some_and(|owner| owner.mutation_declared);
+        let (declared, inherited) = self.commands.get(&command).map_or((false, false), |owner| {
+            (owner.mutation_declared, owner.inherited_uncertain)
+        });
         let mut writes = match self
             .commands
             .get_mut(&command)
             .and_then(|owner| owner.writes.take())
         {
             Some(writes) => writes,
-            None if declared => {
-                CommandWrites::new(CAPACITY).expect("fixed positive journal capacity")
-            }
+            None if declared => CommandWrites::new(CAPACITY)
+                .expect("fixed positive journal capacity")
+                .inheriting(inherited),
             None => return Seal::Legacy(error),
         };
         if error.is_none() && writes.succeed().is_ok() {

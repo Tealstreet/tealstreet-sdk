@@ -560,7 +560,9 @@ impl<P> Cx<'_, P> {
                     generation: identity,
                     phase: CommandPhase::Planned(State { body }),
                     last_deadline: deadline,
-                    writes,
+                    // The founder's inherited fact moves with its journal, so
+                    // every observer's projection keeps it.
+                    writes: writes.map(|writes| writes.inheriting(owner.inherited_uncertain)),
                     mutation_declared: owner.mutation_declared,
                     credentialed: owner.credentialed,
                     pending: 0,
@@ -568,6 +570,7 @@ impl<P> Cx<'_, P> {
                     waits: 0,
                     intent: owner.intent,
                     leg_intents,
+                    inherited_uncertain: owner.inherited_uncertain,
                 };
                 // The founder keeps its own pending/delivery accounting and
                 // becomes an observer: it holds no journal or send right.
@@ -586,7 +589,7 @@ impl<P> Cx<'_, P> {
             }
             _ => {
                 owner.phase = CommandPhase::Planned(State { body });
-                owner.writes = writes;
+                owner.writes = writes.map(|writes| writes.inheriting(owner.inherited_uncertain));
                 owner.leg_intents = leg_intents;
                 owner.last_deadline = deadline;
                 registry.plan_index.push(preflight.owner());
