@@ -142,6 +142,42 @@ pub enum SessionResend {
 - **Journal owns the terminal.** The shared write journal projects the
   terminal even where native `trade_finish` strips fields.
 
+## Engine path for the status-exempt grant (claude-dazzy3 S1)
+
+Today a 408 or 5xx write never reaches the venue codec in DATA custody.
+`ResponseProof::from_status` (`http_evidence.rs`) marks it Unproven. The
+managed write path (`http_lifecycle.rs`, write response completion) records
+evidence through `unproven_http_evidence` and fails the Plan directly, and
+`classify` rule 3 (`unproven_status`) returns Unknown before any code table.
+
+The grant therefore needs one named, venue-declared exemption:
+
+- A new Venue method with a default: `fn status_exempt_refusal(&self, pending:
+  &Self::Pending, response: Response<'_>) -> bool` (default `false`). It is
+  consulted only when `from_status` is Unproven. GRVT returns `true` only when
+  its own parser reads code 1000 from the body.
+- When it returns `true`, that delivery is treated as native-codec evidence:
+  `on_response` runs in DATA custody, and `classify_write` skips rule 3 for
+  that delivery only (engine-internal, per-delivery state). The venue's table
+  maps 1000 to `RefusedResend`, so the grant comes from the ordinary journal
+  gate.
+- Any other body (a different code, or unparsable) leaves the hook `false`,
+  and today's path is unchanged: Unknown, fence and reconcile, no grant.
+- It is additive: a defaulted trait method, with no change to `Row`,
+  `CodeTable` or `Verdict`. Only GRVT overrides it, and CALLERS discloses it as
+  venue-declared.
+
+## Immediate Read-failure continuation (claude-dazzy3 S2)
+
+`continue_serial_plan` (immediate) from failure custody mirrors the
+`continue_serial_plan_after` failure rules exactly:
+
+- it requires the current Read call's own released failure (an unreleased or
+  provider refusal stays the engine stop);
+- it allows only a Read `next`; a Mutation `next` is Invalid;
+- a second continuation from the same failure callback is refused;
+- every refusal spends nothing.
+
 ## REDs (before source)
 
 Written against #2069 phase 3 (its park and seed), stacked after it.
@@ -179,10 +215,19 @@ Written against #2069 phase 3 (its park and seed), stacked after it.
     is unchanged.
 13. Seed gate: attempt 2 does not send while Ready at `r`, and an announce at the
     same `r` does not wake it.
+14. Status-exempt grant: a 503 whose body parses as code 1000 reaches
+    `on_response`, gets the RefusedResend grant and resends once. A 408 or 503
+    with any other code stays Unknown with no grant and the fence armed. A 503
+    whose 1000 body fails to parse stays Unknown. A venue that does not
+    override the hook keeps today's path for 1000 at 503.
+15. Immediate continuation mirrors continue_after: an unreleased failure stops;
+    a Mutation `next` and a second continuation from one callback are refused,
+    spending nothing.
 
 ## Gates
 
 Engine-focused tests under `http-plans` and `http-plans,order-locks`; clippy
 `-D warnings`; fmt. Plan review, then REDs, then source. WASM bytes reported.
-The API is additive. It depends on #2069 phase 3 (the Bind park and the
-minimum-revision seed), so it stacks after it.
+The API is additive. It depends on #2069 phase 3's SOURCE, not just its plan
+(the Bind park and the pub(crate) minimum-revision seed), so the REDs wait for
+that source and the PR stacks after it.
