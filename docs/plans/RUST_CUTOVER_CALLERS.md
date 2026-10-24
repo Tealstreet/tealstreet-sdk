@@ -6327,6 +6327,97 @@ distinguish the following:
 | Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
 | Engine Timeout terminal | The root expired. No further work is issued. |
 
+## Selected caller-wait roots and physical history pages
+
+Signed plain command reads can retain one selected identity, slot, route and
+account-evidence scope across physical pages. The original root captures the
+caller's exact receipt deadline. Each eligible page or native re-send gets a
+fresh Read/Never child capped by that root; a preceding page's shorter deadline
+does not bound the next page. Selection never changes midway through a query.
+
+Root expiry uses the shared strict Timeout terminal without accepted-row
+publication or an incomplete marker. A physical page timeout while the root is
+live retains the shared history caller's accepted-prefix recovery. Queued native
+state retires by exact owner through the shared expiry hook. Consumers complete
+only through their original root and keep their existing retry eligibility,
+paging, body validation and finalization policy. This helper changes no host
+wait, numeric completion contract or native venue issuer by itself.
+
+## TxFlow whole managed socket family
+
+TxFlow uses shared managed feeds for both api-ws and node ws. API is Public;
+node is Private unless public_data_only. Shared/Disabled public-feed policy
+suppresses public sockets/topics while retaining private node financial traffic.
+Both feeds retain receive-before-decode AnyText liveness, native JSON/ping bytes,
+10s connect,30s idle,10s ping and1s-to16s retry bounds. Duplicate/retired/expired
+socket ingress is inert before native publication. Only node retirement clears
+published books and invalidates the account generation/settings/read owners.
+
+Subscriptions represent the final desired set, reconciled against frames already
+returned to the host, with150ms pacing. Transient subscribe/unsubscribe flips may
+coalesce before release. They do not create an unbounded FIFO or a4096-flip close;
+actual retained-capacity refusal remains bounded by the shared core. Unsubscribe
+after an already-returned subscribe still emits the native unsubscribe frame at
+the existing cadence. The final set converges after a burst of flips.
+
+Private opening/reconnect refresh follows the complete desired node batch and a
+subsequent shared released-interest timer ingress. This deliberately replaces
+native HTTP-before-paced-private-frames ordering; it is host-action handoff, not
+peer acknowledgement. The callback selects current native read/revision state.
+Refresh intent survives refusal/retirement and is consumed only by native read
+ownership. Startup and poll reads remain independent; startup consumption prevents
+a later wake from adding a refresh the native early-open path never admitted.
+Public-only mode has no private refresh. A missing private address still fails
+configuration before I/O; the defensive no-address callback remains a guarded
+native no-op. HTTP builders, PublicCors/static headers, financial reducers,
+history, signing and trading retain their existing contracts.
+
+
+### Replay protocol diagnostics at final capture
+
+Replay checkpoints capture comparison state without finalizing protocol
+coverage. Both TS and Rust replay receivers aggregate protocol errors once at
+the logical end of the replay, before correctness-mode memory collection. A
+checkpoint taken before an authentication acknowledgement or the first
+heartbeat therefore cannot permanently introduce an incomplete-lifecycle
+diagnostic into an otherwise complete final result.
+
+Actual event violations remain recorded and appear in the final report. Missing
+final authentication, heartbeat or required subscriptions still fail; an audit
+exception still aborts replay. This changes harness reporting, not native order,
+fill, transport or signing behavior. The tape and declared-failure policy retain
+their existing meaning; a clean intermediate capture does not certify private
+parity.
+
+## Hyperliquid perps history caller-root custody
+
+Perps fills, orders, income, public trades and uncached REST client-ID lookup now
+use one Read root at the exact caller receipt deadline (configured/per-call
+rustCommandTimeoutMs; absent input is stamped120000ms at engine receipt). Each physical
+page gets a20s child at eligible dequeue in the native shared Account FIFO,
+capped by that unchanged root. Missing receipts refuse typed with no default,
+I/O or outcome. These unsigned JSON POSTs retain the same user/vault/application
+subject, Content-Type and transport-preparation obligation. Public Auth* failures
+retain typed metadata without AccountAuth evidence.
+
+At root expiry the engine emits one strict Timeout with no financial outcome:
+accepted rows, INCOMPLETE markers and native finalizers are discarded; late data
+and old queued continuations are inert. A failed page while the root remains
+live keeps native accepted-only recovery, or strict failure if no eligible rows
+were accepted. fetchHistoricalPositions / PositionHistory::FillsSymbol therefore
+reject at root expiry instead of folding a prefix. Lookup keeps native unknownOid
+and symbol-mismatch non-definitive results and untyped codec errors.
+
+Native geometry is unchanged:200 pages per fills/funding stage, up to400 for
+combined income, inclusive timestamp/ID progress, retention notices, sorting and
+limits. Streamed pages reserve120 weight then settle20+ceil(rows/20) in the shared
+1000/min budget (full fills120, full funding45); no whole-walk duration is promised.
+Queued children do not spend their20s before dequeue, but the caller root keeps
+running. Existing cached/invalid/anonymous local lookup and standalone spot
+completion behavior remain unchanged. Uncached public-only identity refusals now
+obey caller-root capacity before their native message; admitted local refusals
+immediately clear their root timer and publish exactly one terminal.
+
 ## Bitget native dispatch signer checkpoint (draft; hosted prerequisite pending)
 
 This proposed change covers `bitget`, `bitgetusdc` and `bitgetinverse` native
