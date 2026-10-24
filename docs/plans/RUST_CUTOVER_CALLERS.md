@@ -7221,7 +7221,6 @@ Caller-visible changes:
   setup facts such as AsterDEX's version. `local_signer_from_json_for`, which
   has no options, refines nothing.
 
-
 ## KuCoin opaque HMAC custody and native staging
 
 Both aliases consume raw key/secret/passphrase and optional broker material only
