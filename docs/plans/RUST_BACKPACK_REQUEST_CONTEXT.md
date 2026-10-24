@@ -581,3 +581,22 @@ original invalid-clock and capacity failures become typed engine refusals,
 while native messages, keyless operation, Store/no-I/O, prior-owner delivery and
 immediate reuse stay GREEN. The only manifest change removes the one planned
 count-two fingerprint. #1870 remains frozen and unaffected on its own branch.
+
+Exact source proposal SHA-256
+`c6ca2e3b60fb34b5af0c40ca99de1119edd3da46ee8417c00b8dab20002dc3ad`
+is SOURCE/API CLEAR from hcmq3f. `618518256e0` applies that source; local scoped
+Backpack verification passes 167 tests with zero failures and one pre-existing
+ignored account/background repair test. All-target strict Clippy and scoped fmt
+pass. Original seven control bodies are unchanged.
+
+The first bans run correctly stopped on stale-base MEXC inventory growth after
+an unrelated prune landed. `0e9161a1479` plain-merges actual `db6fa45bbb7` (MEXC
+and OKX venue changes/docs only; no shared engine change), retaining incoming
+CALLERS first plus the own suffix exactly once. Both Backpack source/control
+blobs remain byte-identical to the tested implementation. Bans, including both
+inventory scanner/ratchet controls, now pass. Relative to that incoming tip,
+exactly five own paths remain and the only map change is the planned count-two
+Backpack trading fingerprint removal. Key-selection maps are unchanged.
+Fresh CI and exact committed preservation review are in flight; no merge or
+full-package proof is claimed. Architecture gate: No shared policy copy, only
+native refusal messages composed through existing shared custody APIs.
