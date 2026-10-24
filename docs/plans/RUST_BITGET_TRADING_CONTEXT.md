@@ -108,33 +108,44 @@ whole command has no input-count cap; request count is
 
 ## Overseer rulings (2026-10-25)
 
-1. No step cap; stack on fe7lgm's streamed serial Plan.
-2. 40009: preserve the single resend via `plan_resend_context` with an
-   explicit one-resend grant; never more.
-3. 40085: preserve the replan as a second admission from the job's DATA
-   custody.
-4. Detection wait: preflight parking.
-5. Reads in the job and the Unknown reconcile mirror OKX.
-6. One scratch CI WASM measurement with `http-plans` enabled.
+1. No step cap, and no root wall-clock: stack on fe7lgm's streamed serial
+   Plan (`RUST_PLAN_SERIAL_STREAM.md` at `5eab0dc0b3a`). Each call is bounded
+   by `now + timeout_ms`; the chain advances only from DATA. Native has no
+   whole-job bound, so a 10 000-call UTA order stays native.
+2. 40009: `SerialCall.attempts` 2 for mutations; the one resend goes through
+   `plan_resend_context` from that call's DATA, a fresh retry Context that
+   re-runs Prepare/Sign/Bind (new stamp, nonce reserved at Bind). Never more.
+   `read_retries` stays venue job state.
+3. 40085: the replan is a plain continuation (`continue_serial_plan` with the
+   re-read calls, then the replanned job). No seal, no second root or
+   admission.
+4. Detection wait: the WriteAfterReads command wait parks the queue before
+   planning, with the native 10 s bound failing queued commands as native
+   does. It is never a root cap.
+5. Reads in the job are `SerialCall` Read operations under the admitted
+   credential; native read retries use `continue_serial_plan_after(250·n)`
+   on the Plan's own timer. The Unknown reconcile mirrors OKX.
+6. Mixed batch: `KnownPartial` plus `fail_plan` projects failure with every
+   streamed accepted ID, that batch's included.
+7. One scratch CI WASM measurement with `http-plans` enabled (gate 3).
 
 ## Gates before production
 
-1. **Streamed serial Plan** (fe7lgm). It must also carry gates 2-4 and:
-   - **Wall-clock.** Native has no overall bound. A root capped at the
-     caller receipt (120 000 ms default) refuses native max orders (10 000
-     UTA calls ≈ 25 min at 150 ms). Needs a native-parity root.
-   - **Mixed batch.** A Classic place with a non-empty `failure_list` is
-     terminal with IDs kept, not a continue.
-2. **Reads after admission.** Amend resolve and the 40085 re-reads, with the
-   native 250·n ms retry, in the same owner or an approved equivalent.
-3. **Resend grant and re-admission.** Rulings 2 and 3 need engine support:
-   today `plan_resend_context` refuses at `selected >= attempts`, and
-   `done_plan`/`fail_plan` seal the command.
-4. **Preflight parking.** `begin_preflight_with_command_wait` is ReadOnly-only
-   today; the queue needs it for WriteAfterReads.
-5. **WASM.** Bitget runs under the 1 363 968-byte override. The scratch CI
-   measurement with `http-plans` enabled decides whether this slice fits.
-6. **#1956 (6b).** Shared journal owner; stack on its landing.
+1. **Streamed serial Plan** (fe7lgm), landed with the contract above,
+   including the WriteAfterReads command wait (`b2b40eb5a00`).
+2. **#1956 (6b).** Shared journal owner; stack on its landing.
+3. **WASM.** Bitget runs under the 1 363 968-byte override. Scratch run
+   `40114957320` (`875b60c5005`, only `http-plans` enabled on the bitget
+   crate, no venue use) measured **1 418 022** bytes, 54 054 over. The
+   slice cannot land under the override as is; a budget ruling or engine
+   size work is required before production.
+
+## Callers (tealstreet-next)
+
+TS-visible results are unchanged except one new bound: each write and read
+call ends at 20 000 ms as a typed Timeout (Unknown for a released write, which
+then reconciles). Native trading calls had no request deadline. Recorded in
+`RUST_CUTOVER_CALLERS.md` at production time.
 
 ## Original REDs
 
