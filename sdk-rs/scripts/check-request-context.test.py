@@ -92,9 +92,11 @@ class RequestContextBan(unittest.TestCase):
         self.assertEqual(hashlib.sha256(json.dumps(after, sort_keys=True).encode()).hexdigest(),
                          '6318d427aca63f36566df341d8ed3facc9b9f49b68a0d08f4d774567b83df9a9')
         original = ban.git('show', '848924471635eee7a0c61c64407a861c3aea37f3:sdk-rs/' + path)
-        current_source = (ban.ROOT / path).read_text()
+        landed_source = ban.git('show', '77f124089477a6aed502d9b02aa7f08752b7bfa5:sdk-rs/' + path)
         self.assertEqual(dict(ban.fingerprints(original)), before)
-        self.assertEqual(dict(ban.fingerprints(current_source)), after)
+        self.assertEqual(dict(ban.fingerprints(landed_source)), after)
+        live = {path: dict(ban.fingerprints((ban.ROOT / path).read_text()))}
+        self.assertFalse(ban.check(live, live, [('landed', current)]))
         self.assertEqual(set(before) - set(after), {
             '5c28b0ebae1f2a54f344d52c2c422801c8e82381c7fd8ad95d13cd549e88ddec'})
         self.assertEqual(set(after) - set(before), {
@@ -147,45 +149,20 @@ class RequestContextBan(unittest.TestCase):
         # Source changes still have to exactly match the frozen manifest.
         self.assertTrue(ban.check(extra, landed, [('original', old)]))
 
-    def test_exact_signer_factory_rehash_preserves_count_and_cannot_regrow(self):
-        approved = {'venues/binance/src/history.rs': {'after': {'153ef00b195a92e18337317fde397c0707f7778eadc4bfc02b2c0d2ffbf493c5': 1,
-                                                     '2263b7c3975168a800233a5720729a5293adc8d79ddc822742da439875b1c927': 1,
-                                                     '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 3,
-                                                     '5d6691e305370ef1b5e22426e494d28b28936de80d5d5af079e9deae52eb33f2': 1,
-                                                     '6a3d37fddbb5fff8f3cd2c8d2ab4958d84b5c1efd268fd69c1464b41183a0c6a': 1,
-                                                     '896c2dc203c518dc9ae1c6b5eb51b5591da28af19f9ff2461c4c629a490fb1a5': 1,
-                                                     '931fea11387a3eb1ccf2c909b869b3ee559925055e436a3987df14969b35fc81': 1,
-                                                     'a2e0593410ad976880489badf3fbdf89ad9f79859b04b9860d23044f327967d3': 1,
-                                                     'abe91b4dc9b434e9eb3b21058d48e235a63990574ed4431b56d81aa1bb372f49': 1,
-                                                     'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 2,
-                                                     'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
-                                                     'f859db20866f37469af70c624ec5ad2f31c4f7bd10c1bd1b0da41299b91f7eb7': 1},
-                                           'before': {'153ef00b195a92e18337317fde397c0707f7778eadc4bfc02b2c0d2ffbf493c5': 1,
-                                                      '2263b7c3975168a800233a5720729a5293adc8d79ddc822742da439875b1c927': 1,
-                                                      '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 3,
-                                                      '5d6691e305370ef1b5e22426e494d28b28936de80d5d5af079e9deae52eb33f2': 1,
-                                                      '6a3d37fddbb5fff8f3cd2c8d2ab4958d84b5c1efd268fd69c1464b41183a0c6a': 1,
-                                                      '7b98ff7fe9c2b0fba3fa2034b1d3cddb9008a47f9c7731d28364b7097fb1b66d': 1,
-                                                      '896c2dc203c518dc9ae1c6b5eb51b5591da28af19f9ff2461c4c629a490fb1a5': 1,
-                                                      'a2e0593410ad976880489badf3fbdf89ad9f79859b04b9860d23044f327967d3': 1,
-                                                      'abe91b4dc9b434e9eb3b21058d48e235a63990574ed4431b56d81aa1bb372f49': 1,
-                                                      'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 2,
-                                                      'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
-                                                      'f859db20866f37469af70c624ec5ad2f31c4f7bd10c1bd1b0da41299b91f7eb7': 1}},
-         'venues/binance/src/lib.rs': {'after': {'088924f3ac9b1699da1a2b0c712052ec5d14e133e51b4a93094827c12109ef7e': 1,
-                                                 '29866cd39178c8da46ea6e7de031a9cd684e76f2734dbc6f60a081be3980972b': 1,
-                                                 '5ed40af7dbe1e5b76ca8be90e29eabcbce35d0d0c768e765826c2b6525a06ada': 1,
-                                                 '931fea11387a3eb1ccf2c909b869b3ee559925055e436a3987df14969b35fc81': 1,
-                                                 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1},
-                                       'before': {'088924f3ac9b1699da1a2b0c712052ec5d14e133e51b4a93094827c12109ef7e': 1,
-                                                  '29866cd39178c8da46ea6e7de031a9cd684e76f2734dbc6f60a081be3980972b': 1,
-                                                  '5ed40af7dbe1e5b76ca8be90e29eabcbce35d0d0c768e765826c2b6525a06ada': 1,
-                                                  '660826b694da348256b3fbbb3d2e4429c0be08068f931faa9b0cf92bae92004d': 1,
-                                                  'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1}}}
+    def test_exact_signer_policy_rehash_preserves_count_and_cannot_regrow(self):
+        # Exact Phemex signing-release re-expression approved by claude-ddi2il.
+        approved = {'venues/phemex/src/trading.rs': {'after': {'06d49adf719c2e5ba5712d013a8bd485f49a8559eab9fbd74b8265789e9e3c9c': 1,
+                   'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1,
+                   'db4da6f92276f049047ceb4f85c06083f4c683531dd3d76b0a5ba44d9e2d5cb7': 1,
+                   'e6f9b79a027f31adbd5a2b4c25669770848c36a0b761835a87f5783a961f4790': 1},
+         'before': {'06d49adf719c2e5ba5712d013a8bd485f49a8559eab9fbd74b8265789e9e3c9c': 1,
+                    'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1,
+                    'ce2317fc0bfce16cd6c1a0f3eaaa03828eef8d6a89d120fcf4fefb51a8d6b7fd': 1,
+                    'db4da6f92276f049047ceb4f85c06083f4c683531dd3d76b0a5ba44d9e2d5cb7': 1}}}
         original = {path: dict(pair['before']) for path, pair in approved.items()}
         changed = {path: dict(pair['after']) for path, pair in approved.items()}
-        self.assertEqual(sum(map(sum, (c.values() for c in original.values()))), 21)
-        self.assertEqual(sum(map(sum, (c.values() for c in changed.values()))), 21)
+        self.assertEqual(sum(map(sum, (c.values() for c in original.values()))), 4)
+        self.assertEqual(sum(map(sum, (c.values() for c in changed.values()))), 4)
         self.assertFalse(ban.check(changed, changed, [('approved-original', original)]))
         for path in changed:
             pruned = {p: dict(c) for p, c in changed.items()}
@@ -261,12 +238,23 @@ class RequestContextBan(unittest.TestCase):
         # Owner approvals: exact added fingerprints and exact entry sizes.
         sign_http = '6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219'
         approved = {
+            'venues/apexomni/src/lib.rs': ({
+                '43f0a5248e3c01a293d3738c30ea1e956206f0ee972b359917ab94cc8920b84b',
+                '4d0bf337c43e368b2b3bb52928e8cfafdffba590f333fc8ccd63cdcff8059a5e',
+                '50c383ad66e41296ad7968d1d004afce80581aa8183b7e393a28bce694028341',
+                'beed17adaec269aa1ac580185fb6e9bc7f47d298ece6bffb103661f9da543ad0'}, 3, 4),
             'venues/bingx/src/lib.rs': ({sign_http}, 10, 9),
             'venues/weex/src/lib.rs': ({sign_http}, 19, 17),
+            # claude-ddi2il: one temporary Phemex legacy attachment, remove before master.
+            'venues/phemex/src/lib.rs': ({sign_http}, 18, 16),
             'venues/okx/src/lib.rs': ({
                 '2e9218906fd923fa6c83c648873ea2527c33dd1068d609c8c1ec343630b36911',
-                'b1761cdefa174ea70037cfceab33b91ad7279e59d22ccecb872e996dd5b0c32c',
-                'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa'}, 8, 11),
+                'b1761cdefa174ea70037cfceab33b91ad7279e59d22ccecb872e996dd5b0c32c'}, 8, 10),
+            'venues/bitget/src/lib.rs': ({
+                '5b44116449d06833b5f091cb3866ced7f16f181fd1226b31ad977eff6bf26ac9',
+                '6c77d608b079104cc5338cbabb01a7c4a0e24f112ef91ea5483c423808d92bad',
+                'a921be85fe127dcd74b1718af170b7309b86f0b4f66469353f73cc86c722be28',
+                'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa'}, 4, 8),
         }
         self.assertEqual(set(ban.STAGING_BOOTSTRAPS), set(approved))
         for path, (old_map, new_map) in ban.STAGING_BOOTSTRAPS.items():

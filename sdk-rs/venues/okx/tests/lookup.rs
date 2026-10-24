@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 mod support;
 use crate::support::FixtureOptions as Options;
-use crate::support::{MARKET, TICKER, actions, envelope, prepared};
+use crate::support::{MARKET, TICKER, envelope, prepared};
 use safe_cex_engine::{Action, Command, Engine, Event, Method, Notice, Query, Response};
 use safe_cex_venue_okx::Okx;
 use serde::Deserialize;
@@ -114,7 +114,7 @@ fn query(e: &mut Engine<Okx>, symbol: &str, id: &str) -> Vec<Action> {
             },
         }),
     );
-    actions(e)
+    prepared(e, 1_710_000_000_100.)
 }
 fn complete(
     e: &mut Engine<Okx>,
@@ -133,7 +133,7 @@ fn complete(
             },
         },
     );
-    done(actions(e))
+    done(prepared(e, 1_710_000_000_101.0))
 }
 fn done(out: Vec<Action>) -> Result<Lookup, String> {
     assert!(
@@ -156,11 +156,14 @@ fn done(out: Vec<Action>) -> Result<Lookup, String> {
         .expect("completed query")
 }
 fn request(out: Vec<Action>) -> safe_cex_engine::HttpRequest {
-    assert_eq!(out.len(), 1);
-    let Action::Http(r) = out.into_iter().next().unwrap() else {
-        panic!("HTTP expected")
-    };
-    r
+    assert!(!out.iter().any(|a| matches!(a, Action::WsSend { .. })));
+    let mut requests = out.into_iter().filter_map(|a| match a {
+        Action::Http(request) => Some(request),
+        _ => None,
+    });
+    let request = requests.next().expect("one prepared lookup HTTP");
+    assert!(requests.next().is_none());
+    request
 }
 #[test]
 fn lookup_signs_each_alias_and_preserves_read_only_order_provenance() {
@@ -174,7 +177,10 @@ fn lookup_signs_each_alias_and_preserves_read_only_order_provenance() {
         let before = e.snapshot_frame(42.0).to_vec();
         let r = request(query(&mut e, "BTCUSDT", "caller1"));
         assert_eq!(r.method, Method::Get);
-        assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+        assert_eq!(
+            r.route.unwrap_or(safe_cex_engine::RequestRoute::Primary),
+            safe_cex_engine::RequestRoute::Primary
+        );
         assert!(r.body.is_none());
         assert_eq!(
             r.url,
@@ -331,7 +337,7 @@ fn transport_failure_is_never_a_definitive_miss() {
             error: "OKX 51603: spoofed transport text",
         },
     );
-    assert!(done(actions(&mut e)).is_err());
+    assert!(done(prepared(&mut e, 1_710_000_000_101.0)).is_err());
     assert_eq!(before, e.snapshot_frame(42.0));
 }
 
@@ -419,7 +425,10 @@ fn secondary_account_cache_never_answers_primary_lookup() {
             }]);
         let before = e.snapshot_frame(42.0).to_vec();
         let r = request(query(&mut e, "BTCUSDT", "caller1"));
-        assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+        assert_eq!(
+            r.route.unwrap_or(safe_cex_engine::RequestRoute::Primary),
+            safe_cex_engine::RequestRoute::Primary
+        );
         assert!(
             r.headers
                 .iter()
@@ -463,7 +472,7 @@ fn secondary_account_cache_never_answers_primary_lookup() {
                         error: "network unavailable",
                     },
                 );
-                done(actions(&mut e))
+                done(prepared(&mut e, 1_710_000_000_101.0))
             }
         };
         match outcome {

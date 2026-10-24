@@ -1,13 +1,18 @@
 //! Rare reads return Binance-compatible JSON without touching the store.
 use crate::sign::{Credentials, Params};
 use crate::{Pending, wire};
+use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::de::optional_number;
+use safe_cex_engine::history::{ReadCompletion, ReadHistoryRows};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Error, Operation, Owner, Policy, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot, SelectedRead,
+};
 use safe_cex_engine::time;
-use safe_cex_engine::{Cx, Method, Query, Response, TimerId};
+use safe_cex_engine::{CommandWait, Cx, Level, Method, Query, Response, TimerId, VenueError};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -18,10 +23,45 @@ const PAGE_DELAY: f64 = 200.0;
 const MAX_FILL_PAGES: u32 = 1000;
 
 pub struct Request {
-    command: u32,
-    window: (f64, f64),
+    page: Page,
+    leg: Leg,
     rows: Vec<Row>,
     error: Option<String>,
+}
+
+struct Page {
+    command: u32,
+    window: (f64, f64),
+    path: &'static str,
+    params: Params,
+    at: ArrayAt,
+    resent: bool,
+}
+
+enum Leg {
+    Signed(ReadLeg),
+    Public(Context),
+}
+impl Leg {
+    fn context(&self) -> &Context {
+        match self {
+            Self::Signed(leg) => leg.context(),
+            Self::Public(context) => context,
+        }
+    }
+}
+
+enum Root {
+    Signed(ReadRoot),
+    Public(Context),
+}
+impl Root {
+    fn context(&self) -> &Context {
+        match self {
+            Self::Signed(root) => root.context(),
+            Self::Public(context) => context,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -32,7 +72,7 @@ enum Kind {
     Trades,
 }
 
-struct Read {
+struct QueryState {
     kind: Kind,
     symbol: Option<String>,
     order_id: Option<String>,
@@ -42,7 +82,12 @@ struct Read {
     to: Option<f64>,
     walk: Option<RangeWalk>,
     fills: Option<FillPages>,
-    rows: Vec<Row>,
+}
+
+struct Read {
+    native: QueryState,
+    root: Root,
+    output: ReadHistoryRows<Row>,
     timer: Option<TimerId>,
 }
 
@@ -325,7 +370,7 @@ impl History {
             local_result(cx, Ok("[]"));
             return;
         }
-        let mut read = Read {
+        let mut read = QueryState {
             kind: Kind::Trades,
             symbol: None,
             order_id: None,
@@ -335,8 +380,6 @@ impl History {
             to: None,
             walk: None,
             fills: None,
-            rows: Vec::new(),
-            timer: None,
         };
         match query {
             Query::OrderByClientId { .. } => {
@@ -421,17 +464,74 @@ impl History {
                 read.walk = Some(RangeWalk::new(from, to, WEEK, read.limit as usize));
             }
         }
-        self.reads.insert(command, read);
-        self.next(cx, credentials, command);
+        match cx.command_wait() {
+            Some(CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+            None => {
+                let _ = cx.reject_unstamped_command(Operation::Read);
+                return;
+            }
+            Some(CommandWait::Remaining(_)) => {}
+        }
+        let root = if matches!(read.kind, Kind::Trades) {
+            let Ok(context) = cx.admit_caller_read_root(None, None) else {
+                return;
+            };
+            Root::Public(context)
+        } else {
+            let Some(credentials) = credentials else {
+                return;
+            };
+            let slots = Slots::new(
+                Some(credentials.primary.clone()),
+                credentials.read.clone(),
+                SlotPolicy::default(),
+            );
+            let selected = SelectedRead::select(&slots, ReadRole::Read { scope: None });
+            let Ok(root) = SelectedRead::command_root(
+                cx,
+                selected,
+                LocalRefusal {
+                    diagnostic: None,
+                    error: "BingX history requires credentials".into(),
+                },
+            ) else {
+                return;
+            };
+            Root::Signed(root)
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root.context().clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(root.context(), error.read_venue_error());
+                return;
+            }
+        };
+        self.reads.insert(
+            command,
+            Read {
+                native: read,
+                root,
+                output: ReadHistoryRows::new(completion, encode_rows),
+                timer: None,
+            },
+        );
+        self.next(cx, command);
     }
 
-    fn next(&mut self, cx: &mut Cx<'_, Pending>, credentials: Option<&Credentials>, command: u32) {
+    fn next(&mut self, cx: &mut Cx<'_, Pending>, command: u32) {
         let Some(read) = self.reads.get_mut(&command) else {
             return;
         };
-        let (from, to) = if let Some(fills) = &read.fills {
+        if let Err(error) = cx.validate_read_root_context(read.root.context()) {
+            self.admission_failed(cx, command, error);
+            return;
+        }
+        let (from, to) = if let Some(fills) = &read.native.fills {
             (Some(fills.from), Some(fills.to))
-        } else if let Some(walk) = &mut read.walk {
+        } else if let Some(walk) = &mut read.native.walk {
             loop {
                 match walk.step() {
                     Step::Fetch { from, to } => break (Some(from), Some(to)),
@@ -444,19 +544,19 @@ impl History {
                 }
             }
         } else {
-            (read.from, read.to)
+            (read.native.from, read.native.to)
         };
         let mut params = Params::new();
-        if let Some(symbol) = &read.symbol {
+        if let Some(symbol) = &read.native.symbol {
             params = params.str("symbol", &native_symbol(symbol));
         }
-        if let Some(order) = &read.order_id {
+        if let Some(order) = &read.native.order_id {
             params = params.str("orderId", order);
         }
-        if let Some(kind) = &read.income_type {
+        if let Some(kind) = &read.native.income_type {
             params = params.str("incomeType", kind);
         }
-        let (path, start, end, limit) = match read.kind {
+        let (path, start, end, limit) = match read.native.kind {
             Kind::Fills => (
                 "/openApi/swap/v2/trade/fillHistory",
                 "startTs",
@@ -482,8 +582,8 @@ impl History {
                 "limit",
             ),
         };
-        params = params.num(limit, f64::from(read.limit));
-        if let Some(fills) = &read.fills {
+        params = params.num(limit, f64::from(read.native.limit));
+        if let Some(fills) = &read.native.fills {
             params = params.num("pageIndex", f64::from(fills.page));
         }
         if let Some(from) = from {
@@ -492,30 +592,229 @@ impl History {
         if let Some(to) = to {
             params = params.num(end, to);
         }
-        let auth = if matches!(read.kind, Kind::Trades) {
-            None
-        } else {
-            credentials
-        };
-        let request = Pending::History(Request {
-            command,
-            window: (from.unwrap_or(0.0), to.unwrap_or(0.0)),
-            rows: Vec::new(),
-            error: None,
-        });
-        let at = if matches!(read.kind, Kind::Fills) {
+        let at = if matches!(read.native.kind, Kind::Fills) {
             ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"])
         } else {
             ArrayAt::EnvelopeField("data")
         };
-        crate::issue(cx, auth, Method::Get, path, params, Some(at), request);
+        self.send_page(
+            cx,
+            Page {
+                command,
+                window: (from.unwrap_or(0.0), to.unwrap_or(0.0)),
+                path,
+                params,
+                at,
+                resent: false,
+            },
+        );
     }
 
-    pub fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
-        let Some(read) = self.reads.get(&request.command) else {
+    fn send_page(&mut self, cx: &mut Cx<'_, Pending>, page: Page) {
+        let command = page.command;
+        let Some(read) = self.reads.get(&command) else {
             return;
         };
-        let row = match read.kind {
+        let (url, _, body) = page.params.clone().render(
+            Method::Get,
+            page.path,
+            vec![("X-SOURCE-KEY", "Tealstreet".into())],
+        );
+        let queued = match &read.root {
+            Root::Signed(root) => {
+                let leg = match root.leg(
+                    cx,
+                    ReadLegPolicy {
+                        timeout_ms: 20_000,
+                        pacing: None,
+                    },
+                ) {
+                    Ok(leg) => leg,
+                    Err(error) => {
+                        self.admission_failed(cx, command, error);
+                        return;
+                    }
+                };
+                let path = page.path;
+                let params = page.params.clone();
+                leg.queue(
+                    cx,
+                    ReadRequest {
+                        method: Method::Get,
+                        url,
+                        body,
+                        stream: Some(page.at),
+                    },
+                    move |identity| {
+                        Box::new(crate::sign::dispatch::Http::new(
+                            identity.clone(),
+                            Method::Get,
+                            path,
+                            params,
+                        ))
+                    },
+                    move |leg| {
+                        Pending::History(Request {
+                            page,
+                            leg: Leg::Signed(leg),
+                            rows: Vec::new(),
+                            error: None,
+                        })
+                    },
+                )
+            }
+            Root::Public(root) => {
+                let context = match cx.http_leg_context(
+                    root,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                ) {
+                    Ok(context) => context,
+                    Err(error) => {
+                        self.admission_failed(cx, command, error);
+                        return;
+                    }
+                };
+                let at = page.at;
+                let pending = Pending::History(Request {
+                    page,
+                    leg: Leg::Public(context.clone()),
+                    rows: Vec::new(),
+                    error: None,
+                });
+                let queued = cx.request_managed_with_headers(
+                    context,
+                    Method::Get,
+                    url,
+                    crate::sign::unsigned_headers(Method::Get),
+                    body,
+                    pending,
+                );
+                if let Ok(id) = queued {
+                    cx.stream_response(id, at);
+                }
+                queued
+            }
+        };
+        if let Err((Pending::History(request), error)) = queued {
+            let _ = cx.finish_http_context(request.leg.context());
+            self.admission_failed(cx, command, error);
+        }
+    }
+
+    fn delivery_current(&self, cx: &Cx<'_, Pending>, request: &Request) -> bool {
+        let Some(read) = self.reads.get(&request.page.command) else {
+            return false;
+        };
+        let selected = match (&read.root, &request.leg) {
+            (Root::Signed(root), Leg::Signed(leg)) => root.validate_delivery(cx, leg),
+            (Root::Public(root), Leg::Public(leg)) => cx.validate_read_http_delivery(root, leg),
+            _ => return false,
+        };
+        selected.is_ok()
+            && read
+                .output
+                .validate_delivery(cx, request.leg.context())
+                .is_ok()
+    }
+
+    fn owner_current(&self, cx: &Cx<'_, Pending>, request: &Request) -> bool {
+        self.reads.get(&request.page.command).is_some_and(|read| {
+            read.root.context().owner() == request.leg.context().owner()
+                && cx.validate_read_root_context(read.root.context()).is_ok()
+        })
+    }
+
+    fn admission_failed(&mut self, cx: &mut Cx<'_, Pending>, command: u32, error: Error) {
+        let Some(read) = self.reads.get(&command) else {
+            return;
+        };
+        if error == Error::Revoked
+            && cx.validate_read_root_context(read.root.context()) == Err(Error::Revoked)
+        {
+            if let Some(read) = self.reads.remove(&command)
+                && let Some(timer) = read.timer
+            {
+                cx.clear_timer(timer);
+            }
+            return;
+        }
+        self.reject(cx, command, error.read_venue_error());
+    }
+
+    fn reject(&mut self, cx: &mut Cx<'_, Pending>, command: u32, error: VenueError) {
+        if let Some(read) = self.reads.remove(&command) {
+            if let Some(timer) = read.timer {
+                cx.clear_timer(timer);
+            }
+            let _ = read.output.reject(cx, error);
+        }
+    }
+
+    pub fn retire(&mut self, owner: Owner) {
+        self.reads
+            .retain(|_, read| read.root.context().owner() != owner);
+    }
+
+    fn resign(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        response: Response<'_>,
+    ) -> Result<Request, ()> {
+        let signed = match &request.leg {
+            Leg::Signed(_) => true,
+            Leg::Public(_) => false,
+        };
+        if signed && !request.page.resent && crate::signature_rejected(response.body) {
+            cx.notice(
+                Level::Warn,
+                safe_cex_engine::log::code::REQUEST_FAILED,
+                "BingX rejected a request signature; re-signing it once",
+            );
+            let _ = cx.finish_http_context(request.leg.context());
+            request.page.resent = true;
+            self.send_page(cx, request.page);
+            return Err(());
+        }
+        Ok(request)
+    }
+
+    pub fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        if !self.delivery_current(cx, &request) {
+            let _ = cx.finish_http_context(request.leg.context());
+            return;
+        }
+        if let Ok(request) = self.resign(cx, request, response) {
+            self.on_failed(
+                cx,
+                request,
+                &format!(
+                    "response did not contain the expected list: {}",
+                    response.body
+                ),
+            );
+        }
+    }
+
+    pub fn on_item(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
+        if !self.delivery_current(cx, request) {
+            return;
+        }
+        let Some(read) = self.reads.get(&request.page.command) else {
+            return;
+        };
+        let row = match read.native.kind {
             Kind::Orders => serde_json::from_str::<OrderRow>(item)
                 .map_err(|e| e.to_string())
                 .and_then(map_order),
@@ -537,7 +836,7 @@ impl History {
                 .map(|r| {
                     Row::Trade(Trade {
                         id: r.id,
-                        symbol: symbol(read.symbol.as_deref().unwrap_or_default()),
+                        symbol: symbol(read.native.symbol.as_deref().unwrap_or_default()),
                         price: r.price,
                         qty: r.qty,
                         quote_qty: r.quote_qty,
@@ -548,7 +847,7 @@ impl History {
                 .map_err(|e| e.to_string()),
             Kind::Fills => serde_json::from_str::<FillRow>(item)
                 .map_err(|e| e.to_string())
-                .and_then(|row| map_fill(row, read.symbol.as_deref().unwrap_or_default())),
+                .and_then(|row| map_fill(row, read.native.symbol.as_deref().unwrap_or_default())),
         };
         match row {
             Ok(row) => request.rows.push(row),
@@ -559,7 +858,24 @@ impl History {
     pub fn on_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        _credentials: Option<&Credentials>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        let context = request.leg.context().clone();
+        if !self.delivery_current(cx, &request) {
+            let _ = cx.finish_http_context(&context);
+            return;
+        }
+        let Ok(request) = self.resign(cx, request, response) else {
+            return;
+        };
+        self.response_data(cx, request, response);
+        let _ = cx.finish_http_context(&context);
+    }
+
+    fn response_data(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
         mut request: Request,
         response: Response<'_>,
     ) {
@@ -571,10 +887,10 @@ impl History {
             );
             return;
         }
-        let Some(read) = self.reads.get_mut(&request.command) else {
+        let Some(read) = self.reads.get_mut(&request.page.command) else {
             return;
         };
-        if matches!(read.kind, Kind::Fills) {
+        if matches!(read.native.kind, Kind::Fills) {
             let result = serde_json::from_str::<Envelope<FillData>>(response.body)
                 .map_err(|e| e.to_string())
                 .and_then(|response| {
@@ -612,48 +928,57 @@ impl History {
             self.on_failed(cx, request, &error);
             return;
         }
-        if let Some(fills) = &mut read.fills {
-            let full = request.rows.len() >= read.limit as usize;
+        let command = request.page.command;
+        match Self::accept_page(cx, read, &mut request) {
+            Ok(Some(truncated)) => self.finish(cx, command, truncated),
+            Ok(None) => read.timer = Some(cx.set_timer(PAGE_DELAY)),
+            Err(error) => self.on_http_failed(cx, request, error),
+        }
+    }
+
+    fn accept_page(
+        cx: &Cx<'_, Pending>,
+        read: &mut Read,
+        request: &mut Request,
+    ) -> Result<Option<bool>, VenueError> {
+        let mut admission = read
+            .output
+            .admit(cx, request.leg.context())
+            .map_err(Error::read_venue_error)?;
+        let result = if let Some(fills) = &mut read.native.fills {
+            let full = request.rows.len() >= read.native.limit as usize;
             if request
                 .rows
                 .iter()
                 .any(|row| row.timestamp() < fills.from || row.timestamp() > fills.to)
             {
-                self.on_failed(
-                    cx,
-                    request,
-                    "fill history returned executions outside its requested window",
-                );
-                return;
+                return Err("fill history returned executions outside its requested window".into());
             }
-            let before = read.rows.len();
-            read.rows.extend(
-                request
-                    .rows
-                    .drain(..)
-                    .filter(|row| fills.seen.insert(row.identity())),
-            );
+            let before = fills.seen.len();
+            for row in request.rows.drain(..) {
+                if fills.seen.insert(row.identity()) {
+                    admission.stage(row);
+                }
+            }
             if full {
-                if read.rows.len() == before || fills.page >= MAX_FILL_PAGES {
-                    self.on_failed(cx, request, "fill history is incomplete: native pagination made no progress or reached its page budget");
-                    return;
+                if fills.seen.len() == before || fills.page >= MAX_FILL_PAGES {
+                    return Err("fill history is incomplete: native pagination made no progress or reached its page budget".into());
                 }
                 fills.page += 1;
+                None
             } else if fills.to < fills.end {
                 let next = fills.to + 1.0;
                 if next <= fills.from {
-                    self.on_failed(cx, request, "fill history time range cannot advance");
-                    return;
+                    return Err("fill history time range cannot advance".into());
                 }
                 fills.from = next;
                 fills.to = (next + WEEK).min(fills.end);
                 fills.page = 1;
+                None
             } else {
-                self.finish(cx, request.command, false);
-                return;
+                Some(false)
             }
-            read.timer = Some(cx.set_timer(PAGE_DELAY));
-        } else if let Some(walk) = &mut read.walk {
+        } else if let Some(walk) = &mut read.native.walk {
             let page: Vec<PageRow> = request
                 .rows
                 .iter()
@@ -662,49 +987,51 @@ impl History {
                     identity: row.identity(),
                 })
                 .collect();
-            let fresh = walk.page(request.window.0, request.window.1, &page);
-            let mut rows: Vec<_> = request.rows.into_iter().map(Some).collect();
-            read.rows
-                .extend(fresh.into_iter().filter_map(|index| rows[index].take()));
-            read.timer = Some(cx.set_timer(PAGE_DELAY));
+            let fresh = walk.page(request.page.window.0, request.page.window.1, &page);
+            let mut rows: Vec<_> = request.rows.drain(..).map(Some).collect();
+            for index in fresh {
+                if let Some(row) = rows[index].take() {
+                    admission.stage(row);
+                }
+            }
+            None
         } else {
-            // With only a time filter, a full page at one millisecond cannot
-            // prove completeness. Fills use their native page cursor instead.
-            let saturated = read.from.is_some()
-                && read.from == read.to
-                && request.rows.len() >= read.limit as usize;
-            read.rows.extend(request.rows);
-            self.finish(cx, request.command, saturated);
-        }
+            let saturated = read.native.from.is_some()
+                && read.native.from == read.native.to
+                && request.rows.len() >= read.native.limit as usize;
+            for row in request.rows.drain(..) {
+                admission.stage(row);
+            }
+            Some(saturated)
+        };
+        admission.accept_page();
+        Ok(result)
     }
 
     fn finish(&mut self, cx: &mut Cx<'_, Pending>, command: u32, truncated: bool) {
-        let Some(mut read) = self.reads.remove(&command) else {
+        let Some(read) = self.reads.remove(&command) else {
             return;
         };
+        if let Some(timer) = read.timer {
+            cx.clear_timer(timer);
+        }
         if truncated {
-            cx.fail(
-                command,
-                "history is incomplete: time window could not be fully paged",
+            let _ = read.output.reject(
+                cx,
+                "history is incomplete: time window could not be fully paged".into(),
             );
             return;
         }
-        if !matches!(read.kind, Kind::Trades) {
-            read.rows
-                .sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
-        }
-        match serde_json::to_string(&read.rows).map_err(|e| e.to_string()) {
-            Ok(data) => cx.done(command, data),
-            Err(error) => cx.fail(command, error),
-        };
+        let kind = read.native.kind;
+        let _ = read.output.finish_with(cx, Ok(()), move |mut rows| {
+            if !matches!(kind, Kind::Trades) {
+                rows.sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
+            }
+            encode_rows(&rows)
+        });
     }
 
-    pub fn on_timer(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        credentials: Option<&Credentials>,
-        timer: TimerId,
-    ) {
+    pub fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         let command = self.reads.iter_mut().find_map(|(command, read)| {
             if read.timer == Some(timer) {
                 read.timer = None;
@@ -714,7 +1041,7 @@ impl History {
             }
         });
         if let Some(command) = command {
-            self.next(cx, credentials, command);
+            self.next(cx, command);
         }
     }
 
@@ -722,28 +1049,31 @@ impl History {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: safe_cex_engine::VenueError,
+        error: VenueError,
     ) {
-        if let Some(timer) = self.reads.get(&request.command).and_then(|read| read.timer) {
-            cx.clear_timer(timer);
-        }
-        self.fail_read(cx, request, &error);
+        self.on_http_failed(cx, request, error);
     }
 
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        self.fail_read(cx, request, &error.into());
+        self.on_http_failed(cx, request, error.into());
     }
 
-    /// Native and signer failures share one command completion.
-    fn fail_read(
+    pub fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: &safe_cex_engine::VenueError,
+        error: VenueError,
     ) {
-        self.reads.remove(&request.command);
-        cx.fail(request.command, error.to_owned());
+        let current = self.owner_current(cx, &request);
+        let _ = cx.finish_http_context(request.leg.context());
+        if current {
+            self.reject(cx, request.page.command, error);
+        }
     }
+}
+
+fn encode_rows(rows: &[Row]) -> Result<String, VenueError> {
+    serde_json::to_string(rows).map_err(|error| error.to_string().into())
 }
 
 fn map_fill(row: FillRow, fallback_symbol: &str) -> Result<Row, String> {

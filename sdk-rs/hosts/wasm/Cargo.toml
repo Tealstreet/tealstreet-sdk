@@ -26,14 +26,14 @@ kraken = ["safe-cex-venues/kraken", "text-ingress"]
 asterdex = ["safe-cex-venues/asterdex", "text-ingress", "safe-cex-engine/command-asterdex", "dispatch-signing"]
 lighter = ["safe-cex-venues/lighter", "text-ingress"]
 woo = ["safe-cex-venues/woo", "text-ingress"]
-bitrue = ["safe-cex-venues/bitrue", "text-ingress"]
-bitget = ["safe-cex-venues/bitget", "text-ingress"]
+bitrue = ["safe-cex-venues/bitrue", "text-ingress", "dispatch-signing"]
+bitget = ["safe-cex-venues/bitget", "text-ingress", "dispatch-signing"]
 backpack = ["safe-cex-venues/backpack", "text-ingress"]
 blofin = ["safe-cex-venues/blofin", "text-ingress"]
 mexc = ["safe-cex-venues/mexc", "text-ingress"]
 bingx = ["safe-cex-venues/bingx", "text-ingress", "dispatch-signing"]
 weex = ["safe-cex-venues/weex", "text-ingress", "dispatch-signing"]
-phemex = ["safe-cex-venues/phemex", "text-ingress"]
+phemex = ["safe-cex-venues/phemex", "text-ingress", "dispatch-signing"]
 default = [
     "bitunix",
     "breakoutprop",

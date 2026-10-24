@@ -15,7 +15,7 @@ fn place(
         5.0,
         Event::Command(Command::PlaceOrders { command: 1, orders }),
     );
-    actions(e)
+    prepared(e, 5.0)
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn caller_id_and_contract_amount_are_sent_verbatim_after_lot_adjustment() {
         &envelope(r#"{"ordId":"1234","sCode":"0","sMsg":""}"#),
         6.0,
     );
-    assert!(actions(&mut e).iter().any(
+    assert!(prepared(&mut e, 6.0).iter().any(
         |a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[\"1234\"]")
     ));
 }
@@ -88,7 +88,7 @@ fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
         &envelope(r#"{"ordId":"1","sCode":"0","sMsg":""}"#),
         6.0,
     );
-    let a = actions(&mut e)
+    let a = prepared(&mut e, 6.0)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap();
@@ -101,7 +101,7 @@ fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
         &envelope(r#"{"algoId":"2","sCode":"0","sMsg":""}"#),
         7.0,
     );
-    let a = actions(&mut e)
+    let a = prepared(&mut e, 7.0)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap();
@@ -112,7 +112,7 @@ fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
         &envelope(r#"{"algoId":"3","sCode":"0","sMsg":""}"#),
         8.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[\"1\",\"2\",\"3\"]")));
+    assert!(prepared(&mut e, 8.0).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[\"1\",\"2\",\"3\"]")));
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn lost_write_response_never_retries() {
             error: "lost response after acceptance",
         },
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 6.0);
     assert!(out.iter().any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get && r.url.contains("orders-pending"))));
     assert!(
         !out.iter()
@@ -206,7 +206,7 @@ fn ack(
         }),
         6.0,
     );
-    actions(e)
+    prepared(e, 6.0)
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn split_brackets_protect_each_accepted_lot_before_another_entry() {
         r#"{"code":"1","msg":"All operations failed","data":[{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
         7.0,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 7.0);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         out.iter()
@@ -344,7 +344,7 @@ fn market_and_terminal_amends_are_rejected_before_writes() {
                 amount: None,
             }),
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 5.0);
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             out.iter()
@@ -374,7 +374,7 @@ fn oco_amend_keeps_sibling_stop_and_amends_only_selected_native_leg() {
             amount: Some(3.145),
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let a = http(&out);
     assert!(matches!(a, Action::Http(r) if r.url.ends_with("/amend-algos")));
     assert!(body(a).contains("\"algoId\":\"91\""));
@@ -406,7 +406,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
         5.0,
         Event::Command(Command::CancelOrders { command: 2, ids }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let mut rows = vec![r#"{"ordId":"1","sCode":"0","sMsg":""}"#; 19];
     rows.push(r#"{"ordId":"2","sCode":"51400","sMsg":"Order does not exist"}"#);
     let mixed = format!(
@@ -414,7 +414,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
         rows.join(",")
     );
     reply(&mut e, http(&out), &mixed, 6.0);
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 6.0);
     assert!(out.iter().any(
         |a| matches!(a, Action::Notice(Notice::CommandError { command:2, message }) if message.contains("51400"))
     ));
@@ -446,7 +446,7 @@ fn replacement_never_runs_after_cancellation_rejection() {
             amount: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     assert!(matches!(http(&out), Action::Http(r) if r.url.ends_with("/cancel-algos")));
     reply(
         &mut e,
@@ -454,7 +454,7 @@ fn replacement_never_runs_after_cancellation_rejection() {
         &envelope(r#"{"algoId":"91","sCode":"51400","sMsg":"Order does not exist"}"#),
         6.0,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 6.0);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         out.iter()
@@ -477,7 +477,7 @@ fn terminal_ws_status_survives_a_late_amend_error() {
             amount: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     e.store_mut().set_order_status("91", OrderStatus::Closed);
     reply(
         &mut e,
@@ -485,7 +485,7 @@ fn terminal_ws_status_survives_a_late_amend_error() {
         &envelope(r#"{"ordId":"91","sCode":"51503","sMsg":"Already filled"}"#),
         6.0,
     );
-    actions(&mut e);
+    prepared(&mut e, 6.0);
     assert_eq!(e.store().order("91").unwrap().status, OrderStatus::Closed);
 }
 
@@ -508,7 +508,7 @@ fn conditional_amend_keeps_limit_execution_price_and_trigger_source() {
             amount: Some(3.145),
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let a = http(&out);
     assert!(matches!(a, Action::Http(r) if r.url.ends_with("/amend-algos")));
     assert!(body(a).contains("\"newTriggerPx\":\"38000\""));
@@ -533,7 +533,7 @@ fn replacement_is_fully_preflighted_before_canceling_protection() {
             amount: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert_eq!(e.store().order("91_sl").unwrap().status, OrderStatus::Open);
 }
@@ -551,7 +551,7 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
             side: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let Action::Http(r) = http(&out) else {
         unreachable!()
     };
@@ -567,7 +567,7 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
             },
         },
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 6.0);
     assert!(
         out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get)),
@@ -648,7 +648,7 @@ fn standalone_protective_limit_amend_preserves_original_by_rejecting_before_canc
                 amount: None,
             }),
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 5.0);
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("execution price"))));
         assert_eq!(e.store().order(id), Some(&original));
@@ -753,7 +753,7 @@ fn lost_cancel_and_amend_responses_keep_pending_state_until_a_fresh_read() {
                 }
             }),
         );
-        let request = actions(&mut e)
+        let request = prepared(&mut e, 5.0)
             .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
@@ -767,7 +767,7 @@ fn lost_cancel_and_amend_responses_keep_pending_state_until_a_fresh_read() {
                 error: "timeout after exchange acceptance",
             },
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 6.0);
         assert_eq!(
             e.store().order("uncertain").unwrap().status,
             if amend {
@@ -805,7 +805,7 @@ fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows(
             format!(r#"{{"ordId":"{id}","sCode":"0"}}"#)
         };
         reply(&mut e, request, &envelope(&ack), 6.0);
-        out = actions(&mut e);
+        out = prepared(&mut e, 6.0);
     }
     assert!(
         e.store().orders().is_empty(),
@@ -818,7 +818,7 @@ fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows(
             symbol: "BTCUSDT".into(),
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 7.0);
     let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
     assert!(
         matches!(request, Action::Http(r) if r.url.ends_with("/cancel-batch-orders") && r.body.as_ref().unwrap().contains("entry"))
@@ -829,7 +829,7 @@ fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows(
         &envelope(r#"{"ordId":"entry","sCode":"0"}"#),
         8.0,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 8.0);
     let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
     assert!(
         matches!(request, Action::Http(r) if r.url.ends_with("/cancel-algos") && r.body.as_ref().unwrap().contains("stop") && r.body.as_ref().unwrap().contains("profit"))
@@ -840,7 +840,7 @@ fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows(
         r#"{"code":"0","data":[{"algoId":"stop","sCode":"0"},{"algoId":"profit","sCode":"0"}]}"#,
         9.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(
+    assert!(prepared(&mut e, 9.0).iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone {
             command: 2,
@@ -867,7 +867,7 @@ fn partial_batch_accepted_order_remains_cancelable_before_the_stream() {
         6.0,
     );
     assert!(
-        actions(&mut e)
+        prepared(&mut e, 6.0)
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
     );
@@ -878,7 +878,7 @@ fn partial_batch_accepted_order_remains_cancelable_before_the_stream() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/cancel-batch-orders") && r.body.as_ref().unwrap().contains("accepted"))));
+    assert!(prepared(&mut e, 7.0).iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/cancel-batch-orders") && r.body.as_ref().unwrap().contains("accepted"))));
 }
 
 fn ready_with_held_reconciliation() -> (
@@ -938,7 +938,7 @@ fn ready_with_held_reconciliation() -> (
         );
     }
     e.handle(5., Event::WsOpened { socket: private });
-    actions(&mut e);
+    prepared(&mut e, 5.);
     e.handle(
         5.,
         Event::WsMessage {
@@ -946,7 +946,7 @@ fn ready_with_held_reconciliation() -> (
             text: r#"{"event":"login","code":"0","msg":""}"#,
         },
     );
-    let mut handed_off = actions(&mut e);
+    let mut handed_off = prepared(&mut e, 5.);
     let wakeups: Vec<_> = handed_off
         .iter()
         .filter_map(|a| match a {
@@ -956,7 +956,7 @@ fn ready_with_held_reconciliation() -> (
         .collect();
     for timer in wakeups {
         e.handle(5., Event::TimerFired { timer });
-        handed_off.extend(actions(&mut e));
+        handed_off.extend(prepared(&mut e, 5.));
     }
     let held: Vec<_> = handed_off
         .into_iter()
@@ -1016,7 +1016,7 @@ fn ambiguous_http_and_native_timeouts_preserve_writes_and_force_fresh_reconcilia
                     }
                 }),
             );
-            let write = http(&actions(&mut e)).clone();
+            let write = http(&prepared(&mut e, 5.)).clone();
             let Action::Http(write) = write else {
                 unreachable!()
             };
@@ -1031,7 +1031,7 @@ fn ambiguous_http_and_native_timeouts_preserve_writes_and_force_fresh_reconcilia
                     },
                 },
             );
-            let out = actions(&mut e);
+            let out = prepared(&mut e, 6.);
             let expected = if amend {
                 OrderStatus::Updating
             } else {
@@ -1069,11 +1069,11 @@ fn ambiguous_http_and_native_timeouts_preserve_writes_and_force_fresh_reconcilia
                 expected,
                 "pre-write empty snapshot must not clear pending state"
             );
-            actions(&mut e);
+            prepared(&mut e, 7.);
             while let Some(read) = fresh.pop() {
                 reply(&mut e, &read, &envelope(""), 8.);
                 fresh.extend(
-                    actions(&mut e).into_iter().filter(
+                    prepared(&mut e, 8.).into_iter().filter(
                         |a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")),
                     ),
                 );
@@ -1112,7 +1112,7 @@ fn definite_business_rejection_restores_cancel_or_amend_state() {
                 }
             }),
         );
-        let Action::Http(write) = http(&actions(&mut e)).clone() else {
+        let Action::Http(write) = http(&prepared(&mut e, 5.)).clone() else {
             unreachable!()
         };
         e.handle(
@@ -1126,7 +1126,7 @@ fn definite_business_rejection_restores_cancel_or_amend_state() {
                 },
             },
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 6.);
         assert_eq!(
             e.store().order("rejected").unwrap().status,
             OrderStatus::Open
@@ -1177,7 +1177,7 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
                 },
             }),
         );
-        let actions = actions(&mut e);
+        let actions = prepared(&mut e, 2000.0);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions.iter().any(|a| matches!(
@@ -1213,7 +1213,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
                 side: None,
             }),
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 5.0);
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
         assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 99, error }) if error.legacy_text().contains("leverage limits"))));
     }
@@ -1303,7 +1303,7 @@ fn ready_engine() -> (
         ..Default::default()
     });
     e.start(0.0);
-    let a = prepared(&mut e, 0.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     // Private startup begins with the catalogue, alongside the ticker seed.
     let out = prepared(&mut e, 1.0);
@@ -1380,7 +1380,7 @@ fn account_config_is_reread_and_a_mode_change_in_the_okx_app_is_applied() {
     );
     assert!(e.store().hedged());
     assert!(
-        actions(&mut e)
+        prepared(&mut e, now)
             .iter()
             .any(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
     );
@@ -1398,7 +1398,7 @@ fn config_read_sent_before_our_mode_write_cannot_revert_it() {
             symbol: None,
         }),
     );
-    let write = actions(&mut e)
+    let write = prepared(&mut e, now)
         .into_iter()
         .find(|a| matches!(a, Action::Http(r) if r.url.ends_with("/api/v5/account/set-position-mode")))
         .expect("mode write");
@@ -1432,7 +1432,7 @@ fn unparseable_polled_account_level_keeps_the_known_level() {
         now,
     );
     assert!(
-        !actions(&mut e)
+        !prepared(&mut e, now)
             .iter()
             .any(|a| is_get(a, "/api/v5/account/positions?instType=SWAP")),
         "unchanged mode and unknown level must not reconcile"
@@ -1462,7 +1462,7 @@ fn leverage_read_survives_unrelated_private_pushes() {
             symbol: None,
         }),
     );
-    let write = actions(&mut e)
+    let write = prepared(&mut e, 5.5)
         .into_iter()
         .find(|a| matches!(a, Action::Http(r) if r.url.ends_with("set-position-mode")))
         .unwrap();
@@ -1592,7 +1592,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
             },
         );
         // The write's own reconciliation predates its failure; fail it so the retry reads after.
-        let read = actions(&mut e)
+        let read = prepared(&mut e, 6.0)
             .into_iter()
             .find(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))
             .expect("an uncertain placement must reconcile");
@@ -1610,7 +1610,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
                 },
             },
         );
-        let retry = actions(&mut e)
+        let retry = prepared(&mut e, 7.0)
             .into_iter()
             .find_map(|a| match a {
                 Action::SetTimer {
@@ -1621,7 +1621,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
             })
             .expect("retry timer");
         e.handle(5_007.0, Event::TimerFired { timer: retry });
-        let mut reads: Vec<_> = actions(&mut e)
+        let mut reads: Vec<_> = prepared(&mut e, 5_007.0)
             .into_iter()
             .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")))
             .collect();
@@ -1635,7 +1635,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
             };
             reply(&mut e, &read, &body, 5_008.0);
             reads.extend(
-                actions(&mut e)
+                prepared(&mut e, 5_008.0)
                     .into_iter()
                     .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders"))),
             );
@@ -1647,7 +1647,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
                 symbol: "BTCUSDT".into(),
             }),
         );
-        let refused = actions(&mut e).iter().any(|a| {
+        let refused = prepared(&mut e, 5_009.0).iter().any(|a| {
             matches!(
                 a,
                 Action::Notice(Notice::CommandFailed { command: 2, error })
@@ -1911,10 +1911,10 @@ fn unready_engine() -> (safe_cex_engine::Engine<safe_cex_venue_okx::Okx>, Action
         ..Default::default()
     });
     e.start(0.0);
-    let a = prepared(&mut e, 0.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     let mut out = prepared(&mut e, 1.0);
-    let a = out.remove(0);
+    let a = take_http(&mut out);
     reply(&mut e, &a, &envelope(TICKER), 2.0);
     out.extend(prepared(&mut e, 2.0));
     let config = out

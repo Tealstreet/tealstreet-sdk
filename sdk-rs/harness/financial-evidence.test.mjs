@@ -25,6 +25,51 @@ test('flat position realized PnL survives placeholder filtering, including zero 
   assert.deepEqual(native.flatPositionPnl, original.flatPositionPnl);
 });
 
+test('unavailable flat-position PnL cannot manufacture a row from a native NaN sentinel', () => {
+  for (const realizedPnl of [NaN, Infinity, -Infinity, undefined, null, '', ' ', 'unavailable', true, false, {}, []]) {
+    const positions = [{ symbol: 'ETHUSD_PERP', side: 'long', positionMode: 'oneway', contracts: 0, realizedPnl }];
+    const before = structuredClone(positions);
+    assert.deepEqual(flatPositionPnl(positions), [], String(realizedPnl));
+    assert.deepEqual(positions, before);
+  }
+});
+
+test('TS absence and the native unavailable sentinel normalize to the same flat-position evidence', () => {
+  const ts = account();
+  ts.positions = [{ symbol: 'ETHUSD_PERP', side: 'long', positionMode: 'oneway', contracts: 0 }];
+  const rust = structuredClone(ts);
+  rust.positions[0].realizedPnl = new Float64Array([NaN])[0];
+  const expected = normalize(ts);
+  const actual = normalize(rust, 'rust');
+  assert.deepEqual(actual.flatPositionPnl, expected.flatPositionPnl);
+  assert.deepEqual(compareSnapshots(snapshot(expected), snapshot(actual)), []);
+});
+
+test('finite flat-position PnL retains signed zero, losses and numeric-string evidence', () => {
+  for (const realizedPnl of [0, -0, -5, 7.25, '0', '-5', '7.25', '1e3']) {
+    const positions = [{ symbol: 'ETHUSD_PERP', side: 'long', positionMode: 'oneway', contracts: 0, realizedPnl }];
+    const before = structuredClone(positions);
+    assert.deepEqual(flatPositionPnl(positions), [{
+      symbol: 'ETHUSD_PERP', side: 'long', positionMode: 'oneway', realizedPnl: Number(realizedPnl),
+    }]);
+    assert.deepEqual(positions, before);
+  }
+});
+
+test('non-flat PnL stays in the ordinary position view and real losses remain mismatches', () => {
+  const value = account();
+  value.positions = [{ symbol: 'ETHUSD_PERP', side: 'long', contracts: 2, realizedPnl: -5 }];
+  assert.deepEqual(flatPositionPnl(value.positions), []);
+  assert.equal(normalize(value, 'rust').positions[0].realizedPnl, -5);
+  value.positions[0].contracts = 0;
+  const expected = normalize(value);
+  for (const realizedPnl of [0, 5, NaN, undefined, null]) {
+    const different = structuredClone(value);
+    different.positions[0].realizedPnl = realizedPnl;
+    assert.match(compareSnapshots(snapshot(expected), snapshot(normalize(different, 'rust'))).join('\n'), /flatPositionPnl/);
+  }
+});
+
 test('both bracket trigger sources compare independently', () => {
   const value = account();
   value.orders = [{ id: 'bracket', symbol: 'BTC', type: 'limit', tpTriggerType: 'mark_price', slTriggerType: 'last_price' }];

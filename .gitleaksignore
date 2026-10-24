@@ -82,3 +82,17 @@ a44fd8ea8eb80f4e805280933728c0642d35cf2f:packages/safe-cex/src/exchanges/coinbas
 # Synthetic Coinbase capability-test key, replaced with the signing-test fixture.
 # Owner approved this exact historical fingerprint only; future changes scan.
 04c434dc2d482cd4498a50e9086be82dfb2071c4:sdk-rs/venues/coinbase/tests/support/history_family.rs:generic-api-key:116
+
+# Synthetic Phemex socket vector: HMAC-SHA256("secret", "key1700000060").
+# This is the independently verified signature from literal test credentials.
+# Exact historical occurrence only; production and future changes remain scanned.
+81fc6001a6b07234f69a44f04c7c261982f418aa:sdk-rs/venues/phemex/tests/managed_private_socket.rs:generic-api-key:146
+
+# Same synthetic Phemex HMAC vector in the original signer RED: literal
+# test key/secret; independently recomputed, never an account credential.
+# Exact historical occurrence only; no path or rule exemption.
+77f3a83f9fa9ffdfc6493e7903810ecf337464cd:sdk-rs/venues/phemex/tests/dispatch_signing.rs:generic-api-key:424
+
+# Maintainer-approved historical Bitrue plan attribution prose; no credential.
+# Current wording changed; only this original commit/file/rule/line is ignored.
+48f8b6cbe5788fabdc417e507b6cded77b23aa7a:docs/plans/RUST_BITRUE_DISPATCH_SIGNER.md:generic-api-key:271

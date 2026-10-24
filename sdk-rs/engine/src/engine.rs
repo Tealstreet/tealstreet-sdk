@@ -1468,6 +1468,8 @@ struct Io<P> {
     http_plan_ready: Option<crate::request_context::Plan>,
     #[cfg(feature = "http-plans")]
     http_plan_expiring: Option<crate::request_context::Plan>,
+    #[cfg(feature = "http-plans")]
+    http_preflight_ready: Option<crate::request_context::Preflight>,
     http_owner_poison: bool,
     #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
@@ -1531,6 +1533,8 @@ struct Io<P> {
     #[cfg(feature = "managed-sockets")]
     socket_driver: crate::socket_driver::Driver,
     #[cfg(feature = "managed-sockets")]
+    socket_message: Option<(crate::socket_lifecycle::Epoch, f64)>,
+    #[cfg(feature = "managed-sockets")]
     managed_sockets: bool,
     #[cfg(feature = "managed-sockets")]
     socket_failed: bool,
@@ -1565,6 +1569,8 @@ impl<P> Default for Io<P> {
             http_plan_ready: None,
             #[cfg(feature = "http-plans")]
             http_plan_expiring: None,
+            #[cfg(feature = "http-plans")]
+            http_preflight_ready: None,
             http_owner_poison: false,
             #[cfg(feature = "http-plans")]
             http_plan_poison: false,
@@ -1619,6 +1625,8 @@ impl<P> Default for Io<P> {
             #[cfg(feature = "managed-sockets")]
             socket_driver: Default::default(),
             #[cfg(feature = "managed-sockets")]
+            socket_message: None,
+            #[cfg(feature = "managed-sockets")]
             managed_sockets: false,
             #[cfg(feature = "managed-sockets")]
             socket_failed: false,
@@ -1638,6 +1646,20 @@ impl<P> Default for Io<P> {
             socket_continuation_bytes: 0,
         }
     }
+}
+
+/// The delivery that may authorize or forbid a command's completion. A
+/// session delivery is no command's, so its callbacks settle like a
+/// delivery-less (socket or timer) callback; it does not bind waiters.
+fn completion_delivery(
+    delivery: &Option<request_context_registry::Delivery>,
+) -> Option<&request_context_registry::Delivery> {
+    delivery.as_ref().filter(|delivery| {
+        !matches!(
+            delivery.context.owner(),
+            crate::request_context::Owner::Session { .. }
+        )
+    })
 }
 
 impl<P> Io<P> {
@@ -2378,6 +2400,12 @@ impl<P> Cx<'_, P> {
         authority: Option<&crate::request_context::Context>,
         observer: bool,
     ) -> Result<(), crate::request_context::Error> {
+        #[cfg(feature = "http-plans")]
+        if self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
+            !matches!(ready.owner(), crate::request_context::Owner::Command { id, .. } if id == command)
+        }) {
+            return Err(crate::request_context::Error::Revoked);
+        }
         if authority.is_none() && !self.io.numeric_entry_completion_allowed(command) {
             return Err(crate::request_context::Error::Revoked);
         }
@@ -2388,7 +2416,7 @@ impl<P> Cx<'_, P> {
         let delivery = if observer {
             None
         } else {
-            self.io.http_delivery.as_ref()
+            completion_delivery(&self.io.http_delivery)
         };
         let seal = self
             .io
@@ -2581,6 +2609,27 @@ pub trait Venue {
     #[cfg(feature = "http-plans")]
     fn on_http_owner_retired(&mut self, _owner: &crate::request_context::HttpOwnerRetirement) {}
 
+    /// Cleanup may return one already-parked successor, without Cx authority.
+    /// The engine validates it only after this exact retirement completes.
+    #[cfg(feature = "http-plans")]
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &crate::request_context::HttpOwnerRetirement,
+    ) -> Option<crate::request_context::Preflight> {
+        self.on_http_owner_retired(owner);
+        None
+    }
+
+    /// One exact retained owner is active after the outer event has unwound.
+    /// Returning without a terminal, submitted read or Plan fails that owner.
+    #[cfg(feature = "http-plans")]
+    fn on_http_preflight_ready(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _preflight: &crate::request_context::Preflight,
+    ) {
+    }
+
     /// Typed readiness after actual HTTP scope exit. The engine marks due slots
     /// once before this callback; no delivery/publication authority is lent.
     #[cfg(feature = "http-plans")]
@@ -2614,6 +2663,10 @@ pub trait Venue {
     /// Fixed per-engine send-group floors; individual attempts may only extend
     /// the gap following their physical transport handoff.
     fn http_pacing(&self) -> &[crate::request_context::Pacing] {
+        &[]
+    }
+    /// Flat immutable sets share the registered primitive clocks.
+    fn http_pacing_sets(&self) -> &[crate::request_context::PacingSet] {
         &[]
     }
 
@@ -2953,10 +3006,11 @@ impl<V: Venue> Engine<V> {
         })?;
         let mut store = Store::default();
         store.set_quantity_units(venue.capabilities().quantity_units);
-        let http_pacing =
-            crate::request_context::SendPacing::new(venue.http_pacing()).map_err(|_| {
-                VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput)
-            })?;
+        let http_pacing = crate::request_context::SendPacing::with_sets(
+            venue.http_pacing(),
+            venue.http_pacing_sets(),
+        )
+        .map_err(|_| VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput))?;
         Ok(Self {
             venue,
             store,
@@ -3381,6 +3435,7 @@ impl<V: Venue> Engine<V> {
         // Expired observers detach before any delivery can project to them.
         self.sweep_executions(now);
         if self.expire_plan_timer(now, &event) {
+            self.flush_preflight_readiness(now);
             return;
         }
         if self.expire_http_timer(now, &event) {
@@ -3388,6 +3443,7 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            self.flush_preflight_readiness(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
@@ -3398,16 +3454,19 @@ impl<V: Venue> Engine<V> {
         {
             self.io.execution_timer = None;
             self.sweep_executions(now);
+            self.flush_preflight_readiness(now);
             return;
         }
         let admitted = self.admit_http_event(now, &event);
         if self.collect_write_response(now, &event, admitted) {
+            self.flush_preflight_readiness(now);
             return;
         }
         if !admitted {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            self.flush_preflight_readiness(now);
             return;
         }
         let completed_http = match &event {
@@ -3425,6 +3484,7 @@ impl<V: Venue> Engine<V> {
             }
             #[cfg(feature = "order-locks")]
             self.reconcile_uncertain(now);
+            self.flush_preflight_readiness(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
@@ -3436,6 +3496,7 @@ impl<V: Venue> Engine<V> {
             }
             #[cfg(feature = "order-locks")]
             self.reconcile_uncertain(now);
+            self.flush_preflight_readiness(now);
             return;
         }
         #[cfg(feature = "order-locks")]
@@ -3449,6 +3510,7 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            self.flush_preflight_readiness(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
@@ -3465,6 +3527,7 @@ impl<V: Venue> Engine<V> {
             self.settle_http_event(request);
             self.sweep_executions(now);
         }
+        self.flush_preflight_readiness(now);
     }
 
     fn sweep_executions(&mut self, now: f64) {
@@ -3474,6 +3537,8 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         cx.sweep_executions();
+        #[cfg(feature = "http-plans")]
+        cx.fail_orphaned_plans();
     }
 
     /// Dispatch held cancellations whose acknowledged ids are now stored, or
@@ -3551,8 +3616,14 @@ impl<V: Venue> Engine<V> {
             self.io.request_contexts.enter_delivery(delivery);
         }
         let previous = std::mem::replace(&mut self.io.http_delivery, delivery.clone());
+        #[cfg(feature = "managed-sockets")]
+        let socket_message = self.io.socket_message.take();
         self.handle_event_scoped(now, event);
         self.io.http_delivery = previous;
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.io.socket_message = socket_message;
+        }
         if let Some(delivery) = delivery.as_ref() {
             self.io.request_contexts.exit_delivery(delivery);
         }
@@ -3913,6 +3984,8 @@ impl<V: Venue> Engine<V> {
     }
 
     fn finish_event_scope(&mut self, now: f64) {
+        #[cfg(feature = "http-plans")]
+        self.io.request_contexts.end_preflight_admission();
         self.io.request_contexts.end_plan_admission();
         self.flush_http_owner_retirements();
         self.finish_deferred_commands(now);
@@ -4404,6 +4477,7 @@ impl<V: Venue> Engine<V> {
             || self.io.http_delivery.is_some()
             || self.io.http_plan_ready.is_some()
             || self.io.http_plan_expiring.is_some()
+            || self.io.http_preflight_ready.is_some()
             || !self.io.request_contexts.plan_scope_clear()
         {
             return;
@@ -4489,11 +4563,14 @@ impl<V: Venue> Engine<V> {
             // A caught hook panic permanently fences the engine. No unwind
             // reset guard or fabricated allocator failure is used.
             self.io.http_owner_poison = true;
-            self.venue.on_http_owner_retired(&token);
+            let wake = self.venue.on_http_owner_retired_preflight(&token);
             assert!(
                 self.io.request_contexts.complete_retirement(&token),
                 "HTTP owner retirement changed during cleanup"
             );
+            if let Some(wake) = wake {
+                let _ = self.io.request_contexts.queue_preflight_ready(&wake);
+            }
             self.io.http_owner_poison = false;
             self.assert_live();
         }
@@ -4509,6 +4586,7 @@ impl<V: Venue> Engine<V> {
         self.flush_http_owner_retirements();
         self.io.dispatch_now = now;
         self.flush_http_plans(now);
+        self.flush_preflight_readiness(now);
     }
 
     /// Callback actions must traverse the same queue as the original event.
@@ -4766,6 +4844,7 @@ impl<V: Venue> Engine<V> {
             self.dispatch_actions(self.io.dispatch_now);
             self.fence_socket_actions(self.io.dispatch_now);
         }
+        self.flush_preflight_readiness(self.io.dispatch_now);
         if self.store.take_rejected_empty_catalogue() {
             push_event(
                 &mut self.io.actions,

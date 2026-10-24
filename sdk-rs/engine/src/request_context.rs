@@ -137,6 +137,20 @@ pub struct SessionPolicy {
     /// The venue contract makes a new create/keepalive harmless while an
     /// earlier one is unresolved (cite it at the declaration site).
     pub repeat_safe: bool,
+    /// Unsigned requests that carry the primary key's login or session token
+    /// in their body or headers. Only a keyless session may declare it.
+    pub private_egress: Option<PrivateEgress>,
+}
+
+/// Granted only by a `SessionAuth` credential selection
+/// (`Selection::session_egress`); a venue cannot construct it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrivateEgress(());
+
+impl PrivateEgress {
+    pub(crate) fn granted() -> Self {
+        Self(())
+    }
 }
 
 /// Independent of HTTP method: private POST snapshots are still reads.
@@ -164,6 +178,25 @@ pub enum Egress {
     PublicCors,
     /// Unsigned public reads sent directly, bypassing account proxies.
     Direct,
+    /// Primary private egress for unsigned requests carrying a session's
+    /// login or token. Minted only by the session core; routing only.
+    Session(SessionEgress),
+}
+
+/// Opaque: no constructor outside the engine, so a venue cannot forge it.
+/// It names no key and grants no write, signing or session authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionEgress {
+    generation: u64,
+}
+
+impl SessionEgress {
+    pub(crate) fn new(generation: u64) -> Self {
+        Self { generation }
+    }
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -219,6 +252,13 @@ impl Credential {
 pub struct Pacing {
     pub group: u32,
     pub minimum_gap_ms: f64,
+}
+
+/// A flat declaration over primitive pacing groups, resolved at engine construction.
+#[derive(Clone, Copy, Debug)]
+pub struct PacingSet {
+    pub group: u32,
+    pub constraints: &'static [Pacing],
 }
 
 /// Immutable across physical retries of a logical leg.
@@ -295,11 +335,13 @@ impl Context {
         let Some(egress) = egress else {
             return Ok(self);
         };
-        let valid = match self.credential.as_ref() {
-            Some(credential) => {
+        let valid = match (self.credential.as_ref(), egress) {
+            (Some(_), Egress::Session(_)) => false,
+            (Some(credential), egress) => {
                 egress == Egress::Primary && credential.slot == CredentialSlot::Primary
             }
-            None => self.operation == Operation::Read,
+            (None, Egress::Session(_)) => true,
+            (None, _) => self.operation == Operation::Read,
         };
         if !valid {
             return Err(Error::Invalid);
@@ -316,7 +358,7 @@ impl Context {
     /// host's intent-based routing.
     pub fn route(&self) -> Option<crate::RequestRoute> {
         match self.egress? {
-            Egress::Primary => None,
+            Egress::Primary | Egress::Session(_) => None,
             Egress::PublicCors => Some(crate::RequestRoute::PublicCors),
             Egress::Direct => Some(crate::RequestRoute::Direct),
         }
@@ -358,7 +400,7 @@ impl Context {
     }
     pub fn routing_intent(&self) -> RoutingIntent {
         match self.egress {
-            Some(Egress::Primary) => RoutingIntent::Primary,
+            Some(Egress::Primary | Egress::Session(_)) => RoutingIntent::Primary,
             Some(Egress::PublicCors | Egress::Direct) => RoutingIntent::Public,
             None => self.credential_intent(),
         }
@@ -880,48 +922,162 @@ impl Lifecycle {
 #[derive(Default)]
 pub struct SendPacing {
     groups: Vec<(Pacing, Option<f64>)>,
+    sets: Vec<(u32, Vec<PacingConstraint>)>,
+}
+#[derive(Clone, Copy)]
+struct PacingConstraint {
+    index: usize,
+    minimum_gap_ms: f64,
+}
+struct ResolvedPacing<'a> {
+    single: Option<PacingConstraint>,
+    members: &'a [PacingConstraint],
+    outer_gap_ms: f64,
+}
+impl ResolvedPacing<'_> {
+    fn constraints(&self) -> impl Iterator<Item = PacingConstraint> + '_ {
+        self.single
+            .into_iter()
+            .chain(self.members.iter().copied())
+            .map(|mut member| {
+                member.minimum_gap_ms = member.minimum_gap_ms.max(self.outer_gap_ms);
+                member
+            })
+    }
+}
+fn resolve_pacing<'a>(
+    groups: &[(Pacing, Option<f64>)],
+    sets: &'a [(u32, Vec<PacingConstraint>)],
+    pacing: Option<Pacing>,
+) -> Result<ResolvedPacing<'a>, Error> {
+    let mut resolved = ResolvedPacing {
+        single: None,
+        members: &[],
+        outer_gap_ms: 0.,
+    };
+    let Some(pacing) = pacing else {
+        return Ok(resolved);
+    };
+    if !pacing.minimum_gap_ms.is_finite() || pacing.minimum_gap_ms < 0. {
+        return Err(Error::Invalid);
+    }
+    resolved.outer_gap_ms = pacing.minimum_gap_ms;
+    if let Some(index) = groups
+        .iter()
+        .position(|(group, _)| group.group == pacing.group)
+    {
+        resolved.single = Some(PacingConstraint {
+            index,
+            minimum_gap_ms: groups[index].0.minimum_gap_ms,
+        });
+    } else {
+        resolved.members = &sets
+            .iter()
+            .find(|(id, _)| *id == pacing.group)
+            .ok_or(Error::Invalid)?
+            .1;
+    }
+    Ok(resolved)
 }
 impl SendPacing {
     pub fn new(groups: &[Pacing]) -> Result<Self, Error> {
+        Self::with_sets(groups, &[])
+    }
+
+    pub fn with_sets(groups: &[Pacing], sets: &[PacingSet]) -> Result<Self, Error> {
+        const SET_CAPACITY: usize = 16;
+        if sets.len() > SET_CAPACITY || sets.iter().any(|set| set.constraints.len() > SET_CAPACITY)
+        {
+            return Err(Error::Capacity);
+        }
         if groups
             .iter()
             .any(|p| !p.minimum_gap_ms.is_finite() || p.minimum_gap_ms < 0.)
+            || sets.iter().any(|set| {
+                set.constraints.is_empty()
+                    || set
+                        .constraints
+                        .iter()
+                        .any(|p| !p.minimum_gap_ms.is_finite() || p.minimum_gap_ms < 0.)
+            })
         {
             return Err(Error::Invalid);
         }
         if groups
             .iter()
             .enumerate()
-            .any(|(i, group)| groups[..i].iter().any(|p| p.group == group.group))
+            .any(|(i, p)| groups[..i].iter().any(|q| q.group == p.group))
+            || sets.iter().enumerate().any(|(i, set)| {
+                groups.iter().any(|p| p.group == set.group)
+                    || sets[..i].iter().any(|other| other.group == set.group)
+                    || set
+                        .constraints
+                        .iter()
+                        .enumerate()
+                        .any(|(j, p)| set.constraints[..j].iter().any(|q| q.group == p.group))
+            })
         {
             return Err(Error::Duplicate);
         }
+        let mut registered = Vec::new();
+        registered
+            .try_reserve_exact(groups.len())
+            .map_err(|_| Error::Capacity)?;
+        registered.extend(groups.iter().map(|group| (*group, None)));
+        let mut resolved_sets = Vec::new();
+        resolved_sets
+            .try_reserve_exact(sets.len())
+            .map_err(|_| Error::Capacity)?;
+        for set in sets {
+            let mut members = Vec::new();
+            members
+                .try_reserve_exact(set.constraints.len())
+                .map_err(|_| Error::Capacity)?;
+            for member in set.constraints {
+                let index = groups
+                    .iter()
+                    .position(|p| p.group == member.group)
+                    .ok_or(Error::Invalid)?;
+                members.push(PacingConstraint {
+                    index,
+                    minimum_gap_ms: groups[index].minimum_gap_ms.max(member.minimum_gap_ms),
+                });
+            }
+            resolved_sets.push((set.group, members));
+        }
         Ok(Self {
-            groups: groups.iter().map(|group| (*group, None)).collect(),
+            groups: registered,
+            sets: resolved_sets,
         })
     }
-    fn check(&self, pacing: Option<Pacing>, now: f64) -> Result<Option<f64>, Error> {
-        let Some(pacing) = pacing else {
-            return Ok(None);
-        };
-        let eligible = self
-            .groups
-            .iter()
-            .find(|(group, _)| group.group == pacing.group)
-            .ok_or(Error::Invalid)?
-            .1;
-        Ok(eligible.filter(|at| now < *at))
+
+    /// Canonical expanded-floor validation for admission paths requiring no pacing.
+    pub fn validate_zero(&self, pacing: Option<Pacing>) -> Result<(), Error> {
+        let resolved = resolve_pacing(&self.groups, &self.sets, pacing)?;
+        if resolved
+            .constraints()
+            .any(|member| member.minimum_gap_ms != 0.)
+        {
+            return Err(Error::Invalid);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check(&self, pacing: Option<Pacing>, now: f64) -> Result<Option<f64>, Error> {
+        let resolved = resolve_pacing(&self.groups, &self.sets, pacing)?;
+        let mut wait: Option<f64> = None;
+        for member in resolved.constraints() {
+            if let Some(at) = self.groups[member.index].1.filter(|at| now < *at) {
+                wait = Some(wait.map_or(at, |previous| previous.max(at)));
+            }
+        }
+        Ok(wait)
     }
     fn released(&mut self, pacing: Option<Pacing>, now: f64) {
-        if let Some(pacing) = pacing {
-            // claim checked the fixed registry before invoking admission.
-            if let Some((group, next)) = self
-                .groups
-                .iter_mut()
-                .find(|(group, _)| group.group == pacing.group)
-            {
-                *next = Some((now + group.minimum_gap_ms.max(pacing.minimum_gap_ms)).min(f64::MAX));
-            }
+        let resolved =
+            resolve_pacing(&self.groups, &self.sets, pacing).expect("Claim prevalidated pacing");
+        for member in resolved.constraints() {
+            self.groups[member.index].1 = Some((now + member.minimum_gap_ms).min(f64::MAX));
         }
     }
 }
@@ -1049,6 +1205,10 @@ pub(crate) struct PreparedWriteSeal {
 impl PreparedWriteSeal {
     pub(crate) fn is_failure(&self) -> bool {
         self.failure.is_some()
+    }
+
+    pub(crate) fn failure(&self) -> Option<&VenueError> {
+        self.failure.as_ref()
     }
 }
 impl CommandWrites {
