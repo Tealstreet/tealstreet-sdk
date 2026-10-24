@@ -22,7 +22,7 @@ impl<'a> DispatchContext<'a> {
     }
     /// A wire stamp never negative and, with a floor, strictly after the
     /// released stamp it came from, even on a fixed or backward clock. Without
-    /// a floor it is `stamp_ms()` on every valid clock.
+    /// a floor it is `stamp_ms()` on valid nonnegative clocks.
     pub fn stamp_after(&self, floor: Option<crate::StampFloor>) -> Result<f64, SignError> {
         const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.;
         let current = self.stamp_ms();

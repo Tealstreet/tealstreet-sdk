@@ -30,16 +30,18 @@ and all retry authority remain with the admitted owner, not this primitive.
     for every family, so nothing can depend on one, and Bitrue natively clamps
     its stamp to 0.
   - With `None` it is `max(0, stamp_ms())`: equal to `stamp_ms()` on every
-    valid clock.
+    valid nonnegative clock.
   - Any resulting stamp beyond `MAX_SAFE_INTEGER` refuses `InvalidRequest`,
     whether the current clock or `floor + 1` crosses the bound. A non-finite
     current clock is invalid; no rounding, saturation or NaN-to-zero fallback.
 - `stamp_ms()` is unchanged, so no other family's stamps move.
 - **The floor carries no authority.** It only constrains the stamp. Resend
   authority still comes from the venue's genuine refusal classification plus
-  the engine retry context (`http_retry_context` with
-  `RetryEvidence::DefinitiveRefusal`, or `AdmittedRead::retry`). That keeps the
-  original Selection, account, generation and egress.
+  the operation-specific admitted resend path. Writes need the classifier-issued
+  `ResendGrant` and `Cx::http_resend_context`; reads use their declared retry
+  policy and allowed evidence through `AdmittedRead::retry`. The legacy
+  `http_retry_context(...DefinitiveRefusal)` explicitly refuses and is not a
+  substitute. The real owner retains original Selection/account/generation/egress.
 - **Use.** A recipe for a resend is constructed with
   `Option<StampFloor>` from the `SigningRelease` of the attempt being resent,
   and calls `dispatch.stamp_after(floor)` in every `prepare`. Every stale
