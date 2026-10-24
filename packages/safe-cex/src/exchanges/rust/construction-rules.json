@@ -4,6 +4,7 @@
     "privateEligible": [["canSign"]]
   },
   "venues": {
+    "cryptocom": {"bridge": {"dispatchSigning": true, "readCredentials": "validateOnly"}},
     "bitrue": {"bridge": {"dispatchSigning": true}},
     "weex": {"bridge": {"dispatchSigning": true}, "signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
     "okx": {"bridge": {"dispatchSigning": true}, "signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}, "remoteSigning": {"enabled": true, "payloadSupported": false, "protectedHeaders": ["OK-ACCESS-KEY", "OK-ACCESS-SIGN", "OK-ACCESS-TIMESTAMP", "OK-ACCESS-PASSPHRASE"], "wire": {"exchangeName": "okx", "extraData": "secondsTimestamp", "secondsSuffix": {"method": "GET", "path": "/users/self/verify"}}, "signatureEncoding": "base64", "passphraseHeader": "OK-ACCESS-PASSPHRASE"}},

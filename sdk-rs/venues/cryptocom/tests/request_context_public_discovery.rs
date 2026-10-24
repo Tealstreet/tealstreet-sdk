@@ -6,17 +6,18 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, TimerId, VenueError,
 };
-use safe_cex_venue_cryptocom::{Cryptocom, Options};
+use safe_cex_venue_cryptocom::Cryptocom;
+use support::fixture::Options;
 use support::{INSTRUMENTS, TICKERS, jittered};
 
 type TestEngine = Engine<Cryptocom>;
 const SYMBOL: &str = "BTCUSD-PERP";
 
 fn new() -> TestEngine {
-    safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    support::fixture::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }))
+    })
 }
 fn actions(e: &mut TestEngine, now: f64) -> Vec<Action> {
     safe_cex_engine::test_support::prepared_actions(e, now)
@@ -349,11 +350,11 @@ fn native_public_wire_and_values_are_unchanged() {
 }
 #[test]
 fn native_testnet_public_wire_stays_unsigned() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    let mut e = support::fixture::engine(Options {
         testnet: true,
         public_data_only: true,
         ..Default::default()
-    }));
+    });
     e.start(0.);
     let read = packet(&actions(&mut e, 0.), "/public/get-instruments");
     assert_eq!(
@@ -425,11 +426,11 @@ fn native_ticker_failure_is_independent_and_retains_cached_quote() {
 }
 #[test]
 fn native_usable_catalogue_peers_commit_and_private_reads_start_before_tickers() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    let mut e = support::fixture::engine(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         ..Default::default()
-    }));
+    });
     e.start(0.);
     let read = packet(&actions(&mut e, 0.), "/public/get-instruments");
     let partial = INSTRUMENTS.replace("\"data\":[", "\"data\":[{\"symbol\":\"BROKENUSD-PERP\",\"inst_type\":\"PERPETUAL_SWAP\",\"tradable\":true},");
@@ -460,11 +461,11 @@ fn native_usable_catalogue_peers_commit_and_private_reads_start_before_tickers()
 
 #[test]
 fn parked_ticker_route_keeps_native_private_start_independent() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    let mut e = support::fixture::engine(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         ..Default::default()
-    }));
+    });
     e.start(0.);
     let catalogue = packet(&actions(&mut e, 0.), "/public/get-instruments");
     reply(&mut e, 1., &catalogue, 200, INSTRUMENTS);
@@ -484,14 +485,22 @@ fn parked_ticker_route_keeps_native_private_start_independent() {
             _ => None,
         })
         .expect("ticker route is still parked");
-    let (private_index, private) = output
+    let (private_index, private_preparation) = output
         .iter()
         .enumerate()
         .find_map(|(i, a)| match a {
-            Action::Http(read) if read.url.contains("/private/") => Some((i, read)),
+            Action::ManagedHttp(a) => match a.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if request.url.contains("/private/") => Some((i, *preparation)),
+                _ => None,
+            },
             _ => None,
         })
-        .expect("independent native private read already leaves");
+        .expect("independent managed private read is queued while ticker stays parked");
+    let private = release(&mut e, 1., private_preparation);
     assert!(
         ticker_index < private_index,
         "logical ticker enqueue still precedes private startup"
