@@ -1655,3 +1655,13 @@ reference tests across26 targets pass (target counts include empty doc tests).
 Strict Clippy/fmt, bans and both inventory checks pass after the fix. Independent
 source/adversarial, caller and full-map delta reviews are CLEAR atbec93dd562a;
 architecture gate No. CI family size/CPU and other CI gates remain pending.
+
+
+### Hyperliquid spot candle custody controls
+
+Eleven dedicated controls cover standalone/merged spot on both networks, exact
+native wire and rows, validation order, real Prepare/Bind/Claim, early delivery,
+original deadline, preparation failure, clock/capacity recovery and duplicate
+owner/delivery. All pass with zero ignored. Existing candle and spot fixtures
+retain native assertions while driving managed preparation. The new probe opens
+no socket, so it makes no standalone socket-composition claim.
