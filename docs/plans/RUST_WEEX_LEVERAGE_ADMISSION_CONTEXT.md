@@ -10,7 +10,7 @@ Composition: plain merge `24494f352e8`, with both CALLERS append sections kept.
 The remaining numeric failure in lib.rs fetch_leverage runs when managed::read
 returns Err. It has fingerprint
 `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa`, one
-occurrence; other equal fingerprints are outside this slice. managed.rs::read
+occurrence in this slice; other equal fingerprints are outside it. managed.rs::read
 has exactly this one caller. No physical request site is pruned by this change.
 
 Replace only that numeric fallback with the existing initial command Read

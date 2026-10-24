@@ -212,6 +212,12 @@ fn invalid_clock(now: f64) {
         &safe_cex_engine::request_context::Error::Revoked.read_venue_error()
     );
     assert_eq!(e.store().setting("BTCUSDT"), before);
+    // MAX cannot be followed by an advancing finite clock on the same engine.
+    let mut e = if now == f64::MAX {
+        engine(primary())
+    } else {
+        e
+    };
     let a = ask(&mut e, NOW, COMMAND);
     let id = request(&a).id;
     accepted(&mut e, NOW + 1., id, COMMAND);
