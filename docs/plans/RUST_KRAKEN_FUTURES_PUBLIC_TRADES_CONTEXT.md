@@ -32,7 +32,8 @@ engine PR is required for the public walk.
 ## Native wire, rows and traversal
 
 Query::PublicTrades is unsigned GET on futures.kraken.com or demo-futures.kraken.com:
-/derivatives/api/v3/history?symbol={lowercase caller symbol}, then &lastTime={ISO}.
+/derivatives/api/v3/history?symbol={lowercase caller symbol}; later pages retain
+native sorted form order: ?lastTime={ISO}&symbol={lowercase caller symbol}.
 Keep native form escaping, empty headers, absent body and native egress. No market
 lookup or symbol normalization is added; output retains the caller's symbol.
 Stream ArrayAt::Field("history"). There is no native request_timeout declaration.
@@ -141,3 +142,62 @@ original/native/core API review and source authorization.
 Local cargo: changed Kraken crate/new target only, CARGO_BUILD_JOBS=4, one build
 at a time. CI owns workspace/all-feature/WASM/replay gates. Plan+RED work does not
 change or merge frozen2058/2033, and no PR/READY/production claim is implied.
+
+## Reviewed recovery and physical-timeout binding
+
+Fe7's existing-API fit confirms original-Context ReadCursorHistory authority,
+strict reject versus accepted-only finish_with, and strict root expiry. The
+review's two initial pins were corrected against actual source and native tests:
+- claude-ddi2il explicitly ruled preserve native accepted-only recovery after
+  later HTTP503 AND malformed DATA. A stricter DATA policy needs a separate
+  explicitly scoped PR. Fe7 withdrew the strict-DATA suggestion independently.
+- validate_read_http_delivery correctly rejects a physically expired child, so
+  it is NOT called to bind physical Timeout. Engine on_http_failed dispatch is
+  already exact released-attempt custody; finishing a child removes its managed
+  entries. The callback Pending carries the current page child, which must match
+  the history's retained current child. Validate the ORIGINAL root with
+  validate_read_root_context; expired/revoked root emits nothing. Then finish the
+  child, discard_staged_page and finish_with(Err) for accepted-only recovery (or
+  strict failure if accepted Vec is empty). No failure-validator/authority seam.
+
+Controls pin late failure from an already completed child, page2 physical
+Timeout recovering page1, strict original-root expiry before a later failure,
+and streamed-but-unaccepted page2 prefix discard. The initial native cursor
+fixture mistakenly expected lastTime after symbol; corrected to actual sorted
+form order lastTime then symbol. That fixture failure is excluded from RED
+receipts. Source remains unchanged; no stricter DATA assertion replaces native
+working controls. Production still waits for original reviews and actual2058
+callback composition.
+
+## Original executed checkpoint
+
+New target compiles on unchanged9a757 and executes29 tests:16 intended assertion
+REDs,13 working GREENs, zero ignored. REDs expose raw HTTP before public Prepare
+(first and later page), capacity/duplicate/invalid-clock bypass, absent raw
+fractional receipt/physical20s timers, late successful or accepted-prefix result
+past the original root, and absent physical timeout boundaries. Physical20s
+assertions are NEW-CONTRACT policy controls, not existing native timeout bugs.
+
+The first Prepare assertion gates deeper Bind/Claim, typed pre-release fields,
+late preparation/permit, later strict refusal, exact capacity two-slot recovery
+and255/254-peer survival suffixes. No executed proof is claimed for those gated
+suffixes. The three root-expiry controls genuinely receive native success/partial
+success instead of strict Timeout. No missing API/compilation failure, fixture
+panic or setup error is counted as RED. The initial cursor query-order fixture
+failure was corrected to native sorted form before this receipt.
+
+Working controls pin both hosts and unsigned wire, empty/default/zero/positive
+limit, unknown mixed-case symbol/form escaping, exact ID/uid/millisecond/side/
+quoteQty encoding, cursor oldest.floor()+1ms and final sort/dedupe, native later
+transport/HTTP503/codec accepted-only recovery and marker-before-result,
+first/staged-page failure without false partial success, repeated-boundary and
+50-page failure, stale completed-child failure silence, interrupted streamed
+page2 prefix discard, and zero-wait external rejection. Native DATA recovery
+controls stay unchanged under the overseer's explicit parity ruling.
+
+Scoped target strict Clippy and rustfmt/diff checks pass, jobs4 sequential. All221
+existing Kraken/engine/crypto/registry/checker/Cargo paths remain byte-exact9a757.
+Only this new plan and new target differ; no source, inventory, selection or
+existing fixture change. Original/native review remains separate from these
+owner execution receipts. Actual2058 composition is still required before
+production callback wiring; do not merge its frozen head into this checkpoint.
