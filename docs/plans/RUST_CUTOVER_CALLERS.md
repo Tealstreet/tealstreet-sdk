@@ -6808,3 +6808,51 @@ rows and readiness are preserved. Existing in-flight retries can finish but cann
 publish exhausted authority. Positions, balances and normal polling continue. Public wire
 payloads, signing, commands/results, IDs and frame shapes keep their contracts.
 No wrapper, SDK, CLI, MCP or server caller needs a new parameter or outcome type.
+
+## BloFin local FetchLeverage Read refusals
+
+Unknown market still precedes margin/mode-not-loaded before credentials, with
+exact native messages and absent kind/outcome fields. Each of these two local
+refusals now acquires its genuine shared Read owner; capacity refusal supersedes
+the native error with one typed Read failure and no write Outcome. No numeric
+fallback or extra terminal occurs. Duplicate live ids preserve their diagnostic
+and original owner. No Store change, HTTP, provider, timer or private credential
+is introduced. Valid signed leverage queries retain their original issuance,
+path, request fields, revision checks, response handling and native retries.
+
+## Polymarket and Kraken fixed settings (2026-10-24)
+
+Polymarket SetLeverage/SetMarginType/SetPositionMode and Kraken Futures
+SetPositionMode(false) adopt actual #1989 done_local_setting. They remain
+keyless Store no-ops with exact `[]` and `null` results, respectively, and no
+I/O. Success is confined to genuine Setting entry and now honors its receipt;
+an invalid clock produces typed InvalidInput/NotSent instead of numeric
+success. No Context, credential, physical attempt or signer readiness is
+created. Kraken true-mode refusal is unchanged. Inventory shrinks by two
+occurrences. See RUST_FIXED_SETTING_ADOPTION.md for the native compatibility
+and NEW-CONTRACT refusal controls.
+
+## OKX reported closed-position caller-root custody
+
+FetchClosedPositions now owns the immutable original caller receipt deadline
+(default120000ms, or the supplied rustCommandTimeoutMs). Each signed page has a
+20s/Never child minted only at its actual native100ms dequeue, capped by that
+root. Keyless and unknown-symbol empty results require genuine Read admission;
+missing/invalid receipts or full capacity can therefore produce one typed Read
+refusal instead of bypassing custody. No local timeout default is fabricated.
+
+Root expiry strictly returns one typed Timeout with no rows or INCOMPLETE, and
+local child admission/submission refusal strictly rejects the root. Physical
+HTTP/transport/live-child-timeout and provider/preparation failure preserve the
+native policy: fail without accepted output, otherwise return only accepted
+rows with owned INCOMPLETE. Shared typed failure metadata is retained on strict
+failure; released Read timeouts have no money outcome. Exact-owner retirement
+prevents late data and native timers from affecting a reused command ID.
+
+Raw OKX rows, Secondary-else-Primary selection behind the primary-required gate,
+wire parameters, PAGE100/MAX100, cursor/cycle/cap semantics and mapper stay
+unchanged. SDK fetchClosedPnl/fetchReportedClosedPnl still catches and reports
+failure then returns[]; fetchHistoricalPositions/okxJournal with report:false
+still propagates it. Recovered results keep copyHistoryCompleteness. This
+retires the Closed funnel consumer with0 direct lexical inventory removals;
+account/discovery/writes retain their shared list/sign sites until conversion.

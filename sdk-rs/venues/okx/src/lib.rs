@@ -83,7 +83,7 @@ pub enum Pending {
     },
     Account(account::Request),
     History(Box<history::Request>),
-    Closed(closed::Request),
+    Closed(Box<closed::Request>),
     Trade(trading::Request),
     Markets {
         /// This physical discovery read's Background Context, once admitted.
@@ -608,18 +608,6 @@ impl Okx {
         }
     }
 
-    fn list(&self, cx: &mut Cx<'_, Pending>, path: &str, private: bool, pending: Pending) {
-        let headers = self.headers(Method::Get);
-        let request = cx.request_streamed(
-            Method::Get,
-            format!("{}{path}", self.rest()),
-            headers,
-            ArrayAt::EnvelopeField("data"),
-            pending,
-        );
-        self.sign_request(cx, request, Method::Get, path, private, false);
-    }
-
     fn ensure_feed(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         if let Err(error) = self.managed_connect(cx, channel) {
             cx.notice(
@@ -867,7 +855,7 @@ impl Okx {
         } else if let Pending::History(request) = pending {
             self.history_failed(cx, *request, error);
         } else if let Pending::Closed(request) = pending {
-            Self::closed_failed(cx, request, error);
+            Self::closed_failed(cx, *request, error);
         } else if let Pending::Candles { root, .. } = pending {
             // Native soft shape for any post-send failure, deadline included.
             // Not gated on read delivery: an expired leg would never finish.
@@ -1021,7 +1009,7 @@ impl Venue for Okx {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
-            Pending::Closed(request) => Self::closed_item(request, item),
+            Pending::Closed(request) => Self::closed_item(cx, request, item),
             Pending::Markets {
                 kind,
                 rows,
@@ -1277,6 +1265,11 @@ impl Venue for Okx {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Closed(read) = &pending
+            && !read.valid_delivery(cx)
+        {
+            return;
+        }
         if let Pending::History(read) = &pending
             && !read.valid_delivery(cx)
         {
@@ -1355,7 +1348,7 @@ impl Venue for Okx {
             }
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, *request, response),
-            Pending::Closed(request) => self.closed_response(cx, request),
+            Pending::Closed(request) => self.closed_response(cx, *request),
             Pending::Markets {
                 kind,
                 rows,
@@ -1598,7 +1591,7 @@ impl Venue for Okx {
     ) {
         match pending {
             Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
-            Pending::Closed(request) => Self::closed_sign_failed(cx, request, error),
+            Pending::Closed(request) => Self::closed_sign_failed(cx, *request, error),
             Pending::Account(account::Request::Leverage { context, .. }) => {
                 let _ = cx.fail_context(&context, error);
             }
@@ -1616,6 +1609,7 @@ impl Venue for Okx {
         _pending: Vec<Pending>,
     ) {
         self.retire_history(owner);
+        self.retire_closed(owner);
     }
 
     /// The managed leverage read keeps the engine's typed failure, e.g. Timeout.
@@ -1627,6 +1621,7 @@ impl Venue for Okx {
     ) {
         match pending {
             Pending::History(read) => self.history_failed(cx, *read, error),
+            Pending::Closed(read) => Self::closed_http_failed(cx, *read, error),
             Pending::Account(account::Request::Leverage { context, .. }) => {
                 let _ = cx.fail_context(&context, error);
             }

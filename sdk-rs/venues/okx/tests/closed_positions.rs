@@ -24,7 +24,11 @@ fn fetch(e: &mut Engine<Okx>, symbol: Option<&str>, from: Option<f64>, to: Optio
 }
 
 fn request(e: &mut Engine<Okx>) -> Action {
-    actions(e)
+    request_at(e, NOW)
+}
+
+fn request_at(e: &mut Engine<Okx>, now: f64) -> Action {
+    prepared(e, now)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .expect("a positions-history request")
@@ -87,15 +91,15 @@ fn rows_page_backwards_by_the_oldest_close_time_and_pass_through_verbatim() {
         })
         .expect("TS waits 100ms between pages");
     e.handle(NOW + 100.0, Event::TimerFired { timer });
-    let second = request(&mut e);
+    let second = request_at(&mut e, NOW + 100.0);
     assert!(
         url(&second).contains("&after=1709499999999&limit=100"),
         "{}",
         url(&second)
     );
     let last = [row(100, 1_709_400_000_000)];
-    reply(&mut e, &second, &page(&last), NOW);
-    let result = done(&prepared(&mut e, NOW + 100.0)).unwrap().unwrap();
+    reply(&mut e, &second, &page(&last), NOW + 100.0);
+    let result = done(&actions(&mut e)).unwrap().unwrap();
     let got: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
     let expected: Vec<serde_json::Value> = rows
         .iter()
@@ -156,17 +160,18 @@ fn the_page_cap_warns_and_keeps_rows() {
     fetch(&mut e, None, None, None);
     let mut time = 1_709_900_000_000u64;
     let mut out = Vec::new();
-    for _ in 0..100 {
-        let a = request(&mut e);
+    for index in 0..100 {
+        let at = NOW + f64::from(index) * 100.0;
+        let a = request_at(&mut e, at);
         let rows: Vec<String> = (0..100).map(|i| row(i, time - i as u64)).collect();
         time -= 1_000;
-        reply(&mut e, &a, &page(&rows), NOW);
+        reply(&mut e, &a, &page(&rows), at);
         out = actions(&mut e);
         if let Some(timer) = out.iter().find_map(|a| match a {
             Action::SetTimer { timer, .. } => Some(*timer),
             _ => None,
         }) {
-            e.handle(NOW, Event::TimerFired { timer });
+            e.handle(at + 100.0, Event::TimerFired { timer });
         }
     }
     let rows = done(&out).unwrap().unwrap();
@@ -255,13 +260,13 @@ fn failed_later_page_returns_only_validated_rows_with_owned_completeness() {
         })
         .unwrap();
     e.handle(NOW + 100.0, Event::TimerFired { timer });
-    let second = request(&mut e);
+    let second = request_at(&mut e, NOW + 100.0);
     let failed = format!(
         r#"{{"code":"50011","msg":"rate limited","data":[{}]}}"#,
         row(999, 1_709_400_000_000)
     );
-    reply(&mut e, &second, &failed, NOW);
-    let out = prepared(&mut e, NOW + 100.0);
+    reply(&mut e, &second, &failed, NOW + 100.0);
+    let out = actions(&mut e);
     assert!(
         matches!(done(&out), Some(Ok(_))),
         "later failure must retain accepted rows"
@@ -304,16 +309,17 @@ fn a_nonadjacent_close_time_cursor_cycle_stops_in_the_shared_pager() {
     let mut e = trading_engine();
     fetch(&mut e, None, None, None);
     let mut terminal = Vec::new();
-    for time in [1000, 500, 1000] {
-        let current = request(&mut e);
+    for (index, time) in [1000, 500, 1000].into_iter().enumerate() {
+        let at = NOW + index as f64 * 100.0;
+        let current = request_at(&mut e, at);
         let rows: Vec<_> = (0..100).map(|i| row(i, time)).collect();
-        reply(&mut e, &current, &page(&rows), NOW);
+        reply(&mut e, &current, &page(&rows), at);
         terminal = actions(&mut e);
         if let Some(timer) = terminal.iter().find_map(|a| match a {
             Action::SetTimer { timer, .. } => Some(*timer),
             _ => None,
         }) {
-            e.handle(NOW + 100.0, Event::TimerFired { timer });
+            e.handle(at + 100.0, Event::TimerFired { timer });
         }
     }
     assert!(
