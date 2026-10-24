@@ -2021,3 +2021,76 @@ fn l1_wallet_role_is_primary_only_for_injected_refs_and_policies() {
         Err(SignError::InvalidRequest)
     );
 }
+
+#[test]
+fn alias_primary_secondary_takes_the_primary_ref_when_omitted() {
+    use crate::signing::{
+        CredentialSetupPolicy, ExtraFieldPolicy, ExtraKey, ExtraKeyPolicy, Identities, Identity,
+        IdentitySetupPolicy,
+    };
+    let policy = CredentialSetupPolicy {
+        primary: Some(IdentitySetupPolicy {
+            extra: Some(ExtraKeyPolicy {
+                key: ExtraKey::KucoinBroker,
+                field: ExtraFieldPolicy::Optional,
+                encoding: None,
+                trim: true,
+            }),
+            ..Default::default()
+        }),
+        secondary: Some(IdentitySetupPolicy {
+            extra: Some(ExtraKeyPolicy {
+                key: ExtraKey::KucoinBroker,
+                field: ExtraFieldPolicy::AliasPrimary,
+                encoding: None,
+                trim: false,
+            }),
+            ..Default::default()
+        }),
+    };
+    let identity = |name: &str, broker: Option<&str>| Identity {
+        credential: KeyRef(format!("{name}.key")),
+        signing: KeyRef(format!("{name}.secret")),
+        passphrase: None,
+        stable_id: None,
+        extra: broker
+            .map(|broker| (ExtraKey::KucoinBroker, KeyRef(broker.into())))
+            .into_iter()
+            .collect(),
+    };
+    // A host-supplied secondary that omits the alias reads with the primary's
+    // one broker ref, never silently without broker attribution.
+    let mut ids = Identities {
+        primary: Some(identity("primary", Some("primary.broker"))),
+        secondary: Some(identity("secondary", None)),
+    };
+    assert_eq!(policy.apply_to_identities(&mut ids, false), Ok(()));
+    assert_eq!(
+        ids.secondary.unwrap().extra.get(&ExtraKey::KucoinBroker),
+        Some(&KeyRef("primary.broker".into()))
+    );
+    // No primary broker: the secondary stays without one (nothing to alias).
+    let mut none = Identities {
+        primary: Some(identity("primary", None)),
+        secondary: Some(identity("secondary", None)),
+    };
+    assert_eq!(policy.apply_to_identities(&mut none, false), Ok(()));
+    assert!(none.secondary.unwrap().extra.is_empty());
+    // A differing secondary ref is still refused, and nothing is mutated first.
+    let mut differing = Identities {
+        primary: Some(identity("primary", Some("primary.broker"))),
+        secondary: Some(identity("secondary", Some("other.broker"))),
+    };
+    assert_eq!(
+        policy.apply_to_identities(&mut differing, false),
+        Err(SignError::InvalidRequest)
+    );
+    assert_eq!(
+        differing
+            .secondary
+            .unwrap()
+            .extra
+            .get(&ExtraKey::KucoinBroker),
+        Some(&KeyRef("other.broker".into()))
+    );
+}

@@ -225,6 +225,21 @@ impl CredentialSetupPolicy {
                 .expect("existing secondary")
                 .passphrase = passphrase;
         }
+        // An omitted alias names the primary's one ref, as trusted local setup
+        // installs it; a read slot never loses the primary's attribution.
+        if let Some(declared) = self
+            .secondary
+            .and_then(|policy| policy.extra)
+            .filter(|declared| declared.field == ExtraFieldPolicy::AliasPrimary)
+            && let Some(reference) = identities
+                .primary
+                .as_ref()
+                .and_then(|primary| primary.extra.get(&declared.key))
+                .cloned()
+            && let Some(secondary) = identities.secondary.as_mut().filter(|id| complete(id))
+        {
+            secondary.extra.entry(declared.key).or_insert(reference);
+        }
         Ok(())
     }
 }
