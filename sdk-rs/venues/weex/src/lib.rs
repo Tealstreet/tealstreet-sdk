@@ -52,7 +52,7 @@ pub struct Pending {
     seed_generation: u32,
 }
 enum Task {
-    BookQuery(CommandId),
+    BookQuery(depth_query::Request),
     Markets(Vec<Market>),
     Account(account::Request),
     Trade(trading::Request),
@@ -741,10 +741,6 @@ impl WeexFutures {
         cx.book_changed(&symbol);
     }
     fn fail(&mut self, cx: &mut Cx<'_, Pending>, task: Task, error: &str) {
-        if let Task::BookQuery(command) = task {
-            cx.fail(command, depth_query::failure(error, ErrorKind::Network));
-            return;
-        }
         if let Task::Identity { context, .. } = &task {
             Self::identity_failed(cx, context, error);
             return;
@@ -1130,14 +1126,14 @@ impl Venue for WeexFutures {
             self.trade_response(cx, request, response);
             return;
         }
+        if let Task::BookQuery(request) = p.task {
+            self.book_query_response(cx, request, response);
+            return;
+        }
         if response.status == 429 {
             self.paused_until = self
                 .paused_until
                 .max(cx.now + rate::delay(response, cx.now));
-        }
-        if let Task::BookQuery(command) = p.task {
-            self.book_query_response(cx, command, response);
-            return;
         }
         if response.status >= 400 {
             self.fail(
@@ -1295,6 +1291,7 @@ impl Venue for WeexFutures {
     ) {
         match p.task {
             Task::Candles(request) => request.failed(cx, error),
+            Task::BookQuery(request) => request.failed(cx, error),
             Task::Account(r) => {
                 self.account_request_failed(cx, r, p.seed_generation, &error.message)
             }
@@ -1311,25 +1308,25 @@ impl Venue for WeexFutures {
         p: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        if let Task::Candles(request) = p.task {
-            request.failed(cx, error);
-        } else if let Task::Trade(request) = p.task {
-            self.trade_failed(cx, request, error);
-        } else {
-            self.on_request_failed(cx, p, &error.message);
+        match p.task {
+            Task::Candles(request) => request.failed(cx, error),
+            Task::BookQuery(request) => request.failed(cx, error),
+            Task::Trade(request) => self.trade_failed(cx, request, error),
+            task => self.on_request_failed(cx, Pending { task, ..p }, &error.message),
         }
+    }
+    fn read_root_retired(&mut self, owner: Owner, _pending: Vec<Pending>) {
+        self.deferred_gets.retain(|deferred| match &deferred.task {
+            Task::BookQuery(query) => query.owner() != owner,
+            Task::Candles(candles) => candles.completion.root().owner() != owner,
+            _ => true,
+        });
     }
     fn on_http_owner_retired(
         &mut self,
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
     ) {
         self.retire_trade(owner);
-    }
-    fn read_root_retired(&mut self, owner: Owner, _pending: Vec<Pending>) {
-        self.deferred_gets.retain(|deferred| match &deferred.task {
-            Task::Candles(candles) => candles.completion.root().owner() != owner,
-            _ => true,
-        });
     }
     fn unproven_http_evidence(
         &self,
@@ -1374,10 +1371,12 @@ impl Venue for WeexFutures {
             {
                 return;
             }
-            if let Task::Candles(request) = r.task {
-                self.send_candle_query(cx, &r.path, &r.query, request);
-            } else {
-                self.get(cx, &r.path, &r.query, r.task, r.stream);
+            match r.task {
+                Task::Candles(request) => {
+                    self.send_candle_query(cx, &r.path, &r.query, request);
+                }
+                Task::BookQuery(request) => self.send_book_query(cx, request, r.query),
+                task => self.get(cx, &r.path, &r.query, task, r.stream),
             }
             return;
         }
@@ -1431,17 +1430,7 @@ impl Venue for WeexFutures {
             limit,
         } = command
         {
-            self.get(
-                cx,
-                paths::DEPTH,
-                &format!(
-                    "symbol={}&limit={}",
-                    safe_cex_engine::url::encode(symbol),
-                    limit.unwrap_or(200)
-                ),
-                Task::BookQuery(command),
-                None,
-            );
+            self.fetch_book_query(cx, command, symbol, limit);
             return;
         }
 
