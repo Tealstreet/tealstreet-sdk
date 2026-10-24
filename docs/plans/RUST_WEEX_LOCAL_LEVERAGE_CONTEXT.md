@@ -1,6 +1,6 @@
 # WEEX local leverage refusal custody
 
-Status: plan before compiling original assertions; production held.
+Status: plan and original assertion evidence; production held.
 Base: actual `557de7ae7fbf6d2a00fdd3cbf1d0a962bd7fc570`.
 
 ## Scope and ownership
@@ -102,3 +102,38 @@ Run only this changed target with CARGO_BUILD_JOBS=4, then scoped Clippy/fmt.
 No local full-workspace/all-feature sweeps. Get bounded native/core review of the
 plan and original evidence before production. This task authorizes plan + REDs
 only; do not push a PR or change runtime/inventories at this checkpoint.
+
+## Original evidence receipt
+
+Plan commit `0336a336afc` precedes the new test target. Executed with the native
+WEEX source and engine byte-identical to the pinned actual base:
+
+```sh
+CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=2 cargo test --manifest-path sdk-rs/Cargo.toml \
+  -p safe-cex-venue-weex --test local_leverage_context
+CARGO_BUILD_JOBS=4 cargo clippy --manifest-path sdk-rs/Cargo.toml \
+  -p safe-cex-venue-weex --test local_leverage_context -- -D warnings
+```
+
+Result: five independent assertion REDs, six GREEN controls, zero ignored tests.
+All REDs reach full-error comparisons, with no compile, setup, missing-method or
+missing-request failure. Capacity mismatches preserve the native local error
+where a real overflow admission produced canonical Read Capacity; NaN clock
+mismatches preserve the native error instead of canonical Read Revoked.
+The 256 retained owners are real Contexts from genuine fixture entries, without
+physical requests; no 256-request native wire claim is made.
+
+The paused-capacity case first receives an actual unsigned order-book 429 with
+Retry-After 3, then retains the owners at a live finite clock. No private pause
+mutation is used. Native controls verify unknown market over pause/credentials,
+pause over credentials, equality at 4001, exact absent error fields, settings
+unchanged, repeated local ID reuse, and live native signed leverage wire/output.
+The independent capacity GREEN executes overflow refusal, duplicate diagnostic,
+exact peer retirement and a new owner taking the freed slot.
+
+The three capacity REDs stop at their error mismatch. Their later settings,
+local retry and second-peer retirement assertions remain explicit post-cutover
+execution gates. Shared expired/deferred-callback behavior and managed protocol
+counts are not new native injection proofs in this checkpoint. Scoped target
+Clippy and rustfmt pass; no broad build or CI dispatch was run. Production,
+engine, maps, checker, selection, account and trading source remain base-exact.
