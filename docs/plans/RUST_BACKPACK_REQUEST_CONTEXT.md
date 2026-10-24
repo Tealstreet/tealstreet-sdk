@@ -849,3 +849,27 @@ provider-output suffixes remain gated until GREEN. Added working controls pin
 empty-read-key native construction refusal and Primary Mutation selection plus
 exact RFC provider output despite a configured secondary. Proposed registry
 source is not applied and is under owner review separately.
+
+Complete consumer proposal checkpoint: original-source appended bad-seed control
+35e5b744c12 executes17 cases,10GREEN/7original assertionRED,0ignored. Private
+FetchAccount preserves both exact seed errors; public-only FetchAccount instead
+preserves its credentials-required refusal. All have native absent kind/outcome
+and zero physical/provider actions. Do not invent NotSent metadata for these
+native local failures. Existing public-only CONFIG_INVALID/no-start control
+also remains GREEN.
+
+Because configuration failure precedes public-only but seed failure follows it,
+the complete proposal types the stored error as Configuration/Seed without
+matching message strings. A shared validate_read_credentials captures the two
+stages once at construction. Registry construction passes that status; direct
+Backpack construction captures it only when absent. Start and FetchAccount
+consume metadata and delete their own validation/seed re-checks. This extends
+the reviewed registry shape and still needs exact consumer owner review.
+
+Complete source proposal (not applied): /tmp/codex-backpack-identity-consumer.patch,
+SHA-256 c3964cfa54dfb826cc99febb80e034556b61888ae049bdb313f80a5e37668006.
+Five paths: registry helper/construction, venue sign/lib/identity and explicit
+support Options initializer. Includes genuine selected Read/provider queue,
+exact Context DATA validation before parsing, typed terminal ownership, and
+primary-window inheritance. Sent to m26ps4 and hcmq3f for exact source/API fit;
+no compile, source readiness or runtime execution claim for this proposal.
