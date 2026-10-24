@@ -729,9 +729,6 @@
     "766f5ee44b7b25802cc85973a468fc872f0d83bbef8320e067ed436d4985244b": 2,
     "9abef505f5f9a1664cdae8b3c966edfebd4748240d5855c984067457d1b77499": 1
   },
-  "venues/polymarket/src/lib.rs": {
-    "3c2518cd3efa9ec044158c6dd5008cc36722ff550877663df294c8c8c2d55621": 1
-  },
   "venues/polymarket/src/trading.rs": {
     "5a10d25b95cc023a50c9ad506fe37e87a89e8d0e1f0e12f669daead116de0099": 1,
     "5b02bb983a5e994687c385c6cbe7676982daf9cf00a067f01bf5aa35a2a29067": 1,

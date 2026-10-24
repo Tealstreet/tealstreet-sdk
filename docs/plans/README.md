@@ -384,3 +384,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | GRVT unsigned instrument catalog custody | Managed implementation; source review and CI pending | Before changing startup/refresh publication, the new 20-second bound or the dead options-arm deletion. | [RUST_GRVT_CATALOG_CONTEXT.md](RUST_GRVT_CATALOG_CONTEXT.md) |
 
 | TxFlow command candle snapshot | Managed source under review; 19 dedicated controls pass | Before managing the unsigned command candle read; excludes initial local refusals, discovery and account. | [RUST_TXFLOW_CANDLE_CONTEXT.md](RUST_TXFLOW_CANDLE_CONTEXT.md) |
+
+| Polymarket Gamma catalogue custody | Managed adoption; original and pressure controls pass, review/CI pending | Before adopting unsigned streamed catalogue pages; retain atomic cursor walk and native retry. | [RUST_POLYMARKET_CATALOGUE_CONTEXT.md](RUST_POLYMARKET_CATALOGUE_CONTEXT.md) |
