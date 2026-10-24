@@ -15,10 +15,10 @@ This bounded slice retires exactly **2 fingerprints / 2 occurrences** from
 | Existing site | Consumer | Managed destination |
 | --- | --- | --- |
 | `get`: `cx.request`, fingerprint `a1d7eb3cdf7f4e938351efa132ee68dac79fc9e6e26db557c0ffd67282e9ae14` | Subscription depth snapshot | Unsigned Background Read, one managed HTTP operation |
-| `stream`: `cx.request_streamed`, fingerprint `e7ec3b5f8c170e9a5887721f2eedda084ecf9f5a5eba8d1e899957c63019e0bb` | Markets and ticker discovery | Unsigned streamed Background Read per physical operation |
+| `stream`: `cx.request_streamed`, fingerprint `2cb4c59f38cca507a15b20d1ace303afd27defc1b4fe0aba50dddcbcb1f9c37c` | Markets and ticker discovery | Unsigned streamed Background Read per physical operation |
 
 The conservative `matches!(request.call, AmendRead { .. })` witness
-`2cb4c59f38cca507a15b20d1ace303afd27defc1b4fe0aba50dddcbcb1f9c37c`
+`e7ec3b5f8c170e9a5887721f2eedda084ecf9f5a5eba8d1e899957c63019e0bb`
 stays unchanged. Account/history/identity/trading and the signed funnel stay
 legacy until dispatch recipes and their actual native pacing/custody are ready.
 No private or command-owned read is relabelled Background.
@@ -49,8 +49,10 @@ expired current handles may retire, revoked handles cannot touch newer work.
 Failure ownership is not DATA authority. No command terminal or auth-health
 outcome is created for these credential-free Background operations.
 
-Native response headers still supply 429 pause evidence in their existing scope
-before stale DATA is discarded. Keep the discovery envelope check precedence:
+A still-live exact managed response supplies native 429 pause evidence before
+stale subscription-generation DATA is discarded. At/after operation expiry the
+engine rejects the response before the adapter sees headers; expired or retired
+responses supply no rate evidence, an intentional consequence of managed expiry. Keep the discovery envelope check precedence:
 an invalid discovery envelope does not newly become rate evidence. Preserve
 `depth_paused_until` and the matching account pause without using a stale payload
 as rows, progress or snapshot. Preserve failure/backoff once after a rejected
@@ -69,13 +71,15 @@ has the same native retry shape as an ordinary failed operation.
 Depth: `/api/v1/contract/depth/{native_id}?limit=1000`, GET, no credential/header/body.
 Keep the public-open gate, per-symbol generation fence, buffering bound 2000,
 contract-size scaling, exact u64 version, version+1 replay and gap resync. Preserve
-Backoff(250ms, 7, 30s), native nominal book schedule, and Retry-After handling.
+Backoff(250ms, 7, 30s), its first exactly 500ms resync after incrementing failures,
+the native nominal book schedule, and Retry-After handling.
 Unsubscribe/re-subscribe retains its native generation fence. An old operation
 cannot retire or publish the replacement's snapshot or another symbol's peer.
 
 Caller-visible correction: route preparation/final release now precedes public
 HTTP, and data arriving at or after the immutable 20-second operation deadline
-cannot load markets/tickers or replace a book, even before timer ingress. Failed
+cannot load markets/tickers or replace a book, even before timer ingress. Expired headers also no longer supply rate
+evidence. Failed
 or expired operations still retry through native startup/book recovery. Wire,
 subscription ordering, financial assertions and live successful results remain.
 Record that correction in CALLERS with the implementation, not as a claim here.
@@ -104,3 +108,17 @@ Record that correction in CALLERS with the implementation, not as a claim here.
 Architecture gate: **No**. This adopts existing Background Read issuance,
 managed dispatch and exact delivery validation. It adds no venue executor,
 issuer, timer, retry, credential policy or lifetime validator.
+
+## Original execution receipt
+
+At unchanged base production, the dedicated integration target executes **18
+controls: 11 assertion REDs / 7 working GREEN / zero ignored**. The REDs cover
+eager unsigned dispatch, missing parked deadline custody and late DATA; working
+controls preserve wire/results, exact native recovery, live peer independence,
+generation fencing, startup backoff and invalid-envelope/rate precedence.
+The live transport failure is injected at 20,199ms, before the 20,200ms deadline;
+the distinct timeout case uses equality. Scoped test-target strict Clippy passes.
+The initial test compile errors were corrected before this execution receipt.
+No runtime, fixture or manifest byte changed. The source, caller and full-map
+reviews found the two fingerprint labels swapped, a 500ms depth-backoff assertion
+and the expired-header scope; this checkpoint corrects all three.
