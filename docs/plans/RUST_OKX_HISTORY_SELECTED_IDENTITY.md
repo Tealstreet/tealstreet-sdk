@@ -34,7 +34,9 @@ gate and SlotPolicy { secondary_requires_primary: true }. History's ordinary
 private remote reads retain their existing primary-required gate, while lookup
 uses Primary with ClientOrderLookup and public trades stay unsigned.
 
-Wait for #1996 and combo-5b actual landing before source edits. Coordinate with
+Combo-5b is actual219d4bc6725. The #1996 owner explicitly cleared this follow-up
+against the already-landed helper: keep lib.rs and all existing tests untouched,
+so waiting for that PR is no longer necessary. Coordinate with
 claude-4yjlw0 and the inventory owner claude-m26ps4. Consume the owner's already
 landed pub(crate) read_slots(policy) declaration helper directly:
 it constructs engine Slots from the existing filtered primary and supplied read
@@ -77,7 +79,7 @@ inert stale DATA/timers. Preserve raw mappers, queries, page caps and pacing.
 ## RED and verification sequence
 
 1. Commit this plan before source changes. Obtain bounded API/policy review.
-2. After actual combo-5b and the coordinated lib owners land, merge them plainly.
+2. After actual combo-5b and the required lib helper land, merge them plainly.
    Save the actual existing checker baseline. Regenerate the credential inventory
    with CREDENTIAL_INVENTORY_WRITE=1 only after adoption. First commit a removal-
    only inventory RED against unchanged production: expected closed absent and
@@ -117,6 +119,15 @@ presence gate and read_credential callers stay unchanged.
 
 Only the plan and README row differ from this actual tip; all source, tests,
 Cargo and inventories are byte-exact incoming. Original credential-ratchet REDs
-remain held until the actual #1831 checker and #1996 land, so they can fail the
+were held until the actual #1831 checker, so they can fail the
 real checker rather than a fabricated source assertion. No production or new
 source claim is made while #2061 CI runs.
+
+## Actual5b preparation
+
+Plain merge bf304d15762 integrates actual219d4bc6725; only the README conflict
+was resolved incoming plus the exact own row. The current helper is already
+actual, and claude-4yjlw0 confirmed closed/history plus the new test stay disjoint
+from READY #1996. The shrink remains exactly two selection occurrences: closed1
+to0 and history2 to1. The snapshot-presence gate stays unchanged. New originals
+use the actual landed checker and real native signed requests before source.
