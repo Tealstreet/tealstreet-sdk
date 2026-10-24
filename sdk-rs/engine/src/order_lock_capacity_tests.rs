@@ -6,12 +6,14 @@ use crate::model::PlaceOrderOpts;
 #[derive(Default)]
 struct Held {
     entries: usize,
+    /// Guard order mutations without taking scopes for placements.
+    placements_unguarded: bool,
 }
 
 impl Venue for Held {
     type Pending = ();
     fn guard_pending_placements(&self) -> bool {
-        true
+        !self.placements_unguarded
     }
     fn guard_order_mutations(&self) -> bool {
         true
@@ -58,7 +60,11 @@ fn place(command: CommandId, symbol: &str) -> Command {
 }
 
 fn started() -> Engine<Held> {
-    let mut e = crate::test_support::seeded_engine(Held::default());
+    started_with(Held::default())
+}
+
+fn started_with(venue: Held) -> Engine<Held> {
+    let mut e = crate::test_support::seeded_engine(venue);
     e.start(0.);
     e.drain_actions().for_each(drop);
     e
@@ -206,4 +212,18 @@ fn control_amend_and_cancel_at_the_cap_keep_the_existing_refusal() {
         assert_eq!(errors[0].outcome, None);
         assert!(nothing_sent(&actions));
     }
+}
+
+#[test]
+fn control_placements_take_no_scope_without_guard_pending_placements() {
+    let mut e = started_with(Held {
+        placements_unguarded: true,
+        ..Default::default()
+    });
+    fill(&mut e, 64);
+    e.handle(2., Event::Command(place(65, "S65")));
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(failures(&actions, 65).is_empty(), "{actions:?}");
+    assert_eq!(e.venue.entries, 65);
+    assert!(!(1..=65).any(|id| e.io.order_locks.contains(id)));
 }
