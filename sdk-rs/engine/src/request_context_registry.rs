@@ -1485,6 +1485,19 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Validate a Read child's delivery under its command's exact root, of any
+    /// operation (e.g. verification reads after writes). Read publication only;
+    /// failure callbacks prove ownership, never response data. No send, retry,
+    /// completion, journal or outcome authority.
+    pub fn validate_command_read_http_delivery(
+        &self,
+        root: &Context,
+        leg: &Context,
+    ) -> Result<(), Error> {
+        let _ = (root, leg);
+        Err(Error::Invalid)
+    }
+
     /// Validate a Background Read in this exact managed HTTP callback. Publish
     /// synchronously after validation, before retiring the Context. Native
     /// response validity and publication freshness remain separate requirements.
