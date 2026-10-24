@@ -782,6 +782,8 @@ impl Venue for Probe {
             self.retire_now(cx);
         }
         if self.shared.borrow().announce_timer == Some(timer) {
+            // One-shot: re-arm so a probe can announce again.
+            self.shared.borrow_mut().announce_timer = Some(cx.set_timer(60_000.));
             let session = self.shared.borrow().session.clone().expect("live Session");
             for waiter in cx.session_ready(&session) {
                 match waiter {

@@ -238,6 +238,10 @@ impl SessionHeaders {
     pub(crate) fn entries(&self) -> &[(&'static str, SecretHeaderValue)] {
         &self.entries
     }
+
+    pub(crate) fn placement(&self) -> SessionPlacement {
+        self.placement
+    }
 }
 
 /// A venue's answer for one Session generation at managed prepare.

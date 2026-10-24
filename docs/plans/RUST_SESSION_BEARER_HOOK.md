@@ -739,3 +739,30 @@ per-recipe proposal):
   is First. For a no-body GET (no Content-Type) the GRVT and BreakoutProp
   slices assert native's actual order for that request, not just the engine
   rule (dazzy3 B7); O4 collision and limits still apply after placement.
+
+### Phase 3 source (local, unpushed)
+
+- `Bearer.seen` holds the latest revision read at Bind; a Stale reprepare
+  keeps it. `admit(seen, answer)` binds only a Ready answer newer than `seen`;
+  anything else parks. The pub(crate) seed setter is fe7lgm's: it lands with
+  its only consumer (`serial_plan_session_resend`, plan 92f1ff3dcd9), so no
+  caller-less API ships here.
+- All three NotReady sites park instead of failing: the unsigned Bind, the
+  signed pre-signing check (before any provider work) and the signed Bind
+  (packet wiped, recipe kept for the re-sign). `park_bearer` re-arms the call
+  timer at its deadline and appends to `bearer_parked` in park order.
+- `session_ready` records the generation in `bearer_woken`.
+  `flush_bearer_fences`, which already runs at every post-callback point, now
+  drains fences and wakes until both are empty. A wake re-prepares, through
+  `reprepare_http`, each parked call whose revision `wakes` (Some and newer
+  than `seen`).
+- `attach_session_headers` inserts at `SessionPlacement` (`First`, or right
+  after the first matching header, else first). Overflow wipes exactly the
+  inserted range.
+
+Results: session_bearer 47 default / 53 with barriers; engine lib 871 / 1076;
+clippy `-D warnings` clean in default, barrier and lib-only modes. Mutations:
+admit ignoring `seen` fails P11; a wake ignoring the revision fails P4; a wake
+that never re-prepares fails eight P tests; ignoring placement fails O1.
+Removing park cleanup on call removal changes no behaviour (a stale entry is
+skipped at the wake), so no test pins it: it keeps the list from growing.

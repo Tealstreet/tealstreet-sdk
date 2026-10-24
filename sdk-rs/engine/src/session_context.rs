@@ -621,6 +621,10 @@ impl<P> Cx<'_, P> {
         let Ok(generation) = self.io.request_contexts.validate_session(session) else {
             return vec![];
         };
+        // Also announces the bundle: parked Bind calls re-check after the callback.
+        if !self.io.bearer_woken.contains(&generation) {
+            self.io.bearer_woken.push(generation);
+        }
         // A Ready owner is live by its own deadline; a Failed one keeps its
         // hold until the venue fails the command, which removes the owner.
         // A parked Slot is issued now, with this drain's delivery as its

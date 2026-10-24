@@ -1527,6 +1527,10 @@ struct Io<P> {
     bearer_bound: Vec<(u64, Vec<RequestId>)>,
     /// Bound preparations a Session retire fenced, failed after the callback.
     bearer_fenced: Vec<crate::request_context::Preparation>,
+    /// Unreleased Bearer calls parked on (generation, request), in park order.
+    bearer_parked: Vec<(u64, RequestId)>,
+    /// Generations whose venue announced a bundle; drained after the callback.
+    bearer_woken: Vec<u64>,
     http_pacing: crate::request_context::SendPacing,
     http_responses: crate::request_context::ReconciliationResponses,
     http_write_revision: u64,
@@ -1639,6 +1643,8 @@ impl<P> Default for Io<P> {
             managed_http: Default::default(),
             bearer_bound: Vec::new(),
             bearer_fenced: Vec::new(),
+            bearer_parked: Vec::new(),
+            bearer_woken: Vec::new(),
             http_pacing: Default::default(),
             entropy: None,
             #[cfg(feature = "order-locks")]
