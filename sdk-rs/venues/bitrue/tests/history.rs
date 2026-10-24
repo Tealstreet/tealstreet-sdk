@@ -1,14 +1,16 @@
+mod support;
 use safe_cex_engine::model::{Limits, Market, MinMax, Order, Precision};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Query, Response};
-use safe_cex_venue_bitrue::{Bitrue, Options};
+use safe_cex_venue_bitrue::Bitrue;
+use support::Options;
 const SYMBOL: &str = "E-BTC-USDT";
 const ROW: &str = r#"{"tradeId":1558124009467904992,"price":60000,"qty":3,"amount":180,"contractName":"E-BTC-USDT","side":"BUY","fee":"-0.1","bidId":1558124009467904993,"askId":1558124009467904994,"isBuyer":true,"isMaker":true,"ctime":1700000000123}"#;
 fn engine() -> Engine<Bitrue> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
+    let mut e = support::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
-    }));
+    });
     e.store_mut().set_markets(vec![Market {
         id: SYMBOL.into(),
         symbol: SYMBOL.into(),
@@ -58,7 +60,8 @@ fn query(e: &mut Engine<Bitrue>, query: Query) {
     );
 }
 fn request(e: &mut Engine<Bitrue>) -> HttpRequest {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(&mut *e, 1700000000000.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.contains("/myTrades") => Some(r),
             _ => None,
@@ -66,7 +69,8 @@ fn request(e: &mut Engine<Bitrue>) -> HttpRequest {
         .unwrap()
 }
 fn result(e: &mut Engine<Bitrue>) -> Result<String, String> {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(&mut *e, 1700000000000.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone {
                 command: 99,
@@ -253,10 +257,10 @@ fn windows_require_known_symbols_and_unsupported_histories_do_not_fabricate_ledg
 }
 #[test]
 fn public_only_fills_fail_before_private_requests() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     query(&mut e, fills());
     assert!(result(&mut e).is_err());
 }
@@ -376,7 +380,8 @@ fn lookup(e: &mut Engine<Bitrue>, symbol: &str, client_order_id: &str) {
     );
 }
 fn lookup_request(e: &mut Engine<Bitrue>) -> HttpRequest {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(&mut *e, 1700000000000.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -534,7 +539,7 @@ fn client_lookup_network_failure_falls_back_to_latest_cache_without_side_effects
 }
 #[test]
 fn client_lookup_without_private_credentials_never_asserts_definitive_absence() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options::default()));
+    let mut e = support::engine(Options::default());
     lookup(&mut e, SYMBOL, "caller-id");
     let missing = lookup_result(&mut e);
     assert!(!missing.found);
@@ -570,7 +575,9 @@ fn lookup_copy_retains_other_extra_fields_and_does_not_clear_store_unit_metadata
 
 fn owned_failure(e: &mut Engine<Bitrue>) -> safe_cex_engine::VenueError {
     let mut failures = Vec::new();
-    for action in e.drain_actions() {
+    for action in
+        safe_cex_engine::test_support::prepared_actions(&mut *e, 1700000000000.).into_iter()
+    {
         match action {
             Action::Http(_) => panic!("unexpected continuation"),
             Action::Notice(Notice::CommandDone { .. }) => panic!("failed page became success"),
@@ -623,7 +630,9 @@ fn owner_types_malformed_and_missing_array_failures_without_empty_success() {
 
 fn retry_request(e: &mut Engine<Bitrue>) -> HttpRequest {
     let mut requests = Vec::new();
-    for action in e.drain_actions() {
+    for action in
+        safe_cex_engine::test_support::prepared_actions(&mut *e, 1700000000000.).into_iter()
+    {
         match action {
             Action::Http(r) => requests.push(r),
             Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }) => {
@@ -655,7 +664,9 @@ fn interrupt(e: &mut Engine<Bitrue>, r: &HttpRequest, prefix: &str) {
             data: prefix.as_bytes(),
         },
     );
-    for action in e.drain_actions() {
+    for action in
+        safe_cex_engine::test_support::prepared_actions(&mut *e, 1700000000000.).into_iter()
+    {
         match action {
             Action::Http(_)
             | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }) => {
@@ -769,7 +780,9 @@ fn retry_resets_same_id_economics_and_keeps_signature_and_transport_budgets_sepa
 
 fn owned_success(e: &mut Engine<Bitrue>, expected_command: u32) -> serde_json::Value {
     let mut results = Vec::new();
-    for action in e.drain_actions() {
+    for action in
+        safe_cex_engine::test_support::prepared_actions(&mut *e, 1700000000000.).into_iter()
+    {
         match action {
             Action::Http(_) => panic!("single-page success continued"),
             Action::Notice(Notice::CommandFailed { .. }) => panic!("successful page rejected"),
@@ -852,38 +865,50 @@ fn signature_retry_does_not_replenish_get_retry_budget() {
 
 #[test]
 fn utf8_and_missing_list_fail_without_retry_or_prefix_publication() {
-    for error in [
-        "invalid UTF-8",
-        "response did not contain the expected list: {}",
-    ] {
+    for staged_prefix in [true, false] {
         let mut e = engine();
         query(&mut e, fills());
         let r = retry_request(&mut e);
         e.handle(
-            1700000000000.0,
+            1700000000000.,
             Event::HttpStart {
                 request: r.id,
                 status: 200,
                 headers: "",
             },
         );
-        let prefix = format!(r#"{{"code":0,"data":[{ROW},"#);
+        if staged_prefix {
+            let prefix = format!(r#"{{"code":0,"data":[{ROW},"#);
+            e.handle(
+                1700000000000.,
+                Event::HttpChunk {
+                    request: r.id,
+                    data: prefix.as_bytes(),
+                },
+            );
+            assert!(
+                safe_cex_engine::test_support::prepared_actions(&mut e, 1700000000000.).is_empty(),
+                "staging a history row cannot publish or continue"
+            );
+        }
+        let bytes = if staged_prefix {
+            &[0xff, 0xfe][..]
+        } else {
+            br#"{"code":0,"data":{}}"#.as_slice()
+        };
         e.handle(
-            1700000000000.0,
+            1700000000000.,
             Event::HttpChunk {
                 request: r.id,
-                data: prefix.as_bytes(),
+                data: bytes,
             },
         );
-        assert!(e.drain_actions().next().is_none());
-        e.handle(
-            1700000000000.0,
-            Event::HttpFailed {
-                request: r.id,
-                error,
-            },
-        );
-        assert_eq!(owned_failure(&mut e).message, error);
+        e.handle(1700000000000., Event::HttpEnd { request: r.id });
+        let error = owned_failure(&mut e);
+        assert!(error.partial.is_none());
+        if !staged_prefix {
+            assert!(error.message.contains("response did not contain"));
+        }
     }
 }
 

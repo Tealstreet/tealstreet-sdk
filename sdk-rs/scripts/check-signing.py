@@ -20,7 +20,7 @@ def sites():
     found = collections.defaultdict(collections.Counter)
     for path in sorted((ROOT / 'venues').glob('*/src/**/*.rs')):
         relative = path.relative_to(ROOT / 'venues')
-        if relative.parts[0] not in {'asterdex', 'binance', 'bingx', 'bybit', 'okx', 'bitget', 'phemex'} and (path.name == 'sign.rs' or 'sign' in relative.parts[2:-1]):
+        if relative.parts[0] not in {'asterdex', 'binance', 'bingx', 'bybit', 'okx', 'bitget', 'phemex', 'bitrue'} and (path.name == 'sign.rs' or 'sign' in relative.parts[2:-1]):
             continue
         for line in path.read_text().splitlines():
             if not line.strip().startswith('//') and PATTERN.search(line):
