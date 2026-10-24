@@ -7991,3 +7991,15 @@ retire exact ownership and run matching native cleanup/backoff once; they cannot
 clear newer work. Partial currency publication, native poll/retry, revision and
 uncertain-write semantics remain native. History/income, PublicTrades, socket
 login/snapshot behavior, request wire and credential-selection policy are retained.
+
+### Managed socket intermediate authentication progress
+
+AuthEvidence::Progress renews only a current Required-auth Authenticating feed's
+existing OPEN-origin auth window. It grants no Ready, Accepted, interests or
+HTTP authority. The exact admitted text then reaches the existing native message
+handler to retain its accepted challenge and request epoch-bound authentication
+signing. Existing auth evidence dispatch and default feeds remain unchanged.
+Both original and renewed equality fences run before native codec/publication
+or final signed send; independent CONNECT snapshot and payload bounds remain.
+The Supervisor allocates its prospective replacement watch before changing the
+old watch or origin, and existing fatal exhaustion prevents partial output.
