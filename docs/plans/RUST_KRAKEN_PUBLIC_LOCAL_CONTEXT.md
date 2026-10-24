@@ -153,3 +153,14 @@ attempts exposed obsolete raw-bootstrap fixtures (one public ticker helper, then
 socket/trading bootstraps); corrected transport-only fixtures preserve all
 assertions. The final successful run supersedes those failures. Shared checker
 and bans receipts, independent review and exact-head CI remain separate gates.
+
+## Independent review receipt
+
+At frozen cf12e136de6, source/adversarial, caller and full-map reviews are CLEAR
+(read-only, no independent execution claim). Exact scope is 22 paths; all 5577
+unowned incoming paths are preserved. The original nine-control file is an exact
+byte prefix with four appended tests. Existing native assertions and nonce/header
+proofs remain intact. Inventory maps, their retained key/value order and the
+held Futures success are independently confirmed. Both checker commands and
+bans pass, including the 15 checker controls. Exact-head CI/replay/WASM/size and
+bounded core source review remain separate pending gates.
