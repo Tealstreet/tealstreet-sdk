@@ -316,7 +316,8 @@ impl ContextRegistry {
             #[cfg(feature = "http-plans")]
             _ => panic!("command entry must retain a Context root"),
         };
-        assert_eq!(root, context);
+        // Plain comparisons: release WASM carries no Debug for Context or Owner.
+        assert!(root == context, "command entry retains its own root");
         assert!(!*entry_owned, "command entry already retained");
         *entry_owned = true;
     }
