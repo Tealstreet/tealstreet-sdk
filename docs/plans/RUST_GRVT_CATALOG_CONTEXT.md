@@ -88,8 +88,9 @@ private auth refresh, queues and financial reducers remain outside this slice.
 ## Original controls and independent review
 
 Use actual Engine/GRVT ingress and real prepared resources, Bind and Claim; raw
-compatibility is allowed only in original native-positive drivers, visibly apart
-from managed-custody assertions. Do not fabricate publication, root provenance,
+compatibility is allowed only in original wire/reply-ingress probes, visibly apart
+from managed-custody assertions requiring Prepare. A legacy reply probe conveys
+no managed release authority. Do not fabricate publication, root provenance,
 metadata or login state. A thin delegator may defer native start until real peer
 commands fill the pool; that scheduling is a fixture, not a simulated catalog.
 
@@ -125,3 +126,29 @@ own target over15G between builds. Strict scoped Clippy/fmt and ratchets follow.
 No broad local builds or WIP CI; publish an intended freeze draft only. Source
 CLEAR plus green exact-head CI permit READY; CPU infra retry requires a fresh
 workflow_dispatch attempt1 cohort, never failed-job attempt2 proof.
+
+## Original execution checkpoint
+
+On unchanged actual5ae97 source, the dedicated target compiles and executes26
+controls:14 intended assertion REDs/12 GREEN/0 ignored, with no missing-method,
+compile or fixture/setup failure. Managed startup/bound/prepare/held/timeout/
+refresh/cleanup and stale-stream suffixes fail first at the genuine Prepare
+assertion against eager raw HTTP. Full256-context admission fails at leaked raw
+outbound work. Unclaimed DATA and late DATA at20s independently publish on the
+legacy path, exposing the missing admission/deadline contracts.
+
+The mid-stream test drives a real item callback (count1), confirms Store is still
+unpublished, then finishes at the new equality deadline: native final DATA
+publishes, yielding the intended assertion RED. It is not a claimed execution
+of a Prepare-gated suffix. Native wire/reply ingress probes explicitly accept
+legacy HTTP on original production; managed-custody probes never do.
+
+Working controls pin both deployment wires/publication/300s refresh, native
+1000/2000 jittered backoff, strict HTTP/code1000/empty/missing-envelope/nonUTF8
+failure, success followed by late failure with no extra backoff, and all3 engine
+pre-entry option refusals with zero forwarded venue calls plus ordinary-command
+positive controls. Seven existing library controls pass unchanged, including
+noncatalog preparation default delegation and login composition. Capacity
+recovery/255-survivor, root cleanup/reuse, held release and managed retry/refresh
+suffixes remain unexecuted after earlier REDs until cutover. Production, Cargo,
+all inventories and every existing fixture remain byte-exact the actual base.
