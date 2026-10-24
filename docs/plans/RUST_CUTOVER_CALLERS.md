@@ -7748,6 +7748,8 @@ production changes. Plan: RUST_CPU_PRODUCER_STEP_METADATA.md.
 
 
 
+
+
 ## WEEX local leverage refusals use command Read authority
 
 FetchLeverage preserves unknown-market, active shared-pause, then missing-read-
@@ -7889,6 +7891,49 @@ move that state before admission or use committed on_signing_release; the pure
 hook cannot mutate Pending. Execution-owned groups, retries and fallback members
 are refused in this first slice. Later serial mixed Read/Mutation steps require
 G2. No venue is adopted and no legacy request site is removed by this seam alone.
+
+## AsterDEX synchronous Read admission
+
+Low-level Aster Query commands that finish locally (keyless private history,
+invalid history bounds, order windows wider than seven days, unsupported client
+ID lookup, missing fills symbol, unrepresentable inclusive end and V1 unscoped
+orders), cached FetchLeverage and unsupported FetchCandles intervals complete
+through a genuine command-owned Read Context. Native result/error strings,
+untyped local errors and keyless-before-validation precedence are preserved.
+PublicTrades remains exempt from the keyless private-history shortcut.
+
+An invalid engine clock or full request capacity produces one typed Read
+admission failure with no financial outcome, rather than the cached/empty result
+or local validation error. These local calls issue no HTTP or timers and change
+no Store data. A live duplicate command ID retains the shared diagnostic without
+completing its existing owner; a completed synchronous ID can be reused.
+
+SDK RustExchange callers keep their existing capability behavior: Aster's
+Settings leverage path can return cache/null without a low-level FetchLeverage,
+and clientOrderLookup=false uses the existing open-order fallback. This entry
+describes the low-level command terminals, not additional SDK dispatches.
+
+
+
+
+
+## WEEX leverage initial managed admission preserves shared Read causes
+
+After the existing unknown-market, shared-pause and credential-selection checks,
+FetchLeverage now admits its signed symbolConfig read through the initial
+SelectedRead command transaction. Registry capacity returns the canonical Read
+Capacity error with outcome None, rather than the venue lifecycle Internal/NotSent
+fallback. An unavailable or invalid receipt returns the shared cause; invalid or
+nonadvancing clocks give Revoked / "Request context was revoked", InvalidInput
+and no outcome. An expired own receipt uses the existing Read Timeout helper.
+Admission owns the failure terminal, without a numeric fallback or a new receipt.
+
+Read selection, the selected identity and passphrase, URL/query/signature, native
+settings revision and publication remain unchanged. The physical policy stays
+20 seconds, Never and no pacing, including when the outer host wait is shorter;
+this does not add a tracked caller-wait history root. Queue and provider refusals
+keep their existing typed fields. Duplicate ownership, original-peer completion
+and fresh ID reuse keep shared engine semantics. No auth evidence is added.
 
 ## Crypto.com private dispatch and Plan custody
 
