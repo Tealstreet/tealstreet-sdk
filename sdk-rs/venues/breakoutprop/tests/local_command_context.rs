@@ -123,7 +123,7 @@ fn terminal(actions: &[Action]) -> &Notice {
 fn invalid(case: Case) {
     let mut engine = fresh();
     engine.handle(f64::NAN, Event::Command(command(case)));
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, f64::NAN);
     let Notice::CommandFailed { command, error } = terminal(&actions) else {
         panic!("invalid entry succeeded: {actions:?}");
     };
@@ -173,7 +173,7 @@ fn finite_local_cases_keep_native_results_messages_kind_and_no_io() {
     for case in CASES {
         let mut engine = fresh();
         engine.handle(1000., Event::Command(command(case)));
-        let actions: Vec<_> = engine.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.);
         match terminal(&actions) {
             Notice::CommandDone { command, result } => {
                 assert!(matches!(case, Case::Leverage));
@@ -204,7 +204,7 @@ fn finite_local_cases_keep_native_results_messages_kind_and_no_io() {
 fn new_contract_finite_unsupported_stp_mutation_is_not_sent() {
     let mut engine = fresh();
     engine.handle(1000., Event::Command(command(Case::WriteStp)));
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.);
     let Notice::CommandFailed { error, .. } = terminal(&actions) else {
         panic!("unsupported STP succeeded");
     };
@@ -222,7 +222,7 @@ fn settled_local_id_reuse_keeps_every_native_terminal() {
         Case::BuildFailure,
     ] {
         engine.handle(1000., Event::Command(command(case)));
-        let actions: Vec<_> = engine.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.);
         assert!(matches!(
             terminal(&actions),
             Notice::CommandDone { command: 91, .. } | Notice::CommandFailed { command: 91, .. }
@@ -237,7 +237,7 @@ fn unsupported_capabilities_still_refuse_before_native_entry() {
         Command::FetchAccountGreeks { command: 91 },
     ] {
         engine.handle(1000., Event::Command(command));
-        let actions: Vec<_> = engine.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.);
         let Notice::CommandFailed { error, .. } = terminal(&actions) else {
             panic!("unsupported capability succeeded");
         };
@@ -270,7 +270,7 @@ fn native_negative_candle_time_keeps_the_physical_login_path() {
             to_ms: None,
         }),
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.);
     assert!(actions.iter().any(|action| matches!(action, Action::Http(request) if request.url.ends_with("/login") && request.method == safe_cex_engine::Method::Post)));
     assert!(!actions.iter().any(|action| matches!(
         action,

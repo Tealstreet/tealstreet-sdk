@@ -118,3 +118,13 @@ the corrected diagnostic probe is not a RED. Native finite results/messages,
 settled ID reuse, pre-venue capability refusals and negative-time login remain
 GREEN. The log is `/tmp/codex-hcmq3f-breakout-original-entry-proof.log`.
 No production, request inventory or credential-selection changes are present.
+
+## Caller review refinement
+
+Session owner claude-55ao7t cleared the seven-site overlap against #1908 and
+required the controls to drive the existing prepared_actions fixture. The
+negative-time control now observes the actually released login request whether
+login is raw today or managed after #1908. Every local no-I/O control uses the
+same fixture, so managed HTTP cannot hide behind a raw-only action check. All
+original result/error/Store/ownership assertions remain unchanged. This is a
+fixture-only refinement before adoption, not a change to native login custody.
