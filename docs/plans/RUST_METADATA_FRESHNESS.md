@@ -909,3 +909,29 @@ its own fence. It passes as a GREEN preservation control. Engine failure routing
 consumes Pending by exact request ID before the venue callback, so a late failure
 cannot enter trade_failed for a reused command. A nearby comment records that
 rule; no native reducer or failure policy changes.
+
+## 2026-10-25: bounded write-fence index size reduction
+
+The actual `92de1326994` composition at `1b5ea288600` fails the approved
+Bitget allowance in Rust run `40110890188`: both Bitget variants measure
+1,364,068 bytes against 1,363,968 (100 bytes over). The official reports are
+`strict-replay-bitget` and `strict-replay-bitgetusdc` artifacts. Bitget source
+is incoming-exact; no allowance increase is part of this change.
+
+The private metadata write-reservation index uses a Vec instead of a HashMap.
+It keeps the same 256-owner cap and duplicate refusal before invalidation or
+insertion. Retirement finds only the exact command, removes it with swap_remove,
+and performs the same symbol/global invalidation. Pending checks remain an
+any-match over symbol scopes. No iteration order, public API, generation,
+terminal, Store publication or financial policy changes. Scans are bounded by
+256 reservations; the index no longer links its identity-key HashMap machinery
+through the common terminal cleanup.
+
+A new preservation control first passed on the original HashMap implementation.
+It pins duplicate and capacity refusal without revision changes, surviving peer
+fences, slot recovery, and inert repeated retirement. After the Vec change,
+55 filtered metadata library controls and 180 scoped engine/BingX/WEEX
+integration tests pass, zero ignored, with four jobs and serial builds. The
+exact source patch is subject to bounded core review and strict scoped checks.
+These are native correctness receipts; WASM savings remain unmeasured until the
+new freeze candidate has its single PR Rust run. No local WASM sweep is used.

@@ -138,7 +138,7 @@ pub(crate) struct State {
     observation_floors: HashMap<String, Stamp>,
     current: HashMap<String, Token>,
     attempts: HashMap<Token, Attempt>,
-    writes: HashMap<CommandId, Option<String>>,
+    writes: Vec<(CommandId, Option<String>)>,
     #[cfg(feature = "http-plans")]
     work: work::Index<crate::engine::ExecutionHandle>,
 }
@@ -217,22 +217,23 @@ impl State {
         command: CommandId,
         symbol: Option<&str>,
     ) -> Result<(), VenueError> {
-        if self.writes.len() >= MAX_ATTEMPTS || self.writes.contains_key(&command) {
+        if self.writes.len() >= MAX_ATTEMPTS || self.writes.iter().any(|(id, _)| *id == command) {
             return Err(invalid("metadata write capacity or duplicate owner"));
         }
         self.invalidate(symbol);
-        self.writes.insert(command, symbol.map(str::to_owned));
+        self.writes.push((command, symbol.map(str::to_owned)));
         Ok(())
     }
     pub(crate) fn write_finished(&mut self, command: CommandId) {
-        if let Some(symbol) = self.writes.remove(&command) {
+        if let Some(index) = self.writes.iter().position(|(id, _)| *id == command) {
+            let (_, symbol) = self.writes.swap_remove(index);
             self.invalidate(symbol.as_deref());
         }
     }
     pub(crate) fn write_pending(&self, symbol: &str) -> bool {
         self.writes
-            .values()
-            .any(|scope| scope.as_deref().is_none_or(|s| s == symbol))
+            .iter()
+            .any(|(_, scope)| scope.as_deref().is_none_or(|s| s == symbol))
     }
     pub(crate) fn begin(
         &mut self,
@@ -806,6 +807,42 @@ mod tests {
         );
         assert!(store.metadata_eligible(&next));
     }
+    #[test]
+    fn write_capacity_and_duplicate_refusals_preserve_existing_fences() {
+        let mut store = Store::default();
+        store.metadata_write_started(1, Some("BTC")).unwrap();
+        let before_duplicate = store.metadata_revision();
+        assert!(store.metadata_write_started(1, Some("ETH")).is_err());
+        assert!(store.metadata_revision_current(&before_duplicate));
+        assert!(!store.metadata_write_pending("ETH"));
+
+        for command in 2..=MAX_ATTEMPTS as u32 {
+            store.metadata_write_started(command, Some("BTC")).unwrap();
+        }
+        let overflow = MAX_ATTEMPTS as u32 + 1;
+        let before_overflow = store.metadata_revision();
+        assert!(store.metadata_write_started(overflow, Some("ETH")).is_err());
+        assert!(store.metadata_revision_current(&before_overflow));
+        assert!(store.metadata_write_pending("BTC"));
+        assert!(!store.metadata_write_pending("ETH"));
+
+        store.metadata_write_finished(7);
+        store.metadata_write_started(overflow, Some("ETH")).unwrap();
+        assert!(store.metadata_write_pending("BTC"));
+        assert!(store.metadata_write_pending("ETH"));
+        store.metadata_write_finished(overflow);
+        assert!(store.metadata_write_pending("BTC"));
+        assert!(!store.metadata_write_pending("ETH"));
+        let after_retirement = store.metadata_revision();
+        store.metadata_write_finished(overflow);
+        assert!(store.metadata_revision_current(&after_retirement));
+
+        for command in 1..=MAX_ATTEMPTS as u32 {
+            store.metadata_write_finished(command);
+        }
+        assert!(!store.metadata_write_pending("BTC"));
+    }
+
     #[test]
     fn bounded_symbol_state_never_forgets_an_overflow_invalidation() {
         let mut state = State::default();
