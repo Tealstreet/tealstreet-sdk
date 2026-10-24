@@ -397,6 +397,52 @@ def derived_bindings(stream, found):
         if any(value_use(stream, found, k) for k in range(equals + 1, initializer_end)):
             for k in pattern_names(stream, *pattern):
                 found.append((stream[k], 'derived', *scope))
+    bodies = function_bodies(stream)
+
+    def rest_of_function(index):
+        return min((end for start, end in bodies if start <= index < end), default=len(stream))
+
+    assignment_operators = {'=', '!', '<', '>', '+', '-', '*', '/', '%', '&', '|', '^'}
+    for i, token in enumerate(stream):
+        # `x = <expr over a Cx value>` rebinds x for the rest of its function.
+        if (token == '=' and stream[i + 1:i + 2] != ['='] and i >= 2 and IDENT.fullmatch(stream[i - 1])
+                and stream[i - 2] not in assignment_operators | {'.', '::', 'let', 'mut', ':'}
+                and any(value_use(stream, found, k) for k in range(i + 1, expression_end(stream, i + 1)))):
+            found.append((stream[i - 1], 'derived', i, rest_of_function(i)))
+        # `local.method(.., cx, ..)` may store the Cx (v.push(cx), h.set(cx)).
+        if value_use(stream, found, i) and call_argument(stream, i):
+            opening = i - 1
+            depth = 0
+            while opening >= 0:
+                if stream[opening] in {')', ']', '}'}:
+                    depth += 1
+                elif stream[opening] in {'(', '[', '{'}:
+                    if depth == 0:
+                        break
+                    depth -= 1
+                opening -= 1
+            if opening >= 2 and stream[opening - 2] == '.':
+                try:
+                    root = receiver_start(stream, opening - 1)
+                except ValueError:
+                    continue  # A literal receiver cannot store the Cx.
+                # A concrete non-Cx typed binding (or self) can hold a Cx only through
+                # a field naming Cx, which check_cx_names already refuses.
+                if (IDENT.fullmatch(stream[root]) and stream[root] not in {'self', 'Self'}
+                        and resolve(found, stream[root], root) != 'other'):
+                    found.append((stream[root], 'derived', i, rest_of_function(i)))
+
+
+def function_bodies(stream):
+    bodies = []
+    for i, token in enumerate(stream):
+        if token == 'fn' and i + 1 < len(stream) and IDENT.fullmatch(stream[i + 1]):
+            k = i + 2
+            while k < len(stream) and stream[k] not in {'{', ';'}:
+                k = group_end(stream, k) if stream[k] in {'(', '['} else k + 1
+            if k < len(stream) and stream[k] == '{':
+                bodies.append((k, group_end(stream, k)))
+    return bodies
 
 
 def resolve(found, name, index):
@@ -525,7 +571,10 @@ def context_fingerprints(source):
             start = receiver_start(stream, i)
             if stream[i - 1] == '.':
                 # A call, index, macro or field result over a Cx value counts too.
-                legacy = call and ((start == i - 2 and resolve(found, stream[i - 2], i) in FLOW) or any(
+                # A whole chain rooted at a Cx-flow binding (other than a Cx parameter's
+                # own fields), or any receiver expression over a Cx value, counts.
+                root = resolve(found, stream[start], start) if IDENT.fullmatch(stream[start]) else None
+                legacy = call and ((start == i - 2 and root in FLOW) or root in {'derived', 'closure'} or any(
                     value_use(stream, found, k) for k in range(start, i - 1)))
             else:
                 path = stream[start:i]

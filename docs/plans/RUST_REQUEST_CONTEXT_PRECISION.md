@@ -97,11 +97,10 @@ and they force migrations to "prune" lines that never sent anything.
 
 ## Residual
 
-The checker is still lexical. A `Cx` laundered through a generic std function
-(`let c = std::convert::identity(cx)`) is not caught. Rules (2) close every
-venue-defined route: no `Cx`-returning fn, no alias, no field, no trait impl.
-Review must reject the std shape, as it would any deliberate evasion of the
-old checker.
+The checker is still lexical. Rules (2) refuse `Cx`-returning fns, aliases,
+fields and trait impls. The review revisions below count the bindings and
+receivers a Cx value flows into, `let c = std::convert::identity(cx)` among
+them, and state the routes that remain.
 
 ## REDs (`scripts/check-request-context.test.py`, `PrecisionRed`)
 
@@ -172,3 +171,29 @@ on a `cx`/`ctx` receiver. The other 248 are dropped:
 Every drop is listed by path, digest, count and reason in
 `RUST_REQUEST_CONTEXT_PRECISION_MAPPING.json`. Each new map is a per-digest
 subset of the base map. The socket inventory is unchanged.
+
+## Second review revision (claude-4yjlw0, `e0b0743555c`)
+
+- **P1.** A legacy call counts when its receiver chain is rooted at a derived
+  or untyped-closure binding, at any depth (`w.0.request`, `h.cx.done`,
+  `w.inner().request`). Plain reassignment `x = <expr over a Cx value>`
+  derives `x` for the rest of its function.
+- **P2.** A local passed a Cx value through a method call
+  (`v.push(cx)`, `h.set(cx)`) becomes derived for the rest of the function,
+  so `v[0].request(..)` and `h.cx.request(..)` count. `self` and concrete
+  non-Cx typed parameters are not tainted. They can hold a Cx only through a
+  field or generic argument naming `Cx`, which the type-position rule refuses.
+  At base this keeps the inventory unchanged: 463 prod and 1 test.
+- **P3, intentional.** Calls to venue helpers such as `self.request(cx, ..)`
+  or `self.fail(cx, ..)` are no longer inventoried as sites. Each helper's own
+  body, where the `cx.request`/`cx.fail` call lives, still is. A new caller of
+  an existing helper therefore adds no entry. A new legacy call inside a
+  helper, or a new helper, still does.
+
+Residual, restated: the checker is lexical. A Cx stored by a free function
+that takes the destination as an argument, such as
+`std::mem::replace(&mut slot, cx)` followed by `slot.request(..)`, is not
+traced: only method receivers and `let`/assignment targets are tainted.
+Generic callees are closed. A generic parameter can call `request`/`fail`
+only through a trait implemented for `Cx`, and such an impl is refused.
+Review must reject the free-function store shape as deliberate evasion.

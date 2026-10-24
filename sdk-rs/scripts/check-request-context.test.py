@@ -163,7 +163,8 @@ class RequestContextBan(unittest.TestCase):
 
 
 def in_cx_fn(body, name='cx'):
-    return 'fn handle(&mut self, ' + name + ": &mut Cx<'_, Pending>) { " + body + ' }'
+    return ('fn handle(&mut self, account: &mut Account, ' + name + ": &mut Cx<'_, Pending>) { "
+            + body + ' }')
 
 
 class PrecisionRed(unittest.TestCase):
@@ -244,11 +245,20 @@ class PrecisionRed(unittest.TestCase):
             'for c in [pass(cx)] { c.fail(1, e); }', 'if let Some(c) = wrap(cx) { c.done(1, row); }',
             'match wrap(cx) { Some(c) => c.done(1, row), None => {} }',
             'each(|c, row| { let d = c; d.done(1, row); });',
+            # Chains rooted at a derived binding, and plain reassignment.
+            'let w = W(cx); w.0.request(1);', 'let h = H::new(cx); h.cx.done(1, r);',
+            'let w = pass(cx); w.inner().request(1);', 'let (w,) = (W(cx),); w.0.request(1);',
+            'let mut c = other(); c = pass(cx); c.request(1);',
+            # A local that a method call may store the Cx into.
+            'let mut v = Vec::new(); v.push(cx); v[0].request(1);',
+            'let mut h = H::default(); h.set(cx); h.cx.request(1);',
         ]:
             with self.subTest(body=body):
                 self.assertEqual(sum(self.prod(in_cx_fn(body)).values()), 1)
         # Members of a Cx field are not Cx calls; field reads are not calls at all.
-        for body in ['cx.store.done(1);', 'let s = cx.now; s.done(1);', 'if read.request.done { }']:
+        # A concrete non-Cx typed binding cannot store a Cx without naming its type.
+        for body in ['cx.store.done(1);', 'let s = cx.now; s.done(1);', 'if read.request.done { }',
+                     'account.bump(cx); account.request(cx, 1);']:
             with self.subTest(body=body):
                 self.assertFalse(self.prod(in_cx_fn(body)))
 
