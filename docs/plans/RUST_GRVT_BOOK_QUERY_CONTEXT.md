@@ -205,3 +205,15 @@ Scanner-exact scope is lib 11 to 8 and depth_query 3 to 0, GRVT 41 to 35. Only
 those two map keys change; foreign manifest bytes/order and all candle source
 blobs remain exact to the parent. No engine, host, Cargo, signer, private reducer,
 queue or Session source is changed. Shared callback edits are BookQuery-only.
+
+
+## Typed timeout review control
+
+After the source review at 1ef3e520173, one appended compiling control releases
+five Network failures then the sixth request until its physical timer. The
+terminal incorrectly becomes Network instead of the engine Timeout: one
+intended assertion RED, 25 GREEN, zero ignored, on unchanged runtime. A second
+working control observes a positive 0.5 ms caller remainder: the packet rounds
+to 1 ms but DATA at the original caller equality still fails Timeout. An initial
+probe incorrectly expected that positive remainder to refuse before Prepare;
+the observed shared behavior is retained instead. Original24 assertions remain.

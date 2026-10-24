@@ -786,3 +786,46 @@ fn zero_wait_refuses_before_native_issue() {
     );
     assert!(e.drain_actions().next().is_none());
 }
+
+#[test]
+fn exhausted_transport_budget_preserves_the_final_physical_timeout_kind() {
+    let mut e = engine(false);
+    let mut actions = ask(&mut e, NOW, 60_000, false);
+    for attempt in 0..5 {
+        let request = release(&mut e, NOW + f64::from(attempt), &actions);
+        actions = failed(&mut e, NOW + f64::from(attempt) + 1., &request);
+        assert!(outcomes(&actions, OWNER).is_empty());
+        prep(&actions);
+    }
+    let final_request = release(&mut e, NOW + 5., &actions);
+    let timer = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_005. => Some(*timer),
+            _ => None,
+        })
+        .expect("sixth physical window");
+    e.handle(NOW + 20_005., Event::TimerFired { timer });
+    let terminal = e.drain_actions().collect::<Vec<_>>();
+    native_error(&terminal, ErrorKind::Timeout);
+    assert!(reply(&mut e, NOW + 20_006., &final_request, 200, BOOK).is_empty());
+}
+
+#[test]
+fn sub_millisecond_remainder_keeps_the_original_caller_fence() {
+    let mut e = engine(false);
+    let actions = ask(&mut e, NOW, 1000, false);
+    let request = release(&mut e, NOW, &actions);
+    let next = failed(&mut e, NOW + 999.5, &request);
+    assert_eq!(prep(&next).1.timeout_ms, Some(1));
+    let second = release(&mut e, NOW + 999.5, &next);
+    assert_eq!(second.timeout_ms, Some(1));
+    let terminal = reply(&mut e, NOW + 1000., &second, 200, BOOK);
+    no_io(&terminal);
+    let values = outcomes(&terminal, OWNER);
+    assert_eq!(values.len(), 1);
+    assert_eq!(
+        values[0].as_ref().unwrap_err().kind,
+        Some(ErrorKind::Timeout)
+    );
+}
