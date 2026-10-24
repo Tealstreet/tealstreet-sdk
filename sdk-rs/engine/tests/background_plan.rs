@@ -60,6 +60,7 @@ struct Cycle {
     activations: usize,
     stage: usize,
     failures: usize,
+    last_failure: Option<safe_cex_engine::VenueError>,
     retry_errors: bool,
     calls: u16,
     idle: bool,
@@ -253,8 +254,13 @@ impl Venue for Cycle {
     fn on_http_owner_retired(&mut self, _: &safe_cex_engine::request_context::HttpOwnerRetirement) {
         assert!(!self.panic_retire, "adversarial cleanup callback panic");
     }
-    fn on_background_task_failed(&mut self, _: &BackgroundTask, _: safe_cex_engine::VenueError) {
+    fn on_background_task_failed(
+        &mut self,
+        _: &BackgroundTask,
+        error: safe_cex_engine::VenueError,
+    ) {
         self.failures += 1;
+        self.last_failure = Some(error);
     }
     fn on_request_failed(
         &mut self,
@@ -803,4 +809,53 @@ fn a_caught_native_cleanup_panic_never_acknowledges_or_replaces_the_child() {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| engine.prepare_dispatch(2.)))
             .is_err()
     );
+}
+
+#[test]
+fn pause_during_the_third_admission_emits_budget_exhausted_without_a_fourth() {
+    let handle = Arc::new(Mutex::new(None));
+    let mut engine = support::seeded_engine(Cycle {
+        retry_errors: true,
+        control: handle.clone(),
+        ..Default::default()
+    });
+    engine.start(0.);
+    let mut released = requests(&mut engine, 0.).pop().unwrap();
+    for (now, delay) in [(1., 1000.), (1002., 2000.)] {
+        engine.handle(
+            now,
+            Event::HttpFailed {
+                request: released.id,
+                error: "network",
+            },
+        );
+        let (_, timers) = drain(&mut engine, now);
+        let (timer, at) = timers
+            .into_iter()
+            .find(|(_, at)| *at == now + delay)
+            .unwrap();
+        engine.handle(at, Event::TimerFired { timer });
+        released = requests(&mut engine, at).pop().unwrap();
+    }
+    assert_eq!(engine.venue().activations, 3);
+    control(&mut engine, &handle, 3003., Control::Pause(4000.));
+    let (http, timers) = drain(&mut engine, 3003.);
+    assert!(http.is_empty());
+    assert!(!timers.iter().any(|(_, at)| *at == 4000.));
+    let error = engine.venue().last_failure.as_ref().unwrap();
+    assert_eq!(
+        error.message,
+        "Background traversal admission budget exhausted"
+    );
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    assert!(error.outcome.is_none());
+    engine.handle(
+        4000.,
+        Event::HttpFailed {
+            request: released.id,
+            error: "late old request",
+        },
+    );
+    assert!(requests(&mut engine, 4000.).is_empty());
+    assert_eq!(engine.venue().activations, 3);
 }

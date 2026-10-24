@@ -6388,3 +6388,19 @@ keeps the existing Capacity failure (Internal).
 Capacity returns as the corresponding work retires; background work does not
 borrow the remaining share or reset command evidence. This can refuse a
 command that would have fit without the active background child.
+
+
+### Physical Read Plans do not park in Session waiters
+
+Background Plan children and planned-execution legs retain their own Plan/Slot
+sequencing. `session_wait` refuses those physical owners with State before any
+wait hold or timer is installed, matching command-owned Plan refusal. Plain
+Background Context waiting is unchanged. Session retirement revokes child send
+and delivery immediately and finishes their managed resource/timer cleanup at
+the same event boundary; the task replacement stays blocked until exact native
+owner cleanup is acknowledged.
+
+The Background task's cap counts successful Plan admissions, including a
+traversal later interrupted by pause/supersession. Interruption at admission three
+returns typed InvalidInput budget exhaustion with no financial outcome; it
+creates neither a fourth admission nor an automatic fresh cycle.

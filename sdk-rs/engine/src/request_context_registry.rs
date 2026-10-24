@@ -763,26 +763,24 @@ impl ContextRegistry {
 
     #[cfg(feature = "http-plans")]
     fn background_context_count(&self, now: Option<f64>) -> Result<usize, Error> {
-        let mut occupied = 0usize;
+        let mut occupied = self
+            .contexts
+            .values()
+            .filter(|context| {
+                matches!(context.owner(), Owner::Background { .. })
+                    && self.physical_owner(context.owner())
+                    && now.is_none_or(|now| context.deadline() > now)
+            })
+            .count();
         for entry in self.physical.values() {
-            let Some(owner @ Owner::Background { .. }) = entry.physical else {
+            if !matches!(entry.physical, Some(Owner::Background { .. })) {
                 continue;
-            };
-            let active = self
-                .contexts
-                .values()
-                .filter(|context| {
-                    context.owner() == owner && now.is_none_or(|now| context.deadline() > now)
-                })
-                .count();
+            }
             let unissued = match &entry.phase {
                 CommandPhase::Planned(state) => state.unissued(),
                 _ => 0,
             };
-            occupied = occupied
-                .checked_add(active)
-                .and_then(|n| n.checked_add(unissued))
-                .ok_or(Error::Capacity)?;
+            occupied = occupied.checked_add(unissued).ok_or(Error::Capacity)?;
         }
         Ok(occupied)
     }

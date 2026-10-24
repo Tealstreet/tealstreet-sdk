@@ -617,3 +617,34 @@ before removing the Session, then cascades only that parent's indexed tasks
 after removal; an anchor with no tasks takes the empty O(1) path. Idle task
 registrations also hold no timer: a count of armed parent timers avoids scanning
 idle parent registrations on unrelated timer events.
+
+
+### Physical Plan waits and same-event Session retirement
+
+`session_wait` refuses any registered physical Plan, including an
+`Owner::Execution` Plan leg: those legs keep Plan/Slot sequencing and cannot be
+parked as a plain Session waiter. This follows the command-owned Plan rule and
+is acknowledged by the #1919 owner. The dedicated planned-Execution control
+checks refusal before IDs, timers, actions or waiter holds change.
+
+Every existing event exit calls `flush_preflight_readiness`, whose first step
+now runs `flush_background_tasks`; start and Background timer paths also call it
+explicitly. A socket/timer callback retirement control inspects `managed_http`,
+physical owners and exact child/Plan/parent timers immediately after that same
+`handle` returns, before another event or `prepare_dispatch` can help cleanup.
+Background occupancy counting uses one Context pass and one physical Plan pass,
+rather than scanning all Contexts once per Background owner.
+
+A pause or supersession interrupting admission three ends that bounded cycle
+with typed InvalidInput (`Background traversal admission budget exhausted`),
+no financial outcome, no fourth admission and no automatic cycle reset. Explicit
+cancellation/parent retirement keep their own cleanup disposition. A later
+genuine new demand may begin a new cycle; retained interrupted demand cannot.
+
+Follow-up controls execute socket and timer retirement in the same-event test,
+the planned-Execution Session refusal, and third-admission interruption. The
+runtime target passes15, background-filtered units30, request-context296 and
+execution124; strict scoped Clippy passes with http-plans/test-support/order-locks.
+Fixture generic-connect/import and failure-observation setup errors were fixed
+before this receipt and supply no original-RED evidence. Share saturation still
+uses hard Capacity pending the API owner's demand-disposition ruling.

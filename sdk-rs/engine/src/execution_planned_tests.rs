@@ -84,6 +84,7 @@ mod planned_execution {
         reject_first: bool,
         /// The only write is definitively refused and the Plan completes.
         reject_only: bool,
+        session_wait_probe: bool,
     }
 
     impl Shared {
@@ -164,6 +165,15 @@ mod planned_execution {
                 share(cx, &preflight, steps, self.read).expect("shared plan execution");
             let slot = cx.plan_slots(&plan).unwrap().remove(0);
             let leg = cx.plan_leg_context(&plan, &slot).unwrap();
+            if self.session_wait_probe {
+                let session = cx.open_session(crate::request_context::SessionPolicy {
+                    credential: None, repeat_safe: true,
+                }).unwrap();
+                let before = (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len());
+                assert!(cx.session_wait(&session, &leg, leg.clone()).err().unwrap().1 == Error::State);
+                assert!((cx.io.next_id, cx.io.timers.len(), cx.io.actions.len()) == before);
+                assert!(cx.session_ready(&session).is_empty());
+            }
             if self.read {
                 cx.request_managed(
                     leg.clone(),
@@ -340,6 +350,17 @@ mod planned_execution {
                 action: VenueAction::FetchBalanceInfo,
             }),
         );
+    }
+
+    #[test]
+    fn a_planned_execution_leg_cannot_be_parked_as_a_plain_session_context() {
+        let mut engine = crate::test_support::seeded_engine(Shared {
+            read: true, session_wait_probe: true, ..Default::default()
+        });
+        engine.start(0.);
+        command(&mut engine, 0., FOUNDER);
+        assert!(engine.venue().plan.is_some());
+        assert!(engine.io.managed_http.len() == 1);
     }
 
     fn prepared(actions: &[Action]) -> Vec<Preparation> {

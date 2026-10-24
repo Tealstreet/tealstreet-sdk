@@ -664,11 +664,19 @@ impl<P> Cx<'_, P> {
             .as_mut()
             .expect("retained task parent");
         if self.io.http_background_retiring == Some(plan.owner())
-            && task.admissions < 3
             && parent.scheduler.retiring(&slot).is_some()
         {
-            task.cycle_complete |= task.removing;
-            task.failure = error;
+            if task.admissions >= 3 && !task.removing && !task.cycle_complete {
+                parent.scheduler.cancel(&slot).expect("registered task");
+                task.cycle_complete = true;
+                task.failure = Some(
+                    VenueError::new("Background traversal admission budget exhausted")
+                        .kind(crate::ErrorKind::InvalidInput),
+                );
+            } else {
+                task.cycle_complete |= task.removing;
+                task.failure = error;
+            }
             return;
         }
         if success || retry {
@@ -1403,5 +1411,186 @@ mod tests {
         assert!((cx.io.next_id, cx.io.actions.len(), cx.io.timers.len()) == before);
         assert!(cx.io.request_contexts.background.ready.is_empty());
         assert!(!cx.io.http_plan_poison);
+    }
+}
+
+#[cfg(test)]
+mod retirement_tests {
+    use super::*;
+    use crate::book::Book;
+    use crate::credential_selection::{SlotPolicy, Slots};
+    use crate::selected_read::ReadRole;
+    use crate::signing::{Identity, KeyRef, SignError, SignRequest, SignResult};
+    use crate::{Action, Command, Event, Method, Response, SignStep, SocketId, Venue};
+
+    struct Recipe;
+    impl SignStep for Recipe {
+        fn prepare(
+            &mut self,
+            _: &mut Action,
+            _: &crate::DispatchContext<'_>,
+        ) -> Result<SignRequest, SignError> {
+            Err(SignError::Refused)
+        }
+        fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {
+            unreachable!()
+        }
+        fn freshness_ms(&self) -> f64 {
+            1000.
+        }
+    }
+    #[derive(Default)]
+    struct Probe {
+        session: Option<Session>,
+        plan: Option<Plan>,
+        timer: Option<TimerId>,
+        socket: Option<SocketId>,
+    }
+    impl Probe {
+        fn retire(&self, cx: &mut Cx<'_, Context>) {
+            assert!(
+                cx.retire_session(self.session.as_ref().unwrap())
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+    impl Venue for Probe {
+        type Pending = Context;
+        fn start(&mut self, cx: &mut Cx<'_, Context>) {
+            let session = cx
+                .open_session(crate::request_context::SessionPolicy {
+                    credential: None,
+                    repeat_safe: true,
+                })
+                .unwrap();
+            let identity = Identity {
+                credential: KeyRef("cleanup-key".into()),
+                signing: KeyRef("cleanup-signing".into()),
+                passphrase: None,
+                stable_id: None,
+                extra: Default::default(),
+            };
+            let selected = SelectedRead::select(
+                &Slots::new(Some(identity), None, SlotPolicy::default()),
+                ReadRole::Read { scope: None },
+            )
+            .unwrap();
+            let task = cx
+                .register_background_task(
+                    &session,
+                    selected,
+                    BackgroundTaskPolicy {
+                        calls: 1,
+                        debounce_ms: 0.,
+                        refresh_debounce_ms: 0.,
+                    },
+                )
+                .unwrap();
+            cx.request_background_task(&task, read_scheduler::Demand::Refresh)
+                .unwrap();
+            self.session = Some(session);
+            self.timer = Some(cx.set_timer(10.));
+            self.socket = Some(cx.connect("wss://cleanup.test"));
+        }
+        fn on_background_task_ready(
+            &mut self,
+            cx: &mut Cx<'_, Context>,
+            _: &BackgroundTask,
+            activation: &BackgroundActivation,
+        ) {
+            let plan = cx.admit_background_plan(activation).unwrap();
+            let slot = cx.plan_slots(&plan).unwrap().remove(0);
+            let context = cx.plan_leg_context(&plan, &slot).unwrap();
+            cx.request_signed_managed(
+                context.clone(),
+                Method::Get,
+                "https://cleanup.test/read".into(),
+                None,
+                Box::new(Recipe),
+                context,
+            )
+            .unwrap();
+            self.plan = Some(plan);
+        }
+        fn on_timer(&mut self, cx: &mut Cx<'_, Context>, timer: TimerId) {
+            if self.timer == Some(timer) {
+                self.retire(cx);
+            }
+        }
+        fn on_message(&mut self, cx: &mut Cx<'_, Context>, _: SocketId, _: &str) {
+            self.retire(cx);
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, Context>, _: SocketId) {}
+        fn on_close(&mut self, _: &mut Cx<'_, Context>, _: SocketId, _: u16) {}
+        fn on_command(&mut self, _: &mut Cx<'_, Context>, _: Command) {}
+        fn on_response(&mut self, _: &mut Cx<'_, Context>, _: Context, _: Response<'_>) {
+            panic!("unreleased response");
+        }
+        fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, _: &str) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    #[test]
+    fn retiring_a_parent_from_socket_or_timer_cleans_the_child_in_that_same_event() {
+        for socket_event in [false, true] {
+            let mut engine = crate::test_support::seeded_engine(Probe::default());
+            engine.start(0.);
+            assert!(engine.io.managed_http.len() == 1);
+            let socket = engine.venue().socket.unwrap();
+            if socket_event {
+                engine.handle(0., Event::WsOpened { socket });
+            }
+            let plan = engine.venue().plan.as_ref().unwrap().clone();
+            let mut timers = vec![
+                engine
+                    .io
+                    .request_contexts
+                    .physical_plan_timer(plan.owner())
+                    .unwrap(),
+            ];
+            timers.extend(engine.io.managed_http.values().map(|managed| managed.timer));
+            timers.extend(
+                engine
+                    .io
+                    .request_contexts
+                    .background
+                    .parents
+                    .iter()
+                    .flatten()
+                    .map(|parent| parent.timer),
+            );
+            assert!(
+                timers
+                    .iter()
+                    .all(|timer| engine.io.timers.contains_key(timer))
+            );
+            let timer = engine.venue().timer.unwrap();
+            engine.handle(
+                10.,
+                if socket_event {
+                    Event::WsMessage {
+                        socket,
+                        text: "retire",
+                    }
+                } else {
+                    Event::TimerFired { timer }
+                },
+            );
+            // Inspect directly, before prepare_dispatch or another host event can flush.
+            assert!(engine.io.managed_http.is_empty());
+            assert!(
+                timers
+                    .iter()
+                    .all(|timer| !engine.io.timers.contains_key(timer))
+            );
+            assert!(engine.io.request_contexts.physical.is_empty());
+            assert!(engine.io.request_contexts.background.count == 0);
+            assert!(engine.io.request_contexts.background.timer_count == 0);
+        }
     }
 }
