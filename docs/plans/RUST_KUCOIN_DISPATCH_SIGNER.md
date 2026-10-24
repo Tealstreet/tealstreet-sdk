@@ -377,3 +377,33 @@ Newly visible sign.rs lines at the migrated-family flip (original77f bytes):
 | 185 | `239d8bb1b21eae866af31bbf63a30b5b06ab0bea27aa256fe4a260fd801ac53f` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
 | 187 | `1f18bec61f449c3913ae221613ed165c7a7569b05bd6c1f99bdd0360f5259e57` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
 | 193 | `d4687b2e7809352d30f7f173c117a678d8293f1c9a4377d22cdabe864e638f58` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+
+## HMAC review corrections and strengthened RED checkpoint
+
+The 36943 plan was NOT HMAC CLEAR: 4y found a P1 missing signing inventory and
+P2 omitted Futures write 400005 retry, plus integer-stamp/maintainer/redaction
+wording. The separate 41/38 map and newly exposed sign.rs16/13 scan above address
+the inventory finding without altering either manifest. The plan now names
+claude-ddi2il as composition authority, pins native integer wire milliseconds,
+requires redacted Debug and explicitly includes the immediate one-write retry.
+
+At test checkpoint5759e49f654 on unchanged77f production:
+
+- With Spot: **5 assertion REDs / 10 working GREENs**, 15 compiling tests,
+  zero ignored. The additional RED sees zero provider batches instead of two on
+  the actual Futures DELETE-write 400005 reissue.
+- Without Spot: **4 assertion REDs / 9 working GREENs**, 13 compiling tests,
+  zero ignored.
+- Broker role: **7 NEW-CONTRACT runtime schema REDs / 2 existing working GREENs**,
+  9 compiling tests, zero ignored. Added alias Debug and the complete eight-
+  alternative algorithm matrix; later assertions remain unexecuted until schema
+  support exists.
+- The native write control sees two immediate attempts at stamps1234/1235 with
+  identical method/URL/body, changed request/broker MACs and the same passphrase
+  MAC. Additional Python-independent raw-query/passphrase/broker vectors from
+  4y's review pass, including literal plus and space. Native Options/BrokerOptions
+  redacted Debug exposes none of the synthetic primary/read/broker material.
+
+Both earlier independent scopes remain historical to their reviewed pin;
+request HMAC re-review of these corrections before any production. No source,
+credential policy, checker predicate or inventory change is part of this draft.
