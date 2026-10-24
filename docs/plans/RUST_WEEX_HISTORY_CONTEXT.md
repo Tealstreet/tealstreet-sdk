@@ -279,3 +279,14 @@ physical Context and use strict typed history rejection. The dead deferred_gets
 history filter is removed. The refreshed focused suite passes 84 controls:
 9 unit, 40 native history, 23 custody and 12 local/admission. Exact delta
 re-review and strict/CI gates remain separate.
+
+### Current landing composition
+
+Plain-merged actual `ceae26c3795` after #1997. The sole merge conflict was
+CALLERS append ordering; incoming entries precede the unchanged history entry.
+Together the two conversions remove the final production callers of
+`signed_request` and its `account::auth_scope` adapter. The first merged build
+failed on those two orphaned helpers under `-D warnings`; both are removed, and
+the old helper-only secondary fixture retains explicit identity/slot selection
+checks. Native history and account managed-release controls remain in place.
+The exact lexical inventory is regenerated with removal only.

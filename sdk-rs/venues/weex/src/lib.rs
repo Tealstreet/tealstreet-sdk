@@ -361,49 +361,6 @@ impl WeexFutures {
             Err(error) => managed::reject(cx, context, error.to_string()),
         }
     }
-    /// Legacy-owned private requests: native owners keep their lifecycle, and the
-    /// one temporary staging site hands canonical work to the injected provider.
-    #[allow(clippy::too_many_arguments)]
-    fn signed_request(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        method: Method,
-        path: &str,
-        query: &str,
-        body: Option<String>,
-        task: Task,
-        stream: Option<ArrayAt>,
-    ) -> bool {
-        let Some((identity, slot)) = self.credentials.select(method) else {
-            return false;
-        };
-        let mut pairs: Vec<_> = query.split('&').filter(|p| !p.is_empty()).collect();
-        pairs.sort_unstable_by_key(|p| p.split('=').next().unwrap_or(""));
-        let path_query = if pairs.is_empty() {
-            path.to_owned()
-        } else {
-            format!("{path}?{}", pairs.join("&"))
-        };
-        let recipe = dispatch_signing::Http::new(identity.clone(), method, path_query, body);
-        let (url, headers, body) = recipe.unsigned();
-        let scope = account::auth_scope(&task);
-        let pending = Pending {
-            task,
-            invalid: false,
-            skipped: Vec::new(),
-            seed_generation: self.seed_generation,
-        };
-        let id = if let Some(at) = stream {
-            cx.request_streamed_body(method, url, headers, body, at, pending)
-        } else {
-            cx.request(method, url, headers, body, pending)
-        };
-        cx.sign_http(id, Box::new(recipe));
-        if let Some(scope) = scope {
-            cx.tag_account_read(id, slot, scope);
-        }
-        true
-    }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.socket = Some(
             cx.connect(

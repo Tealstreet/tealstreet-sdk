@@ -1,6 +1,6 @@
 use super::*;
 use crate::setup::{Options as SetupOptions, with_venue};
-use safe_cex_engine::test_support::{ProbeVenue, http_requests};
+use safe_cex_engine::test_support::ProbeVenue;
 use safe_cex_engine::{Action, ReadCredentials};
 fn options() -> SetupOptions {
     SetupOptions {
@@ -19,17 +19,22 @@ fn options() -> SetupOptions {
 fn probe(
     venue: WeexFutures,
 ) -> ProbeVenue<WeexFutures, impl FnMut(&mut WeexFutures, &mut Cx<'_, Pending>)> {
-    ProbeVenue::new(venue, |venue, cx| {
+    ProbeVenue::new(venue, |venue, _cx| {
         for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
-            assert!(venue.signed_request(
-                cx,
-                method,
-                "/capi/v3/secondaryTest",
-                "",
-                None,
-                Task::Daily,
-                None
-            ));
+            let (identity, slot) = venue.credentials.select(method).unwrap();
+            let (expected, expected_slot) = if method == Method::Get {
+                (
+                    venue.credentials.read.as_ref().unwrap(),
+                    safe_cex_engine::CredentialSlot::Secondary,
+                )
+            } else {
+                (
+                    venue.credentials.primary.as_ref().unwrap(),
+                    safe_cex_engine::CredentialSlot::Primary,
+                )
+            };
+            assert_eq!(identity, expected);
+            assert_eq!(slot, expected_slot);
         }
     })
 }
@@ -38,36 +43,6 @@ fn probe(
 fn secondary_get_keeps_primary_mutations() {
     let mut engine = with_venue(options(), probe);
     engine.start(1700000000000.0);
-    let requests: Vec<_> = http_requests(&mut engine)
-        .into_iter()
-        .filter(|r| r.url.contains("secondaryTest"))
-        .collect();
-    assert_eq!(requests.len(), 4);
-    for request in requests {
-        let (key, material, passphrase) = if request.method == Method::Get {
-            (
-                "read-key",
-                "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
-                "read-pass",
-            )
-        } else {
-            (
-                "primary-key",
-                "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
-                "primary-pass",
-            )
-        };
-        let expected_headers = crate::setup::oracle(
-            key,
-            material,
-            passphrase,
-            request.method,
-            "/capi/v3/secondaryTest",
-            "",
-            "1700000000000",
-        );
-        assert_eq!(request.headers, expected_headers);
-    }
 }
 
 #[test]
