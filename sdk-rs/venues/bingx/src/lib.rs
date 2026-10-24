@@ -983,7 +983,6 @@ impl Venue for Bingx {
         }
         let pending = match pending {
             Pending::Signed(signed) => {
-<<<<<<< HEAD
                 if signed
                     .context
                     .as_ref()
@@ -991,13 +990,7 @@ impl Venue for Bingx {
                 {
                     return;
                 }
-                if !signed.resent
-                    && !matches!(&signed.inner, Pending::Identity(_))
-                    && signature_rejected(response.body)
-                {
-=======
                 if !signed.resent && signature_rejected(response.body) {
->>>>>>> 0abc15bd2bdb728b02f0d499f216bbe0d8d91e93
                     if signed.context.is_some() {
                         self.resend_managed(cx, *signed);
                     } else {
@@ -1425,10 +1418,6 @@ impl Venue for Bingx {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-<<<<<<< HEAD
-        if let Command::FetchAccount { command } = command {
-            self.fetch_identity(cx, command);
-=======
         if matches!(
             &command,
             Command::SetLeverage { .. }
@@ -1439,7 +1428,6 @@ impl Venue for Bingx {
         }
         if let Command::FetchAccount { .. } = command {
             self.fetch_identity(cx);
->>>>>>> 0abc15bd2bdb728b02f0d499f216bbe0d8d91e93
             return;
         }
         match command {
