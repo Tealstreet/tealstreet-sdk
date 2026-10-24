@@ -3,9 +3,9 @@
 use crate::dispatch_signing::{Http, url};
 use crate::{Pending, Task};
 use safe_cex_engine::credential_selection::CredentialUnavailable;
-use safe_cex_engine::request_context::{Context, RetryPolicy, Scope};
-use safe_cex_engine::selected_read::{ReadPolicy, ReadRequest, SelectedRead};
-use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, VenueError};
+use safe_cex_engine::request_context::{Context, Operation, RetryPolicy};
+use safe_cex_engine::selected_read::{LocalRefusal, ReadPolicy, ReadRequest, SelectedRead};
+use safe_cex_engine::{CommandWait, Cx, ErrorKind, Method, Outcome, VenueError};
 
 fn refused() -> VenueError {
     VenueError::new("WEEX managed read lifecycle is unavailable")
@@ -13,24 +13,41 @@ fn refused() -> VenueError {
         .outcome(Outcome::NotSent)
 }
 
-/// Issue one signed GET under `command`'s scope whose task owns its context
-/// until it completes. Native WEEX reads never re-sign, so the read keeps its
-/// single physical attempt. Without authority the caller fails the command.
+/// Admit one signed GET from the genuine command entry. Its task retains the
+/// context through completion; admission owns its refusal terminal.
 pub(crate) fn read(
     cx: &mut Cx<'_, Pending>,
     selected: Result<SelectedRead, CredentialUnavailable>,
-    command: CommandId,
     path_query: String,
     seed_generation: u32,
     task: impl FnOnce(Context) -> Task,
-) -> Result<(), VenueError> {
+) {
+    match cx.command_wait() {
+        Some(CommandWait::Remaining(_)) => {}
+        Some(CommandWait::Expired) => {
+            let _ = cx.reject_expired_command(Operation::Read);
+            return;
+        }
+        None => {
+            let _ = cx.reject_unstamped_command(Operation::Read);
+            return;
+        }
+    }
     let policy = ReadPolicy {
         timeout_ms: 20_000,
         pacing: None,
         retry: RetryPolicy::Never,
     };
-    let Ok(read) = SelectedRead::scoped(cx, selected, Scope::Command(command), policy) else {
-        return Err(refused());
+    let Ok(read) = SelectedRead::command(
+        cx,
+        selected,
+        policy,
+        LocalRefusal {
+            diagnostic: None,
+            error: refused(),
+        },
+    ) else {
+        return;
     };
     let context = read.context().clone();
     let request = ReadRequest {
@@ -53,7 +70,6 @@ pub(crate) fn read(
     if queued.is_err() {
         reject(cx, &context, refused());
     }
-    Ok(())
 }
 
 pub(crate) fn complete(cx: &mut Cx<'_, Pending>, context: &Context, data: String) {

@@ -1,6 +1,6 @@
 # WEEX leverage initial managed admission
 
-Status: plan and original assertion evidence; production held.
+Status: draft production cutover after native/core plan and original-evidence CLEAR.
 Actual base: `9a757d406b8`.
 Required parent: #2055 `911d20cc06a` (local leverage refusals).
 Composition: plain merge `24494f352e8`, with both CALLERS append sections kept.
@@ -142,3 +142,18 @@ No Start/private handshake, deferred-entry or queue-capacity fault injection is
 claimed. Scoped strict Clippy and rustfmt pass; CI/broad local builds were not
 run for this checkpoint. Its only own paths are this plan, README and the new
 test, compared with `24494f352e8`; runtime and inventories remain parent-exact.
+
+## Production cutover
+
+Both bounded plan/original-evidence reviews cleared `cad3bc092ba`; `379edea20c1`
+corrected the MAX-clock recovery suffix to use a fresh engine and clarified the
+single in-slice occurrence. The initial SelectedRead command transaction now
+owns admission failure. The caller's numeric fallback and command-id handoff
+are removed, with the Selection producer and managed queue/complete/reject
+callbacks unchanged. The manifest decrements only the in-slice c873 occurrence.
+
+Scoped production execution: all 10 admission controls and 16 local leverage
+controls pass, zero ignored, including the former RED recovery suffixes.
+Strict scoped Clippy and formatting pass with jobs=4. No deferred callback,
+queue-fault injection or full Start handshake is claimed. Broad checks belong
+to CI; source review and current-tip ratchets are separate gates.
