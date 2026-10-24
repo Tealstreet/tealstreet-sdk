@@ -2721,6 +2721,21 @@ pub trait Venue {
         self.on_session_wait_expired(cx, pending, error);
     }
 
+    /// A retained Preflight read parked on a Session ended unissued because the
+    /// Session was retired or failed. This runs in that Preflight's ready
+    /// custody: re-park on another live Session, or finish or fail the Preflight.
+    #[cfg(feature = "http-plans")]
+    fn on_preflight_session_wait_ended(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        preflight: &crate::request_context::Preflight,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        let _ = preflight;
+        self.on_session_wait_expired(cx, pending, error);
+    }
+
     /// A session waiter reached its owner's original deadline before the venue
     /// drained it. Nothing was sent for that owner.
     fn on_session_wait_expired(

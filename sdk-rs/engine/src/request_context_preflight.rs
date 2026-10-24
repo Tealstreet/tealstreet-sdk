@@ -8,6 +8,9 @@ pub(super) use call::State;
 #[path = "request_context_preflight_ready.rs"]
 mod ready;
 
+#[path = "request_context_preflight_session.rs"]
+mod session_wait;
+
 impl ContextRegistry {
     fn prepare_preflight(
         &mut self,
