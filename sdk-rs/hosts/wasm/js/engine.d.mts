@@ -34,6 +34,8 @@ export class WasmEngine implements WasmEngineLike {
   httpPrepared(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
   httpPreparationFailed(preparation: string, code: string, now: number): string;
   httpClaim(permit: string, now: number): string;
+  httpGroupPending?(permit: string): boolean;
+  httpClaimGroup?(permit: string, now: number, bounds: Float64Array): 0 | 1 | 2;
   /** Headers are name:value lines, with no added whitespace. */
   requiresExternalSigner(): boolean;
   /** JSON array of SignAlgorithm the JS provider can sign; omitted means unknown. */

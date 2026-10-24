@@ -8,6 +8,7 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+http-mutation-barriers = ["safe-cex-engine/http-mutation-barriers"]
 # Additive provider bootstrap; at least one venue feature is still required.
 dispatch-signing = ["safe-cex-venues/dispatch-signing"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress"]

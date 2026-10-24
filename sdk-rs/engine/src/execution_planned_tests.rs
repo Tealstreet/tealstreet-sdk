@@ -20,6 +20,7 @@ mod planned_execution {
 
     fn plan_policy() -> PlanPolicy {
         PlanPolicy {
+            independent_calls: false,
             operation: Operation::Mutation,
             credential: Some(credential()),
             pacing: None,
@@ -56,6 +57,7 @@ mod planned_execution {
 
     fn read_plan_policy() -> PlanPolicy {
         PlanPolicy {
+            independent_calls: false,
             operation: Operation::Read,
             credential: None,
             pacing: None,
@@ -84,6 +86,8 @@ mod planned_execution {
         reject_first: bool,
         /// The only write is definitively refused and the Plan completes.
         reject_only: bool,
+        /// An earlier attempt of the founder's intent may have reached the venue.
+        inherited: bool,
         /// Answers are resendable refusals; `resend_attempts` is the declared
         /// budget, and `accept_resend` accepts the second attempt instead.
         resend: bool,
@@ -129,6 +133,9 @@ mod planned_execution {
                     }
                 })
                 .unwrap();
+            if self.inherited {
+                cx.inherit_preflight_uncertainty(&preflight).unwrap();
+            }
             let calls = [CallBound {
                 timeout_ms: 20_000,
                 attempts: if self.resend { self.resend_attempts } else { 1 },
@@ -1102,6 +1109,99 @@ mod planned_execution {
                 Some(crate::Outcome::Rejected),
                 "owner {owner}"
             );
+        }
+    }
+
+    fn outcome(actions: &[Action], owner: CommandId) -> Option<crate::Outcome> {
+        let terminal = terminals(actions, owner);
+        assert_eq!(terminal.len(), 1, "owner {owner}");
+        terminal[0].clone().unwrap_err().outcome
+    }
+
+    fn expected(inherited: bool, plain: crate::Outcome) -> Option<crate::Outcome> {
+        Some(if inherited { crate::Outcome::Unknown } else { plain })
+    }
+
+    #[test]
+    fn an_inherited_fact_reaches_every_observer_of_a_rejected_execution() {
+        for inherited in [false, true] {
+            let mut e = crate::test_support::seeded_engine(Shared {
+                reject_only: true,
+                inherited,
+                ..Default::default()
+            });
+            e.start(0.);
+            command(&mut e, 0., FOUNDER);
+            command(&mut e, 0., FOLLOWER);
+            let token = prepared(&e.drain_actions().collect::<Vec<_>>())[0];
+            release(&mut e, token, 0.);
+            respond(&mut e, token, 10.);
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            // Collect both observers before asserting so each is evidenced.
+            let outcomes = [FOUNDER, FOLLOWER].map(|owner| outcome(&actions, owner));
+            assert_eq!(
+                outcomes,
+                [expected(inherited, crate::Outcome::Rejected); 2],
+                "founder and follower"
+            );
+        }
+    }
+
+    #[test]
+    fn an_inherited_founder_leaving_before_release_is_never_told_not_sent() {
+        for inherited in [false, true] {
+            let mut e = crate::test_support::seeded_engine(Shared {
+                inherited,
+                ..Default::default()
+            });
+            e.start(0.);
+            command(&mut e, 0., FOUNDER);
+            let ids = e.io.next_id;
+            e.drain_actions().for_each(drop);
+            detach_founder(&mut e, 1.);
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert_eq!(
+                outcome(&actions, FOUNDER),
+                expected(inherited, crate::Outcome::NotSent)
+            );
+            assert_eq!(e.io.next_id, ids, "the carry spends no identity");
+        }
+    }
+
+    #[test]
+    fn a_refused_execution_admission_keeps_the_inherited_fact() {
+        for inherited in [false, true] {
+            let mut e = crate::test_support::seeded_engine(Shared {
+                invalid_steps: true,
+                inherited,
+                ..Default::default()
+            });
+            e.start(0.);
+            command(&mut e, 0., FOUNDER);
+            assert_eq!(e.venue.refusals, vec![Error::Invalid]);
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert_eq!(
+                outcome(&actions, FOUNDER),
+                expected(inherited, crate::Outcome::NotSent)
+            );
+        }
+    }
+
+    #[test]
+    fn an_inherited_execution_success_stays_successful() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            inherited: true,
+            ..Default::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., FOLLOWER);
+        let token = prepared(&e.drain_actions().collect::<Vec<_>>())[0];
+        release(&mut e, token, 0.);
+        respond(&mut e, token, 10.);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        for owner in [FOUNDER, FOLLOWER] {
+            assert_eq!(terminals(&actions, owner), vec![Ok("placed".into())]);
         }
     }
 }

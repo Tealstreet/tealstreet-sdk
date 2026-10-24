@@ -8,7 +8,6 @@ use crate::request_context::{
     Waiter, WriteResult,
 };
 use crate::{ErrorKind, Outcome, VenueError};
-use std::collections::HashMap;
 
 const SESSIONS: usize = 64;
 
@@ -24,14 +23,14 @@ enum Write {
 struct State {
     policy: SessionPolicy,
     /// Mutation legs by logical identity: one physical attempt per operation.
-    writes: HashMap<u64, Write>,
+    writes: crate::IdMap<u64, Write>,
     /// A released write had no proven outcome. Only retirement clears it.
     unresolved: bool,
 }
 
 #[derive(Default)]
 pub(super) struct Sessions {
-    live: HashMap<u64, State>,
+    live: crate::IdMap<u64, State>,
 }
 
 impl Sessions {
@@ -57,7 +56,7 @@ impl Sessions {
             generation,
             State {
                 policy,
-                writes: HashMap::new(),
+                writes: Default::default(),
                 unresolved: false,
             },
         );
@@ -168,7 +167,7 @@ impl Sessions {
 
     /// Bound per-operation records by live logical handles. In-flight attempts
     /// keep theirs until the physical attempt settles.
-    pub(super) fn prune(&mut self, contexts: &HashMap<u64, Context>) {
+    pub(super) fn prune(&mut self, contexts: &crate::IdMap<u64, Context>) {
         for state in self.live.values_mut() {
             state.writes.retain(|leg, write| {
                 contexts.contains_key(leg)
@@ -202,6 +201,21 @@ enum Unit {
         slot: crate::request_context::plan::Slot,
         context: Context,
     },
+    /// A retained Preflight's next read, issued only at resume. Its wait is
+    /// bounded by the caller's receipt cap, if any.
+    #[cfg(feature = "http-plans")]
+    Preflight {
+        handle: crate::request_context::Preflight,
+        read: Box<(Policy, crate::request_context::plan::CallTerms)>,
+        cap: f64,
+    },
+    /// A retained Preflight read's declared retry, selected only at resume.
+    #[cfg(feature = "http-plans")]
+    PreflightRetry {
+        handle: crate::request_context::Preflight,
+        context: Context,
+        cap: f64,
+    },
 }
 
 impl Unit {
@@ -210,15 +224,31 @@ impl Unit {
             Unit::Owner(owner) => owner.deadline(),
             #[cfg(feature = "http-plans")]
             Unit::Slot { plan, .. } | Unit::Retry { plan, .. } => plan.deadline(),
+            #[cfg(feature = "http-plans")]
+            Unit::Preflight { cap, .. } | Unit::PreflightRetry { cap, .. } => *cap,
         }
     }
 
     #[cfg(feature = "http-plans")]
     fn plan(&self) -> Option<&crate::request_context::Plan> {
         match self {
-            Unit::Owner(_) => None,
             Unit::Slot { plan, .. } | Unit::Retry { plan, .. } => Some(plan),
+            _ => None,
         }
+    }
+
+    #[cfg(feature = "http-plans")]
+    fn preflight(&self) -> Option<&crate::request_context::Preflight> {
+        match self {
+            Unit::Preflight { handle, .. } | Unit::PreflightRetry { handle, .. } => Some(handle),
+            _ => None,
+        }
+    }
+
+    /// Plan and Preflight units are held for a disposition after the callback.
+    #[cfg(feature = "http-plans")]
+    fn held(&self) -> bool {
+        !matches!(self, Unit::Owner(_))
     }
 }
 
@@ -244,6 +274,10 @@ pub(in crate::engine) struct Waits<P> {
         P,
         VenueError,
     )>,
+    /// Parked Preflight reads whose Session ended, delivered after the callback
+    /// in that Preflight's ready custody. Storage is reserved at park.
+    #[cfg(feature = "http-plans")]
+    preflight_ended: Vec<(crate::request_context::Preflight, P, VenueError)>,
 }
 
 impl<P> Default for Waits<P> {
@@ -252,6 +286,8 @@ impl<P> Default for Waits<P> {
             entries: vec![],
             #[cfg(feature = "http-plans")]
             ended: vec![],
+            #[cfg(feature = "http-plans")]
+            preflight_ended: vec![],
         }
     }
 }
@@ -263,20 +299,16 @@ impl<P> Waits<P> {
     }
 
     pub(in crate::engine) fn parked_units(&self) -> usize {
-        self.entries
-            .iter()
-            .filter(|wait| wait.unit.plan().is_some())
-            .count()
+        self.entries.iter().filter(|wait| wait.unit.held()).count()
     }
 
     pub(in crate::engine) fn reserve_ended(&mut self) -> Result<(), Error> {
-        let parked = self
-            .entries
-            .iter()
-            .filter(|wait| wait.unit.plan().is_some())
-            .count();
-        // Additional to the current length: every parked Slot, plus this one.
+        let parked = self.parked_units();
+        // Additional to the current length: every parked unit, plus this one.
         self.ended
+            .try_reserve(parked + 1)
+            .map_err(|_| Error::Capacity)?;
+        self.preflight_ended
             .try_reserve(parked + 1)
             .map_err(|_| Error::Capacity)
     }
@@ -317,13 +349,58 @@ impl<P> Waits<P> {
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::engine) fn park_preflight_read(
+        &mut self,
+        session: u64,
+        handle: crate::request_context::Preflight,
+        read: (Policy, crate::request_context::plan::CallTerms),
+        cap: f64,
+        timer: Option<TimerId>,
+        pending: P,
+    ) {
+        self.entries.push(Wait {
+            session,
+            unit: Unit::Preflight {
+                handle,
+                read: Box::new(read),
+                cap,
+            },
+            timer,
+            pending,
+        });
+    }
+
+    pub(in crate::engine) fn park_preflight_retry(
+        &mut self,
+        session: u64,
+        handle: crate::request_context::Preflight,
+        context: Context,
+        cap: f64,
+        timer: Option<TimerId>,
+        pending: P,
+    ) {
+        self.entries.push(Wait {
+            session,
+            unit: Unit::PreflightRetry {
+                handle,
+                context,
+                cap,
+            },
+            timer,
+            pending,
+        });
+    }
+
     #[cfg(test)]
     pub(in crate::engine) fn ended_capacity(&self) -> usize {
         self.ended.capacity()
     }
 
     fn has_slot_work(&self) -> bool {
-        !self.ended.is_empty() || self.entries.iter().any(|wait| wait.unit.plan().is_some())
+        !self.ended.is_empty()
+            || !self.preflight_ended.is_empty()
+            || self.entries.iter().any(|wait| wait.unit.held())
     }
 }
 
@@ -403,6 +480,25 @@ impl<P> Cx<'_, P> {
         self.io
             .request_contexts
             .issue_session(identity, generation, policy, self.now, None)
+    }
+
+    /// A new physical leg of a session operation, keeping its exact raw bound.
+    /// A Read leg can never become a Mutation; any other owner is refused.
+    pub fn session_leg_context(
+        &mut self,
+        parent: &Context,
+        policy: Policy,
+    ) -> Result<Context, Error> {
+        self.io.request_contexts.validate_legacy(parent)?;
+        self.io.request_contexts.validate_send(parent, self.now)?;
+        let Owner::Session { generation } = parent.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.session_scope()?;
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        self.io
+            .request_contexts
+            .issue_session(identity, generation, policy, self.now, Some(parent))
     }
 
     /// Work owned by a command or the background that carries this session's
@@ -569,6 +665,29 @@ impl<P> Cx<'_, P> {
                         owner_error(reason),
                     )),
                 },
+                #[cfg(feature = "http-plans")]
+                Unit::Preflight { handle, read, .. } => {
+                    let (policy, terms) = *read;
+                    match self.resume_preflight_read(&handle, policy, terms) {
+                        Ok(read) => waiters.push(Waiter::Ready(read, wait.pending)),
+                        Err(reason) => self.io.session_waits.preflight_ended.push((
+                            handle,
+                            wait.pending,
+                            owner_error(reason),
+                        )),
+                    }
+                }
+                #[cfg(feature = "http-plans")]
+                Unit::PreflightRetry {
+                    handle, context, ..
+                } => match self.resume_preflight_retry(&handle, &context) {
+                    Ok(read) => waiters.push(Waiter::Ready(read, wait.pending)),
+                    Err(reason) => self.io.session_waits.preflight_ended.push((
+                        handle,
+                        wait.pending,
+                        owner_error(reason),
+                    )),
+                },
             }
         }
         waiters
@@ -604,6 +723,16 @@ impl<P> Cx<'_, P> {
                         .session_waits
                         .ended
                         .push((plan, slot, wait.pending, error.clone()));
+                }
+                // A parked Preflight read ends the same way, in its own
+                // Preflight-ready custody.
+                #[cfg(feature = "http-plans")]
+                Unit::Preflight { handle, .. } | Unit::PreflightRetry { handle, .. } => {
+                    self.io.session_waits.preflight_ended.push((
+                        handle,
+                        wait.pending,
+                        error.clone(),
+                    ));
                 }
             }
         }
@@ -643,6 +772,17 @@ impl<V: Venue> Engine<V> {
         let wait = entries.remove(index);
         self.io.timers.remove(&timer);
         self.begin_event_scope();
+        // A parked Preflight read reached its caller's receipt cap: the
+        // Preflight's terminal comes first, then the pending returns once.
+        #[cfg(feature = "http-plans")]
+        if let Some(handle) = wait.unit.preflight() {
+            Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            }
+            .expire_parked_preflight(handle);
+        }
         self.venue.on_session_wait_expired(
             &mut Cx {
                 now,
@@ -681,11 +821,18 @@ impl<V: Venue> Engine<V> {
                 wait.unit
                     .plan()
                     .is_some_and(|plan| !registry.plan_registered(plan))
+                    || wait
+                        .unit
+                        .preflight()
+                        .is_some_and(|handle| !registry.preflight_registered(handle))
             });
             if let Some(index) = sealed {
                 let wait = self.io.session_waits.entries.remove(index);
-                let plan = wait.unit.plan().expect("swept parked Plan unit");
-                let reason = if now >= plan.deadline() {
+                if let Some(timer) = wait.timer {
+                    self.io.timers.remove(&timer);
+                    self.io.actions.push(Action::ClearTimer { timer });
+                }
+                let reason = if now >= wait.unit.deadline() {
                     Error::TimedOut
                 } else {
                     Error::Revoked
@@ -699,6 +846,9 @@ impl<V: Venue> Engine<V> {
                     wait.pending,
                     owner_error(reason),
                 );
+            } else if !self.io.session_waits.preflight_ended.is_empty() {
+                let (handle, pending, error) = self.io.session_waits.preflight_ended.remove(0);
+                self.end_preflight_session_wait(now, handle, pending, error);
             } else if self.io.session_waits.ended.is_empty() {
                 return;
             } else {

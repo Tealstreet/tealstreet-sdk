@@ -10,6 +10,10 @@ use crate::request_context::{
 #[path = "http_unsigned_headers_tests.rs"]
 mod unsigned_headers_tests;
 
+#[cfg(feature = "http-mutation-barriers")]
+#[path = "http_group.rs"]
+mod mutation_group;
+
 enum ManagedRecipe {
     Unsigned(&'static [(&'static str, &'static str)]),
     Signed(Box<dyn crate::SignStep>),
@@ -25,6 +29,9 @@ pub(super) struct Managed {
     /// Decided at issue from the binding; reprepare never re-derives it.
     intent: RoutingIntent,
     bearer: Option<Bearer>,
+    #[cfg(feature = "http-mutation-barriers")]
+    group: Option<Box<mutation_group::Member>>,
+    waiting_route: Option<Prepared>,
 }
 
 /// A Session-bound packet's generation and the revision its header carries.
@@ -299,6 +306,24 @@ impl<P> Cx<'_, P> {
         if let Err(error) = self.io.request_contexts.validate_send(&context, self.now) {
             return Err((pending, error));
         }
+        #[cfg(feature = "http-mutation-barriers")]
+        let group = match self
+            .io
+            .request_contexts
+            .validate_mutation_group_submission(&context)
+        {
+            Ok(key) => key.map(|key| Box::new(mutation_group::Member::new(key))),
+            Err(error) => return Err((pending, error)),
+        };
+        // A group claims its members together; until that claim checks every
+        // member's Bearer (R11), a Bearer-bound group member is refused.
+        #[cfg(feature = "http-mutation-barriers")]
+        if bearer.is_some() && group.is_some() {
+            return Err((pending, Error::Invalid));
+        }
+        if let Err(error) = self.io.http_pacing.check(context.pacing(), self.now) {
+            return Err((pending, error));
+        }
         if context.credential().is_some() != step.is_some() {
             return Err((pending, Error::Invalid));
         }
@@ -445,6 +470,9 @@ impl<P> Cx<'_, P> {
                     generation,
                     revision: None,
                 }),
+                #[cfg(feature = "http-mutation-barriers")]
+                group,
+                waiting_route: None,
             },
         );
         if let Some(generation) = bearer {
@@ -642,7 +670,11 @@ impl<P> Io<P> {
         }
     }
 
-    fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
+    fn take_managed_with_cancel(
+        &mut self,
+        request: RequestId,
+        cancel: Option<Action>,
+    ) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
         if let Some(bearer) = managed.bearer
             && let Some(bound) = self.bearer_bound.get_mut(&bearer.generation)
@@ -652,6 +684,12 @@ impl<P> Io<P> {
                 self.bearer_bound.remove(&bearer.generation);
             }
         }
+        #[cfg(feature = "http-mutation-barriers")]
+        if managed.group.is_some() {
+            self.actions.retain(|action| !matches!(action,
+                Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::BindGroup { members, .. }
+                    if members.iter().any(|member| member.preparation.attempt().request == request))));
+        }
         self.request_contexts
             .retire_attempt(managed.lifecycle.context(), request);
         self.rearm_execution_timer();
@@ -660,16 +698,25 @@ impl<P> Io<P> {
         self.actions.push(Action::ClearTimer {
             timer: managed.timer,
         });
-        self.actions
-            .push(Action::ManagedHttp(Box::new(HttpAction::Cancel {
+        self.actions.push(cancel.unwrap_or_else(|| {
+            Action::ManagedHttp(Box::new(HttpAction::Cancel {
                 preparation: managed.lifecycle.preparation(),
                 signing: managed.signing_attempt,
-            })));
+            }))
+        }));
         Some(managed)
     }
 
     pub(super) fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
-        let managed = self.take_managed(request)?;
+        self.discard_managed_with_cancel(request, None)
+    }
+
+    fn discard_managed_with_cancel(
+        &mut self,
+        request: RequestId,
+        cancel: Option<Action>,
+    ) -> Option<PendingHttp<P>> {
+        let managed = self.take_managed_with_cancel(request, cancel)?;
         if managed.lifecycle.context().operation() == Operation::Mutation
             && managed.lifecycle.release().is_some()
         {
@@ -682,6 +729,20 @@ impl<P> Io<P> {
         #[cfg(feature = "order-locks")]
         self.order_read_tokens.remove(&request);
         self.pending.remove(&request)
+    }
+}
+
+#[cfg(not(feature = "http-mutation-barriers"))]
+impl<V: Venue> Engine<V> {
+    pub fn http_group_pending(&self, _: &crate::request_context::GroupPermit) -> bool {
+        false
+    }
+    pub fn claim_http_group(
+        &mut self,
+        _: f64,
+        _: crate::request_context::GroupPermit,
+    ) -> Result<crate::request_context::GroupClaim, Error> {
+        Err(Error::Invalid)
     }
 }
 
@@ -718,35 +779,22 @@ impl<V: Venue> Engine<V> {
                 }
                 managed.lifecycle.prepared(token, prepared)
             });
-        if prepared_result.is_ok()
-            && let Some(attempt) = managed.signing_attempt
-        {
-            // The token is read at the signed Bind; refuse before provider work.
-            if let Some(bearer) = managed.bearer {
-                let ready = match bearer.current(&self.venue, &self.io.request_contexts) {
-                    Ok(Some(_)) => Ok(()),
-                    Ok(None) => Err(Error::State),
-                    Err(reason) => Err(reason),
-                };
-                if let Err(reason) = ready {
-                    self.http_preparation_failed(now, token, reason, bearer_refused(reason));
-                    return;
-                }
-            }
-            let ready = managed.lifecycle.begin_signing().and_then(|_| {
-                self.io
-                    .signing
-                    .activate_managed(attempt, managed.lifecycle.deadline())
-                    .map_err(|_| Error::State)
-            });
-            if let Err(error) = ready {
-                self.http_preparation_failed(
+        #[cfg(feature = "http-mutation-barriers")]
+        if managed.group.is_some() {
+            match prepared_result {
+                Ok(()) => self.pump_mutation_group(now, request),
+                Err(Error::State) => {}
+                Err(error) => self.http_preparation_failed(
                     now,
                     token,
                     error,
-                    VenueError::new("HTTP signing preparation failed"),
-                );
+                    VenueError::new("HTTP group route failed"),
+                ),
             }
+            return;
+        }
+        if prepared_result.is_ok() && managed.signing_attempt.is_some() {
+            self.resume_prepared_signing(now, token, prepared);
             return;
         }
         let prepared_result = prepared_result
@@ -789,6 +837,90 @@ impl<V: Venue> Engine<V> {
                 error,
                 VenueError::new("HTTP preparation is no longer valid"),
             ),
+        }
+    }
+
+    fn resume_prepared_signing(&mut self, now: f64, token: Preparation, prepared: Prepared) {
+        let request = token.attempt().request;
+        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+            return;
+        };
+        if managed.lifecycle.preparation() != token {
+            return;
+        }
+        if let Err(error) = managed.validate(&self.io.request_contexts, now) {
+            self.http_preparation_failed(
+                now,
+                token,
+                error,
+                VenueError::new("HTTP signing window expired"),
+            );
+            return;
+        }
+        if prepared.expires_at.is_some_and(|at| now >= at) {
+            self.reprepare_http(now, token);
+            return;
+        }
+        match self
+            .io
+            .http_pacing
+            .check(managed.lifecycle.context().pacing(), now)
+        {
+            Err(error) => {
+                self.http_preparation_failed(
+                    now,
+                    token,
+                    error,
+                    VenueError::new("Invalid HTTP signing pacing"),
+                );
+                return;
+            }
+            Ok(Some(at)) => {
+                managed.waiting_route = Some(prepared);
+                self.io.actions.push(Action::SetTimer {
+                    timer: managed.timer,
+                    at_ms: at
+                        .min(managed.lifecycle.deadline())
+                        .min(prepared.expires_at.unwrap_or(f64::MAX)),
+                });
+                return;
+            }
+            Ok(None) => {}
+        }
+        let was_waiting = managed.waiting_route.take().is_some();
+        let Some(attempt) = managed.signing_attempt else {
+            return;
+        };
+        // The token is read at the signed Bind; refuse before provider work.
+        if let Some(bearer) = managed.bearer {
+            let ready = match bearer.current(&self.venue, &self.io.request_contexts) {
+                Ok(Some(_)) => Ok(()),
+                Ok(None) => Err(Error::State),
+                Err(reason) => Err(reason),
+            };
+            if let Err(reason) = ready {
+                self.http_preparation_failed(now, token, reason, bearer_refused(reason));
+                return;
+            }
+        }
+        let ready = managed.lifecycle.begin_signing().and_then(|_| {
+            self.io
+                .signing
+                .activate_managed(attempt, managed.lifecycle.deadline())
+                .map_err(|_| Error::State)
+        });
+        if let Err(error) = ready {
+            self.http_preparation_failed(
+                now,
+                token,
+                error,
+                VenueError::new("HTTP signing preparation failed"),
+            );
+        } else if was_waiting {
+            self.io.actions.push(Action::SetTimer {
+                timer: managed.timer,
+                at_ms: managed.lifecycle.deadline(),
+            });
         }
     }
 
@@ -891,6 +1023,13 @@ impl<V: Venue> Engine<V> {
                         .max(1.) as u32,
                 );
                 managed.recipe = Some(pending);
+                #[cfg(feature = "http-mutation-barriers")]
+                if let Some(member) = &mut managed.group {
+                    member.packet = Some(packet);
+                    member.permit = Some(permit);
+                    self.pump_mutation_group(now, request);
+                    return;
+                }
                 self.io
                     .actions
                     .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
@@ -963,6 +1102,10 @@ impl<V: Venue> Engine<V> {
         self.io.request_contexts.enter_delivery(&delivery);
         if let Some(pending) = self.io.discard_managed(request) {
             self.begin_event_scope();
+            #[cfg(feature = "http-plans")]
+            {
+                self.io.http_history_failure = None;
+            }
             let previous = self.io.http_delivery.replace(delivery.clone());
             self.venue.on_http_preparation_failed(
                 &mut Cx {
@@ -1011,6 +1154,15 @@ impl<V: Venue> Engine<V> {
     /// its transport API on Released, with no intervening await or actor hop.
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
         self.assert_live();
+        #[cfg(feature = "http-mutation-barriers")]
+        if self
+            .io
+            .managed_http
+            .get(&permit.attempt().request)
+            .is_some_and(|managed| managed.group.is_some())
+        {
+            return Err(Error::Revoked);
+        }
         self.io.dispatch_now = now;
         self.expire_read_roots(now);
         let request = permit.attempt().request;
@@ -1105,6 +1257,10 @@ impl<V: Venue> Engine<V> {
             if let Some(released) = release_flag {
                 *released = true;
             }
+            #[cfg(feature = "http-plans")]
+            self.io
+                .request_contexts
+                .record_read_plan_release(&managed.delivery());
             self.io
                 .request_contexts
                 .execution_leg_released(managed.lifecycle.context());
@@ -1187,6 +1343,26 @@ impl<V: Venue> Engine<V> {
             );
             return;
         }
+        #[cfg(feature = "http-mutation-barriers")]
+        if managed
+            .group
+            .as_ref()
+            .is_some_and(|member| member.announced && !member.bound)
+        {
+            self.http_preparation_failed(
+                now,
+                token,
+                Error::State,
+                VenueError::new("HTTP group binding failed before claim"),
+            );
+            return;
+        }
+        if managed.waiting_route.take().is_some() {
+            self.io.actions.push(Action::SetTimer {
+                timer: managed.timer,
+                at_ms: managed.lifecycle.deadline(),
+            });
+        }
         // Do not advance a lifecycle generation or take its retained recipe
         // unless a fresh signing attempt can also be allocated.
         if managed.signing_attempt.is_some() && !self.io.signing.available_id() {
@@ -1207,6 +1383,10 @@ impl<V: Venue> Engine<V> {
                 VenueError::new("HTTP request cannot be prepared again"),
             );
             return;
+        }
+        #[cfg(feature = "http-mutation-barriers")]
+        if let Some(member) = &mut managed.group {
+            member.reset();
         }
         let old_signing = managed.signing_attempt;
         if let Some(recipe) = managed
@@ -1261,6 +1441,34 @@ impl<V: Venue> Engine<V> {
         };
         let request = *request;
         if now.is_finite() && now < managed.lifecycle.deadline() {
+            #[cfg(feature = "http-mutation-barriers")]
+            if managed
+                .group
+                .as_ref()
+                .is_some_and(|member| member.pacing_wait)
+            {
+                let timer = managed.timer;
+                let deadline = managed.lifecycle.deadline();
+                self.io
+                    .managed_http
+                    .get_mut(&request)
+                    .unwrap()
+                    .group
+                    .as_mut()
+                    .unwrap()
+                    .pacing_wait = false;
+                self.io.actions.push(Action::SetTimer {
+                    timer,
+                    at_ms: deadline,
+                });
+                self.pump_mutation_group(now, request);
+                return true;
+            }
+            if let Some(prepared) = managed.waiting_route {
+                let token = managed.lifecycle.preparation();
+                self.resume_prepared_signing(now, token, prepared);
+                return true;
+            }
             self.io.actions.push(Action::SetTimer {
                 timer: *timer,
                 at_ms: managed.lifecycle.deadline(),
@@ -1274,12 +1482,13 @@ impl<V: Venue> Engine<V> {
         let managed = &self.io.managed_http[&request];
         if managed.lifecycle.release().is_some() {
             let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Timeout);
-            self.handle_event(
+            self.handle_event_with_read_timeout(
                 now,
                 Event::HttpFailed {
                     request,
                     error: "HTTP request timed out",
                 },
+                true,
             );
             self.io.http_failure_kind = kind;
             self.io.discard_managed(request);
@@ -1433,6 +1642,10 @@ impl<V: Venue> Engine<V> {
                 .expect("active capture has a managed request")
                 .delivery();
             self.io.request_contexts.enter_delivery(&delivery);
+            #[cfg(feature = "http-plans")]
+            {
+                self.io.http_history_failure = None;
+            }
             let previous = self.io.http_delivery.replace(delivery.clone());
             if let Some(error) = proof.error() {
                 let venue = &self.venue;
@@ -1453,8 +1666,19 @@ impl<V: Venue> Engine<V> {
                         io: &mut self.io,
                     };
                     #[cfg(feature = "http-plans")]
-                    let sealed = if let Some(plan) = &plan {
-                        cx.fail_plan(plan, error)
+                    let sealed = if let Some(failure) = cx
+                        .io
+                        .request_contexts
+                        .independent_plan_failure(&delivery, error.clone())
+                    {
+                        cx.with_independent_plan_failure(
+                            plan.as_ref()
+                                .expect("independent failure belongs to a Plan"),
+                            failure,
+                            |cx, failure| self.venue.on_http_failed(cx, pending.value, failure),
+                        )
+                    } else if let Some(plan) = &plan {
+                        cx.fail_plan_owned(plan, error)
                     } else {
                         cx.fail_context(&delivery.context, error)
                     };
@@ -1527,6 +1751,70 @@ impl<V: Venue> Engine<V> {
     }
 }
 
+#[cfg(feature = "http-plans")]
+pub(in crate::engine) struct PreparedReadCleanup {
+    request: RequestId,
+    preparation: Preparation,
+    cancel: Action,
+}
+
+#[cfg(feature = "http-plans")]
+impl<P> Io<P> {
+    pub(super) fn prepare_read_history_cleanup(
+        &mut self,
+        owner: Owner,
+        leg: Option<u64>,
+        notices: usize,
+    ) -> Result<Vec<PreparedReadCleanup>, Error> {
+        let matches = |managed: &Managed| {
+            managed.lifecycle.context().owner() == owner
+                && leg.is_none_or(|leg| managed.lifecycle.context().leg() == leg)
+        };
+        let count = self
+            .managed_http
+            .values()
+            .filter(|managed| matches(managed))
+            .count();
+        let mut cleanup = Vec::new();
+        cleanup
+            .try_reserve_exact(count)
+            .map_err(|_| Error::Capacity)?;
+        // Four per request cover Cancel, its timer clear, and execution-timer clear/rearm.
+        // Additional notices cover Plan timer actions, the terminal and optional marker.
+        self.actions
+            .try_reserve(
+                count
+                    .checked_mul(4)
+                    .and_then(|n| n.checked_add(notices))
+                    .ok_or(Error::Capacity)?,
+            )
+            .map_err(|_| Error::Capacity)?;
+        for (request, managed) in &self.managed_http {
+            if matches(managed) {
+                cleanup.push(PreparedReadCleanup {
+                    request: *request,
+                    preparation: managed.lifecycle.preparation(),
+                    cancel: Action::ManagedHttp(Box::new(HttpAction::Cancel {
+                        preparation: managed.lifecycle.preparation(),
+                        signing: managed.signing_attempt,
+                    })),
+                });
+            }
+        }
+        Ok(cleanup)
+    }
+    pub(super) fn commit_read_history_cleanup(&mut self, cleanup: Vec<PreparedReadCleanup>) {
+        for item in cleanup {
+            assert!(
+                self.managed_http
+                    .get(&item.request)
+                    .is_some_and(|managed| managed.lifecycle.preparation() == item.preparation)
+            );
+            self.discard_managed_with_cancel(item.request, Some(item.cancel));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1541,6 +1829,8 @@ mod tests {
     include!("request_context_reconciliation_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_plan_expiry_tests.rs");
+    #[cfg(feature = "http-plans")]
+    include!("request_context_plan_independence_tests.rs");
 
     #[derive(Debug)]
     struct Pending(Context);

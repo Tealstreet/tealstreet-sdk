@@ -10,7 +10,6 @@ use crate::request_context::{
 use crate::request_context::{
     HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
 };
-use std::collections::HashMap;
 #[cfg(feature = "http-plans")]
 use std::collections::VecDeque;
 
@@ -70,6 +69,9 @@ struct CommandOwner {
     /// Some Context or declared policy of this owner named a credential; only
     /// then can its auth-kind failure be credential-health evidence.
     credentialed: bool,
+    /// An earlier attempt of this intent may have reached the venue. Every
+    /// journal this owner creates projects its failure at least Unknown.
+    inherited_uncertain: bool,
 }
 
 enum CommandPhase {
@@ -163,10 +165,15 @@ mod owned_call;
 mod preflight;
 #[cfg(feature = "http-plans")]
 pub(super) use owned_call::Admission as OwnedAdmission;
+#[cfg(feature = "http-plans")]
+pub(super) use owned_call::ReleasedReadFailure;
 
 #[cfg(feature = "http-plans")]
 #[path = "request_context_planned.rs"]
 mod planned;
+#[cfg(feature = "http-plans")]
+#[cfg(feature = "http-mutation-barriers")]
+pub(in crate::engine) use planned::MutationGroupKey;
 
 #[cfg(not(feature = "http-plans"))]
 #[path = "request_context_without_plans.rs"]
@@ -196,12 +203,12 @@ pub(super) enum Seal {
 #[derive(Default)]
 pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
-    contexts: HashMap<u64, Context>,
-    commands: HashMap<CommandId, CommandOwner>,
+    contexts: crate::IdMap<u64, Context>,
+    commands: std::collections::HashMap<CommandId, CommandOwner>,
     sessions: session::Sessions,
     /// Session generation each Bearer-bound leg carries; same-leg retries and
     /// resends inherit it. Leg identities are never reused.
-    bearer_legs: HashMap<u64, u64>,
+    bearer_legs: std::collections::HashMap<u64, u64>,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
     executions: execution::Executions,
@@ -224,7 +231,7 @@ pub(super) struct ContextRegistry {
     /// Plan-backed executions' physical owners, keyed by execution identity.
     /// They hold the Plan, its slots and journal; no command observes them.
     #[cfg(feature = "http-plans")]
-    physical: HashMap<u64, CommandOwner>,
+    physical: crate::IdMap<u64, CommandOwner>,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
     /// Order-read epoch at each live owner's first released Read: one logical
@@ -583,6 +590,7 @@ impl ContextRegistry {
                         .map(|(_, intent)| intent),
                     leg_intents: Vec::new(),
                     credentialed: context.credential().is_some(),
+                    inherited_uncertain: false,
                 });
         }
         self.contexts.insert(identity, context.clone());
@@ -864,7 +872,8 @@ impl ContextRegistry {
                     writes.register(request, context.leg())?;
                 }
             } else {
-                let mut writes = CommandWrites::new(CAPACITY)?;
+                let mut writes =
+                    CommandWrites::new(CAPACITY)?.inheriting(owner.inherited_uncertain);
                 writes.register(request, context.leg())?;
                 owner.writes = Some(writes);
             }
@@ -1221,19 +1230,18 @@ impl ContextRegistry {
         {
             return Seal::Stale;
         }
-        let declared = self
-            .commands
-            .get(&command)
-            .is_some_and(|owner| owner.mutation_declared);
+        let (declared, inherited) = self.commands.get(&command).map_or((false, false), |owner| {
+            (owner.mutation_declared, owner.inherited_uncertain)
+        });
         let mut writes = match self
             .commands
             .get_mut(&command)
             .and_then(|owner| owner.writes.take())
         {
             Some(writes) => writes,
-            None if declared => {
-                CommandWrites::new(CAPACITY).expect("fixed positive journal capacity")
-            }
+            None if declared => CommandWrites::new(CAPACITY)
+                .expect("fixed positive journal capacity")
+                .inheriting(inherited),
             None => return Seal::Legacy(error),
         };
         if error.is_none() && writes.succeed().is_ok() {
@@ -1537,23 +1545,15 @@ impl<P> Cx<'_, P> {
 
     /// A new physical leg under the same logical authority. Preserve its exact
     /// raw deadline; integer timeout recomputation cannot round the bound up.
+    /// Session legs use `session_leg_context`, so families without Sessions
+    /// never link Session issuance.
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
         self.io.request_contexts.validate_legacy(parent)?;
         self.io.request_contexts.validate_send(parent, self.now)?;
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
-            Owner::Session { generation } => {
-                self.session_scope()?;
-                let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-                return self.io.request_contexts.issue_session(
-                    identity,
-                    generation,
-                    policy,
-                    self.now,
-                    Some(parent),
-                );
-            }
+            Owner::Session { .. } => return Err(Error::Invalid),
             Owner::Execution { .. } => Scope::Execution,
         };
         self.make_http_context(scope, policy, Some(parent), None)

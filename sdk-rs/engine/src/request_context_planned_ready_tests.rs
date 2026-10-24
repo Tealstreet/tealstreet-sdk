@@ -30,6 +30,7 @@ fn preflight_policy() -> PreflightPolicy {
 
 fn plan_policy() -> PlanPolicy {
     PlanPolicy {
+        independent_calls: false,
         operation: Operation::Read,
         credential: None,
         pacing: None,

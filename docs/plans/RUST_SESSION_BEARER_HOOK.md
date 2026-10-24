@@ -494,3 +494,15 @@ has no ready custody and may retire a Session; `retire_session` keeps the
 reservation ahead of `drain_waits`. Held from READY until #2037 (with N7 and
 its cap fix) and G2b land; R10b, R10b' (including the parked-Preflight case)
 and R11 follow then.
+
+Restacked on #2037's 6b head `c9691ad9b2a` (N7, its cap fix, mutation
+barriers and the core-size maps):
+- The signed pre-check (a dead or NotReady Bearer refuses before provider
+  work) moved into `resume_prepared_signing`, after any pacing wait, so it runs
+  when signing actually begins.
+- `take_managed_with_cancel` keeps the per-generation Bearer index clean
+  beside the group BindGroup removal.
+- Fail-closed until R11: with `http-mutation-barriers`, a Bearer-bound
+  request that would join a mutation group is refused `Invalid` at issue,
+  because the group claim does not yet check each member's Bearer.
+

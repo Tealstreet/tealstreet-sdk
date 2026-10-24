@@ -289,6 +289,27 @@ New-contract REDs follow the API review:
      the #1949 receipt cap (a timer at the cap) or ends only through Session
      retire/failed or `fail_preflight`.
    It lands on the post-5b integration of this branch.
+   - `preflight_session_wait(handle, policy, terms, session, pending)` takes
+     the same custody and term checks as `preflight_read_context`, then marks
+     the Preflight `session_parked` and consumes its handoff. Nothing else may
+     issue, complete or FIFO-park it until its drain or ended disposition.
+   - `preflight_retry_session_wait(handle, context, evidence, session,
+     pending)` parks a failed Read call (`Stage::Parked`) in the failed
+     delivery's custody, or re-parks it from its ended disposition.
+   - Resume issues or selects the read under the drain's delivery; a
+     no-delivery resume is that attempt's custody for the event, like a Slot.
+   - A caller receipt cap gets one wait timer at the cap. On expiry the engine
+     seals the Preflight with Timeout first, then returns the pending once.
+     Without a cap, the wait ends only through retire/failed or a terminal.
+   - Retire/failed queue the read. After the callback,
+     `Venue::on_preflight_session_wait_ended` runs in that Preflight's own
+     ready custody. A hook that neither re-parks, issues a read nor finishes
+     fails the Preflight once with the ended error (NotSent).
+   - Parking inside #1896's Preflight-ready callback counts as progress.
+   - A capped Preflight's reads (issued directly or at resume) have windows
+     ending at the original receipt cap, so a late resume can never release
+     past the caller's receipt (codex-zs5e83 review P1). Uncapped Preflights
+     keep their declared window.
 4. **Bearer composition.** N8b and R10b' land with or after the Bearer hook's
    packet fence.
 

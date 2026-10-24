@@ -161,6 +161,7 @@ impl Venue for NativeAmend {
             })
             .collect::<Vec<_>>();
         let policy = PlanPolicy {
+            independent_calls: false,
             operation: Operation::Mutation,
             credential: Some(credential()),
             pacing: None,
@@ -223,6 +224,7 @@ impl Venue for NativeAmend {
                 &preflight,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Mutation,
                     credential: Some(credential()),
                     pacing: None,
@@ -631,6 +633,7 @@ impl Venue for ReadProbe {
             },
         ];
         let policy = PlanPolicy {
+            independent_calls: false,
             operation: Operation::Read,
             credential: None,
             pacing: None,
@@ -804,6 +807,7 @@ impl Venue for OrdinalProbe {
                 &preflight,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Mutation,
                     credential: Some(credential()),
                     pacing: None,

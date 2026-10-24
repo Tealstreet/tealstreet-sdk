@@ -656,13 +656,13 @@ fn session_contexts_require_the_session_credential_and_keep_their_owner() {
     })
     .unwrap();
     let leg = with(&mut engine, 2., |cx| {
-        cx.http_leg_context(&read, keyed.clone())
+        cx.session_leg_context(&read, keyed.clone())
     })
     .unwrap();
     assert_eq!(leg.owner(), session.owner());
     assert_eq!(leg.deadline(), read.deadline());
     assert_eq!(
-        with(&mut engine, 2., |cx| cx.http_leg_context(
+        with(&mut engine, 2., |cx| cx.session_leg_context(
             &read,
             Policy {
                 operation: Operation::Mutation,
@@ -782,7 +782,7 @@ fn a_session_that_is_not_repeat_safe_sends_one_write_at_a_time() {
     assert_eq!(mutation(&mut engine, &session, 2.), Err(Error::State));
     assert_eq!(
         with(&mut engine, 2., |cx| cx
-            .http_leg_context(&first, policy(Operation::Mutation))),
+            .session_leg_context(&first, policy(Operation::Mutation))),
         Err(Error::State)
     );
     assert_eq!(queue_result(&mut engine, &second, 2.), Err(Error::State));
@@ -1403,6 +1403,7 @@ fn a_planned_command_is_refused_a_session_wait_instead_of_parking() {
                 &preflight,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Read,
                     credential: None,
                     pacing: None,
@@ -1513,7 +1514,7 @@ fn a_keyless_login_carrying_credentials_in_its_body_must_not_route_public() {
         "the body carries the API key; Public/CORS egress would leak it"
     );
     let leg = with(&mut engine, 2., |cx| {
-        cx.http_leg_context(&login, policy(Operation::Mutation))
+        cx.session_leg_context(&login, policy(Operation::Mutation))
     })
     .unwrap();
     assert_eq!(
@@ -1988,10 +1989,55 @@ fn session_roots_declare_no_egress_and_their_legs_inherit_it() {
     assert_eq!(root.egress(), None);
     assert_eq!(root.routing_intent(), RoutingIntent::Public);
     let leg = with(&mut engine, 2., |cx| {
-        cx.http_leg_context(&root, policy(Operation::Read))
+        cx.session_leg_context(&root, policy(Operation::Read))
     })
     .unwrap();
     assert!(matches!(leg.owner(), Owner::Session { .. }));
     assert_eq!(leg.egress(), root.egress());
     assert_eq!(leg.routing_intent(), RoutingIntent::Public);
+}
+
+#[test]
+fn session_legs_have_their_own_entry_and_generic_legs_refuse_sessions() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let read = with(&mut engine, 1., |cx| {
+        cx.session_context(&session, policy(Operation::Read))
+    })
+    .unwrap();
+    let ids = engine.io.next_id;
+    let contexts = engine.io.request_contexts.contexts.len();
+    assert_eq!(
+        with(&mut engine, 2., |cx| cx
+            .http_leg_context(&read, policy(Operation::Read))),
+        Err(Error::Invalid),
+        "a Session leg never takes the generic path"
+    );
+    assert_eq!(engine.io.next_id, ids, "the refusal spends no identity");
+    assert_eq!(engine.io.request_contexts.contexts.len(), contexts);
+
+    let background = with(&mut engine, 2., |cx| {
+        cx.http_context(
+            crate::request_context::Scope::Background,
+            policy(Operation::Read),
+        )
+    })
+    .unwrap();
+    {
+        let ids = engine.io.next_id;
+        assert_eq!(
+            with(&mut engine, 2., |cx| cx
+                .session_leg_context(&background, policy(Operation::Read))),
+            Err(Error::Invalid),
+            "only a Session parent derives a session leg"
+        );
+        assert_eq!(engine.io.next_id, ids);
+    }
+
+    let leg = with(&mut engine, 2., |cx| {
+        cx.session_leg_context(&read, policy(Operation::Read))
+    })
+    .unwrap();
+    assert_eq!(leg.owner(), session.owner());
+    assert_eq!(leg.deadline(), read.deadline());
 }

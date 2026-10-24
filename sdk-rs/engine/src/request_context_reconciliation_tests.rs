@@ -42,6 +42,7 @@ mod reconciled_writes {
             preflight,
             steps,
             PlanPolicy {
+                independent_calls: false,
                 operation: Operation::Mutation,
                 credential: Some(credential()),
                 pacing: None,

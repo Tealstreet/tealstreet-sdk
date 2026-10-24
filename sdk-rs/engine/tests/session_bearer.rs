@@ -349,6 +349,7 @@ impl Probe {
                     credential: None,
                     pacing: None,
                     retry: RetryPolicy::Never,
+                    independent_calls: false,
                 },
             )
             .unwrap();
