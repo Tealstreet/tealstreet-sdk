@@ -1447,11 +1447,16 @@ impl Body {
         }
     }
     fn next_wake(&self) -> f64 {
-        self.entries
+        let wake = self
+            .entries
             .iter()
             .filter(|entry| entry.credit == Credit::Unissued && !entry.notified && !entry.parked)
             .filter_map(|entry| entry.eligible_at)
-            .fold(self.handle.deadline(), f64::min)
+            .fold(self.handle.deadline(), f64::min);
+        self.serial
+            .as_ref()
+            .and_then(|serial| serial.condition_deadline())
+            .map_or(wake, |at| wake.min(at))
     }
 }
 
@@ -1869,6 +1874,9 @@ mod history;
 
 #[path = "request_context_serial_plan.rs"]
 mod serial;
+
+#[path = "request_context_condition_wait.rs"]
+mod condition_wait;
 
 #[cfg(all(test, not(feature = "http-mutation-barriers")))]
 #[path = "request_context_group_disabled_tests.rs"]

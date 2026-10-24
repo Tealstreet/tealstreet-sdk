@@ -16,9 +16,26 @@ pub(super) struct Serial {
     /// Read calls sign with the Preflight's read role (or go unsigned), never
     /// with the Plan's write credential.
     read: Option<Credential>,
+    /// A pending condition wait: its generation and engine deadline (ROOT when
+    /// unbounded). `waits` numbers every wait this Plan has taken.
+    pub(super) condition: Option<(u64, f64)>,
+    pub(super) waits: u64,
+}
+
+/// How a continuation's next call becomes eligible.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Next {
+    Now,
+    After(u32),
+    /// Held on a venue condition until `release_condition_wait`.
+    Parked,
 }
 
 impl Serial {
+    pub(super) fn condition_deadline(&self) -> Option<f64> {
+        self.condition.map(|(_, at)| at).filter(|at| *at < ROOT)
+    }
+
     pub(super) fn terms(
         &self,
         write: &Option<Credential>,
@@ -128,6 +145,8 @@ impl<P> Cx<'_, P> {
                 refusals_complete: policy.refusals_complete,
                 call: first,
                 read: intent.read_credential,
+                condition: None,
+                waits: 0,
             }),
         )?;
         let slot = self
@@ -151,7 +170,7 @@ impl<P> Cx<'_, P> {
         context: &Context,
         next: SerialCall,
     ) -> Result<Slot, Error> {
-        self.continue_serial(plan, slot, context, next, None)
+        self.continue_serial(plan, slot, context, next, Next::Now)
     }
 
     /// As `continue_serial_plan`, but the next call is issued from the Plan
@@ -168,20 +187,20 @@ impl<P> Cx<'_, P> {
         if delay_ms == 0 {
             return Err(Error::Invalid);
         }
-        self.continue_serial(plan, slot, context, next, Some(delay_ms))
+        self.continue_serial(plan, slot, context, next, Next::After(delay_ms))
             .map(drop)
     }
 
     // Every check precedes the first change: a refusal leaves the current call
     // settleable exactly as it was.
     #[inline(never)]
-    fn continue_serial(
+    pub(super) fn continue_serial(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
         next: SerialCall,
-        delay_ms: Option<u32>,
+        wake: Next,
     ) -> Result<Slot, Error> {
         validate_call(next)?;
         let body = self.io.request_contexts.validate_plan(plan, self.now)?;
@@ -203,7 +222,7 @@ impl<P> Cx<'_, P> {
             // A released Read's failure retries once more as a fresh Read; no
             // DATA or write fact is invented for it.
             Stage::Active { failed: true }
-                if delay_ms.is_some() && context.operation() == Operation::Read =>
+                if matches!(wake, Next::After(_)) && context.operation() == Operation::Read =>
             {
                 if !self
                     .io
@@ -244,11 +263,14 @@ impl<P> Cx<'_, P> {
             after_refusal: &[],
         }];
         let steps = [StepBound {
-            wait_ms: delay_ms.unwrap_or(0),
+            wait_ms: match wake {
+                Next::After(delay_ms) => delay_ms,
+                Next::Now | Next::Parked => 0,
+            },
             calls: &calls,
         }];
         let schedule = Schedule::from_steps(&steps)?;
-        self.commit_serial_continuation(plan, context, leg, next, schedule, delay_ms)
+        self.commit_serial_continuation(plan, context, leg, next, schedule, wake)
     }
 
     fn commit_serial_continuation(
@@ -258,7 +280,7 @@ impl<P> Cx<'_, P> {
         leg: Option<u64>,
         next: SerialCall,
         schedule: Schedule,
-        delay_ms: Option<u32>,
+        wake: Next,
     ) -> Result<Slot, Error> {
         self.io.retire_http_leg(context);
         self.io.request_contexts.contexts.remove(&context.leg());
@@ -315,11 +337,15 @@ impl<P> Cx<'_, P> {
             signing,
             credit: Credit::Unissued,
             call: None,
-            eligible_at: Some(eligibility(now, delay_ms.unwrap_or(0), ROOT)),
+            eligible_at: match wake {
+                Next::Now => Some(eligibility(now, 0, ROOT)),
+                Next::After(delay_ms) => Some(eligibility(now, delay_ms, ROOT)),
+                Next::Parked => None,
+            },
             // An immediate call is issued in this custody; a delayed one
-            // wakes the venue through the Plan timer.
-            notified: delay_ms.is_none(),
-            parked: false,
+            // wakes the venue through the Plan timer, a parked one on release.
+            notified: wake == Next::Now,
+            parked: wake == Next::Parked,
         };
         body.handoff = handoff;
         body.serial.as_mut().expect("validated serial Plan").call = next;

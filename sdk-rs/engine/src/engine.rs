@@ -2651,6 +2651,17 @@ pub trait Venue {
     ) {
     }
 
+    /// An engine-bounded condition wait expired, in failure custody. Fail the
+    /// owner here; returning without a terminal seals it once as NotSent.
+    #[cfg(feature = "http-plans")]
+    fn on_condition_wait_expired(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _owner: &crate::request_context::ConditionOwner,
+        _error: VenueError,
+    ) {
+    }
+
     /// Bounded native correlation metadata only. No credential, outbound packet
     /// or recipe may be retained here. Managed mutations require this codec.
     fn capture_http_reconciliation(
@@ -4635,8 +4646,9 @@ impl<V: Venue> Engine<V> {
             return false;
         };
         let Some(plan) = self.io.request_contexts.plan_for_timer(*timer) else {
-            return false;
+            return self.expire_preflight_condition(now, *timer);
         };
+        self.expire_plan_condition(now, &plan);
         self.flush_http_plans(now);
         request_context_registry::ContextRegistry::rearm_live_plan(&mut self.io, &plan);
         true
