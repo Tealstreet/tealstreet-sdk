@@ -580,3 +580,157 @@ fn native_identity_local_refusal_is_once_and_creates_no_transport() {
         assert!(e.store().positions().is_empty());
     }
 }
+
+#[test]
+fn identity_leg_expiry_has_one_typed_terminal_instead_of_silent_drop() {
+    let (mut e, actions) = identity(false);
+    let read = request(&actions, "currency=USDT");
+    let body = r#"{"code":0,"data":{"account":{"userID":"expired"}}}"#;
+    response(&mut e, NOW + 20_000., read.id, 200, body);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 42, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        failures.len(),
+        1,
+        "expired identity owns one typed terminal, not a silent DATA rejection"
+    );
+    assert_eq!(failures[0].kind, Some(safe_cex_engine::ErrorKind::Timeout));
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 42, .. })
+    )));
+    response(&mut e, NOW + 20_001., read.id, 200, body);
+    assert!(
+        e.drain_actions().next().is_none(),
+        "duplicate expiry delivery is inert"
+    );
+}
+
+#[test]
+fn reconciliation_expiry_releases_reading_and_native_backoff_issues_fresh_primary_read() {
+    let (mut e, actions, wake) = uncertain();
+    let old = request(&actions, "activeList");
+    let expired_at = wake + 20_000.;
+    response(
+        &mut e,
+        expired_at,
+        old.id,
+        200,
+        r#"{"code":10002,"data":null}"#,
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let retry = actions.iter().find_map(|action| match action {
+        Action::SetTimer { timer, at_ms } if *at_ms > expired_at => Some((*timer, *at_ms)),
+        _ => None,
+    });
+    assert!(
+        retry.is_some(),
+        "physical expiry must release native reading and retain the owed reconciliation through backoff"
+    );
+    let (timer, at) = retry.unwrap();
+    e.handle(at, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(
+        requests(&actions)
+            .iter()
+            .filter(|r| r.url.contains("activeList"))
+            .count()
+            + prepares(&actions, "activeList"),
+        1,
+        "native retry must issue one fresh physical read"
+    );
+    if let Some(fresh) = requests(&actions)
+        .iter()
+        .find(|r| r.url.contains("activeList"))
+    {
+        assert_ne!(fresh.id, old.id);
+        assert_eq!(fresh.route, Some(RequestRoute::Primary));
+    }
+    for action in &actions {
+        if let Action::ManagedHttp(action) = action
+            && let HttpAction::Prepare {
+                intent, request, ..
+            } = action.as_ref()
+            && request.url.contains("activeList")
+        {
+            assert_eq!(
+                *intent,
+                safe_cex_engine::request_context::RoutingIntent::Primary
+            );
+        }
+    }
+    no_numeric_terminal(&actions);
+}
+
+#[test]
+fn native_both_currency_failures_release_pending_and_schedule_one_poll() {
+    for reverse in [false, true] {
+        let (mut e, actions, _) = started();
+        let mut reads = [
+            request(&actions, "currency=USDT"),
+            request(&actions, "currency=USDC"),
+        ];
+        if reverse {
+            reads.reverse();
+        }
+        e.handle(
+            NOW + 1.,
+            Event::HttpFailed {
+                request: reads[0].id,
+                error: "offline",
+            },
+        );
+        let first: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !first.iter().any(|a| matches!(a, Action::SetTimer { .. })),
+            "remaining sibling still owns the aggregate cycle"
+        );
+        e.handle(
+            NOW + 2.,
+            Event::HttpFailed {
+                request: reads[1].id,
+                error: "offline",
+            },
+        );
+        let last: Vec<_> = e.drain_actions().collect();
+        let polls: Vec<_> = last
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            polls.len(),
+            1,
+            "both failures release aggregate custody once"
+        );
+        assert!(e.store().positions().is_empty());
+        assert_eq!(e.store().balance().total, 0.);
+        e.handle(
+            NOW + 3.,
+            Event::HttpFailed {
+                request: reads[0].id,
+                error: "duplicate",
+            },
+        );
+        assert!(e.drain_actions().next().is_none());
+        let (timer, at) = polls[0];
+        e.handle(at, Event::TimerFired { timer });
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert_eq!(
+            requests(&actions)
+                .iter()
+                .filter(|r| r.url.contains("accountPositions"))
+                .count(),
+            2
+        );
+        no_numeric_terminal(&actions);
+    }
+}

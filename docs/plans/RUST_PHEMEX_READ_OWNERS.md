@@ -40,9 +40,13 @@ A physical leg cannot extend the caller deadline through signing, routing,
 Bind/reprepare, Claim or response. Refused admission creates no transport owner.
 
 Background Pending state carries its own AdmittedRead plus native Request or
-OrdersRead; it is not a borrowed command entry. Before streamed account_item,
-response parsing/publication, global rate-limit mutation or error cleanup,
-validate_background_read_http_delivery against that exact read. Native cycle,
+OrdersRead; it is not a borrowed command entry. Live DATA delivery (streamed
+account_item, response parsing/publication and global rate-limit mutation) must
+pass validate_background_read_http_delivery against that exact read. Failure
+cleanup has a separate path: live delivery validation may return TimedOut for an
+exact physical timeout, and preparation/provider/queue refusal may have no DATA
+scope at all. Never return solely on that validation failure and strand custody.
+Native cycle,
 write/slice revisions, SnapshotBuilder coverage, per-row versions/holds and
 currency validation remain additional predicates; shared Context does not replace
 them. A successful currency can publish while its peer fails. Preserve aggregate
@@ -51,6 +55,20 @@ The native aggregate cleanup is not a renewable transport deadline: both read
 bounds derive from the original cycle start, including partial admission failure.
 No duplicate failure may clear a newer cycle's bit or schedule a second poll.
 At equality, deny streamed/response effects even without TimerFired first.
+
+Failure-only cleanup consumes the exact returned Pending/read handle, attempts
+finish_http_context to retire that handle (expired current handles may retire),
+and independently checks native cycle+currency or symbol+active-read custody.
+It releases matching pending/reading ownership and schedules native backoff once;
+no row/Store publication or global pause mutation is allowed. Retired/duplicate
+old failure cannot clear a newer read, cycle bit or owed reconciliation generation.
+A rejected finish call is not permission to clear arbitrary work; use only the
+matching Pending's native custody. For queue refusal, the Result's returned
+Pending is the sole cleanup input. For admission refusal before a Pending/read
+exists, undo only the native slot reserved by that admission attempt. Do not
+invent a live Context or call a DATA validator to obtain failure cleanup rights.
+Identity timeout/preparation/provider failure likewise uses its owned root/leg
+terminal path, not a blanket live-DATA early return.
 
 Reconciliation preserves the native signed-write-expiry +5s not_before fence,
 paused_until, placing guard, one-read flag, generation/lost-ID/cancel-late logic,
@@ -80,6 +98,20 @@ Before production certification add parked-provider, delayed route/Claim,
 partial-admission pressure, stream-before-expiry then response-at-expiry,
 cycle/write/slice race, failure-first/both currency orders, stale 429, per-symbol
 reconciliation generations, malformed rows/10002 and exact typed refusal controls.
+The following ACTUAL managed recovery controls are mandatory source/certification
+gates after actual #1974; native HttpFailed injection is not their substitute:
+
+| Failure input | Required recovery proof |
+| --- | --- |
+| Exact physical Timeout at deadline, including no prior timer ingress | Failure callback receives the expired handle; both currency-leg orders release matching custody and poll again; OrdersRead releases reading and native backoff issues a fresh read; one cleanup, no data/pause effects |
+| Real preparation refusal through the host handshake | Returned failure Pending is cleaned once even without DATA delivery; sibling currency can commit; native retry can admit after capacity/setup recovers |
+| Parked provider returns a typed refusal or expires | Same exact ownership cleanup, zero physical send/Store mutation, late provider completion inert; recovered provider allows the native next attempt |
+| Genuine shared queue capacity refusal returning Pending | Reserved native bit/reading slot is released once without a fake Context or callback; free capacity, fire native retry/poll and prove both currency and per-symbol reads issue |
+| Old timeout/provider/queue completion after a replacement owns work | Old failure cannot clear newer pending/reading or pause/publish; newer response still commits and cleanup credits return once |
+
+Keep these failure controls separate from live DATA expiry/429 REDs. Their final
+receipt must include real Prepare/Bind/Claim/provider/timeout transitions, not
+only assertions that a Prepare was expected on the original legacy source.
 Run focused tests and strict Clippy locally; full native and CPU/memory/size gates
 in CI. Request uufub4 API/custody and ih35js native/REST/financial reviews, plus
 signer-owner composition review. Prune only actually retired own inventory sites
@@ -120,7 +152,7 @@ payload has an identical live financial positive. The native account 20s timer
 is deliberately absent from equality REDs; expiry must be a delivery predicate.
 No assertion claims an actual managed provider/Claim happened on legacy source.
 
-Commands from sdk-rs (bounded build jobs 4):
+Commands from sdk-rs (historical execution used jobs 4; subsequent shared-Mac runs use jobs 2):
 `cargo test -p safe-cex-venue-phemex --test request_context_read_owners`
 (expected assertion failure), and
 `cargo clippy -p safe-cex-venue-phemex --test request_context_read_owners -- -D warnings`
@@ -135,3 +167,29 @@ An independent scan of current production sites equals the exact requested
 17e93 manifest, and all production/map/checker bytes are unchanged. This is a
 base-drift limitation, not a regular ratchet PASS; no override was used. Recheck
 normally after actual #1974/current-tip integration before any production PR.
+
+## Failure-custody review correction
+
+uufub4 and ih35js found that live DATA validation before error cleanup could
+strand pending bits/OrdersRead.reading at expiry. The admission section now
+separates DATA/stream/429 permission from exact failure-only retirement and native
+cleanup. finish_http_context explicitly permits an expired current handle to
+retire without granting sends; no copied issuer/attempt check is introduced.
+
+Three appended original-source controls execute: identity leg expiry requires
+one typed Timeout terminal (RED), expired reconciliation retains native retry
+and a fresh Primary read (RED), and both currency failures in either order free
+pending custody and produce exactly one poll (GREEN). The first two present a
+real response at the expiry boundary; on native legacy source they do not claim
+an actual managed Timeout callback. The both-failure control injects ordinary
+HttpFailed and is likewise not a preparation/provider/queue refusal receipt.
+Actual managed failure transitions remain the explicit matrix gate above.
+
+Expanded result: 19 executed, 10 named assertion RED / 9 GREEN / 0 ignored.
+All original 16 test/helper bodies are byte-exact to 8ffc9c0d73a; only three
+controls were appended. Initial new typed-error assertion required Some(Timeout)
+for the optional ErrorKind field; corrected before the recorded execution.
+Scoped strict Clippy, rustfmt, diff whitespace and fixture secret scan pass.
+Production, existing fixtures, Cargo and inventories/checkers remain base-exact.
+Independent uuf original-8ffc archive receipt: 8 RED/8 GREEN, no setup failures;
+that receipt does not claim execution of these three added controls.
