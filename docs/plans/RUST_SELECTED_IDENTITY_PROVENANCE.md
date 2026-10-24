@@ -420,13 +420,25 @@ engine, even with the same refs/subjects and matching numeric handles, has a
 new issuer and cannot revive any old witness or consumed grant.
 
 WASM order: normal `EngineHost.dispose()` first respects the existing group
-handoff guard, before fencing or cleanup effects. Retirement may refuse before
-the tombstone, or the host may defer the WHOLE teardown until the last handoff;
-it must not flip liveness between committed sibling dispatches. The exact owner
-hook remains review-gated. A preclaim tombstone denies every group leg with zero
-HTTP. A retirement attempt from the first dispatch must preserve all committed
-sibling handoffs and conservative Unknown/accepted-ID evidence; no sibling can
-be changed to NotSent or prepared again by per-member liveness validation.
+handoff guard, before fencing or cleanup effects. `HandoffInProgress` is a
+pre-effect signal: it changes no liveness, ingress fence, cleanup-once state or
+resource ownership. On that signal the host defers the WHOLE teardown and
+retries exactly once after the last committed sibling handoff, in that same
+event or at the end of the handoff loop. It must not fence ingress halfway,
+report disposal complete with a live snapshot, or flip liveness between sibling
+dispatches. The exact owner hook remains review-gated. A preclaim tombstone
+denies every group leg with zero HTTP. A retirement attempt from the first
+dispatch preserves all committed sibling handoffs and conservative
+Unknown/accepted-ID evidence; no sibling becomes NotSent or prepares again
+through per-member liveness validation.
+
+Mandatory source-stage control: request dispose between two committed sibling
+dispatches; assert zero sibling NotSent, zero reprepare, one retirement only
+after the last handoff, and a dead snapshot when disposal completes. The pending
+teardown remains internal to that handoff event; the public disposal boundary
+must not return an observable completed/disposed state while the snapshot is
+still live. Exact synchronous/reentrant completion semantics need the host and
+G2b owners' source review; no fake asynchronous compatibility path is implied.
 
 When healthy (`deadError === undefined`), the common cleanup establishes the
 public fence and a local once-only guard, then calls the plain administrative
@@ -438,14 +450,18 @@ private registry cleanup may bypass only dead-snapshot normal validation using
 its exact engine/owner failure-only witness. Released journals, accepted IDs,
 consumed budgets and one common group seal remain intact.
 
-When poisoned (`deadError !== undefined`), cleanup must not read ANY engine
+When failed (`deadError !== undefined`), cleanup must not read ANY engine
 property, getter or export, including retirement, current_group/claim validation
 and free. It settles/cancels host-owned commands, transports, signing jobs,
 sockets and timers only; interrupted writes stay Unknown. This is the ONE
 permitted retirement-hook skip, based on deadError rather than ownsEngine or
 missing-hook detection. The engine cannot run again; its inert bounded records
 remain until the instance is discarded. Owned cleanup accepts the bounded leak
-of one trapped engine rather than re-entering a possibly torn WASM heap.
+of one failed engine rather than re-entering a possibly torn WASM heap.
+This choice covers ALL deadError causes, including untrapped identity/resource
+exhaustion, not only RuntimeError/RangeError traps. Exhaustion cleanup also skips
+retire and free conservatively; no engine getter is used to distinguish causes.
+Source-stage controls must cover both trap and untrapped-exhaustion entry paths.
 
 Healthy borrowed and owned hosts both retire; ownsEngine controls free only.
 A required production retirement hook cannot be silently skipped in the healthy
@@ -564,8 +580,9 @@ retirement throw followed by every later host cleanup, trap mid-call followed by
 dispose with zero engine-export/getter/free access, and untouched interrupted-write
 Unknown/IDs. The native panic variant is distinct from owned, retained and
 cancelled-future cases. A preclaim tombstone denies all legs with zero HTTP; a
-first-dispatch retirement attempt must refuse before tombstone or defer the whole
-retirement until every committed handoff is complete. Failed seal still leaves
+first-dispatch retirement attempt returns only a pre-effect HandoffInProgress;
+the host defers the whole teardown and retries once after every committed
+handoff, with a dead snapshot before disposal completes. Failed seal still leaves
 setup mutable with no witness. Candidate native codec forms and exact shared
 registry/G2b/native/host hunks remain owner-reviewed before implementation.
 
