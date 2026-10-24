@@ -7304,3 +7304,12 @@ support requires a separate member-order proof and has no individual fallback.
 The existing Kraken secret-digest allocator stays only for its uncut-over native
 consumer, whose stable-namespace continuity and hosted nonce transport need
 separate certification before adoption.
+
+Selected reads carry nonce authority only through `queue_with_nonce`, minted
+from their private retained selection. Ordinary AdmittedRead/ReadLeg queues
+reject a declared nonce claim before request/signing IDs. The nonce queue
+requires the exact authority it just minted; missing, substituted or invalid
+subject claims return the pending wrapper with typed InvalidInput for contextual
+settlement. Nonce-free selected queues and direct managed Slots-claim requests
+keep their existing paths. Each physical retry/queue mints afresh; no reselection
+or reservation occurs while the read snapshot is held.

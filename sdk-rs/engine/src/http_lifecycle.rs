@@ -16,6 +16,10 @@ mod mutation_group;
 enum ManagedRecipe {
     Unsigned(&'static [(&'static str, &'static str)]),
     Signed(Box<dyn crate::SignStep>),
+    SelectedRead(
+        Box<dyn crate::SignStep>,
+        Option<std::sync::Arc<crate::nonce::ClaimAuthority>>,
+    ),
 }
 
 pub(super) struct Managed {
@@ -137,6 +141,27 @@ impl<P> Cx<'_, P> {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn request_selected_read_managed(
+        &mut self,
+        context: Context,
+        method: Method,
+        url: String,
+        body: Option<String>,
+        step: Box<dyn crate::SignStep>,
+        claim: Option<std::sync::Arc<crate::nonce::ClaimAuthority>>,
+        pending: P,
+    ) -> Result<RequestId, (P, Error)> {
+        self.queue_managed(
+            context,
+            method,
+            url,
+            body,
+            ManagedRecipe::SelectedRead(step, claim),
+            pending,
+        )
+    }
+
     fn queue_managed(
         &mut self,
         context: Context,
@@ -179,9 +204,10 @@ impl<P> Cx<'_, P> {
         pending: P,
         #[cfg(feature = "http-plans")] admission: Option<&request_context_registry::OwnedAdmission>,
     ) -> Result<RequestId, (P, Error)> {
-        let (step, public_headers) = match recipe {
-            ManagedRecipe::Unsigned(headers) => (None, headers),
-            ManagedRecipe::Signed(step) => (Some(step), &[][..]),
+        let (step, public_headers, selected_claim) = match recipe {
+            ManagedRecipe::Unsigned(headers) => (None, headers, None),
+            ManagedRecipe::Signed(step) => (Some(step), &[][..], None),
+            ManagedRecipe::SelectedRead(step, claim) => (Some(step), &[][..], Some(claim)),
         };
         if let Err(error) = self.io.request_contexts.validate_send(&context, self.now) {
             return Err((pending, error));
@@ -202,6 +228,16 @@ impl<P> Cx<'_, P> {
             .as_ref()
             .and_then(|step| step.nonce_claim())
             .map(|claim| claim.authority());
+        if let Some(expected) = selected_claim {
+            let matches = match (&expected, &nonce_claim) {
+                (None, None) => true,
+                (Some(expected), Some(actual)) => std::sync::Arc::ptr_eq(expected, actual),
+                _ => false,
+            };
+            if !matches {
+                return Err((pending, Error::Invalid));
+            }
+        }
         if let Some(authority) = &nonce_claim {
             let installed = match authority.selection.slot() {
                 CredentialSlot::Primary => self.io.identities.primary.as_ref(),

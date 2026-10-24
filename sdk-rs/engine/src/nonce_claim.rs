@@ -37,6 +37,11 @@ impl NonceSelectionError {
 }
 
 impl NonceClaim {
+    /// Metadata from the selected identity; never an input for key selection.
+    pub fn slot(&self) -> crate::CredentialSlot {
+        self.authority.selection.slot()
+    }
+
     pub(crate) fn mint(
         domain: &'static NonceDomain,
         selection: Selection,
@@ -182,6 +187,8 @@ mod tests {
             .select_with_nonce(CredentialRole::Read { scope: None }, &KRAKEN)
             .unwrap();
         assert_ne!(p.slot(), s.slot());
+        assert_eq!(pc.slot(), p.slot());
+        assert_eq!(sc.slot(), s.slot());
         assert_ne!(pi.signing, si.signing);
         let a = pc.authority().reserve(1000., 9000.).unwrap();
         let b = sc.authority().reserve(999., 99000.).unwrap();
