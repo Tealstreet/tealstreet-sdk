@@ -30,8 +30,8 @@ no current vulnerability is asserted merely because this new contract is absent.
 Provisional vocabulary, exact API pending review:
 
 ```rust
-// Trusted construction, before start; no venue callback can mint this snapshot.
-engine.install_identity_snapshot(identities, provider, subjects, setup_policy)
+// Final seal after host injections, before start; no venue can mint this snapshot.
+engine.install_identity_snapshot(IdentitySetup { subjects, credential_policy })
     -> Result<SetupSnapshot, SetupError>
 // Shared selection resolves an opaque binding from that installed snapshot.
 // Admission couples it to this exact owner/leg; no arbitrary external Context.
@@ -189,13 +189,7 @@ Names and signatures proposed for `engine::identity_snapshot`:
 
 ```rust
 pub struct IdentitySetup {
-    pub identities: signing::Identities,
-    pub provider: Option<signing::Provider>,
     pub credential_policy: signing::CredentialSetupPolicy,
-    pub host_algorithms: Option<Vec<signing::Algorithm>>,
-    pub private_feed: signing_policy::PrivateFeedPolicy,
-    pub public_feed: PublicFeedPolicy,
-    pub account_startup: bool,
     pub subjects: SubjectSlots,
 }
 pub struct SubjectSlots {
@@ -213,7 +207,8 @@ pub struct SubjectId { /* private codec domain, environment, canonical bytes */ 
 pub struct IdentitySnapshot { /* private Arc<InstalledSetup> */ }
 pub enum SetupError {
     Started, AlreadyInstalled, Retired, MissingIdentity, InvalidIdentity,
-    MissingSubject, SubjectConflict, UnsupportedCodec, Policy, Capability,
+    MissingSubject, SubjectConflict, SecondaryRequiresPrimary,
+    UnsupportedCodec, Policy, Capability,
 }
 impl<V: Venue> Engine<V> {
     pub fn install_identity_snapshot(&mut self, setup: IdentitySetup)
@@ -231,16 +226,52 @@ snapshot, in addition to the existing Context issuer. One slot/subject cannot
 be swapped into a witness after construction. Installation mints no HTTP IDs,
 owner credits, deadlines, nonce reservations or provider signing jobs.
 
-Validate a temporary complete tuple, applying `CredentialSetupPolicy` to a local
-copy of identities, resolving any declared fallback once, checking required refs
-and supported capabilities, and matching subjects to the complete slots. Only
-then replace the engine's final identities/provider/policies and install the
-snapshot together. The final identities must be exactly the refs passed to the
-venue constructor by registry setup; a differing tuple refuses. No observable
-partial registration or frozen setter survives failure. A second install always
-refuses, including an identical tuple; there is no replace/uninstall/revive API.
-A public-only empty-identity engine needs no provenance witness. An identity
-without required resolved subject metadata cannot opt into provenance yet.
+Installation is the final seal, not part of registry allocation/build. Registry
+construction resolves trusted refs, subject inputs and policy, but mints no
+snapshot. EngineHost then performs its existing `setEntropy`,
+`setSigningEntropy` and `useExternalSigner` configuration while still unsealed.
+Only after all of these succeed does the constructor call the proposed WASM
+`sealIdentitySnapshot()` administrative entry; no start, admission, provider
+job or HTTP work can precede that seal for a provenance-enabled engine. Thus
+host injection remains legal, and every dependent setter freezes immediately
+when the actual install succeeds. There is no installed-but-mutable interval.
+
+The installation input contains only subjects and the trusted credential policy;
+the engine captures its actual final registered identities, provider, host
+algorithms, feed policies and account-startup setting from its configuration.
+Entropy providers stay in their existing engine storage and are frozen in place;
+neither their secret state nor a new seed is copied into the witness. Validate a
+temporary complete tuple, including policy checks against a local identity copy.
+The result must equal the exact trusted refs passed to the venue constructor;
+do not normalize or install a different identity at this late boundary. Publish
+the one snapshot only after all validation succeeds. No provider/ref/policy
+replacement occurs as a side effect of validation. On every failure, existing
+pre-install settings remain unchanged and legal to replace: no partial snapshot,
+partial subject registration, consumed owner/ID or frozen half-state remains.
+A second install always refuses, including an identical tuple; there is no
+replace/uninstall/revive API.
+
+Installation errors are explicit. A complete identity without its required
+resolved trading-account subject is `MissingSubject`. A subject for an absent
+slot, refs different from the registry's trusted identity, or unequal resolved
+Primary/Secondary trading-account domain/environment/value is `SubjectConflict`
+(malformed refs are `InvalidIdentity`). Secondary without Primary is
+`SecondaryRequiresPrimary`, not missing-equals-missing or a fallback. The same
+failure atomicity applies to all these errors. A public-only empty-identity
+engine needs no provenance witness; a private family without resolved native
+subjects cannot enable this contract until its discovery/codec prerequisite is
+reviewed. No implicit legacy fallback satisfies a provenance-required caller.
+
+For snapshot-aware WASM construction, `identitySnapshotRequired()` is a closed
+capability established by the trusted constructor. A required engine must expose
+`sealIdentitySnapshot()` and the reviewed private retirement path; missing hooks
+are a construction error, never an optional skip. The constructor seals after
+the final host injection and before returning a usable host. Native Host builders
+likewise finish `with_signer`/entropy injection before `Host::run` seals and
+starts; a direct native caller must explicitly install before start. A required
+engine started unsealed returns typed NotSent startup refusal before venue
+callbacks or IDs. Earlier fake engines with no provenance requirement keep
+their existing host compatibility; they cannot produce a bound read.
 
 ### Exact dependent-setter inventory
 
@@ -250,7 +281,7 @@ mutation and preserve existing post-start error contracts where already typed.
 
 | Existing Engine setter | Installed-snapshot behavior | Constructor consequence |
 | --- | --- | --- |
-| `set_signer(Option<Provider>) -> Result<(), VenueError>` | Refuse replacement and removal, even before start | Provider is installed by the atomic tuple |
+| `set_signer(Option<Provider>) -> Result<(), VenueError>` | Refuse replacement and removal, even before start | Final pre-injected provider is captured at seal |
 | `set_identities(Identities) -> Result<(), VenueError>` | Refuse every later registration | Registry's existing final trusted refs converge on that tuple |
 | `set_host_algorithms(Option<Vec<Algorithm>>) -> Result<(), VenueError>` | Refuse capability replacement/removal | Capture host declaration with the provider |
 | `set_private_feed_policy(PrivateFeedPolicy) -> Result<(), VenueError>` | Refuse | Capture final private-feed policy |
@@ -271,11 +302,14 @@ does not guarantee that an external provider will remain available.
 
 Registry source map: the existing trusted setup paths registering identities at
 `registry/src/lib.rs` near 1183, 1274 and 1436, and shared `finish` near 195, must
-converge rather than registering a second tuple. The registry resolves subjects
-before the one install and before `visitor.visit(engine)` exposes the engine.
+converge rather than registering a second tuple. The registry resolves trusted
+subject inputs before exposing a staged engine through `visitor.visit(engine)`;
+that staged value has no snapshot/binding or private provenance authority yet.
+The host completes its actual provider/capability/entropy injection, then seals
+that exact tuple before start. No venue callback participates in sealing.
 Absent codec/discovery metadata blocks that family's provenance adoption; this
 PR does not claim its private reads are newly available. The constructor owners
-must review those hooks before source edits; no source has been changed here.
+must review those hooks before source edits; no runtime source has changed here.
 
 ### Subject codec and canonical account relation
 
@@ -283,8 +317,9 @@ Proposed codec boundary:
 
 ```rust
 pub enum SubjectCodec { CoinbasePortfolio, GrvtTradingAccount }
+pub enum SubjectEnvironment { Production, Sandbox }
 pub struct AccountSubjectInput {
-    pub environment: String,
+    pub environment: SubjectEnvironment,
     pub signer: Option<String>,
     pub trading_account: Option<String>,
     pub fee_subject: Option<String>,
@@ -295,6 +330,10 @@ pub fn resolve_subject(codec: SubjectCodec, input: AccountSubjectInput)
 ```
 
 These are candidate native codecs for review, not cleared family adoptions.
+Environment is a closed enum, never free text. Unknown serialized variants or
+a codec/environment pair not supported by native setup refuse; any additional
+environment requires a reviewed variant. Domain/environment are not inferred
+from a user URL, arbitrary casing or string aliases.
 Do not add a generic `String -> SubjectId` constructor. Codec domain and network/
 environment are part of identity: same text in another venue/environment never
 matches. The codec validates lengths, format and native canonical representation;
@@ -373,12 +412,17 @@ All retained snapshot/binding handles then fail validation permanently. A new
 engine, even with the same refs/subjects and matching numeric handles, has a
 new issuer and cannot revive any old witness or consumed grant.
 
-WASM order: `EngineHost.dispose()` fences public ingress (`disposed=true`) first;
-a private direct call to `engine.retireIdentitySnapshot()` then retires native
-authority before abort/transport cleanup, before clearing signer handles, and
-before an owned engine is freed. This call must not go through `invoke`, which
+WASM order: both `EngineHost.dispose()` and `failEngine()` fence public ingress
+(`disposed=true`) before entering the common `cleanup()`. Retirement belongs at
+the top of `cleanup()`, after its local once-only guard and before even command
+settlement/deadline release, socketFailures, HTTP, provider jobs, socket/timer
+cleanup, signer clearing or owned-engine free. Direct cleanup must also establish
+the public fence; `disposed` alone is not the once-only cleanup guard because
+both entry paths set it first. The private retirement call must not use `invoke`, which
 correctly rejects disposed hosts, or dispatch actions/callbacks from teardown.
-Cleanup attempts all remaining releases if one throws. It runs once for BOTH
+It ignores any return value and never drains actions or normal engine callbacks.
+Cleanup attempts all remaining releases if retirement, command settlement or a
+resource release throws. It runs once for BOTH
 borrowed and owned hosts; `ownsEngine=false` only controls `free`, not retirement.
 A missing hook on a test double does not permit a snapshot-aware production host
 to silently skip retirement; exact construction capability detection is a source
@@ -388,7 +432,14 @@ Native `Host::run` already returns its engine after stopping. Fence inbox/comman
 admission before invoking the same engine retirement hook, then abort existing
 managed/provider/socket/timer resources before returning that retained engine.
 Drop/unwind paths need the same retirement guarantee; do not perform normal
-venue callbacks from Drop. Proposed private cleanup does not rely on a disposed
+venue callbacks from Drop. Name an explicit cancellation control: poll a native
+`Host::run` future with live HTTP/provider/socket/timer ownership, then drop that
+future without reaching its normal return. A retained snapshot witness must be
+retired and resources aborted without a new venue callback or success terminal.
+Pair that with normal owned-drop and retained-engine-return controls; cancellation
+is not covered by either of them. The safe owned-engine return/Drop source shape
+(for example an `Option<Engine>` taken only after stop) needs exact source review.
+Proposed private cleanup does not rely on a disposed
 JS wrapper to prove Rust liveness. Native owned and retained-engine controls,
 plus WASM borrowed/owned controls, are required before runtime readiness.
 
@@ -397,8 +448,10 @@ plus WASM borrowed/owned controls, are required before runtime readiness.
 Existing three native tests remain GREEN compatibility evidence, not REDs.
 The next controls are explicitly NEW-CONTRACT. First executable REDs can test
 actual `EngineHost.dispose` with a declared `retireIdentitySnapshot` spy: borrowed
-and owned hosts must call it once after the public fence and before any resource
-cleanup/free. A working control proves public ingress already refuses during
+and owned hosts must call it once after the public fence and before any command
+settlement, socket-failure/signing cleanup or other resource release/free. A
+`failEngine` RED must cover that second entry into the same cleanup. Return an
+action from the spy and assert no action dispatch/drain. A working control proves public ingress already refuses during
 cleanup; another proves owned versus borrowed `free` behavior is preserved.
 These are boundary-call contract tests, not proof of the unimplemented Rust
 snapshot or an assertion of an existing wrong-account exploit.
@@ -435,3 +488,30 @@ G1 constructor review adds one precise borrow requirement:
 the existing child queue helper without unwrapping or dropping the binding.
 Tasks and all children retain the whole bound value; there is no public method
 returning an unbound owned read or optional/plain compatibility constructor.
+
+
+## Review corrections: final seal and common cleanup
+
+fe7lgm reviewed the first host controls CLEAR but withheld API clearance. This
+revision addresses the construction conflict explicitly: registry build is not
+installation. Existing host entropy and external-signer injection happen first;
+one final install/seal then captures that actual tuple before start, immediately
+freezing all eight setters. No installed snapshot is mutable. A constructor
+control must preserve both distinct entropy inputs and external capability data,
+then require sealing before start; no missing API compile failure counts as RED.
+
+The shared cleanup top is the retirement boundary for both normal dispose and
+`failEngine`, before even pending-command settlement. Expanded ordered controls
+include pending write rejection/deadline cleanup, socket-failure timers and all
+signing maps. The retirement spy returns an action and the test requires no
+`run`/transport dispatch. Existing assertions remain. The borrowed/owned
+`failEngine` variants are host-boundary controls only, not proof that calling
+Rust after a WASM trap is safe. Exact safe retirement after poison, a throwing
+retirement hook and all later cleanup attempts remain mandatory source-stage
+controls; the implementation cannot simply re-enter a borrowed poisoned engine.
+Native cancelled-run-future, owned-drop and retained-engine-return cases are
+three separately required controls. Subject errors and Secondary-requires-
+Primary are explicit and atomic; environment is closed, never a free string.
+
+Revised API and construction/teardown hooks require both reviewers again before
+runtime edits. Candidate native codec accepted forms still need their owners.
