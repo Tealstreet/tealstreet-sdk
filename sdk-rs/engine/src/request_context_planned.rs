@@ -569,6 +569,22 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Park a failed Read call's declared retry on a login Session, in the
+    /// failed delivery's custody, without selecting the next attempt. The
+    /// resume selects it under the existing evidence, budget and window.
+    pub fn plan_retry_session_wait(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        evidence: RetryEvidence,
+        session: &crate::request_context::Session,
+        pending: P,
+    ) -> Result<(), (P, Error)> {
+        let _ = (plan, slot, context, evidence, session);
+        Err((pending, Error::State))
+    }
+
     /// Issue a parked Slot's leg at its Session's resume, under the drain's
     /// delivery, with a window that starts now.
     pub(in crate::engine) fn resume_plan_slot(
