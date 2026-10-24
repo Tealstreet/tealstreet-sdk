@@ -1683,3 +1683,12 @@ Existing financial and signing assertions remain. Fixture preparation uses
 existing event times; cancelled deadlines are removed from the fixture's active
 timer list as a host would. Signer probes gain a genuine unused carrier Context,
 with no new managed-signing claim. Broad CI gates remain pending.
+
+
+Discovery closure adds a seventeenth managed control: raw ticker preparation
+remains parked while native private startup proceeds, then real prepare/bind/
+claim releases the ticker and publishes quotes. The overseer accepted this
+independence; CALLERS names the physical-order consequence. All three bounded
+reviews are CLEAR at a9282a7e787. Refreshed scoped suite: 165 tests/16 targets,
+zero ignored; strict all-target Clippy passes. Actual landing integration retains
+all incoming foreign changes and only the discovery singleton inventory prune.

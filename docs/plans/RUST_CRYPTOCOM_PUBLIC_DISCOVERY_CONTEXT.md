@@ -177,3 +177,25 @@ native purpose of this sequence; no local queue/timer or shared workaround.
 A new raw-action managed control holds ticker preparation, observes private
 HTTP and its original nonce, then releases ticker later and verifies quotes.
 It is additional managed coverage, not an original RED execution claim.
+
+
+## Integrated verification and review closure
+
+Actual landings 557de7ae7fb and 10d01de5279 are genuinely merged. Shared
+append conflicts retain incoming text followed by this slice's exact suffix.
+The manifest keeps all incoming entries and removes only the Crypto.com lib.rs
+singleton. The foreign BingX/Hyperliquid stale-base check failures were resolved
+by the first integration; the subsequent Backpack stale-base failure required
+the second. No foreign source or checker exception was added.
+
+At a9282a7e787, source/adversarial, caller and full-map bounded reviews are
+CLEAR, including the new raw parked-route control and its CALLERS disclosure.
+The overseer explicitly accepted private startup independence while the ticker
+route is parked. Architecture gate: No; issuance, delivery validation and expiry
+use shared engine APIs without a venue replacement.
+
+The refreshed scoped Crypto.com suite passes 165 tests across 16 targets
+(including empty doc tests), zero ignored; strict all-target Clippy passes.
+The raw parked-route control is additional managed coverage, not an original
+RED. Current inventory and bans receipts are checked after actual integration;
+family bytes, replay/CPU and broad certification are left to CI.
