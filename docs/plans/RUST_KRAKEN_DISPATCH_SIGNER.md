@@ -638,3 +638,28 @@ bans and all ratchets pass. Explicit execution of the held original target gives
 source blob is byte-exact CBC. No engine/registry/host source differs from the
 nonce head; no existing public engine item is changed by this recipe slice.
 All three inventories and every native Kraken caller blob equal the actual tip.
+
+### Gated nonce prerequisite refresh
+
+After the first Rust run's fixed-size failures, the nonce owner supplied corrected
+#2093 `acd84f92741b99fe120b93d8f22ee7ea75d021b0`, including actual tip cc5ab6aed5d.
+Plain merge d8fe6fcb866 composes that exact head with the frozen recipe ee270.
+README takes incoming plus the recipe row once; CALLERS is incoming exact.
+The only manual non-doc hunk is Kraken Cargo: retain HMAC-SHA512 and the unchanged
+opt-in adoption-originals target, plus the dependency's engine dispatch-nonce
+feature alongside order-locks. No profile or budget changes.
+
+All Kraken source and tests are byte-exact ee270. Engine, registry, hosts and
+all three inventories are byte-exact the corrected dependency. There is no
+native caller, hosted, namespace or receipt-semantics change in this integration.
+HMAC reviewer 4yjlw0 and custody reviewer m26ps4 CLEAR the exact d8fe composition;
+the nonce owner confirms the family opt-in. Default Kraken tests remain 337 PASS,
+zero failed/ignored; strict all-target Clippy compiles the opt-in originals,
+workspace all-target compilation, formatting, full bans and all ratchets PASS.
+The unchanged 13 GREEN / 10 RED adoption-original receipt remains local-only
+deferred evidence, never a claim that recipe CI certifies native adoption.
+
+The nonce owner's separate measurements and explicit-feature real-WASM proof
+remain bounded core/engine+recipe evidence. The fresh stacked PR run must certify
+the combined recipe head and fixed family budgets; no local result substitutes
+for that gate. Freeze and push once for one PR-triggered run, with no dispatch.
