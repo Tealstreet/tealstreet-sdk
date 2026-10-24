@@ -1,5 +1,6 @@
 import type { SignAlgorithm, Signer, SignReceipt, SignResult } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from '../../types';
+import type { RemoteSigningPolicy } from './construction';
 
 import { nanoid } from 'nanoid';
 
@@ -172,12 +173,21 @@ function payloadReceiver(options: Partial<ExchangeOptions> | undefined, key: str
 /** Decode only the declared prepared WS grammar; never use advisory context as
  * authority or draw a new timestamp. HTTP work keeps ordinary correlation ids.
  */
-function wsMetadata(codec: 'bybitExpiry' | 'binanceSpot' | undefined, payload: string, key: string, receipt: SignReceipt, credentialDelimited: boolean): Record<string, unknown> | undefined {
-  // Native WS recipes delimit the owned public key as a Credential part;
-  // hosted WS captures have no HTTP stamp. An HTTP query can share WS grammar.
-  if (receipt.stampMs !== undefined && !credentialDelimited) return undefined;
+function wsMetadata(wire: RemoteSigningPolicy['wire'], payload: string, key: string, receipt: SignReceipt, credentialDelimited: boolean, suffixDelimited: boolean): Record<string, unknown> | undefined {
+  const codec = wire?.extraData;
+  const seconds = wire?.secondsSuffix;
+  // Native WS recipes delimit the owned public key as a Credential part, or a
+  // declared seconds suffix as typed parts; hosted WS captures have no stamp.
+  if (receipt.stampMs !== undefined && !credentialDelimited && !suffixDelimited) return undefined;
   const stamp = (text: string) => /^(0|[1-9][0-9]*)$/.test(text) && Number.isSafeInteger(Number(text)) ? Number(text) : undefined;
-  if (codec === 'bybitExpiry') {
+  if (codec === 'secondsTimestamp' && seconds) {
+    const suffix = `${seconds.method}${seconds.path}`;
+    if (!payload.endsWith(suffix)) return undefined;
+    const timestamp = stamp(payload.slice(0, -suffix.length));
+    if (timestamp === undefined || !Number.isSafeInteger(timestamp * 1000)
+      || (receipt.stampMs !== undefined && receipt.stampMs !== timestamp * 1000)) throw refused();
+    return { timestamp };
+  } else if (codec === 'bybitExpiry') {
     if (!payload.startsWith('GET/realtime')) return undefined;
     const expiry = stamp(payload.slice('GET/realtime'.length));
     if (expiry === undefined || (receipt.expiryMs !== undefined && receipt.expiryMs !== expiry)) throw refused();
@@ -200,7 +210,8 @@ function wsMetadata(codec: 'bybitExpiry' | 'binanceSpot' | undefined, payload: s
 export function createRemoteSignerProvider(options: RemoteSignerProviderOptions): Signer {
   const { exchangeName, remoteSigner, payloadSigner } = options;
   const declaration = deriveRemoteSigningPolicy(exchangeName)?.wire;
-  const wire = declaration && { ...declaration };
+  const wire = declaration && { ...declaration,
+    ...(declaration.secondsSuffix && { secondsSuffix: { ...declaration.secondsSuffix } }) };
   const presentation = deriveRemoteSigningPolicy(exchangeName);
   const encoding = presentation?.signatureEncoding ?? 'hex';
   const passphraseHeader = presentation?.passphraseHeader;
@@ -211,6 +222,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
   const passphrases = new Map<string, number[]>();
   try {
     if (encoding !== 'hex' && encoding !== 'base64') throw refused();
+    if ((wire?.extraData === 'secondsTimestamp') !== (wire?.secondsSuffix !== undefined)) throw refused();
     accountName = remoteSigner?.accountName;
     if (accountName !== undefined && (typeof accountName !== 'string' || accountName.length > 4096)) throw refused();
     for (const [slot, source] of Object.entries(options.identities)) {
@@ -287,7 +299,13 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
         for (const part of parts) { payload.set(part, offset); offset += part.length; }
         const text = decodeUtf8(payload);
         const credentialDelimited = operation.payload.length === 3 && operation.payload[1].kind === 'credential';
-        const extraData = remoteSigner ? wsMetadata(wire?.extraData, text, entry.identity.publicCredential, receipt, credentialDelimited) : undefined;
+        const asciiPart = (part: number[], expected: string) => part.length === expected.length
+          && part.every((byte, index) => byte === expected.charCodeAt(index));
+        const suffix = wire?.extraData === 'secondsTimestamp' ? wire.secondsSuffix : undefined;
+        const suffixDelimited = suffix !== undefined && operation.payload.length === 3
+          && operation.payload.every((part) => part.kind === 'bytes')
+          && asciiPart(parts[1], suffix.method) && asciiPart(parts[2], suffix.path);
+        const extraData = remoteSigner ? wsMetadata(wire, text, entry.identity.publicCredential, receipt, credentialDelimited, suffixDelimited) : undefined;
         return { kind: 'sign' as const, entry, payload: text, extraData };
       });
       for (const item of work) {

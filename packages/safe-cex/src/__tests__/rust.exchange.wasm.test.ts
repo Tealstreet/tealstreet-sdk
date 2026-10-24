@@ -149,6 +149,7 @@ const recordedOkxTransport = () => {
     'amend-order': [{ ordId: '301', sCode: '0', sMsg: '' }],
   };
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect: (_url, { onOpen, onMessage }) => {
       let closed = false;
@@ -729,7 +730,7 @@ describe('RustEngineExchange', () => {
     const { WasmEngine } = await loadNodeEngine();
     for (const passphrase of [undefined, '']) {
       expect(() => new WasmEngine(venue, JSON.stringify({ key: 'k', secret: 's', passphrase }))).toThrow(
-        'Bitget requires a passphrase',
+        'Invalid local signer setup',
       );
     }
   });

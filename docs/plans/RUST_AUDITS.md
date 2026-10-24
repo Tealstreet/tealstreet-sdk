@@ -2707,3 +2707,339 @@ Pure inventory prune removes only `venues/binance/src/identity.rs`:
 and `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa: 1`.
 All other manifest bytes/maps remain exact; Binance shrinks from 26 fingerprints
 / 30 occurrences to 24 / 28. No rehash, site growth or checker exemption.
+
+## Phemex unsigned public-trades Context ownership
+
+The unsigned /md/v2/trade query now owns one genuine public Read root and
+managed delivery, including its existing native pause queue. Row admission and
+terminal ownership use ReadCompletion/ReadHistoryRows; stale429 cannot extend a
+pause, and typed preparation/network/expiry errors survive to the correct owner.
+Native signed public/private, income, identity, trading and socket paths remain
+held consumers. Their shared legacy fingerprints are retained. Only the public
+tuple codec's conservative f913fd4f macro occurrence is removed (1F/1O); this is
+not a claim that the shared physical request funnel has migrated.
+
+## Selected managed signed Read composition
+
+Shared admission/selection/queue/refusal composition is additive in engine
+selected_read.rs, with genuine callback and original-generation controls. The
+original BingX/WEEX copies erase capacity denial fields; those two native
+assertion REDs are retained for separate consumer adoption, not marked fixed by
+engine probes. No venue P0, private signer, Plan history or inventory-zero
+claim is closed by this library seam.
+
+## BingX identity selected Read adoption
+
+FetchAccount now consumes actual #1962 rather than the legacy local completion
+and admission-error fallback. Its two identity terminal fingerprints are removed;
+family inventory is 32F/35O at actual 9f405e55403. Original capacity/clock and
+typed Network/Timeout assertions pass alongside native wire/config/codec controls.
+The generic managed helper and all other family callers remain with their owners.
+
+
+## Shared CPU certification owner
+
+CPU remeasurement and aggregation belong to one harness policy, parameterized
+by the existing exact suite registry. Every CPU-gated suite adopts the same
+planner, eligible-only second-run matrix and unconditional final checker; venue
+code owns no bypass or local copy. Existing strict gate validators rederive both
+retained reports before arithmetic. Original report bytes and declared results
+stay immutable. A sealed runtime capsule transports the original measured
+inputs to a separate physical job without rebuilding or installing dependencies.
+Current run, source, physical producer, upload, case and cache identities bind
+the evidence; missing or ambiguous authority rejects before certification.
+No fixture/tape/profile/threshold change forms part of this policy.
+
+Only a validated cpu-runtime suite name selects the 4 GiB artifact response type.
+Metadata, logs and ordinary archives retain 512 MiB; cached bytes are rechecked
+under the requested type. An empty immutable-artifact HTTP 200 shares the existing
+two-attempt retrieval budget with socket recovery. Exact artifact size/digest,
+producer/source, archive and restored-runtime ownership are unchanged. The failed
+Bybit attempt remains failed and supplies no timing or mean; transport recovery
+creates no physical retry or third sample.
+
+## Selected root and physical page custody
+
+The shared selected-read module now couples one original caller-receipt Read
+root with immutable selected page children. Snapshot mismatch is rejected before
+shared root/leg delivery validation. Child construction cannot select a new key
+or renew the original root, and no per-venue expiry/finalizer is introduced.
+No venue inventory or Plan authority finding is closed by these engine controls.
+
+
+### Replay terminal audit observation
+
+The original WOO exported-audit probe reproduced four sticky false coverage
+diagnostics per receiver after a discarded checkpoint query. Four working
+controls passed and two assertion controls failed before the fix. The
+behavior-preserving shared extraction and original REDs are committed at
+`d59643b0b16`; the independent causal review binds the exact eight historical
+keys without claiming full-tape lifecycle completeness.
+
+One shared capture helper now attaches terminal protocol diagnostics only at
+the explicit final boundary in both receivers. The audit implementations stay
+unchanged. Controls retain genuine pre-auth violations and genuine late private
+errors, propagate final audit exceptions, and reject either caller forgetting
+its final flag. Existing capture-before-memory and performance ordering remain
+covered. No known declaration is removed by this change.
+
+## Hyperliquid perps history managed custody
+
+The perps history adapter now consumes the shared caller-root expiry/refusal
+funnel, ReadCursorHistory admission and exact Context terminals. Children are
+minted only at the native Account FIFO dequeue; reservation weight is charged
+only after managed submission. Root retirement drops exactly the owner's queued
+History continuations, preserving unrelated Account and History work. The engine
+owns deadlines, typed causes and strict root expiry; no venue custody algorithm
+is added. Standalone spot and already-managed cached local lookup stay outside
+this conversion. Exact own shrink:history.rs9F/11O, including five conservative
+macro occurrences; shared Account physical send sites remain counted.
+
+## OKX history managed caller-root custody
+
+History now consumes shared caller-root expiry/refusal and ReadCompletion with
+exact page delivery validation before native DATA/progress mutation. Native
+pacing derives every20s page from the same original root; retirement drops only
+that Owner's delayed history entries. Engine-owned whole-root expiry is strict;
+ordinary live-root released failures retain the native discard-prefix soft[]
+query shape. Provider/preparation and synchronous issuance refusal remain hard
+failures; no release inference, root timer, retry loop or error table is added.
+The exact prune is history.rs14F/18O plus History's lib signing-failure1F/1O.
+Discovery's two list/sign sites and the OKX staging entry remain because actual
+Markets/Tickers consumers still use them, confirmed with the signer owner.
+
+## Crypto.com read-command Context adoption
+
+~~Public candle commands publish numeric terminals after direct HTTP, without
+shared preparation/root-deadline custody; five local history terminals bypass
+Context admission.~~ Candle Pending carries its issued Read root through managed
+release and shared delivery validation, then uses Context finalizers. Local
+history branches alone borrow genuine entry without a numeric fallback; valid
+native history remains untouched. Exactly nine occurrences/seven entries are
+removed,30/27 becomes21/20. No background discovery, private signer, account,
+trading or shared-policy migration is implied. Architecture gate No: all
+release, lifetime, root-validation and finalization authority stays in the engine.
+
+### Crypto.com Read adoption on actual shared seams
+
+The five local history branches now invoke genuine entry directly; the historical
+finish_local_history issuer/finalizer wrapper is removed. One pure policy serves
+local terminals and unsigned candles. The shared public-auth-health fix is actual:
+the original public_typed_route_auth_errors_keep_metadata_without_auth_health_evidence
+control preserves AuthInvalid/Expired/Permission metadata while health stays0,
+without any venue workaround. Exact seven-fingerprint/nine-occurrence prune is
+unchanged; discovery's shared get sender and every private/retrying site remain.
+
+### Lighter local history command authority
+
+Seven synchronous legacy history terminals now consume genuine shared Read roots.
+Original test-only5a0303:4GREEN/15assertionRED/0ignored; all19 nowPASS. Native
+validation and credential-presence precedence remain unchanged; shared entry
+refusal owns capacity/clock failure without numeric fallback. Exact inventory
+history10->3, Lighter41->34occurrences; remote paging/auth/source untouched.
+
+### GRVT local history command authority
+
+Seven immediate history failures now consume shared Read admission and fail their
+exact original root. Original test-only checkpoint7b2fa480691 gives four native
+controls PASS and15 assertion REDs; all19 pass after adoption. Genuine retained
+owners pin capacity, reuse and duplicate custody; real login fixtures preserve
+native session/validation precedence without private-state mutation. History
+inventory11F/11O becomes4F/4O; family53F/56O becomes46F/49O. Remote source is exact.
+
+## KuCoin local command refusal ownership
+
+Eight numeric local failure sites now use shared genuine command admission and
+Context failure, reducing KuCoin from 56 to 48 lexical occurrences (51 to 43
+fingerprints). No signer, private request helper, successful no-I/O setting or
+remote completion is converted. Source and inventory reviews found no venue-local
+retry, classifier, owner registry or completion algorithm.
+
+## Bitrue initial local refusal ownership
+
+Three initial synchronous numeric failure occurrences now use shared Mutation
+entry and Context failure. Bitrue shrinks 33 to 30 occurrences and 20 to 18
+fingerprints. The repeated planning-error fingerprint decreases only 2 to 1;
+the queued remote-flow error remains. Signing and successful local settings are
+held for their separately owned migrations/seam.
+
+## GRVT replay coverage diagnostic proof
+
+The final-capture controls retain two original assertion REDs and eight working
+controls against the exact pre-correction shared module. The corrected shared
+API passes ten new controls plus 14 existing GRVT controls. Fresh authenticated
+raw pairs from runs 40037292055/40040892521 differ only in metrics and protocol
+errors: TS3/Rust6 error occurrences become empty arrays, covering six unique
+keys. The remaining 27 ordered failures, fixers and strict FAIL stay exact.
+Independent raw receipt `/tmp/codex-grvt-replay-evidence/independent-review.json`
+SHA256 `0b1de5f1261505a046f5cd10647a02f5ea4b6f1f56e16b3f4a7bbf2e0f5d1b10`.
+Only the six-key current-tape group is pruned; all other manifest bytes remain.
+This one-pair proof does not claim five-repeat or final-head CI qualification.
+
+### Crypto.com replay protocol declaration sweep
+
+The real protocol audit reproduces four TS and five Rust sticky subscription
+errors when the original capture observes it before the authentication ACK.
+Two assertion REDs and ten working controls precede exact reviewed #1944 reuse;
+all twelve pass with final-only capture. Genuine invalid signatures, early
+subscriptions and late unanswered heartbeats remain visible, including Rust's
+additional `user.trade` requirement. No new venue capture policy is introduced.
+
+Authenticated source-bound baseline and corrected reports differ only in the
+nine protocol keys and timing metrics. Both receivers preserve five writes,
+nine checkpoints and zero transport/signature failures. All sixty remaining
+ordered strict failures and fixers are unchanged. The bounded evidence has one
+correctness pair per role; repeated final-head CI is separate qualification.
+Native source, audit checks, input tapes and historical declarations are intact.
+
+### Binance Spot terminal audit declaration sweep
+
+The exact original capture has two final-assertion REDs with fourteen working
+controls. Each receiver retains both subscription and request coverage errors
+if a checkpoint observes the audit before the subscription ACK. The existing
+shared terminal-capture correction passes all sixteen controls while preserving
+real HMAC, typed request-ID, private-event, generation and late-ACK violations.
+
+Authenticated family archives bind the exact Spot tape and complete receiver
+objects: only metrics and the four protocol errors differ. All twenty-eight
+remaining ordered failures and fixers are exact, with three writes, six
+checkpoints and zero transport/signature failure counters. Only the current-tape
+four-key group is removed; all other manifest bytes remain unchanged. The
+historical one-pair evidence is distinct from current-head five-pair CI.
+
+## MEXC pre-I/O Mutation refusals
+
+Two reachable native trade_command refusals use direct genuine Mutation entry,
+Context diagnostic and Context failure. The duplicate Err terminal after an
+always-returning Err branch is removed as unreachable. Exact removal-only prune
+is3 fingerprints/3 occurrences (two converted branches plus one orphan), leaving
+MEXC18F/18O and trading4F/4O. Signed writes, queue progression, pacing, identity,
+account/history, unsigned background sends and asynchronous terminals remain
+explicit separate consumers. Native UUID entropy before refusal consumes no
+engine action/ID/entry custody; real Engine controls prove admission remains valid.
+
+Architecture gate: No. Existing shared entry/refusal, diagnostics and terminal
+authority; one pure policy, no local journal, issuer wrapper, timer, classifier,
+credential counter or numeric completion fallback.
+
+## KuCoin Spot fixed-setting completion custody
+
+Closed two legacy success sites covering three Setting commands through actual
+#1989 done_local_setting. Six original assertion REDs and four working native
+controls now pass unchanged. Native keyless/pre-credential semantics, unknown
+symbol insertion and successful mode no-ops are preserved. Shared engine owns
+receipt, command capacity and sole terminal; signer/private REST remain held.
+
+## Bitrue local fixed-setting success custody
+
+Closed the one numeric SetPositionMode(false) success using shared #1989
+done_local_setting. Native pre-credential ordering and the true-mode refusal
+remain unchanged. No venue-local admission, owner or completion algorithm.
+Bitrue inventory 30 -> 29 occurrences, 18 -> 17 fingerprints; all private
+signing/read/write migrations remain separate.
+
+## Finite flat-position PnL evidence
+
+Plan-first `1fadf14a790` and original-control commit `bae23010581` isolate a
+shared evidence bug: unavailable native NaN passed the flat-row admission test
+and became a null-valued PnL row. Original controls report five PASS/two assertion
+FAIL; the finite-conversion predicate makes all seven PASS. The scoped financial,
+comparison and declaration-policy checks pass 28 controls. Zero, negative and
+numeric-string PnL remain evidence, genuine PnL changes still fail, and inputs
+remain immutable. Native state and all other comparison fields are untouched.
+The fourteen inverse declaration keys require fresh raw CI proof before pruning.
+
+### Remaining immediately workable public Read sites
+
+Paradex removes two local candle terminals and its numeric book issuance-refusal
+fallback. Lighter's final public lib request becomes a managed Background catalog
+read with exact delivery validation and retirement before fallback/retry. No
+signer, private authority, session or engine policy is changed. Original new
+targets execute seven native controls PASS and15 intended assertion REDs, zero
+ignored. Exact own prune is four singleton occurrences across three keys.
+
+## WOO and Crypto.com shared snapshot-token fan-out
+
+~~Their joined order censuses publish native cache state and Store rows without
+using the engine's explicit financial write fence.~~ Both now capture one Store
+token per logical join, preserve it across pages/bounded retries and admit native
+cache updates plus rows at one commit boundary. Existing per-ID WS clocks remain
+protocol-owned; no venue epoch copy, universal WS invalidation or new engine API.
+
+Two native original-code controls expose the accepted-write crossing: WOO's
+older empty join removes retained orders after a validated cancel ACK, and
+Crypto.com's older nonempty join inserts an absent order after a validated
+cancel-all ACK. The shared boundary keeps the previous accepted rows until a
+fresh read. This is a snapshot authority correction; it does not invent a new
+native ACK payload, optimistic terminal row, execution or command outcome.
+Explicit Store invalidation/exhaustion and startup-cache controls are adoption
+controls, not additional original financial-defect claims. WS-peer compatibility
+controls pass on the original code and after adoption.
+
+BloFin remains a separate design item: startup execution-prefix seeding can be
+valid even when newer WS order-state revisions reject row replacement, and the
+seed path releases queued executions. Preserve that dual evidence policy before
+moving it to a shared admission boundary; this pair changes no BloFin source.
+
+## BloFin local leverage refusal custody
+
+Two account.rs numeric failures now use shared genuine Read admission followed
+by fail_context on that exact root. BloFin 23->21 occurrences / 19->17 fingerprints;
+only the two singleton rows are removed. No signer, trading, history, closed
+position or successful private read is converted. The coherent custody cutover
+remains with codex-zs5e83. No per-venue admission/completion implementation.
+
+## OKX closed-position request ownership
+
+Closed pages now consume shared SelectedRead command roots/legs and the original
+ReadCompletion/ReadCursorHistory authority. Delivery admission precedes raw row
+count, oldest timestamp, staging and cursor changes. The engine owns whole-call
+expiry; exact-Owner retirement removes native delayed pages, with no local root
+timer or numeric terminal fallback. Native accepted-prefix provider/physical
+recovery remains separate from strict root/local refusal. Shared list/sign
+consumer deletion is deferred to the remaining account/discovery/write owners;
+this conversion does not remove or relax any staging/checker inventory row.
+
+## MEXC unsigned discovery and depth Context adoption
+
+The public catalogue/ticker streamed sender and subscription-depth GET sender
+now use existing Background Read issuance and managed HTTP. Exact delivery is
+validated before row decoding, metadata edits and publication; native generation,
+response and financial checks remain. Failure-only retirement permits expired
+current cleanup without DATA or newer-owner authority. The exact removal-only
+manifest delta is two MEXC lib fingerprints/occurrences,18 to16 in the venue.
+No private signer, account/history/trading reducer, scheduler or engine code
+changes in this slice. Family performance/size evidence remains a CI gate.
+
+
+### Hyperliquid spot candle tail
+
+The six spot candle terminals now reuse the existing perps managed Read path.
+The obsolete pending owner and its numeric completions are removed; generic info,
+Builder, History and socket paths remain unchanged. The original checkpoint ran
+two working controls plus nine compiling assertion REDs on unchanged production.
+All eleven now pass alongside ten existing candle and43 spot controls. Two gated
+new-test metadata expectations were corrected to the existing perps NotSent
+contract; primary RED boundaries and native wire/result assertions are retained.
+
+
+## Crypto.com local trading admission
+
+Immediate cancel/amend validation, leverage validation, unsupported margin,
+missing primary key and placement-plan errors now consume actual Mutation entry
+authority before their existing NotSent projection. Fixed position mode uses
+shared LocalSetting with no financial Store change. Rejected admission supplies
+the only failure; revoked custody adds no fallback. Credential-free local errors
+do not count as remote auth evidence. Remote jobs/signing/classification and all
+other venue files remain unchanged; no engine or key-selection algorithm added.
+
+
+## Crypto.com public discovery delivery ownership
+
+Markets/Tickers now carry their original Background Read Context through
+streaming and publication. Actual shared delivery validation precedes row
+parsing/staging and response handling; expiry equality cannot commit a live
+prefix. Shared Context cleanup is separate from DATA admission: already-admitted
+failure keeps its native retry even after sibling issuance prunes expired
+retirement metadata. Completed catalogue retires before successor admission so
+capacity cannot strand ticker startup. No local issuer/timer/selection algorithm.

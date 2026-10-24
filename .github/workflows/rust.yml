@@ -32,6 +32,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # Pushes to a branch finish their run (the newest push waits behind it), so
 # landing gets completed results during a merge rush; PR pushes cancel stale runs.
@@ -73,10 +74,10 @@ jobs:
           - check: fmt
             command: cargo fmt --all --check
           - check: clippy
-            command: cargo clippy --locked --workspace --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark -- -D warnings
+            command: cargo clippy --locked --workspace --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark,schnorr -- -D warnings
           - check: test
             # Workspace builds unify crypto features; prove disabled and enabled provider arms.
-            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark --lib signer::'
+            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr --lib signer::'
           # Workspace resolution unifies family features. Exercise each
           # standalone engine closure, including both Plan configurations.
           - check: engine-feature-modes
@@ -224,7 +225,7 @@ jobs:
   # Replays recorded traffic through TS and Rust: output must be identical, and
   # on public data Rust must use less CPU and less memory (see the plan's gates).
   gate:
-    name: Rust / replay gate (${{ matrix.venue }})
+    name: Rust / replay measurement (${{ matrix.venue }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -437,6 +438,13 @@ jobs:
       - name: Scripted lifecycle financial parity (fixed sanitized capture)
         if: matrix.venue == 'binance'
         run: corepack yarn -s rust:gate:record --venue binance --tape sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl --books BTCUSDT --runs "$PRIVATE_REPLAY_RUNS"
+      - name: Seal approved CPU measurement inputs
+        id: cpu_prepare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node sdk-rs/harness/cpu-ci.mjs --command prepare --suite '${{ matrix.venue }}'
+          --out '${{ runner.temp }}/cpu-runtime-first' --mode '${{ inputs.replay_artifact == 'combined' && 'combined' || 'family' }}'
       - name: Public data (correctness, CPU and memory)
         run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}' --runs 9
       - name: OKX inverse public books (correctness, CPU and memory)
@@ -557,7 +565,27 @@ jobs:
       # this mandatory verifier can certify the job; unknown/missing gates fail.
       - name: Verify strict replay results and declared known failures
         if: always()
-        run: corepack yarn -s rust:gate:verify --suite '${{ matrix.venue }}'
+        id: cpu_collect
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node sdk-rs/harness/cpu-ci.mjs --command collect --suite '${{ matrix.venue }}'
+      - name: Retain CPU runtime capsule
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cpu-cohort-${{ matrix.venue }}
+          path: sdk-rs/harness/out/cpu-collection/cohort/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Retain the eligible original runtime bytes
+        if: steps.cpu_collect.outputs.has_eligible == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: cpu-runtime-${{ matrix.venue }}
+          path: ${{ steps.cpu_prepare.outputs.runtime_path }}/
+          retention-days: 3
+          if-no-files-found: error
       - name: Retain strict gate reports and artifact budgets
         if: always()
         uses: actions/upload-artifact@v7
@@ -585,3 +613,134 @@ jobs:
             sdk-rs/hosts/wasm/pkg/node/package.json
           retention-days: 3
           if-no-files-found: error
+
+
+  cpu-plan:
+    name: Rust / CPU remeasurement plan
+    needs: gate
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      has_eligible: ${{ steps.plan.outputs.has_eligible }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - name: Authenticate complete first evidence and select eligible cases
+        id: plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node sdk-rs/harness/cpu-ci.mjs --command plan --out '${{ runner.temp }}/cpu-plan'
+      - name: Retain CPU remeasurement plan
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cpu-plan
+          path: ${{ runner.temp }}/cpu-plan/
+          retention-days: 14
+          if-no-files-found: error
+
+  cpu-second:
+    name: Rust / CPU remeasurement (${{ matrix.suite }})
+    needs: cpu-plan
+    if: needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.cpu-plan.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No install, compilation, module build, or measurement fallback here.
+      - name: Public CPU remeasurement from sealed original runtime
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node sdk-rs/harness/cpu-ci.mjs --command second --suite '${{ matrix.suite }}' --out '${{ runner.temp }}/cpu-runtime-second'
+      - name: Retain CPU remeasurement results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cpu-second-${{ matrix.suite }}
+          path: sdk-rs/harness/out/
+          retention-days: 14
+          if-no-files-found: error
+
+  cpu-certify:
+    name: Rust / shared CPU certification
+    needs: [gate, cpu-plan, cpu-second]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      results: ${{ steps.certify.outputs.results }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - name: Verify strict first results or complete two-run means
+        id: certify
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node sdk-rs/harness/cpu-ci.mjs --command certify --out '${{ runner.temp }}/cpu-certificates'
+      - name: Retain CPU certificates
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cpu-certificates
+          path: ${{ runner.temp }}/cpu-certificates/
+          retention-days: 14
+          if-no-files-found: error
+
+  cpu-final:
+    name: Rust / replay gate (${{ matrix.suite }})
+    needs: cpu-certify
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [breakoutprop, apexomni, asterdex, woo, binance, bitunix, orderly, coinbase, bitget, bitgetusdc, backpack, blofin, mexc, polymarket, kucoin, kucoinspot, bingx, bybit, okx, cryptocom, weex, grvt, phemex, krakenspot, hyperliquidspot, kraken, lighter, lighter-robinhood, bitrue, hyperliquid, paradex, txflow]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require complete same-run shared certification
+        env:
+          CPU_CERT_RESULT: ${{ needs.cpu-certify.result }}
+          CPU_CERT_RESULTS: ${{ needs.cpu-certify.outputs.results }}
+        run: node sdk-rs/harness/cpu-ci.mjs --command status --suite '${{ matrix.suite }}'

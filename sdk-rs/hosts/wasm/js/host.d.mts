@@ -260,12 +260,12 @@ export interface SigningIdentity {
   /** Trusted caller-assigned identity/nonce scope; never a key hash or slot name. */
   stableId?: string;
   /** Additional provider-owned signing refs; never an identity or nonce scope. */
-  extra?: { zklinkSeed?: string };
+  extra?: { zklinkSeed?: string; l1Wallet?: string };
 }
 export interface SigningIdentities { primary?: SigningIdentity; secondary?: SigningIdentity }
 export interface LocalIdentityMetadata {
   stableId?: string;
-  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
+  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text' | 'base58';
   trimCredential?: boolean;
 }
 /** Trusted local setup metadata; credential strings arrive on the setup channel. */
@@ -320,7 +320,7 @@ export type EntropyProvider = (length: number) => Uint8Array;
 
 export interface CommandOptions {
   /** Override the host deadline for this call only; same bounds as commandTimeoutMs.
-   * Host metadata: never sent to the native engine or venue. */
+   * The effective wait also enters the engine as receipt metadata; never the venue. */
   timeoutMs?: number;
   /** Command-bound events while this request remains pending, including synchronous
    * dispatch. Internal fields.command is unchanged; routing hosts translate it.
