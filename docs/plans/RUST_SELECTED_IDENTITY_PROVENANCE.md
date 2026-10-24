@@ -685,3 +685,17 @@ host.engine.X arguments before invoke's disposed guard. The demonstrated managed
 post path is fixed; this does not claim every socket/abort/fetch callback has been
 audited for zero property access. No late WASM export entry is permitted, and full
 Rust snapshot/native/deferred-completion readiness remains separately gated.
+
+## P3(a) observer and readiness continuation audit
+
+The next bounded audit covers callbacks that begin on a healthy host but invoke
+a public observer/provider callback before evaluating an engine-method argument.
+Socket open/first-data/close observers may synchronously fence the host; a bound
+HTTP ready callback may likewise retire it before Claim. Existing healthy event
+delivery must continue to work. Proxy controls will distinguish property reads
+from actual export calls; only independently reproduced reads are changed.
+
+No group claim/dispatch, typed deferred completion or Rust/native hook is part
+of this audit. Proposed host callback fences and managed-readiness revalidation
+are sent as exact hunks to their owners before source edits. Checks stay scoped
+to Node tests with test concurrency one; no Cargo or full-workspace build.
