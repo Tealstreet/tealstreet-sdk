@@ -457,7 +457,7 @@ impl WeexFutures {
             Err(error) => {
                 let message = match error {
                     BackgroundReadError::Selection(_) => {
-                        "WEEX managed read lifecycle is unavailable".into()
+                        "WEEX account read requires credentials".into()
                     }
                     BackgroundReadError::Admission(error) => error.read_venue_error().message,
                 };

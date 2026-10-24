@@ -144,3 +144,10 @@ The SelectedRead implementation passes 9 WEEX unit controls, 39 account tests,
 No new selection API or managed.rs change is introduced. The earlier socket,
 trading, identity, security and dispatch receipts precede this small builder
 convergence; CI will verify the combined branch before any readiness claim.
+
+Credential review at dd41090fa8f cleared selection/queue custody and requested
+restoring the defensive missing-selection text. Test a468b722dc1 reproduces
+one assertion RED with no HTTP/sign/deactivation, then the one-string fix makes
+it GREEN. Unit controls now 10/10, Background 6/6 and auth 5/5; strict all-target
+Clippy passes after the correction. Admission still keeps its canonical typed
+Read cause; the existing command helper's NotSent presentation is unchanged.
