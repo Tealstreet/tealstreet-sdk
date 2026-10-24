@@ -659,3 +659,40 @@ fn deferred_batch_binds_once_and_refused_attempt_ignores_late_success() {
         assert_eq!(engine.venue().errors.len(), usize::from(refuse));
     }
 }
+
+#[test]
+fn secondary_selection_refuses_non_get_and_primary_only_history() {
+    let (_, ids) = provider("recipe-secondary-native-bound", true, 0);
+    for (method, path) in [
+        (Method::Post, "/derivatives/api/v3/sendorder"),
+        (Method::Get, "/derivatives/api/history/v3/executions"),
+        (Method::Get, "/api/history/v3/executions"),
+    ] {
+        assert!(
+            Selected::futures(&ids, CredentialRole::Read { scope: None })
+                .unwrap()
+                .futures_http(method, path, "", false, 5000.)
+                .is_err(),
+            "secondary must not serve this native primary-only request"
+        );
+    }
+    let selected = Selected::futures(
+        &ids,
+        CredentialRole::PrimaryRead {
+            reason: PrimaryReason::History,
+            scope: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        selected
+            .futures_http(
+                Method::Get,
+                "/derivatives/api/history/v3/executions",
+                "",
+                false,
+                5000.
+            )
+            .is_ok()
+    );
+}
