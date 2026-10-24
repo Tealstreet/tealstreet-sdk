@@ -399,8 +399,9 @@ manifest agree21/14. No financial authority is inferred from the role or floor.
 Verification checkpoint: source/caller/full-map independent reviews are CLEAR at
 2024ec88acc after all fixes; no remaining High/Medium. The map reviewer explicitly
 confirmed typed-role reuse is semantic deduplication, with no hidden/renamed sites,
-21/14 exact source/manifest, original25assertions unchanged and5653unowned entries
-preserved. Executed220Bitrue native controls plus1compile-fail doc, registry3,
-TS construction4, and earlier305Binance controls on identical engine source PASS.
+21/14 exact source/manifest and original25assertions unchanged. All 5,621 unowned
+entries from the 5,653-entry incoming tree were preserved. Executed220Bitrue native
+controls plus1compile-fail doc, registry3, TS construction4, and earlier305Binance
+controls on identical engine source PASS.
 Focused strict/checker/fmt gates pass; full fresh CI and HMAC-owner source review
 are still pending. No WASM/replay/size result is inferred from native tests.
