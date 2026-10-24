@@ -592,7 +592,10 @@ fn a_position_heal_refresh_is_a_managed_signed_background_read() {
         .actions
         .into_iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms: 1_100. } => Some(timer),
+            Action::SetTimer {
+                timer,
+                at_ms: 1_100.,
+            } => Some(timer),
             _ => None,
         })
         .expect("heal timer");
@@ -601,4 +604,49 @@ fn a_position_heal_refresh_is_a_managed_signed_background_read() {
     assert_eq!(heal.requests.len(), 1);
     signed(&heal.requests[0], "/v3/account");
     managed(&heal, 1);
+}
+
+#[test]
+fn fetch_account_refusals_keep_the_legacy_text_and_send_nothing() {
+    let public_only = private_engine(
+        Options {
+            public_data_only: true,
+            ..Options::default()
+        },
+        &material(Some("pass")),
+    );
+    let keyless = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_apexomni::ApexOmni::new(Options::default()),
+    );
+    for mut engine in [public_only, keyless] {
+        let output = command(
+            &mut engine,
+            20.,
+            Command::FetchAccount { command: COMMAND },
+            None,
+        );
+        assert!(output.requests.is_empty());
+        assert_eq!((output.legacy, output.prepared), (0, 0));
+        assert_eq!(
+            terminal(&output, COMMAND).unwrap_err().message,
+            "ApeX account identity requires API credentials"
+        );
+    }
+}
+
+#[test]
+fn public_data_only_with_a_passphrase_still_signs_symbols() {
+    let mut engine = private_engine(
+        Options {
+            public_data_only: true,
+            ..Options::default()
+        },
+        &material(Some("pass")),
+    );
+    engine.start(0.);
+    let output = drain(&mut engine, 0.);
+    assert_eq!(output.requests.len(), 1);
+    signed(&output.requests[0], "/v3/symbols");
+    managed(&output, 1);
+    assert_eq!(output.intents, [RoutingIntent::Primary]);
 }
