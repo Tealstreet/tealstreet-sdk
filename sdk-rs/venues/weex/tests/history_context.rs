@@ -465,3 +465,337 @@ fn a_history_429_keeps_the_native_pause_and_request_failed_notice() {
     let done = reply(&mut e, NOW + 1011., &released.requests[0], "[]");
     assert_eq!(terminals(&done), [Ok("[]".into())]);
 }
+
+fn issue_at(
+    e: &mut Engine<WeexFutures>,
+    now: f64,
+    command: u32,
+    read: Query,
+    wait: Option<u32>,
+) -> Output {
+    e.handle_command(
+        now,
+        Command::Query {
+            command,
+            query: read,
+        },
+        wait,
+    )
+    .unwrap();
+    drain(e, now)
+}
+
+fn long_orders() -> Query {
+    Query::OrderHistory {
+        symbol: None,
+        from_ms: Some(NOW - 300. * 86_400_000.),
+        to_ms: Some(NOW),
+        limit: None,
+    }
+}
+
+fn empty_page(request: &HttpRequest) -> &'static str {
+    if request.url.contains("allAlgoOrders") {
+        r#"{"orders":[],"hasMore":false}"#
+    } else {
+        "[]"
+    }
+}
+
+fn active_timers(output: &Output, deadline: f64) -> Vec<safe_cex_engine::TimerId> {
+    let cleared: Vec<_> = output
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::ClearTimer { timer } => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    output
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == deadline && !cleared.contains(timer) => {
+                Some(*timer)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_default_receipt_deadline_survives_signed_endpoint_restarts() {
+    let mut e = engine();
+    let mut output = issue_at(&mut e, NOW, 7, long_orders(), None);
+    for page in 1..=6 {
+        assert_eq!(output.requests.len(), 1);
+        let request = &output.requests[0];
+        assert_eq!(request.timeout_ms, Some(20_000));
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(key, value)| *key == "ACCESS-KEY" && value == "read-key")
+        );
+        output = reply(
+            &mut e,
+            NOW + f64::from(page) * 19_000.,
+            request,
+            empty_page(request),
+        );
+        assert!(terminals(&output).is_empty());
+    }
+    assert_eq!(output.requests.len(), 1);
+    assert_eq!(output.requests[0].timeout_ms, Some(6_000));
+    e.handle(NOW + 120_000., Event::PollScaleChanged { scale: 1. });
+    strict_timeout(&drain(&mut e, NOW + 120_000.));
+}
+
+#[test]
+fn a_raised_wait_completes_the_same_signed_walk_beyond_the_default_wait() {
+    let mut e = engine();
+    let mut output = issue_at(&mut e, NOW, 7, long_orders(), Some(200_000));
+    for page in 1..=8 {
+        assert_eq!(output.requests.len(), 1, "native page {page}");
+        let request = &output.requests[0];
+        assert_eq!(request.timeout_ms, Some(20_000));
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(key, value)| *key == "ACCESS-KEY" && value == "read-key")
+        );
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(key, value)| *key == "ACCESS-PASSPHRASE" && value == "primary-pass")
+        );
+        output = reply(
+            &mut e,
+            NOW + f64::from(page) * 19_000.,
+            request,
+            empty_page(request),
+        );
+        if page < 8 {
+            assert!(terminals(&output).is_empty());
+        }
+    }
+    assert_eq!(terminals(&output), [Ok("[]".into())]);
+    assert_eq!(markers(&output), 0);
+    assert!(output.requests.is_empty());
+}
+
+fn fractional_orders() -> (Engine<WeexFutures>, Output) {
+    let mut e = engine();
+    let first = issue_at(&mut e, NOW + 0.25, 7, orders(), Some(100));
+    let next = reply(&mut e, NOW + 10.25, &first.requests[0], NORMAL);
+    assert_eq!(next.requests.len(), 1);
+    (e, next)
+}
+
+#[test]
+fn half_a_millisecond_before_root_expiry_still_allows_native_prefix_recovery() {
+    let (mut e, next) = fractional_orders();
+    e.handle(
+        NOW + 99.75,
+        Event::HttpFailed {
+            request: next.requests[0].id,
+            error: "live fractional failure",
+        },
+    );
+    let output = drain(&mut e, NOW + 99.75);
+    let result = terminals(&output);
+    assert_eq!(result.len(), 1);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(result[0].as_ref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(markers(&output), 1);
+    assert!(output.requests.is_empty());
+}
+
+#[test]
+fn fractional_root_equality_rejects_without_native_prefix_recovery() {
+    let (mut e, next) = fractional_orders();
+    e.handle(
+        NOW + 100.25,
+        Event::HttpFailed {
+            request: next.requests[0].id,
+            error: "expired fractional failure",
+        },
+    );
+    strict_timeout(&drain(&mut e, NOW + 100.25));
+}
+
+#[test]
+fn an_actual_child_timer_with_a_live_longer_root_recovers_only_accepted_rows() {
+    let mut e = engine();
+    let first = query(&mut e, orders(), 100_000);
+    let next = reply(&mut e, NOW + 10., &first.requests[0], NORMAL);
+    assert_eq!(next.requests[0].timeout_ms, Some(20_000));
+    let timers = active_timers(&next, NOW + 20_010.);
+    assert_eq!(timers.len(), 1, "exact released second-page timer");
+    e.handle(NOW + 20_010., Event::TimerFired { timer: timers[0] });
+    let output = drain(&mut e, NOW + 20_010.);
+    let result = terminals(&output);
+    assert_eq!(result.len(), 1);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(result[0].as_ref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(markers(&output), 1);
+    assert!(output.requests.is_empty());
+}
+
+fn equal_deadline_timer_order(root_first: bool) {
+    let mut e = engine();
+    let first = query(&mut e, orders(), 100);
+    // Root admission emits its timer before the first physical preparation.
+    let root = active_timers(&first, NOW + 100.)[0];
+    let next = reply(&mut e, NOW + 10., &first.requests[0], NORMAL);
+    let physical = active_timers(&next, NOW + 100.);
+    assert_eq!(physical.len(), 1, "exact released second-page timer");
+    assert_ne!(root, physical[0]);
+    let (first, stale) = if root_first {
+        (root, physical[0])
+    } else {
+        (physical[0], root)
+    };
+    e.handle(NOW + 100., Event::TimerFired { timer: first });
+    strict_timeout(&drain(&mut e, NOW + 100.));
+    e.handle(NOW + 100.5, Event::TimerFired { timer: stale });
+    let late_timer = drain(&mut e, NOW + 100.5);
+    assert!(terminals(&late_timer).is_empty());
+    assert_eq!(markers(&late_timer), 0);
+    let late = reply(
+        &mut e,
+        NOW + 101.,
+        &next.requests[0],
+        r#"{"orders":[{"invalid":true}]}"#,
+    );
+    assert!(terminals(&late).is_empty());
+    assert_eq!(markers(&late), 0);
+    assert!(late.requests.is_empty());
+}
+
+#[test]
+fn root_timer_before_equal_page_timer_is_strict_and_late_data_is_inert() {
+    equal_deadline_timer_order(true);
+}
+
+#[test]
+fn page_timer_before_equal_root_timer_is_strict_and_late_data_is_inert() {
+    equal_deadline_timer_order(false);
+}
+
+#[test]
+fn expired_generation_cannot_complete_its_reused_id_or_retire_a_live_peer() {
+    let mut e = engine();
+    let first = query(&mut e, orders(), 100);
+    let root_timer = active_timers(&first, NOW + 100.)[0];
+    let old = reply(&mut e, NOW + 10., &first.requests[0], NORMAL);
+    let peer = issue_at(&mut e, NOW + 20., 8, public(), Some(1000));
+    assert_eq!(peer.requests.len(), 1);
+    e.handle(NOW + 100., Event::TimerFired { timer: root_timer });
+    strict_timeout(&drain(&mut e, NOW + 100.));
+    let current = issue_at(&mut e, NOW + 101., 7, orders(), Some(1000));
+    assert_eq!(current.requests.len(), 1);
+    assert_ne!(old.requests[0].id, current.requests[0].id);
+    let stale = reply(
+        &mut e,
+        NOW + 102.,
+        &old.requests[0],
+        r#"{"orders":[{"invalid":true}]}"#,
+    );
+    assert!(terminals(&stale).is_empty());
+    assert_eq!(markers(&stale), 0);
+    assert!(stale.requests.is_empty());
+    e.handle(NOW + 103., Event::TimerFired { timer: root_timer });
+    let stale_timer = drain(&mut e, NOW + 103.);
+    assert!(terminals(&stale_timer).is_empty());
+    assert!(stale_timer.requests.is_empty());
+    let peer_done = reply(&mut e, NOW + 104., &peer.requests[0], "[]");
+    assert_eq!(
+        peer_done
+            .actions
+            .iter()
+            .filter(|action| matches!(action,
+                Action::Notice(Notice::CommandDone { command: 8, result }) if result == "[]"
+            ))
+            .count(),
+        1
+    );
+    assert!(terminals(&peer_done).is_empty());
+    let next = reply(&mut e, NOW + 105., &current.requests[0], "[]");
+    assert_eq!(next.requests.len(), 1);
+    let done = reply(&mut e, NOW + 106., &next.requests[0], r#"{"orders":[]}"#);
+    assert_eq!(terminals(&done), [Ok("[]".into())]);
+    assert_eq!(markers(&done), 0);
+}
+
+#[test]
+fn second_page_preparation_refusal_is_strict_after_accepted_rows() {
+    let mut e = engine();
+    let first = query(&mut e, orders(), 1000);
+    e.handle(
+        NOW + 10.,
+        Event::HttpResponse {
+            request: first.requests[0].id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: NORMAL,
+            },
+        },
+    );
+    let pending: Vec<_> = e.drain_actions().collect();
+    let preparation = pending
+        .into_iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("second-page route preparation");
+    let cause = VenueError::new("route reservation refused")
+        .kind(ErrorKind::Internal)
+        .outcome(safe_cex_engine::Outcome::NotSent);
+    e.http_preparation_failed(
+        NOW + 11.,
+        preparation,
+        safe_cex_engine::request_context::Error::Capacity,
+        cause.clone(),
+    );
+    let refused = drain(&mut e, NOW + 11.);
+    assert_eq!(terminals(&refused), [Err(cause)]);
+    assert_eq!(markers(&refused), 0);
+    assert!(refused.requests.is_empty());
+}
+
+#[test]
+fn provider_refusal_after_accepted_rows_keeps_typed_fields_without_auth_evidence() {
+    let mut e = support::setup::engine_with_provider(
+        Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("pass".into()),
+            ..Default::default()
+        },
+        |inner| std::sync::Arc::new(support::setup::Gated::new(inner, &[true, false])),
+    );
+    let first = query(&mut e, orders(), 1000);
+    assert_eq!((first.legacy, first.prepared, first.claimed), (0, 1, 1));
+    let refused = reply(&mut e, NOW + 10., &first.requests[0], NORMAL);
+    assert_eq!(
+        terminals(&refused),
+        [Err(
+            safe_cex_engine::signing::SignError::Refused.venue_error()
+        )]
+    );
+    assert_eq!(markers(&refused), 0);
+    assert!(refused.requests.is_empty());
+    assert!(!refused.actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::AccountAuth { .. } | Notice::Deactivate)
+    )));
+    assert_eq!(e.health().auth_failures, 0);
+}

@@ -1,7 +1,8 @@
 # WEEX history paging on the original caller Read root
 
 Owner: codex-cxxyqr, transferred from codex-uufub4 by the overseer.
-Baseline: actual `ba3d7da1d3aaba26d6c40d6615fdc467d6ec185d`.
+Original RED baseline: actual `ba3d7da1d3aaba26d6c40d6615fdc467d6ec185d`.
+Current runtime integration: actual `5f86ae51717`.
 Branch: `feat/rust-weex-history-context`. Status: source checkpoint; readiness review pending.
 
 ## Scope and dependencies
@@ -13,17 +14,12 @@ expiry. No Plan, Background root, venue root timer, numeric terminal, deadline
 renewal, or shared engine edit belongs to this slice. Existing synchronous
 history admission/refusals keep their already-managed local path.
 
-The signed-page adapter additionally needs #1983, owned by codex-9czdjh:
-`SelectedRead::command_root`, immutable `ReadRoot`, and move-only `ReadLeg`.
-The reviewed candidate is `598b5a09cc3`; it is not an actual landing at this
-checkpoint. The landed SelectedRead has only single-leg command/background
-issuers, and its private identity cannot be bound to a caller-root child by
-venue code. Do not emulate it or remint a command root. Original-source REDs
-can run on this baseline; production conversion waits for the actual #1983
-landing and its owner's current pin. #1992's `scoped` addition is not this seam.
-
-Update: actual #1983 `a2533f5761f` was plain-merged at `9fd6e5afe47`. The source
-checkpoint now consumes its ReadRoot/ReadLeg API; the dependency is satisfied.
+The signed-page adapter consumes actual #1983 `a2533f5761f`, owned by
+codex-9czdjh: `SelectedRead::command_root`, immutable `ReadRoot`, and move-only
+`ReadLeg`. It was plain-merged at `9fd6e5afe47` before the source checkpoint;
+actual landing `5f86ae51717` is now integrated at `57b51ff5bd3`. The source uses
+the landed root/leg seam directly, without a venue substitute. #1992's `scoped`
+addition is not this seam.
 
 Keep #1997 account-cycle work on its separate branch. Shared WEEX lib routing
 edits must compose with its owner; `send_account`, trading, socket custody,
@@ -242,3 +238,30 @@ with this cutover: remote paging now requires a retained root plus one physical
 child. Full capacity refuses once; one freed slot admits the root but strictly
 refuses its child with no leak; two freed slots allow the unchanged native wire.
 The existing local-query precedence/capacity controls remain unchanged.
+
+
+## Native readiness controls on the integrated production source
+
+The current history_context target passes 23 controls: the original thirteen
+bodies are unchanged, plus ten independent controls for the default receipt cap
+across endpoint restarts, an override completing beyond 120 seconds, fractional
+predeadline recovery versus equality, a real child-only timer, both equal-time
+timer orders, generation reuse with a live unrelated peer, typed preparation
+refusal and typed provider refusal with no auth evidence.
+
+The additional native capacity control accepts a normal order page, parks its
+algo continuation behind the existing 429 pause, then retains 255 genuine Read
+peers. A genuine admission control captures the full Capacity error. Dequeue
+must reject the history with that same typed value, no prefix, marker or HTTP;
+freeing one peer then permits a new root plus child, proving the refused root
+was released while the other peers stayed live. This control passes. It tests
+child construction capacity; it does not claim a separate native queue-refusal
+injection after successful child construction. The returned-Pending queue-error
+branch retires the child and invokes the same strict root rejection; its source
+custody and shared #1983 queue controls remain review evidence, not that native
+execution receipt.
+
+No shared API, signer recipe, account-cycle code, inventory or STAGING is changed.
+ReadCompletion, ReadCursorHistory and ReadRangeHistory are named explicitly in
+production so no legacy authority alias obscures the cutover. Exact native/source
+review and fresh strict/CI/WEEX size/replay results remain required.

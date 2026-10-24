@@ -5,10 +5,7 @@ use crate::wire::{Str, number, optional_number, timestamp};
 use crate::{Pending, Task, WeexFutures};
 use safe_cex_engine::Level;
 use safe_cex_engine::credential_selection::{PrimaryReason, SlotPolicy, Slots};
-use safe_cex_engine::history::{
-    ReadCompletion as Completion, ReadCursorHistory as CursorHistory,
-    ReadRangeHistory as RangeHistory,
-};
+use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory, ReadRangeHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
@@ -36,7 +33,7 @@ enum Read {
     List {
         root: Root,
         pending: VecDeque<Fetch>,
-        owner: Box<CursorHistory<ListRow>>,
+        owner: Box<ReadCursorHistory<ListRow>>,
         kind: Kind,
         missing_fill_id: bool,
         order_id: Option<String>,
@@ -54,8 +51,8 @@ enum Read {
     },
 }
 enum IncomeHistory {
-    Range(RangeHistory<Income>),
-    Single(CursorHistory<Income>),
+    Range(ReadRangeHistory<Income>),
+    Single(ReadCursorHistory<Income>),
 }
 
 enum Root {
@@ -790,24 +787,24 @@ impl WeexFutures {
                 let Some(root) = self.history_root(cx, Kind::Income) else {
                     return;
                 };
-                let completion = match Completion::from_context(cx, command, root.context().clone())
-                {
-                    Ok(completion) => completion,
-                    Err(error) => {
-                        let _ = cx.fail_context(root.context(), error.read_venue_error());
-                        return;
-                    }
-                };
+                let completion =
+                    match ReadCompletion::from_context(cx, command, root.context().clone()) {
+                        Ok(completion) => completion,
+                        Err(error) => {
+                            let _ = cx.fail_context(root.context(), error.read_venue_error());
+                            return;
+                        }
+                    };
                 let owner = if let (Some(a), Some(b)) = (from_ms, to_ms)
                     && b > a
                 {
-                    IncomeHistory::Range(RangeHistory::new(
+                    IncomeHistory::Range(ReadRangeHistory::new(
                         completion, RangeWalk::new(a,b,INCOME_WINDOW,100),
                         |gaps| format!("WEEX income history is INCOMPLETE: {gaps} chunk(s) could not be walked to completion; totals are a lower bound"),
                         |rows| serde_json::to_string(rows).map_err(|e|VenueError::new(e.to_string())),
                     ).with_request_budget(INCOME_BUDGET, "WEEX income history is INCOMPLETE: lifetime request budget exhausted; totals are a lower bound"))
                 } else {
-                    IncomeHistory::Single(CursorHistory::new(
+                    IncomeHistory::Single(ReadCursorHistory::new(
                         completion,
                         CursorWalk::new(1),
                         |_| "WEEX income history page budget exhausted".into(),
@@ -856,7 +853,7 @@ impl WeexFutures {
         let Some(root) = self.history_root(cx, kind) else {
             return;
         };
-        let completion = match Completion::from_context(cx, command, root.context().clone()) {
+        let completion = match ReadCompletion::from_context(cx, command, root.context().clone()) {
             Ok(completion) => completion,
             Err(error) => {
                 let _ = cx.fail_context(root.context(), error.read_venue_error());
@@ -868,7 +865,7 @@ impl WeexFutures {
             Read::List {
                 root,
                 pending: requests,
-                owner: Box::new(CursorHistory::new(
+                owner: Box::new(ReadCursorHistory::new(
                     completion,
                     CursorWalk::new(1),
                     |_| "WEEX history stage page budget exhausted".into(),
