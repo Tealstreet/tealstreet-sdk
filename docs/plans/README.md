@@ -393,3 +393,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Independent Mutation Plan calls | Plan-first engine follow-up after #1932 | Before continuing independent native batch siblings after a delivered unproven 408/5xx. | [RUST_PLAN_INDEPENDENT_FAILURES.md](RUST_PLAN_INDEPENDENT_FAILURES.md) |
 | Parallel Mutation preparation | Engine/host and pacing reviewed; CI pending | Before releasing any parallel mutation leg while sibling preparation/signing is outstanding. | [RUST_PLAN_MUTATION_PREPARE_BARRIER.md](RUST_PLAN_MUTATION_PREPARE_BARRIER.md) |
+
+| Dispatch nonce reservation and release ordering | Plan and compiling RED phase | Before reserving a selected-key nonce in SignStep preparation or changing nonce receipt and release-floor custody. | [RUST_DISPATCH_NONCE_RESERVATION.md](RUST_DISPATCH_NONCE_RESERVATION.md) |

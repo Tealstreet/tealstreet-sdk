@@ -16,6 +16,10 @@ mod mutation_group;
 enum ManagedRecipe {
     Unsigned(&'static [(&'static str, &'static str)]),
     Signed(Box<dyn crate::SignStep>),
+    SelectedRead(
+        Box<dyn crate::SignStep>,
+        Option<std::sync::Arc<crate::nonce::ClaimAuthority>>,
+    ),
 }
 
 pub(super) struct Managed {
@@ -137,6 +141,27 @@ impl<P> Cx<'_, P> {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn request_selected_read_managed(
+        &mut self,
+        context: Context,
+        method: Method,
+        url: String,
+        body: Option<String>,
+        step: Box<dyn crate::SignStep>,
+        claim: Option<std::sync::Arc<crate::nonce::ClaimAuthority>>,
+        pending: P,
+    ) -> Result<RequestId, (P, Error)> {
+        self.queue_managed(
+            context,
+            method,
+            url,
+            body,
+            ManagedRecipe::SelectedRead(step, claim),
+            pending,
+        )
+    }
+
     fn queue_managed(
         &mut self,
         context: Context,
@@ -179,9 +204,10 @@ impl<P> Cx<'_, P> {
         pending: P,
         #[cfg(feature = "http-plans")] admission: Option<&request_context_registry::OwnedAdmission>,
     ) -> Result<RequestId, (P, Error)> {
-        let (step, public_headers) = match recipe {
-            ManagedRecipe::Unsigned(headers) => (None, headers),
-            ManagedRecipe::Signed(step) => (Some(step), &[][..]),
+        let (step, public_headers, selected_claim) = match recipe {
+            ManagedRecipe::Unsigned(headers) => (None, headers, None),
+            ManagedRecipe::Signed(step) => (Some(step), &[][..], None),
+            ManagedRecipe::SelectedRead(step, claim) => (Some(step), &[][..], Some(claim)),
         };
         if let Err(error) = self.io.request_contexts.validate_send(&context, self.now) {
             return Err((pending, error));
@@ -197,6 +223,33 @@ impl<P> Cx<'_, P> {
         };
         if let Err(error) = self.io.http_pacing.check(context.pacing(), self.now) {
             return Err((pending, error));
+        }
+        let nonce_claim = step
+            .as_ref()
+            .and_then(|step| step.nonce_claim())
+            .map(|claim| claim.authority());
+        if let Some(expected) = selected_claim {
+            let matches = match (&expected, &nonce_claim) {
+                (None, None) => true,
+                (Some(expected), Some(actual)) => std::sync::Arc::ptr_eq(expected, actual),
+                _ => false,
+            };
+            if !matches {
+                return Err((pending, Error::Invalid));
+            }
+        }
+        if let Some(authority) = &nonce_claim {
+            let installed = match authority.selection.slot() {
+                CredentialSlot::Primary => self.io.identities.primary.as_ref(),
+                CredentialSlot::Secondary => self.io.identities.secondary.as_ref(),
+            };
+            if !self.io.nonce_unscheduled
+                || installed.is_none_or(|identity| !authority.matches_identity(identity))
+                || context.credential() != Some(&authority.credential)
+                || context.routing_intent() != authority.selection.intent()
+            {
+                return Err((pending, Error::Invalid));
+            }
         }
         if context.credential().is_some() != step.is_some() {
             return Err((pending, Error::Invalid));
@@ -227,6 +280,11 @@ impl<P> Cx<'_, P> {
                 || (step.is_some() && !self.io.signing.available_id()))
         {
             return Err((pending, Error::Capacity));
+        }
+        if let Some(authority) = &nonce_claim
+            && authority.bind_once().is_err()
+        {
+            return Err((pending, Error::Invalid));
         }
         #[cfg(feature = "http-plans")]
         let (request, generation, timer, deadline) = if let Some(admission) = admission {
@@ -281,6 +339,7 @@ impl<P> Cx<'_, P> {
                 step,
                 self.now,
                 deadline,
+                nonce_claim,
             ) {
                 return Err((
                     pending,
@@ -713,9 +772,12 @@ impl<V: Venue> Engine<V> {
         completion: crate::signing_dispatch::Completion,
     ) {
         use crate::signing_dispatch::Completion;
-        let (pending, mut outbound, error, stale) = match completion {
+        let nonce_stale = matches!(&completion, Completion::NonceStale(_));
+        let (mut pending, mut outbound, error, stale) = match completion {
             Completion::Ready(pending, outbound) => (pending, Some(outbound), None, false),
-            Completion::Stale(pending) => (pending, None, None, true),
+            Completion::Stale(pending) | Completion::NonceStale(pending) => {
+                (pending, None, None, true)
+            }
             Completion::Failed(pending, error) => (pending, None, Some(error), false),
         };
         let Some(request) = pending.request_id() else {
@@ -754,6 +816,19 @@ impl<V: Venue> Engine<V> {
             return;
         }
         if stale {
+            if nonce_stale {
+                if pending.nonce_repairs >= crate::signing_dispatch::MAX_NONCE_REPREPARES {
+                    self.http_preparation_failed(
+                        now,
+                        token,
+                        Error::State,
+                        VenueError::new("Signing nonce repair budget exhausted")
+                            .kind(ErrorKind::Internal),
+                    );
+                    return;
+                }
+                pending.nonce_repairs += 1;
+            }
             managed.recipe = Some(pending);
             self.reprepare_http(now, token);
             return;
@@ -963,14 +1038,81 @@ impl<V: Venue> Engine<V> {
             revision: self.io.protocol_clock.revision(),
         };
         let mut signing_release = None;
-        let result =
-            managed
-                .lifecycle
-                .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
-                    signing_release =
-                        Some(crate::SigningRelease::new(release.signature, release.time)?);
-                    self.venue.on_http_release(&mut pending.value, release)
-                });
+        let mut nonce_stale = false;
+        let nonce = managed
+            .recipe
+            .as_ref()
+            .and_then(|recipe| recipe.nonce.as_ref());
+        let has_nonce_claim = managed
+            .recipe
+            .as_ref()
+            .is_some_and(crate::signing_dispatch::Pending::has_nonce_claim);
+        let result = match (has_nonce_claim, nonce) {
+            (true, Some(nonce)) => {
+                let prepared = managed
+                    .lifecycle
+                    .prepare_claim(permit, time, &self.io.http_pacing);
+                match prepared {
+                    Ok(crate::request_context::group_lifecycle::ClaimPreparation::WaitUntil(
+                        at,
+                    )) => Ok(Claim::WaitUntil(at)),
+                    Ok(crate::request_context::group_lifecycle::ClaimPreparation::Ready(draft)) => {
+                        let admission = match self.http_release {
+                            super::HttpRelease::NonceUnscheduled(admit) => {
+                                admit(&self.venue, &pending.value, draft.release())
+                            }
+                            super::HttpRelease::Mutable(_) => Err(Error::Invalid),
+                        }
+                        .and_then(|()| {
+                            let release = *draft.release();
+                            let observation =
+                                crate::SigningRelease::new(release.signature, release.time)?;
+                            let ready =
+                                draft.admit(crate::request_context::Admission::Unscheduled)?;
+                            Ok((observation, ready, release))
+                        });
+                        match admission {
+                            Err(reason) => Err(reason),
+                            Ok((observation, ready, release)) => {
+                                signing_release = Some(observation);
+                                let committed = nonce.commit_release(|| {
+                                    managed
+                                        .lifecycle
+                                        .commit_claim(ready, &mut self.io.http_pacing);
+                                });
+                                match committed {
+                                    Ok(true) => Ok(Claim::Released(release)),
+                                    Ok(false) => {
+                                        nonce_stale = true;
+                                        Err(Error::Stale)
+                                    }
+                                    Err(_) => Err(Error::State),
+                                }
+                            }
+                        }
+                    }
+                    Err(reason) => Err(reason),
+                }
+            }
+            (true, None) | (false, Some(_)) => Err(Error::State),
+            (false, None) => {
+                managed
+                    .lifecycle
+                    .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
+                        signing_release =
+                            Some(crate::SigningRelease::new(release.signature, release.time)?);
+                        match self.http_release {
+                            super::HttpRelease::Mutable(admit) => {
+                                admit(&mut self.venue, &mut pending.value, release)
+                            }
+                            super::HttpRelease::NonceUnscheduled(admit) => {
+                                admit(&self.venue, &pending.value, release)?;
+                                Ok(crate::request_context::Admission::Unscheduled)
+                            }
+                        }
+                    })
+            }
+        };
         if let Ok(Claim::Released(release)) = result {
             if let Some(released) = release_flag {
                 *released = true;
@@ -1032,6 +1174,25 @@ impl<V: Venue> Engine<V> {
         }
         if journal && !matches!(result, Ok(Claim::Released(_))) {
             self.io.http_responses.remove(request);
+        }
+        if nonce_stale {
+            let recipe = self
+                .io
+                .managed_http
+                .get_mut(&request)
+                .and_then(|managed| managed.recipe.as_mut())
+                .expect("nonce release has a retained recipe");
+            if recipe.nonce_repairs >= crate::signing_dispatch::MAX_NONCE_REPREPARES {
+                self.http_preparation_failed(
+                    now,
+                    preparation,
+                    Error::State,
+                    VenueError::new("Signing nonce repair budget exhausted")
+                        .kind(ErrorKind::Internal),
+                );
+                return Err(Error::State);
+            }
+            recipe.nonce_repairs += 1;
         }
         if let Err(error) = result {
             self.http_preparation_failed(
@@ -1711,16 +1872,14 @@ mod tests {
                 cx.stream_response(request, ArrayAt::Root);
             }
         }
-        fn on_http_release(
-            &mut self,
-            _: &mut Pending,
-            release: &HttpRelease,
-        ) -> Result<Admission, Error> {
-            self.releases.push(*release);
-            Ok(if self.deny {
-                Admission::Denied
-            } else {
-                Admission::Unscheduled
+        fn http_release() -> crate::HttpRelease<Self> {
+            crate::HttpRelease::Mutable(|this, _, release| {
+                this.releases.push(*release);
+                Ok(if this.deny {
+                    Admission::Denied
+                } else {
+                    Admission::Unscheduled
+                })
             })
         }
         fn on_http_preparation_failed(
@@ -1945,6 +2104,7 @@ mod tests {
             http.url = format!("https://venue.test/read?stamp={}", context.stamp_ms());
             Ok(crate::signing::SignRequest {
                 receipt: crate::signing::SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(context.stamp_ms()),
                     expiry_ms: Some(context.stamp_ms() + 3_000.),
                 },

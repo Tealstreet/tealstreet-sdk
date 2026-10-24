@@ -1,20 +1,31 @@
 import { ManagedHttp, prepareFetch } from './managed-http.mjs';
 export { HttpPreparationError } from './managed-http.mjs';
 
-// Return only the closed numeric record; never serialize arbitrary provider data.
+function signingNonce(value) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 20
+    || (value.length > 1 && value[0] === '0')) return false;
+  for (let i = 0; i < value.length; i++) {
+    const digit = value.charCodeAt(i);
+    if (digit < 48 || digit > 57) return false;
+  }
+  return value.length < 20 || value <= '18446744073709551615';
+}
+
+// Return only closed clock/decimal-nonce facts, never arbitrary provider data.
 function signingReceipt(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).some((key) => key !== 'stampMs' && key !== 'expiryMs')) return undefined;
-  const { stampMs, expiryMs } = value;
+    || Object.keys(value).some((key) => key !== 'stampMs' && key !== 'expiryMs' && key !== 'nonce')) return undefined;
+  const { stampMs, expiryMs, nonce } = value;
+  if (nonce !== undefined && !signingNonce(nonce)) return undefined;
   if ([stampMs, expiryMs].some((time) => time !== undefined && (!Number.isSafeInteger(time) || time < 0))
     || (stampMs !== undefined && expiryMs !== undefined && expiryMs <= stampMs)) return undefined;
-  return { ...(stampMs === undefined ? {} : { stampMs }), ...(expiryMs === undefined ? {} : { expiryMs }) };
+  return { ...(stampMs === undefined ? {} : { stampMs }), ...(expiryMs === undefined ? {} : { expiryMs }), ...(nonce === undefined ? {} : { nonce }) };
 }
 
 function checkedSigningResult(expected, count, result) {
   const receipt = signingReceipt(result?.receipt);
   const rawValues = result?.values;
-  if (!receipt || !expected || receipt.stampMs !== expected.stampMs || receipt.expiryMs !== expected.expiryMs
+  if (!receipt || !expected || receipt.stampMs !== expected.stampMs || receipt.expiryMs !== expected.expiryMs || receipt.nonce !== expected.nonce
     || !Array.isArray(rawValues) || rawValues.length !== count) return undefined;
   const values = [];
   for (let i = 0; i < count; i++) {

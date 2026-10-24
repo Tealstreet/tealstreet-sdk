@@ -40,6 +40,7 @@ impl SignStep for Recipe {
         request.url = format!("https://pacing.test/read?stamp={}", cx.stamp_ms());
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(cx.stamp_ms()),
                 expiry_ms: Some(cx.stamp_ms() + 1000.),
             },
@@ -101,9 +102,11 @@ impl Venue for Probe {
             .unwrap();
         }
     }
-    fn on_http_release(&mut self, _: &mut Pending, _: &HttpRelease) -> Result<Admission, Error> {
-        self.releases += 1;
-        Ok(Admission::Unscheduled)
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::Mutable(|this, _: &mut Pending, _: &HttpRelease| {
+            this.releases += 1;
+            Ok(Admission::Unscheduled)
+        })
     }
     fn on_http_preparation_failed(
         &mut self,

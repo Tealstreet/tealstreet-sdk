@@ -271,7 +271,7 @@ export interface LocalIdentityMetadata {
 /** Trusted local setup metadata; credential strings arrive on the setup channel. */
 export interface LocalSignerMetadata { primary?: LocalIdentityMetadata; secondary?: LocalIdentityMetadata }
 /** Canonical facts in protocol UTC milliseconds; neither field is fabricated. */
-export interface SignReceipt { stampMs?: number; expiryMs?: number }
+export interface SignReceipt { stampMs?: number; expiryMs?: number; nonce?: string }
 export interface SignResult {
   values: number[][];
   receipt: SignReceipt;

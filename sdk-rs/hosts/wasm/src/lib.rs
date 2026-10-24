@@ -697,6 +697,7 @@ impl WasmEngine {
         let (protocol_now, revision) = self.inner.signing_clock(now);
         let stamp_ms = safe_cex_engine::time::wire_stamp_ms(protocol_now);
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(stamp_ms),
             expiry_ms: None,
         }

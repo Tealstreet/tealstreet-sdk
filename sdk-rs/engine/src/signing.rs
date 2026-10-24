@@ -356,7 +356,16 @@ pub struct SignReceipt {
     pub stamp_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expiry_ms: Option<f64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "nonce_decimal"
+    )]
+    pub nonce: Option<u64>,
 }
+#[path = "signing_nonce_decimal.rs"]
+mod nonce_decimal;
+
 impl SignReceipt {
     pub fn validate(&self) -> Result<(), SignError> {
         if [self.stamp_ms, self.expiry_ms]

@@ -127,6 +127,7 @@ impl SignStep for Recipe {
         }
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(cx.stamp_ms()),
                 expiry_ms: Some(cx.stamp_ms() + self.1),
             },

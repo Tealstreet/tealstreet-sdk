@@ -1,17 +1,61 @@
 //! Shared bounded park/resume state for HTTP, WS messages and WS upgrades.
+use crate::nonce::{ClaimAuthority, NonceClaim, NonceError, NonceReservation};
 use crate::signing::{SignError, SignReceipt, SignRequest, SignResult, validate_result_shape};
 use crate::signing_headers::ResultHeaderPolicy;
 use crate::{Action, HttpRequest, RequestId, SocketId, TimerId};
+use std::{
+    cell::{Cell, RefCell},
+    sync::Arc,
+};
 
 /// Narrow send-time view: protocol clock and injected signing entropy only.
 /// Identity replay seeding never supplies nonce bytes to this context.
 pub struct DispatchContext<'a> {
     pub now_ms: f64,
     entropy: Option<&'a crate::entropy::Entropy>,
+    nonce: Option<PrepareNonce<'a>>,
+    nonce_invalid: Cell<bool>,
+}
+struct PrepareNonce<'a> {
+    expected: &'a Arc<ClaimAuthority>,
+    raw_now: f64,
+    reservation: RefCell<Option<NonceReservation>>,
 }
 impl<'a> DispatchContext<'a> {
     pub(crate) fn new(now_ms: f64, entropy: Option<&'a crate::entropy::Entropy>) -> Self {
-        Self { now_ms, entropy }
+        Self {
+            now_ms,
+            entropy,
+            nonce: None,
+            nonce_invalid: Cell::new(false),
+        }
+    }
+    /// Reserve once for this exact selected recipe and preparation. Never a clock stamp.
+    pub fn reserve_nonce(&self, claim: &NonceClaim) -> Result<u64, NonceError> {
+        let result = (|| {
+            let Some(record) = &self.nonce else {
+                return Err(NonceError::InvalidClaim);
+            };
+            let authority = claim.authority();
+            if !Arc::ptr_eq(record.expected, &authority) {
+                return Err(NonceError::InvalidClaim);
+            }
+            let mut slot = record
+                .reservation
+                .try_borrow_mut()
+                .map_err(|_| NonceError::InvalidClaim)?;
+            if slot.is_some() {
+                return Err(NonceError::InvalidClaim);
+            }
+            let reservation = authority.reserve(record.raw_now, self.now_ms)?;
+            let nonce = reservation.nonce;
+            *slot = Some(reservation);
+            Ok(nonce)
+        })();
+        if result.is_err() {
+            self.nonce_invalid.set(true);
+        }
+        result
     }
     /// Integer protocol milliseconds captured for this signing attempt.
     /// Use this for wire timestamps; `now_ms` retains submillisecond precision
@@ -51,6 +95,11 @@ impl<'a> DispatchContext<'a> {
 
 /// Canonicalisation and result insertion only; no keys or I/O.
 pub trait SignStep: Send {
+    /// Declare the immutable selected authority before any signing or I/O admission.
+    fn nonce_claim(&self) -> Option<&NonceClaim> {
+        None
+    }
+
     /// Static public codec data for the unsigned managed transport intent.
     /// Credentials and signatures belong exclusively to provider/apply results.
     /// The managed queue snapshots this once; it grants no callback authority.
@@ -70,6 +119,8 @@ pub trait SignStep: Send {
     }
 }
 
+pub(crate) const MAX_NONCE_REPREPARES: u8 = 8;
+
 pub(crate) struct Pending {
     /// Always unsigned while stored in Dispatch, including completed metadata.
     pub outbound: Action,
@@ -88,8 +139,14 @@ pub(crate) struct Pending {
     pub receipt: SignReceipt,
     prepared_protocol_at: Option<f64>,
     header_policy: ResultHeaderPolicy,
+    nonce_claim: Option<Arc<ClaimAuthority>>,
+    pub(crate) nonce: Option<NonceReservation>,
+    pub(crate) nonce_repairs: u8,
 }
 impl Pending {
+    pub(crate) fn has_nonce_claim(&self) -> bool {
+        self.nonce_claim.is_some()
+    }
     fn receipt_expired(&self, raw_now: f64) -> bool {
         self.receipt.expiry_ms.is_some_and(|expiry| {
             let protocol_now = self.prepared_protocol_at.unwrap_or(f64::NAN)
@@ -126,6 +183,7 @@ pub(crate) struct Dispatch {
 pub(crate) enum Completion {
     Ready(Pending, Action),
     Stale(Pending),
+    NonceStale(Pending),
     Failed(Pending, SignError),
 }
 impl Dispatch {
@@ -290,6 +348,7 @@ impl Dispatch {
         }
         let deadline = now + f64::from(timeout);
         let header_policy = step.result_header_policy();
+        let nonce_claim = step.nonce_claim().map(NonceClaim::authority);
         if !matches!(header_policy, ResultHeaderPolicy::Deny)
             && !matches!(outbound, Action::Http(_))
         {
@@ -314,6 +373,9 @@ impl Dispatch {
                 receipt: Default::default(),
                 prepared_protocol_at: None,
                 header_policy,
+                nonce_claim,
+                nonce: None,
+                nonce_repairs: 0,
             },
         );
         Ok(deadline)
@@ -325,10 +387,12 @@ impl Dispatch {
         step: Box<dyn SignStep>,
         now: f64,
         deadline: f64,
+        nonce_claim: Option<Arc<ClaimAuthority>>,
     ) -> Result<(), SignError> {
         self.stage(id, outbound, step, TimerId(0), now)?;
         let p = self.pending.get_mut(&id).expect("staged recipe");
         p.managed = true;
+        p.nonce_claim = nonce_claim;
         p.route_ready = false;
         p.deadline = deadline;
         Ok(())
@@ -410,7 +474,59 @@ impl Dispatch {
             original.timeout_ms = current.timeout_ms;
         }
         p.outbound = p.unsigned.clone();
-        let work = p.step.prepare(&mut p.outbound, context)?;
+        let current = p.step.nonce_claim().map(NonceClaim::authority);
+        match (&p.nonce_claim, &current) {
+            (None, None) => {}
+            (Some(expected), Some(actual)) if p.managed && Arc::ptr_eq(expected, actual) => {}
+            _ => return Err(SignError::InvalidRequest),
+        }
+        let invocation = DispatchContext {
+            now_ms: context.now_ms,
+            entropy: context.entropy,
+            nonce_invalid: Cell::new(false),
+            nonce: p.nonce_claim.as_ref().map(|expected| PrepareNonce {
+                expected,
+                raw_now: now,
+                reservation: RefCell::new(None),
+            }),
+        };
+        let work = p.step.prepare(&mut p.outbound, &invocation)?;
+        if invocation.nonce_invalid.get() {
+            return Err(SignError::InvalidRequest);
+        }
+        p.nonce = invocation
+            .nonce
+            .and_then(|record| record.reservation.into_inner());
+        match (&p.nonce_claim, &p.nonce) {
+            (None, None) if work.receipt.nonce.is_none() => {}
+            (Some(_), Some(reservation)) if work.receipt.nonce == Some(reservation.nonce) => {
+                for operation in &work.operations {
+                    let payload = match operation {
+                        crate::signing::Operation::Sign { key, payload, .. }
+                            if *key == reservation.authority.signing =>
+                        {
+                            Some(payload)
+                        }
+                        crate::signing::Operation::Sha256 { payload } => Some(payload),
+                        crate::signing::Operation::Present { key }
+                            if *key == reservation.authority.credential.reference =>
+                        {
+                            None
+                        }
+                        _ => return Err(SignError::InvalidRequest),
+                    };
+                    if payload.is_some_and(|parts| {
+                        parts.iter().any(|part| {
+                            matches!(part, crate::signing::PayloadPart::Credential { key }
+                            if *key != reservation.authority.credential.reference)
+                        })
+                    }) {
+                        return Err(SignError::InvalidRequest);
+                    }
+                }
+            }
+            _ => return Err(SignError::InvalidRequest),
+        }
         if !matches!(p.header_policy, ResultHeaderPolicy::Deny)
             && !matches!(p.outbound, Action::Http(_))
         {
@@ -468,10 +584,27 @@ impl Dispatch {
         if !now.is_finite() || now >= p.deadline {
             return Some(Completion::Failed(p, SignError::TimedOut));
         }
+        if p.nonce_claim.is_some()
+            && result
+                .as_ref()
+                .is_ok_and(|result| result.receipt.nonce != p.receipt.nonce)
+        {
+            return Some(Completion::Failed(p, SignError::InvalidResult));
+        }
         // A stale provider error belongs to the old canonical payload too.
         // Reprepare with a new attempt identity before interpreting any result.
         if p.prepared_revision.is_some_and(|at| at != clock_revision) {
             return Some(Completion::Stale(p));
+        }
+        if let Some(reservation) = &p.nonce {
+            match reservation.fresh() {
+                Ok(true) => {}
+                Ok(false) => {
+                    drop(result);
+                    return Some(Completion::NonceStale(p));
+                }
+                Err(_) => return Some(Completion::Failed(p, SignError::Unavailable)),
+            }
         }
         let result = match result {
             Ok(result) => result,
@@ -511,6 +644,7 @@ impl Dispatch {
         pending.prepared_revision = None;
         pending.prepared_protocol_at = None;
         pending.receipt = Default::default();
+        pending.nonce = None;
         pending.route_ready = !pending.managed;
         self.pending.insert(id, pending);
     }
@@ -606,6 +740,7 @@ mod header_tests {
         ) -> Result<SignRequest, SignError> {
             Ok(SignRequest {
                 receipt: SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(1000.),
                     expiry_ms: None,
                 },

@@ -389,7 +389,9 @@ impl<P> Cx<'_, P> {
             terminals,
             barriers,
         } = declaration;
-        if (!cfg!(feature = "http-mutation-barriers") || physical) && !barriers.is_empty() {
+        if (!cfg!(feature = "http-mutation-barriers") || physical || self.io.nonce_unscheduled)
+            && !barriers.is_empty()
+        {
             return Err(Error::Invalid);
         }
         let (intent, old_read) = self.preflight_plan_origin(preflight)?;
