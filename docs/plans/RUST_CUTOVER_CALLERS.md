@@ -6547,3 +6547,14 @@ demote the kind to mimic legacy string-only callbacks. The20s Context lifetime
 is explicitly a new admission-through-preparation/response whole-command bound,
 distinct from the old host's physical HTTP timeout fallback. Raw candle t/order
 and malformed numeric-string-to-zero coercion remain unchanged.
+
+## Lighter synchronous history Read custody
+
+The seven native local history replies (unsupported client ID/income category,
+invalid bounds/native index/market, empty keyless history and unavailable private
+identity) retain native precedence, JSON and messages. They now borrow genuine
+shared Read command admission before publishing, so invalid clocks, full owner
+capacity and reused ownership produce one engine refusal without a financial
+outcome. Both Lighter and Robinhood, on mainnet/testnet, keep the same contract.
+Remote history requests, pagination, authentication and byte-level query/codec
+behavior are unchanged; this slice issues no remote-fallthrough Context.
