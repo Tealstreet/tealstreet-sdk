@@ -597,6 +597,10 @@ fn prepare_local_signer_with_policy(
         primary.filter(|_| !(public_data_only && read_policy == ReadCredentialsPolicy::PublicRead));
     let read = options.read_credentials.take();
     let secondary = if read_policy == ReadCredentialsPolicy::ValidateOnly {
+        // Trusted setup computes the result; a caller-supplied one is refused.
+        if options.read_credentials_valid.is_some() {
+            return Err(invalid("Unexpected read credential validation result"));
+        }
         // Validated once here; the material is wiped and never installed.
         options.read_credentials_valid = read.map(|mut read| {
             let valid = read.validate().is_ok();

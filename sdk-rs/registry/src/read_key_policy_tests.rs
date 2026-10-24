@@ -127,6 +127,26 @@ mod setup {
     }
 
     #[test]
+    fn trusted_setup_never_overwrites_a_caller_supplied_result() {
+        for preset in [
+            r#""readCredentialsValid":false"#,
+            r#""readCredentialsValid":true,"readCredentials":{"key":"read","secret":"value"}"#,
+        ] {
+            let mut options = options(&format!(r#"{{"key":"primary","secret":"value",{preset}}}"#));
+            assert!(
+                prepare_local_signer_with_policy(
+                    &mut options,
+                    Default::default(),
+                    false,
+                    ValidateOnly
+                )
+                .is_err(),
+                "{preset}"
+            );
+        }
+    }
+
+    #[test]
     fn the_default_installs_the_read_key_exactly_as_before() {
         let json = r#"{"key":"primary","secret":"value","readCredentials":{"key":"read","secret":"value"}}"#;
         for public in [false, true] {
