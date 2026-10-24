@@ -872,3 +872,9 @@ one terminal but leave metadata_write_pending true. No compile/setup failure is
 counted (the fixture uses the current StepBound/CallBound schema). Same-id
 reuse/stale-seal checks follow the expiry assertion and are not claimed executed
 until the fix makes that first assertion pass. Logs stay outside Git.
+
+The one-line common-funnel cleanup turns all three controls GREEN, including
+execution of expiry -> same-id reuse -> stale Plan and timer rejection -> new
+expiry. The exact hook follows successful request_contexts.finish and
+untrack_read_root; Seal::Stale returns before Store cleanup. This source result
+is separate from fresh CI and owner source review.
