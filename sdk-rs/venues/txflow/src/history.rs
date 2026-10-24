@@ -252,16 +252,24 @@ impl TxFlow {
                 kind.clone(),
             ),
             Query::PublicTrades { .. } => {
-                cx.fail(command, "TxFlow does not document a REST public trades history query; use the trades stream");
+                crate::local_context::complete(cx, safe_cex_engine::request_context::Operation::Read, Err("TxFlow does not document a REST public trades history query; use the trades stream".into()));
                 return;
             }
             Query::OrderByClientId { .. } => {
-                cx.fail(command, "TxFlow indexed lookup cannot prove non-placement");
+                crate::local_context::complete(
+                    cx,
+                    safe_cex_engine::request_context::Operation::Read,
+                    Err("TxFlow indexed lookup cannot prove non-placement".into()),
+                );
                 return;
             }
         };
         if !self.options.testnet || self.user().is_none() {
-            cx.fail(command, "TxFlow testnet account identity required");
+            crate::local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err("TxFlow testnet account identity required".into()),
+            );
             return;
         }
         if from
@@ -271,14 +279,22 @@ impl TxFlow {
             || from.zip(to).is_some_and(|(a, b)| a > b)
             || limit == Some(0)
         {
-            cx.fail(command, "Invalid TxFlow history range or limit");
+            crate::local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err("Invalid TxFlow history range or limit".into()),
+            );
             return;
         }
         if symbol
             .as_ref()
             .is_some_and(|s| self.historical_assets.get(s).and_then(|id| *id).is_none())
         {
-            cx.fail(command, "Unknown or ambiguous TxFlow history symbol");
+            crate::local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err("Unknown or ambiguous TxFlow history symbol".into()),
+            );
             return;
         }
         let mut request = Request {
@@ -313,7 +329,11 @@ impl TxFlow {
             && (request.symbol.is_some()
                 || (!request.include("deposit") && !request.include("withdraw")))
         {
-            cx.done(command, "[]".into());
+            crate::local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Ok("[]".into()),
+            );
             return;
         }
         self.history_page(cx, request);
