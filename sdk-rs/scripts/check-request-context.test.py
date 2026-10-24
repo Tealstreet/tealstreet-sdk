@@ -304,6 +304,8 @@ class PrecisionRed(unittest.TestCase):
                   "fn keep(cx: &mut Cx<'_, P>, n: u8) {} " + in_cx_fn('keep(cx, &mut v); v[0].request(1);'))
         with self.assertRaises(ValueError):
             ban.context_fingerprints(source)
+        with self.assertRaises(ValueError):
+            ban.context_fingerprints('paste::paste! { fn [<keep _ x>](t: u8) {} }')
 
     def test_closure_escapes_taint_the_enclosing_function(self):
         unrelated = ' h.done(1);'
