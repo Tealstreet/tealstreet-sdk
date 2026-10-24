@@ -2863,6 +2863,81 @@ fingerprints. The repeated planning-error fingerprint decreases only 2 to 1;
 the queued remote-flow error remains. Signing and successful local settings are
 held for their separately owned migrations/seam.
 
+## GRVT replay coverage diagnostic proof
+
+The final-capture controls retain two original assertion REDs and eight working
+controls against the exact pre-correction shared module. The corrected shared
+API passes ten new controls plus 14 existing GRVT controls. Fresh authenticated
+raw pairs from runs 40037292055/40040892521 differ only in metrics and protocol
+errors: TS3/Rust6 error occurrences become empty arrays, covering six unique
+keys. The remaining 27 ordered failures, fixers and strict FAIL stay exact.
+Independent raw receipt `/tmp/codex-grvt-replay-evidence/independent-review.json`
+SHA256 `0b1de5f1261505a046f5cd10647a02f5ea4b6f1f56e16b3f4a7bbf2e0f5d1b10`.
+Only the six-key current-tape group is pruned; all other manifest bytes remain.
+This one-pair proof does not claim five-repeat or final-head CI qualification.
+
+### Crypto.com replay protocol declaration sweep
+
+The real protocol audit reproduces four TS and five Rust sticky subscription
+errors when the original capture observes it before the authentication ACK.
+Two assertion REDs and ten working controls precede exact reviewed #1944 reuse;
+all twelve pass with final-only capture. Genuine invalid signatures, early
+subscriptions and late unanswered heartbeats remain visible, including Rust's
+additional `user.trade` requirement. No new venue capture policy is introduced.
+
+Authenticated source-bound baseline and corrected reports differ only in the
+nine protocol keys and timing metrics. Both receivers preserve five writes,
+nine checkpoints and zero transport/signature failures. All sixty remaining
+ordered strict failures and fixers are unchanged. The bounded evidence has one
+correctness pair per role; repeated final-head CI is separate qualification.
+Native source, audit checks, input tapes and historical declarations are intact.
+
+### Binance Spot terminal audit declaration sweep
+
+The exact original capture has two final-assertion REDs with fourteen working
+controls. Each receiver retains both subscription and request coverage errors
+if a checkpoint observes the audit before the subscription ACK. The existing
+shared terminal-capture correction passes all sixteen controls while preserving
+real HMAC, typed request-ID, private-event, generation and late-ACK violations.
+
+Authenticated family archives bind the exact Spot tape and complete receiver
+objects: only metrics and the four protocol errors differ. All twenty-eight
+remaining ordered failures and fixers are exact, with three writes, six
+checkpoints and zero transport/signature failure counters. Only the current-tape
+four-key group is removed; all other manifest bytes remain unchanged. The
+historical one-pair evidence is distinct from current-head five-pair CI.
+
+## MEXC pre-I/O Mutation refusals
+
+Two reachable native trade_command refusals use direct genuine Mutation entry,
+Context diagnostic and Context failure. The duplicate Err terminal after an
+always-returning Err branch is removed as unreachable. Exact removal-only prune
+is3 fingerprints/3 occurrences (two converted branches plus one orphan), leaving
+MEXC18F/18O and trading4F/4O. Signed writes, queue progression, pacing, identity,
+account/history, unsigned background sends and asynchronous terminals remain
+explicit separate consumers. Native UUID entropy before refusal consumes no
+engine action/ID/entry custody; real Engine controls prove admission remains valid.
+
+Architecture gate: No. Existing shared entry/refusal, diagnostics and terminal
+authority; one pure policy, no local journal, issuer wrapper, timer, classifier,
+credential counter or numeric completion fallback.
+
+## KuCoin Spot fixed-setting completion custody
+
+Closed two legacy success sites covering three Setting commands through actual
+#1989 done_local_setting. Six original assertion REDs and four working native
+controls now pass unchanged. Native keyless/pre-credential semantics, unknown
+symbol insertion and successful mode no-ops are preserved. Shared engine owns
+receipt, command capacity and sole terminal; signer/private REST remain held.
+
+## Bitrue local fixed-setting success custody
+
+Closed the one numeric SetPositionMode(false) success using shared #1989
+done_local_setting. Native pre-credential ordering and the true-mode refusal
+remain unchanged. No venue-local admission, owner or completion algorithm.
+Bitrue inventory 30 -> 29 occurrences, 18 -> 17 fingerprints; all private
+signing/read/write migrations remain separate.
+
 ## OKX closed-position request ownership
 
 Closed pages now consume shared SelectedRead command roots/legs and the original
