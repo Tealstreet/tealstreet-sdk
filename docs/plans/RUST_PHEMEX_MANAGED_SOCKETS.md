@@ -323,3 +323,18 @@ known diagnostics with zero unexpected errors and zero resolved declarations.
 This closes the construction/report absence, not the declared parity gaps.
 Local wasm-opt is unavailable; no local size/public performance claim follows.
 Fresh CI must certify the rebuilt standalone family and private case coverage.
+
+
+## SDK secondary-slot regression composition
+
+General CI on actual-ba3 integrationad6 found one stale parity-sweep assertion:
+it still required Phemex primary/read credential material in generic engine
+options after the reviewed custody cutover. The focused original case reproduces
+that assertion failure. Its replacement pins distinct primary/read values in the
+existing third-argument signer setup channel and asserts all raw credential fields
+absent from both engine JSON and retained exchange options. Bitunix's existing
+legacy constructor assertions remain intact. The mock only adds the optional
+third constructor argument; no production or native financial assertion changes.
+The complete parity-sweep plus Phemex construction targets pass19/19 after the
+update, including the Bitunix working control. Fresh CI and exact bounded review
+remain separate refreeze gates. Original failed CI is retained without a rerun.
