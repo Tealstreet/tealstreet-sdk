@@ -315,3 +315,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Paradex public refusals and Lighter catalog | Implementation under review; original REDs recorded | Before converting the last four immediately workable public request sites. | [RUST_PUBLIC_READ_TAIL.md](RUST_PUBLIC_READ_TAIL.md) |
 
 | BloFin local leverage Read refusals | Shared Read admission adoption under review | Before changing the two pre-credential local FetchLeverage refusal sites independently of signer cutover. | [RUST_BLOFIN_LOCAL_LEVERAGE_REFUSALS.md](RUST_BLOFIN_LOCAL_LEVERAGE_REFUSALS.md) |
+
+
+| Native socket snapshot barrier | Shared prerequisite API plan | Before separating login acceptance from a connect-origin native snapshot completion; no venue timer or second reducer. | [RUST_SOCKET_SNAPSHOT_BARRIER.md](RUST_SOCKET_SNAPSHOT_BARRIER.md) |
