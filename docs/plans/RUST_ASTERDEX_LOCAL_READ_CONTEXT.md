@@ -166,3 +166,27 @@ unittest discovery glob selected zero checker tests; the correct dedicated
 check-request-context.test.py target was then run and all15 passed.
 Independent source/adversarial, caller and complete-map reviews are requested
 on the committed runtime checkpoint before final CI/readiness.
+
+## Local command layout measurement
+
+Overseer requests a leaner terminal shape after measured first-adopter costs.
+Keep PR1987's f6365cb67eb unchanged as the original size/native control; use
+separate branch feat/rust-aster-local-read-layout for this behavior-preserving
+experiment. Core measurements show one with_command_entry instance, not one
+per site; aggregate CI delta9524bytes is not per-site causal attribution.
+
+One pure native helper takes the borrowed Command and returns only the selected
+local result kind (static history result, cached-leverage symbol or unsupported
+candle interval). It has no Cx, Context, admission, finalization or I/O. The real
+Venue::on_command callback performs one shared direct admit_http_command, then
+constructs the native result and directly calls done_context/fail_context. Cached
+Store access remains after admission. Native preflight predicates retain their
+exact precedence; successful remote request construction is unchanged. No venue
+wrapper around engine entry, new authority, status classifier or policy change.
+
+Retain all26 original controls byte-exact and re-run Aster/Binance native, strict
+Clippy/fmt/ratchets/bans. The exact5F10O prune remains unchanged. Request bounded
+independent layout reviews and send the immutable candidate to core for an
+apples-to-apples Aster measurement with its existing prototype, without merging
+unreviewed core source here. No profile/budget/test relaxation, local WASM build
+or PR1987 head change is implied by the experiment.
