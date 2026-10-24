@@ -985,8 +985,7 @@ impl Venue for Bingx {
                 return;
             }
             Pending::History(request) => {
-                self.history
-                    .on_response(cx, self.credentials.as_ref(), request, response);
+                self.history.on_response(cx, request, response);
                 return;
             }
             Pending::Trade(request) => {
@@ -1168,6 +1167,7 @@ impl Venue for Bingx {
                     managed::finish(cx, context);
                 }
             }
+            Pending::History(request) => self.history.on_stream_error(cx, request, response),
             pending => self.on_request_failed(
                 cx,
                 pending,
@@ -1225,6 +1225,7 @@ impl Venue for Bingx {
     ) {
         match pending {
             Pending::Identity(read) => self.identity_failed(cx, read, error),
+            Pending::History(request) => self.history.on_http_failed(cx, request, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
@@ -1292,8 +1293,16 @@ impl Venue for Bingx {
             error,
         );
     }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.history.retire(owner);
+    }
+
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        self.history.on_timer(cx, self.credentials.as_ref(), timer);
+        self.history.on_timer(cx, timer);
         if self.account.handles_timer(timer) {
             if let Some(c) = &self.credentials {
                 self.account.on_timer(cx, timer, c);
