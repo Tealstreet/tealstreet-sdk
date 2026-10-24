@@ -480,8 +480,11 @@ Bind and release Claim; no Context, provider success or receipt is fabricated.
 Feature-off unit/adoption targets execute another 40 PASS, zero failed/ignored;
 scoped strict Clippy passes for KuCoin with/without Spot and for the registry
 target, and both packages pass formatting.
-The four registry construction controls pass after shared constructor validation
-was deduplicated. SDK broker retention had two original assertion REDs before the
+The five registry construction controls pass after shared constructor validation
+was deduplicated. The added public-only/passphrase-less-primary control drives
+real registry construction and public bullets, depth and candles, pinning unsigned
+headers and no signing failure even though the unused primary ref is registered.
+SDK broker retention had two original assertion REDs before the
 capsule mapping; those plus existing local-signer setup controls now pass 64.
 
 Bounded independent source review is CLEAR for failure disposition and trusted
@@ -509,6 +512,9 @@ or SIGNER_POLICY_BOOTSTRAPS allowance has been changed or claimed.
 This is local composition evidence, not a freeze or actual shared landing claim.
 The shared alias policy tightening (requiring the primary's existing broker ref
 on a configured secondary), actual prerequisite integration, final reviews and
-full CI remain required. Current full request ratchet is red only for stale-base
-foreign BloFin/Hyperliquid/Kraken/MEXC/Polymarket map drift; own exact inventory and all 15
-request checker controls pass. No foreign map update is authorized by that drift.
+full CI remain required. The current landing 9d344d541d5 was plain-merged at 265aee2c35f; all reviewed
+KuCoin and shared signing/custody blobs remained byte-exact. Four docs conflicts
+kept incoming text followed by each unchanged approved composition suffix. Own
+exact inventories and all 15 request checker controls pass. Foreign credential
+selection drift already present in combo-5b remains with its owners; no foreign
+map update is authorized by that drift.

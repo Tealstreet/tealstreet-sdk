@@ -121,3 +121,132 @@ fn explicit_empty_secondary_passphrase_never_inherits_primary() {
         assert!(prepare_local_signer_for(venue, &mut options).is_err());
     }
 }
+
+struct PublicOnly;
+impl Visit for PublicOnly {
+    type Output = Vec<HttpRequest>;
+    fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
+        use safe_cex_engine::{Event, Notice, Response};
+        let primary = engine.identities().primary.as_ref().unwrap();
+        assert!(primary.passphrase.is_none());
+        let mut requests = Vec::new();
+        let drain = |engine: &mut Engine<V>, requests: &mut Vec<HttpRequest>| {
+            let actions = safe_cex_engine::test_support::prepared_actions(engine, NOW);
+            for action in &actions {
+                assert!(!matches!(
+                    action,
+                    Action::Sign { .. } | Action::Notice(Notice::CommandFailed { .. })
+                ));
+                if let Action::Http(request) = action {
+                    assert_eq!(
+                        request.headers,
+                        vec![
+                            ("X-CHANNEL-API-CODE", "3zexp".into()),
+                            ("Content-Type", "application/json".into()),
+                        ]
+                    );
+                    requests.push(request.clone());
+                }
+            }
+            actions
+        };
+        engine.start(NOW);
+        drain(&mut engine, &mut requests);
+        for body in [
+            r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","baseCurrency":"XBT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"maxOrderQty":1000000,"maxLeverage":125,"multiplier":0.001}]}"#,
+            r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100","bestBidPrice":"99","bestAskPrice":"101","size":12}]}"#,
+        ] {
+            let request = requests.last().unwrap().id;
+            engine.handle(
+                NOW,
+                Event::HttpResponse {
+                    request,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            drain(&mut engine, &mut requests);
+        }
+        let bullets: Vec<_> = requests
+            .iter()
+            .filter(|request| request.url.ends_with("/bullet-public"))
+            .cloned()
+            .collect();
+        assert_eq!(bullets.len(), 2);
+        let mut sockets = Vec::new();
+        for request in bullets {
+            engine.handle(NOW, Event::HttpResponse { request: request.id, response: Response {
+                status: 200, headers: "", body: r#"{"code":"200000","data":{"token":"fixture-public-token","instanceServers":[{"endpoint":"wss://fixture.test/ws","pingInterval":18000,"pingTimeout":10000}]}}"#,
+            } });
+            sockets.extend(
+                drain(&mut engine, &mut requests)
+                    .into_iter()
+                    .filter_map(|action| match action {
+                        Action::WsConnect { socket, .. } => Some(socket),
+                        _ => None,
+                    }),
+            );
+        }
+        assert_eq!(sockets.len(), 2);
+        for socket in sockets {
+            engine.handle(NOW, Event::WsOpened { socket });
+            engine.handle(
+                NOW,
+                Event::WsMessage {
+                    socket,
+                    text: r#"{"type":"welcome"}"#,
+                },
+            );
+            drain(&mut engine, &mut requests);
+        }
+        engine.handle(
+            NOW,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        drain(&mut engine, &mut requests);
+        engine
+            .handle_command(
+                NOW,
+                Command::FetchCandles {
+                    command: 283,
+                    symbol: "BTCUSDT".into(),
+                    interval: safe_cex_engine::model::Interval::H1,
+                    limit: Some(1),
+                    from_ms: None,
+                    to_ms: Some(7_200_000.),
+                },
+                Some(120_000),
+            )
+            .unwrap();
+        drain(&mut engine, &mut requests);
+        requests
+    }
+}
+#[test]
+fn public_only_passphrase_less_primary_never_signs_bullet_depth_or_candles() {
+    let options: EngineOptions = serde_json::from_str(
+        r#"{"key":"fixture-public-key","secret":"fixture-public-secret","publicDataOnly":true}"#,
+    )
+    .unwrap();
+    let requests = build("kucoin", options, entropy(), PublicOnly).unwrap();
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.url.contains("/level2/snapshot?"))
+    );
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.url.contains("/kline/query?"))
+    );
+    assert!(
+        !requests
+            .iter()
+            .any(|request| request.url.ends_with("/bullet-private"))
+    );
+}
