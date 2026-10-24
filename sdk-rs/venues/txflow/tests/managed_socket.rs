@@ -113,7 +113,7 @@ impl<V: Venue> Rig<V> {
     }
 
     fn drain(&mut self) -> Vec<Action> {
-        let actions: Vec<_> = self.engine.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now);
         for action in &actions {
             match action {
                 Action::SetTimer { timer, at_ms } => {
