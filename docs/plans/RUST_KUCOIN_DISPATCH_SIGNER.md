@@ -9,7 +9,8 @@ approved by this document.
 ## Scope and current accounting
 
 The exact checker inventory is **46 occurrences / 42 path-local fingerprints**.
-All 46 are listed below. The signer/broker cutover removes their custody gate;
+All 46 RC sites are listed below; the separate signing inventory follows too.
+The signer/broker cutover removes their custody gate;
 it does not itself prove every history, execution, session or Mutation owner has
 migrated. Conservative test/macro rows remain counted until real call-site
 conversion makes them obsolete; no renaming or rewritten assertion is a prune.
@@ -38,7 +39,7 @@ window, never wholesale adoption of an old branch tree.
 standalone PR. Its parent composition contains unlanded #1973 `b89c2f39b9d` and
 #1990 `fd531f4b01c`; `fa9d7592b7c` composed their sign_key paths. Reuse the reviewed
 broker deltas `d545ee95bb4`, `62e412720d3`, `62377e9368e` after those prerequisites
-land or a maintainer authorizes exact composition. Do not copy their 27-path
+land or the authorizing maintainer claude-ddi2il grants exact composition. Do not copy their 27-path
 aggregate diff onto the current tip or rewrite their shared algorithm resolver.
 
 Broker responsibilities are one declared role and generic setup policy:
@@ -70,6 +71,9 @@ Selection, Identity or broker alias; that remains separately owned shared work.
 
 ## Atomic recipe and native bytes
 
+The native stamp is integer milliseconds: `wire_stamp_ms(now) as u64`, rendered
+as decimal text (sign.rs:51). Pin this exact conversion and reject unsafe/non-finite
+clock inputs through shared validation; do not silently change other families.
 One dispatch receipt stamp, one atomic SignRequest, ordered operations:
 
 1. Present the selected API key ref.
@@ -115,9 +119,14 @@ Every eligible 400005 reissue prepares a fresh atomic request and receipt; never
 replay headers. Funding/history retain 1000 * retries ms and native eligibility;
 provider failure neither skips nor doubles that delay. Account has its existing
 shared retries<1 signature / retries<2 other-failure budget and page resets.
-Native 400002 is AuthInvalid, not a clock retry. Spot gains no generic retry.
+Futures trading.rs:867-876 also reissues a write immediately ONCE on 400005,
+using the retained retried flag. It must prepare a fresh atomic provider batch
+with a new receipt and recomputed request/passphrase/broker MACs, without a
+new timer or renewed command root. Native 400002 is AuthInvalid, not a clock
+retry. Spot gains no generic retry.
 A two-attempt control must compare changing request/broker MACs and unchanged
-passphrase MAC, each genuinely recomputed in its own batch.
+passphrase MAC, each genuinely recomputed in its own batch. Execute this
+control through the genuine Futures write retry path as well as read paths.
 
 Preserve token_pending, generations, dynamic endpoint/token, welcome-before-
 subscribe, shared token retirement and heartbeat/supervisor timing. Keep Futures
@@ -242,3 +251,129 @@ source conversion/obsolete-control cleanup proves its removal.
 | `venues/kucoin/src/trading.rs` | `a3929c62720c7893d6477453bb8092ee1dc649a8b5024ffd9867b8715c3afc2f` | 1 |
 | `venues/kucoin/src/trading.rs` | `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa` | 1 |
 | `venues/kucoin/src/trading.rs` | `e2059285572e975717f09275846f33678d7bf1e78ddd4d40100025ab825c118f` | 1 |
+
+## Current-tip execution and review receipt
+
+Plan checkpoint36943c51312 is role/setup CLEAR from claude-m26ps4. Independent
+plan/test/preservation review is CLEAR, architecture gate No. The exact seven
+historical native tests remain a token-identical prefix; independent review
+recomputed the seven fixed HMAC vectors. No production, construction policy,
+shared custody code or inventory file has changed. New broker-ref/alias types
+must have redacted Debug: opaque names may appear, key/secret/passphrase/broker
+material must not. Test this at native Options and installed alias boundaries,
+matching existing Sensitive/credential redaction; no raw provider material Debug.
+
+Original tests committed c635adf7120 execute on unchanged77f production:
+
+- With Spot: 11 compiling tests, **4 assertion REDs / 7 working GREENs**, zero
+  ignored. Every RED observes zero provider batches where one is required:
+  Futures catalogue, broker catalogue, Futures identity and Spot identity.
+- Without Spot: 9 compiling tests, **3 assertion REDs / 6 working GREENs**,
+  zero ignored. The two Spot-specific controls are not compiled in that mode.
+- Isolated broker role: 8 compiling tests, **6 NEW-CONTRACT runtime schema
+  REDs / 2 existing working GREENs**, zero ignored. The first missing
+  `kucoinBroker` role/policy decode rejects; downstream trim/alias/MAC assertions
+  have NOT executed and are not claimed as independent semantic defect proofs.
+- Working controls include actual native ordered MAC/header bytes, complete and
+  partial broker triplets/default/false verify, selected read-key broker MAC,
+  configured Spot public unsigned behavior, keyless Futures unsigned behavior,
+  a genuine atomic two-MAC provider batch, and existing ordinary/role isolation.
+
+Strict test-target Clippy passes for both packages after correcting two
+get-then-check assertion-style warnings; test meanings are unchanged. The role
+algorithm matrix covers all eight non-HmacSha256 variants in the current enum.
+Full local banned-patterns and request/signing/socket ratchets, whitespace checks
+and prose/test secret scans pass. No full native suite, WASM build, replay, size,
+production provider integration or actual broker landing is inferred here.
+
+The draft deliberately retains executed REDs. HMAC review, actual prerequisites
+or an explicit shared composition, production source review and fresh CI remain
+separate gates. No source is authorized solely by these test receipts.
+
+## Separate signing inventory and migrated-family flip
+
+The request table above is exhaustive only for RC provenance. The independent
+`signing-legacy-sites.json` snapshot on77f contains **41 occurrences / 38
+path-local fingerprints** for KuCoin. This is a different ratchet and count.
+
+| Path under sdk-rs/ | Occurrences | Fingerprints | Required disposition |
+| --- | ---: | ---: | --- |
+| venues/kucoin/src/history.rs | 1 | 1 | Remove raw credential decision through selected opaque custody |
+| venues/kucoin/src/lib.rs | 16 | 15 | Erase generic/raw primary/read/passphrase/broker material and local signing |
+| venues/kucoin/src/secondary_tests.rs | 8 | 8 | Preserve original assertions through trusted fixture setup; retain legitimate test oracles explicitly |
+| venues/kucoin/src/spot/mod.rs | 16 | 14 | Erase raw private helper/state; keep public requests unsigned |
+
+Production must add `kucoin` to the migrated family set in check-signing.py and
+its negative-control loop, exactly as Bitrue2029 does. That flip also starts
+scanning sign.rs and sign/ descendants, which the current legacy-family rule
+excludes. This exposes **16 currently matching sign.rs lines / 13 distinct
+line fingerprints** (enumerated below). Those are an additional scanner-visibility
+obligation, not 16 new production sites introduced by the cutover. Remove native
+primitive/secret holders, move any retained oracle behind test configuration, and
+freeze only legitimate reviewed test/metadata matches. Run negative controls for
+new and duplicate sites; preserve every other family map/order. Request actual
+bootstrap grants where required; no broad exception or guessed final count.
+
+The following separate signing manifest map is exhaustive at the frozen base:
+
+| Path under sdk-rs/ | Signing fingerprint | Count |
+| --- | --- | ---: |
+| `venues/kucoin/src/history.rs` | `2896204db3e09d1a447d95223c9c07b959206c1049fb573f85e5cf184c3e7a8a` | 1 |
+| `venues/kucoin/src/lib.rs` | `0219bc24bc618541b8bf84b12a617687f15c479a2a90d9a765b85c28878bfd7c` | 1 |
+| `venues/kucoin/src/lib.rs` | `1f18bec61f449c3913ae221613ed165c7a7569b05bd6c1f99bdd0360f5259e57` | 1 |
+| `venues/kucoin/src/lib.rs` | `20861b679b7c10377687b03415921648e95232082ba70cf253fa5e92dd5cce5a` | 2 |
+| `venues/kucoin/src/lib.rs` | `239d8bb1b21eae866af31bbf63a30b5b06ab0bea27aa256fe4a260fd801ac53f` | 1 |
+| `venues/kucoin/src/lib.rs` | `31c4a378f691bfb9a36c5bfab06eefdbc87243936860af8d8bc1ff86e6060e84` | 1 |
+| `venues/kucoin/src/lib.rs` | `370d47b1b3dca65ba5ffee892a08785f5833f4db7d5264872d4e88e5e04c567c` | 1 |
+| `venues/kucoin/src/lib.rs` | `3d0b1da9613f86f2f90197fe3d09161f9b775bbcd3eb7d61c0bbf4caf0f10573` | 1 |
+| `venues/kucoin/src/lib.rs` | `56b2f68f6e9d2a7e8d8d9c12697428fa0218289b90f6689ffb620baf490041e4` | 1 |
+| `venues/kucoin/src/lib.rs` | `84a58c8cf37ba0b1dc8a11fa97c888c268fabc018cc0cc0213e8ad689a5a14df` | 1 |
+| `venues/kucoin/src/lib.rs` | `998051a7b82dfb9002576f90c080a63ad097bd78ea4f1b21f8ef67b3e1d30152` | 1 |
+| `venues/kucoin/src/lib.rs` | `b385287b7903b95152ecb2025d782dbe45d7ac64448fef388e9ac6056188ed13` | 1 |
+| `venues/kucoin/src/lib.rs` | `b44b8c98339cc77eb4fd6a0ec89fa0c5a55f0dd263d57dfa5dc6fc3031594c04` | 1 |
+| `venues/kucoin/src/lib.rs` | `c04fc85172b971840f73318a9736832e498f2b19c4e7d132a0d6407263f60584` | 1 |
+| `venues/kucoin/src/lib.rs` | `f2743a2be9b140c75420eb6b472c32912171665878b5586c6d9ca53853c62a9f` | 1 |
+| `venues/kucoin/src/lib.rs` | `f5337bace3eb12b97fe8ec3b8ff28168506324b89eb83b624688404891673788` | 1 |
+| `venues/kucoin/src/secondary_tests.rs` | `2791b1cb0b8e1d24249ff6ba09597949814014f3dd4e007efa0cd2344e716052` | 1 |
+| `venues/kucoin/src/secondary_tests.rs` | `312e63f384b36461835c77c42018f6ed4813059e71a2aa5ad975a4a76ae547ba` | 1 |
+| `venues/kucoin/src/secondary_tests.rs` | `5197051b828db9d78a27c00482911a29712a6d9dad1ea40b1c4e897286143dbc` | 1 |
+| `venues/kucoin/src/secondary_tests.rs` | `5b80fd58f5f9859eef7ed9d57eaf6a9087d5057f87b1e89c497e756cf894df11` | 1 |
+| `venues/kucoin/src/secondary_tests.rs` | `5bcd752556bac2b8348e1071d147565c915e158f4c0d016782795d1bd121218a` | 1 |
+| `venues/kucoin/src/secondary_tests.rs` | `8fde5a2b784059f7db8e376d194270496958f22cf05923decb29eddc607cf153` | 1 |
+| `venues/kucoin/src/secondary_tests.rs` | `96590eff7cf76980f83548cc0da7a59621eae3391da67fe9863e68bafd8de327` | 1 |
+| `venues/kucoin/src/secondary_tests.rs` | `d52b3ae1b0690eae15c7aff4c4bf222fa70a0a4304616eaf812cd96cf0dec9e2` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `05816b24b2ee1edaf364146f9016d0d6f10a08b56b0ef613234cdb9bd4f13f4b` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `0c34e33203af9f5eb6bf128257c8bdf5caaab04d5808e870fcb70cc22a59a7c6` | 2 |
+| `venues/kucoin/src/spot/mod.rs` | `178d78c26cfc9c6e19f6fea3deec67a29da33635fab918a8742961cd75ee6e67` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `20861b679b7c10377687b03415921648e95232082ba70cf253fa5e92dd5cce5a` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `293e48984f4ee24823325b8a5ff7cad1ba41975db53422d477d9ed7793db178a` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `370d47b1b3dca65ba5ffee892a08785f5833f4db7d5264872d4e88e5e04c567c` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `74d7492f0b6267a2f75ee1fb7874a090b6cd10d68fd1ed35224c61491cf900f3` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `84a58c8cf37ba0b1dc8a11fa97c888c268fabc018cc0cc0213e8ad689a5a14df` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `9b258d4209b1982036d0bf8c004a7a1eb3eccabf81a295ecdc197d522623498d` | 2 |
+| `venues/kucoin/src/spot/mod.rs` | `b385287b7903b95152ecb2025d782dbe45d7ac64448fef388e9ac6056188ed13` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `bb0b6519a9602671c05eaeb09cebec736bd1256fc71ffdd6a2dce4e2786c1e33` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `bcc0c3e0c84201bd384ce04502323c3b473579c97451aa96065d9e9371f50da0` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `f2743a2be9b140c75420eb6b472c32912171665878b5586c6d9ca53853c62a9f` | 1 |
+| `venues/kucoin/src/spot/mod.rs` | `f5337bace3eb12b97fe8ec3b8ff28168506324b89eb83b624688404891673788` | 1 |
+
+Newly visible sign.rs lines at the migrated-family flip (original77f bytes):
+
+| Line | Signing fingerprint | Disposition before source freeze |
+| ---: | --- | --- |
+| 2 | `48fd4540f198706c9bb61b9937bb5d67341bd69e331c1bc10b6d7a6385008710` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 17 | `6fa4402de35a1a6f3f80e355ec7e327d4bbdee53c43dbb7c41858fe087f29c61` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 59 | `659735b719f8acf3fdea49dfc2f0e5ffc8828897283ed8cee326ef0c38727b7d` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 60 | `8c1c69ce9f10f73666ef4c21123abe7c29fe9ed22644347ff6b30cfc38b42b53` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 67 | `659735b719f8acf3fdea49dfc2f0e5ffc8828897283ed8cee326ef0c38727b7d` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 68 | `8c1c69ce9f10f73666ef4c21123abe7c29fe9ed22644347ff6b30cfc38b42b53` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 86 | `83fa4a266d9ff7985b9c77292f2a8c45b6ebbff517eef91aade3a4875f3954df` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 106 | `736bafffd2886401fcf5c57cdb6d41e45493f3954ba159693e1258fd60718c05` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 145 | `736bafffd2886401fcf5c57cdb6d41e45493f3954ba159693e1258fd60718c05` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 181 | `84713aca2ca2e28c8baa26787ac22d860e36cdfbe247a06b32574c5c7c7788bc` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 182 | `3d0b1da9613f86f2f90197fe3d09161f9b775bbcd3eb7d61c0bbf4caf0f10573` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 183 | `0219bc24bc618541b8bf84b12a617687f15c479a2a90d9a765b85c28878bfd7c` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 184 | `56b2f68f6e9d2a7e8d8d9c12697428fa0218289b90f6689ffb620baf490041e4` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 185 | `239d8bb1b21eae866af31bbf63a30b5b06ab0bea27aa256fe4a260fd801ac53f` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 187 | `1f18bec61f449c3913ae221613ed165c7a7569b05bd6c1f99bdd0360f5259e57` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |
+| 193 | `d4687b2e7809352d30f7f173c117a678d8293f1c9a4377d22cdabe864e638f58` | Remove production custody/MAC work; retain only genuine test or diagnostic evidence |

@@ -90,8 +90,8 @@ fn new_contract_broker_trim_matches_rust_and_preserves_bom() {
     }
     for material in [None, Some(""), Some("  \t ")] {
         let (_, ids) = install(material, true);
-        assert!(ids.primary.unwrap().extra.get(&role()).is_none());
-        assert!(ids.secondary.unwrap().extra.get(&role()).is_none());
+        assert!(!ids.primary.unwrap().extra.contains_key(&role()));
+        assert!(!ids.secondary.unwrap().extra.contains_key(&role()));
     }
 }
 
@@ -143,6 +143,11 @@ fn new_contract_broker_role_refuses_every_other_algorithm() {
         Algorithm::HmacSha512,
         Algorithm::Sha256SecretSuffix,
         Algorithm::Ed25519,
+        Algorithm::Es256,
+        Algorithm::Secp256k1Digest,
+        Algorithm::StarkDigest,
+        Algorithm::SchnorrDigest,
+        Algorithm::ZkLinkContract,
     ] {
         let request = SignRequest {
             receipt: Default::default(),
