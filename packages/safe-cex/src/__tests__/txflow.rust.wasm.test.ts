@@ -9,6 +9,7 @@ import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from 
 import { DefaultStore } from '../store/store.base';
 import { directTransport } from '../transport/direct';
 import { PositionMode } from '../types';
+import { prepareRecordedHttp } from './support/managedHttp';
 
 const REST = 'https://rpc.txflow-testnet.xyz';
 const PUBLIC_PROXY = 'https://public-cors.invalid';
@@ -76,6 +77,7 @@ const recordedTxFlowTransport = () => {
     activeAssetData: { user: WALLET, coin: '1', leverage: { type: 'cross', mode: 'oneWay', value: 7 } },
   };
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => 1_700_000_000_000 + performance.now() - startedAt,
     connect: (url, { channel, onOpen }) => {
       const socket = { url, channel, sent: [] as unknown[] };
