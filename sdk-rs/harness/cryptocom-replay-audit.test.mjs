@@ -55,8 +55,8 @@ for (const impl of ['ts', 'rust']) {
     acknowledge(audit);
     subscribe(audit, requiredChannels(impl));
     heartbeat(audit, 44);
-    assert.deepEqual(checkpoint.protocolErrors, []);
     assert.deepEqual(finish(audit).protocolErrors, []);
+    assert.deepEqual(checkpoint.protocolErrors, []);
   });
 
   test(`${impl}: genuine invalid authentication survives a later valid lifecycle`, () => {
