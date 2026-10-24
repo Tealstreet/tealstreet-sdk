@@ -5761,6 +5761,37 @@ native decision order and introduces no request, signer, timer, Store mutation
 or incomplete marker. PublicTrades retains its existing managed public path;
 other private history, signing, settings and REST fallthrough remain unchanged.
 
+
+### Bybit option trading on the ordinary Plan path (slice 4a)
+
+Option `placeOrders`, `updateOrder`, `cancelOrders`, `cancelSymbolOrders`,
+leverage and margin settings now follow the ordinary Bybit contract above.
+Request bodies are unchanged.
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| A batch of option orders where some are refused | Failure `KnownPartial` with `partialOrderIds` for the placed ones (was success with those IDs) | Same as ordinary D4; rides the same NX confirmation. |
+| An option amend whose acknowledgement names another order | `Unknown` (was success) | Reconcile through reads; never resend. |
+| An option cancel answered "order not exists" (`110001`) | Success; the row stays until the one fresh order read the engine requests (was a local Cancelled) | Do not expect the row to vanish on the ACK. |
+| Option writes after a lost or uncertain reply | Resend only on a classified `10002`/`10004` refusal, never on text or transport loss | None. |
+| Option leverage or margin setting | `NotSent` `unsupported`, now worded for options (was the spot wording). `setPositionMode` is account-wide and unchanged: it applies to the primary (linear) category whatever symbol it names | Do not offer leverage or margin settings for options. |
+| A trade command on a disabled option product | `NotSent` `invalidInput` (was untyped), as for reads and other disabled products | Enable the product. |
+| An option amend refused with "not modified" text | `Rejected` (was success) | Same as ordinary: only `34040` on a trading-stop write is a satisfied no-op. |
+| An option cancel refused with "order not exists" / "too late to cancel" text under a code other than `110001`/`170213` | `Rejected` (was a local Cancelled) | Branch on the native code, not text. |
+| An option cancel-all answered `success:"0"` | `Unknown` (was a known refusal) | Reconcile through reads. |
+| An option create whose `orderLinkId` echo differs from the sent one | `Unknown` (was success) | Reconcile; the caller's ID is the lookup key. |
+
+### Bybit option queries and seeds on managed reads (slice 4b)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| `fetchOptionChain` / `fetchAccountGreeks` have a 20 s native window | `timeout` when it expires; a late answer is ignored | None. |
+| Refusals before any request | Typed `NotSent`: `invalidInput` for "Options are not enabled" and an invalid chain query; `authInvalid` for Greeks without an API key (was untyped text) | Branch on `kind`; text unchanged. |
+| A native refusal of the option read | The classified kind and `venueCode`, with the message prefixed `Bybit options:` | Branch on `kind`. |
+| Greeks after a signature/timestamp refusal | Re-read once, re-signed, only on a native `10002`/`10004`; a text-only match never re-reads | None. |
+| `fetchOptionExpiries` | Needs command admission; a full command table refuses it once with the shared `internal` capacity error; otherwise unchanged | None. |
+| Option ticker seeds at startup | Managed discovery reads with the same retry, pause and degradation rules | None. |
+
 ## Exact background read delivery
 
 Adapters publishing a one-leg Background Read use

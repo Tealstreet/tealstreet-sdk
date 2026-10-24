@@ -1,7 +1,7 @@
 //! Ordinary (Linear, Inverse, Spot and Demo) trading on the engine's Preflight
 //! and Plan core. Each command owns one genuine preflight: optional signed mode
 //! reads, then one admitted native plan whose write facts the engine journal
-//! seals. Hyro and option placements stay on the legacy job pipeline (D5).
+//! seals. Options run here too; Hyro stays on the legacy job pipeline until it adopts.
 use super::acknowledgement::{self as ack, Answer, Row};
 use super::codes::BYBIT;
 use super::{
@@ -21,7 +21,7 @@ use safe_cex_engine::request_context::{
     RetryEvidence, RetryPolicy, WriteResult,
 };
 use safe_cex_engine::{
-    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, Store, VenueError,
+    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError,
 };
 use std::collections::VecDeque;
 
@@ -147,25 +147,12 @@ fn fields(body: &str) -> Fields {
 }
 
 impl BybitLinear {
-    /// Hyro placements and every option-symbol command stay on the legacy job
-    /// pipeline (D5, removed before the master merge).
-    pub(crate) fn ordinary_command(&self, store: &Store, command: &Command) -> bool {
-        let option = |symbol: &str| self.category_for(symbol) == Category::Option;
-        let order_option = |id: &String| store.order(id).is_some_and(|order| option(&order.symbol));
-        let touches_options = match command {
-            Command::PlaceOrders { orders, .. } => orders.iter().any(|o| option(&o.symbol)),
-            Command::AmendOrder { id, .. } => order_option(id),
-            Command::CancelOrders { ids, .. } => ids.iter().any(order_option),
-            Command::CancelSymbolOrders { symbol, .. }
-            | Command::SetLeverage { symbol, .. }
-            | Command::SetMarginType { symbol, .. } => option(symbol),
-            _ => false,
-        };
-        // Hyro placements keep the legacy pipeline until their own adoption.
+    /// Hyro placements stay on the legacy job pipeline until their own
+    /// adoption (H2; D5, removed before the master merge).
+    pub(crate) fn ordinary_command(&self, command: &Command) -> bool {
         !(self.variant.is_hyro() && matches!(command, Command::PlaceOrders { .. }))
             && trade_command_id(command).is_some()
             && !matches!(command, Command::CancelOrdersWithSymbols { .. })
-            && !touches_options
     }
 
     /// The genuine command entry: one preflight before any check or read.
@@ -224,6 +211,7 @@ impl BybitLinear {
     }
 
     /// Native validation before any read or write, in the legacy order.
+    // A product the account has not enabled is its configuration (as for reads).
     fn ordinary_gate(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> Option<Gate> {
         if let Some(error) = self.config_error.clone() {
             return Some(Gate::Fail(not_sent(error)));
@@ -241,17 +229,23 @@ impl BybitLinear {
         if let Some(symbol) = symbol
             && !self.category_enabled(self.category_for(&symbol))
         {
-            return Some(Gate::Fail(not_sent("Bybit product is not enabled")));
+            return Some(Gate::Fail(disabled_product()));
         }
         if let Command::PlaceOrders { orders, .. } = command {
             for order in orders {
                 if !self.category_enabled(self.category_for(&order.symbol)) {
-                    return Some(Gate::Fail(not_sent("Bybit product is not enabled")));
+                    return Some(Gate::Fail(disabled_product()));
                 }
-                if order.implied_volatility.is_some() {
+                let option = self.category_for(&order.symbol) == Category::Option;
+                if !option && order.implied_volatility.is_some() {
                     return Some(Gate::Fail(not_sent(
                         "impliedVolatility is supported only on Bybit options",
                     )));
+                }
+                // The whole batch validates before any read: an invalid option
+                // must not cost a mode read for its linear neighbours.
+                if option && let Err(error) = self.format_option(cx, order) {
+                    return Some(Gate::Fail(not_sent(error)));
                 }
             }
             // An unpriced protective order must never become a market order.
@@ -1476,4 +1470,8 @@ fn context_command(context: &Context) -> CommandId {
         safe_cex_engine::request_context::Owner::Command { id, .. } => id,
         _ => 0,
     }
+}
+
+fn disabled_product() -> VenueError {
+    not_sent("Bybit product is not enabled").kind(ErrorKind::InvalidInput)
 }

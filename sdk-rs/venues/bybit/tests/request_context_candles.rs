@@ -159,8 +159,13 @@ fn cached_balance_info_and_disabled_product_refusals_need_command_authority() {
         leverage: 2.0,
         side: None,
     });
-    assert_eq!(failure(&h, 49).outcome, Some(Outcome::NotSent));
-    for command in [46, 47, 49] {
+    // The write's Preflight needs no context slot, so its disabled-product
+    // gate answers before any I/O.
+    let write = failure(&h, 49);
+    assert_eq!(write.outcome, Some(Outcome::NotSent));
+    assert_eq!(write.kind, Some(ErrorKind::InvalidInput));
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 49).count(), 1);
+    for command in [46, 47] {
         let error = failure(&h, command);
         assert_eq!(
             error.kind,

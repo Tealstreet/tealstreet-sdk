@@ -1401,7 +1401,7 @@ impl BybitLinear {
             let query = Query::new()
                 .str("category", "option")
                 .str("baseCoin", &base_coin);
-            self.send(
+            self.send_discovery(
                 cx,
                 Rest::get("/v5/market/tickers", query).streamed(),
                 Then::OptionSeed {
@@ -1974,7 +1974,13 @@ impl BybitLinear {
                     }
                 }
             }
-            Then::Options(request) => self.on_options_response(cx, request, response),
+            // Managed option reads settle in on_options_response before this
+            // public path; kept typed so no caller can leave one unanswered.
+            Then::Options(request) => {
+                let response =
+                    response.map_err(|error| VenueError::new(error).kind(ErrorKind::Internal));
+                self.on_options_response(cx, request, response)
+            }
             // Managed kline reads never reach the legacy public path.
             Then::Candles(_) => {}
             Then::Account(request) => self.on_account_response(cx, request, response),
@@ -2306,6 +2312,7 @@ impl Venue for BybitLinear {
             Then::Ordinary(request) => self.on_ordinary_leg_failed(cx, request, error),
             Then::Candles(read) => Self::candles_failed(cx, read, error),
             Then::Identity(context) => self.identity_response(cx, context, Err(error)),
+            Then::Options(request) => self.on_options_response(cx, request, Err(error)),
             then => self.on_request_failed(
                 cx,
                 Pending {
@@ -2503,6 +2510,10 @@ impl Venue for BybitLinear {
             Self::candles_response(cx, read, &response);
             return;
         }
+        if let Then::Options(request) = pending.then {
+            self.on_options_response(cx, request, Ok(response));
+            return;
+        }
         if let Some(read) = pending.read.clone() {
             // Only a live Background read may publish; the engine never
             // delivers an answer for a retired attempt.
@@ -2556,6 +2567,19 @@ impl Venue for BybitLinear {
         {
             return self.on_response(cx, pending, response);
         }
+        // A native option refusal is classified; a success without its list is malformed.
+        if let Then::Options(request) = pending.then {
+            let response = if venue_error(&response).is_some() {
+                Ok(response)
+            } else {
+                Err(
+                    VenueError::new("Bybit options: response did not contain the expected list")
+                        .kind(ErrorKind::Internal),
+                )
+            };
+            self.on_options_response(cx, request, response);
+            return;
+        }
         // Fee, refresh and discovery-limit failures can carry `result: {}`.
         // Preserve typed limit evidence and headers; successful discovery still
         // requires its streamed list.
@@ -2591,7 +2615,12 @@ impl Venue for BybitLinear {
             Then::Candles(read) => Self::candles_item(cx, read, item),
             Then::RefreshMarkets(page) => self.refresh_item(page, item),
             Then::Account(request) => self.on_account_item(cx, request, item),
-            Then::Options(request) => options::on_item(request, item),
+            Then::Options(request) => {
+                let context = request.context().clone();
+                if cx.validate_read_http_delivery(&context, &context).is_ok() {
+                    options::on_item(request, item)
+                }
+            }
             then => {
                 if matches!(then, Then::Markets { .. })
                     && let Ok(row) = decode_instrument(item)
@@ -2636,9 +2665,7 @@ impl Venue for BybitLinear {
             Then::History(request) => self.on_history_sign_failed(cx, request, error),
             Then::Closed(request) => self.on_closed_sign_failed(cx, request, error),
             Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
-            Then::Options(
-                options::Request::Chain { command, .. } | options::Request::Greeks { command, .. },
-            ) => cx.fail(command, error),
+            Then::Options(request) => self.on_options_response(cx, request, Err(error)),
             then => self.on_public_response(cx, then, Err(&error.message)),
         }
     }
@@ -2750,7 +2777,7 @@ impl Venue for BybitLinear {
         };
         let category = symbol.map_or(self.primary_category, |symbol| self.category_for(symbol));
         // An ordinary trade command fails through its own preflight.
-        if !self.category_enabled(category) && self.ordinary_command(cx.store, &command) {
+        if !self.category_enabled(category) && self.ordinary_command(&command) {
             self.on_trade_command(cx, command);
             return;
         }
@@ -2792,14 +2819,13 @@ impl Venue for BybitLinear {
         }
         self.select_category(category);
         match command {
-            Command::FetchOptionChain { command, query } => {
-                self.fetch_option_chain(cx, command, query)
-            }
+            // The engine binds the command when each read is admitted.
+            Command::FetchOptionChain { command: _, query } => self.fetch_option_chain(cx, query),
             Command::FetchOptionExpiries {
-                command,
+                command: _,
                 underlying,
-            } => self.fetch_option_expiries(cx, command, &underlying),
-            Command::FetchAccountGreeks { command } => self.fetch_account_greeks(cx, command),
+            } => self.fetch_option_expiries(cx, &underlying),
+            Command::FetchAccountGreeks { command: _ } => self.fetch_account_greeks(cx),
             Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
             Command::UnsubscribeOrderBook { symbol } => self.unsubscribe_book(cx, &symbol),
             Command::SubscribeCandles { symbol, interval } => {
