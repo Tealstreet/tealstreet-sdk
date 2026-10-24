@@ -2957,3 +2957,12 @@ read with exact delivery validation and retirement before fallback/retry. No
 signer, private authority, session or engine policy is changed. Original new
 targets execute seven native controls PASS and15 intended assertion REDs, zero
 ignored. Exact own prune is four singleton occurrences across three keys.
+
+### Phemex dispatch-signing custody candidate
+
+Full native funnel and WS auth now use opaque provider recipes, removing14
+legacy lib credential/material fingerprints. Typed signer refusal preserves
+accepted-prefix IDs and native rollback revisions; actual-release raw expiry
+is accumulated as a maximum before the native5s reconciliation skew. Production
+wire/financial controls pass. Independent source/caller reviews are CLEAR;
+full-map/HMAC review, final CI and the combined #1970/#1974 landing remain gates.
