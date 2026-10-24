@@ -44,7 +44,9 @@ attempt are discarded before retry; no prefix success, cache or Store write.
 
 Native on_request_failed increments attempts while attempts<5 and immediately
 calls send_request: one initial plus five transport retries, exactly six physical
-attempts with no backoff, pause or per-attempt waiting. Native HTTP/status/code,
+attempts with no backoff, pause or per-attempt waiting. Native Candles uses
+request_streamed_body with timeout_ms=None; only Builders sets an explicit10s
+request timeout. That source does not prove a native20s attempt window. Native HTTP/status/code,
 missing-array or malformed-row failures do not retry. Code1000 for Candles is
 explicitly excluded from account-refresh/auth retry. No native auth grant.
 
@@ -59,9 +61,12 @@ entry uses the established reject_expired_command(Read) handling, without renewa
 
 For valid work admit one StepBound with one CallBound: timeout_ms20000,
 attempts6, RetryWindow::FreshAttempt; PlanPolicy Read/no credential/ReadFailure.
-The logical call span is6*20s and the Plan deadline is min(native span, original
-caller receipt), not a fresh120s/default surrogate. Each released attempt receives
-its own native20s physical window under that same cap. A late retry may get a
+The20s admission-to-expiry attempt policy and derived6*20s logical ceiling are
+NEW caller contracts, including stuck route/Prepare/Bind time before release.
+The Plan deadline is min(declared120s ceiling, original caller receipt), not a
+fresh120s/default surrogate. Each selected attempt receives its own shared20s
+physical cap under that same original bound. These bounds are not inferred from
+the native timeout_ms=None or a default host timeout; no native20s claim is made. A late retry may get a
 shorter window, or refuse with less than1ms remaining. Pin that behavior so a
 caller cap is never mistaken for a lost native retry or renewed at dequeue.
 
@@ -99,8 +104,11 @@ inside Job. Route Candles response/failure before the login context.take hooks.
 New typed callbacks must delegate every non-Candles pending to the engine's old
 default (on_sign_error for preparation; on_request_failed for transport), never
 fail_pending. Preserve login_failed/session retirement. A post-#1905 login
-preparation-failure composition control is required before final readiness; use
-prepared_actions in native fixtures so both pre/post-login custody works.
+preparation-failure composition control is required when #1905 is composed
+before this slice freezes; use prepared_actions in native fixtures so both
+pre/post-login custody works. If #1905 lands later, its integrator owns that
+same composition control. The unsigned public slice needs no login capability
+or actual #1905 prerequisite; current non-Candles delegation must remain exact.
 
 ## Original controls before source
 
@@ -136,7 +144,9 @@ show eager raw HTTP before Prepare. Three local capacity REDs retain the native
 unclassified error instead of shared Capacity; remote capacity and invalid-clock
 cases emit raw HTTP or native validation. Unclaimed DATA, real physical-timeout
 fresh-window, typed preparation, short retry-cap and stale-reply controls fail at
-the disclosed first Prepare boundary; their deeper suffixes are unexecuted gates.
+the disclosed first Prepare boundary; their deeper suffixes are unexecuted gates. The physical
+20s timer and120s ceiling controls assert NEW caller contracts, not an original
+native physical-timeout bug.
 Claimed late DATA still succeeds beyond the caller cap, and no caller root timer
 exists on the original path. No missing API or compilation failure is RED proof.
 
@@ -163,3 +173,26 @@ maps remain exact to the assigned base; no shared file is changed.
 
 Scoped strict Clippy on the new target and scoped rustfmt/diff checks pass.
 Local cargo used four jobs, sequentially; no workspace or all-feature sweep.
+
+
+## Required timeout-contract correction before source
+
+9cz's native review identified that the raw candle request sets timeout_ms=None.
+The proposed20s admission/route/Prepare/Bind/physical policy and declared120s
+logical ceiling are therefore explicitly NEW bounded caller contracts. Fe7
+accepted that correction with no engine API change. Production must add a CALLERS
+entry disclosing both bounds, preparation expiry and original receipt precedence;
+that disclosure is a source/freeze gate. No host timeout or native physical window
+is guessed. The native six immediate transport attempts remain exact, and the
+physical-timeout test is correctly labelled new-contract evidence.
+
+Fe7's no-seventh-attempt P3 is already pinned on the sixth failure's own batch:
+strict_error begins with no_io, whose managed arm forbids Prepare and Bind, before
+the duplicate failure control. Fe7 accepted that citation as closure. His optional
+cap-minus0.5ms control remains optional source-stage strengthening; it is not
+claimed by the current shortened-window control. The login preparation-failure
+composition gate remains mandatory for whichever integrates #1905 and this
+slice second; public candles do not depend on a login capability.
+
+The corrected plan/diagnostic target re-executes the same23 controls:15 intended
+assertion REDs/8 GREEN/0ignored. Assertion conditions and runtime APIs are unchanged.

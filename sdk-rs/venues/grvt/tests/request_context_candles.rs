@@ -600,7 +600,7 @@ fn physical_timeout_keeps_a_fresh_twenty_second_retry_window() {
             Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
             _ => None,
         })
-        .expect("first native physical20s timer");
+        .expect("first shared physical20s timer");
     let (permit, _) = bind(&mut e, NOW, p);
     assert!(matches!(e.claim_http(NOW, permit), Ok(Claim::Released(_))));
     e.handle(NOW + 20_000., Event::TimerFired { timer });
