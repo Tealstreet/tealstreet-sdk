@@ -2044,8 +2044,6 @@ fn spot_tpsl_streamed_before_the_seed_and_committed_after_it_is_relabelled() {
 
 /// Two same-ID sends per leg is a bound on the retained intent, not per
 /// caller: a resumed identical call must not send the uncertain create again.
-/// Two same-ID sends per leg is a bound on the retained intent, not per
-/// caller: a resumed identical call must not send the uncertain create again.
 /// Amended (ruling Q4, R1(a)): one send per call, re-read before each resume.
 #[test]
 fn hyro_resumed_call_cannot_exceed_two_same_id_creates() {
@@ -3499,19 +3497,19 @@ fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
     }
 }
 
-/// Review B: with no resend granted (an execution-owned Hyro create), Bybit's
-/// clock in the 10002 refusal still corrects the next attempt's signature.
+/// A Hyro create refused 10002 is resent once, signed with the clock Bybit
+/// named in the refusal.
 #[test]
-fn hyro_recv_window_refusal_corrects_the_next_attempt_clock() {
+fn hyro_recv_window_refusal_resend_uses_bybit_clock() {
     let mut h = ready(Variant::Hyrotrader);
     place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
     let create = h.take("/v5/order/create");
     h.reply(create.id, 200, &recv_window_refusal(h.now));
-    assert!(!h.has_request("/v5/order/create"));
-    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
-    let next = h.take("/v5/order/create");
+    // The restored one-time resend signs with Bybit's corrected clock.
+    let resend = h.take("/v5/order/create");
+    assert_eq!(link(&resend), link(&create));
     assert_eq!(
-        Harness::header(&next, "X-BAPI-TIMESTAMP"),
+        Harness::header(&resend, "X-BAPI-TIMESTAMP"),
         Some((h.now + 600_000.).floor().to_string())
     );
 }
