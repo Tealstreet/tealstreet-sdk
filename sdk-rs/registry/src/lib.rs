@@ -535,7 +535,12 @@ pub fn prepare_local_signer(
     ),
     VenueError,
 > {
-    prepare_local_signer_with_policy(options, Default::default(), false)
+    prepare_local_signer_with_policy(
+        options,
+        Default::default(),
+        false,
+        construction::ReadCredentialsPolicy::Install,
+    )
 }
 
 /// Trusted legacy setup with the shared family policy applied before installation.
@@ -557,7 +562,8 @@ pub fn prepare_local_signer_for(
         let setup = asterdex_setup::local_setup(options, public_data_only)?;
         return local_signer_from_setup(setup, policy, public_data_only);
     }
-    prepare_local_signer_with_policy(options, policy, public_data_only)
+    let read_policy = construction::read_credentials_policy(venue);
+    prepare_local_signer_with_policy(options, policy, public_data_only, read_policy)
 }
 
 #[cfg(feature = "dispatch-signing")]
@@ -565,6 +571,7 @@ fn prepare_local_signer_with_policy(
     options: &mut EngineOptions,
     policy: safe_cex_engine::signing::CredentialSetupPolicy,
     public_data_only: bool,
+    read_policy: construction::ReadCredentialsPolicy,
 ) -> Result<
     (
         safe_cex_engine::signing::Provider,
@@ -584,15 +591,27 @@ fn prepare_local_signer_with_policy(
         } else {
             None
         };
-    let secondary = options
-        .read_credentials
-        .take()
-        .map(|mut read| LocalIdentity {
+    use construction::ReadCredentialsPolicy;
+    // A public-only PublicRead provider holds no primary, so only Read roles select.
+    let primary =
+        primary.filter(|_| !(public_data_only && read_policy == ReadCredentialsPolicy::PublicRead));
+    let read = options.read_credentials.take();
+    let secondary = if read_policy == ReadCredentialsPolicy::ValidateOnly {
+        // Validated once here; the material is wiped and never installed.
+        options.read_credentials_valid = read.map(|mut read| {
+            let valid = read.validate().is_ok();
+            read.erase_secrets();
+            valid
+        });
+        None
+    } else {
+        read.map(|mut read| LocalIdentity {
             key: Secret::new(std::mem::take(&mut read.key)),
             secret: Secret::new(std::mem::take(&mut read.secret)),
             passphrase: read.passphrase.take().map(Secret::new),
             ..Default::default()
-        });
+        })
+    };
     local_signer_from_setup(LocalSetup { primary, secondary }, policy, public_data_only)
 }
 
@@ -659,11 +678,38 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
-    local_signer_from_json_with_policy(
+    let (signer, identities) = local_signer_from_json_with_policy(
         input,
         construction::signer_setup_policy(venue),
         public_data_only,
-    )
+    )?;
+    read_key_identities(
+        construction::read_credentials_policy(venue),
+        &identities,
+        public_data_only,
+    )?;
+    Ok((signer, identities))
+}
+
+/// A ValidateOnly family never installs a read identity, and a public-only
+/// PublicRead family never installs a primary; any other input is refused.
+fn read_key_identities(
+    policy: construction::ReadCredentialsPolicy,
+    identities: &safe_cex_engine::signing::Identities,
+    public_data_only: bool,
+) -> Result<(), VenueError> {
+    use construction::ReadCredentialsPolicy;
+    match policy {
+        ReadCredentialsPolicy::ValidateOnly if identities.secondary.is_some() => Err(invalid(
+            "This venue validates read credentials without installing them",
+        )),
+        ReadCredentialsPolicy::PublicRead if public_data_only && identities.primary.is_some() => {
+            Err(invalid(
+                "Public-only read credentials cannot install a primary identity",
+            ))
+        }
+        _ => Ok(()),
+    }
 }
 
 #[cfg(feature = "dispatch-signing")]
@@ -755,6 +801,27 @@ pub fn build<T: Visit>(
     build_with_signer(venue, options, entropy, signer, visitor)
 }
 
+/// The validation result travels only for a ValidateOnly family, never with
+/// the material, and a false result keeps the native construction refusal.
+fn read_key_options(
+    policy: construction::ReadCredentialsPolicy,
+    options: &EngineOptions,
+) -> Result<(), VenueError> {
+    let validate_only = policy == construction::ReadCredentialsPolicy::ValidateOnly;
+    match options.read_credentials_valid {
+        Some(_) if options.read_credentials.is_some() || !validate_only => {
+            return Err(invalid("Unexpected read credential validation result"));
+        }
+        Some(valid) => safe_cex_engine::ReadCredentials::status(valid).map_err(invalid)?,
+        None => {}
+    }
+    if let Some(identities) = &options.signing {
+        let public_data_only = construction::signer_setup_public_data_only(options);
+        read_key_identities(policy, identities, public_data_only)?;
+    }
+    Ok(())
+}
+
 /// Generic options contain opaque references; provider owns all credentials.
 pub fn build_with_signer<T: Visit>(
     venue: &str,
@@ -827,6 +894,7 @@ pub fn build_with_signer<T: Visit>(
     if let Some(read) = &options.read_credentials {
         read.validate().map_err(invalid)?;
     }
+    read_key_options(construction::read_credentials_policy(venue), &options)?;
     #[cfg(feature = "kraken")]
     if matches!(venue, "kraken" | "krakenspot")
         && !options.public_data_only
@@ -1635,6 +1703,10 @@ pub struct EngineOptions {
     pub log_level: Option<String>,
     #[serde(default)]
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    /// A ValidateOnly family's read-key result, set by trusted setup in place
+    /// of the material (`ReadCredentials::status`); None when no read key.
+    #[serde(default)]
+    pub read_credentials_valid: Option<bool>,
     #[cfg(feature = "blofin")]
     #[serde(default)]
     pub broker_attribution: bool,
@@ -2066,3 +2138,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "read_key_policy_tests.rs"]
+mod read_key_policy_tests;

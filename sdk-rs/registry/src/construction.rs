@@ -49,6 +49,26 @@ struct BridgeRule {
     api_key_index_required: bool,
     isolated_book_subscriptions: bool,
     dispatch_signing: bool,
+    read_credentials: ReadCredentialsPolicy,
+}
+
+/// What trusted setup does with a family's read key (declared, never inferred).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReadCredentialsPolicy {
+    /// Installed as the secondary identity, as before.
+    #[default]
+    Install,
+    /// Validated once, then dropped; only the result reaches the venue.
+    ValidateOnly,
+    /// Also usable without a primary in public-only mode, for Read roles only.
+    PublicRead,
+}
+
+impl ReadCredentialsPolicy {
+    fn is_install(&self) -> bool {
+        *self == Self::Install
+    }
 }
 
 enum DemoRule {
@@ -68,6 +88,9 @@ pub struct BridgeConstruction {
     pub api_key_index_required: bool,
     pub isolated_book_subscriptions: bool,
     pub dispatch_signing: bool,
+    /// Omitted when `Install`, so undeclared families keep their exact record.
+    #[serde(skip_serializing_if = "ReadCredentialsPolicy::is_install")]
+    pub read_credentials: ReadCredentialsPolicy,
 }
 
 pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
@@ -98,6 +121,7 @@ pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
         api_key_index_required: rule.api_key_index_required,
         isolated_book_subscriptions: rule.isolated_book_subscriptions,
         dispatch_signing: rule.dispatch_signing,
+        read_credentials: rule.read_credentials,
     }
 }
 
@@ -107,6 +131,14 @@ include!(concat!(env!("OUT_DIR"), "/construction_rules.rs"));
 #[cfg_attr(not(feature = "asterdex"), allow(dead_code))]
 pub fn signer_setup_mapping(venue: &str) -> Option<SetupMapping> {
     venue_rule(venue).and_then(|rule| rule.setup_mapping)
+}
+
+/// The family's declared read-key policy.
+pub fn read_credentials_policy(venue: &str) -> ReadCredentialsPolicy {
+    venue_rule(venue)
+        .unwrap_or(&DEFAULT_RULE)
+        .bridge
+        .read_credentials
 }
 
 /// Family declarations are compiled from the shared construction table.
