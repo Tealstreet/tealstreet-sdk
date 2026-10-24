@@ -1609,4 +1609,13 @@ strict all-target/all-feature Clippy, scoped fmt, full bans and both request
 ratchets (15 checker tests) pass. Existing native test expectations stay intact;
 public fixture collectors now drive the shared prepared-action executor at their
 explicit event times. Signed secondary probes use an inert Identity continuation
-instead of a public Markets continuation. CI and final runtime reviews pending.
+instead of a public Markets continuation.
+
+Two independent runtime findings received their own assertion-RED commit221bfbfc2ff
+and fixbec93dd562a: expired cleanup metadata must not suppress native failure
+recovery; accepted catalogue custody must retire before successor admission. All
+20 controls now pass; refreshed223 MEXC tests across19 targets and305 Binance
+reference tests across26 targets pass (target counts include empty doc tests).
+Strict Clippy/fmt, bans and both inventory checks pass after the fix. Independent
+source/adversarial, caller and full-map delta reviews are CLEAR atbec93dd562a;
+architecture gate No. CI family size/CPU and other CI gates remain pending.

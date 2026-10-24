@@ -149,3 +149,14 @@ keeps native recovery even when retirement metadata was already pruned. Accepted
 catalogue DATA retires before account/ticker successor admission. Neither change
 grants DATA authority or touches a different generation; the new controls require
 fresh recovery, peer preservation and ticker admission at full occupancy.
+
+## Verification at the reviewed source
+
+Sourcebec93dd562a:223 MEXC native tests across19 targets and305 Binance reference
+tests across26 targets pass; target counts include empty doc tests. The original
+18-control file is byte-exactc58c123d68c and the two review regressions are
+byte-exact221bfbfc2ff, all20 passing. Strict all-target/all-feature MEXC Clippy,
+scoped fmt, full bans and both request checks (15 tests) pass. Source/adversarial,
+caller and full-map re-reviews are CLEAR atbec93dd562a, architecture gate No.
+CI has not yet certified family bytes, CPU or the integration; no merge window
+is claimed. This verification append changes documentation only.
