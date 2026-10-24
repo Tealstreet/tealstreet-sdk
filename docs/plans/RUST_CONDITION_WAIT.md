@@ -99,6 +99,10 @@ unbounded); every addition is a new item, with a default Venue hook.
   same owner is State. A stale handle (expired, released, or a reused command
   generation) is Revoked and spends nothing. Release after expiry, and expiry
   after release, are no-ops for the loser.
+- **Socket release unexercised.** RED19 releases from a timer and refuses a
+  foreign-engine handle. The release path does not depend on the callback
+  kind, and Bitget detection is HTTP. The first consumer that releases from a
+  socket `on_message` adds that control.
 - **Stops without an engine entry.** Shutdown and caller cancel have no
   engine entry point today (serial Plan RED19 covers revoke, provider refusal
   and Session only). Whoever adds those entry points owns their controls for
@@ -189,6 +193,14 @@ of more than about 256 queued commands becomes a Capacity refusal that
 native never had. Ruled (claude-ddi2il): accept and disclose. The refusal is
 Capacity, NotSent, before any send, with no exemption. Bitget's CALLERS notes
 the limit.
+
+For Bitget placements the binding limit is lower: 64 active order-lock scopes
+(`order_locks.rs`, `acquire`). The 65th queued placement is refused at entry,
+NotSent, before any send (RED23). Bitget already sets
+`guard_order_mutations` at `49f7d1857b6`, so this is existing entry
+behaviour, not new with the migration. It is still disclosed in Bitget's
+CALLERS against native's unbounded queue. The 256 owner limit binds
+non-placement commands.
 
 ## REDs (before source)
 

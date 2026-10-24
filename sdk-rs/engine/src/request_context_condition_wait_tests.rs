@@ -1093,6 +1093,69 @@ mod condition_waits {
         assert!(!e.io.request_contexts.has_plans());
     }
 
+    #[test]
+    fn condition_17_a_declining_serial_expiry_seals_once_with_the_streamed_ids() {
+        let mut e = engine(Cond {
+            total: 2,
+            serial_parks: 1,
+            serial_bound: Some(500),
+            on_expired: OnExpired::Decline,
+            ..Default::default()
+        });
+        place(&mut e, 0., 7);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let (actions, now) = drive(&mut e, actions, 0., ["ok:a"]);
+        assert_eq!(e.venue.serial_waits, [Ok(())]);
+        let timer = timer_at(&actions, now + 500.).expect("the Plan's one timer");
+        e.handle(now + 500., Event::TimerFired { timer });
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let result = terminals(&actions, 7);
+        let [Err(error)] = &result[..] else {
+            panic!("one engine seal: {result:?}")
+        };
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["a"]);
+        assert_ne!(
+            error.outcome,
+            Some(crate::Outcome::Unknown),
+            "nothing was live"
+        );
+        #[cfg(feature = "order-locks")]
+        assert!(!e.io.order_locks.uncertain("BTCUSD"), "no fence");
+        assert!(!e.io.request_contexts.has_plans());
+    }
+
+    /// The order-lock scope limit (64 active) binds Bitget's queued placements
+    /// before the 256-owner limit; this is existing entry behaviour.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn condition_23_the_65th_queued_placement_is_refused_before_any_send() {
+        let mut e = engine(Cond {
+            park: true,
+            ..Default::default()
+        });
+        for id in 1..=64 {
+            place(&mut e, 0., id);
+        }
+        e.drain_actions().for_each(drop);
+        assert_eq!(e.venue.parks.len(), 64);
+        assert!(
+            e.venue.parks.iter().all(Result::is_ok),
+            "64 placements park"
+        );
+        place(&mut e, 0., 65);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let result = terminals(&actions, 65);
+        assert!(
+            matches!(&result[..], [Err(error)] if error.outcome == Some(crate::Outcome::NotSent)),
+            "{result:?}"
+        );
+        assert!(prepared(&actions).is_none());
+        assert_eq!(e.venue.parks.len(), 64, "the parked 64 are unaffected");
+        for id in 1..=64 {
+            assert!(e.io.order_locks.contains(id));
+        }
+    }
+
     #[cfg(feature = "order-locks")]
     #[test]
     fn condition_18_a_parked_owner_holds_its_lock_until_its_terminal() {
