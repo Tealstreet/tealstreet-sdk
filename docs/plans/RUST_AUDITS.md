@@ -3201,3 +3201,30 @@ projected only inside the prepared commit closure. All three exits retain native
 order before trade_plan, credentials, builders and queues. Only trading8->5 is
 pruned; every foreign inventory byte and retained hash count stays unchanged.
 Valid trading, queued revalidation, signing and private lifecycle are excluded.
+
+## GRVT initial leverage refusal authority
+
+The unknown-market and missing-authenticated-account FetchLeverage branches now
+admit genuine keyless Read owners before fail_context. Native market-before-account
+precedence, exact strings and kind/outcome/code/hint None are retained. Only the
+two account singletons disappear (11->9); all retained and foreign inventory
+bytes/order stay exact. Valid private body/issuance, account/login Sessions,
+callbacks, signing/selection, reconciliation and queues are excluded.
+
+
+## GRVT unsigned instrument catalog custody
+
+Plan bea3c4cd014 precedes originals955aaf6448a:14 compiling assertion REDs
+and12 working controls on unchanged production. Core and native original
+reviews are CLEAR. The catalog now uses an unsigned Background Read root and
+managed Prepare/Bind/Claim, with exact delivery validation before every item,
+final response and stream-error mutation. Success retires after synchronous
+native publication and continuation; failure retires before native Backoff.
+The login-only Pending.context remains None for catalog jobs.
+
+Inventory lib8->6 removes one catalog sender and separately deletes one
+provably unreachable options refusal. The engine still rejects all three option
+commands before venue entry; the fallback unsupported arm only supplies match
+exhaustiveness. Foreign inventory bytes/order and signing/selection stay exact.
+Scoped123 controls and strict Clippy pass; independent source and exact-head CI
+remain separate gates.
