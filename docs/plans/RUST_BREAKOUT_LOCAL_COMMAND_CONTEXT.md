@@ -24,7 +24,7 @@ pacing, signing, accepted-ID or financial reducer change is selected.
 
 Keep the native option-refusal occurrence held: engine capability checks reject
 those commands before venue entry. The duplicate-job occurrence also stays held:
-the ordinary guarded write-entry path intercepts live duplicate IDs before the
+the ordinary shared command-entry guard intercepts live duplicate IDs before the
 native job guard. Do not invent a wrapper/capability, fake Context or numerical
 entry to claim either as an original assertion RED. The mixed unsupported arm
 also contains FetchAccount and symbol-aware amendment; preserve the existing
@@ -99,3 +99,11 @@ local validation. The corrected case uses an infinite bound to exercise native
 iso_time refusal. A separate passing control requires the real physical login
 path for -1ms, pinning that no negative-time restriction may be introduced.
 No production or inventory change accompanies either fixture correction.
+
+
+The genuine duplicate probe confirms an earlier shared command guard, with
+code command.duplicate and message "Command ID is already in flight". The
+initial probe expected the later order-lock diagnostic, so that assertion is
+excluded from RED evidence and corrected to the observed native contract. The
+control must still require no second send or terminal and a successful original
+physical reply. It is a working boundary control, not an adoption regression.

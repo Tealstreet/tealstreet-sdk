@@ -310,7 +310,7 @@ fn ordinary_duplicate_write_guard_preserves_the_original_native_delivery() {
     assert!(request.url.contains("/orders"));
     let before = rig.notices.len();
     rig.command(place());
-    assert!(rig.notices[before..].iter().any(|n| matches!(n, Notice::Event(event) if event.message == "Order command ID is already in flight")));
+    assert!(rig.notices[before..].iter().any(|n| matches!(n, Notice::Event(event) if event.code == "command.duplicate" && event.message == "Command ID is already in flight")), "native duplicate notices: {:?}", &rig.notices[before..]);
     assert!(!rig.notices[before..].iter().any(|n| matches!(
         n,
         Notice::CommandFailed { command: 91, .. } | Notice::CommandDone { command: 91, .. }
