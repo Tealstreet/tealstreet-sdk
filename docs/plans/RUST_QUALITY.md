@@ -1696,3 +1696,7 @@ codec/default bounds, sorting/duplicates, ten-page/no-progress limits, empty
 success, five-second polling, stale subscription generations and validation
 precedence. All28 and47 unchanged native controls pass; strict/fmt and inventory
 checks are scoped locally, with full workspace/WASM/replay proof delegated to CI.
+
+The CI unit-fixture correction changes only the secondary probe's pending
+constructor fields, preserving every original assertion. Scoped unit tests and
+all-target Clippy now cover this constructor as well as integration targets.

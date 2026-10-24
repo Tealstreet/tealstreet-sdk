@@ -3038,7 +3038,9 @@ other venue files remain unchanged; no engine or key-selection algorithm added.
 Four lib.rs legacy request occurrences are adopted: the chart send, numeric
 failure, and final numeric done/fail. Family27->23, lib4->0; only that exact
 manifest block is removed. No Spot, signing/key-selection, account, history,
-trading, shared engine or existing fixture changes. Plan and original assertion
+trading or shared engine changes. Existing fixture assertions remain intact;
+the secondary probe constructor receives only the root/context field carry.
+Plan and original assertion
 checkpoints precede source; the28 controls began17 assertionRED/11GREEN.
 Source-stage recovery suffix correction records the required root+child two-slot
 geometry without altering the original initial-capacity assertions. The28 now

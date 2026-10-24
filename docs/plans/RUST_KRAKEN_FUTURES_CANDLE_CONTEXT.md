@@ -204,3 +204,17 @@ controls and8 selection controls pass. Bans/ratchet currently reports only
 incoming prunes since10d (Backpack trading, Crypto.com trading, WEEX depth/lib);
 those four sources and manifest sections are unchanged from10d. Integrate actual
 landing to inherit those prunes before CI; do not edit their inventory manually.
+
+## CI unit-fixture compatibility correction
+
+Exact4371177c6cf received independent core/source CLEAR from uufub4 and fe7lgm
+(the latter executed28/28), plus hcmq3f native/source/caller/map CLEAR read-only.
+Full Rust40096740976 then found a genuine unit-test compile error: the native
+secondary_tests probe_pending carrier still initialized the removed command
+field. Its sole constructor change is command:None -> root:None/context:None.
+The ProbeVenue ignores responses; no Context is manufactured and all signing,
+selection, request and assertion text remains unchanged. Production and all28
+new controls remain byte-exact437. This compatibility carry adds secondary_tests
+to the owned test paths, without another manifest delta. Local unit+dedicated
+execution and scoped all-target strict checks replace the earlier incomplete
+lib-only Clippy coverage; fresh CI and a bounded delta review follow the fix.
