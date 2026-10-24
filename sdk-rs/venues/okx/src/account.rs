@@ -3,12 +3,16 @@ use crate::wire::*;
 use crate::{Okx, Pending, scaled, usd};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{
     Context, Credential, Operation, Policy, RetryPolicy, Scope,
 };
-use safe_cex_engine::{Cx, ErrorKind, Fill, Response, TimerId, VenueError, json, num};
+use safe_cex_engine::selected_read::{
+    BackgroundReadError, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
+use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError, json, num};
 use std::collections::{HashMap, HashSet};
 
 pub const PRIVATE: usize = 1;
@@ -100,6 +104,8 @@ pub enum Request {
         version: u64,
     },
     Balance {
+        /// This physical page's Background Read, set once admitted.
+        context: Option<Context>,
         generation: u64,
         version: u64,
         equity: SnapshotBuilder<String, (String, f64)>,
@@ -107,6 +113,7 @@ pub enum Request {
         invalid: bool,
     },
     Positions {
+        context: Option<Context>,
         generation: u64,
         version: u64,
         product: usize,
@@ -114,6 +121,7 @@ pub enum Request {
         invalid: bool,
     },
     Orders {
+        context: Option<Context>,
         generation: u64,
         version: u64,
         kind: usize,
@@ -125,6 +133,48 @@ pub enum Request {
         cursors: HashSet<String>,
         invalid: bool,
     },
+}
+
+impl Request {
+    /// The physical account-cycle page's Background Read, once admitted.
+    pub(crate) fn page_context(&self) -> Option<&Context> {
+        match self {
+            Self::Balance { context, .. }
+            | Self::Positions { context, .. }
+            | Self::Orders { context, .. } => context.as_ref(),
+            Self::Config { .. } | Self::Leverage { .. } => None,
+        }
+    }
+
+    /// An account-cycle page decodes and publishes only its own exact delivery;
+    /// without an admitted Context it has no authority (fail closed).
+    fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        match self {
+            Self::Balance { context, .. }
+            | Self::Positions { context, .. }
+            | Self::Orders { context, .. } => context
+                .as_ref()
+                .is_some_and(|context| cx.validate_background_read_http_delivery(context).is_ok()),
+            Self::Config { .. } | Self::Leverage { .. } => true,
+        }
+    }
+
+    fn with_context(mut self, admitted: Context) -> Self {
+        if let Self::Balance { context, .. }
+        | Self::Positions { context, .. }
+        | Self::Orders { context, .. } = &mut self
+        {
+            *context = Some(admitted);
+        }
+        self
+    }
+}
+
+/// Retiring an already-settled page is a no-op.
+pub(crate) fn retire(cx: &mut Cx<'_, Pending>, context: Option<&Context>) {
+    if let Some(context) = context {
+        let _ = cx.finish_http_context(context);
+    }
 }
 
 #[derive(Clone, Default)]
@@ -285,29 +335,29 @@ impl Okx {
                 position_version: version,
                 balance_version: version,
             });
-            self.list(
+            self.account_read(
                 cx,
                 "/api/v5/account/account-position-risk?instType=SWAP",
-                true,
-                Pending::Account(Request::Balance {
+                Request::Balance {
+                    context: None,
                     generation,
                     version,
                     equity: SnapshotBuilder::default(),
                     risk_rows: 0,
                     invalid: false,
-                }),
+                },
             );
-            self.list(
+            self.account_read(
                 cx,
                 "/api/v5/account/positions?instType=SWAP",
-                true,
-                Pending::Account(Request::Positions {
+                Request::Positions {
+                    context: None,
                     generation,
                     version,
                     product: 0,
                     rows: SnapshotBuilder::default(),
                     invalid: false,
-                }),
+                },
             );
         }
         if include_orders && !self.account.orders_in_flight {
@@ -317,6 +367,7 @@ impl Okx {
             self.orders_page(
                 cx,
                 Request::Orders {
+                    context: None,
                     generation,
                     version: self.account.revision,
                     kind: 0,
@@ -332,7 +383,56 @@ impl Okx {
         }
     }
 
-    fn orders_page(&self, cx: &mut Cx<'_, Pending>, request: Request) {
+    /// One physical account-cycle page under its own Background Read with the
+    /// read key when configured, else the primary key. A refused admission or
+    /// queue is a pre-send failure on the native path.
+    fn account_read(&mut self, cx: &mut Cx<'_, Pending>, path: &str, request: Request) {
+        let slots = Slots::new(
+            self.credentials.clone(),
+            self.options.read_credentials.clone(),
+            SlotPolicy::default(),
+        );
+        let selected = SelectedRead::select(&slots, ReadRole::Read { scope: None });
+        let read = match SelectedRead::background(
+            cx,
+            selected,
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(read) => read,
+            Err(BackgroundReadError::Selection(_)) => {
+                self.account_failed(cx, request, "OKX account read requires credentials");
+                return;
+            }
+            Err(BackgroundReadError::Admission(error)) => {
+                self.account_failed(cx, request, &error.read_venue_error().message);
+                return;
+            }
+        };
+        let request = request.with_context(read.context().clone());
+        let demo = self.options.testnet;
+        let queued = read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url: format!("{}{path}", self.rest()),
+                body: None,
+                stream: Some(json::ArrayAt::EnvelopeField("data")),
+            },
+            |identity| {
+                Box::new(crate::sign::Http::new(Some(identity.clone()), path.into()).demo(demo))
+            },
+            |_| Pending::Account(request),
+        );
+        if let Err((Pending::Account(request), error)) = queued {
+            self.account_failed(cx, request, &error.venue_error().message);
+        }
+    }
+
+    fn orders_page(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         let Request::Orders {
             kind,
             product,
@@ -354,7 +454,7 @@ impl Okx {
         if !cursor.is_empty() {
             path.push_str(&format!("&after={cursor}"));
         }
-        self.list(cx, &path, true, Pending::Account(request));
+        self.account_read(cx, &path, request);
     }
 
     pub(crate) fn login(&self, cx: &mut Cx<'_, Pending>, channel: usize) {
@@ -374,6 +474,12 @@ impl Okx {
                 )),
             );
         }
+    }
+
+    /// One ingress gate for a delivery: exact Background custody for a cycle
+    /// page, plus the native generation fence, before any codec runs.
+    pub(crate) fn account_delivery_current(&self, cx: &Cx<'_, Pending>, request: &Request) -> bool {
+        request.delivered(cx) && self.account_request_current(request)
     }
 
     fn account_request_current(&self, request: &Request) -> bool {
@@ -414,7 +520,7 @@ impl Okx {
         request: &mut Request,
         item: &str,
     ) {
-        if !self.account_request_current(request) {
+        if !self.account_delivery_current(cx, request) {
             return;
         }
         match request {
@@ -745,6 +851,7 @@ impl Okx {
                 equity,
                 risk_rows: 1,
                 invalid: false,
+                ..
             } => {
                 if let Some(join) = &mut self.account.join
                     && join.generation == generation
@@ -755,6 +862,7 @@ impl Okx {
                 self.finish_join(cx);
             }
             Request::Positions {
+                context,
                 generation,
                 version,
                 product,
@@ -763,17 +871,19 @@ impl Okx {
             } => {
                 let product = product + 1;
                 if let Some(kind) = self.instrument_types().get(product) {
-                    self.list(
+                    // The settled page retires before the next one is admitted.
+                    retire(cx, context.as_ref());
+                    self.account_read(
                         cx,
                         &format!("/api/v5/account/positions?instType={}", kind.as_str()),
-                        true,
-                        Pending::Account(Request::Positions {
+                        Request::Positions {
+                            context: None,
                             generation,
                             version,
                             product,
                             rows,
                             invalid: false,
-                        }),
+                        },
                     );
                     return;
                 }
@@ -786,6 +896,7 @@ impl Okx {
                 self.finish_join(cx);
             }
             Request::Orders {
+                context,
                 generation,
                 version,
                 mut kind,
@@ -807,9 +918,11 @@ impl Okx {
                         }
                         return;
                     }
+                    retire(cx, context.as_ref());
                     self.orders_page(
                         cx,
                         Request::Orders {
+                            context: None,
                             generation,
                             version,
                             kind,
@@ -830,9 +943,11 @@ impl Okx {
                     kind = 0;
                 }
                 if product < self.instrument_types().len() {
+                    retire(cx, context.as_ref());
                     self.orders_page(
                         cx,
                         Request::Orders {
+                            context: None,
                             generation,
                             version,
                             kind,
@@ -1001,6 +1116,7 @@ impl Okx {
         request: Request,
         error: &str,
     ) {
+        retire(cx, request.page_context());
         if !self.account_request_current(&request) {
             return;
         }

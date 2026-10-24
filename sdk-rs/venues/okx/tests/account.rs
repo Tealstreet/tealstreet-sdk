@@ -162,7 +162,7 @@ fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str) {
         };
         reply(e, &a, &body, 5.0);
         requests.extend(
-            actions(e)
+            prepared(e, 5.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -308,7 +308,7 @@ fn rejected_login_closes_and_reconnects() {
         private,
         r#"{"event":"login","code":"60009","msg":"Login failed"}"#,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 4.0);
     assert!(
         out.iter()
             .any(|a| matches!(a, Action::WsClose { socket } if *socket == private))
@@ -325,7 +325,7 @@ fn rejected_login_closes_and_reconnects() {
         .unwrap();
     e.handle(20_000.0, Event::TimerFired { timer });
     assert!(
-        actions(&mut e)
+        prepared(&mut e, 20_000.0)
             .iter()
             .any(|a| matches!(a, Action::WsConnect { url, .. } if url.ends_with("/private")))
     );
@@ -353,7 +353,7 @@ fn malformed_known_position_row_without_a_stored_copy_commits_flat() {
     }
     assert!(e.store().loaded().positions && e.store().loaded().balance);
     assert!(e.store().positions().is_empty());
-    let errors: Vec<_> = actions(&mut e)
+    let errors: Vec<_> = prepared(&mut e, 5.0)
         .into_iter()
         .filter_map(|a| match a {
             Action::Notice(Notice::Event(event)) if event.level == Level::Error => {
@@ -383,7 +383,7 @@ fn resweep(
             code: 1006,
         },
     );
-    let out = actions(e);
+    let out = prepared(e, now);
     let (timer, at) = out
         .iter()
         .find_map(|a| match a {
@@ -396,7 +396,7 @@ fn resweep(
         })
         .expect("private reconnect backoff");
     e.handle(at, Event::TimerFired { timer });
-    let private = actions(e)
+    let private = prepared(e, at)
         .into_iter()
         .find_map(|a| match a {
             Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(socket),
@@ -404,7 +404,7 @@ fn resweep(
         })
         .expect("replacement private epoch");
     e.handle(at, Event::WsOpened { socket: private });
-    actions(e);
+    prepared(e, at);
     e.handle(
         at,
         Event::WsMessage {
@@ -429,7 +429,7 @@ fn resweep(
         };
         reply(e, &a, &body, at + 1.0);
         requests.extend(
-            actions(e)
+            prepared(e, at + 1.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -508,9 +508,10 @@ fn complete_fresh(e: &mut Engine<Okx>, mut requests: Vec<Action>, position: &str
         } else {
             envelope("")
         };
-        reply(e, &a, &body, 30_000.0);
+        // Inside the shared 20 s read deadline of a page issued after reconnect.
+        reply(e, &a, &body, 10_000.0);
         requests.extend(
-            actions(e)
+            prepared(e, 10_000.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -527,7 +528,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
             code: 1006,
         },
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 100.0);
     let timer = out
         .iter()
         .find_map(|a| match a {
@@ -536,7 +537,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
         })
         .unwrap();
     e.handle(2_000.0, Event::TimerFired { timer });
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 2_000.0);
     let socket = out
         .iter()
         .find_map(|a| match a {
@@ -545,7 +546,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
         })
         .unwrap();
     e.handle(2_001.0, Event::WsOpened { socket });
-    actions(&mut e);
+    prepared(&mut e, 2_001.0);
     e.handle(
         2_002.,
         Event::WsMessage {
@@ -576,7 +577,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
     // The SDK completes startup before commands; repeat authentication starts
     // another read sweep whose replies race the acknowledged settings write.
     ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-    let stale = actions(&mut e)
+    let stale = prepared(&mut e, 4.0)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
@@ -589,7 +590,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
             side: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
     reply(
         &mut e,
@@ -597,7 +598,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
         &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"20","mgnMode":"cross"}"#),
         6.0,
     );
-    let fresh: Vec<_> = actions(&mut e)
+    let fresh: Vec<_> = prepared(&mut e, 6.0)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
@@ -704,7 +705,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
                 side: None,
             }),
         );
-        let request = actions(&mut e)
+        let request = prepared(&mut e, 6.0)
             .into_iter()
             .find(|a| matches!(a, Action::Http(_)))
             .unwrap();
@@ -714,7 +715,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
             &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"12","mgnMode":"cross"}"#),
             7.0,
         );
-        let requests = actions(&mut e);
+        let requests = prepared(&mut e, 7.0);
         for a in requests
             .iter()
             .filter(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
@@ -773,7 +774,7 @@ fn filtered_market_rows_are_skipped_and_the_rest_of_the_snapshot_commits() {
                     envelope("")
                 };
                 reply(&mut e, &action, &body, 5.0);
-                pending.extend(actions(&mut e));
+                pending.extend(prepared(&mut e, 5.0));
             }
             Action::Notice(safe_cex_engine::Notice::Event(event)) => {
                 logs.push(event.message.clone())
@@ -948,7 +949,7 @@ fn rejected_currency_row_holds_the_usd_balance_instead_of_double_counting() {
         };
         reply(&mut e, &a, &body, 5.0);
         pending.extend(
-            actions(&mut e)
+            prepared(&mut e, 5.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );

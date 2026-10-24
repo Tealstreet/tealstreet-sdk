@@ -6326,3 +6326,16 @@ distinguish the following:
 | --- | --- |
 | Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
 | Engine Timeout terminal | The root expired. No further work is issued. |
+### OKX account-cycle reads under Background Context
+
+This covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`. [Plan](RUST_OKX_ACCOUNT_CYCLE.md).
+
+- The balance (`account-position-risk`), positions (each product) and open-order
+  pages (`orders-pending` and `orders-algo-pending`, each product, kind and cursor)
+  are now one managed Background read per page. Each page signs with the read key
+  when configured, otherwise the primary key.
+- An unanswered page ends at a 20 s deadline. The account cycle then reads again
+  on its native retry instead of staying stuck. A long order walk is never cut
+  short, because every page has its own 20 s.
+- URLs, the demo header, row decoding, the balance and positions join, order
+  paging, product order and rate-limit backoff are unchanged.
