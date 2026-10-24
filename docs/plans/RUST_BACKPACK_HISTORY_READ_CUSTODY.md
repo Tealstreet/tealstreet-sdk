@@ -82,3 +82,21 @@ Scoped Cargo only, CARGO_BUILD_JOBS=4, one local build; strict checks and all
 request/credential/signing/socket ratchets. Original controls are committed
 before production. Push only a frozen draft after source review gates; one PR
 Rust run, no duplicate dispatch. READY requires source CLEAR and qualifying CI.
+
+## Original execution checkpoint
+
+On the unchanged #2090 source, scoped history_context executes 21 tests:
+6 native working controls PASS, 14 caller-custody assertion REDs, plus 1
+explicitly NEW per-physical-page-cap assertion RED, 0 ignored. Four routes
+currently emit no physical timeout and accept empty successful DATA at/even
+after the genuine 37ms receipt; the page-2 controls demonstrate renewal risk.
+No missing methods/imports or compiler failure are counted. Working controls
+cover all four before-expiry completions, primary native wire/headers/window,
+public-only saved-secondary three-route signatures, page-2 before-expiry
+completion, public high-precision trade economics and accepted-page-only
+recovery after a later streamed transport failure.
+
+This is original-source evidence, not implementation or source-stage proof.
+Native registry parity remains inherited unmodified; exact managed lifecycle,
+retirement, hostile DATA and JS/capsule evidence controls remain gates. Receipt:
+/tmp/codex-backpack-history-context-originals-receipt.json.
