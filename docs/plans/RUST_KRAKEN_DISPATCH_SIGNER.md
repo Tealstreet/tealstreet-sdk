@@ -522,3 +522,25 @@ never activate selected account reads beside legacy private sends and claim
 nonce continuity. Registry/WASM dispatch-signing feature admission and real
 hosted decimal-nonce forwarding remain future cutover/certification gates.
 No native caller, socket, inventory, constructor or nonce dispatcher changed.
+
+### Recipe review closure and vector handoff
+
+HMAC4y closes P2 at22ecc3a2368; m26 carries opaque/Futures recipe CLEAR with
+Spot construction held for ValidateOnly. That pin passes14 recipe controls,
+strict scoped Clippy and formatting. All runtime files remain local only.
+
+For the independent nonce reviewer, the ordered Spot-body control additionally
+pins the node:crypto v22.23.3 literal for exact
+z=a%20b&a=%2B&nonce=1700000000000000 at /0/private/Balance under fixture base64
+secret a3Jha2VuLXRlc3Qtc2VjcmV0. Expected/observed API-Sign is
+9nPa4POWk+x8f6ac73CMMcAv0ddmc2bhwiGzh4HDkiiC7bisZTTvbZkGUtCnXO0FBThHVdw9r+njh3f22eFkhw==.
+The targeted real-dispatch control passes after this additive assertion. Native
+Spot appends nonce LAST when other form fields exist, preserving their order;
+the empty-form Balance vector has nonce as its only field.
+
+Independent node:crypto reference values for nonce9007199254740993,
+9007199254740995 and18446744073709551615 are provided to the nonce owner as
+future host/WASM acceptance inputs. They are computation-only references, not
+claims that these boundary nonces traversed this recipe, engine reservation or
+WASM. Real Kraken-family WASM/EngineHost/HMAC and repaired-nonce recomputation
+remain OPEN with the nonce/host owner. No private caller is activated here.

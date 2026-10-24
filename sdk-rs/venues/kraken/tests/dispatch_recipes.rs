@@ -314,6 +314,10 @@ fn spot_nonce_is_last_and_matches_independent_vector() {
         packets(&actions)[0].body.as_deref(),
         Some("z=a%20b&a=%2B&nonce=1700000000000000")
     );
+    assert_eq!(
+        packets(&actions)[0].headers[1].1,
+        "9nPa4POWk+x8f6ac73CMMcAv0ddmc2bhwiGzh4HDkiiC7bisZTTvbZkGUtCnXO0FBThHVdw9r+njh3f22eFkhw=="
+    );
 }
 #[test]
 fn primary_read_and_mutation_roles_stay_primary_and_read_uses_secondary() {
