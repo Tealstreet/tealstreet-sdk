@@ -1104,3 +1104,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/support/local_trade_refusals.rs"]
+mod local_trade_refusals;

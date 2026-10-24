@@ -49,7 +49,10 @@ using the native Store/terminal predicate, plus existing live job reservations
 and the new job's place count. Do not execute acknowledged.retain to discover a
 local refusal. Admit the genuine operation first, then settle only that Context;
 Rejected already published its terminal, Revoked grants nothing. Failed entry
-must leave acknowledged, jobs, native reservations and Store untouched.
+must leave acknowledged, jobs, native reservations and Store untouched. An
+admitted routing-capacity refusal may then run the same native cleanup before
+its diagnostic/failure; the other two refusal branches retain their native
+no-cleanup ordering.
 
 For a valid native remote job, leave the existing cleanup/insert/advance path
 without a newly issued managed root. This is a refusal-only cutover, not partial
@@ -95,8 +98,9 @@ retains only test peers, with no fabricated Context or private issuer checks.
 - Preserve valid V1 settings POST and V3 STP GET wire/slot/signature through the
   actual installed provider and native clock response. Full owner capacity must
   not turn otherwise-valid legacy remote jobs into abandoned managed commands.
-- Exercise duplicate custody, more than256 synchronous terminal reuses, and UUID
-  entropy preceding later validation. Preserve existing native financial tests.
+- Exercise duplicate custody and more than256 synchronous terminal reuses. Aster
+  plan_place does not generate UUIDs; do not transplant MEXC entropy-preflight
+  claims. Preserve existing native financial tests.
 
 Only test files, a cfg(test) module declaration and this plan/index may change
 before review. Runtime production and inventory stay exact. Count only executed
@@ -127,3 +131,48 @@ Architecture gate: No per-venue replacement of a cross-cutting concern. Native
 job/refusal planning consumes the shared genuine-entry/Context terminal APIs;
 operation is explicit, acknowledged capacity is a native pure projection, and
 all lifetime, rejection, auth-health and completion authority stays in the engine.
+
+## Original execution and byte evidence
+
+The initial fixture build found an incorrect STP enum variant and an attempted
+mutation through Engine's private venue field. Both were corrected before
+counting REDs: fixture state is seeded before constructing the real Engine.
+The initial executed target gave18 assertion REDs/6 working controls; the three
+Read outcome cases are subsequently split into independent tests so each reaches
+its own intended assertion instead of stopping at the first loop failure.
+Native metadata/precedence,300 synchronous reuses, duplicate custody, selective
+ack cleanup, accepted V1 POST and accepted secondary V3 STP GET work at baseline.
+Accepted remote wire controls run with256 genuine retained managed peers.
+
+The historical CI browser-wasm-families artifact12543180475 from green landing
+Rust run40048277914 pins sourceHead `f8163b7b8523c62fe905894d395405db778140ca`.
+Its manifest and downloaded Aster WASM independently agree on **1,321,596 B**,
+SHA256 `9484e1a4db2d57b6acc260d97e7698c3cbbfcded5c175c23eff1f4824b9ce9c9`,
+leaving21,892 B under1,343,488. #2004 is included; #2006 and lean #1987 are not.
+The plan base has identical engine/crypto/Aster/Binance/registry/WASM/Cargo
+inputs to that source pin. This is pinned baseline evidence, not fresh exact-head
+CI or a forecast for the complete adoption. fe7lgm separately measured
+1,322,304 B locally at2f5105596db. No current baseline number is added to the
+older lean/full-composition calibration to fabricate an adoption size PASS.
+
+The complete original checkpoint executes **20 assertion REDs /7 working
+controls /0 ignored** on unchanged production at a7f04339c59. Fourteen entry
+controls cover seven Read/Mutation/auth-shape paths at invalid clock/full peer
+capacity; three independent Read outcomes, one auth-health and two pre-admission
+ack-state assertions complete the20 REDs. The two ack failures directly show
+retired routing entries being pruned before entry is refused. The seventh native
+positive admits9,999 placements with one live and one Store-observed ack at full
+managed capacity, proving only the live ack consumes native capacity.
+
+Invalid/capacity controls currently stop at the native diagnostic-count mismatch;
+their subsequent typed fields, peer validation, real retirement/recovery and
+Store assertions are adoption gates, not claimed executed on the failing native
+branch. Each independent Read outcome assertion executes and observes legacy
+Some(NotSent) versus required None. Existing native fixture and runtime files
+remain exact except the four-line cfg(test) child-module declaration.
+
+Scoped Clippy/fmt passed before the final added near-capacity working control;
+a refresh follows that addition. Checker controls pass15/15. Initial provenance
+failed solely because a newer incoming KuCoin prune was missing from the base;
+this is not waived, and a genuine updated-tip merge follows the original RED
+commit before claiming a provenance pass.
