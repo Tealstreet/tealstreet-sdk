@@ -24,12 +24,12 @@ Two venues need something else, and neither should be solved in venue code:
 
 ## Declaration
 
-One optional per-family field in `construction-rules.json`, beside
-`signerSetup`:
+One optional per-family field in `construction-rules.json`, inside the
+family's `bridge` object (so it reaches JS through the existing bridge record):
 
 ```json
-"cryptocom": {"readCredentials": "validateOnly"},
-"backpack":  {"readCredentials": "publicRead"}
+"cryptocom": {"bridge": {"readCredentials": "validateOnly"}},
+"backpack":  {"bridge": {"readCredentials": "publicRead"}}
 ```
 
 (These rows are the consumers' to add; see below.)
@@ -87,14 +87,17 @@ second ValidateOnly consumer.
 constructor:
 - a ValidateOnly family receiving a secondary identity, whether injected
   `options.signing.secondary` or a secondary in the JS setup capsule, is
-  refused `InvalidInput`/`NotSent` before construction;
+  refused `InvalidInput` (no outcome, like today's construction refusal)
+  before construction;
 - `read_credentials_valid` on a non-ValidateOnly family is refused;
 - `read_credentials` and `read_credentials_valid` together are refused.
 
 ## PublicRead
 
 In public-only mode (`signer_setup_public_data_only`), a PublicRead family
-with a valid read key installs a secondary-only provider. The primary identity
+never installs a primary identity: shared trusted setup drops and wipes any
+primary input, and a supplied primary identity is refused. A valid read key
+is installed as the only identity. The primary identity
 is always `None` there, so `Slots` selection can only yield the read key for
 `Read` roles. `Mutation`, `SessionAuth` and `PrimaryRead` see `Missing`.
 Private mode is unchanged.
@@ -164,3 +167,22 @@ measured with the existing size harness and reported in the PR.
 Venue wiring stays in the consumer PRs: the Crypto.com options/startup/identity
 and Backpack's history selection. This PR adds no Bearer, nonce or selection
 change.
+
+## Implementation (`feat/rust-read-key-validate-only`)
+
+- `1fcd41c346c`, `b312fff7c97`: `ReadCredentials::status`.
+- `885144b1291`: the registry side.
+  - The codegen field and `construction::ReadCredentialsPolicy`.
+  - `BridgeConstruction.read_credentials`, serialized only when declared.
+  - `EngineOptions.read_credentials_valid`.
+  - The `prepare_local_signer_with_policy` branches.
+  - `read_key_identities`, on the JSON setup and injected identities.
+  - `read_key_options` in `build_with_signer`.
+  - Controls in `registry/src/read_key_policy_tests.rs`. Mutation-checked:
+    disabling the ValidateOnly branch or the status refusal fails them.
+- `801eb45f456`: the JS side.
+  - The bridge type and the construction evaluator.
+  - `LocalSignerSetup`: the flag, no capsule secondary, the flag spliced into
+    the options JSON as text.
+  - Controls in `rust.read-key-policy.test.ts`. They fail on the pre-change
+    source (4 REDs); the 2 unchanged-default controls pass.
