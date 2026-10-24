@@ -130,17 +130,21 @@ revision Stale). All fallible resource,
 pacing and owner admissions must finish before release commits. The global
 check-and-floor update is one critical section at Released; floor becomes
 max(floor, nonce), never rolls back, and no callback executes under the mutex.
-No observer, write journal, pacing charge or physical send may occur on refusal.
+Observers, write-journal release marking and pacing charge run strictly after
+the Released commit. None may occur on refusal. The floor check, infallible
+Lifecycle Released commit and floor update share one no-callback/no-allocation
+critical section after all fallible owner/pacing/journal admission. A refused
+admission must leave the floor unchanged for a later in-order release.
 Once Released commits, subsequent host failure is ordinary possibly-sent/Unknown;
 it must never be projected back to NotSent or automatically re-reserved.
 
 Exact two-phase composition with Lifecycle::claim is a mandatory source gate:
 failed venue admission cannot burn a released floor or pacing/write credit, and
 a concurrent engine release cannot slip between the floor check and commit.
-Apply the same private fence to supported ordinary signed transport releases;
-group release must validate all member reservations before its atomic commit.
-If that composition cannot be proved, refuse nonce-bearing group admission
-before IDs/credits, with no single-member fallback, until separately supported.
+Apply the same private fence to supported ordinary signed transport releases.
+Nonce-bearing group admission refuses before IDs/credits by default, without a
+single-member fallback. Future support must prove host member handoff order
+matches nonce order, not merely validate all reservations atomically.
 
 ## Bounded pre-send repair
 
@@ -192,7 +196,7 @@ Required controls before runtime readiness:
    Primary/Secondary, Futures/Spot, two engines and a recreated engine share
    reservation and released-floor continuity without a secret/key-hash subject.
 5. Fixed/regressing clocks and >1000 reservations/ms stay strictly monotonic;
-   MAX_SAFE-ms boundary, scaled values above2^53, u64 exhaustion and invalid raw
+   MAX_SAFE-ms boundary, scaled values above 2^53, u64 exhaustion and invalid raw
    clocks are exact. Protocol offset and StampFloor do not alter the nonce floor.
 6. Canonical decimal receipt round-trip including u64::MAX; deny numeric/sign/
    whitespace/leading-zero/overflow forms and mismatched provider/wire nonces.
@@ -212,7 +216,7 @@ controls separately; downstream suffixes behind a RED are not executed evidence.
 
 ## Executed original checkpoint
 
-The dedicated `dispatch_nonce_reservation` target compiles against actual5b,
+The dedicated `dispatch_nonce_reservation` target compiles against actual 5b,
 with unchanged engine/host/provider/venue runtime. Initial execution gives five
 assertion REDs and nine working GREEN controls, zero ignored:
 
@@ -246,3 +250,50 @@ handoff is represented by the genuine successful final claim and signed packet.
 Scoped target strict Clippy, rustfmt, credential-selection checker and full bans
 pass on this checkpoint at jobs4. Only this target is executed locally; no
 workspace/all-feature sweep, runtime certification or CI readiness is claimed.
+
+## Adapter porting and source certification precision
+
+The queue-store continuity and distinct-subject GREENs use the fixture's
+QueueTime helper; source adoption ports that helper to a trusted selected
+KRAKEN claim and records its reservations, without changing either outcome
+assertion. The exact independent-domain control currently expects 1000/1001:
+its adapter normalizes only the observed fixed raw floor for that test, or the
+control remains an unchanged Cx public-agent compatibility check. It must not
+pretend the production KRAKEN domain has scale1. Choose and review that explicit
+adapter delta before source; no production compatibility allocator is kept.
+
+The 2002-step/regression/u64 exhaustion GREEN calls the legacy allocator
+directly. Keep that historical baseline in this checkpoint; port its allocation
+helper to engine-private KRAKEN-domain testing with an injected initial counter
+near exhaustion. The adapter invocation changes, while exact increment, decimal
+value and Err assertions remain. It is not evidence that the new KRAKEN domain
+exists today. reserve_kraken_legacy stays until the venue cutover, as stated
+above, and is then removed rather than retained for this test.
+
+A separate dispatch-level exhaustion control must show Internal/NotSent, no
+provider invocation and no handoff. Add genuine same-ms dispatcher pairs,
+canonical receipt '0' success and empty/'00' denials; the original unknown-field
+negative control is not decimal parser proof. A dispatch-level overflow cannot
+be substituted with the existing allocator Err alone.
+
+Final Claim nonce Stale returns Err(Stale) and follows the existing repair path
+in that call: Cancel the old preparation, then fresh Prepare and signing under
+the same physical request identity and original deadline. Native/WASM hosts
+must treat that Stale as do-not-send with no host-created terminal. Only the
+engine's repair or exhaustion produces the outcome. Source review must pin
+this exact observable action sequence and unchanged host behavior.
+
+Add 32-request same-subject controls for a reverse initial bound-claim burst
+(repair each stale request and release it before advancing) and ordinary paced
+FIFO release. Every request in those schedules must release in increasing nonce
+order without eight-repair exhaustion. This is not a promise against an
+unbounded adversary: repeatedly releasing a newer request during each parked
+repair can deliberately exhaust the approved local bound. A separate control
+forces eight nonce repairs and verifies the one typed pre-send terminal.
+If ordinary FIFO pacing alone exhausts the bound, raise that as a design defect
+before source rather than weakening the working burst control.
+
+A new physical retry resumed through #2037 Plan/Preflight session waiting
+reserves only in its own prepare; parking and Session readiness reserve nothing.
+A pending provider result omitting a required nonce is InvalidResult before
+apply. Bearer and route repairs do not consume the nonce-only eight-repair count.
