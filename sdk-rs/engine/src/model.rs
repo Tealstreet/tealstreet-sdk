@@ -750,7 +750,13 @@ pub(crate) mod replayed_enum {
         D: Deserializer<'de>,
         E: Deserialize<'de>,
     {
-        deserializer.deserialize_any(Replayed(PhantomData))
+        // Only naming the variant is per enum; the replay rules are shared.
+        let (variant, shape) = deserializer.deserialize_any(Replayed)?;
+        let value = E::deserialize(variant.into_deserializer())?;
+        match shape.as_ref().and_then(Shape::unexpected) {
+            None => Ok(value),
+            Some(unexpected) => Err(de::Error::invalid_type(unexpected, &"unit")),
+        }
     }
 
     pub(crate) fn optional<'de, D, E>(deserializer: D) -> Result<Option<E>, D::Error>
@@ -777,7 +783,8 @@ pub(crate) mod replayed_enum {
         deserializer.deserialize_option(Optional(PhantomData))
     }
 
-    struct Replayed<E>(PhantomData<E>);
+    /// The variant name, and for a map form the variant's value shape.
+    struct Replayed;
 
     /// Just enough of a value to name it in a type error.
     enum Shape {
@@ -848,34 +855,34 @@ pub(crate) mod replayed_enum {
         }
     }
 
-    impl<'de, E: Deserialize<'de>> Visitor<'de> for Replayed<E> {
-        type Value = E;
+    impl<'de> Visitor<'de> for Replayed {
+        type Value = (String, Option<Shape>);
         fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.write_str("string or map")
         }
-        fn visit_str<X: de::Error>(self, v: &str) -> Result<E, X> {
-            E::deserialize(v.to_owned().into_deserializer())
+        fn visit_str<X: de::Error>(self, v: &str) -> Result<Self::Value, X> {
+            Ok((v.to_owned(), None))
         }
-        fn visit_bool<X: de::Error>(self, v: bool) -> Result<E, X> {
+        fn visit_bool<X: de::Error>(self, v: bool) -> Result<Self::Value, X> {
             Err(X::invalid_type(Unexpected::Bool(v), &self))
         }
-        fn visit_i64<X: de::Error>(self, v: i64) -> Result<E, X> {
+        fn visit_i64<X: de::Error>(self, v: i64) -> Result<Self::Value, X> {
             Err(X::invalid_type(Unexpected::Signed(v), &self))
         }
-        fn visit_u64<X: de::Error>(self, v: u64) -> Result<E, X> {
+        fn visit_u64<X: de::Error>(self, v: u64) -> Result<Self::Value, X> {
             Err(X::invalid_type(Unexpected::Unsigned(v), &self))
         }
-        fn visit_f64<X: de::Error>(self, v: f64) -> Result<E, X> {
+        fn visit_f64<X: de::Error>(self, v: f64) -> Result<Self::Value, X> {
             Err(X::invalid_type(Unexpected::Float(v), &self))
         }
-        fn visit_unit<X: de::Error>(self) -> Result<E, X> {
+        fn visit_unit<X: de::Error>(self) -> Result<Self::Value, X> {
             Err(X::invalid_type(Unexpected::Unit, &self))
         }
-        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<E, A::Error> {
+        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
             while seq.next_element::<de::IgnoredAny>()?.is_some() {}
             Err(de::Error::invalid_type(Unexpected::Seq, &self))
         }
-        fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<E, A::Error> {
+        fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
             // The buffer checked the entry count, then the variant name, then
             // that the variant's value was unit.
             let mut first: Option<(String, Shape)> = None;
@@ -886,13 +893,7 @@ pub(crate) mod replayed_enum {
                 first.get_or_insert((key, shape));
             }
             match first {
-                Some((variant, shape)) if entries == 1 => {
-                    let value = E::deserialize(variant.into_deserializer())?;
-                    match shape.unexpected() {
-                        None => Ok(value),
-                        Some(unexpected) => Err(de::Error::invalid_type(unexpected, &"unit")),
-                    }
-                }
+                Some((variant, shape)) if entries == 1 => Ok((variant, Some(shape))),
                 _ => Err(de::Error::invalid_value(
                     Unexpected::Map,
                     &"map with a single key",
