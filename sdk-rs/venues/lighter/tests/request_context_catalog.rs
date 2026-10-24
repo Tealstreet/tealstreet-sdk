@@ -381,7 +381,7 @@ fn streamed_prefix_then_transport_failure_is_discarded_before_fallback() {
         NOW + 2.,
         Event::HttpChunk {
             request: old.id,
-            data: META[..META.len() - 2].as_bytes(),
+            data: &META.as_bytes()[..META.len() - 2],
         },
     );
     empty(&mut e, NOW + 2.);
