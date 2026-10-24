@@ -328,3 +328,13 @@ Review fixes:
   no outcome. One terminal settles, and a late success is inert.
 - Both P3s: the repeat inspection of the same immutable Slots is described
   accurately in the source.
+
+## Composed landing validation
+
+The green source at `e79de6394e5` is plain-merged with the current landing
+`8f8fbaf1415`; BloFin source, recipes and controls remain byte-exact. The
+registry union preserves the exact BloFin setup and arm. BloFin's 246 tests
+and the registry's 20 unit plus four signer controls pass, zero ignored.
+`cargo check --workspace --all-targets` passes with CARGO_BUILD_JOBS=4;
+normal bans and ratchets pass. The composed-tree exception authorizes no fresh
+CI; the published exact-head Rust run 40122205178 remains the source receipt.
