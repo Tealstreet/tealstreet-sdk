@@ -44,6 +44,8 @@ pub struct Store {
     currency_balances: Option<Vec<CurrencyBalance>>,
     /// Stable symbols retain account settings across market replacement/delisting.
     settings: HashMap<Box<str>, MarketSetting>,
+    #[cfg(feature = "metadata-freshness")]
+    metadata: Option<Box<crate::metadata::State>>,
     hedged: bool,
     loaded: Loaded,
     latency: f64,
@@ -677,6 +679,10 @@ impl Store {
             })
             .collect();
         self.changes.settings = true;
+        #[cfg(feature = "metadata-freshness")]
+        if let Some(metadata) = &mut self.metadata {
+            metadata.changed(None);
+        }
     }
 
     pub fn update_setting(&mut self, symbol: &str, update: impl FnOnce(&mut MarketSetting)) {
@@ -685,9 +691,139 @@ impl Store {
         update(setting);
         if *setting != before {
             self.changes.settings = true;
+            #[cfg(feature = "metadata-freshness")]
+            if let Some(metadata) = &mut self.metadata {
+                metadata.changed(Some(symbol));
+            }
+        }
+    }
+}
+
+#[cfg(feature = "metadata-freshness")]
+impl Store {
+    fn metadata_state(&mut self) -> &mut crate::metadata::State {
+        self.metadata.get_or_insert_with(Default::default)
+    }
+
+    pub fn begin_metadata(
+        &mut self,
+        symbol: &str,
+        publish: bool,
+        fallback: crate::metadata::Fallback,
+    ) -> Result<crate::metadata::Token, crate::VenueError> {
+        self.metadata_state().begin(symbol, publish, fallback)
+    }
+
+    pub fn metadata_eligible(&self, token: &crate::metadata::Token) -> bool {
+        self.metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.eligible(token))
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub fn metadata_work(
+        &self,
+        key: &crate::metadata::WorkKey,
+    ) -> Option<crate::engine::ExecutionHandle> {
+        self.metadata.as_ref()?.lookup_work(key)
+    }
+    #[cfg(feature = "http-plans")]
+    pub fn metadata_work_space(&self, symbol: &str) -> bool {
+        self.metadata
+            .as_ref()
+            .is_none_or(|state| state.work_space(symbol))
+    }
+    #[cfg(feature = "http-plans")]
+    pub fn metadata_executions(
+        &self,
+    ) -> Vec<(crate::metadata::Token, crate::engine::ExecutionHandle)> {
+        self.metadata
+            .as_ref()
+            .map_or_else(Vec::new, |state| state.work_handles())
+    }
+    #[cfg(feature = "http-plans")]
+    pub fn bind_metadata_work(
+        &mut self,
+        key: crate::metadata::WorkKey,
+        handle: crate::engine::ExecutionHandle,
+    ) -> Result<crate::metadata::Token, crate::VenueError> {
+        self.metadata_state().bind_work(key, handle)
+    }
+    #[cfg(feature = "http-plans")]
+    pub fn retire_metadata_work(&mut self, token: &crate::metadata::Token) {
+        if let Some(state) = self.metadata.as_mut() {
+            state.retire_work(token);
         }
     }
 
+    pub fn metadata_observation(&mut self) -> crate::metadata::Observation {
+        self.metadata_state().observation()
+    }
+
+    pub fn invalidate_metadata(&mut self, symbol: Option<&str>) {
+        self.metadata_state().invalidate(symbol);
+    }
+    pub fn metadata_revision(&mut self) -> crate::metadata::Observation {
+        self.metadata_state().revision()
+    }
+    pub fn metadata_revision_current(&self, stamp: &crate::metadata::Observation) -> bool {
+        self.metadata
+            .as_ref()
+            .is_some_and(|state| state.revision_current(stamp))
+    }
+
+    /// A background read cannot overwrite a newer read or settings write.
+    pub fn observe_setting(
+        &mut self,
+        symbol: &str,
+        stamp: &crate::metadata::Observation,
+        setting: crate::metadata::ObservedSetting,
+    ) -> bool {
+        if !self.metadata_state().observe(symbol, stamp) {
+            return false;
+        }
+        self.settings.insert(symbol.into(), setting.0);
+        self.changes.settings = true;
+        true
+    }
+
+    pub fn metadata_write_started(
+        &mut self,
+        command: crate::CommandId,
+        symbol: Option<&str>,
+    ) -> Result<(), crate::VenueError> {
+        self.metadata_state().write_started(command, symbol)
+    }
+    pub fn metadata_write_finished(&mut self, command: crate::CommandId) {
+        if let Some(metadata) = self.metadata.as_mut() {
+            metadata.write_finished(command);
+        }
+    }
+    pub fn metadata_write_pending(&self, symbol: &str) -> bool {
+        self.metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.write_pending(symbol))
+    }
+
+    /// Completes ownership and publishes a full validated proposal atomically.
+    /// Native caches update before the separate engine-owned Plan terminal.
+    pub fn finish_metadata(
+        &mut self,
+        token: &crate::metadata::Token,
+        result: Result<crate::metadata::Proposal, crate::VenueError>,
+    ) -> Option<crate::metadata::Resolution> {
+        let symbol = self.metadata.as_ref()?.symbol(token)?.to_owned();
+        let cached = self.setting(&symbol);
+        let (completion, publication) = self.metadata.as_mut()?.complete(token, result, cached)?;
+        if let Some(setting) = publication {
+            self.settings.insert(symbol.into_boxed_str(), setting);
+            self.changes.settings = true;
+        }
+        Some(completion)
+    }
+}
+
+impl Store {
     pub fn hedged(&self) -> bool {
         self.hedged
     }
@@ -1288,6 +1424,66 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "metadata-freshness")]
+    #[test]
+    fn an_unrelated_read_terminal_does_not_allocate_metadata_state() {
+        use crate::request_context::{Operation, Policy, RetryPolicy};
+        use crate::{Action, Command, Cx, Engine, Event, Notice, Response, SocketId, Venue};
+        struct Read;
+        impl Venue for Read {
+            type Pending = ();
+            fn start(&mut self, _: &mut Cx<'_, ()>) {}
+            fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
+                let root = cx
+                    .admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    })
+                    .unwrap();
+                cx.done_context(&root, "[]".into()).unwrap();
+            }
+            fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: crate::TimerId) {}
+            fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+            fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+            fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+            fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+            fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+            fn book(&self, _: &str) -> Option<&crate::book::Book> {
+                None
+            }
+            fn books(&self) -> Box<dyn Iterator<Item = (&str, &crate::book::Book)> + '_> {
+                Box::new(std::iter::empty())
+            }
+        }
+        let mut engine: Engine<Read> = crate::test_support::seeded_engine(Read);
+        assert!(engine.store().metadata.is_none());
+        engine.handle(
+            0.,
+            Event::Command(Command::FetchCandles {
+                command: 7,
+                symbol: "BTCUSD".into(),
+                interval: crate::model::Interval::M1,
+                limit: Some(2),
+                from_ms: None,
+                to_ms: None,
+            }),
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a,
+                    Action::Notice(Notice::CommandDone { command: 7, result }) if result == "[]"
+                ))
+                .count(),
+            1
+        );
+        assert!(engine.store().metadata.is_none());
+    }
 
     fn snapshot_order(id: &str) -> Order {
         Order {

@@ -10,6 +10,7 @@ use safe_cex_engine::credential_selection::Slots;
 use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
+use safe_cex_engine::metadata::{Observation, ObservedSetting};
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, StopTriggerType, TimeInForce,
@@ -56,6 +57,7 @@ pub enum Request {
     },
     Positions {
         revision: u64,
+        settings_stamp: Observation,
         rows: Vec<Position>,
         settings: Vec<(String, MarketSetting)>,
         skipped: Vec<String>,
@@ -94,7 +96,6 @@ pub struct Account {
     orders_revision: u64,
     positions_revision: u64,
     settings_revision: u64,
-    metadata_generations: HashMap<String, u64>,
     balance_revision: u64,
     orders_in_flight: Option<u64>,
     positions_in_flight: Option<u64>,
@@ -312,23 +313,11 @@ impl Account {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         credentials: Option<&Credentials>,
-        command: u32,
+        _command: u32,
         symbol: String,
         publish: bool,
     ) {
-        let Some(credentials) = credentials else {
-            cx.fail(
-                command,
-                metadata_error("BingX metadata requires credentials"),
-            );
-            return;
-        };
-        let Some(market) = cx.store.market(&symbol) else {
-            cx.fail(command, metadata_error("Unknown BingX market"));
-            return;
-        };
-        let native = market.id.clone();
-        self.start_metadata(cx, credentials, symbol, native, publish);
+        self.start_metadata(cx, credentials, symbol, publish);
     }
     /// Keeps earlier malformed markets the new catalogue still lacks; returns the
     /// malformed count before and after.
@@ -542,6 +531,7 @@ impl Account {
         }
         self.last_positions = cx.now;
         self.positions_in_flight = Some(self.positions_revision);
+        let settings_stamp = cx.store.metadata_observation();
         self.read_snapshot(
             cx,
             credentials,
@@ -549,6 +539,7 @@ impl Account {
             Params::new(),
             Request::Positions {
                 revision: self.positions_revision,
+                settings_stamp,
                 rows: Vec::new(),
                 settings: Vec::new(),
                 skipped: Vec::new(),
@@ -1001,6 +992,7 @@ impl Account {
             }
             Request::Positions {
                 revision,
+                settings_stamp,
                 mut rows,
                 settings,
                 skipped,
@@ -1037,7 +1029,9 @@ impl Account {
                         self.settings_changed();
                     }
                     for (symbol, value) in settings {
-                        cx.store.update_setting(&symbol, |s| *s = value);
+                        if let Ok(value) = ObservedSetting::new(value) {
+                            cx.store.observe_setting(&symbol, &settings_stamp, value);
+                        }
                     }
                 } else {
                     for id in &skipped {
@@ -1231,6 +1225,7 @@ impl Account {
                     self.settings_changed();
                     self.bump_positions();
                     let symbol = config.s.replace('-', "");
+                    cx.store.invalidate_metadata(Some(&symbol));
                     let hedged = cx.store.hedged();
                     if config.l > 0.0 {
                         cx.store.update_setting(&symbol, |s| {
@@ -1811,7 +1806,6 @@ mod sign_failure_owners {
         a.key_in_flight = true;
         a.socket = Some(SocketId(44));
         a.keepalive = Some(TimerId(77));
-        a.metadata_generations.insert("BTCUSDT".into(), 1);
         let request = match kind {
             0 => Request::Balance {
                 revision: 1,
@@ -1821,6 +1815,7 @@ mod sign_failure_owners {
             },
             1 => Request::Positions {
                 revision: 1,
+                settings_stamp: Observation::default(),
                 rows: vec![],
                 settings: vec![],
                 skipped: vec![],

@@ -20,10 +20,18 @@ def modes():
     if not families:
         raise RuntimeError('expected at least one venue family')
     closures = {}
-    grouped = {(): ['engine baseline'], ('order-locks', 'test-support'): ['explicit CI control'],
-               # No family links session-bearer yet; its tests run only here.
-               ('http-mutation-barriers', 'http-plans', 'session-bearer', 'test-support'):
-                   ['session-bearer control']}
+    grouped = {
+        (): ['engine baseline'],
+        ('order-locks', 'test-support'): ['explicit CI control'],
+        # metadata-freshness OFF control: standalone Bitget with test support.
+        ('order-locks', 'polling-control', 'test-support'): ['metadata freshness OFF control'],
+    }
+    grouped[('metadata-freshness', 'test-support')] = ['metadata-only CI control']
+    grouped[('http-plans', 'metadata-freshness', 'order-locks', 'test-support')] = [
+        'metadata Plan CI control']
+    # No family links session-bearer yet; its tests run only here.
+    grouped[('http-mutation-barriers', 'http-plans', 'session-bearer', 'test-support')] = [
+        'session-bearer control']
     for family in families:
         tree = subprocess.check_output([
             'cargo', 'tree', '--locked', '--target', 'wasm32-unknown-unknown',
