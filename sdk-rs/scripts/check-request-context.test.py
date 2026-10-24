@@ -197,7 +197,7 @@ class PrecisionRed(unittest.TestCase):
         # The innermost binding wins: a typed non-Cx closure parameter shadows.
         self.assertFalse(self.prod(in_cx_fn('each(|c: &mut Row| { ' + call + ' });', 'c')))
         # An inferred closure type is untyped, so it is counted.
-        for kind in ['_', '&mut _', "&'a mut _"]:
+        for kind in ['_', '&mut _', "&'a mut _", 'Option<_>', '&mut Vec<_>', '&mut S<_>']:
             self.assertEqual(self.prod('fn f() { each(|c: ' + kind + '| { ' + call + ' }); }'), lexical)
         # One predicate allows the type and resolves the receiver, lifetimes included.
         for kind in ["&'a Cx<'_, P>", "&'a mut Cx<'_, P>", "&Cx<'_, P>"]:
@@ -214,17 +214,8 @@ class PrecisionRed(unittest.TestCase):
                 self.assertEqual(sum(self.prod(in_cx_fn(body)).values()), 1)
         self.assertFalse(self.prod(in_cx_fn('sign::request(secret, 1);')))
 
-    def test_cx_alias_and_rebinding_fail_closed(self):
+    def test_cx_type_names_outside_parameters_fail_closed(self):
         for source in [
-            in_cx_fn('let c = cx; c.done(1, row);'),
-            in_cx_fn('let c = &mut *cx; c.done(1, row);'),
-            in_cx_fn('(cx).request(1);'),
-            in_cx_fn('let s = S { cx }; s.cx.done(1, row);'),
-            in_cx_fn('let s = S { inner: cx };'),
-            in_cx_fn('let pair = (cx, 1);'),
-            in_cx_fn('let all = [cx];'),
-            in_cx_fn('match cx { c => c.done(1, row) }'),
-            in_cx_fn('if let c = cx { c.done(1, row); }'),
             "use safe_cex_engine::Cx as Ctx;",
             "type Alias<'a> = Cx<'a, Pending>;",
             "struct Holder<'a> { cx: &'a mut Cx<'a, Pending> }",
@@ -234,9 +225,32 @@ class PrecisionRed(unittest.TestCase):
         ]:
             with self.subTest(source=source), self.assertRaises(ValueError):
                 ban.context_fingerprints(source)
-        # Allowed value positions: member access, call argument, declaration.
-        ban.context_fingerprints(in_cx_fn('let t = cx.now; helper(cx, 1); other(&mut *cx); each(cx, |cx, row| cx.done(1, row));'))
         ban.context_fingerprints("fn f(apply: impl FnMut(&mut Cx<'_, Pending>, Row)) {}")
+
+    def test_an_escaping_cx_counts_every_reference_in_its_function(self):
+        # ESCAPE (claude-ddi2il): any use but a member or an analysed call argument
+        # taints the function; every legacy reference in it counts as before.
+        unrelated = 'h.done(1); pending.request.retry();'
+        for escape in [
+            'let c = cx;', 'let c = &mut *cx;', '(cx).now;', 'let s = S { cx };', 'let s = S { inner: cx };',
+            'let pair = (cx, 1);', 'let all = [cx];', 'match cx { _ => {} }', 'if let c = cx { }',
+            'm!(cx);', 'm![cx, 1];', 'm! { cx }', 'store(Some(cx));', 'let w = W(cx);',
+            'let c = pass(cx);', 'x = pass(cx);', 'pass(cx).now;', 'v.push(cx);', 'h.set(cx);',
+            'v.push(W(cx));', 'v.extend(Some(cx));', 'h.x = Some(cx);', 'v[0] = Some(cx);', '*s = Some(cx);',
+            'std::mem::replace(&mut slot, cx);', 'Vec::push(&mut v, cx);', 'keep(move || cx.now);',
+        ]:
+            with self.subTest(escape=escape):
+                self.assertEqual(sum(self.prod(in_cx_fn(escape + ' ' + unrelated)).values()), 2)
+        # Without an escape the same unrelated references record nothing.
+        for analysed in ['helper(cx, 1);', 'self.helper(cx, 1);', 'account.bump(cx);',
+                         'other(&mut *cx);', 'return helper(cx);', 'let t = cx.now;']:
+            with self.subTest(analysed=analysed):
+                self.assertFalse(self.prod(in_cx_fn(analysed + ' ' + unrelated)))
+
+    def test_a_generic_escape_counts(self):
+        # A venue generic identity returns the Cx under another name.
+        source = 'fn id<T>(t: T) -> T { t } ' + in_cx_fn('let c = id(cx); c.request(1);')
+        self.assertEqual(sum(self.prod(source).values()), 1)
 
     def test_cx_flowing_through_expressions_and_bindings_is_counted(self):
         for body in [
@@ -262,15 +276,13 @@ class PrecisionRed(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertFalse(self.prod(in_cx_fn(body)))
 
-    def test_a_macro_cannot_carry_a_cx_value(self):
+    def test_a_macro_carrying_a_cx_value_taints_its_function(self):
         source = 'macro_rules! id { ($e:expr) => { $e } } ' + in_cx_fn('id!(cx).fail(1, e);')
-        with self.assertRaises(ValueError):
-            ban.context_fingerprints(source)
-        for body in ['m!(cx);', 'm![cx, 1];', 'm! { cx }']:
-            with self.subTest(body=body), self.assertRaises(ValueError):
-                ban.context_fingerprints(in_cx_fn(body))
+        self.assertEqual(sum(self.prod(source).values()), 1)
         # Calls and members inside a macro are ordinary uses.
-        self.assertFalse(self.prod(in_cx_fn('let s = format!("{}", label(cx, 1)); log!(cx.now);')))
+        # A member inside a macro is an ordinary use; a nested call's result is consumed.
+        self.assertFalse(self.prod(in_cx_fn('log!(cx.now); h.done(1);')))
+        self.assertTrue(self.prod(in_cx_fn('let s = format!("{}", label(cx, 1)); h.done(1);')))
 
     def test_test_regions_are_listed_separately(self):
         call = 'cx.done(command, "null".into());'

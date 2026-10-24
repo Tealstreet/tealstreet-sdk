@@ -225,10 +225,8 @@ def cx_type(segment, offset):
 
 
 def inferred(segment):
-    """`_`, `&_` or `&'a mut _`: the compiler, not the text, chooses the type."""
-    rest = [token for k, token in enumerate(segment)
-            if token not in {'&', 'mut', "'"} and not (k and segment[k - 1] == "'")]
-    return rest == ['_']
+    """Any `_` (not `'_`) leaves the type to the compiler: `_`, `Option<_>`, `&mut Vec<_>`."""
+    return any(token == '_' and not (k and segment[k - 1] == "'") for k, token in enumerate(segment))
 
 
 def parameter(part):
@@ -315,144 +313,6 @@ def bindings(stream):
     return found, declarations, allowed_types
 
 
-PATTERN_WORDS = {'mut', 'ref', 'let', 'if', 'while', 'for', 'in', 'match', 'box', 'self', 'true', 'false'}
-FLOW = {'cx', 'closure', 'derived'}
-
-
-def value_use(stream, found, index):
-    """A Cx-flow binding used as a value rather than through a member."""
-    token = stream[index]
-    return (IDENT.fullmatch(token) is not None and not (index and stream[index - 1] in {'.', '::'})
-            and stream[index + 1:index + 2] != ['.'] and resolve(found, token, index) in FLOW)
-
-
-def pattern_names(stream, start, end):
-    return [k for k in range(start, end)
-            if IDENT.fullmatch(stream[k]) and stream[k] not in PATTERN_WORDS and stream[k][0].islower()
-            and stream[k + 1:k + 2] not in [['('], ['{'], ['::'], ['!']] and stream[k - 1:k] != ['::']]
-
-
-def enclosing_end(stream, index):
-    depth = 0
-    for k in range(index, len(stream)):
-        if stream[k] in {'(', '[', '{'}:
-            depth += 1
-        elif stream[k] in {')', ']', '}'}:
-            if depth == 0:
-                return k
-            depth -= 1
-    return len(stream)
-
-
-def derived_bindings(stream, found):
-    """Untyped let/for/match bindings fed by a Cx value: conservatively Cx-bound."""
-    for i, token in enumerate(stream):
-        if token == 'let':
-            equals = i + 1
-            while equals < len(stream) and stream[equals] not in {'=', ';'}:
-                equals = group_end(stream, equals) if stream[equals] in {'(', '[', '{'} else equals + 1
-            if equals >= len(stream) or stream[equals] != '=':
-                continue
-            colon = next((k for k in range(i + 1, equals) if stream[k] == ':'), None)
-            if colon is not None and not inferred(stream[colon + 1:equals]):
-                continue
-            pattern = (i + 1, colon if colon is not None else equals)
-            if stream[i - 1:i] in [['if'], ['while']]:
-                initializer_end = equals + 1
-                while initializer_end < len(stream) and stream[initializer_end] != '{':
-                    initializer_end = (group_end(stream, initializer_end)
-                                       if stream[initializer_end] in {'(', '['} else initializer_end + 1)
-                if initializer_end >= len(stream):
-                    continue
-                scope = (initializer_end, group_end(stream, initializer_end))
-            else:
-                initializer_end = expression_end(stream, equals + 1)
-                scope = (initializer_end, enclosing_end(stream, initializer_end))
-        elif token == 'for':
-            within = i + 1
-            while within < len(stream) and stream[within] != 'in':
-                within += 1
-            if within >= len(stream):
-                continue
-            body = within + 1
-            while body < len(stream) and stream[body] != '{':
-                body = group_end(stream, body) if stream[body] in {'(', '['} else body + 1
-            if body >= len(stream):
-                continue
-            pattern, equals, initializer_end = (i + 1, within), within, body
-            scope = (body, group_end(stream, body))
-        elif token == 'match':
-            body = i + 1
-            while body < len(stream) and stream[body] != '{':
-                body = group_end(stream, body) if stream[body] in {'(', '['} else body + 1
-            if body >= len(stream):
-                continue
-            if any(value_use(stream, found, k) for k in range(i + 1, body)):
-                end = group_end(stream, body)
-                for k in pattern_names(stream, body + 1, end - 1):
-                    found.append((stream[k], 'derived', k, end))
-            continue
-        else:
-            continue
-        if any(value_use(stream, found, k) for k in range(equals + 1, initializer_end)):
-            for k in pattern_names(stream, *pattern):
-                found.append((stream[k], 'derived', *scope))
-    bodies = function_bodies(stream)
-
-    def rest_of_function(index):
-        return min((end for start, end in bodies if start <= index < end), default=len(stream))
-
-    assignment_operators = {'=', '!', '<', '>', '+', '-', '*', '/', '%', '&', '|', '^'}
-    for i, token in enumerate(stream):
-        # `x = <expr over a Cx value>` rebinds x for the rest of its function.
-        if (token == '=' and stream[i + 1:i + 2] != ['='] and i >= 2 and IDENT.fullmatch(stream[i - 1])
-                and stream[i - 2] not in assignment_operators | {'.', '::', 'let', 'mut', ':'}
-                and any(value_use(stream, found, k) for k in range(i + 1, expression_end(stream, i + 1)))):
-            found.append((stream[i - 1], 'derived', i, rest_of_function(i)))
-        # `local.method(.., cx, ..)` may store the Cx (v.push(cx), h.set(cx)).
-        if value_use(stream, found, i) and call_argument(stream, i):
-            opening = i - 1
-            depth = 0
-            while opening >= 0:
-                if stream[opening] in {')', ']', '}'}:
-                    depth += 1
-                elif stream[opening] in {'(', '[', '{'}:
-                    if depth == 0:
-                        break
-                    depth -= 1
-                opening -= 1
-            if opening >= 2 and stream[opening - 2] == '.':
-                try:
-                    root = receiver_start(stream, opening - 1)
-                except ValueError:
-                    continue  # A literal receiver cannot store the Cx.
-                # A concrete non-Cx typed binding (or self) can hold a Cx only through
-                # a field naming Cx, which check_cx_names already refuses.
-                if (IDENT.fullmatch(stream[root]) and stream[root] not in {'self', 'Self'}
-                        and resolve(found, stream[root], root) != 'other'):
-                    found.append((stream[root], 'derived', i, rest_of_function(i)))
-
-
-def function_bodies(stream):
-    bodies = []
-    for i, token in enumerate(stream):
-        if token == 'fn' and i + 1 < len(stream) and IDENT.fullmatch(stream[i + 1]):
-            k = i + 2
-            while k < len(stream) and stream[k] not in {'{', ';'}:
-                k = group_end(stream, k) if stream[k] in {'(', '['} else k + 1
-            if k < len(stream) and stream[k] == '{':
-                bodies.append((k, group_end(stream, k)))
-    return bodies
-
-
-def resolve(found, name, index):
-    best = None
-    for bound, kind, start, end in found:
-        if bound == name and start <= index < end and (best is None or end - start < best[1]):
-            best = (kind, end - start)
-    return best and best[0]
-
-
 def call_argument(stream, index):
     """True when stream[index] (after & / mut / * prefixes) is a whole call argument."""
     before = index - 1
@@ -488,22 +348,107 @@ def check_cx_names(stream, allowed_types):
         raise InventoryRefusal('Cx type outside a parameter, import or Fn signature')
 
 
-def check_cx_values(stream, found, declarations):
-    macros = [(i + 2, group_end(stream, i + 2)) for i in range(len(stream))
-              if stream[i + 1:i + 2] == ['!'] and stream[i + 2:i + 3] in [['('], ['{'], ['[']]
-              and stream[i] != 'macro_rules']
+POSSIBLY_CX = {'cx', 'closure'}
+
+
+def innermost(found, name, index):
+    best = None
+    for bound, kind, start, end in found:
+        if bound == name and start <= index < end and (best is None or end - start < best[2] - best[1]):
+            best = (kind, start, end)
+    return best
+
+
+def enclosing_call(stream, index):
+    """Index of the `(` whose argument list holds stream[index], or None."""
+    depth, opening = 0, index - 1
+    while opening >= 0:
+        token = stream[opening]
+        if token in {')', ']', '}'}:
+            depth += 1
+        elif token in {'(', '[', '{'}:
+            if depth == 0:
+                return opening if token == '(' else None
+            depth -= 1
+        opening -= 1
+    return None
+
+
+def analysed_argument(stream, found, index):
+    """A plain argument the callee analyses: not a store, wrapper or consumed result."""
+    if not call_argument(stream, index):
+        return False
+    opening = enclosing_call(stream, index)
+    callee = stream[opening - 1]
+    if not IDENT.fullmatch(callee) or callee[0].isupper():
+        return False  # A constructor or wrapper holds the Cx.
+    close = group_end(stream, opening)
+    for part_start, part in arguments(stream, opening, close):
+        if part[:2] == ['&', 'mut'] and len(part) > 2 and part[2] not in {'self', '*'}:
+            if not (len(part) == 3 and innermost(found, part[2], part_start + 2) and
+                    innermost(found, part[2], part_start + 2)[0] == 'other'):
+                return False  # A `&mut local` destination may receive it (mem::replace, Vec::push).
+    if opening >= 2 and stream[opening - 2] == '.':
+        try:
+            root = receiver_start(stream, opening - 1)
+        except ValueError:
+            return False
+        binding = innermost(found, stream[root], root) if IDENT.fullmatch(stream[root]) else None
+        if stream[root] not in {'self', 'Self'} and (binding is None or binding[0] != 'other'):
+            return False  # A local receiver may store it (v.push(cx), h.set(cx)).
+    after = close
+    while stream[after:after + 1] == ['?']:
+        after += 1
+    try:
+        start = receiver_start(stream, opening + 1) if stream[opening - 2:opening - 1] in [['.'], ['::']] else opening - 1
+    except ValueError:
+        return False
+    # Only a whole statement, block tail or returned value; a bound, chained,
+    # nested or assigned result may carry the Cx onward.
+    return (stream[start - 1:start] in [[';'], ['{'], ['}'], ['return']]
+            and stream[after:after + 1] in [[';'], ['}']])
+
+
+def arguments(stream, opening, close):
+    offset = opening + 1
+    for part in split_top(stream[opening + 1:close - 1]):
+        yield offset, part
+        offset += len(part) + 1
+
+
+def closure_bodies(stream):
+    bodies = []
+    for i in range(len(stream) - 1):
+        if closure_bar(stream, i) or (stream[i:i + 2] == ['|', '|'] and i and (
+                stream[i - 1] in CLOSURE_OPENERS or stream[i - 2:i] == ['=', '>'])):
+            j = i + 1 if stream[i + 1] == '|' else i + 1
+            while j < len(stream) and stream[j] != '|':
+                j = group_end(stream, j) if stream[j] in {'(', '['} else j + 1
+            k = j + 1
+            if k < len(stream) and stream[k] == '-':
+                while k < len(stream) and stream[k] != '{':
+                    k += 1
+            if k < len(stream):
+                bodies.append((i, group_end(stream, k) if stream[k] == '{' else expression_end(stream, k)))
+    return bodies
+
+
+def tainted_scopes(stream, found, declarations):
+    """Scopes whose possibly-Cx binding escapes anywhere but a member or analysed argument."""
+    tainted = set()
+    closures = closure_bodies(stream)
     for i, token in enumerate(stream):
         if not IDENT.fullmatch(token) or i in declarations or (i and stream[i - 1] in {'.', '::'}):
             continue
-        kind = resolve(found, token, i)
-        if kind == 'cx':
-            member = stream[i + 1:i + 2] == ['.'] and stream[i + 2:i + 3] != ['.']
-            if member or call_argument(stream, i):
-                continue
-            # A macro's own argument is a token tree it may rebind or splice.
-            if any(start < i < end for start, end in macros):
-                raise InventoryRefusal('Cx value inside a macro')
-            raise InventoryRefusal('Cx alias or rebinding')
+        binding = innermost(found, token, i)
+        if binding is None or binding[0] not in POSSIBLY_CX:
+            continue
+        member = stream[i + 1:i + 2] == ['.'] and stream[i + 2:i + 3] != ['.']
+        # A closure capturing the Cx may be stored or returned with it.
+        captured = any(start <= i < end and binding[1] < start for start, end in closures)
+        if captured or not (member or analysed_argument(stream, found, i)):
+            tainted.add((binding[1], binding[2]))
+    return sorted(tainted)
 
 
 def test_ranges(stream):
@@ -544,8 +489,8 @@ def context_fingerprints(source):
             definitions.append((i, group_end(stream, opening)))
     found, declarations, allowed_types = bindings(stream)
     check_cx_names(stream, allowed_types)
-    check_cx_values(stream, found, declarations)
-    derived_bindings(stream, found)
+    tainted = tainted_scopes(stream, found, declarations)
+    escaped = lambda index: any(start <= index < end for start, end in tainted)
     tests = test_ranges(stream)
     prod, test = collections.Counter(), collections.Counter()
     counted = []
@@ -569,17 +514,16 @@ def context_fingerprints(source):
             if call:
                 end = group_end(stream, end)
             start = receiver_start(stream, i)
-            if stream[i - 1] == '.':
-                # A call, index, macro or field result over a Cx value counts too.
-                # A whole chain rooted at a Cx-flow binding (other than a Cx parameter's
-                # own fields), or any receiver expression over a Cx value, counts.
-                root = resolve(found, stream[start], start) if IDENT.fullmatch(stream[start]) else None
-                legacy = call and ((start == i - 2 and root in FLOW) or root in {'derived', 'closure'} or any(
-                    value_use(stream, found, k) for k in range(start, i - 1)))
+            if escaped(i):
+                legacy = True  # Where a Cx escapes, every reference counts as before.
+            elif stream[i - 1] == '.':
+                binding = innermost(found, stream[i - 2], i)
+                legacy = call and start == i - 2 and binding is not None and binding[0] in POSSIBLY_CX
             else:
-                path = stream[start:i]
-                arguments = range(i + 1, end) if call else range(0)
-                legacy = CX in path or any(value_use(stream, found, k) for k in arguments)
+                # `Cx::fail(..)`, `<Cx as T>::done(..)`, or any path call handed a Cx.
+                legacy = CX in stream[start:i] or call and any(
+                    (binding := innermost(found, stream[k], k)) is not None and binding[0] in POSSIBLY_CX
+                    for k in range(i + 1, end) if IDENT.fullmatch(stream[k]))
             if legacy:
                 counted.append(i)
                 add(start, end, i)
@@ -587,11 +531,12 @@ def context_fingerprints(source):
             end = group_end(stream, i + 2)
             if name == 'include':
                 raise ValueError('unscanned Rust include')
-    # A macro invocation is frozen only when it wraps a counted legacy call.
+    # A macro invocation is frozen where a Cx escapes (as before) or when it wraps a counted call.
     for i, token in enumerate(stream):
         if stream[i + 1:i + 2] == ['!'] and stream[i + 2:i + 3] in [['('], ['{'], ['[']] and token != 'macro_rules':
             end = group_end(stream, i + 2)
-            if any(i + 3 <= at < end for at in counted):
+            if any(i + 3 <= at < end for at in counted) or (
+                    escaped(i) and any(t.removeprefix('r#') in METHODS for t in stream[i + 3:end])):
                 add(i, end, i)
     return dict(prod), dict(test)
 
