@@ -164,3 +164,12 @@ proofs remain intact. Inventory maps, their retained key/value order and the
 held Futures success are independently confirmed. Both checker commands and
 bans pass, including the 15 checker controls. Exact-head CI/replay/WASM/size and
 bounded core source review remain separate pending gates.
+
+Core cleared cf12e136de6. Exact ad59 CI builds for Futures and Spot are both
+1,144,447 bytes for web and Node, leaving 199,041 bytes below the family budget.
+Futures replay passed. Spot's compiled frame fixture lacked prepareHttp, so its
+managed startup failed before the financial assertions. Against the exact CI
+artifact, all five original frame controls fail unchanged; installing the shared
+recorded preparation helper makes all five pass. The helper's own test also passes.
+No frame assertion, production source or other Spot reply handler changes.
+Fresh full CI remains required; the earlier failed Spot run is historical.
