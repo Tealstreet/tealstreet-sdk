@@ -36,6 +36,9 @@ mod planned_calls {
         responses: usize,
         timers: usize,
         retired: usize,
+        /// Issue the first leg in admission custody but never queue it.
+        issue_only: bool,
+        unqueued: Option<Context>,
         // A delivered call reports itself as a complete order read.
         #[cfg(feature = "order-locks")]
         reconcile_reads: bool,
@@ -203,7 +206,11 @@ mod planned_calls {
                 )
                 .unwrap(),
             );
-            if !self.idle {
+            if self.issue_only {
+                let plan = self.plan.as_ref().unwrap();
+                let slot = cx.plan_slots(plan).unwrap().remove(0);
+                self.unqueued = Some(cx.plan_leg_context(plan, &slot).unwrap());
+            } else if !self.idle {
                 self.queue(cx);
                 if self.parallel {
                     let plan = self.plan.as_ref().unwrap();
@@ -1401,5 +1408,62 @@ mod planned_calls {
         cx.fail_plan(&plan, "explicit failure").unwrap();
         e.drain_actions().for_each(drop);
         assert_eq!(e.venue.retired, 1);
+    }
+
+    fn plan_wait_fixture(issue_only: bool) -> (Engine<Plans>, Plan, crate::request_context::Session) {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            idle: true,
+            issue_only,
+            ..Default::default()
+        });
+        start(&mut e, 0.);
+        let plan = e.venue.plan.clone().unwrap();
+        let session = Cx { now: 0., store: &mut e.store, io: &mut e.io }
+            .open_session(crate::request_context::SessionPolicy {
+                credential: None,
+                repeat_safe: true,
+            })
+            .unwrap();
+        e.drain_actions().for_each(drop);
+        (e, plan, session)
+    }
+    /// Control (RUST_PLAN_SESSION_WAIT C1): a Plan leg cannot park on a Session.
+    #[test]
+    fn a_plan_leg_cannot_park_on_a_session_today() {
+        let (mut e, _, session) = plan_wait_fixture(true);
+        let leg = e.venue.unqueued.clone().unwrap();
+        let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+        let (ids, timers) = (cx.io.next_id, cx.io.timers.len());
+        let refused = cx.session_wait(&session, &leg, leg.clone());
+        assert_eq!(refused.map_err(|(_, error)| error), Err(Error::State));
+        assert_eq!((cx.io.next_id, cx.io.timers.len()), (ids, timers));
+        assert!(cx.session_ready(&session).is_empty(), "no wait was held");
+    }
+    /// Control (C3): a session_ready drain outside Plan custody cannot issue
+    /// the eligible Slot itself.
+    #[test]
+    fn a_session_drain_outside_plan_custody_cannot_issue_a_leg() {
+        let (mut e, plan, session) = plan_wait_fixture(false);
+        let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+        assert!(cx.session_ready(&session).is_empty());
+        let slot = cx.plan_slots(&plan).unwrap().remove(0);
+        assert_eq!(cx.plan_leg_context(&plan, &slot), Err(Error::Revoked));
+    }
+    /// Control (C4): a leg issued before a login wait longer than its logical
+    /// window cannot be queued after it, so the wait must precede issue.
+    #[test]
+    fn a_plan_leg_issued_before_a_long_wait_has_expired_when_login_returns() {
+        let (mut e, plan, _) = plan_wait_fixture(true);
+        let leg = e.venue.unqueued.clone().unwrap();
+        let after_login = leg.deadline() + 1.;
+        assert!(after_login < plan.deadline(), "the Plan root outlives the leg window");
+        let queued = Cx { now: after_login, store: &mut e.store, io: &mut e.io }.request_managed(
+            leg.clone(),
+            Method::Get,
+            "https://venue.test/read".into(),
+            None,
+            leg,
+        );
+        assert_eq!(queued.map(|_| ()).map_err(|(_, error)| error), Err(Error::TimedOut));
     }
 }

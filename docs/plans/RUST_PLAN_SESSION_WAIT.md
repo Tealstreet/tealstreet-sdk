@@ -1,0 +1,162 @@
+# Rust Plan Session Wait
+
+Owner: claude-fe7lgm (Plan owner). Consumer: codex-zs5e83 (Paradex, 36
+engine-gated sites). Composes with claude-m26ps4's Session-fenced JIT Bearer
+hook (`RUST_SESSION_BEARER_HOOK.md`, feat/rust-session-bearer-hook).
+
+## Problem
+
+A Paradex private Read or write runs as a command Plan (or a retained Preflight
+read). Its legs need the venue's login Session to be ready, because the Bearer
+is derived from that Session at prepare time. While login is in flight, the leg
+must wait. Today it cannot:
+
+- `Cx::session_wait` refuses any owner whose command is not in the plain
+  Context phase (`context_phase`, request_context_registry.rs:867), so Plan and
+  Preflight owners get `State`.
+- Parking an already-issued leg would not help. A Plan leg's Context deadline
+  is `timeout × attempts` from issue (`CallTerms::window`), so a login wait can
+  outlive it. A write leg is also journal-registered at issue
+  (`make_plan_leg_context`). Resuming it would need a new Context under a
+  journal entry keyed to the old leg.
+- Re-issuing the leg from the `session_ready` drain fails custody:
+  `plan_leg_context` requires the handoff delivery, initial custody or Plan-ready
+  custody (request_context_planned.rs:543-561). Queueing requires
+  `delivery == call.admission.predecessor` (`state.admission`).
+
+## Design
+
+Park the unit of work **before** it consumes an attempt, and do the issue or
+select on resume, inside the custody the resume grants.
+
+### Park points
+
+1. **Unissued Slot.** `Cx::plan_session_wait(plan, slot, session, pending)`.
+   - It needs exactly the authority `plan_leg_context` needs: a live command
+     Plan, an available and eligible Slot, `Credit::Unissued`, and Plan custody
+     (handoff, initial or ready).
+   - It marks the entry `parked: Some(generation)`. The credit stays
+     `Unissued`, and the Slot is reserved: it is excluded from `plan_slots` and
+     from the eligibility pump, and it cannot be issued, settled or terminally
+     retired by the venue.
+   - No Context, ID, journal entry or attempt is spent.
+2. **Failed call awaiting retry.**
+   `Cx::plan_retry_session_wait(plan, slot, context, evidence, session, pending)`,
+   in the failed delivery's custody. It runs the same checks as
+   `plan_retry_context` / `plan_resend_context`: evidence, `selected <
+   attempts`, and window remaining. It consumes nothing: the call moves to
+   `Stage::Parked { generation }`, and the failed attempt's leg is retired as
+   usual. A resend grant is checked here and consumed only at resume.
+3. **Retained Preflight read.** `Cx::preflight_session_wait(handle, session,
+   pending)` before `preflight_read_context`, and the retry variant after a
+   failed read call. The same rules apply. The Preflight keeps its generation.
+
+Execution-owned (physical) Plans are refused with `State`, as are Background
+Plans. This is consistent with the G1 `context_phase` ruling.
+
+### Resume
+
+`Cx::session_ready(session)` keeps its signature and return type. For a Plan or
+Preflight waiter, the engine does the deferred work at drain time, with the
+**current delivery as predecessor**:
+
+- **Slot:** it issues the leg via `make_plan_leg_context`, with resume custody
+  standing in for Plan custody. The result is a fresh Context: a new physical
+  window from now, capped by the Plan root, which is "the eligible 20 s child".
+  Journal registration, the leg intent (if one was declared at park) and the
+  first attempt happen only now.
+- **Retry:** it runs `select_plan_retry`, consuming exactly one attempt within
+  `terms.attempts` and the declared `RetryWindow`. For FreshAttempt that means
+  a fresh physical deadline; Shared keeps the original window.
+- It returns `Waiter::Ready(context, pending)`, exactly as for a plain waiter.
+  The venue queues the leg in the same callback, because custody is bound to
+  that delivery.
+
+If the work can't be done at resume (the Plan root has expired, or the window
+has less than 1 ms left), the waiter comes back `Waiter::Failed(..)` with a
+typed Timeout/NotSent. The Slot is unparked, and the Plan's own expiry or
+terminal path decides the command terminal.
+
+The original root (the Plan or Preflight generation), the Slot and the attempt
+lineage are preserved: nothing is consumed while parked.
+
+### Fencing
+
+- **Expiry.** The wait timer is at the Plan root (or Preflight) deadline, not a
+  leg deadline. Plan root expiry runs first and seals the Plan through the
+  common path. The parked entry's pending is then delivered once via
+  `on_session_wait_expired`, NotSent. A later wait-timer firing is a no-op.
+- **Retire or failed session.** `retire_session` / `session_failed` keep their
+  return contract for plain waiters. Plan and Preflight waiters are unparked
+  and their pendings queued. Each is delivered **after the current callback
+  exits** through one new hook, `Venue::on_plan_session_wait_ended(cx, pending,
+  error)`, run in that Plan's (or Preflight's) ready custody. The venue can
+  then re-park on a new Session after re-login (the Paradex JWT regeneration
+  case), or `fail_plan` / `fail_preflight`.
+  - The engine never fails the Plan itself.
+  - Each owner is visited once, with storage reserved at park.
+  - This is the same queued fan-out shape as Bearer R10, so both use one flush.
+- **Projection.** Parking adds no outcome. A wait that ends unissued is NotSent
+  for that attempt only. The command terminal still comes from
+  `failure_projection`, so prior released attempts and #2016's inherited fact
+  stay Unknown.
+
+### Composition with the Bearer hook (m26ps4)
+
+- A parked unit has no packet, so the Bearer hook never runs for it. After
+  resume, the venue queues the leg with the new `bearer: Some(&session)` binding
+  on `request_managed`, and prepare reads the hook then.
+- One retire flush: Bearer R10 fails bound unreleased packets, and this plan
+  ends parked waits. Both are queued, once per owner, after the callback.
+- A parked unit is never also a bound packet, because parking requires
+  not-queued, so no owner is visited twice.
+- If the Session retires after resume but before release, that is Bearer R3/R10
+  (packet fence), not this plan.
+
+### G2b groups
+
+A Slot inside a mutation-group barrier range cannot be parked individually
+(`State`). Group members are issued and activated together, so a group waits
+before issuing any member: park the whole barrier range, or nothing. That is a
+follow-up only if a consumer needs it, and Paradex does not.
+
+## Original REDs and controls (on 77f12408947)
+
+The new methods don't exist, so these are compiling controls that pin today's
+gaps. None is counted as a RED for a missing method:
+
+- C1: `session_wait(session, plan_leg)` gives `State`, sets no timer and holds
+  no wait.
+- C2: `session_wait(session, preflight_read_context)` gives `State`.
+- C3: from a `session_ready` drain outside Plan custody, `plan_leg_context` on an
+  eligible Slot gives `Revoked`.
+- C4: a Plan leg issued before a wait longer than `timeout × attempts` cannot be
+  queued after it (`validate` gives `TimedOut`). This is the reason to park
+  before issue.
+
+New-contract REDs follow the API review:
+
+- N1: a Slot parked, then `session_ready`: one fresh leg with a deadline of
+  now + timeout (capped by the root), the same Slot ordinal, `selected == 1`,
+  queued in the drain callback, one HTTP.
+- N2: a retry parked after a failed attempt: resume consumes exactly one
+  attempt, and a parked call never exceeds `terms.attempts`.
+- N3: Plan root expiry while parked: one Plan terminal (Timeout), the pending is
+  delivered once via `on_session_wait_expired`, and there is no HTTP.
+- N4: retire while parked: no HTTP, `on_plan_session_wait_ended` runs once
+  after the callback in ready custody, re-park on a new Session succeeds, and
+  resume issues the leg.
+- N5: the projection is unchanged. A released, unanswered first attempt, then a
+  parked retry, then a retire and `fail_plan`, gives Unknown. With #2016, an
+  inherited fact plus a parked Slot gives Unknown.
+- N6: custody. Parking outside Plan custody, on an execution or Background
+  Plan, on a group Slot, twice on one Slot, or with a foreign or stale Session
+  gives `Revoked`/`State`/`Duplicate`. Each refusal spends no IDs or timers.
+- N7: Preflight. A parked read resumes as a fresh read context under the same
+  Preflight generation, with the predecessor equal to the drain delivery.
+
+## Gates
+
+Engine focused tests in every feature mode; clippy `-D warnings`; fmt. Review by
+codex-zs5e83 (consumer fit for the 36 sites) and claude-m26ps4 (Bearer
+composition).
