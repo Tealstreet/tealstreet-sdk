@@ -3228,21 +3228,21 @@ fn duplicate_link_codes_are_unknown_for_place_only() {
         );
 
         let mut h = ready(Variant::Linear);
-        place(&mut h, 121, vec![order("BTCUSDT", 1.0)]);
-        while h.has_request("/v5/position/list") {
-            h.respond(
-                "/v5/position/list",
-                200,
-                r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
-            );
-        }
-        created(&mut h, "dup-cancel");
-        h.outcomes.clear();
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"dup-cancel","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+        );
         h.command(Command::CancelOrders {
             command: 122,
             ids: vec!["dup-cancel".into()],
         });
-        let cancel = h.take("/v5/order/cancel");
+        let path = if h.has_request("/v5/order/cancel-batch") {
+            "/v5/order/cancel-batch"
+        } else {
+            "/v5/order/cancel"
+        };
+        let cancel = h.take(path);
         h.reply(
             cancel.id,
             200,

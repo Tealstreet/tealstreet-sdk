@@ -6438,3 +6438,10 @@ without native `110001`/`170213`, seals Unknown and reconciles via a fresh
 snapshot; it is never reported gone. Follow-up: capture real Hyro cancel,
 amend and already-gone replies when a Hyro account is available, then pin
 them as fixtures.
+
+### Bybit duplicate-link create refusals (R2)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| A create answered `10014` or `110072` (duplicate `orderLinkId`), every Bybit variant | `Unknown`: the order may already exist, so the engine reconciles it (was `Rejected`) | Treat as uncertain; reconcile before resubmitting the same link. |
+| The same codes on cancel or amend | Unchanged: `Rejected` | None. |
