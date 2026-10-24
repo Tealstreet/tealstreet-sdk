@@ -91,7 +91,10 @@ returns `Invalid`, so the REDs fail at their assertions, not at compile time.
 - C2 (control): the same with `validate_background_read_http_delivery(leg)`
   gives `Invalid`.
 - R1: the new validator is `Ok` in that DATA callback. Publication runs once and
-  `done_context(root)` seals once.
+  `done_context(root)` seals once through the journal projection. With no
+  confirmed write in the fixture, that terminal is NotSent failure: the Read
+  child cannot turn the Mutation root into success. (Corrected at source; the
+  original suffix expected CommandDone and had not executed behind the RED.)
 - R2: a live sibling Read leg of the same root (not the delivered one) gives
   `Revoked`, with no publication.
 - R3: the delivered leg is the Mutation write, so validating it as a Read child
@@ -111,7 +114,8 @@ Added after codex-5c57jl's contract review:
 
 These land with source, on the post-5b fixtures:
 
-- R3: a delivered signed Mutation write leg gives `Invalid`.
+- R3: a Mutation write leg gives `Invalid`, checked first, even when it is this
+  callback's exact delivery (the leg operation precedes root custody).
 - R11: a Preflight or Plan-phase command gives Invalid/Revoked.
 - R12: a #1919 execution observer gives `Revoked`, and a physical Execution
   owner gives `Invalid`.

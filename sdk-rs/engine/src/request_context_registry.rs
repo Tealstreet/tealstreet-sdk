@@ -1648,8 +1648,40 @@ impl<P> Cx<'_, P> {
         root: &Context,
         leg: &Context,
     ) -> Result<(), Error> {
-        let _ = (root, leg);
-        Err(Error::Invalid)
+        // A write's response is classified as a write, never published as a Read.
+        if leg.operation() != Operation::Read {
+            return Err(Error::Invalid);
+        }
+        self.validate_completion_context(root)?;
+        let Owner::Command { id, .. } = root.owner() else {
+            return Err(Error::Invalid);
+        };
+        // An observer re-dispatches only through its execution.
+        if self.io.request_contexts.is_observer(id) {
+            return Err(Error::Revoked);
+        }
+        let owner = self
+            .io
+            .request_contexts
+            .commands
+            .get(&id)
+            .ok_or(Error::Revoked)?;
+        // Preflight and Plan phases have their own delivery validators.
+        if !matches!(owner.phase, CommandPhase::Context { .. }) {
+            return Err(Error::Invalid);
+        }
+        if owner.context_root() != Some(root) {
+            return Err(Error::Revoked);
+        }
+        self.validate_http_context(leg)?;
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        if delivery.context != *leg
+            || leg.owner() != root.owner()
+            || leg.deadline() > root.deadline()
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(())
     }
 
     /// Validate a Background Read in this exact managed HTTP callback. Publish
