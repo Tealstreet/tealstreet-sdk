@@ -3,7 +3,7 @@ import type { ExchangeOptions } from '../../types';
 
 import { describe, expect, it } from 'vitest';
 
-import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { RustEngineExchange, runsOnRustEngine } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { LocalSignerSetup, withoutSigningCredentials } from '../../exchanges/rust/localSignerSetup';
 import { deriveBridgeConstruction, derivePublicMode, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
@@ -398,4 +398,43 @@ it('preserves JSON null-as-None secondary fallback while explicit empty never in
     secondary: { key: 'read', secret: 'read-secret', passphrase: null },
   });
   expect(() => new LocalSignerSetup({ ...options, secondary_passphrase: '' }, deriveSignerSetupPolicy('okx'))).toThrow('secondary signing credentials require a passphrase');
+});
+
+describe('ApeX signer admission (RUST_APEXOMNI_SIGNER_ADMISSION.md)', () => {
+  const apex = {
+    engine: 'rust',
+    key: 'api-key',
+    secret: 'audit-apex-material',
+    passphrase: 'pass',
+    omniKeySeed: `0x${'11'.repeat(65)}`,
+  } as unknown as ExchangeOptions;
+
+  it('carries the OmniKey seed only in provider setup, as the zklinkSeed extra', () => {
+    const setup = new LocalSignerSetup(apex, deriveSignerSetupPolicy('apexomni'), false, apex.omniKeySeed);
+    const safe = withoutSigningCredentials(apex);
+    expect(JSON.stringify(safe)).not.toContain('11'.repeat(65));
+    expect(JSON.stringify(safe)).not.toContain('audit-apex-material');
+    const calls: unknown[][] = [];
+    class Engine {
+      constructor(...args: unknown[]) {
+        calls.push(args);
+      }
+    }
+    setup.construct(Engine as never, 'apexomni', JSON.stringify(safe));
+    expect(JSON.parse(calls[0][2] as string)).toEqual({
+      primary: {
+        key: 'api-key',
+        secret: 'audit-apex-material',
+        passphrase: 'pass',
+        extra: { zklinkSeed: { value: apex.omniKeySeed, encoding: 'hex' } },
+      },
+    });
+    expect(deriveBridgeConstruction('apexomni', apex).dispatchSigning).toBe(true);
+  });
+
+  it('keeps keyless and remote-signer ApeX accounts on TS until P8', () => {
+    const remoteSigner = { sign: async () => ({}) } as unknown as ExchangeOptions['remoteSigner'];
+    expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: '', remoteSigner })).toBe(false);
+    expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: 'local' })).toBe(true);
+  });
 });
