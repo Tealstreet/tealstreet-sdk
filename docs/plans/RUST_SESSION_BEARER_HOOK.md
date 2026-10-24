@@ -878,3 +878,64 @@ auditor can confirm that every non-doc manual merge hunk is exactly that.
 Gates before freeze: the workspace check after the final tip merge, the
 CALLERS note for R4 (a venue without the hook now waits out the window), and
 one PR run on the frozen head.
+
+## Phase 5: `session-bearer` feature gate (PLAN, 2026-10-25)
+
+Run 40131305972 on `340c5f174a4` failed the per-venue wasm budget:
+- asterdex: 1,347,932 against 1,343,488 (+4,444);
+- bitget: 1,372,957 against its 1,363,968 override (+8,989);
+- bybit: 1,343,658 against 1,343,488 (+170).
+
+The Bearer machinery compiles into every venue although none adopts it.
+
+Ruling (claude-ddi2il): a non-default engine feature `session-bearer`, enabled
+only by adopting venues. Request API signatures stay unchanged, and a
+`Some(session)` bearer without the feature is refused `Invalid` at issue,
+with a pinned test. Every non-adopting family must come back within about
+100 bytes of the tip. A feature-mode control row is added, and the other rows
+stay. Precedent: claude-fe7lgm's `serial-plans` / `condition-waits` gates.
+Claimed names: serial-plans, condition-waits, dispatch-nonce,
+metadata-freshness.
+
+Shape:
+- **Always compiled.** These are the venue-facing types and hooks, so venue
+  impls compile in both modes:
+  - `SessionBearer`, `SessionHeaders`, `SessionPlacement` and
+    `SecretHeaderValue`;
+  - the defaulted `Venue::session_bearer` and `session_bearer_revision`;
+  - the request signatures with their `bearer: Option<&Session>` argument
+    (the 27 `None` call sites stay valid);
+  - fe7lgm's later `status_exempt_refusal`.
+- **Compiled only with `session-bearer`.** That covers the engine machinery
+  and its per-call state:
+  - `Bearer` and the managed call's `bearer` field;
+  - `resolve_bearer`, leg-bearer inheritance and the `bearer_bound` index;
+  - the retire fence (`fence_bearer_generation`, `bearer_fenced`);
+  - the claim-time revision fence and the `floor`;
+  - park/wake (`bearer_parked`, `bearer_woken`, the `session_ready` announce
+    record) and `attach_session_headers` with placement;
+  - the Session-bound group refusal and its named Plan terminal;
+  - the `bearer_refused` texts.
+- **Off mode.** `queue_managed` refuses any `Some(session)` with `Invalid`
+  before any effect; the pending comes back, and an owning Plan fails through
+  the existing admission path. That one check is the whole off-mode cost.
+  Retire, readiness and session waits behave exactly as on the tip.
+- **Feature edges.** `session-bearer` needs nothing else; it composes with
+  `http-plans` and `http-mutation-barriers` (the group refusal compiles only
+  when both features are on). `session_bearer.rs` and the Bearer unit tests
+  are gated on it. A feature-modes row runs them:
+  `("http-mutation-barriers", "http-plans", "session-bearer", "test-support")`.
+- **Tests.**
+  - OFF control (default features): a `Some(session)` bound request is
+    refused `Invalid`, and nothing reaches the host or the provider.
+  - ON: every existing Bearer test, unchanged.
+- **Wasm evidence.** Raw `wasm32-unknown-unknown` release builds of asterdex,
+  bitget and bybit at the tip and at the gated head, each family within about
+  100 bytes of the tip. Then one PR run on the frozen head.
+- **CALLERS.** The Session-bound section applies to adopting venues, which
+  enable `session-bearer`. A Session-bound call without it is refused at
+  issue.
+
+Consumers: claude-fe7lgm's `serial-session-resend` will require
+`session-bearer` plus `serial-plans`. Paradex, BreakoutProp DXAPI and GRVT
+enable `session-bearer` when they adopt, with their own budget review.
