@@ -208,9 +208,7 @@ fn native_message(case: Case) -> &'static str {
         Case::CandleInterval => "TxFlow does not support 3h candles",
         Case::CandleRange => "Invalid candle time range",
         Case::MissingLeverage => "TxFlow account leverage is not confirmed for BTC-USDC",
-        Case::Account => {
-            "TxFlow account query completion is not implemented; use live account state"
-        }
+        Case::Account => "This action is not supported on this venue",
         Case::Book => "TxFlow order book queries are not implemented; use the book subscription",
         Case::ReadStp | Case::WriteStp => {
             "TxFlow does not document configurable self-trade prevention"
