@@ -108,10 +108,11 @@ impl BitgetFutures {
         } else {
             None
         };
-        let credential = refusal
-            .is_none()
-            .then(|| self.read_credential(PATH))
-            .flatten();
+        let (credential, identity) = if refusal.is_none() {
+            self.read_selection(PATH)
+        } else {
+            (None, None)
+        };
         // A rejected admission already published the command's typed failure.
         let Ok(root) = cx.admit_http_command(crate::read_policy(credential)) else {
             return;
@@ -120,7 +121,7 @@ impl BitgetFutures {
             finish(cx, &root, Err(error));
             return;
         }
-        let recipe = sign::Http::new(self.credential_identity(root.credential()), PATH.into());
+        let recipe = sign::Http::new(identity, PATH.into());
         if let Err((pending, reason)) = cx.request_signed_managed(
             root.clone(),
             Method::Get,
