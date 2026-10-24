@@ -649,10 +649,7 @@ impl Bitrue {
             | Command::SetLeverage { command, .. } => *command,
             _ => return Err("Unsupported Bitrue trading command".into()),
         };
-        if self.options.public_data_only
-            || self.options.key.as_deref().is_none_or(str::is_empty)
-            || self.options.secret.as_deref().is_none_or(str::is_empty)
-        {
+        if self.options.public_data_only || self.options.credentials.is_none() {
             return Err("Bitrue trading requires API credentials".into());
         }
         let mut plan = Plan::new(id);
@@ -1167,6 +1164,22 @@ impl Bitrue {
             self.trade_finish(cx, *request.plan, Some(error));
         }
     }
+    pub(crate) fn trade_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+        prior_attempt: bool,
+    ) {
+        let prior_mutation = match request.credential_role() {
+            safe_cex_engine::credential_selection::CredentialRole::Mutation => prior_attempt,
+            _ => false,
+        };
+        if prior_mutation || request.plan.effective || !request.plan.ids.is_empty() {
+            error.outcome = Some(Outcome::Unknown);
+        }
+        self.trade_failed(cx, request, error);
+    }
     /// A request that never answered. Reads precede a write that was never sent.
     pub(crate) fn trade_lost(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         let read = matches!(request.step.effect, Effect::Inspect(_) | Effect::Verify(_));
@@ -1537,5 +1550,15 @@ fn answer_failure(response: &Response<'_>, message: String, documented: bool) ->
         }
         _ if documented => rejected(error, ErrorKind::Rejected),
         _ => error,
+    }
+}
+
+impl Request {
+    pub(crate) fn credential_role(&self) -> safe_cex_engine::credential_selection::CredentialRole {
+        use safe_cex_engine::credential_selection::CredentialRole;
+        match self.step.effect {
+            Effect::Inspect(_) | Effect::Verify(_) => CredentialRole::Read { scope: None },
+            _ => CredentialRole::Mutation,
+        }
     }
 }

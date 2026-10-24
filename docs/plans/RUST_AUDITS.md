@@ -3111,6 +3111,47 @@ Valid writes, queues, signatures, nonces, account, History, Builder and sockets
 remain exact. Original checks precede source and expose custody gaps, not new
 financial outcome defects or an altered signing model.
 
+### Kraken Futures unsigned PublicTrades custody
+
+One raw history request is replaced by managed unsigned physical pages under a
+single caller-receipt Read root. The public walk has its own carrier/module;
+private history and actual #2058 candle handling remain intact. Shared history
+admission guards exact delivery before identities/rows/progress; preparation
+refusal/root expiry stay strict, while native later transport/503/codec failure
+recovers only previously accepted rows. The new 20s child policy and typed first
+released failure are disclosed in CALLERS. Sole intended request inventory
+change: history.rs 6->5, family23->22. Bounded source review/CI remain separate.
+
+## Receipt-bound StampFloor shared primitive
+
+Opaque release-derived stamp metadata and one opt-in dispatch helper replace no
+venue source in this slice. Only SigningRelease mints the floor from its validated
+receipt; it grants no retry, owner, account, credential or transport authority.
+Inherited new-API compile REDs are distinct from two executed assertion REDs
+against the inherited implementation's unsafe-current/NaN boundaries. Existing
+stamp_ms and other families' recipes are unchanged. Bitrue adoption remains a
+separate consumer migration after actual shared landing.
+
+### Bitrue opaque signer cutover
+
+The integrated original provider/retry oracles reproduced 8 assertion REDs plus
+17 working controls before source. Candidate closes those eight, preserves native
+bytes and independent retry budgets, and withholds uncertain 500/408 signature
+replay through the shared classifier. Physical bracket legs keep one caller root.
+No managed write journal, accepted-ID Partial or zero-legacy claim; staged native
+owner lifetimes remain explicit. Independent source/caller/full-map review follows.
+
+Verification checkpoint: source/caller/full-map independent reviews are CLEAR at
+2024ec88acc after all fixes; no remaining High/Medium. The map reviewer explicitly
+confirmed typed-role reuse is semantic deduplication, with no hidden/renamed sites,
+21/14 exact source/manifest and original25assertions unchanged. All 5,621 unowned
+entries from the 5,653-entry incoming tree were preserved. Executed220Bitrue native
+controls plus1compile-fail doc, registry3, TS construction4, and earlier305Binance
+controls on identical engine source PASS.
+Focused strict/checker/fmt gates pass; full fresh CI and HMAC-owner source review
+are still pending. No WASM/replay/size result is inferred from native tests.
+
+
 
 ## Metadata/settings freshness core
 

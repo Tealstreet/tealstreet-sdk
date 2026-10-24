@@ -1793,6 +1793,48 @@ clock, zero-wait and schedule4999/5000/None boundary assertions are retained.
 The existing trading, spot and schedule targets pass unchanged. No broad local
 workspace/all-feature or WASM/performance build substitutes for exact-head CI.
 
+### Kraken Futures PublicTrades custody controls
+
+Plan/original checkpoint f24c1588e45 was independently CLEAR (16 assertion REDs,
+13 native GREENs). Source composition uses actual #2058 883c5c8deb8. Controls
+cover exact caller/child bounds, held Prepare/Bind, strict typed preparation,
+capacity with two-slot/no-leak recovery, duplicate/clock/late work fences and
+accepted-only later transport/503/codec/physical-timeout recovery. The external
+NaN fixture adaptation and narrow first PublicTrades Network expectation are
+disclosed in the plan; private failure assertions remain unchanged. Full Rust,
+WASM and workspace checks belong to the one PR-triggered CI run.
+
+## StampFloor clock-boundary controls
+
+Original four new-API compile controls are retained from m26's handoff. Four
+additional frozen controls pin unsafe/non-finite current clocks, the maximum
+safe current stamp, and unchanged stamp_ms behavior; two fail at runtime on the
+inherited draft before correction. The opaque type has both a nameable positive
+doctest and a constructor-privacy compile-fail control. Shared release tests
+retain genuine prepare/bind/claim and no-release-on-denial behavior separately.
+No venue inventory prune or native migration receipt is claimed by this core PR.
+
+### Bitrue dispatch custody and physical Read legs
+
+Options retain only opaque Identity refs. Provider preparation/apply attest exact
+transport intent, ordered unsigned headers and atomic receipt/results before release.
+Original 25 assertions pass; additional caller-deadline, delayed provider and
+malformed-result controls execute through genuine Engine callbacks. The scanner
+changes 29/17 to21/14, distinguishing three genuine bracket completion removals
+from five conservative obsolete request-field matches. No bootstrap growth.
+Legacy execution/group/session/history ownership remains a separate blocker.
+
+Verification checkpoint: source/caller/full-map independent reviews are CLEAR at
+2024ec88acc after all fixes; no remaining High/Medium. The map reviewer explicitly
+confirmed typed-role reuse is semantic deduplication, with no hidden/renamed sites,
+21/14 exact source/manifest and original25assertions unchanged. All 5,621 unowned
+entries from the 5,653-entry incoming tree were preserved. Executed220Bitrue native
+controls plus1compile-fail doc, registry3, TS construction4, and earlier305Binance
+controls on identical engine source PASS.
+Focused strict/checker/fmt gates pass; full fresh CI and HMAC-owner source review
+are still pending. No WASM/replay/size result is inferred from native tests.
+
+
 
 Metadata/settings freshness: BingX query ownership and both adapters' background
 Store observations/write fences use the shared settings boundary. WEEX explicit
