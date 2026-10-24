@@ -391,3 +391,12 @@ Plan admission and host behavior are untouched. The original two barrier REDs
 remain ignored: this extraction alone does not hold or release a group. Exact
 group orchestration, coupled Lifecycle/pacing validation and host hunks still
 require separate source agreement before edits.
+
+### Current landing integration
+
+Actual a2533f5761f is plain-merged at 20549629e52. Only the README index needed
+manual resolution: incoming rows plus this plan's row once. The shared
+SigningRelease/HttpRelease expiry projectors are retained. Existing single-claim
+controls pass 47/47. The original async barrier assertions still both fail when
+explicitly unignored on this integration; the both-succeed compatibility control
+passes. This refresh does not claim a group implementation or READY.
