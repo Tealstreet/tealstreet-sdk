@@ -30,8 +30,8 @@ previous call's exact DATA custody. There is no declared length.
 ```rust
 impl<P> Cx<'_, P> {
     /// Admit a streamed serial write Plan with its first call. Requires a
-    /// WriteAfterReads Preflight with a write credential and a receipt bound at
-    /// genuine entry. The Plan root's deadline is that bound receipt.
+    /// WriteAfterReads Preflight with a write credential. The root has no
+    /// wall-clock of its own; each call carries its own bound.
     pub fn admit_serial_plan(
         &mut self,
         preflight: &Preflight,
@@ -41,7 +41,7 @@ impl<P> Cx<'_, P> {
 
     /// In the exact DATA custody of the current call: settle it, then admit
     /// the next serial call under the same root. Refuses while any write fact
-    /// is uncertain, after the root deadline, or outside that custody.
+    /// is uncertain, after a stop, or outside that custody.
     pub fn continue_serial_plan(
         &mut self,
         plan: &Plan,
@@ -49,9 +49,24 @@ impl<P> Cx<'_, P> {
         context: &Context,
         next: SerialCall,
     ) -> Result<Slot, Error>;
+
+    /// As `continue_serial_plan`, but the next call is issued from the Plan
+    /// timer's callback after `delay_ms` (native read retries).
+    pub fn continue_serial_plan_after(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        delay_ms: u32,
+        next: SerialCall,
+    ) -> Result<(), Error>;
 }
 
-pub struct SerialCall { pub timeout_ms: u32 } // one physical attempt, Never
+pub struct SerialCall {
+    pub operation: Operation, // Read or Mutation, under the admitted credential
+    pub timeout_ms: u32,      // the per-call bound
+    pub attempts: u8,         // 1, or 2 for Bitget's native 40009 resend
+}
 pub struct SerialPolicy {
     pub credential: Credential,
     pub pacing: Option<Pacing>,
@@ -81,12 +96,12 @@ call. A native job with nothing to send ends through the existing
     KnownPartial batch (every row's outcome proven, mixed accepted and
     refused, as `classify_write` returns for a definitive mixed batch).
     PartialUnknown and unproven Failed stop the chain;
-  - the root still live;
+  - the Plan not stopped;
   - no uncertain fact anywhere in the journal.
   It spends the next call's IDs (three, plus one signing ID) at that moment.
-  No timer, socket, Session, retry grant or second root is created.
+  No socket, Session, venue timer or second root is created.
 - **Check all, then commit.** `continue_serial_plan` runs every check (custody,
-  definitive fact, live root, no uncertainty, capacity, pacing) before it
+  definitive fact, not stopped, no uncertainty, capacity, pacing) before it
   changes anything. A refused continue leaves the current call exactly as it
   was: still settleable through `finish_plan_call`, then `done_plan` or
   `fail_plan`, with the journal intact. There is no half-settled state.
@@ -103,33 +118,58 @@ call. A native job with nothing to send ends through the existing
   acquires or releases its own fence.
 - **Nonces per call.** Each continuation reserves its nonce at Bind, like a
   declared leg. A refused continue reserves none.
-- **Receipt capture at genuine entry.** Today `begin_preflight` leaves the
-  receipt unbound, and `begin_preflight_with_command_wait` accepts only
-  ReadOnly. Shared change: `begin_preflight_with_command_wait` also accepts
-  WriteAfterReads and binds the exact caller receipt at genuine entry, with
-  the existing refusals (missing receipt: the shared typed refusal; expired at
-  entry: Revoked, no effects). `admit_serial_plan` reads that bound cap, in
-  genuine entry or later ready custody (after reads, parks or Session waits),
-  and never re-captures or rebases it. An unbound Preflight is Invalid; an
-  expired cap at admission is TimedOut, spending nothing. A Preflight admits
+- **No root wall-clock (ruling, claude-ddi2il).** Native has no whole-job
+  bound, so the serial root has no deadline and the caller receipt never caps
+  it. Each call is bounded by `now + timeout_ms`, a new bound that native does
+  not set, disclosed in CALLERS. The chain advances only from DATA (or the
+  single-use delayed-continuation callback), so every interval is bounded and
+  the Plan always terminates.
+- **Caller-wait expiry mid-chain.** Receipt expiry is not a Plan terminal and
+  emits no Timeout. The chain keeps sending, the command reads
+  `CommandWait::Expired` as a held command does today, and the order lock and
+  slot stay held. The command's one terminal is the Plan's own.
+- **Stops.** Credential revoke or rotation, Session retirement, engine
+  shutdown and caller cancel each stop the chain at the next custody point; a
+  live call is still settled or retired, never orphaned. They project failure
+  with every streamed accepted ID, plus Unknown when a released call is live,
+  in which case the lock converts to the fence. These and `done_plan` or
+  `fail_plan` are the only ways the lock and slot are released.
+- **Receipt capture for parking (shared change).** Today `begin_preflight`
+  leaves the receipt unbound, and `begin_preflight_with_command_wait` accepts
+  only ReadOnly. Bitget's 10 s Classic/UTA detection wait parks before
+  anything can be planned, so `begin_preflight_with_command_wait` also accepts
+  WriteAfterReads. It binds the exact caller receipt at genuine entry, with
+  the existing refusals: a missing receipt gets the shared typed refusal, and
+  expiry at entry gets Revoked with no effects. The bound cap bounds only the
+  Preflight's reads and parks, as for ReadOnly. Serial admission never takes it
+  as a root deadline, and never re-captures or rebases it. A Preflight admits
   at most one Plan, so a second admission is State. Declared mutation Plans
   keep refusing a bound receipt, as at the base.
-- **Wall-clock.** The root deadline is that bound receipt deadline, never
-  extended. This is native parity only if native's
-  whole funnel is bounded by the same receipt. Open, for consumers: OKX and
-  Bitget must confirm native's overall bound for a 30,000-call input before the
-  REDs freeze. If native has none, this invariant refuses real orders, as the
-  cap did. Each call's own bound is
-  `min(now + timeout_ms, root)`. Root expiry seals the Plan through the
-  existing Plan timer.
+- **Resend.** With `attempts: 2`, one resend is allowed. It comes only from the
+  DATA custody of a definitive refusal that `classify_write` proves the venue
+  may resend (Bitget 40009), never after Unknown, 408 or 5xx. It goes through
+  the existing `plan_resend_context` grant and journal gate. The resend is a
+  new Context and a new request: it signs fresh, with a new stamp and a nonce
+  reserved at Bind, and never replays bytes. A third attempt is refused.
+- **Read calls.** A Read `SerialCall` (amend resolve, metadata and position
+  re-reads) never enters the write journal, the accepted IDs or the
+  `refusals_complete` accounting. A failed Read stops or retries as native
+  does, with no write side effects.
+- **Delayed continuation.** `continue_serial_plan_after` arms the Plan's one
+  timer, which has no other user. It is refused while any fact is uncertain,
+  and that is re-checked when it fires. Its callback custody is single-use and
+  exclusive with a live call. It has the same check-all-then-commit rule.
+- **Replan.** A serial Plan declares no calls. So a replan (Bitget 40085
+  promotion) is just the next continuation with different calls: nothing is
+  sealed and there is no second admission or root.
 - **Uncertain stops.** An Unknown fact makes `continue_serial_plan` refuse
   with State. The venue then calls `fail_plan`, the journal projects Unknown,
   and the existing uncertain-write fence drives reconciliation. Nothing after
   an uncertain row is sent.
-- **Refused admissions spend nothing.** Bad custody, a stale delivery, an
-  expired root or capacity are refused before IDs or state change.
-- **Feature scope.** `http-plans`. Mutation only (a Read Plan has no
-  `next_write`). No session wait (`plan_session_wait` on a serial slot is
+- **Refused admissions spend nothing.** Bad custody, a stale delivery, a
+  stopped Plan or capacity are refused before IDs or state change.
+- **Feature scope.** `http-plans`. Admitted from a WriteAfterReads Preflight
+  only (a Read Plan has no `next_write`); Read calls run inside it. No session wait (`plan_session_wait` on a serial slot is
   State), no mutation-barrier groups, no executions, no `after_refusal`
   fallbacks.
 
@@ -192,62 +232,32 @@ recorded refusals. Only the native continue-and-finish path (OKX code 2) calls
 Default (`false`), as for every declared Plan, the projection is unchanged.
 No consumer fallback, fabricated acceptance or numeric terminal.
 
-## Bitget slice 3 fit (proposed, pending ruling)
+## Rulings and native facts
 
-Native facts from claude-4yjlw0 (`venues/bitget/src/trading.rs` at
-`49f7d1857b6`) change three parts of this plan. Each needs a ruling from
-claude-ddi2il before the REDs freeze.
+claude-ddi2il approved all of these. Native facts come from claude-4yjlw0
+(`venues/bitget/src/trading.rs` at `49f7d1857b6`); the rules themselves are in
+Invariants above.
 
-- **No whole-job bound (F8).** Native's serial queue runs until the last call
-  settles. The legacy funnel sets no request deadline. A 10,000-lot order
-  takes about 25 min at 150 ms per call, against the 120 s default caller
-  wait. A root capped at the receipt refuses native maximum orders. Proposed:
-  the serial root has no wall-clock deadline of its own. Each call is bounded by
-  `now + timeout_ms`, and the chain advances only from DATA, so the Plan always
-  terminates and every interval is bounded, as native's is. The caller receipt
-  keeps its existing meaning. If ruled so, the receipt binding (RED13) is not
-  needed for serial admission and is dropped.
-- **One resend (40009).** `SerialCall` gains `attempts` (1 or 2). A second
-  attempt goes through the existing `plan_resend_context` grant from that
-  call's DATA custody. Its terms are fixed at continuation, as for a declared
-  leg.
-- **Reads in the chain, with delayed retry.** `SerialCall` gains `operation`
-  (Read or Mutation) under the admitted credential. This covers amend
-  ResolveAmend GETs and the re-reads after a 40085 promotion. Native retries a
-  read up to 3 times at 250×n ms. Proposed:
-  `continue_serial_plan_after(plan, slot, context, delay_ms, next)` arms the
-  Plan's existing timer, so there is still one timer and no venue timer. Its
-  callback is the next call's custody, and the root stays one Context. The
-  pacing refusal (F4) still applies to policy pacing.
-- **Replan on promotion (40085).** A serial Plan declares no calls, so a
-  replan is the next continuation with different calls. Nothing is sealed or
-  re-admitted. This meets the "second admission from DATA custody" ruling
-  without a second root.
-- **Engine conditions on these proposals (claude-dazzy3).**
-  - *Caller-wait expiry mid-chain.* Receipt expiry is not a Plan terminal and
-    emits no Timeout. The chain keeps sending, the command reads
-    `CommandWait::Expired` as a held command does today, and the order lock
-    and slot stay held. The command's one terminal is the Plan's own.
-  - *Stops without a root deadline.* Credential revoke or rotation, Session
-    loss, engine teardown and caller cancel each stop the chain at the next
-    custody point (a live call is still settled or retired, never orphaned).
-    They project failure with every streamed accepted ID, plus Unknown when a
-    released call is live, in which case the lock converts to the fence. These
-    terminals and `done_plan`/`fail_plan` are the only ways the lock and slot
-    are released.
-  - *Resend.* Allowed only from DATA custody of a definitive 40009 refusal
-    proven by `classify_write`, never after Unknown, 408 or 5xx, through the
-    existing resend grant and journal gate. A third attempt is refused.
-  - *Read calls.* A Read fact never enters the write journal, accepted IDs or
-    the `refusals_complete` accounting. A failed Read stops or retries as
-    native does, with no write side effects.
-  - *Delayed continuation.* Refused while any fact is uncertain, and
-    re-checked when the timer fires. The timer custody is single-use and
-    exclusive with a live call. With no root deadline, the Plan timer has no
-    other user.
-- **Partial batch is terminal (Classic).** A KnownPartial batch followed by
-  `fail_plan` projects failure with every streamed accepted ID, including that
-  batch's. Native keeps the success IDs and then fails the job.
+- **No root wall-clock.** Native's serial queue runs until the last call
+  settles. A 10,000-lot UTA order is about 25 min at 150 ms per call, against
+  the 120 s default caller wait.
+- **One resend (A).** Used only for Bitget's native 40009 single resend; a
+  second 40009 is an explicit rejection.
+- **Read calls and delayed continuation (B).** Up to 4 GETs per step, each
+  retried up to 3 times at 250×n ms.
+- **Replan as continuation (C).** This supersedes the earlier
+  second-admission wording. Restoring Canceling rows and clearing venue state
+  stay venue-side. Native promotes only while no IDs are acknowledged, and
+  otherwise fails with them (`fail_plan`).
+- **Parking (D).** The 10 s detection wait runs before planning. It uses the
+  WriteAfterReads command wait with a 10 s venue bound that fails as native
+  does.
+- **Classic partial batch (E).** KnownPartial plus `fail_plan`, with the IDs
+  kept.
+- Venue-side, no engine ask: the idempotent strategy-missing cancel is
+  classified Accepted; the 4,096 unobserved-placement cap; the amend
+  cancel-and-replace fallback and UTA rollback as per-step next calls; the
+  empty-string ID filter and single-ID fallback.
 
 ## Original REDs and controls (before source)
 
@@ -271,12 +281,12 @@ fails at an assertion.
    earlier accepted ID, and nothing more is sent. The Plan-held order lock
    converts to the uncertain-write fence at that terminal (asserted through
    `order_locks.uncertain`), not merely released.
-5. Root expiry mid-chain, two cases. (a) The live call is unreleased: one
+5. Per-call timeout mid-chain, two cases. (a) The live call is unreleased: one
    Timeout (NotSent) terminal, the call retired, no further issue. (b) The
    live call is released: its fact is Unknown, the projection carries Unknown
    with every streamed accepted ID, and the uncertain-write fence is armed, as
-   in RED4, including the order-lock to fence conversion. An expired root
-   refuses continuation in both.
+   in RED4, including the order-lock to fence conversion. Continuation is
+   refused in both.
 6. Accepted IDs: 10,000 IDs over 500 calls appear in exact order, untruncated,
    in both `partial.order_ids` (after an uncertain stop at call 501) and the
    venue's `done_plan` result path. No `[truncated IDs …]` marker.
@@ -293,7 +303,7 @@ fails at an assertion.
 9. A max-size control for CPU: 30,000 continued calls (one bracketed max input)
    with per-call work O(1). Time is reported on the PR as the CPU
    certification input, not asserted.
-10. A refused continue (expired root, uncertain fact, foreign delivery) leaves
+10. A refused continue (stopped Plan, uncertain fact, foreign delivery) leaves
     the current call settleable: `finish_plan_call` then `done_plan` succeeds
     with the journal intact and nothing reserved.
 11. An accepted reply with an ID over `ID_FIELD` makes that fact Unknown; the
@@ -304,10 +314,10 @@ fails at an assertion.
     `TEXT_BYTES` stream-and-retire budget and count. A PartialUnknown batch
     refuses continuation and projects Unknown.
 13. Receipt binding: WriteAfterReads `begin_preflight_with_command_wait` binds
-    the entry receipt. Controls: missing receipt; expired at entry; an
-    unbound Preflight refused at admission; expired at admission is TimedOut;
-    a second admission from the same Preflight is State; admission in ready
-    custody after a park uses the original cap exactly. Expired at entry is
+    the entry receipt. Controls: missing receipt; expired at entry; a
+    second admission from the same Preflight is State; a park in ready custody
+    keeps the original cap exactly; and admission after the cap has expired
+    still succeeds, with no root deadline taken from it. Expired at entry is
     Revoked, the same kind the ReadOnly path returns today. ReadOnly
     behaviour is unchanged: its existing tests stay green and untouched. A
     declared mutation Plan admitted from a WriteAfterReads Preflight with a
@@ -319,19 +329,20 @@ fails at an assertion.
     or attempt.
 16. A KnownPartial batch, then `fail_plan`: failure projected with that batch's
     accepted IDs after all earlier ones.
-17. (If ruled.) A two-attempt call resends once through `plan_resend_context`
+17. A two-attempt call resends once through `plan_resend_context`
     and refuses a third. A Read call inside a mutation chain. A delayed
     continuation fires from the Plan timer, refuses outside that callback, and
     keeps one Context and one timer. An Unknown fact, then a resend, is
-    refused; so is a resend after 408 or 5xx. A Read fact leaves the journal,
+    refused; so is a resend after 408 or 5xx. The resend signs fresh: a new
+    stamp and a new nonce at Bind, with no replayed bytes. A Read fact leaves the journal,
     the IDs and the refusal count unchanged. A delayed continuation is refused
     while uncertain and when it fires after an uncertain fact, and its
     callback cannot be used twice.
-18. (If ruled.) Caller-wait expiry mid-chain: no terminal or Timeout at
+18. Caller-wait expiry mid-chain: no terminal or Timeout at
     expiry, later calls are still accepted, and the command's single terminal
     is the Plan's.
-19. (If ruled.) Mid-chain stops: credential revoke, Session loss, engine
-    teardown and caller cancel each stop at the next custody point and project
+19. Mid-chain stops: credential revoke, Session retirement, engine
+    shutdown and caller cancel each stop at the next custody point and project
     the streamed IDs. With a released live call they project Unknown and arm
     the fence.
 
@@ -341,6 +352,8 @@ fails at an assertion.
   REDs under `http-plans,order-locks`;
   clippy `-D warnings`; fmt; bans.
 - Independent review of plan and REDs, then source.
+- CALLERS discloses the new per-call bound (native sets none) and that the
+  serial root has no wall-clock.
 - CPU certified on the PR with control 9.
 - WASM bytes reported for Bybit, WOO and Bitget; the primitive is linked only
   by adopters.
