@@ -1,0 +1,113 @@
+# Rust Condition Wait
+
+Owner: claude-fe7lgm. Consumer: claude-4yjlw0 (Bitget slice 3, gate D).
+Ruling needed: claude-ddi2il (scope). Independent review: claude-dazzy3.
+Stacks on the streamed serial Plan (`RUST_PLAN_SERIAL_STREAM.md`).
+
+## Problem
+
+Bitget's trading queue waits for account detection (Classic or UTA) with a
+native 10 s bound (`venues/bitget/src/trading.rs` at `49f7d1857b6`):
+
+- `resume_trading` parks the job and arms `cx.set_timer(10_000)` while
+  `!detected` (416-421). Nothing is started.
+- Detection completes in the account cycle: `private_detected`
+  (`account.rs:286`), reached from the Settings probe's own Background Read
+  (`lib.rs:795-806`, and the account arms of `on_http_failed` and
+  `on_sign_error`). That callback then calls `resume_trading`. It runs in the
+  account read's custody, never the trading command's.
+- `trade_timer` (2255-2267) fails the parked job, and every queued command,
+  NotSent with "Bitget account detection did not complete".
+- The wait recurs after admission. `promote_uta` (`account.rs:1041-1052`, also
+  reachable from history and the account cycle) sets `detected = false`, and
+  the 40085 replan (`trading.rs:1501-1534`) resumes into the 10 s wait mid-job,
+  between serial calls. Promotion requires `job.ids` to be empty, so a
+  mid-Plan expiry is still NotSent.
+
+Both the release and the bound live in borrowed callbacks today: a foreign
+read's custody and a venue timer. Neither may admit, continue or fail a
+Preflight or Plan. A caller receipt cannot supply a 10 s venue bound.
+
+## Design: one scoped wait, two forms
+
+A condition wait parks a Preflight or a serial Plan on a venue condition. It
+has a venue-chosen bound and an opaque, generation-checked release handle.
+It holds no I/O, no live call and no venue timer.
+
+```rust
+impl<P> Cx<'_, P> {
+    /// Before admission, in genuine entry or Preflight-ready custody.
+    pub fn preflight_condition_wait(
+        &mut self,
+        preflight: &Preflight,
+        bound_ms: u32,
+    ) -> Result<ConditionWait, Error>;
+
+    /// Between serial calls, from the current call's exact custody under the
+    /// same checks as `continue_serial_plan` (definitive fact, no
+    /// uncertainty). Settles the call and parks the Plan with no live call.
+    pub fn serial_plan_condition_wait(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        bound_ms: u32,
+    ) -> Result<ConditionWait, Error>;
+
+    /// From any callback, borrowed included. Grants nothing directly: it
+    /// schedules the owner's ready callback in its own custody, in this flush.
+    pub fn release_condition_wait(&mut self, wait: &ConditionWait) -> Result<(), Error>;
+}
+```
+
+- **Release.** `release_condition_wait` checks only the handle's generation.
+  The engine then delivers the existing ready hook in proper custody:
+  Preflight-ready custody for the first form, and `on_http_plan_ready(plan)`
+  for the second. There the venue plans and admits, or continues. This is the
+  N7 shape (a Session ready resumes a parked Preflight) with a venue
+  condition in place of a Session.
+- **Expiry.** One engine timer at `now + bound_ms`. When it fires, a new hook
+  `on_condition_wait_expired(owner, error)` runs in failure custody, where the
+  venue calls `fail_preflight` or `fail_plan`. The engine never chooses the
+  native message. A serial Plan's projection keeps every streamed accepted
+  ID, so the projection stays exact even if a venue parks with IDs.
+- **Single use, one per owner.** A handle releases once. A second wait on the
+  same owner is State. A stale handle (expired, released, or a reused command
+  generation) is Revoked and spends nothing. Release after expiry, and expiry
+  after release, are no-ops for the loser.
+- **Serial Plan rules.** A parked serial Plan has no live call and keeps its
+  one reserved Context. The wait uses the Plan's one timer, so it excludes a
+  delayed continuation. The RED19 stops (revoke, Session retirement,
+  shutdown, cancel) end a parked Plan at once, because nothing is live.
+- **Out of scope.** Commands queued behind the active job are venue state in
+  Bitget's queue, each with its own entry. Failing them at the bound is the
+  venue's own sealed work, not this primitive. Declared Plans keep their
+  current surface.
+
+## REDs (before source)
+
+1. A Preflight parks with no I/O. A release from a foreign Background read's
+   `on_response` delivers Preflight-ready custody in the same flush, and a
+   serial Plan admits there.
+2. A parked Preflight expires at exactly `now + bound_ms`, giving one
+   `on_condition_wait_expired`. `fail_preflight` there projects NotSent. A
+   late release is a no-op.
+3. A serial Plan parks between calls after a definitive fact (the 40085 path),
+   holds one Context and no live call, then is released from a borrowed read
+   and continues in `on_http_plan_ready`.
+4. Parking a serial Plan is refused while a fact is uncertain, outside the
+   call's custody, or with a delayed continuation armed. Each refusal spends
+   nothing.
+5. A stale or double release, a second wait on one owner, and a release from a
+   reused command generation are each refused and spend nothing.
+6. A parked serial Plan expires, then `fail_plan` projects every streamed ID
+   (none on the Bitget path) as a failure, with no fence because nothing was
+   live.
+7. The RED19 stops end a parked Plan or Preflight immediately, with one
+   terminal.
+
+## Gates
+
+Engine-focused tests under `http-plans` and `http-plans,order-locks`; clippy
+`-D warnings`; fmt. Independent review of the plan and REDs, then the source.
+WASM bytes reported, linked only by adopters.
