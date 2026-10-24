@@ -1,21 +1,22 @@
 # TxFlow unsigned account-setting poll custody
 
 Plan-only next slice, owner codex-hcmq3f, 2026-10-25. Base is actual
-`123c8aa15fffd74ec02556128f9fd0146049d4f4`. No production, inventory, Cargo or
+`49f7d1857b66fc14f5164c8ca82ce42d48a53c1d`. No production, inventory, Cargo or
 existing fixture changes belong to this checkpoint. The preceding ticker-seed
-slice is draft #2075 at `92fc8690bff`, not an actual landing dependency yet.
+slice is draft #2075 at `05878ca91f0`, not an actual landing dependency yet.
 
 ## Size and inventory
 
 One occurrence in `account.rs::next_setting`, fingerprint
 `433b39542c0b7e8d83e35d3e897cccc64377df2f741272c2b8a3ec51f571b6e1`, count one.
 Estimate 140–220 production lines across account.rs/lib.rs, plus 250–400 lines
-of dedicated controls. Actual family inventory at this base is 25. This slice
-alone gives 25 to 24; after the separate candle slice's three occurrences and
-ticker seed's one occurrence, it gives 21 to 20. Relative to the requested
-22-site candle-adjusted baseline, the ticker and this slice together give 20.
-The pending #2040 local slice's fifteen removals are separate; never count its
-removals twice or claim an unlanded dependency is actual.
+of dedicated controls. Actual family inventory at this base is 10 after #2040
+landed. This slice alone gives 10 to 9. After the separate pending candle slice
+#2071 (three occurrences) and ticker seed #2075 (one occurrence), it gives 6 to 5.
+Neither pending runtime is an actual dependency here; integrate their genuine
+landings before adoption if they land first. This is one physical sender, not
+an additional key-selection or signing cutover.
+
 
 This sender is independent of the shared info sender. Managing metadata alone
 cannot remove the shared sender while account/history still use it, so no
