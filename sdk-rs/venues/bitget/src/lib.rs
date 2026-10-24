@@ -702,10 +702,12 @@ impl Venue for BitgetFutures {
             Pending::Trade(_) => {}
             Pending::Account {
                 generation,
+                context,
                 request,
-                ..
             } => {
-                if *generation == self.account.generation {
+                if *generation == self.account.generation
+                    && cx.validate_background_read_http_delivery(context).is_ok()
+                {
                     self.account_item(cx, request, item);
                 }
             }
@@ -795,11 +797,14 @@ impl Venue for BitgetFutures {
             request,
         } = pending
         {
-            let _ = cx.finish_http_context(&context);
-            if generation == self.account.generation {
+            // Publish under live custody, then retire; a stale page only retires.
+            if generation == self.account.generation
+                && cx.validate_background_read_http_delivery(&context).is_ok()
+            {
                 self.account_response(cx, request, response);
                 self.resume_trading(cx);
             }
+            let _ = cx.finish_http_context(&context);
             return;
         }
         let valid = serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
