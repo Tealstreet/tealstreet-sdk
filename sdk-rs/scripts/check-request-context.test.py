@@ -257,22 +257,41 @@ class RequestContextBan(unittest.TestCase):
                                 and token.removeprefix('r#') in ban.METHODS}
                     self.assertLessEqual(kinds(source), kinds(original))
 
-    def test_staging_bootstraps_add_only_the_approved_site_and_shrink(self):
-        self.assertEqual(set(ban.STAGING_BOOTSTRAPS), {'venues/bingx/src/lib.rs', 'venues/weex/src/lib.rs'})
+    def test_staging_bootstraps_add_only_the_approved_sites(self):
+        # Owner approvals: exact added fingerprints and exact entry sizes.
+        sign_http = '6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219'
+        approved = {
+            'venues/bingx/src/lib.rs': ({sign_http}, 10, 9),
+            'venues/weex/src/lib.rs': ({sign_http}, 19, 17),
+            'venues/okx/src/lib.rs': ({
+                '2e9218906fd923fa6c83c648873ea2527c33dd1068d609c8c1ec343630b36911',
+                'b1761cdefa174ea70037cfceab33b91ad7279e59d22ccecb872e996dd5b0c32c',
+                'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa'}, 8, 11),
+            'venues/bitget/src/lib.rs': ({
+                '5b44116449d06833b5f091cb3866ced7f16f181fd1226b31ad977eff6bf26ac9',
+                '6c77d608b079104cc5338cbabb01a7c4a0e24f112ef91ea5483c423808d92bad',
+                'a921be85fe127dcd74b1718af170b7309b86f0b4f66469353f73cc86c722be28',
+                'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa'}, 4, 8),
+        }
+        self.assertEqual(set(ban.STAGING_BOOTSTRAPS), set(approved))
         for path, (old_map, new_map) in ban.STAGING_BOOTSTRAPS.items():
             with self.subTest(path=path):
                 added = {d for d, n in new_map.items() if n > old_map.get(d, 0)}
-                self.assertEqual(added, {'6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219'})
-                self.assertLess(sum(new_map.values()), sum(old_map.values()))
+                approved_added, old_size, new_size = approved[path]
+                self.assertEqual(added, approved_added)
+                self.assertEqual((sum(old_map.values()), sum(new_map.values())), (old_size, new_size))
                 old, new = {path: old_map}, {path: new_map}
                 self.assertFalse(ban.check(new, new, [('landed', old)]))
-                for grown in [dict(new_map, **{'f' * 64: 1}), {**new_map, next(iter(added)): 2}]:
-                    self.assertTrue(ban.check({path: grown}, {path: grown}, [('landed', old)]))
-                pruned_map = dict(new_map)
-                del pruned_map[next(iter(added))]
-                pruned = {path: pruned_map}
-                # Once the staging site is pruned, nothing can restore it.
-                self.assertTrue(ban.check(new, new, [('landed', old), ('pruned', pruned)]))
+                grown = [dict(new_map, **{'f' * 64: 1})]
+                grown += [{**new_map, d: new_map[d] + 1} for d in sorted(added)]
+                for map_ in grown:
+                    self.assertTrue(ban.check({path: map_}, {path: map_}, [('landed', old)]))
+                for digest in sorted(added):
+                    pruned_map = dict(new_map)
+                    del pruned_map[digest]
+                    pruned = {path: pruned_map}
+                    # Once a staging site is pruned, nothing can restore it.
+                    self.assertTrue(ban.check(new, new, [('landed', old), ('pruned', pruned)]))
 
     def test_history_bootstraps_cannot_expand_or_override_any_newer_pruned_constraint(self):
         for path, (old_map, new_map) in ban.HISTORY_BOOTSTRAPS.items():

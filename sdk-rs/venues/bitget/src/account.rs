@@ -147,11 +147,14 @@ impl Account {
 impl BitgetFutures {
     pub(crate) fn private_enabled(&self) -> bool {
         !self.options.public_data_only
-            && self.options.key.as_ref().is_some_and(|k| !k.is_empty())
-            && self.options.secret.as_ref().is_some_and(|s| !s.is_empty())
+            && self
+                .options
+                .credentials
+                .as_ref()
+                .is_some_and(|id| id.validate().is_ok())
     }
 
-    fn primary_balance_read(&self, path: &str) -> bool {
+    pub(crate) fn primary_balance_read(&self, path: &str) -> bool {
         self.account.degraded
             && matches!(
                 path.split('?').next().unwrap_or(path),
@@ -159,51 +162,16 @@ impl BitgetFutures {
             )
     }
 
-    pub(crate) fn signed_headers(
+    pub(crate) fn signing_identity(
         &self,
-        now: f64,
         method: Method,
         path: &str,
-        body: &str,
-    ) -> Result<Vec<(&'static str, String)>, String> {
-        let read = self
-            .options
+    ) -> Option<&safe_cex_engine::signing::Identity> {
+        self.options
             .read_credentials
             .as_ref()
-            .filter(|_| method == Method::Get && !self.primary_balance_read(path));
-        let key = self
-            .options
-            .key
-            .as_deref()
-            .map(|primary| read.map_or(primary, |r| r.key.as_str()))
-            .filter(|k| !k.is_empty())
-            .ok_or("Bitget API key is required")?;
-        let secret = self
-            .options
-            .secret
-            .as_deref()
-            .map(|primary| read.map_or(primary, |r| r.secret.as_str()))
-            .filter(|k| !k.is_empty())
-            .ok_or("Bitget secret is required")?;
-        let passphrase = self
-            .options
-            .passphrase
-            .as_deref()
-            .map(|primary| {
-                read.and_then(|r| r.passphrase.as_deref())
-                    .unwrap_or(primary)
-            })
-            .filter(|k| !k.is_empty())
-            .ok_or("Bitget passphrase is required")?;
-        Ok(sign::headers(
-            key,
-            secret,
-            passphrase,
-            now,
-            method.as_str(),
-            path,
-            body,
-        ))
+            .filter(|_| method == Method::Get && !self.primary_balance_read(path))
+            .or(self.options.credentials.as_ref())
     }
 
     fn account_request(
@@ -213,38 +181,12 @@ impl BitgetFutures {
         at: Option<ArrayAt>,
         request: Request,
     ) {
-        match self.signed_headers(cx.now, Method::Get, &path, "") {
-            Ok(headers) => {
-                let url = format!("{}{path}", paths::REST);
-                let id = if let Some(at) = at {
-                    cx.request_streamed(
-                        Method::Get,
-                        url,
-                        headers,
-                        at,
-                        Pending::Account {
-                            generation: self.account.generation,
-                            request,
-                        },
-                    )
-                } else {
-                    cx.request(
-                        Method::Get,
-                        url,
-                        headers,
-                        None,
-                        Pending::Account {
-                            generation: self.account.generation,
-                            request,
-                        },
-                    )
-                };
-                if self.primary_balance_read(&path) {
-                    cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
-                }
-            }
-            Err(error) => cx.retried_failure("bitget.account:241", error),
-        }
+        let pending = Pending::Account {
+            generation: self.account.generation,
+            request,
+        };
+        let payload = at.map_or(crate::Payload::Body(None), crate::Payload::Stream);
+        self.send(cx, Method::Get, &path, payload, true, pending);
     }
 
     pub(crate) fn start_private(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -254,7 +196,13 @@ impl BitgetFutures {
             cx.store.set_orders(vec![]);
             return;
         }
-        if self.options.passphrase.as_deref().is_none_or(str::is_empty) {
+        if self
+            .options
+            .credentials
+            .as_ref()
+            .and_then(|id| id.passphrase.as_ref())
+            .is_none_or(|key| key.0.is_empty())
+        {
             let error =
                 VenueError::new("Bitget requires a passphrase").kind(ErrorKind::InvalidInput);
             self.reject_startup(cx, error, false);
@@ -282,35 +230,21 @@ impl BitgetFutures {
         socket: safe_cex_engine::SocketId,
     ) {
         self.account.authenticated = false;
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Login<'a> {
-            api_key: &'a str,
-            passphrase: &'a str,
-            timestamp: String,
-            sign: String,
+        if let Some(identity) = self.options.credentials.clone() {
+            cx.send_signed(
+                socket,
+                String::new(),
+                Box::new(sign::WsLogin::new(
+                    identity,
+                    if self.account.uta {
+                        paths::UTA_PRIVATE
+                    } else {
+                        paths::PRIVATE
+                    }
+                    .into(),
+                )),
+            );
         }
-        #[derive(Serialize)]
-        struct Auth<'a> {
-            op: &'static str,
-            args: [Login<'a>; 1],
-        }
-        let timestamp = safe_cex_engine::num::format((cx.now / 1000.0).floor());
-        let secret = self.options.secret.as_deref().unwrap_or_default();
-        let signature = sign::signature(secret, &timestamp, "GET", "/user/verify", "");
-        cx.send(
-            socket,
-            serde_json::to_string(&Auth {
-                op: "login",
-                args: [Login {
-                    api_key: self.options.key.as_deref().unwrap_or_default(),
-                    passphrase: self.options.passphrase.as_deref().unwrap_or_default(),
-                    timestamp,
-                    sign: signature,
-                }],
-            })
-            .expect("login"),
-        );
         self.refresh_positions(cx);
         self.refresh_balance(cx);
         self.refresh_orders(cx, false);
@@ -870,6 +804,19 @@ impl BitgetFutures {
     ) {
         self.clear_in_flight(&request);
         cx.retried_failure("bitget.account:870", error);
+    }
+
+    pub(crate) fn account_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+    ) {
+        match request {
+            // Provider refusal is not transport evidence for Classic fallback.
+            Request::Probe => self.probe_failed(cx, error, 0.0),
+            request => self.account_failed(cx, request, error),
+        }
     }
 
     pub(crate) fn account_transport_failed(
@@ -2705,31 +2652,19 @@ mod secondary_policy_tests {
     use super::*;
     #[test]
     fn degraded_balance_uses_primary_fast_client_but_other_gets_use_read_identity() {
-        let mut venue = BitgetFutures::new(crate::Options {
-            key: Some("primary-key".into()),
-            secret: Some("primary-secret".into()),
-            passphrase: Some("primary-pass".into()),
-            read_credentials: Some(safe_cex_engine::ReadCredentials {
-                key: "read-key".into(),
-                secret: "read-secret".into(),
-                passphrase: Some("read-pass".into()),
-            }),
-            ..crate::Options::default()
-        });
         for degraded in [false, true] {
-            venue.account.degraded = degraded;
             for path in [paths::BALANCE, paths::UTA_ASSETS, paths::POSITIONS] {
-                let headers = venue.signed_headers(1.0, Method::Get, path, "").unwrap();
+                let (mut venue, provider) = crate::secondary_tests::setup();
+                venue.account.degraded = degraded;
+                let primary = venue.primary_balance_read(path);
+                let headers = crate::secondary_tests::headers(venue, provider, Method::Get, path);
                 let expected = if degraded && path != paths::POSITIONS {
                     "primary-key"
                 } else {
                     "read-key"
                 };
                 assert!(headers.contains(&("ACCESS-KEY", expected.into())));
-                assert_eq!(
-                    venue.primary_balance_read(path),
-                    degraded && path != paths::POSITIONS
-                );
+                assert_eq!(primary, degraded && path != paths::POSITIONS);
             }
         }
     }

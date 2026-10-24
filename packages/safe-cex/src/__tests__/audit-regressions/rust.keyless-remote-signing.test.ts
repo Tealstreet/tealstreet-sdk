@@ -45,7 +45,7 @@ describe('keyless remote-signed accounts never start on an engine that cannot si
     expect(runsOnRustEngine('asterdex', hosted({ auth: { privateKey: '0xabc' } }))).toBe(true);
     expect(runsOnRustEngine('hyperliquid', { engine: 'rust', secret: '' })).toBe(true);
     // The wallet-key exemption is AsterDEX's own field, not a pass for other venues.
-    expect(runsOnRustEngine('okx', hosted({ auth: { privateKey: '0xabc' } }))).toBe(false);
+    expect(runsOnRustEngine('blofin', hosted({ auth: { privateKey: '0xabc' } }))).toBe(false);
     // Hosted Paradex sends its signing key in `key` with both addresses, as exchange-server does.
     const paradex = hosted({ key: '0x' + '1'.repeat(64), paradexAddress: '0xabc', subkeyAddress: '0xdef' });
     expect(runsOnRustEngine('paradex', paradex)).toBe(true);
@@ -95,7 +95,7 @@ describe('keyless remote-signed accounts never start on an engine that cannot si
   }, 60_000);
 
   it('a directly built engine refuses a hosted account at startup with the reason', async () => {
-    for (const name of ['hyperliquid', 'okx', 'tealstreet-dex', 'coinbase'] as ExchangeName[]) {
+    for (const name of ['hyperliquid', 'blofin', 'tealstreet-dex', 'coinbase'] as ExchangeName[]) {
       const exchange = new RustEngineExchange(name, hosted(), new DefaultStore());
       await expect(exchange.start(), name).rejects.toThrow('keyless remote-signed accounts run on the TS venue');
       exchange.dispose();

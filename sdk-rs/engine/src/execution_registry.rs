@@ -108,12 +108,13 @@ impl ContextRegistry {
             return Err(Error::Invalid);
         };
         let owner = self.commands.get(&id).ok_or(Error::Revoked)?;
-        if !matches!(&owner.phase, CommandPhase::Context { root: issued, entry_owned: true } if issued == root)
+        if !matches!(&owner.phase, CommandPhase::Context { root: issued, entry_owned: true, .. } if issued == root)
         {
             return Err(Error::Revoked);
         }
         if owner.pending != 0
             || owner.deliveries != 0
+            || owner.waits != 0
             || owner.writes.is_some()
             // A Plan seal projects the founder's journal; the member has none.
             || (owner.mutation_declared && !planned)
@@ -544,6 +545,30 @@ impl ContextRegistry {
             .observers
             .insert(id, observer.expect("founder observer"));
         Ok(root)
+    }
+
+    /// Whether `owner` is the live physical Plan that exactly `founder`
+    /// (command and generation) founded; never another execution's member.
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn founded_by(&self, owner: Owner, founder: Owner) -> bool {
+        let (
+            Owner::Execution {
+                generation: identity,
+            },
+            Owner::Command { id, generation },
+        ) = (owner, founder)
+        else {
+            return false;
+        };
+        self.physical_owner(owner)
+            && self
+                .executions
+                .roots
+                .get(&identity)
+                .is_some_and(|execution| {
+                    self.executions.groups.planned(*execution)
+                        && self.executions.groups.member(id) == Some((*execution, generation))
+                })
     }
 
     /// The commands observing a physical Plan owner's execution.

@@ -31,6 +31,15 @@ struct Rule {
     signer_setup: CredentialSetupPolicy,
     #[serde(default)]
     remote_signing: RemoteSigningPolicy,
+    /// Family-specific trusted setup mapping, declared rather than name-matched.
+    #[serde(default)]
+    setup_mapping: Option<SetupMapping>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum SetupMapping {
+    Asterdex,
 }
 
 #[derive(Default, Deserialize)]
@@ -59,12 +68,30 @@ struct RemoteSigningWire {
     exchange_name: String,
     extra_data: Option<RemoteExtraData>,
     request_id: Option<String>,
+    seconds_suffix: Option<SecondsSuffix>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum RemoteExtraData {
     BybitExpiry,
     BinanceSpot,
+    SecondsTimestamp,
+}
+/// The signed literal after a seconds login stamp, e.g. `GET` + `/user/verify`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SecondsSuffix {
+    method: String,
+    path: String,
+}
+impl SecondsSuffix {
+    fn valid(&self) -> bool {
+        (1..=16).contains(&self.method.len())
+            && self.method.bytes().all(|byte| byte.is_ascii_uppercase())
+            && (2..=256).contains(&self.path.len())
+            && self.path.starts_with('/')
+            && self.path.bytes().all(|byte| byte.is_ascii_graphic())
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -81,6 +108,17 @@ struct IdentitySetupPolicy {
     passphrase: Option<SetupFieldPolicy>,
     secret_encoding: Option<KeyEncoding>,
     extra: Option<ExtraKeyPolicy>,
+    signing_algorithm: Option<SigningAlgorithm>,
+}
+
+/// Only asymmetric algorithms may be declared; the provider refuses others.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum SigningAlgorithm {
+    Ed25519,
+    Es256,
+    Secp256k1Digest,
+    StarkDigest,
 }
 
 #[derive(Debug, Deserialize)]
@@ -211,8 +249,12 @@ fn rule(value: &Rule) -> String {
                     )
                 },
             );
+            let signing_algorithm = value.signing_algorithm.as_ref().map_or_else(
+                || "None".into(),
+                |algorithm| format!("Some(safe_cex_engine::signing::Algorithm::{algorithm:?})"),
+            );
             format!(
-                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra} }})",
+                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra}, signing_algorithm: {signing_algorithm} }})",
                 value.trim_credential
             )
         }
@@ -248,8 +290,12 @@ fn rule(value: &Rule) -> String {
             .as_ref()
             .map_or_else(|| "None".into(), |header| format!("Some({header:?})")),
     );
+    let setup_mapping = value.setup_mapping.as_ref().map_or_else(
+        || "None".into(),
+        |mapping| format!("Some(SetupMapping::{mapping:?})"),
+    );
     format!(
-        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing} }}",
+        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing}, setup_mapping: {setup_mapping} }}",
         conditions(&value.can_sign),
         conditions(&value.private_eligible),
     )
@@ -298,7 +344,13 @@ pub fn generate(json: &str) -> Result<String, String> {
                         || id.bytes().any(|byte| byte.is_ascii_control())
                 })
                 || (wire.request_id.is_some()
-                    && !matches!(wire.extra_data, Some(RemoteExtraData::BinanceSpot))))
+                    && !matches!(wire.extra_data, Some(RemoteExtraData::BinanceSpot)))
+                || matches!(wire.extra_data, Some(RemoteExtraData::SecondsTimestamp))
+                    != wire.seconds_suffix.is_some()
+                || wire
+                    .seconds_suffix
+                    .as_ref()
+                    .is_some_and(|suffix| !suffix.valid()))
         {
             return Err("invalid delegated wire declaration".into());
         }
@@ -334,11 +386,15 @@ mod tests {
             "default":{"canSign":[],"privateEligible":[]},
             "venues":{
                 "mexc":{"signerSetup":{"primary":{"trimCredential":true},"secondary":{"trimCredential":false}}},
-                "empty":{"signerSetup":{"primary":{}}}
+                "empty":{"signerSetup":{"primary":{}}},
+                "evm":{"signerSetup":{"primary":{"signingAlgorithm":"secp256k1Digest"}}}
             }
         }"#).unwrap();
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None }) }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }) }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest) }), secondary: None }"));
+        // MAC algorithms are never declarable.
+        assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"hmacSha256"}}}}}"#).is_err());
         assert!(output.contains("CredentialSetupPolicy { primary: None, secondary: None }"));
     }
 

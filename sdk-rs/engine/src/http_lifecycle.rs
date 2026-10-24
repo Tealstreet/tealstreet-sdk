@@ -129,11 +129,7 @@ impl<P> Cx<'_, P> {
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
         #[cfg(feature = "http-plans")]
-        let admission = match self
-            .io
-            .request_contexts
-            .owned_admission(&context, self.io.http_delivery.as_ref())
-        {
+        let admission = match self.owned_http_admission(&context) {
             Ok(admission) => admission,
             Err(error) => return Err((pending, error)),
         };
@@ -235,7 +231,7 @@ impl<P> Cx<'_, P> {
         let http = HttpRequest {
             id: request,
             method,
-            route: None,
+            route: context.route(),
             timeout_ms: Some((deadline - self.now).ceil().max(1.) as u32),
             url,
             headers,
@@ -416,12 +412,25 @@ impl<P> Io<P> {
     #[cfg(feature = "http-plans")]
     /// A sealed physical Plan owner: clear its timer and the requests listed
     /// before the seal (one already settled since then is simply skipped).
-    pub(super) fn retire_http_owner(&mut self, owner: Owner, requests: Vec<RequestId>) {
+    pub(super) fn retire_physical_owner(&mut self, owner: Owner, requests: Vec<RequestId>) {
         if let Some(timer) = self.request_contexts.physical_plan_timer(owner) {
             self.timers.remove(&timer);
             self.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
             self.actions.push(Action::ClearTimer { timer });
         }
+        for request in requests {
+            self.discard_managed(request);
+        }
+    }
+
+    pub(super) fn retire_http_owner(&mut self, owner: Owner) {
+        let requests = self
+            .managed_http
+            .iter()
+            .filter_map(|(request, managed)| {
+                (managed.lifecycle.context().owner() == owner).then_some(*request)
+            })
+            .collect::<Vec<_>>();
         for request in requests {
             self.discard_managed(request);
         }
@@ -451,7 +460,7 @@ impl<P> Io<P> {
     fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
         self.request_contexts
-            .retire_attempt(managed.lifecycle.context());
+            .retire_attempt(managed.lifecycle.context(), request);
         self.rearm_execution_timer();
         self.signing.remove_request(request);
         self.timers.remove(&managed.timer);
@@ -466,7 +475,7 @@ impl<P> Io<P> {
         Some(managed)
     }
 
-    fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
+    pub(super) fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
         let managed = self.take_managed(request)?;
         if managed.lifecycle.context().operation() == Operation::Mutation
             && managed.lifecycle.release().is_some()
@@ -500,6 +509,7 @@ impl<V: Venue> Engine<V> {
     pub fn http_prepared(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
         let request = token.attempt().request;
         let Some(managed) = self.io.managed_http.get_mut(&request) else {
             return;
@@ -661,6 +671,7 @@ impl<V: Venue> Engine<V> {
     ) {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
         let request = token.attempt().request;
         #[cfg(feature = "http-plans")]
         if self
@@ -721,6 +732,7 @@ impl<V: Venue> Engine<V> {
         self.io.request_contexts.exit_delivery(&delivery);
         self.finish_event_scope(now);
         self.sweep_executions(now);
+        self.flush_preflight_readiness(now);
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
         }
@@ -731,6 +743,7 @@ impl<V: Venue> Engine<V> {
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
         let request = permit.attempt().request;
         let managed = self
             .io
@@ -755,8 +768,14 @@ impl<V: Venue> Engine<V> {
             .request_contexts
             .release_flag(managed.lifecycle.context(), request)?;
         let pending = self.io.pending.get_mut(&request).ok_or(Error::Revoked)?;
-        let mutation = managed.lifecycle.context().operation() == Operation::Mutation;
-        if mutation {
+        // Session writes change no orders: no reconciliation record and no
+        // write-revision fence over unrelated command reconciliation.
+        let journal = managed.lifecycle.context().operation() == Operation::Mutation
+            && matches!(
+                managed.lifecycle.context().owner(),
+                Owner::Command { .. } | Owner::Execution { .. }
+            );
+        if journal {
             let capture = if self.io.streams.contains_key(&request) {
                 Err(Error::Invalid)
             } else {
@@ -789,10 +808,13 @@ impl<V: Venue> Engine<V> {
             protocol_ms: self.io.protocol_clock.at(now),
             revision: self.io.protocol_clock.revision(),
         };
+        let mut signing_release = None;
         let result =
             managed
                 .lifecycle
                 .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
+                    signing_release =
+                        Some(crate::SigningRelease::new(release.signature, release.time)?);
                     self.venue.on_http_release(&mut pending.value, release)
                 });
         if let Ok(Claim::Released(release)) = result {
@@ -804,7 +826,10 @@ impl<V: Venue> Engine<V> {
                 .execution_leg_released(managed.lifecycle.context());
             managed.recipe = None;
             managed.signing_attempt = None;
-            if mutation {
+            self.io
+                .request_contexts
+                .session_released(managed.lifecycle.context(), request);
+            if journal {
                 self.io.http_write_revision = self.io.http_write_revision.saturating_add(1);
                 let record = self
                     .io
@@ -831,20 +856,23 @@ impl<V: Venue> Engine<V> {
                     }
                 }
                 if managed.lifecycle.context().operation() == Operation::Read {
-                    self.io
-                        .order_read_tokens
-                        .insert(request, self.io.order_locks.token());
+                    let owner = managed.lifecycle.context().owner();
+                    let token = self
+                        .io
+                        .request_contexts
+                        .read_mark(owner, self.io.order_locks.token());
+                    self.io.order_read_tokens.insert(request, token);
                 }
             }
-            self.venue.on_signing_receipt(
+            self.venue.on_signing_release(
                 SigningTarget::Http {
                     request,
                     pending: &mut pending.value,
                 },
-                release.signature,
+                signing_release.expect("release metadata checked before admission"),
             );
         }
-        if mutation && !matches!(result, Ok(Claim::Released(_))) {
+        if journal && !matches!(result, Ok(Claim::Released(_))) {
             self.io.http_responses.remove(request);
         }
         if let Err(error) = result {
@@ -942,7 +970,7 @@ impl<V: Venue> Engine<V> {
             .iter()
             .find(|(_, managed)| managed.timer == *timer)
         else {
-            return false;
+            return self.expire_session_wait(now, *timer);
         };
         let request = *request;
         if now.is_finite() && now < managed.lifecycle.deadline() {
@@ -1291,6 +1319,11 @@ mod tests {
         // Whether a reconcile hook ever saw borrowed delivery/read authority.
         #[cfg(feature = "order-locks")]
         reconcile_custody: bool,
+        // Later reads are legs of the first read's owner (one logical read).
+        legs: bool,
+        // A delivered read reports itself as a complete order read.
+        #[cfg(feature = "order-locks")]
+        reconcile_reads: bool,
     }
     const GROUP: Pacing = Pacing {
         group: 1,
@@ -1358,23 +1391,25 @@ mod tests {
             &[GROUP]
         }
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+            let mut root: Option<Context> = None;
             for _ in 0..self.count {
                 let scope = self.command.map_or(Scope::Background, Scope::Command);
-                let context = cx
-                    .http_context(
-                        scope,
-                        Policy {
-                            operation: Operation::Read,
-                            credential: self.signed.then(|| crate::request_context::Credential {
-                                slot: CredentialSlot::Primary,
-                                reference: crate::signing::KeyRef("fixture".into()),
-                            }),
-                            timeout_ms: 1_000,
-                            pacing: Some(GROUP),
-                            retry: RetryPolicy::Never,
-                        },
-                    )
-                    .unwrap();
+                let policy = Policy {
+                    operation: Operation::Read,
+                    credential: self.signed.then(|| crate::request_context::Credential {
+                        slot: CredentialSlot::Primary,
+                        reference: crate::signing::KeyRef("fixture".into()),
+                    }),
+                    timeout_ms: 1_000,
+                    pacing: Some(GROUP),
+                    retry: RetryPolicy::Never,
+                };
+                let context = match root.as_ref().filter(|_| self.legs) {
+                    Some(root) => cx.http_leg_context(root, policy),
+                    None => cx.http_context(scope, policy),
+                }
+                .unwrap();
+                root.get_or_insert_with(|| context.clone());
                 let request = if self.signed {
                     cx.request_signed_managed(
                         context.clone(),
@@ -1562,6 +1597,10 @@ mod tests {
                 .unwrap();
                 cx.done_context(&pending.0, "ok".into()).unwrap();
             } else {
+                #[cfg(feature = "order-locks")]
+                if self.reconcile_reads {
+                    cx.orders_reconciled(None);
+                }
                 cx.finish_http_context(&pending.0).unwrap();
             }
         }
@@ -1744,6 +1783,68 @@ mod tests {
         }
         fn freshness_ms(&self) -> f64 {
             3_000.
+        }
+    }
+
+    #[test]
+    fn managed_prepare_carries_the_issued_public_egress_route_through_repreparation() {
+        use crate::request_context::{Egress, RoutingIntent};
+        for (egress, route) in [
+            (Egress::PublicCors, crate::RequestRoute::PublicCors),
+            (Egress::Direct, crate::RequestRoute::Direct),
+        ] {
+            let (mut engine, _) = start(Probe::default());
+            engine.drain_actions().for_each(drop);
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            let context = cx
+                .http_context_with_egress(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 1_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                    egress,
+                )
+                .unwrap();
+            cx.request_managed(
+                context.clone(),
+                Method::Post,
+                "https://venue.test/candles".into(),
+                None,
+                Pending(context),
+            )
+            .unwrap();
+            let prepared = |engine: &mut Engine<Probe>| {
+                engine
+                    .drain_actions()
+                    .find_map(|a| match a {
+                        Action::ManagedHttp(a) => match *a {
+                            HttpAction::Prepare {
+                                preparation,
+                                intent,
+                                request,
+                            } => Some((preparation, intent, request.route)),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .unwrap()
+            };
+            let (first, intent, declared) = prepared(&mut engine);
+            assert_eq!((intent, declared), (RoutingIntent::Public, Some(route)));
+            // A stale route re-prepares the same original packet, route included.
+            bind(&mut engine, first, 0.5);
+            engine.http_preparation_failed(1., first, Error::Stale, VenueError::new("expired"));
+            let (second, intent, declared) = prepared(&mut engine);
+            assert_ne!(second, first);
+            assert_eq!((intent, declared), (RoutingIntent::Public, Some(route)));
         }
     }
 
@@ -3115,10 +3216,13 @@ mod tests {
                 true,
             )
             .unwrap();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new(),
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new(),
+            },
+            None
+        ));
         let (_, token, _) = mutation(&mut engine, 7, 0.);
         let permit = bind(&mut engine, token, 1.);
         engine.claim_http(2., permit).unwrap();
@@ -3301,10 +3405,13 @@ mod tests {
             .order_locks
             .acquire(&placing, &engine.store, true)
             .unwrap();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new()
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new()
+            },
+            None
+        ));
         let (_, token, _) = mutation(&mut engine, 7, 0.);
         let permit = bind(&mut engine, token, 1.);
         engine.claim_http(2., permit).unwrap();
@@ -3343,10 +3450,13 @@ mod tests {
             )
             .unwrap();
         engine.io.order_locks.note_write();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new()
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new()
+            },
+            None
+        ));
         engine.io.order_locks.finish(7, true);
         let permit = bind(&mut engine, tokens[0], 1.);
         engine.claim_http(2., permit).unwrap();
@@ -3391,10 +3501,13 @@ mod tests {
                 true,
             )
             .unwrap();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new()
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new()
+            },
+            None
+        ));
         let (_, token, _) = mutation(&mut engine, 7, 0.);
         let permit = bind(&mut engine, token, 1.);
         assert_eq!(engine.claim_http(2., permit), Err(Error::Invalid));
@@ -4858,5 +4971,142 @@ mod tests {
             )));
             assert_eq!(engine.venue.receipts, 0);
         }
+    }
+
+    /// Release `token` at `at` (bound and claimed), as the host would.
+    #[cfg(feature = "order-locks")]
+    fn release(engine: &mut Engine<Probe>, token: Preparation, at: f64) {
+        let permit = bind(engine, token, at);
+        engine.claim_http(at, permit).unwrap();
+    }
+
+    #[cfg(feature = "order-locks")]
+    fn fenced(engine: &mut Engine<Probe>) {
+        engine.io.order_locks.fence(Some(&["BTCUSDT".into()]));
+    }
+
+    /// One logical order read spans several physical attempts (pages, coins);
+    /// a fence raised after its first page was released is not cleared by rows
+    /// the venue read before it.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_logical_read_counts_only_from_its_earliest_released_leg() {
+        let (mut engine, tokens) = start(Probe {
+            count: 2,
+            legs: true,
+            reconcile_reads: true,
+            ..Probe::default()
+        });
+        release(&mut engine, tokens[0], 1.);
+        fenced(&mut engine);
+        release(&mut engine, tokens[1], 500.);
+        response(&mut engine, tokens[1], 501.);
+        assert_eq!(engine.venue.responses, 1);
+        assert!(
+            engine.io.order_locks.uncertain("BTCUSDT"),
+            "the first page predates the fence"
+        );
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_commands_read_legs_count_from_its_earliest_leg() {
+        let (mut engine, tokens) = start(Probe {
+            count: 2,
+            command: Some(7),
+            legs: true,
+            reconcile_reads: true,
+            ..Probe::default()
+        });
+        release(&mut engine, tokens[0], 1.);
+        fenced(&mut engine);
+        release(&mut engine, tokens[1], 500.);
+        response(&mut engine, tokens[1], 501.);
+        assert_eq!(engine.venue.responses, 1);
+        assert!(engine.io.order_locks.uncertain("BTCUSDT"));
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_logical_read_released_wholly_after_the_fence_clears_it() {
+        let (mut engine, tokens) = start(Probe {
+            count: 2,
+            legs: true,
+            reconcile_reads: true,
+            ..Probe::default()
+        });
+        fenced(&mut engine);
+        release(&mut engine, tokens[0], 1.);
+        release(&mut engine, tokens[1], 500.);
+        response(&mut engine, tokens[1], 501.);
+        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+    }
+
+    /// Separate owners are separate logical reads: a stale owner, retired or
+    /// not, never lowers another owner's freshness.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn an_earlier_owners_read_mark_never_reaches_another_owner() {
+        let (mut engine, tokens) = start(Probe {
+            count: 2,
+            reconcile_reads: true,
+            ..Probe::default()
+        });
+        release(&mut engine, tokens[0], 1.);
+        response(&mut engine, tokens[0], 2.);
+        fenced(&mut engine);
+        release(&mut engine, tokens[1], 500.);
+        response(&mut engine, tokens[1], 501.);
+        assert_eq!(engine.venue.responses, 2);
+        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+    }
+
+    /// A write released under the reading command takes no read mark.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_mutation_leg_never_marks_its_owners_read() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            command: Some(7),
+            reconcile_reads: true,
+            ..Probe::default()
+        });
+        let (_, write, _) = mutation(&mut engine, 7, 0.);
+        release(&mut engine, write, 1.);
+        fenced(&mut engine);
+        release(&mut engine, tokens[0], 500.);
+        response(&mut engine, tokens[0], 501.);
+        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+    }
+
+    /// Marks live only as long as their owner's contexts; the registry's own
+    /// pruning bounds them.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_read_mark_is_dropped_with_its_owners_last_context() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            ..Probe::default()
+        });
+        release(&mut engine, tokens[0], 1.);
+        response(&mut engine, tokens[0], 2.);
+        assert_eq!(engine.io.request_contexts.read_mark_count(), 1);
+        Cx {
+            now: 5_000.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 1_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        )
+        .unwrap();
+        assert_eq!(engine.io.request_contexts.read_mark_count(), 0);
     }
 }
