@@ -516,3 +516,71 @@ same validity window, so both correctly expired; the corrected fixture declares
 distinct recipe validity windows to isolate one expired member. Dedicated
 integration controls now pass nine with none ignored. Native host and shared
 pacing-set composition remain open gates before push/readiness.
+
+## Pending pacing composition and native source review
+
+Reviewed pacing #2025 pin `59109b3ade9` is being merged locally onto `a018f3ccddd`.
+The overlap owner requires this merge remain uncommitted until exact review;
+there is no freeze or new remote head. The resolved source artifact is
+`11d12971e7df` (three engine paths). Both queue checks precede staging and ID
+spend; group custody is checked before canonical pacing. The zero-floor helper
+now delegates to the shared resolver. The new expanded-alias admission control
+passes before any ID/storage mutation.
+
+A genuine composition RED exposed an existing future primitive clock despite a
+zero current floor: a prior Read released with outer gap 100, then the zero-floor
+group tried to sign at time 1. Source correction `d09267a67c0b` remains unapplied
+pending review. It checks the canonical clocks before activating any recipes,
+wakes at the minimum of eligibility and retained call/route bounds, and pumps the
+whole group on an early timer. Scratch passes all twelve group controls plus all
+fifteen pacing controls. Route-expiry/early-wake testing proves no provider call
+before eligibility, one expired-route reprepare with the same physical attempt,
+and unchanged call deadlines at final release. Strict scoped Clippy and the
+feature-off library pass in scratch. The actual uncorrected candidate remains
+RED at the new presign assertion; it must not be pushed or marked ready.
+
+Native source artifact `a81781da54b4` is also unapplied pending review. Genuine
+Engine+Host controls pass three cases: all bind/readiness checks before two
+handoffs with one success, second bind/readiness failure with zero sends and
+NotSent, and first transport panic with both handoffs attempted plus one Unknown
+retaining accepted IDs. The final fixture uses a real Primary Plan and an inline
+fixture provider implementing sign_ready. Early fixture failures at keyless
+preflight admission and the absent sign_ready path are not proof. Native strict
+library/target Clippy passes. Neither host model nor source review alone is full
+G2b CI, wasm32 performance, inherited-uncertainty or landing certification.
+
+## Superseding group-wait custody review
+
+The pacing owner rejected `d09267a67c0b`: with providers parked, another genuine
+Background Claim can advance the shared clock. Signed completion then arms the
+first member's timer after both members became Permitted; its Prepared-only
+wake predicate never announces the group. The owner independently reproduced
+that failure with the earlier presign-wait control still GREEN. A second control
+executed locally proves the same loss when only the non-first member re-prepares
+while the timer's first member remains Permitted. Its expected fresh signing
+work is absent on d092; this is an unlanded composition defect, not a claim about
+an existing shipped venue.
+
+Replacement source `5cf20cf4314f` remains unapplied in the actual worktree. The
+private ordinal-zero Member owns explicit group pacing-wait state, independent
+of its local signing phase. Its exact managed timer consumes that state and runs
+the validated group pump; member reset/drop clears it, and reaching eligibility
+restores the original physical timer deadline. The final Claim path is unchanged.
+Both reproduced regressions now pass with the earlier assertions retained.
+
+The pacing owner independently cleared composition artifact `11d12971e7df` plus
+replacement `5cf20cf4314f` and controls `64792f958a5d` on full commit
+`a018f3ccdddf8184afbb5f74340cae0d70313e5e`: fourteen group controls, fifteen
+pacing controls and the expanded-alias no-ID control pass with managed sockets.
+The composition hash names a patch, not a Git commit. Local Plans-only execution
+also passes thirteen group controls and all fifteen pacing controls; the placing
+fence test is compiled only with order-locks. Strict combined, Plans-only and
+feature-off library checks pass. Core source review is still pending; the actual
+merge remains uncommitted and the rejected correction must not be applied.
+
+Both source owners have now independently cleared the replacement: pacing owner
+with managed sockets and Plan core in Plans-only plus combined modes. The exact
+`5cf20cf4314f` source correction is applied in the worktree, byte-exact to the
+core-reviewed archive. This closes the unlanded composition's phase-dependent
+wake defect. The prior rejection and original RED receipts above remain evidence;
+`d09267a67c0b` is superseded. Native artifact and final CI/readiness remain separate.

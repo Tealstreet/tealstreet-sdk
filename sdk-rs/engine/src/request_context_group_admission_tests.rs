@@ -29,6 +29,15 @@ impl Venue for Consumer {
             minimum_gap_ms: 5.,
         }]
     }
+    fn http_pacing_sets(&self) -> &[crate::request_context::PacingSet] {
+        &[crate::request_context::PacingSet {
+            group: 2,
+            constraints: &[Pacing {
+                group: 1,
+                minimum_gap_ms: 0.,
+            }],
+        }]
+    }
     fn on_command(&mut self, cx: &mut Cx<'_, Context>, _: Command) {
         if self.0 == 14 {
             custody(cx);
@@ -93,6 +102,10 @@ impl Venue for Consumer {
                     group: 99,
                     minimum_gap_ms: 0.,
                 }),
+                15 => Some(Pacing {
+                    group: 2,
+                    minimum_gap_ms: 0.,
+                }),
                 _ => None,
             },
             retry: RetryPolicy::DefinitiveRefusal,
@@ -136,7 +149,7 @@ impl Venue for Consumer {
                 .map(|(plan, _, _)| plan),
             _ => cx.admit_plan_with_barriers(&preflight, &steps, policy, barriers),
         };
-        if self.0 < 10 {
+        if self.0 < 10 || self.0 == 15 {
             assert_eq!(
                 result.err(),
                 Some(if self.0 == 1 {
@@ -323,4 +336,9 @@ fn custody(cx: &mut Cx<'_, Context>) {
 #[test]
 fn group_custody_refuses_foreign_stale_and_out_of_order_without_effects() {
     check(14);
+}
+
+#[test]
+fn expanded_nonzero_set_floor_is_refused_before_group_ids_or_storage() {
+    check(15);
 }

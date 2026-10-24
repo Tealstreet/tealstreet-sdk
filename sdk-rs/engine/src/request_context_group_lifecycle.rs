@@ -54,6 +54,14 @@ impl Lifecycle {
     }
 
     #[cfg(feature = "http-plans")]
+    pub(crate) fn group_activation_bound(&self) -> f64 {
+        match self.state {
+            State::Prepared(route) => self.deadline.min(route.expires_at.unwrap_or(f64::MAX)),
+            _ => self.deadline,
+        }
+    }
+
+    #[cfg(feature = "http-plans")]
     pub(crate) fn group_send_before(&self, release: &HttpRelease) -> Result<f64, Error> {
         let State::Permitted(route, _) = self.state else {
             return Err(Error::State);

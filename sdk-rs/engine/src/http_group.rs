@@ -9,6 +9,8 @@ pub(super) struct Member {
     pub(super) permit: Option<Permit>,
     pub(super) announced: bool,
     pub(super) bound: bool,
+    // Ordinal zero owns a group wake even after its own signature is ready.
+    pub(super) pacing_wait: bool,
 }
 impl Member {
     pub(super) fn new(key: MutationGroupKey) -> Self {
@@ -18,6 +20,7 @@ impl Member {
             permit: None,
             announced: false,
             bound: false,
+            pacing_wait: false,
         }
     }
     pub(super) fn reset(&mut self) {
@@ -27,6 +30,7 @@ impl Member {
         self.permit = None;
         self.announced = false;
         self.bound = false;
+        self.pacing_wait = false;
     }
 }
 impl Drop for Member {
@@ -118,6 +122,56 @@ impl<V: Venue> Engine<V> {
             {
                 return Ok(());
             }
+        }
+        let mut wait: Option<f64> = None;
+        let mut bound = f64::MAX;
+        for id in &ids {
+            let managed = &self.io.managed_http[id];
+            if managed.lifecycle.group_needs_activation() {
+                managed
+                    .lifecycle
+                    .validate_group_activation(now)
+                    .map_err(|error| (*id, error))?;
+            }
+            bound = bound.min(managed.lifecycle.group_activation_bound());
+            if let Some(at) = self
+                .io
+                .http_pacing
+                .check(managed.lifecycle.context().pacing(), now)
+                .map_err(|error| (*id, error))?
+            {
+                wait = Some(wait.map_or(at, |old| old.max(at)));
+            }
+        }
+        if let Some(at) = wait {
+            self.io
+                .actions
+                .try_reserve(1)
+                .map_err(|_| (request, Error::Capacity))?;
+            let managed = self.io.managed_http.get_mut(&ids[0]).unwrap();
+            managed.group.as_mut().unwrap().pacing_wait = true;
+            self.io.actions.push(Action::SetTimer {
+                timer: managed.timer,
+                at_ms: at.min(bound),
+            });
+            return Ok(());
+        }
+        if self.io.managed_http[&ids[0]]
+            .group
+            .as_ref()
+            .unwrap()
+            .pacing_wait
+        {
+            self.io
+                .actions
+                .try_reserve(1)
+                .map_err(|_| (request, Error::Capacity))?;
+            let managed = self.io.managed_http.get_mut(&ids[0]).unwrap();
+            managed.group.as_mut().unwrap().pacing_wait = false;
+            self.io.actions.push(Action::SetTimer {
+                timer: managed.timer,
+                at_ms: managed.lifecycle.deadline(),
+            });
         }
         let mut activation = Vec::new();
         activation

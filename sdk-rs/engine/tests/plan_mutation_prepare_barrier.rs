@@ -168,6 +168,8 @@ struct Consumer {
     attack_results: Vec<safe_cex_engine::request_context::Error>,
     failures: usize,
     reconciles: usize,
+    warmup: bool,
+    placing: bool,
     stagger_freshness: bool,
     entropy_log: Option<EntropyLog>,
 }
@@ -227,7 +229,39 @@ impl Consumer {
 }
 impl Venue for Consumer {
     type Pending = Context;
-    fn start(&mut self, _: &mut Cx<'_, Context>) {}
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        &[safe_cex_engine::request_context::Pacing {
+            group: 77,
+            minimum_gap_ms: 0.,
+        }]
+    }
+    fn start(&mut self, cx: &mut Cx<'_, Context>) {
+        if self.warmup {
+            let context = cx
+                .http_context(
+                    safe_cex_engine::request_context::Scope::Background,
+                    safe_cex_engine::request_context::Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: Some(safe_cex_engine::request_context::Pacing {
+                            group: 77,
+                            minimum_gap_ms: 100.,
+                        }),
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            cx.request_managed(
+                context.clone(),
+                Method::Get,
+                "https://venue.test/clock".into(),
+                None,
+                context,
+            )
+            .unwrap();
+        }
+    }
     fn on_command(&mut self, cx: &mut Cx<'_, Context>, _: Command) {
         let preflight = cx
             .begin_preflight(PreflightPolicy {
@@ -265,7 +299,12 @@ impl Venue for Consumer {
                     independent_calls: self.independent,
                     operation: Operation::Mutation,
                     credential: Some(credential(CredentialSlot::Primary)),
-                    pacing: None,
+                    pacing: self
+                        .warmup
+                        .then_some(safe_cex_engine::request_context::Pacing {
+                            group: 77,
+                            minimum_gap_ms: 0.,
+                        }),
                     retry: RetryPolicy::Never,
                 },
                 if self.pair {
@@ -387,10 +426,16 @@ fn start(pair: bool) -> Engine<Consumer> {
 }
 fn start_consumer(consumer: Consumer) -> Engine<Consumer> {
     let pair = consumer.pair;
+    let placing = consumer.placing;
     let mut engine = support::seeded_engine(consumer);
     engine.set_signer(Some(Arc::new(Provider))).unwrap();
     engine.start(0.);
-    let command = if pair {
+    let command = if placing {
+        Command::PlaceOrders {
+            command: 7,
+            orders: vec![],
+        }
+    } else if pair {
         Command::SetLeverage {
             command: 7,
             symbol: "BTC-USDT".into(),
@@ -781,10 +826,10 @@ fn a_bound_stale_member_reprepares_without_replacing_its_sibling() {
     engine.prepare_dispatch(5_004.);
     let mut groups = Vec::new();
     for action in engine.drain_actions() {
-        if let Action::ManagedHttp(action) = action {
-            if let HttpAction::BindGroup { permit, members } = *action {
-                groups.push((permit, members));
-            }
+        if let Action::ManagedHttp(action) = action
+            && let HttpAction::BindGroup { permit, members } = *action
+        {
+            groups.push((permit, members));
         }
     }
     assert_eq!(groups.len(), 1);
@@ -792,6 +837,8 @@ fn a_bound_stale_member_reprepares_without_replacing_its_sibling() {
     assert!(members[0].request.is_some());
     assert!(members[1].request.is_none());
     assert_eq!(members[1].preparation, retained[1].preparation);
+    assert_eq!(permit.members()[0].attempt(), old.members()[0].attempt());
+    assert_eq!(permit.members()[1].attempt(), old.members()[1].attempt());
     let sibling = retained[1].request.take().unwrap();
     let fresh = members[0].request.take().unwrap();
     assert_eq!(sibling.signer_headers, fresh.signer_headers);
@@ -904,4 +951,481 @@ fn reverse_routes_and_providers_preserve_declaration_order_entropy() {
         matches!(engine.claim_http_group(5., groups[0].0.clone()), Ok(GroupClaim::Released(releases)) if releases.len() == 2)
     );
     assert_eq!(log.lock().unwrap().len(), 2);
+}
+
+#[cfg(feature = "order-locks")]
+#[test]
+fn provider_refusal_leaves_no_placing_fence_or_reconciliation() {
+    let mut engine = start_consumer(Consumer {
+        pair: true,
+        placing: true,
+        ..Default::default()
+    });
+    let work: Vec<_> = prepared_actions(&mut engine, 1.)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((attempt, work)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(work.len(), 2);
+    signed(&mut engine, &work[0], 2.);
+    let mut actions = prepared_actions(&mut engine, 2.);
+    let auth = engine.health().auth_failures;
+    engine.handle(
+        3.,
+        Event::Signed {
+            attempt: work[1].0,
+            result: Err(SignError::Refused),
+        },
+    );
+    actions.extend(prepared_actions(&mut engine, 3.));
+    failed_once(&actions, safe_cex_engine::Outcome::NotSent);
+    assert_eq!(engine.health().auth_failures, auth);
+    assert_eq!(engine.venue().reconciles, 0);
+    assert_eq!(engine.venue().contexts.len(), 2);
+    // An uncertain placing scope would fence this global cancel before venue entry.
+    engine.handle(
+        4.,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 8,
+            symbol: String::new(),
+        }),
+    );
+    assert_eq!(engine.venue().contexts.len(), 4);
+    assert_eq!(engine.venue().reconciles, 0);
+}
+
+#[test]
+fn zero_floor_group_waits_for_an_existing_shared_clock_before_signing() {
+    let log = EntropyLog::default();
+    let mut engine = support::seeded_engine(Consumer {
+        pair: true,
+        warmup: true,
+        entropy_log: Some(log.clone()),
+        ..Default::default()
+    });
+    engine.set_signer(Some(Arc::new(Provider))).unwrap();
+    engine.start(0.);
+    let warmup = prepared_actions(&mut engine, 0.);
+    assert_eq!(http(&warmup).len(), 1);
+    assert_eq!(http(&warmup)[0].url, "https://venue.test/clock");
+    engine.handle(
+        1.,
+        Event::Command(Command::SetLeverage {
+            command: 7,
+            symbol: "BTC-USDT".into(),
+            leverage: 5.,
+            side: None,
+        }),
+    );
+    let waiting = prepared_actions(&mut engine, 1.);
+    assert!(
+        waiting
+            .iter()
+            .all(|action| !matches!(action, Action::Sign { .. } | Action::Http(_))),
+        "zero floor cannot bypass a shared clock charged by an earlier outer gap"
+    );
+    assert!(log.lock().unwrap().is_empty());
+    let timers: Vec<_> = waiting
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 100. => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(timers.len(), 1);
+    engine.handle(100., Event::TimerFired { timer: timers[0] });
+    let ready = prepared_actions(&mut engine, 100.);
+    let work: Vec<_> = ready
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((attempt, work)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(work.len(), 2);
+    assert!(
+        work.iter()
+            .all(|(_, work)| work.receipt.stamp_ms == Some(100.))
+    );
+    assert_eq!(log.lock().unwrap().len(), 2);
+    signed(&mut engine, &work[1], 101.);
+    assert!(http(&prepared_actions(&mut engine, 101.)).is_empty());
+    signed(&mut engine, &work[0], 102.);
+    assert_eq!(http(&prepared_actions(&mut engine, 102.)).len(), 2);
+}
+
+#[test]
+fn group_pacing_wake_reprepares_an_expired_route_without_renewing_bounds() {
+    use safe_cex_engine::request_context::{HttpAction, Prepared};
+    let log = EntropyLog::default();
+    let mut engine = support::seeded_engine(Consumer {
+        pair: true,
+        warmup: true,
+        entropy_log: Some(log.clone()),
+        ..Default::default()
+    });
+    engine.set_signer(Some(Arc::new(Provider))).unwrap();
+    engine.start(0.);
+    assert_eq!(http(&prepared_actions(&mut engine, 0.)).len(), 1);
+    engine.handle(
+        1.,
+        Event::Command(Command::SetLeverage {
+            command: 7,
+            symbol: "BTC-USDT".into(),
+            leverage: 5.,
+            side: None,
+        }),
+    );
+    let routes: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(routes.len(), 2);
+    for (ordinal, token) in routes.iter().enumerate() {
+        engine.http_prepared(
+            1.,
+            *token,
+            Prepared {
+                id: 300 + ordinal as u64,
+                expires_at: (ordinal == 0).then_some(50.),
+            },
+        );
+    }
+    engine.prepare_dispatch(1.);
+    let waiting: Vec<_> = engine.drain_actions().collect();
+    assert!(log.lock().unwrap().is_empty());
+    assert!(
+        !waiting
+            .iter()
+            .any(|a| matches!(a, Action::Sign { .. } | Action::Http(_)))
+    );
+    let timers: Vec<_> = waiting
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 50. => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(timers.len(), 1);
+    engine.handle(25., Event::TimerFired { timer: timers[0] });
+    let early: Vec<_> = engine.drain_actions().collect();
+    assert!(log.lock().unwrap().is_empty());
+    assert!(early.iter().any(
+        |a| matches!(a, Action::SetTimer { timer, at_ms } if *timer == timers[0] && *at_ms == 50.)
+    ));
+    engine.handle(50., Event::TimerFired { timer: timers[0] });
+    let expired: Vec<_> = engine.drain_actions().collect();
+    assert!(log.lock().unwrap().is_empty());
+    let fresh: Vec<_> = expired
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fresh.len(), 1);
+    assert_ne!(fresh[0], routes[0]);
+    assert_eq!(fresh[0].attempt(), routes[0].attempt());
+    engine.http_prepared(
+        60.,
+        fresh[0],
+        Prepared {
+            id: 400,
+            expires_at: None,
+        },
+    );
+    let waiting: Vec<_> = engine.drain_actions().collect();
+    assert!(log.lock().unwrap().is_empty());
+    assert!(waiting.iter().any(
+        |a| matches!(a, Action::SetTimer { timer, at_ms } if *timer == timers[0] && *at_ms == 100.)
+    ));
+    engine.handle(100., Event::TimerFired { timer: timers[0] });
+    engine.prepare_dispatch(100.);
+    let work: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((attempt, work)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(work.len(), 2);
+    assert!(
+        work.iter()
+            .all(|(_, work)| work.receipt.stamp_ms == Some(100.))
+    );
+    signed(&mut engine, &work[0], 101.);
+    signed(&mut engine, &work[1], 102.);
+    engine.prepare_dispatch(102.);
+    let groups: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::BindGroup { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(groups.len(), 1);
+    match engine
+        .claim_http_group(102., groups.into_iter().next().unwrap())
+        .unwrap()
+    {
+        safe_cex_engine::request_context::GroupClaim::Released(releases) => {
+            assert_eq!(releases.len(), 2);
+            assert!(
+                releases
+                    .iter()
+                    .all(|release| release.release.deadline == 20_001.)
+            );
+        }
+        _ => panic!("eligible group did not release"),
+    }
+}
+
+#[test]
+fn review_clock_advanced_while_group_provider_parked_does_not_strand_bind() {
+    use safe_cex_engine::request_context::{HttpAction, Prepared};
+    let mut engine = support::seeded_engine(Consumer {
+        pair: true,
+        warmup: true,
+        ..Default::default()
+    });
+    engine.set_signer(Some(Arc::new(Provider))).unwrap();
+    engine.start(0.);
+    let warm = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("genuine independent background preparation");
+    engine.handle(
+        1.,
+        Event::Command(Command::SetLeverage {
+            command: 7,
+            symbol: "BTC-USDT".into(),
+            leverage: 5.,
+            side: None,
+        }),
+    );
+    let work: Vec<_> = prepared_actions(&mut engine, 1.)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((attempt, work)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        work.len(),
+        2,
+        "unblocked group must start both real providers"
+    );
+    engine.http_prepared(
+        50.,
+        warm,
+        Prepared {
+            id: warm.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let released = prepared_actions(&mut engine, 50.);
+    assert_eq!(http(&released).len(), 1);
+    assert_eq!(http(&released)[0].url, "https://venue.test/clock");
+    signed(&mut engine, &work[0], 51.);
+    signed(&mut engine, &work[1], 52.);
+    let waiting: Vec<_> = engine.drain_actions().collect();
+    let timer = waiting
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 150. => Some(*timer),
+            _ => None,
+        })
+        .expect("actual shared clock now blocks group until 150");
+    assert!(!waiting.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(**action, HttpAction::BindGroup { .. }))));
+    engine.handle(150., Event::TimerFired { timer });
+    engine.prepare_dispatch(150.);
+    let ready: Vec<_> = engine.drain_actions().collect();
+    assert!(ready.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(**action, HttpAction::BindGroup { .. }))), "group wake must resume announcement even when members are already signed");
+}
+
+#[test]
+fn non_first_reprepare_wakes_with_the_first_member_already_permitted() {
+    use safe_cex_engine::request_context::{Error, GroupClaim, HttpAction, Prepared};
+    let log = EntropyLog::default();
+    let mut engine = support::seeded_engine(Consumer {
+        pair: true,
+        warmup: true,
+        entropy_log: Some(log.clone()),
+        ..Default::default()
+    });
+    engine.set_signer(Some(Arc::new(Provider))).unwrap();
+    engine.start(0.);
+    let warmup = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        1.,
+        Event::Command(Command::SetLeverage {
+            command: 7,
+            symbol: "BTC-USDT".into(),
+            leverage: 5.,
+            side: None,
+        }),
+    );
+    let routes: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(routes.len(), 2);
+    for (ordinal, token) in routes.iter().enumerate() {
+        engine.http_prepared(
+            1.,
+            *token,
+            Prepared {
+                id: 800 + ordinal as u64,
+                expires_at: (ordinal == 1).then_some(10.),
+            },
+        );
+    }
+    engine.prepare_dispatch(1.);
+    let work: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((attempt, work)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(work.len(), 2);
+    signed(&mut engine, &work[0], 2.);
+    signed(&mut engine, &work[1], 3.);
+    engine.prepare_dispatch(3.);
+    let mut groups: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::BindGroup { permit, members } => Some((permit, members)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(groups.len(), 1);
+    let (old, retained) = groups.pop().unwrap();
+    engine.http_prepared(
+        50.,
+        warmup,
+        Prepared {
+            id: warmup.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let released = prepared_actions(&mut engine, 50.);
+    assert_eq!(http(&released).len(), 1);
+    assert_eq!(http(&released)[0].url, "https://venue.test/clock");
+    assert!(matches!(
+        engine.claim_http_group(60., old.clone()),
+        Err(Error::Stale)
+    ));
+    let fresh: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fresh.len(), 1);
+    assert_eq!(fresh[0].attempt(), routes[1].attempt());
+    engine.http_prepared(
+        70.,
+        fresh[0],
+        Prepared {
+            id: 900,
+            expires_at: None,
+        },
+    );
+    engine.prepare_dispatch(70.);
+    let waiting: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(log.lock().unwrap().len(), 2);
+    assert!(!waiting.iter().any(|a| matches!(a, Action::Sign { .. })));
+    let timers: Vec<_> = waiting
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 150. => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(timers.len(), 1);
+    engine.handle(150., Event::TimerFired { timer: timers[0] });
+    engine.prepare_dispatch(150.);
+    let fresh_work: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((attempt, work)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        fresh_work.len(),
+        1,
+        "the first member's wake must activate its stale sibling"
+    );
+    assert_eq!(fresh_work[0].1.receipt.stamp_ms, Some(150.));
+    signed(&mut engine, &fresh_work[0], 151.);
+    engine.prepare_dispatch(151.);
+    let mut groups: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::BindGroup { permit, members } => Some((permit, members)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(groups.len(), 1);
+    let (permit, members) = groups.pop().unwrap();
+    assert!(members[0].request.is_none());
+    assert!(members[1].request.is_some());
+    assert_eq!(members[0].preparation, retained[0].preparation);
+    assert_eq!(permit.members()[0], old.members()[0]);
+    assert_eq!(permit.members()[1].attempt(), old.members()[1].attempt());
+    assert!(
+        matches!(engine.claim_http_group(152., permit), Ok(GroupClaim::Released(releases)) if releases.len() == 2 && releases.iter().all(|release| release.release.deadline == 20_001.))
+    );
+    assert_eq!(log.lock().unwrap().len(), 3);
+    assert!(matches!(
+        engine.claim_http_group(152., old),
+        Err(Error::Revoked)
+    ));
 }
