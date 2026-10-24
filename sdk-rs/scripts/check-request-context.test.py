@@ -80,6 +80,22 @@ class RequestContextBan(unittest.TestCase):
         # Bootstrap only establishes the reviewed initial inventory.
         self.assertFalse(ban.check(one, one, []))
 
+    def test_apex_staging_bootstrap_adds_only_the_approved_sites(self):
+        path = 'venues/apexomni/src/lib.rs'
+        old_map, new_map = ban.STAGING_BOOTSTRAPS[path]
+        self.assertEqual(set(ban.STAGING_BOOTSTRAPS), {path})
+        self.assertEqual((sum(old_map.values()), sum(new_map.values())), (3, 4))
+        old, new = {path: old_map}, {path: new_map}
+        self.assertFalse(ban.check(new, new, [('landed', old)]))
+        for grown in [dict(new_map, **{'f' * 64: 1}), {**new_map, next(iter(new_map)): 2}]:
+            self.assertTrue(ban.check({path: grown}, {path: grown}, [('landed', old)]))
+        pruned = dict(new_map)
+        del pruned[next(iter(pruned))]
+        # Once a staging site is pruned, nothing can restore it.
+        self.assertTrue(ban.check(new, new, [('landed', old), ('pruned', {path: pruned})]))
+        # Only the exact old map unlocks the transition.
+        self.assertTrue(ban.check(new, new, [('altered', {path: dict(old_map, **{'e' * 64: 1})})]))
+
     def test_strict_manifest_schema_and_duplicates(self):
         digest = 'a' * 64
         good = {'venues/reference/src/lib.rs': {digest: 1}}
