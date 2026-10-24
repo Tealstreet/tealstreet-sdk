@@ -546,3 +546,12 @@ with one Vitest worker. ESLint deliberately ignores these test files; no lint
 execution is claimed for them. An initial unsupported Vitest --minWorkers flag
 stopped before tests and is excluded from the RED receipt. Fresh CI is required;
 actual #1990 landing order remains held, and 78758 remains unpushed.
+
+The wrapper fix is followed by plain merges of actual 0258ed21afe and16f776ffb82
+(the incoming landing advanced during validation). No unlanded 5db dependency
+was merged. Reviewed KuCoin runtime/tests and engine/crypto signer files remain
+byte-exact63dc. The three wrapper files remain byte-exact their tested fix.
+Manifest deltas against16f are KuCoin-only; docs are incoming plus the existing
+KuCoin/asymmetric composition suffixes once. Full bans, request/signing and
+credential-selection ratchets pass. Fresh PR CI will certify this fix head;
+#1990 actual-landing composition remains required before READY/landing.
