@@ -119,3 +119,47 @@ failing assertions and gated suffixes. No production or existing assertion edits
 until plan/original review. Use CARGO_BUILD_JOBS=4 and one scoped build at a time;
 CI owns full workspace/features/WASM/performance. Original plan/API clearances
 are not production source or actual-prerequisite receipts.
+
+
+## Original execution checkpoint
+
+Plan3b69de0eda3 precedes the dedicated request_context_candles target. Fe7's
+existing-API fit is CLEAR, auditor8x confirms the current5b file boundary, and55
+confirms the narrow public Candles ownership and login composition constraints.
+The retry timing audit is explicit: native send_request is called immediately,
+with no retry backoff. Six released failures terminate, and a duplicate seventh
+failure notification produces neither another physical attempt nor a terminal.
+
+The original target compiles and executes23 controls on unchanged actual10d01:
+15 intended assertion REDs,8 GREEN, zero ignored. Separate mainnet/testnet REDs
+show eager raw HTTP before Prepare. Three local capacity REDs retain the native
+unclassified error instead of shared Capacity; remote capacity and invalid-clock
+cases emit raw HTTP or native validation. Unclaimed DATA, real physical-timeout
+fresh-window, typed preparation, short retry-cap and stale-reply controls fail at
+the disclosed first Prepare boundary; their deeper suffixes are unexecuted gates.
+Claimed late DATA still succeeds beyond the caller cap, and no caller root timer
+exists on the original path. No missing API or compilation failure is RED proof.
+
+Eight working controls pin both deployment wires and native rows/empty results,
+exact validation precedence/messages, malformed/status/native-code strictness,
+six immediate attempts with no seventh, duplicate original-peer retention,
+invalid caller-wait refusal, limit clamping/bound formatting and omission, and
+partial streamed-row discard before a transport retry. The frozen native interval
+message is GRVT does not support 1s candles. The row-prefix control is native
+reset behavior, not accepted-prefix history authority or a soft-success claim.
+
+Shared-capacity recovery validates all255 retained peers after the first peer
+retires and the retried command admits; that suffix remains gated by the initial
+Capacity RED. Preparation-failure suffixes inspect the complete batch for no
+outbound and exactly one matching unsigned Cancel. Cancellation is cleanup, not
+an outbound transport. No native metadata, retry or signature rule is inferred
+from that gated suffix.
+
+The initial fixture expected a different interval-error string; corrected against
+Interval::unsupported before the final receipt. The added streamed-prefix control
+initially used HttpChunk.chunk instead of the existing data field; its compile
+failure is excluded from all RED counts. Production, existing tests, Cargo and
+maps remain exact to the assigned base; no shared file is changed.
+
+Scoped strict Clippy on the new target and scoped rustfmt/diff checks pass.
+Local cargo used four jobs, sequentially; no workspace or all-feature sweep.
