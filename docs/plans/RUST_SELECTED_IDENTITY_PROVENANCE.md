@@ -536,3 +536,78 @@ snapshot installation, typed subject errors, native cancellation, or safe Rust
 retirement after a trap. In the REDs the retirement spy is still unexecuted; its
 internal fence checks and no-action assertions remain mandatory post-cutover
 checks. Exact hooks must be reviewed before making these tests pass.
+
+## Source-hook proposal on the current landing
+
+Current integration is `04f5bdd1cb7`, including actual flat-PnL landing
+`b43525cb103` after the outage. Five-path preservation is checked; the original
+engine and host control blobs remain exact `f39d62ed099`. This section proposes
+runtime hook placement for review; it authorizes no runtime edit or adoption.
+
+### Borrow-free WASM retirement candidate
+
+`host.mjs` explicitly forbids inspecting Rust state after a WASM trap. A normal
+wasm-bindgen `&mut WasmEngine` retirement method may itself need the already
+poisoned borrow, so merely bypassing `EngineHost.invoke` is insufficient. The
+candidate is an engine-minted, failure-only retirement callback obtained AFTER
+successful seal and BEFORE start, then retained in a private host slot.
+
+The WASM administrative surface can preserve the proposed JavaScript spelling
+`retireIdentitySnapshot()` while exporting a getter that returns a previously
+created no-argument function. Host construction captures that function once
+while the engine is healthy; cleanup calls the captured value without reading
+any engine property or obtaining an inner engine borrow after poison. A normal
+engine method masquerading as this callback is not the production implementation.
+Existing test-double methods still test the host boundary, not this Rust safety.
+
+The callback captures only an engine-issued shared liveness cell from the exact
+installed snapshot. It irreversibly tombstones that cell, with no Context,
+provider, registry mutation, I/O, callback dispatch or mutable WasmEngine borrow.
+Every installed-binding admission/Prepare/Bind/handoff/DATA check must honor this
+cell under the existing actor/final-handoff sequencing. The witness cannot be
+minted from a caller counter/epoch, and a public snapshot clone grants no retire
+method. Only the administrative host owns retirement authority.
+
+A healthy private registry cleanup path then retires owner records and resources
+under its issued failure-only witness after normal validation is fenced. A
+poisoned engine must never be re-entered merely to compact those records: all
+such authority is already revoked by the shared tombstone; host-owned jobs,
+transports, timers and commands are canceled/settled conservatively. Whether
+bounded inert records may remain until destruction, and how owned free behaves
+after a trap, require the registry/host owners' explicit source ruling. This
+proposal does not declare that unresolved part safe or clear it by a spy test.
+No retired record may ever resume, gain credits or publish a successful fact.
+
+Exact runtime map for review:
+
+| Source | Proposed hook and required invariant |
+| --- | --- |
+| New `engine/src/identity_snapshot.rs` | Opaque installed allocation, canonical subject data, lifecycle cell and host-only failure authority; no new network/discovery path |
+| `engine/src/engine.rs` | Final install and common eight-setter predicate; capture actual configured tuple; refuse required-unsealed start before callbacks/IDs |
+| `engine/src/selected_read.rs` | Consume exact selection into bound read; retain full witness and crate-private borrowed selection, never unwrap/reselect |
+| `engine/src/request_context_registry*` and G2b ownership/release paths | Existing issuer/owner checks plus exact installed/liveness checks; healthy failure cleanup preserves released-write facts; owner review before touching these hunks |
+| `registry/src/lib.rs` final trusted constructors/finish | Stage native-reviewed subjects and policy with the final refs; defer actual seal until host injections finish; no second identity registry |
+| `hosts/wasm/src/lib.rs` AnyEngine/WasmEngine | Seal export; obtain borrow-free retirement callback while healthy; do not use a mutable engine entry after trap |
+| `hosts/wasm/js/host.mjs` constructor/common cleanup | Inject existing entropy/provider/capabilities, seal, privately capture callback; retirement first before command settlement for dispose/failEngine, no action drain |
+| `hosts/native/src/lib.rs` builders/run/stop/Drop | Seal after builders and before start; fence then retire before resources; owned/returned/cancelled-future controls and no venue callbacks from Drop |
+
+Required source-stage controls include a callback captured while healthy that
+still retires when every ordinary engine method/getter is poisoned; retirement
+throw does not strand command/resource cleanup; required production hooks cannot
+be silently skipped; failed seal leaves setup mutable and no witness; and native
+run-future cancellation revokes retained witnesses and resources without falsely
+reporting an interrupted write as unsent. Existing five RED/five GREEN host
+controls remain intact. These are additions to the source review gates, not
+substitutes for real Rust snapshot/registry/host controls.
+
+### Hosted setup and legacy scope
+
+Hosted construction supplies the server only the signing material required by
+the selected venue's native signing contract. Such material stays in the existing
+provider/setup path; the installed witness contains opaque refs and reviewed
+nonsecret subject metadata, never copied secrets or secret-derived identities.
+Subject resolution cannot request broader signing material as a shortcut. The
+constructor/source review must cover native and hosted modes consistently.
+Changes are scoped to Rust engine/hosted-Rust paths; the existing non-Rust AWS
+production path must remain unaffected. No build profile, CPU threshold or
+WASM-budget edit is part of this provenance slice.
