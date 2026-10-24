@@ -212,3 +212,290 @@ and 27 occurrences (from seven/30/32); all other inventory maps remain intact.
 Full native/static gates and independent implementation reviews are recorded on
 the PR before readiness. Source/caller plan reviews confirmed the initial
 admission outcome exception and architecture gate No.
+
+
+## P0 write adoption, classifier pin 2026-10-23
+
+Audited actual `6741c1c6609437e32090c76745a56ca6c2262445`. This appendix
+supersedes earlier draft WRITE API names. It adds plans/regressions only.
+
+| Audit row | Reverified native path | Required caller contract |
+| --- | --- | --- |
+| #2 | `trading.rs::trade_command` marks every explicit CancelOrders step optional; `trade_failed` logs and advances; `run_trade` completes Done([]) even when all cancels failed. | Each requested leg contributes its own fact; all-failed cancellation is a terminal failure, never successful empty output. |
+| #20 | Pair response validation exits on any invalid/failed row before copying accepted IDs from the response into the job. | Preserve each independently validated native ID as reconciliation evidence on the failure; missing or contradictory rows stay uncertain. |
+
+Current `http_failure` distinguishes AuthInvalid/Permission/RateLimited by
+status only; Pair has `operation`, `clientId`, `id`, symbol/side/type identity
+facts. Do not manufacture a native code table by promoting arbitrary statuses
+or exception strings. Start one CodeTable with explicit unlisted Unknown and
+only existing finite native code distinctions whose refusal evidence is
+verified; empty rows/statuses is safer than guessing. Move native error `code`
+fields as typed codes when present; `operation: Ok` alone is not a complete
+success. The Pair codec must validate correlation/uniqueness before claiming
+caller attribution, while retaining independently valid IDs even when row
+count is wrong. Do not infer succeeded/total/failed_index for incomplete ACKs.
+
+### Landed classifier and write-journal boundary
+
+Use actual #1837 (`e0322577e354739dde6d7e5011e74ab660145885`), not the
+older draft signatures. Declare one family `classify::CodeTable` with `rows`,
+`success`, explicit `unlisted: Verdict::Unknown(None)` and evidence-backed
+`status` entries only. `Key::Message` is exact and code-less; never mix message
+and code rows or introduce substring/prefix inference. Decode integer codes
+strictly via the native codec / `classify::decode_int`, never through f64.
+Engine precedence owns transport, 408/5xx, native evidence, status and malformed
+success. A native code or 2xx alone never proves successful execution.
+
+A genuine command Context uses the actual command entry and real credential;
+managed signed HTTP carries it through Pending. At the exact delivered attempt,
+`classify_write(&ctx, &TABLE, native, message)` creates the failure Fact.
+`http_write_fact(&ctx, WriteFact::Failed { fact, known_effects }, reports)`
+records it; `http_write_failure` is the whole-failure shortcut. Complete native
+success reports `WriteFact::Accepted { order_ids }`; malformed success uses
+`http_write_unproven`. A real batch acknowledgement uses `http_write_batch`
+with caller-ordered items and the native expected count. The codec proves
+identity/uniqueness and correlation; preserve individually known IDs as
+reconciliation evidence without invented caller counts on an incomplete reply.
+
+Only the engine's opaque resend grant may feed `http_resend_context`, retaining
+the original root, deadline and one-shot budget. Use `http_write_leg_intent`
+only for permitted intent narrowing before release. Finish once through
+`done_context`/`fail_context`; CommandWrites owns aggregation, partial IDs and
+whole-command demotion. Do not use private engine-test-only `http_write_result`,
+transitional unmanaged `classify::write`, local status/outcome ladders or a
+numeric completion fallback. A preparation refusal's local NotSent fact is
+valid, but prior released siblings still determine the whole-command outcome.
+
+No runtime conversion is authorized in this plan/tests slice. Missing reusable
+signing, session, Plan/CallWindow or reconciliation ownership remains a shared
+prerequisite; no per-venue replacement. On adoption, reverify actual seam pins,
+remove RED ignore markers while retaining behavior assertions, prune only the
+venue's genuinely removed legacy fingerprints, and add a landed CALLERS
+appendix. Plan/tests preparation neither prunes inventory nor closes P0 rows.
+
+### Phases, file reservations and RED controls
+
+Single ordinary placement/cancel comes before paired placements, optional
+bracket children, cancel-many and amend cancel/replace plans. Managed signing
+needs claude-19pt8s's Backpack recipe plus actual Ed25519 provider #1844; its
+recipe branch is based on the landed depth slice and does not own lib/account/
+trading conversion. No eager Ed25519 through unsigned static headers. Declare
+native X-Broker-Id/body/credential identity exactly through managed signed
+preparation. Multi-leg commands wait for genuine shared Plan admission.
+Preserve native receipt timing, UINT32 client IDs, minimum sizing, generated
+replacement identities, bracket relationships and cancel/fill races.
+
+At this audit #1787 holds account/trading source and their test files; #1870
+holds lib.rs and candle/public tests. This slice touches none of them. Add a
+new `tests/write_adoption_red.rs` using the unchanged existing support fixture:
+(1) stored order 123, explicit CancelOrders, native HTTP refusal -> one failure
+and no Done; (2) Pair returns a valid first row plus failed second row ->
+Unknown with first ID preserved; (3) Pair returns only the valid first row ->
+Unknown with evidence-only Partial, no invented total or failed_index.
+Read actual generated clientId/side values from the request, never hardcode
+random identities. Run `cargo test -p safe-cex-venue-backpack --test
+write_adoption_red p0_write_ -- --ignored --nocapture`. All three must compile
+and fail their original behavior assertion; the ignore markers explicitly
+await adoption, not a passing production claim.
+
+Future controls include all cancel legs failing transport, mixed required and
+optional child failures, reversed ACK order, duplicate/unknown client IDs,
+contradictory symbols, 408/5xx refusal-looking bodies, prior accepted effects
+followed by preparation NotSent, and duplicate/late/wrong-attempt delivery.
+Known partial definitive effects need structured IDs without forcing Unknown;
+unresolved legs require Unknown. Shared CommandWrites, not optional-step
+logging or `effective` demotion, owns the whole-command verdict.
+Recheck the frozen inventory above on adoption, prune only actual vanished
+Backpack entries and add CALLERS then. No manifest change in this slice.
+
+Architecture gate: No for native Engine regressions and shared API planning.
+Future implementation gates: Backpack + Binance, scoped strict Clippy/fmt,
+bans, both ratchets, three clean independent reviews and exact-head CI.
+
+Local plan/test evidence: 3 original-source controls compile and fail
+by the intended behavior assertions; normal venue suites pass
+(137 tests, 3 explicit ignored RED controls).
+Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
+pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
+controls expose defects; they are not GREEN adoption or P0 closure evidence.
+
+## Foreground write adoption implementation plan (2026-10-24)
+
+Selected from #1880 on actual landing `43775f60d0f`: independent foreground
+jobs have no FIFO activation dependency on #1896. Merge the reviewed plan/tests
+first; retain all three original behavioral assertions. Source reservations:
+`trading.rs`, the Options/sign-module and trade callback regions of `lib.rs`,
+`Cargo.toml`, native trading fixtures and dedicated write controls. Our #1870
+candle regions remain separate and unchanged. The signer owner supplies or
+reviews the dispatch recipe in `sign.rs`; provider Ed25519 is #1844. No venue
+or shared source belonging to another open PR is replaced.
+
+1. Begin genuine mutation Preflight before native preflight terminals. Admit
+   one immutable serial Plan from the final native steps, Primary credentials,
+   no retry and an explicit 20-second managed attempt policy. Legacy opaque
+   HTTP declares `timeout_ms: None`; this adds a bounded managed lifetime, not
+   a claim that native commands already had a 20-second root. The checked Plan
+   root is the declared serial attempt span, never a venue timer. Empty work uses the engine's
+   explicit empty-plan completion. Every pending foreground call retains its
+   exact Plan/Slot/Context; Plan-ready drives only that job. No queued owner is
+   activated through another job's delivery.
+2. Replace eager credential headers for foreground writes with the shared
+   Backpack dispatch recipe, preserving instruction, caller-ordered batch rows,
+   canonical parameters, exact JSON body, X-Broker-Id and receive window. Pass
+   only an opaque identity through Options. Never populate it from raw secrets
+   inside the venue. Test setup supplies the provider and identity explicitly;
+   registry/SDK admission and account/WS migration remain separate obligations.
+3. Use one conservative CodeTable (existing codes only, unlisted Unknown,
+   no inferred status refusal). Validate exact Plan delivery before native
+   effects. Record accepted/failure/batch facts through the shared classifier
+   and journal before call settlement. A paired ACK correlates clientId,
+   symbol, side, type and unique native IDs; individually validated rows retain
+   their native IDs even if another row fails or is absent. Only a complete
+   proof publishes the existing paired success reducer.
+4. Every requested explicit cancellation contributes to the command verdict.
+   Continue native optional child work for callback-delivered native failures, while its
+   failure remains in the journal: a final Done cannot erase it. Native optional
+   child failures can therefore produce a failed command with prior effects,
+   rather than a misleading successful empty result. Remove local effective
+   demotion for foreground jobs; the journal owns partial IDs and uncertainty.
+5. Amend fill exhaustion uses the landed immutable conditional-terminal seam.
+   Keep cancellation/fill revision fences and receipt order. Cleanup retires
+   only the exact foreground generation and releases its cancellation latches;
+   no stale callback completes a reused ID. Internal automatic trigger repair
+   remains explicitly legacy background work, with no fabricated command or
+   Context; background Plan issuance is a separately assigned shared follow-up.
+   Its legacy transport sites remain inventoried, with no manifest exemption.
+6. Add managed-release, asynchronous delegated Ed25519, malformed/short/reversed
+   batch, failed-cancel, accepted-ID/later-failure and generation controls. Turn
+   #1880's original REDs green without weakening assertions. Prune only vanished
+   foreground fingerprints after scanning actual source; preserve incoming and
+   background entries. Run Backpack/Binance, scoped strict Clippy/fmt, bans,
+   both request-context checks, three independent audits and exact-head CI.
+
+Architecture gate: native request/ACK correlation and Store freshness stay here;
+command ownership, clock, preparation, signing, retry, classification, aggregate
+outcome and cleanup authority remain engine/provider choke points. This is a
+foreground trading slice, not whole-family signer or background readiness.
+
+
+Plan-audit rulings: the overseer explicitly approved today's shared core rule:
+a delivered 408/5xx immediately stops the Plan as Unknown, retains prior IDs and
+retires unsent legs. Callers must reconcile before resending. Adopt the upcoming
+shared PlanPolicy independence flag when it lands to restore native optional/
+continue-on-error continuation; this remains an open obligation, with no venue
+fallback. The explicit new 20-second managed attempt policy is also approved.
+
+Before first managed mutation release, capture bounded native correlation data
+through capture_http_reconciliation and define the conservative late policy.
+Never publish late rows without the independent native account revision fences.
+Add an original optional-child RED: accepted entry, failed TP, accepted SL still
+emits CHILD_LEG_FAILED and sends SL, then one failed terminal with both accepted
+IDs rather than Done. Preserve native wire/sequence oracles. Classified DATA
+settles via finish_plan_call; callback-delivered preparation/transport failures
+use finish_plan_failed_call if continuing, never fabricate current DATA.
+
+### Foreground write implementation checkpoint
+
+PlaceOrders, CancelOrders, CancelSymbolOrders, AmendOrder and SetLeverage now
+retain a genuine Preflight and admit the final native serial steps as one Plan.
+Each attempt has a new explicit 20,000 ms bound, one attempt and no resend; the
+engine derives the immutable root from those declarations. Independent jobs do
+not borrow FIFO readiness. Empty native work completes through done_empty_plan.
+
+The shared journal owns all verdicts and the terminal. One conservative CodeTable
+has no undocumented refusal rows: unlisted native codes remain Unknown. Partial
+Pair acknowledgements retain only independently correlated native IDs, without
+inventing a total or failed index when the reply is incomplete. Every requested
+cancel contributes its failure, so all-failed cancellation cannot return success.
+An optional child answered with a native 400 can continue to its native sibling,
+but the final failure retains both earlier and later accepted IDs. A racing fill
+that exhausts an amendment uses the declared conditional terminal after the
+exact validated cancellation DATA.
+
+The current shared core stops on delivered 408/5xx, retires unsent suffix slots
+and returns Unknown with prior IDs. Pure native capture preserves code/message
+and exactly correlated IDs without success, Store, retry or authentication
+rights. Reconcile before resending. Adoption of PlanPolicy independent_calls to
+restore native continue_on_error/optional-child continuation is an OPEN follow-up
+when that shared policy lands; there is no venue fallback.
+
+The dispatch recipe owns the canonical instruction/body and headers. Native
+GET, single, batch and cancel proofs are byte-equal to legacy signing; a real
+CancelOrders command also carries a fixed independent Node Ed25519 vector and
+remote-only public-key sentinel through asynchronous Sign/Signed dispatch. No
+HTTP is emitted before Signed, and a duplicate receipt is inert. This proves the
+native delegated-provider path, not the SDK/browser remote adapter or admission.
+The five-second recipe freshness is the queue refresh bound within X-Window.
+
+Only a trusted opaque Options.identity can authorize managed foreground writes.
+The registry's mechanical identity=None literal does not provide admission: raw
+legacy credentials cannot substitute for a managed identity and refusal occurs
+before write I/O. Registry/SDK setup, account/startup/session presentation and
+background repair signing remain OPEN separate work. Internal automatic repair
+retains its legacy sender and response contract. Local unsupported-setting tails
+remain local; no command owner is fabricated for internal repair.
+
+Typed pre-send cancellation refusal restores optimistic state only when its
+native stream stamp is unchanged. Each job releases only its own cancel-latch
+contribution, including retirement and internal preparation failure. Late-response
+capture retains bounded operation correlation; cancelAll records the symbol,
+not an unbounded snapshot of Store IDs. Late delivery does not publish Store
+changes or another command terminal. Original four RED assertions are active;
+new controls cover missing identity, amend refusal versus a newer fill, native
+metadata/prior IDs on 408/5xx, and the real asynchronous cancel.
+
+Exact legacy inventory change: trading.rs ten occurrences become three (the
+internal repair sender and two local unsupported-setting refusals). Other
+Backpack paths remain unchanged. No exemption or inventory addition is used.
+
+Signer review tightened the implementation before readiness: managed admission
+and receive-window selection now depend only on the opaque identity and Options,
+not on legacy account credentials. The actual asynchronous cancel proof uses a
+separate venue constructed with key=None and secret=None; only non-secret market
+and order rows are copied from the native fixture. That proof originally failed
+before removing the account-credential dependency and passes after the fix.
+
+Automatic trigger repair is explicitly the legacy account path, not migrated by
+this foreground slice. Without legacy account credentials it stops before job
+creation or I/O, with an account-signing-pending notice. Existing legacy account
+fixtures retain their repair behavior. The owned ignored RED
+legacy_account_repair_must_adopt_dispatch_signing_before_account_cutover fails on
+the actual legacy sender and belongs to codex-hcmq3f's subsequent account/background
+Plan and signer adoption; it must be un-ignored in that adoption. No private
+account, automatic repair or whole-family signer readiness is claimed here.
+
+Duplicate native body fields are refused by the canonicalizer, rather than
+letting a map silently select one value. The adversarial duplicate-symbol control
+originally released a request and now refuses it before I/O.
+
+Public-data-only mode remains unable to mutate even with a trusted identity.
+Its original regression issued managed work instead of a terminal; the explicit
+mode refusal now returns NotSent before any write preparation. Identity-only
+local signing also pins the declared 5,000 ms receive window, and the repair
+cutover RED matches the exact native cancel preparation rather than unrelated
+managed polling.
+
+## Transitional SDK admission custody (owner ruling, 2026-10-24)
+
+Backpack admission uses option B, explicitly authorized by claude-ddi2il. The
+trusted registry setup supplies the managed trading identity and provider while
+retaining raw credentials ONLY for the existing unadopted account reads/private
+WS and their legacy account-repair scope. This temporarily retains venue-held
+material alongside a provider copy; it is not whole-family signer migration.
+Managed foreground writes still require the opaque identity and sign exclusively
+through the shared provider at send time. There is no raw/eager trading fallback.
+
+construction-rules dispatchSigning stays off and TS construction is unchanged.
+SDK/browser delegated signing readiness is not implied by local admission. The
+registry must register the SAME identities it gives the venue; externally supplied
+providers cannot silently fall back to a local signer. #1946 stacks on m26ps4's
+reviewed admission PR, with the scoped recorded prepareHttp/PrototypeTransport
+fixture carry. This child now integrates reviewed #1964 at 9aa317fc3ae. Its actual landing
+remains pending; this stack alone claims no SDK/browser remote readiness.
+
+REMOVE BEFORE MASTER: codex-hcmq3f owns account/WS/background repair adoption,
+which removes the retained raw fields and ends dual custody. That cutover uses
+ref-only trusted setup and enables the construction declaration only with actual
+SDK/native acceptance. No new raw-material consumer or permanent fallback is
+allowed under this transition. The remaining inventory and owned repair RED
+continue to track that obligation.

@@ -18,7 +18,7 @@ fn private_bootstrap_separates_positions_and_market_settings() {
 #[test]
 fn newer_stream_state_wins_over_inflight_rest_and_failed_reads_preserve_state() {
     let (mut e, s) = ready("disabled");
-    e.handle(2000.0, Event::WsOpened { socket: s });
+    let (s, _) = reconnect(&mut e, s, 2000.0);
     let requests = e
         .drain_actions()
         .filter_map(|a| {
@@ -155,7 +155,7 @@ fn user_event_order_objects_and_raw_arrays_remove_terminal_orders() {
 #[test]
 fn newer_authoritative_rest_closes_positions_after_partial_stream() {
     let (mut e, s) = ready("disabled");
-    e.handle(2000.0, Event::WsOpened { socket: s });
+    let (s, _) = reconnect(&mut e, s, 2000.0);
     let requests = e
         .drain_actions()
         .filter_map(|a| {
@@ -238,7 +238,7 @@ fn fill_count(frame: &[u8]) -> u32 {
 #[test]
 fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
     let (mut e, s) = ready_with_dex("disabled", true);
-    e.handle(2000.0, Event::WsOpened { socket: s });
+    let (s, _) = reconnect(&mut e, s, 2000.0);
     let requests = e
         .drain_actions()
         .filter_map(|a| {
@@ -252,25 +252,25 @@ fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
     message(
         &mut e,
         s,
-        3000.0,
+        4000.0,
         r#"{"channel":"userFills","data":{"fills":[{"coin":"xyz:FOO","side":"B","px":"50","sz":"2","time":3000,"tid":11,"oid":91,"dir":"Open Long","startPosition":"0","closedPnl":"0","fee":"0.01"}]}}"#,
     );
     let timer = e
         .drain_actions()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                (at_ms == 3350.0).then_some(timer)
+                (at_ms == 4350.0).then_some(timer)
             } else {
                 None
             }
         })
         .unwrap();
-    e.handle(3350.0, Event::TimerFired { timer });
+    e.handle(4350.0, Event::TimerFired { timer });
     let next = e
         .drain_actions()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                (at_ms == 3700.0).then_some(timer)
+                (at_ms == 4700.0).then_some(timer)
             } else {
                 None
             }
@@ -288,7 +288,7 @@ fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
         };
         reply(&mut e, &r, 200, body);
     }
-    e.handle(3700.0, Event::TimerFired { timer: next });
+    e.handle(4700.0, Event::TimerFired { timer: next });
     assert!(e.drain_actions().any(|a|matches!(a,Action::Http(r) if kind(&r)=="clearinghouseState" && r.body.as_ref().unwrap().contains("xyz"))));
 }
 #[test]
@@ -300,7 +300,7 @@ fn rest_after_cancel_trust_window_reenables_live_order_updates() {
         2000.0,
         r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","origSz":"1","sz":"0"},"status":"canceled"}]}"#,
     );
-    e.handle(40000.0, Event::WsOpened { socket: s });
+    let (s, _) = reconnect(&mut e, s, 40000.0);
     let requests = e
         .drain_actions()
         .filter_map(|a| {
@@ -318,7 +318,7 @@ fn rest_after_cancel_trust_window_reenables_live_order_updates() {
             STATE
         };
         e.handle(
-            40001.0,
+            41001.0,
             Event::HttpResponse {
                 request: r.id,
                 response: safe_cex_engine::Response {
@@ -332,7 +332,7 @@ fn rest_after_cancel_trust_window_reenables_live_order_updates() {
     message(
         &mut e,
         s,
-        40002.0,
+        41002.0,
         r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"0.5"},"status":"open"}]}"#,
     );
     assert_eq!(e.store().order("9").unwrap().remaining, 0.5);
@@ -395,7 +395,7 @@ fn delayed_hip3_state_preserves_position_after_newer_fill() {
 #[test]
 fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
     let (mut e, s) = ready("disabled");
-    e.handle(2000.0, Event::WsOpened { socket: s });
+    let (s, _) = reconnect(&mut e, s, 2000.0);
     let requests = e
         .drain_actions()
         .filter_map(|a| {
@@ -409,7 +409,7 @@ fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
     message(
         &mut e,
         s,
-        2100.0,
+        3100.0,
         r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"#,
     );
     let snapshot = r#"[{"coin":"BTC","oid":8,"side":"B","limitPx":"80","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}]"#;
@@ -420,7 +420,7 @@ fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
             STATE
         };
         e.handle(
-            2200.0,
+            3200.0,
             Event::HttpResponse {
                 request: r.id,
                 response: safe_cex_engine::Response {
@@ -436,13 +436,13 @@ fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
         .drain_actions()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                (at_ms == 2700.0).then_some(timer)
+                (at_ms == 3700.0).then_some(timer)
             } else {
                 None
             }
         })
         .expect("invalidated reconnect snapshot must retry");
-    e.handle(2700.0, Event::TimerFired { timer });
+    e.handle(3700.0, Event::TimerFired { timer });
     let r = e
         .drain_actions()
         .find_map(|a| {
@@ -454,7 +454,7 @@ fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
         })
         .unwrap();
     e.handle(
-        2800.0,
+        3800.0,
         Event::HttpResponse {
             request: r.id,
             response: safe_cex_engine::Response {
@@ -470,7 +470,7 @@ fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
 
 #[test]
 fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
-    for finished_at in [2400.0, 40_000.0] {
+    for finished_at in [3400.0, 41_000.0] {
         let (mut e, s) = ready("disabled");
         let row = r#"{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}"#;
         message(
@@ -479,7 +479,7 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
             2000.0,
             &format!(r#"{{"channel":"orderUpdates","data":[{{"order":{row},"status":"open"}}]}}"#),
         );
-        e.handle(2100.0, Event::WsOpened { socket: s });
+        let (_replacement, _) = reconnect(&mut e, s, 2100.0);
         let r = e
             .drain_actions()
             .find_map(|a| {
@@ -491,7 +491,7 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
             })
             .unwrap();
         e.handle(
-            2200.0,
+            3200.0,
             Event::HttpStart {
                 request: r.id,
                 status: 200,
@@ -499,14 +499,14 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
             },
         );
         e.handle(
-            2200.0,
+            3200.0,
             Event::HttpChunk {
                 request: r.id,
                 data: format!("[{row},").as_bytes(),
             },
         );
         e.handle(
-            2300.0,
+            3300.0,
             Event::Command(safe_cex_engine::Command::CancelOrders {
                 command: 1,
                 ids: vec!["9".into()],
@@ -522,7 +522,7 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
                 }
             })
             .unwrap();
-        e.handle(2301.0, Event::HttpResponse {
+        e.handle(3301.0, Event::HttpResponse {
         request: cancel.id,
         response: safe_cex_engine::Response {status: 200, headers: "", body: r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#},
     });
@@ -755,15 +755,22 @@ fn close_fill_missing_financial_fields_remain_absent_instead_of_becoming_zero() 
     }
 }
 
+struct ResyncSocket {
+    socket: safe_cex_engine::SocketId,
+    now: f64,
+}
+
 /// Reconnects and answers each account read by kind; returns the warnings logged.
 fn resync(
     e: &mut safe_cex_engine::Engine<safe_cex_venue_hyperliquid::Hyperliquid>,
-    s: safe_cex_engine::SocketId,
+    s: &mut ResyncSocket,
     now: f64,
     state: &str,
     orders: &str,
 ) -> Vec<String> {
-    e.handle(now, Event::WsOpened { socket: s });
+    let (replacement, at) = reconnect(e, s.socket, now.max(s.now));
+    s.socket = replacement;
+    s.now = at;
     let requests = e
         .drain_actions()
         .filter_map(|a| {
@@ -780,7 +787,17 @@ fn resync(
             "frontendOpenOrders" => orders,
             _ => "[]",
         };
-        reply(e, &r, 200, body);
+        e.handle(
+            at,
+            Event::HttpResponse {
+                request: r.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
     }
     e.drain_actions()
         .filter_map(|a| match a {
@@ -795,7 +812,11 @@ fn resync(
 
 #[test]
 fn bad_order_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
-    let (mut e, s) = ready("disabled");
+    let (mut e, socket) = ready("disabled");
+    let mut s = ResyncSocket {
+        socket,
+        now: 1000.0,
+    };
     let row = |oid: u32, coin: &str, px: &str| {
         format!(
             r#"{{"coin":"{coin}","oid":{oid},"side":"B","limitPx":"{px}","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}}"#
@@ -807,12 +828,12 @@ fn bad_order_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
         row(9, "BTC", "90"),
         row(10, "BTC", "70")
     );
-    resync(&mut e, s, 2000.0, STATE, &seeded);
+    resync(&mut e, &mut s, 2000.0, STATE, &seeded);
     assert_eq!(e.store().orders().len(), 3);
     let malformed = row(9, "BTC", "91").replace(r#""sz":"1""#, r#""sz":"bad""#);
     let logs = resync(
         &mut e,
-        s,
+        &mut s,
         3000.0,
         STATE,
         &format!(
@@ -833,7 +854,7 @@ fn bad_order_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
     );
     resync(
         &mut e,
-        s,
+        &mut s,
         4000.0,
         STATE,
         &format!("[{}]", row(8, "BTC", "81")),
@@ -844,7 +865,11 @@ fn bad_order_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
 
 #[test]
 fn malformed_order_row_without_an_id_keeps_every_stored_order() {
-    let (mut e, s) = ready("disabled");
+    let (mut e, socket) = ready("disabled");
+    let mut s = ResyncSocket {
+        socket,
+        now: 1000.0,
+    };
     let row = |oid: u32, px: &str| {
         format!(
             r#"{{"coin":"BTC","oid":{oid},"side":"B","limitPx":"{px}","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}}"#
@@ -852,14 +877,14 @@ fn malformed_order_row_without_an_id_keeps_every_stored_order() {
     };
     resync(
         &mut e,
-        s,
+        &mut s,
         2000.0,
         STATE,
         &format!("[{},{}]", row(8, "80"), row(9, "90")),
     );
     let logs = resync(
         &mut e,
-        s,
+        &mut s,
         3000.0,
         STATE,
         &format!(r#"[{},{{"coin":"BTC","oid":"bad"}}]"#, row(8, "81")),
@@ -871,7 +896,11 @@ fn malformed_order_row_without_an_id_keeps_every_stored_order() {
 
 #[test]
 fn bad_position_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
-    let (mut e, s) = ready("disabled");
+    let (mut e, socket) = ready("disabled");
+    let mut s = ResyncSocket {
+        socket,
+        now: 1000.0,
+    };
     let position = |coin: &str, szi: &str| {
         format!(
             r#"{{"position":{{"coin":"{coin}","szi":"{szi}","entryPx":"100","positionValue":"200","unrealizedPnl":"0","marginUsed":"20","leverage":{{"type":"cross","value":10}}}}}}"#
@@ -885,7 +914,7 @@ fn bad_position_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
     };
     resync(
         &mut e,
-        s,
+        &mut s,
         2000.0,
         &state(2000, 20, &[position("BTC", "2"), position("ETH", "1")]),
         "[]",
@@ -893,7 +922,7 @@ fn bad_position_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
     assert_eq!(e.store().positions().len(), 2);
     let logs = resync(
         &mut e,
-        s,
+        &mut s,
         3000.0,
         &state(3000, 40, &[position("BTC", "3"), position("ETH", "bad")]),
         "[]",
@@ -912,7 +941,7 @@ fn bad_position_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
     assert_eq!(e.store().balance().used, 40.0);
     resync(
         &mut e,
-        s,
+        &mut s,
         4000.0,
         &state(4000, 20, &[position("BTC", "3")]),
         "[]",
@@ -924,7 +953,11 @@ fn bad_position_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
 #[test]
 fn owned_position_on_a_market_gone_from_the_catalogue_keeps_its_stored_copy() {
     use safe_cex_engine::model::{MarginType, Position, PositionMode, PositionSide};
-    let (mut e, s) = ready("disabled");
+    let (mut e, socket) = ready("disabled");
+    let mut s = ResyncSocket {
+        socket,
+        now: 1000.0,
+    };
     let mut positions = e.store().positions().to_vec();
     positions.push(Position {
         id: "SOL-PERP".into(),
@@ -944,24 +977,34 @@ fn owned_position_on_a_market_gone_from_the_catalogue_keeps_its_stored_copy() {
     });
     e.store_mut().set_positions(positions);
     let state = r#"{"assetPositions":[{"position":{"coin":"SOL","szi":"3","entryPx":"20","positionValue":"90","unrealizedPnl":"10","marginUsed":"6","leverage":{"type":"cross","value":10}}},{"position":{"coin":"BTC","szi":"2","entryPx":"100","positionValue":"200","unrealizedPnl":"0","marginUsed":"20","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"26"},"time":2000}"#;
-    let logs = resync(&mut e, s, 2000.0, state, "[]");
+    let logs = resync(&mut e, &mut s, 2000.0, state, "[]");
     assert!(logs.contains(&"Hyperliquid skipped position sol on an unknown market".to_owned()));
     assert_eq!(e.store().position("SOL-PERP").unwrap().contracts, 3.0);
     assert_eq!(e.store().position("BTC-PERP").unwrap().contracts, 2.0);
     // The wallet total nets the native row PnL (10), not the stale stored copy (50).
     assert_eq!(e.store().balance().total, 990.0);
-    let logs = resync(&mut e, s, 3000.0, &state.replace("2000}", "3000}"), "[]");
+    let logs = resync(
+        &mut e,
+        &mut s,
+        3000.0,
+        &state.replace("2000}", "3000}"),
+        "[]",
+    );
     assert!(!logs.iter().any(|m| m.contains("unknown market")));
     assert_eq!(e.store().position("SOL-PERP").unwrap().contracts, 3.0);
 }
 
 #[test]
 fn malformed_position_row_holds_the_wallet_total() {
-    let (mut e, s) = ready("disabled");
+    let (mut e, socket) = ready("disabled");
+    let mut s = ResyncSocket {
+        socket,
+        now: 1000.0,
+    };
     assert_eq!(e.store().balance().total, 1000.0);
     resync(
         &mut e,
-        s,
+        &mut s,
         2000.0,
         r#"{"assetPositions":[{"position":{"coin":"BTC","szi":"2","entryPx":"100","positionValue":"260","unrealizedPnl":"30","marginUsed":"20","leverage":{"type":"cross","value":10}}},{"position":{"coin":"ETH","szi":"bad"}}],"marginSummary":{"accountValue":"1100","totalMarginUsed":"40"},"time":2000}"#,
         "[]",

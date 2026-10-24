@@ -988,7 +988,8 @@ fn a_slow_listen_key_post_is_not_a_connect_timeout() {
     h.event(Event::WsClosed { socket, code: 1006 });
     h.advance(500.0);
     assert!(h.has_request("/fapi/v1/listenKey"));
-    h.advance(30_000.0);
+    // Slower than the 10 s connect timeout, within the 20 s session bound.
+    h.advance(15_000.0);
     h.respond("/fapi/v1/listenKey", 200, r#"{"listenKey":"slow"}"#);
     let pending = h.socket("/private/ws").unwrap();
     assert_ne!(pending, socket);
@@ -1237,6 +1238,11 @@ fn advance_with_account_replies(h: &mut Harness, ms: f64) {
         h.advance((until - h.now).min(1_000.0));
         while h.has_request("/fapi/v3/account") {
             h.respond("/fapi/v3/account", 200, ACCOUNT);
+        }
+        // A user-stream reconnect during the wait must finish within its
+        // 20 s listenKey session bound, like the account siblings above.
+        while h.has_request("/fapi/v1/listenKey") {
+            h.respond("/fapi/v1/listenKey", 200, r#"{"listenKey":"renewed"}"#);
         }
     }
 }
@@ -1595,5 +1601,58 @@ fn exhausted_snapshot_authority_keeps_stream_writes_and_never_issues_an_unfenced
         assert!(!h.has_request("/fapi/v1/openOrders"));
         assert!(!h.has_request("/fapi/v1/openAlgoOrders"));
         assert!(h.engine.store().order("99").is_some());
+    }
+}
+
+fn listen_key_requests(h: &Harness) -> Vec<&safe_cex_engine::HttpRequest> {
+    h.requests
+        .iter()
+        .filter(|request| request.url.contains("/fapi/v1/listenKey"))
+        .collect()
+}
+
+#[test]
+fn a_hung_listen_key_create_is_bounded_and_backs_off() {
+    let mut h = ready();
+    let socket = h.socket("/private/ws").unwrap();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    while listen_key_requests(&h).is_empty() {
+        h.advance(1.0);
+    }
+    assert_eq!(listen_key_requests(&h).len(), 1);
+    h.advance(19_999.0);
+    assert!(h.errors.is_empty(), "{:?}", h.errors);
+    h.advance(1.0);
+    assert_eq!(
+        h.errors,
+        ["Binance user data stream unavailable: network error: HTTP request timed out"]
+    );
+    h.take("/fapi/v1/listenKey");
+    h.advance(5_000.0);
+    assert_eq!(listen_key_requests(&h).len(), 1, "one create after backoff");
+}
+
+#[test]
+fn listen_key_requests_present_only_the_key_on_livenet_and_sign_on_testnet() {
+    for testnet in [false, true] {
+        let mut h = Harness::started(Options {
+            testnet,
+            ..credentials()
+        });
+        h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+        let create = listen_key_requests(&h)
+            .first()
+            .copied()
+            .cloned()
+            .expect("listenKey create after the catalogue");
+        assert_eq!(create.method, Method::Post);
+        assert!(
+            create
+                .headers
+                .iter()
+                .any(|(name, value)| *name == "X-MBX-APIKEY" && value == "api-key")
+        );
+        assert_eq!(create.url.contains("signature="), testnet, "{}", create.url);
+        assert_eq!(create.url.contains("timestamp="), testnet, "{}", create.url);
     }
 }

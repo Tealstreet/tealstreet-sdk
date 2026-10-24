@@ -458,7 +458,11 @@ pub fn decode_command(json: &str) -> Result<Command, serde_json::Error> {
 /// Host configuration is outside the command/result ID domain.
 #[derive(Debug, PartialEq)]
 pub enum HostInput {
-    Command(Command),
+    /// A command and the caller's wait for its reply, when the host sent one.
+    Command {
+        command: Command,
+        timeout_ms: Option<u32>,
+    },
     PublicFeedUpdate(crate::PublicFeedUpdate),
     /// Factor on each venue poll's own cadence; infinity pauses polling. The
     /// optional ceiling is the host's absolute bound on slowed polls.
@@ -512,10 +516,16 @@ pub fn decode_subscription(json: &str) -> Result<Option<Command>, serde_json::Er
 // Keep the large command variant inlined through the host boundary as well.
 #[inline(always)]
 pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
+    // A present wait must hold an integer; `null` is not absence.
+    fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {
+        u64::deserialize(deserializer).map(Some)
+    }
     #[derive(Deserialize)]
     struct Header<'a> {
         #[serde(borrow)]
         op: std::borrow::Cow<'a, str>,
+        #[serde(default, rename = "timeoutMs", deserialize_with = "present")]
+        timeout_ms: Option<u64>,
     }
     let header: Header<'_> = serde_json::from_str(json)?;
     if header.op == "publicFeedUpdate" {
@@ -575,7 +585,21 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
             ceiling_ms: control.ceiling,
         });
     }
-    decode_command(json).map(HostInput::Command)
+    // The envelope's optional caller wait: absent is `None`; a value outside
+    // 1..=MAX_COMMAND_WAIT_MS is an error.
+    let timeout_ms = match header.timeout_ms {
+        None => None,
+        Some(ms) if (1..=u64::from(crate::MAX_COMMAND_WAIT_MS)).contains(&ms) => Some(ms as u32),
+        Some(_) => {
+            return Err(serde::de::Error::custom(
+                "timeoutMs must be a positive integer no greater than 2147483647",
+            ));
+        }
+    };
+    decode_command(json).map(|command| HostInput::Command {
+        command,
+        timeout_ms,
+    })
 }
 
 #[cfg(test)]
@@ -743,7 +767,10 @@ mod tests {
         assert_eq!(decode_command(json).unwrap(), expected);
         assert_eq!(
             decode_host_input(json).unwrap(),
-            HostInput::Command(expected)
+            HostInput::Command {
+                command: expected,
+                timeout_ms: None
+            }
         );
         assert!(decode_command(r#"{"op":"fetchMaxLeverage","command":82}"#).is_err());
     }
@@ -947,12 +974,15 @@ mod tests {
                 r#"{"op":"setLeverage","command":37,"symbol":"BTCUSDT","leverage":5}"#
             )
             .unwrap(),
-            HostInput::Command(Command::SetLeverage {
-                command: 37,
-                symbol: "BTCUSDT".into(),
-                leverage: 5.0,
-                side: None,
-            })
+            HostInput::Command {
+                command: Command::SetLeverage {
+                    command: 37,
+                    symbol: "BTCUSDT".into(),
+                    leverage: 5.0,
+                    side: None,
+                },
+                timeout_ms: None
+            }
         );
         assert!(decode_host_input(r#"{"op":"setLeverage","command":"37"}"#).is_err());
         assert!(decode_host_input(r#"{"op":"unknown"}"#).is_err());
