@@ -1191,6 +1191,7 @@ mod tests {
                 format!("0X{}", crate::hex(secret.as_bytes()).to_uppercase()),
             ),
             ("pem", pem("PRIVATE KEY", &base64)),
+            ("base58", bs58::encode(secret.as_bytes()).into_string()),
         ] {
             let (signer, identities) = LocalSigner::from_json(
                 serde_json::json!({
@@ -1320,6 +1321,13 @@ mod tests {
             ("hex", "0x123".to_owned()),
             ("hex", "0x0x00".to_owned()),
             ("hex", "x00".to_owned()),
+            // Base58 excludes 0, O, I and l; an empty decode is no key.
+            ("base58", "0OIl".to_owned()),
+            ("base58", "".to_owned()),
+            (
+                "base58",
+                "ed25519:11111111111111111111111111111111".to_owned(),
+            ),
             (
                 "pem",
                 pem("PRIVATE KEY", "AQ==").replace("END PRIVATE KEY", "END EC PRIVATE KEY"),
