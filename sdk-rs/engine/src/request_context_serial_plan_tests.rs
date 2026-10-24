@@ -12,6 +12,13 @@ mod serial_plans {
 
     const STEP_MS: f64 = 100.;
 
+    /// A distinct read-role key, as Bitget signs in-job GETs.
+    fn read_key() -> crate::request_context::Credential {
+        crate::request_context::Credential {
+            reference: crate::signing::KeyRef("read-fixture".into()),
+            ..credential()
+        }
+    }
     fn credential() -> crate::request_context::Credential {
         crate::request_context::Credential {
             slot: crate::CredentialSlot::Primary,
@@ -103,6 +110,8 @@ mod serial_plans {
         on_refused: OnRefusedContinue,
         delay_ms: Option<u32>,
         retry_failed_reads: bool,
+        read_key: bool,
+        read_signers: Vec<Option<String>>,
         forge_resend: bool,
         read_failures: u32,
         probe_custody: bool,
@@ -199,7 +208,7 @@ mod serial_plans {
                 } else {
                     PreflightPurpose::WriteAfterReads
                 },
-                read_credential: None,
+                read_credential: self.read_key.then(read_key),
                 write_credential: (!self.read_preflight).then(credential),
             };
             let Ok(preflight) = cx.begin_preflight(policy) else {
@@ -261,8 +270,12 @@ mod serial_plans {
                 .push(cx.io.request_contexts.plan_context_storage());
             #[cfg(feature = "order-locks")]
             self.lock_held.push(cx.io.order_locks.contains(7));
-            // Every serial call carries the admitted credential, Reads included.
-            queue(cx, context, true);
+            self.read_signers.extend(
+                (call.operation == Operation::Read)
+                    .then(|| context.credential().map(|c| c.reference.0.clone())),
+            );
+            let signed = context.credential().is_some();
+            queue(cx, context, signed);
         }
         fn probe(&mut self, cx: &mut Cx<'_, Context>, name: &'static str, context: &Context) {
             let (Some(plan), Some(slot)) = (self.plan.clone(), self.slot.clone()) else {
@@ -1642,11 +1655,29 @@ mod serial_plans {
     }
 
     #[test]
+    fn serial_17_read_calls_sign_with_the_read_role_or_go_unsigned() {
+        for (read_key, signer) in [(true, Some("read-fixture".to_owned())), (false, None)] {
+            let mut e = engine(Serial {
+                total: 3,
+                read_key,
+                next: VecDeque::from([read(), mutation()]),
+                ..Default::default()
+            });
+            command(&mut e, 0., None);
+            admitted(&e);
+            let (actions, _) = drive(&mut e, 0., ["ok:a", "read", "ok:b"]);
+            assert_eq!(done(&actions).as_deref(), Some("[a,b]"));
+            assert_eq!(e.venue.read_signers, [signer], "never the write key");
+        }
+    }
+
+    #[test]
     fn serial_17_a_provider_refused_read_cannot_retry() {
         let mut e = engine(Serial {
             total: 2,
             first: Some(read()),
             retry_failed_reads: true,
+            read_key: true,
             ..Default::default()
         });
         command(&mut e, 0., None);

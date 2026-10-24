@@ -85,6 +85,10 @@ impl<P> Cx<'_, P> {
   same owner is State. A stale handle (expired, released, or a reused command
   generation) is Revoked and spends nothing. Release after expiry, and expiry
   after release, are no-ops for the loser.
+- **Stops without an engine entry.** Shutdown and caller cancel have no
+  engine entry point today (serial Plan RED19 covers revoke, provider refusal
+  and Session only). Whoever adds those entry points owns their controls for
+  parked owners too.
 - **Serial Plan rules.** A parked serial Plan has no live call and keeps its
   one reserved Context. The wait uses the Plan's one timer, so it excludes a
   delayed continuation. The RED19 stops (revoke, Session retirement,

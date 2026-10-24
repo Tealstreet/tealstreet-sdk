@@ -1,8 +1,8 @@
 //! Streamed serial Plans: one live call, continued from exact custody, with no
 //! declared length and no root wall-clock.
 use super::*;
-use crate::request_context::RetryPolicy;
 use crate::request_context::plan::{CallBound, RetryWindow, SerialCall, SerialPolicy, StepBound};
+use crate::request_context::{Credential, RetryPolicy};
 
 /// A serial root never expires by clock; it ends through custody or a stop.
 /// The Plan timer is armed only for a delayed continuation, never at ROOT.
@@ -13,11 +13,21 @@ pub(super) const JOURNAL_ATTEMPTS: usize = 2;
 pub(super) struct Serial {
     pub(super) refusals_complete: bool,
     call: SerialCall,
+    /// Read calls sign with the Preflight's read role (or go unsigned), never
+    /// with the Plan's write credential.
+    read: Option<Credential>,
 }
 
 impl Serial {
-    pub(super) fn terms(&self) -> (Operation, RetryPolicy) {
-        (self.call.operation, retry_policy(self.call))
+    pub(super) fn terms(
+        &self,
+        write: &Option<Credential>,
+    ) -> (Operation, RetryPolicy, Option<Credential>) {
+        let credential = match self.call.operation {
+            Operation::Read => self.read.clone(),
+            Operation::Mutation => write.clone(),
+        };
+        (self.call.operation, retry_policy(self.call), credential)
     }
 }
 
@@ -73,6 +83,7 @@ impl<P> Cx<'_, P> {
             });
         }
         validate_call(first)?;
+        let (intent, _) = self.preflight_plan_origin(preflight)?;
         if policy
             .pacing
             .is_some_and(|pacing| pacing.minimum_gap_ms != 0.)
@@ -108,6 +119,7 @@ impl<P> Cx<'_, P> {
             Some(Serial {
                 refusals_complete: policy.refusals_complete,
                 call: first,
+                read: intent.read_credential,
             }),
         )?;
         let slot = self

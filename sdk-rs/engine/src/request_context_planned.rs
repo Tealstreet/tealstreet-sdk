@@ -955,17 +955,21 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         let window = entry.terms.window(self.now, plan.deadline())?;
-        let (operation, retry) = body
-            .serial
-            .as_ref()
-            .map_or((body.policy.operation, body.policy.retry), |serial| {
-                serial.terms()
-            });
+        let (operation, retry, credential) = body.serial.as_ref().map_or_else(
+            || {
+                (
+                    body.policy.operation,
+                    body.policy.retry,
+                    body.policy.credential.clone(),
+                )
+            },
+            |serial| serial.terms(&body.policy.credential),
+        );
         let mut context = Context::new(
             plan.owner(),
             entry.logical,
             operation,
-            body.policy.credential.clone(),
+            credential,
             self.now,
             window.deadline(),
             body.policy.pacing,

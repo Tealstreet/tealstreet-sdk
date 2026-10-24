@@ -391,14 +391,20 @@ fails at an assertion.
   only while their text fits 64 KB. `refusal_count()` stays exact. A failure
   projection with dropped refusals carries
   `[truncated: N more refusals]`.
-- **Read calls are signed** under the Plan's admitted credential, through
-  `request_signed_managed`. A credentialed Context refuses `request_managed`.
-  A consumer needing an unsigned public read inside the chain must ask.
+- **Read calls sign with the Preflight's read role.** A Read call's Context
+  carries the WriteAfterReads Preflight's `read_credential`, never the
+  Plan's write credential. Bitget signs in-job GETs with its read key. With no
+  read credential, the Read is unsigned and goes through `request_managed`.
+  Read-first Plans are admitted (RED17 read retries start with a Read).
 - **Stops.** Credential and provider refusal (RED19a) and Session retirement
   (RED19b) are covered. There is no engine entry today for "engine shutdown"
   or "caller cancel", so neither has a control; caller-wait expiry is RED18.
   Re-checking uncertainty when a delayed continuation fires is moot: no call
   is live during the delay, so no new fact can arrive.
+- **Carried gaps.** The first consumer that adds an engine entry for
+  shutdown or caller cancel owns those RED19 controls. The first nonce-signing
+  consumer adds the nonce comparison to its resend REDs; the fixture compares
+  signing stamps only. The PR body and that consumer's CALLERS record both.
 - **Fixture edits from the frozen REDs** (no assertion weakened):
   - commands are BTCUSD PlaceOrders with the order-lock guards on, since a
     balance read takes no lock;

@@ -191,8 +191,13 @@ impl EvidenceBudget {
     #[cfg(feature = "http-plans")]
     pub(super) fn release_identities(&mut self, ids: &[String]) {
         for id in ids {
-            self.ids -= 1;
-            self.id_bytes -= std::mem::size_of::<String>() + id.len();
+            self.ids = self
+                .ids
+                .checked_sub(1)
+                .expect("released identities were admitted");
+            self.id_bytes = (self.id_bytes)
+                .checked_sub(std::mem::size_of::<String>() + id.len())
+                .expect("released identity bytes were admitted");
         }
     }
 
