@@ -226,10 +226,10 @@ retries as well as signature refusals, and exact native retry exclusions remain.
 Source anchors, absence of DELETE, local listen retirement, existing error mapping
 and the keyless unsigned signature-refusal reissue are recorded. Registry recvWindow
 normalization was independently rechecked at registry/src/lib.rs:1140-1144.
-The overseer assigned the shared receipt-floor prerequisite to claude-m26ps4.
-Its proposed StampFloor from SigningRelease and DispatchContext::stamp_after is
-consumer-fit CLEAR in direction only; no reviewed source pin exists. The native
-negative-to-zero initial stamp boundary remains an explicit shared-fit question.
+The receipt-floor prerequisite is #2024, owned by codex-9czdjh after the
+maintainer's handoff. claude-m26ps4 supplied the original design and is reviewer
+only; source b9e358ba003 and the authority-doc correction 3e45ce19dba are CLEAR.
+The negative-to-zero boundary is resolved by the reviewed stamp_after contract.
 
 ## Executed original native checkpoint
 
@@ -268,7 +268,7 @@ fabricated-error-string fixture with genuine codec events and strengthening the
 Unknown terminal, exact diagnostic and retry interleavings. HMAC owner review
 of664d8ac0032 is CLEAR, with shared StampFloor source review still separate.
 
-The receipt-floor prerequisite is owned by the credential-core lane. Proposed
+The shared prerequisite is #2024 (codex-9czdjh owns it; claude-m26ps4 reviews it).
 StampFloor is minted only by genuine SigningRelease; stamp_after(floor) applies
 max(0,stamp_ms(),previousReleasedStamp+1), with safe-integer overflow refusal.
 None means max(0,stamp_ms()), preserving the native negative-to-zero boundary
