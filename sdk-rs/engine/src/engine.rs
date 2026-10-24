@@ -1522,8 +1522,9 @@ struct Io<P> {
     #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
     managed_http: crate::IdMap<RequestId, http_lifecycle::Managed>,
-    /// Managed requests bound to each Session generation's Bearer.
-    bearer_bound: HashMap<u64, Vec<RequestId>>,
+    /// Managed requests bound to each Session generation's Bearer. At most a
+    /// few live Sessions, so a scan beats another map type in every build.
+    bearer_bound: Vec<(u64, Vec<RequestId>)>,
     /// Bound preparations a Session retire fenced, failed after the callback.
     bearer_fenced: Vec<crate::request_context::Preparation>,
     http_pacing: crate::request_context::SendPacing,
@@ -1636,7 +1637,7 @@ impl<P> Default for Io<P> {
             http_responses: Default::default(),
             http_write_revision: 0,
             managed_http: Default::default(),
-            bearer_bound: HashMap::new(),
+            bearer_bound: Vec::new(),
             bearer_fenced: Vec::new(),
             http_pacing: Default::default(),
             entropy: None,

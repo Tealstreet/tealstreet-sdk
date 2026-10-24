@@ -533,7 +533,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<Vec<(Context, P, VenueError)>, Error> {
         self.session_scope()?;
         let generation = self.io.request_contexts.validate_session(session)?;
-        let bound = self.io.bearer_bound.get(&generation).map_or(0, Vec::len);
+        let bound = self.io.bearer_bound_len(generation);
         if self.io.bearer_fenced.try_reserve(bound).is_err() {
             return Err(Error::Capacity);
         }

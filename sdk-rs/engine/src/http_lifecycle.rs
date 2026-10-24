@@ -475,12 +475,10 @@ impl<P> Cx<'_, P> {
                 waiting_route: None,
             },
         );
-        if let Some(generation) = bearer {
-            self.io
-                .bearer_bound
-                .entry(generation)
-                .or_default()
-                .push(request);
+        if let Some(generation) = bearer
+            && let Some(bound) = self.io.bearer_bound_mut(generation)
+        {
+            bound.push(request);
         }
         self.io.pending.insert(
             request,
@@ -637,31 +635,49 @@ impl<P> Io<P> {
         }
     }
 
+    fn bearer_bound_mut(&mut self, generation: u64) -> Option<&mut Vec<RequestId>> {
+        self.bearer_bound
+            .iter_mut()
+            .find(|(bound, _)| *bound == generation)
+            .map(|(_, requests)| requests)
+    }
+
+    pub(super) fn bearer_bound_len(&self, generation: u64) -> usize {
+        self.bearer_bound
+            .iter()
+            .find(|(bound, _)| *bound == generation)
+            .map_or(0, |(_, requests)| requests.len())
+    }
+
     fn reserve_bearer_bound(&mut self, generation: u64) -> Result<(), Error> {
-        self.bearer_bound
-            .try_reserve(1)
-            .map_err(|_| Error::Capacity)?;
-        self.bearer_bound
-            .entry(generation)
-            .or_default()
+        if self.bearer_bound_mut(generation).is_none() {
+            self.bearer_bound
+                .try_reserve(1)
+                .map_err(|_| Error::Capacity)?;
+            self.bearer_bound.push((generation, Vec::new()));
+        }
+        self.bearer_bound_mut(generation)
+            .expect("reserved above")
             .try_reserve(1)
             .map_err(|_| Error::Capacity)
     }
 
     fn drop_empty_bearer_bound(&mut self, generation: u64) {
-        if self
-            .bearer_bound
-            .get(&generation)
-            .is_some_and(Vec::is_empty)
-        {
-            self.bearer_bound.remove(&generation);
-        }
+        self.bearer_bound
+            .retain(|(bound, requests)| *bound != generation || !requests.is_empty());
     }
 
     /// Queue every unreleased packet bound to a retired generation for a typed
     /// failure after the current callback; released packets still deliver.
     pub(super) fn fence_bearer_generation(&mut self, generation: u64) {
-        for request in self.bearer_bound.remove(&generation).unwrap_or_default() {
+        let Some(index) = self
+            .bearer_bound
+            .iter()
+            .position(|(bound, _)| *bound == generation)
+        else {
+            return;
+        };
+        for request in self.bearer_bound.swap_remove(index).1 {
             if let Some(managed) = self.managed_http.get(&request)
                 && managed.lifecycle.release().is_none()
             {
@@ -677,12 +693,10 @@ impl<P> Io<P> {
     ) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
         if let Some(bearer) = managed.bearer
-            && let Some(bound) = self.bearer_bound.get_mut(&bearer.generation)
+            && let Some(bound) = self.bearer_bound_mut(bearer.generation)
         {
             bound.retain(|id| *id != request);
-            if bound.is_empty() {
-                self.bearer_bound.remove(&bearer.generation);
-            }
+            self.drop_empty_bearer_bound(bearer.generation);
         }
         #[cfg(feature = "http-mutation-barriers")]
         if managed.group.is_some() {
