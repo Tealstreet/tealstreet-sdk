@@ -3,6 +3,7 @@ use super::{
     account::{Kind, order_kind},
 };
 use safe_cex_engine::history::{Completion, HistoryRows};
+use safe_cex_engine::request_context::Operation;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Outcome, Query, VenueError, model::*, num,
 };
@@ -365,7 +366,7 @@ impl KrakenSpot {
         match command {
             Command::PlaceOrders { command, orders } => match self.prepare_batch(cx, orders) {
                 Ok(steps) => self.enqueue(cx, *command, steps, false),
-                Err(e) => cx.fail(*command, not_sent(e)),
+                Err(e) => crate::public_context::local(cx, Operation::Mutation, Err(not_sent(e))),
             },
             Command::AmendOrder {
                 command,
@@ -374,11 +375,15 @@ impl KrakenSpot {
                 amount,
             } => match self.amend(cx, id, *price, *amount) {
                 Ok(s) => self.enqueue(cx, *command, VecDeque::from([s]), false),
-                Err(e) => cx.fail(*command, not_sent(e)),
+                Err(e) => crate::public_context::local(cx, Operation::Mutation, Err(not_sent(e))),
             },
             Command::CancelOrders { command, ids } => {
                 if ids.iter().any(String::is_empty) {
-                    cx.fail(*command, not_sent("Kraken Spot empty cancel identity"))
+                    crate::public_context::local(
+                        cx,
+                        Operation::Mutation,
+                        Err(not_sent("Kraken Spot empty cancel identity")),
+                    )
                 } else {
                     self.enqueue(
                         cx,
@@ -392,7 +397,11 @@ impl KrakenSpot {
             }
             Command::CancelOrdersWithSymbols { command, orders } => {
                 if orders.iter().any(|o| o.id.is_empty()) {
-                    cx.fail(*command, not_sent("Kraken Spot empty cancel identity"))
+                    crate::public_context::local(
+                        cx,
+                        Operation::Mutation,
+                        Err(not_sent("Kraken Spot empty cancel identity")),
+                    )
                 } else {
                     self.enqueue(
                         cx,
@@ -417,20 +426,33 @@ impl KrakenSpot {
             }
             // FetchAccount is refused by the engine (AccountLookup::Unsupported).
             Command::FetchAccount { .. } => {}
-            Command::FetchOrderBook { command, .. } => cx.fail(
-                *command,
-                "Kraken Spot order book snapshots use subscriptions",
+            Command::FetchOrderBook { .. } => crate::public_context::local(
+                cx,
+                Operation::Read,
+                Err("Kraken Spot order book snapshots use subscriptions".into()),
             ),
-            Command::FetchLeverage { command, .. } => cx.done(*command, "null".into()),
-            Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. }
-            | Command::FetchStpMode { command }
-            | Command::SetStpMode { command, .. } => cx.fail(
-                *command,
-                not_sent("Kraken Spot does not support this account setting")
-                    .kind(ErrorKind::Unsupported),
-            ),
+            Command::FetchLeverage { .. } => {
+                crate::public_context::local(cx, Operation::Read, Ok("null".into()))
+            }
+            command @ (Command::SetLeverage { .. }
+            | Command::SetMarginType { .. }
+            | Command::SetPositionMode { .. }
+            | Command::FetchStpMode { .. }
+            | Command::SetStpMode { .. }) => {
+                let operation = if matches!(command, Command::FetchStpMode { .. }) {
+                    Operation::Read
+                } else {
+                    Operation::Mutation
+                };
+                crate::public_context::local(
+                    cx,
+                    operation,
+                    Err(
+                        not_sent("Kraken Spot does not support this account setting")
+                            .kind(ErrorKind::Unsupported),
+                    ),
+                );
+            }
             Command::Query { command, query } => {
                 let mut completion = Completion::new(*command);
                 match query {

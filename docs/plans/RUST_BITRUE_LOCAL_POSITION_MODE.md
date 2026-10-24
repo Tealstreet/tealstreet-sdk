@@ -64,3 +64,12 @@ REDs (command-owner capacity and sub-ms receipt), plus five working controls.
 The duplicate is an existing Engine diagnostic/owner-preservation control,
 not a migration RED. No shared API compilation failure is counted as evidence.
 The same assertions are retained after the single direct source substitution.
+
+
+## Verification and integration
+
+Source after unused-binding cleanup passes all 185 Bitrue native tests and seven
+optional-feature-off controls, strict Clippy and fmt. Original tests remain
+byte-identical to `7e30964b816`; two assertion REDs now pass. Actual #1995/#2000
+landing `59f50e4f37b` is genuinely integrated, keeping all incoming source/maps.
+Only the same Bitrue singleton is pruned. Full CI remains the merge gate.
