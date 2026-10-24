@@ -69,3 +69,25 @@ disclose suffixes gated by the first capacity or clock assertion.
 Commit plan before compiling originals; independent native and core CLEAR are
 required before source. Scoped Cargo uses CARGO_BUILD_JOBS=4 sequentially. Only
 intended freeze heads are pushed, with one PR Rust run and no duplicate dispatch.
+
+
+## Original execution checkpoint
+
+The new target compiles and executes18 controls:8 intended assertion REDs and
+10 GREEN, zero ignored. Four capacity cases fail at native kind None versus
+shared Internal; four NaN external-entry cases fail at None versus InvalidInput.
+No fixture/setup/missing-method failure is counted. Recovery and255-survivor
+suffixes remain gated after the first capacity assertion.
+
+Native controls independently prove all four generic commands reach GRVT and
+retain exact raw text with no kind, outcome, venue code or hint, including both
+Mutation cases. Configured/public-only variants keep this metadata and no I/O
+or Store effects. Checked zero-wait and duplicates preserve original ownership.
+Symbol-aware amendment is refused before venue entry; a subsequent ordinary
+Read proves forwarding is wired. Every one of the nine dead-group variants
+reaches its earlier native handler and never emits the private-phase diagnostic.
+
+The OPEN Mutation metadata gate is confirmed by execution, not hypothetical:
+CancelOrdersWithSymbols and SetStpMode today have outcome None. Shared admitted
+Mutation completion projects NotSent. No production change is authorized until
+the core owner and overseer settle this contract; Reads have no such mismatch.
