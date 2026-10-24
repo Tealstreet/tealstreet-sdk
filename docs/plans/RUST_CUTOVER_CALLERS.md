@@ -6559,6 +6559,33 @@ outcome. Both Lighter and Robinhood, on mainnet/testnet, keep the same contract.
 Remote history requests, pagination, authentication and byte-level query/codec
 behavior are unchanged; this slice issues no remote-fallthrough Context.
 
+## GRVT synchronous history Read custody
+
+Seven native local history refusals retain their original validation order and
+error messages: unsupported income, missing session, unknown market, invalid
+bounds, range/empty order ID, client-ID syntax and missing subaccount. Publication
+now requires a genuine shared Read root. Clock/capacity rejection produces one
+typed terminal without a financial outcome. Revoked entry and live duplicate IDs
+preserve the existing owner without a second terminal. Successful local admission
+keeps the original untyped native error. Both networks preserve the same behavior.
+Remote history queries, session setup, headers, paging, completion and codecs
+remain unchanged. This slice issues no Context on remote fallthrough.
+
+## KuCoin synchronous command refusal admission
+
+Eight local futures/Spot refusal sites now acquire their genuine shared command
+owner before publishing the native error. Capacity or invalid-entry refusal can
+therefore supersede that error; duplicates cannot replace or complete another
+owner. Read admission failures carry no write outcome, while Mutation admission
+failures are NotSent. Free-capacity native error text, kind, outcome and validation
+order remain unchanged, including Unsupported/NotSent on Spot's unsupported reads.
+
+No local refusal sends HTTP or uses the signing provider. Spot placement building
+still consumes native UUID entropy before some credential/build errors; supplied
+IDs and later batch errors keep their original order. Valid private/public wire
+paths stay legacy, and KCS steady public events gain no admission work. Successful
+keyless fixed settings remain held for the shared local-setting success seam.
+
 ## KuCoin Spot fixed-setting local success
 
 SetLeverage still ignores the requested value and returns `[]` after storing

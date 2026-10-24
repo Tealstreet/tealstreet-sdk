@@ -1481,6 +1481,24 @@ Lighter/Robinhood deployments, duplicate custody, repeated immediate completion
 and saturated remote byte/schema controls remain covered. All19 focused tests
 PASS after original4GREEN/15RED. No shared policy, timer, wrapper or scanner change.
 
+### GRVT local history Read evidence
+
+Seven capacity controls use256 genuine retained Read peers. Invalid-clock,
+retirement/reuse, duplicate-owner and2800 immediate-terminal controls accompany
+native precision/error-precedence checks on both deployments. Saturated public
+trades retains exact legacy POST route, headers, body and nonempty output schema.
+All19 focused tests pass after15 original assertion failures. Existing source
+outside the seven branches, held fixtures and foreign inventory stay unchanged.
+
+## KuCoin refusal admission controls
+
+Ten original assertion REDs cover eight lexical local refusals, including all
+three Spot unsupported variants. They pass after admission conversion, alongside
+native error/credential ordering, UUID entropy, Store preservation and public
+wire controls. Duplicate ownership and more than 256 fixed-clock reuses pin
+retirement; saturated-registry valid private wire controls pin unchanged signed
+fallthrough. The isolated suite contains 18 executed controls, with no ignores.
+
 ## KuCoin Spot fixed-setting admission evidence
 
 Ten native LocalSetting controls cover six original capacity/expired-wait REDs,
