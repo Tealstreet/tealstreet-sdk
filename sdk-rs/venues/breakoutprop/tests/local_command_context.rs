@@ -47,7 +47,7 @@ fn command(case: Case) -> Command {
                 Interval::M1
             },
             limit: Some(1),
-            from_ms: matches!(case, Case::CandleRange).then_some(-1.),
+            from_ms: matches!(case, Case::CandleRange).then_some(f64::INFINITY),
             to_ms: None,
         },
         Case::Leverage => Command::FetchLeverage {
@@ -248,4 +248,31 @@ fn unsupported_capabilities_still_refuse_before_native_entry() {
         assert_eq!(error.kind, None);
         assert_eq!(error.outcome, None);
     }
+}
+
+#[test]
+fn native_negative_candle_time_keeps_the_physical_login_path() {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(BreakoutProp::new(Options {
+        key: "example-user".into(),
+        secret: "example-password".into(),
+        public_data_only: true,
+        ..Options::default()
+    }));
+    engine.handle(
+        1000.,
+        Event::Command(Command::FetchCandles {
+            command: 91,
+            symbol: "ETHUSD".into(),
+            interval: Interval::M1,
+            limit: None,
+            from_ms: Some(-1.),
+            to_ms: None,
+        }),
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(actions.iter().any(|action| matches!(action, Action::Http(request) if request.url.ends_with("/login") && request.method == safe_cex_engine::Method::Post)));
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandFailed { .. }) | Action::Notice(Notice::CommandDone { .. })
+    )));
 }

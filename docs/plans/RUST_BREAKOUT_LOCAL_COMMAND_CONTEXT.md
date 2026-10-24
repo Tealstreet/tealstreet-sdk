@@ -87,3 +87,15 @@ all selection counts. Run only scoped changed crate/test Cargo checks with
 CARGO_BUILD_JOBS=4, one local build at a time, plus fmt/bans/ratchets. Independent
 source/caller/map review and fresh Rust/family WASM size/performance remain gates
 before READY. No CI/merge or whole-family/session custody claim from this plan.
+
+
+## Fixture corrections before the original receipt
+
+The first compile used a nonexistent public Store::settings getter; this is
+excluded from RED evidence. Existing setting/market getters replace it without
+adding any engine API. The first native range fixture used -1ms, which DXtrade
+accepts as an ISO timestamp: it reached legacy login instead of the intended
+local validation. The corrected case uses an infinite bound to exercise native
+iso_time refusal. A separate passing control requires the real physical login
+path for -1ms, pinning that no negative-time restriction may be introduced.
+No production or inventory change accompanies either fixture correction.
