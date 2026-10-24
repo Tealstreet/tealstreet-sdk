@@ -2005,10 +2005,17 @@ fn cancel_orders_with_symbols_is_refused_not_left_open() {
                 symbol: "BTCUSDT".into(),
             }],
         });
-        assert!(
-            h.result(130).is_some_and(|r| r.is_err()),
-            "{variant:?}: {:?}",
-            h.result(130)
+        let failure = h.notices.iter().find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 130,
+                error,
+            } => Some(error),
+            _ => None,
+        });
+        assert_eq!(
+            failure.and_then(|error| error.kind),
+            Some(safe_cex_engine::ErrorKind::Unsupported),
+            "{variant:?}: {failure:?}"
         );
         assert_eq!(
             h.outcomes,

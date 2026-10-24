@@ -432,7 +432,7 @@ impl BybitLinear {
                 retry: RetryPolicy::Never,
             };
             if let Ok(root) = cx.admit_http_command(policy) {
-                let refusal = not_sent("Bybit cancels orders by id; use cancelOrders")
+                let refusal = not_sent("Bybit has no symbol-qualified cancel; use cancelOrders")
                     .kind(ErrorKind::Unsupported);
                 let _ = cx.fail_context(&root, refusal);
             }
