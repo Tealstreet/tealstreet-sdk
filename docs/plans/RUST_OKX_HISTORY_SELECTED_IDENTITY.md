@@ -1,7 +1,8 @@
 # OKX history and closed-position selected identity
 
 Plan first, codex-ih35js, 2026-10-24. Actual landing base
-`db6fa45bbb7cbbfdfeb0aa40d3dd93caac9c9e0b`.
+`db6fa45bbb7cbbfdfeb0aa40d3dd93caac9c9e0b`. Refreshed onto actual
+`7501c8c4412` after #1991 landed; source and inventory remain unchanged.
 
 ## Scope and inventory
 
@@ -24,17 +25,18 @@ counts only after genuinely integrating the actual combo-5b landing.
 
 ## Ownership and native policy
 
-#1991 owns account.rs and #1996 owns discovery in lib.rs. Both add local Slots
-construction using the default policy: a secondary key can serve a read without
-a primary. Okx::new filters the primary for public_data_only and validity, but
+#1991 landed as 7501c8c4412 and #1996 still owns discovery in lib.rs. The shared
+read_slots(policy) helper now exists in lib.rs; account reads use its default
+policy, and the discovery owner will do the same. A secondary key can serve
+those reads without a primary. Okx::new filters the primary for public_data_only and validity, but
 does not filter read_credentials. Closed positions retain their primary-required
 gate and SlotPolicy { secondary_requires_primary: true }. History's ordinary
 private remote reads retain their existing primary-required gate, while lookup
 uses Primary with ClientOrderLookup and public trades stay unsigned.
 
-Wait for #1991/#1996 actual landing before shared lib.rs edits. Coordinate the
-narrow common Slots construction with claude-4yjlw0 and the inventory with
-claude-m26ps4. Prefer the owner's proposed read_slots(policy) declaration helper:
+Wait for #1996 and combo-5b actual landing before source edits. Coordinate with
+claude-4yjlw0 and the inventory owner claude-m26ps4. Consume the owner's already
+landed pub(crate) read_slots(policy) declaration helper directly:
 it constructs engine Slots from the existing filtered primary and supplied read
 identity, and every caller declares its native policy. It must not implement key
 choice, admission, retry, expiry or signing. Preserve the still-live
@@ -103,3 +105,18 @@ Architecture gate: **No**, provided the implementation only consumes the shared
 Slots/SelectedRead/ReadRoot/ReadLeg algorithms. A helper is construction data,
 never a venue-local replacement for engine selection. No intentional caller-
 visible behavior change; any discovered policy difference requires a new ruling.
+
+
+## Waiting-CI refresh after #2061
+
+The common helper was inspected at reviewed #1991 head8d81f40e5ae and its actual
+landing7501c8c4412. No new constructor/helper is needed in this follow-up. Closed
+and history use read_slots(SlotPolicy { secondary_requires_primary: true });
+account/discovery retain their native default policy. The old history snapshot
+presence gate and read_credential callers stay unchanged.
+
+Only the plan and README row differ from this actual tip; all source, tests,
+Cargo and inventories are byte-exact incoming. Original credential-ratchet REDs
+remain held until the actual #1831 checker and #1996 land, so they can fail the
+real checker rather than a fabricated source assertion. No production or new
+source claim is made while #2061 CI runs.
