@@ -1498,3 +1498,11 @@ native error/credential ordering, UUID entropy, Store preservation and public
 wire controls. Duplicate ownership and more than 256 fixed-clock reuses pin
 retirement; saturated-registry valid private wire controls pin unchanged signed
 fallthrough. The isolated suite contains 18 executed controls, with no ignores.
+
+## Bitrue initial refusal regression controls
+
+Three original compiling capacity assertion REDs pass after shared entry
+adoption. Seven isolated controls also pin keyed/keyless/public-only ordering,
+Store preservation, capacity recovery, successful native one-way mode, saturated
+signed wire and genuine duplicate-owner protection with 270 fixed-clock reuses.
+No original test is ignored or rewritten to claim a legacy removal.

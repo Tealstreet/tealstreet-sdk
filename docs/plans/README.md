@@ -293,3 +293,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | GRVT synchronous history Read terminals | Plan; original REDs next | Before changing local history refusal custody or pruning its seven sites. | [RUST_GRVT_LOCAL_HISTORY_CONTEXT.md](RUST_GRVT_LOCAL_HISTORY_CONTEXT.md) |
 | KuCoin local command refusals | Implemented; focused checks/reviews clear, CI pending | Before migrating the eight synchronous pre-I/O refusals while preserving valid signed paths and successful local setting policy. | [RUST_KUCOIN_LOCAL_COMMAND_REFUSALS.md](RUST_KUCOIN_LOCAL_COMMAND_REFUSALS.md) |
+| Bitrue local command refusals | Implemented; focused checks/reviews clear, CI pending | Before migrating three initial synchronous trading refusals while preserving the queued/private path and successful one-way setting. | [RUST_BITRUE_LOCAL_COMMAND_REFUSALS.md](RUST_BITRUE_LOCAL_COMMAND_REFUSALS.md) |
