@@ -152,8 +152,8 @@ impl ApexOmni {
         legacy: bool,
         retries: u8,
     ) -> Result<RequestId, (String, Box<Pending>)> {
-        // Klines carry no authentication. Symbols are signed with a complete
-        // identity, as legacy did; without one it stays public discovery.
+        // Klines carry no authentication. Symbols is signed, as legacy did, when
+        // the identity has a passphrase ref; otherwise it stays public discovery.
         let symbols = request.path == "/v3/symbols";
         let identity = if sign::is_unsigned(&request) {
             None
