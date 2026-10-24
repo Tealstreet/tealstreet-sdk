@@ -93,3 +93,20 @@ changed-crate Clippy/fmt and ratchets follow production. Workspace/all-feature,
 WASM and performance checks remain in CI. Push only an intended freeze draft;
 one PR-triggered Rust run per head, no duplicate explicit dispatch. Source CLEAR
 and green exact-head CI are required for READY.
+
+## Original execution checkpoint
+
+The unchanged actual5d825 source compiles and executes12 controls:4 intended
+assertion REDs/8 working GREENs/0 ignored. Both capacity cases fail at native
+kind None instead of shared Internal, and both NaN Event cases fail at native
+kind None instead of shared InvalidInput. No fixture/setup, missing method or
+compile failure is counted. Native controls independently confirm exact strings,
+kind/outcome/code/hint None, one terminal and no I/O or Store change.
+
+Working controls cover market-before-account precedence, known market without
+an account, public-only and configured-but-unestablished credentials, both
+zero-wait entries and both duplicate commands retaining their original owner.
+The exact first-peer retirement, native recovery and all255-survivor validation
+remain gated suffixes on original source. Production, existing fixtures, Cargo
+and every inventory stay byte-exact the actual base. No plan/RED checkpoint is
+pushed for CI.
