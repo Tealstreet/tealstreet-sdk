@@ -112,8 +112,12 @@ fabricated command id, credential, physical receipt or completion is allowed.
 - Free one real peer, re-use the refused id finitely and get the original native
   result; every other peer stays live. Repeated local refusals do not leak slots.
 - Pin keyless fixed position-mode finite success/no Store change/warning, then
-  RED invalid clock, capacity and expired/sub-ms held caller wait. Denied entry
-  emits no native warning; successful admitted warning follows the terminal.
+  RED invalid clock and capacity. Denied entry emits no native warning;
+  successful admitted warning follows the terminal. A working host-boundary
+  control rejects zero/oversized timeout without dispatch or a fabricated receipt.
+  Crypto.com's fixed setter has no native deferred-entry path, so expired/sub-ms
+  deferred receipt controls belong to the actual shared fixed-Setting seam;
+  this target does not fabricate delayed Fresh custody or mutate Cx clocks.
 - Duplicate a live managed book id with a local refusal/fixed ack; the existing
   read stays live and settles once without cross-command completion.
 - Working controls retain valid private placement wire/progress and empty-job
@@ -131,3 +135,20 @@ WASM size/CPU/memory. No merge without the overseer's explicit window.
 Architecture gate: **No**. Native codecs adopt landed genuine Mutation admission
 and fixed Setting completion; they implement no per-venue lifetime, issuer,
 retry, signer, journal, classifier or finalizer mechanism.
+
+## Original execution checkpoint
+
+The dedicated real-Engine target compiles and executes26 tests on unchanged9330
+production: **18 assertion REDs /8 working GREEN /zero ignored**. The REDs are
+eight entry-clock tests (each first asserts NaN refusal), eight full-capacity
+tests, local credential-health evidence and admission-dependent warning order.
+The predeclared infinity cases and finite post-refusal recovery remain later
+assertions in those bodies, not separately claimed original executions.
+Working controls pin finite native errors/precedence, keyless masking, fixed-mode
+Store preservation from both initial hedged values with both credentials and
+requested values, valid signed wire/progress, legacy empty jobs, duplicate custody,
+300 repeated terminal reuses and undispatched bad host timeout.
+Scoped test-target strict Clippy passes with CARGO_BUILD_JOBS=4, sequentially
+after the test; no workspace/all-feature sweep or local WASM build was run.
+The CommandError fixture-field compile error was corrected before this receipt.
+Production, existing fixtures, Cargo, checker and manifest bytes stay base-exact.
