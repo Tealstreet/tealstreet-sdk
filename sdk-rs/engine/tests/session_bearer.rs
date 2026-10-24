@@ -8,8 +8,8 @@ use safe_cex_engine::request_context::{
     RetryEvidence, RetryPolicy, RoutingIntent, Scope, Session, SessionPolicy,
 };
 use safe_cex_engine::{
-    AccountLookup, Action, Capabilities, Command, Cx, Engine, Event, HttpRequest, Method, Outcome,
-    Response, SocketId, TimerId, Venue, VenueError,
+    AccountLookup, Action, Capabilities, Command, Cx, Engine, Event, HttpRequest, Method, Response,
+    SocketId, TimerId, Venue, VenueError,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -301,12 +301,11 @@ fn respond(e: &mut Engine<Probe>, now: f64, request: &HttpRequest) {
     );
     e.drain_actions().for_each(drop);
 }
-fn not_sent(shared: &Rc<RefCell<Shared>>) -> bool {
-    shared
-        .borrow()
-        .failures
-        .iter()
-        .any(|error| error.outcome == Some(Outcome::NotSent))
+/// A failed Read preparation carries no financial outcome: exactly one typed
+/// failure with `outcome: None`. Only an initial unsent Mutation is NotSent.
+fn one_typed_read_failure(shared: &Rc<RefCell<Shared>>) -> bool {
+    let shared = shared.borrow();
+    shared.failures.len() == 1 && shared.failures[0].outcome.is_none()
 }
 
 /// R1: the Bearer is read at prepare, not snapshotted at issue.
@@ -351,9 +350,10 @@ fn r2_revision_moved_before_claim_reprepares_with_the_new_token() {
     assert!(prepares(&mut e).is_empty());
 }
 
-/// R3: retiring the Session after prepare fences a command-owned bound packet.
+/// R3: retiring the Session after prepare fences a command-owned bound packet;
+/// the Read owner gets one typed failure with no outcome.
 #[test]
-fn r3_session_retired_after_prepare_never_releases_and_fails_not_sent() {
+fn r3_session_retired_after_prepare_never_releases_and_fails_typed() {
     let (mut e, shared) = engine(|shared| shared.next_generation_token = Some("C"));
     let issued = ask(&mut e, 1);
     let (permit, _) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound packet");
@@ -364,13 +364,17 @@ fn r3_session_retired_after_prepare_never_releases_and_fails_not_sent() {
         "a packet bound to a retired generation released"
     );
     e.drain_actions().for_each(drop);
-    assert!(not_sent(&shared), "the owner was not failed typed NotSent");
+    assert!(
+        one_typed_read_failure(&shared),
+        "the Read owner was not failed once, typed, with no outcome"
+    );
     assert!(prepares(&mut e).is_empty());
 }
 
-/// R4: a venue that is NotReady at prepare gets no HTTP and a typed NotSent.
+/// R4: a venue that is NotReady at prepare gets no HTTP; the Read owner gets
+/// one typed failure with no outcome.
 #[test]
-fn r4_venue_not_ready_at_prepare_sends_nothing_and_fails_not_sent() {
+fn r4_venue_not_ready_at_prepare_sends_nothing_and_fails_typed() {
     let (mut e, shared) = engine(|_| {});
     let issued = ask(&mut e, 1);
     shared.borrow_mut().refresh(None);
@@ -378,7 +382,7 @@ fn r4_venue_not_ready_at_prepare_sends_nothing_and_fails_not_sent() {
         prepared(&mut e, NOW + 1., issued[0].0).is_none(),
         "a packet was bound while the venue's Bearer was NotReady"
     );
-    assert!(not_sent(&shared));
+    assert!(one_typed_read_failure(&shared));
 }
 
 /// R5: a retry context reads the current header at its own preparation.
