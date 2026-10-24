@@ -9,6 +9,7 @@ use safe_cex_engine::model::{
     Balance, CurrencyBalance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::store::Store;
 use safe_cex_engine::{Cx, Fill, Response, SocketChannel, SocketId, TimerId};
@@ -61,6 +62,10 @@ pub(crate) struct Account {
     progress: HashMap<String, OrderProgress>,
     pub socket: Option<SocketId>,
     started: bool,
+    /// Engine session owning API-key logins. Not repeat-safe: a login that
+    /// does not succeed retires it, so a reissue is a new generation and the
+    /// engine drops late answers to the abandoned one.
+    login_session: Option<safe_cex_engine::request_context::Session>,
     login_pending: bool,
     waiting: Vec<Pending>,
     summary_pending: bool,
@@ -816,7 +821,113 @@ impl Grvt {
         }
         let body = serde_json::to_string(&Body { api_key: key }).expect("serialize login");
         self.account.login_pending = true;
-        self.request(cx, AUTH, body, Job::Account(Request::Login));
+        self.send_login(cx, body, 0);
+    }
+    /// One session operation per physical login; reissues are new operations.
+    fn send_login(&mut self, cx: &mut Cx<'_, Pending>, body: String, attempts: u8) {
+        use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+        use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, SessionPolicy};
+        const HEADERS: &[(&str, &str)] = &[
+            ("Content-Type", "application/json"),
+            ("X-Grvt-Remember-Me", "true"),
+            ("Cookie", "rm=true"),
+        ];
+        let session = match self.account.login_session.take() {
+            Some(session) if cx.session_live(&session) => Ok(session),
+            _ => {
+                // The body carries the API key: keep it on the primary egress.
+                let slots = Slots::new(self.options.key.as_ref(), None, SlotPolicy::default());
+                let private_egress = slots
+                    .select(CredentialRole::SessionAuth)
+                    .ok()
+                    .and_then(|(selection, _)| selection.session_egress());
+                cx.open_session(SessionPolicy {
+                    credential: None,
+                    repeat_safe: false,
+                    private_egress,
+                })
+            }
+        };
+        let queued = session.and_then(|session| {
+            let context = cx.session_context(
+                &session,
+                Policy {
+                    operation: Operation::Mutation,
+                    credential: None,
+                    // The host default the unmanaged login relied on.
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            );
+            self.account.login_session = Some(session);
+            context
+        });
+        let pending = Pending {
+            path: AUTH,
+            body: body.clone(),
+            job: Job::Account(Request::Login),
+            attempts,
+            auth_resent: false,
+            auth_generation: self.account.generation,
+            context: None,
+        };
+        let refused = match queued {
+            Ok(context) => cx
+                .request_managed_with_headers(
+                    context.clone(),
+                    safe_cex_engine::Method::Post,
+                    format!("{}{AUTH}", self.edge()),
+                    HEADERS,
+                    Some(body),
+                    Pending {
+                        context: Some(context),
+                        ..pending
+                    },
+                )
+                .err()
+                .map(|(pending, _)| pending),
+            Err(_) => Some(pending),
+        };
+        if refused.is_some() {
+            self.retire_login_session(cx);
+            self.account_login_unavailable(cx);
+        }
+    }
+    fn retire_login_session(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(session) = self.account.login_session.take() {
+            let _ = cx.retire_session(&session);
+        }
+    }
+    /// A login that never produced a response: retire its session and reissue
+    /// on a new generation, up to the legacy budget of five.
+    pub(crate) fn login_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+        self.retire_login_session(cx);
+        if pending.attempts < 5 && !self.account.authentication_failed {
+            self.send_login(cx, pending.body, pending.attempts + 1);
+        } else {
+            self.account_login_unavailable(cx);
+        }
+    }
+    /// Record the answered login before its continuation runs.
+    pub(crate) fn login_answered(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        context: safe_cex_engine::request_context::Context,
+        response: &Response<'_>,
+    ) {
+        let (cookie, account_id) = session_headers(response);
+        if crate::wire::check(response).is_ok() && cookie.is_some() && account_id.is_some() {
+            let _ = cx.http_write_fact(
+                &context,
+                safe_cex_engine::classify::WriteFact::Accepted { order_ids: vec![] },
+                None,
+            );
+            let _ = cx.finish_http_context(&context);
+        } else {
+            // Unproven: the next login must be a new generation.
+            self.retire_login_session(cx);
+        }
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending) {
         if self.account.authentication_failed {
@@ -981,6 +1092,7 @@ impl Grvt {
         if let Some(timer) = self.account.login_retry.take() {
             cx.clear_timer(timer);
         }
+        self.retire_login_session(cx);
         cx.notice(Level::Error, code,"GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
     }
     fn refresh_stream_session(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1105,11 +1217,29 @@ impl Grvt {
         symbol: String,
     ) {
         if cx.store.market(&symbol).is_none() {
-            cx.fail(command, "Unknown GRVT leverage market");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "Unknown GRVT leverage market");
             return;
         }
         let Some(account) = self.account.trading_account_id.as_deref() else {
-            cx.fail(command, "GRVT private account is not authenticated");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "GRVT private account is not authenticated");
             return;
         };
         let body =
@@ -2291,3 +2421,7 @@ fn session_headers(response: &Response<'_>) -> (Option<String>, Option<String>) 
         .map(str::to_owned);
     (cookie, account)
 }
+
+#[cfg(test)]
+#[path = "login_preparation_tests.rs"]
+mod login_preparation_tests;
