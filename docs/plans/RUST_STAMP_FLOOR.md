@@ -102,3 +102,17 @@ covers the shared engine and all venue/WASM/replay inputs. Independent source,
 caller and full-map reviews plus m26 review precede readiness; draft PR only,
 no merge without an engine window. Add audit/quality receipt without changing
 other source, retry semantics or clock behavior.
+
+## Executed boundary originals and source correction
+
+`168a9716402` freezes four extra NEW-CONTRACT controls on inherited `6ec4e604fdb`:
+the focused `--lib stamp` run compiled, with two assertion REDs and 19 matching
+working controls. The REDs accepted current 9007199254740992 and silently mapped
+NaN to zero. They are behavioral evidence against the inherited draft API, not
+against a landed StampFloor API. The original R1-R4 handoff remains compile-only.
+
+Source now rejects non-finite current stamps before max/clamping and checks the
+final max result against MAX_SAFE_INTEGER. No legacy stamp_ms, release hook,
+receipt validation, retry counter, scheduling, clock allocator or venue changes.
+The current-clock matrix includes MAX+1, MAX+2 and f64::MAX, with and without a
+floor. Maximum-safe and finite-negative working controls remain unchanged.

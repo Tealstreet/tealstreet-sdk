@@ -25,15 +25,16 @@ impl<'a> DispatchContext<'a> {
     /// a floor it is `stamp_ms()` on every valid clock.
     pub fn stamp_after(&self, floor: Option<crate::StampFloor>) -> Result<f64, SignError> {
         const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.;
-        let current = self.stamp_ms().max(0.);
-        let Some(floor) = floor else {
-            return Ok(current);
-        };
-        let next = floor.millis() + 1.;
-        if next > MAX_SAFE_INTEGER {
+        let current = self.stamp_ms();
+        if !current.is_finite() {
             return Err(SignError::InvalidRequest);
         }
-        Ok(current.max(next))
+        let next = floor.map_or(0., |floor| floor.millis() + 1.);
+        let stamp = current.max(0.).max(next);
+        if stamp > MAX_SAFE_INTEGER {
+            return Err(SignError::InvalidRequest);
+        }
+        Ok(stamp)
     }
     /// Draw anew on every preparation. Failure clears even partial output.
     pub fn signing_bytes(&self, bytes: &mut [u8]) -> Result<(), SignError> {

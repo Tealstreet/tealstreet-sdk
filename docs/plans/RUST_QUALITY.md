@@ -1506,3 +1506,13 @@ adoption. Seven isolated controls also pin keyed/keyless/public-only ordering,
 Store preservation, capacity recovery, successful native one-way mode, saturated
 signed wire and genuine duplicate-owner protection with 270 fixed-clock reuses.
 No original test is ignored or rewritten to claim a legacy removal.
+
+## StampFloor clock-boundary controls
+
+Original four new-API compile controls are retained from m26's handoff. Four
+additional frozen controls pin unsafe/non-finite current clocks, the maximum
+safe current stamp, and unchanged stamp_ms behavior; two fail at runtime on the
+inherited draft before correction. The opaque type has both a nameable positive
+doctest and a constructor-privacy compile-fail control. Shared release tests
+retain genuine prepare/bind/claim and no-release-on-denial behavior separately.
+No venue inventory prune or native migration receipt is claimed by this core PR.
