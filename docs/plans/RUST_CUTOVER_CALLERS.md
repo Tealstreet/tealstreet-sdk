@@ -6897,6 +6897,70 @@ Local history replies, account cycles, metadata groups, trading and the shared
 legacy signer funnel remain with their existing owners.
 
 
+### Backpack managed command candle stream
+
+Supported `FetchCandles` uses genuine engine Read admission and managed unsigned HTTP. The exact X-Broker-Id header and native /api/v1/klines query survive preparation/bind/re-preparation; streaming starts only after final claim. One original twenty-second root owns the list, with zero automatic retries. Exact delivery validation runs before row parsing, malformed diagnostics and response/status handling, so expired or reused owners cannot publish rows or complete another caller.
+
+Bounds remain floor-seconds in startTime/endTime, while native candle response timestamps remain milliseconds. Limit is ignored and no local bound filtering is added. Server order, duplicate timestamps, accepted finite negative/zero values, empty-list success and whole-list failure after a malformed row are preserved, together with the native malformed-row diagnostic. Unsupported interval, startup, WS candles, subscribed books, private sessions and history retain their existing behavior.
+
+Initial Read admission rejection emits one typed engine failure without an outcome. Preparation refusal and parked expiry preserve the engine's local pre-release NotSent fact and typed/native metadata; this is an attempt fact, not proof about a whole command's money effects. Released transport/deadline/integrity failures retain their engine kind without a financial outcome; malformed streamed envelopes receive the shared typed Internal failure. Native row/non-2xx error messages retain their existing fields, with no partial successful list. The separate public depth-query NotSent compatibility contract stays in place. SDK worker/hosted error receivers continue to consume the existing structured fields; no upstream deployment is claimed.
+
+
+## Crypto.com immediate trading command custody
+
+Seven immediate trading refusals now require genuine credential-free Mutation
+admission before publishing the native NotSent error. Invalid clocks, missing
+receipts or full owner capacity instead receive the shared typed refusal once;
+duplicate live ownership publishes no replacement native terminal. No native
+warning or command_error is emitted for denied admission. Finite business
+messages, error kinds, validation/key precedence and unchanged Store are retained.
+Local missing-key refusal carries no remote credential-health evidence.
+
+The fixed SetPositionMode acknowledgement uses shared LocalSetting admission
+without a Store projection: both initial hedged values remain unchanged. Its
+warning is emitted after successful completion, rather than before completion;
+failed/revoked admission emits no warning. Callers receive the same [] payload
+for admitted success. No arguments, signed wire bytes or remote write flow change.
+Empty order/cancel jobs and the asynchronous legacy trade terminals remain for
+the later managed-write conversion. Exactly eight request inventory occurrences
+are removed (Crypto.com 21 to 13); credential-selection inventory is unchanged.
+
+## WEEX public order-book query Read custody
+
+`FetchOrderBook` retains the original caller receipt across the native shared
+rate pause and one unsigned managed HTTP call. It needs no credentials, market
+or subscription; native URL/limit, row order, aliases, cumulative base amounts
+and exact version output remain unchanged and never publish subscription depth.
+The physical call retains 20 s, capped by the original caller wait.
+
+A query parked behind a pause now ends at that receipt deadline instead of
+waiting without a venue whole-query bound. Root expiry rejects once with typed
+Timeout and no write outcome; an expired/revoked 429 cannot extend the shared
+pause, whereas live 429 classification and delay are preserved. A local host
+listener timeout alone still does not cancel the engine command. Native
+HTTP/codec errors retain their original fields, including explicit NotSent.
+Released Network failure, engine physical Timeout and engine integrity failure
+keep their actual typed Read cause and outcome None (legacy wrapped host or
+non-UTF8 delivery failures as Network/NotSent).
+Pre-release managed preparation refusals keep typed NotSent and cannot infer
+credential failure from this public route. Stale generations cannot complete,
+pause or otherwise affect a reused command ID or an unrelated live query.
+
+
+## Backpack fixed-setting refusals
+
+SetMarginType and SetPositionMode keep their native keyless Unsupported/NotSent
+refusals ("Backpack only supports cross margin" and "Backpack position mode is
+fixed") for either requested value. The genuine shared Mutation entry checks
+the caller's receipt, clock and capacity before reporting the native refusal.
+An invalid or unavailable receipt reports the shared typed refusal; an expired
+receipt times out without renewing its bound. Duplicate commands retain their
+existing owner's rights and eventual reply. No credential, signing, HTTP, socket,
+timer or Store update is created by these refusals, and the command ID is
+reusable after completion. No fixed-setting success or new venue capability is
+added.
+
+
 ## BingX local candle refusals use command Read authority
 
 FetchCandles keeps unknown-market, unsupported-interval and invalid-range
