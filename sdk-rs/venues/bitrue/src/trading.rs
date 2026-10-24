@@ -852,11 +852,7 @@ impl Bitrue {
                 );
                 return true;
             }
-            Command::SetPositionMode {
-                command,
-                hedged,
-                symbol: _,
-            } => {
+            Command::SetPositionMode { hedged, .. } => {
                 if *hedged {
                     let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
                         return true;
