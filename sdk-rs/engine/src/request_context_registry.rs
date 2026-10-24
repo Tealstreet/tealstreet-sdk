@@ -680,11 +680,16 @@ impl ContextRegistry {
         self.bearer_legs.get(&context.leg()).copied()
     }
 
-    pub(super) fn bind_leg_bearer(&mut self, leg: u64, generation: u64) {
+    /// Prune bindings of retired legs, then reserve one slot before any effect.
+    pub(super) fn reserve_leg_bearer(&mut self) -> Result<(), Error> {
         if self.bearer_legs.len() >= CAPACITY {
             let contexts = &self.contexts;
             self.bearer_legs.retain(|leg, _| contexts.contains_key(leg));
         }
+        self.bearer_legs.try_reserve(1).map_err(|_| Error::Capacity)
+    }
+
+    pub(super) fn bind_leg_bearer(&mut self, leg: u64, generation: u64) {
         self.bearer_legs.insert(leg, generation);
     }
 

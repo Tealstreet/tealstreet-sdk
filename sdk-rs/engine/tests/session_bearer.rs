@@ -20,6 +20,41 @@ use safe_cex_engine::{
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// The header limit exactly, so the engine's `Authorization` overflows it.
+const CROWDED: &[(&str, &str)] = &[
+    ("x-h0", "v"),
+    ("x-h1", "v"),
+    ("x-h2", "v"),
+    ("x-h3", "v"),
+    ("x-h4", "v"),
+    ("x-h5", "v"),
+    ("x-h6", "v"),
+    ("x-h7", "v"),
+    ("x-h8", "v"),
+    ("x-h9", "v"),
+    ("x-h10", "v"),
+    ("x-h11", "v"),
+    ("x-h12", "v"),
+    ("x-h13", "v"),
+    ("x-h14", "v"),
+    ("x-h15", "v"),
+    ("x-h16", "v"),
+    ("x-h17", "v"),
+    ("x-h18", "v"),
+    ("x-h19", "v"),
+    ("x-h20", "v"),
+    ("x-h21", "v"),
+    ("x-h22", "v"),
+    ("x-h23", "v"),
+    ("x-h24", "v"),
+    ("x-h25", "v"),
+    ("x-h26", "v"),
+    ("x-h27", "v"),
+    ("x-h28", "v"),
+    ("x-h29", "v"),
+    ("x-h30", "v"),
+    ("x-h31", "v"),
+];
 const NOW: f64 = 1_000.25;
 const KEY: &str = "account/primary";
 
@@ -37,6 +72,9 @@ struct Shared {
     /// Retire the Session from inside a response delivery.
     retire_on_response: bool,
     recipe_authorization: bool,
+    crowded: bool,
+    /// The sibling leg binds the same Session as the root.
+    sibling_bound: bool,
     signed: bool,
     egress: Option<Egress>,
     sibling: bool,
@@ -65,6 +103,8 @@ impl Shared {
             bind_retired: false,
             retire_on_response: false,
             recipe_authorization: false,
+            crowded: false,
+            sibling_bound: false,
             signed: false,
             egress: None,
             sibling: false,
@@ -182,6 +222,8 @@ impl Probe {
         } else {
             let headers = if shared.recipe_authorization {
                 RECIPE_AUTHORIZATION
+            } else if shared.crowded {
+                CROWDED
             } else {
                 JSON
             };
@@ -311,9 +353,16 @@ impl Venue for Probe {
         .unwrap();
         if sibling {
             let leg = cx.http_leg_context(&root, policy(false, false)).unwrap();
+            let session = {
+                let shared = self.shared.borrow();
+                shared
+                    .sibling_bound
+                    .then(|| shared.session.clone())
+                    .flatten()
+            };
             cx.request_managed(
                 leg.clone(),
-                None,
+                session.as_ref(),
                 Method::Get,
                 "https://fixture/public".into(),
                 None,
@@ -644,6 +693,38 @@ fn r3_retire_inside_a_response_delivery_fails_the_bound_packet_after_it() {
     assert_eq!(shared.borrow().failures.len(), 1);
 }
 
+/// R3, two bound packets of one command: retire fails the owner once; the
+/// owner's terminal retires its second packet, which then never releases.
+#[test]
+fn r3_one_owner_with_two_bound_packets_fails_once() {
+    let (mut e, shared) = engine(|shared| {
+        shared.sibling = true;
+        shared.sibling_bound = true;
+        shared.next_generation_token = Some("C");
+    });
+    let issued = ask(&mut e, 1);
+    assert_eq!(issued.len(), 2);
+    let permits = issued
+        .into_iter()
+        .map(|(preparation, ..)| {
+            let (permit, request) = prepared(&mut e, NOW + 1., preparation).expect("packet");
+            assert_eq!(authorization(&request), Some("Bearer A"));
+            permit
+        })
+        .collect::<Vec<_>>();
+    retire(&mut e, &shared, NOW + 2.);
+    e.drain_actions().for_each(drop);
+    assert!(one_typed_read_failure(&shared, ErrorKind::InvalidInput));
+    for permit in permits {
+        assert!(!matches!(
+            e.claim_http(NOW + 3., permit),
+            Ok(Claim::Released(_))
+        ));
+    }
+    e.drain_actions().for_each(drop);
+    assert_eq!(shared.borrow().failures.len(), 1);
+}
+
 /// R4: a venue that is NotReady at prepare gets no HTTP; the Read owner gets
 /// one typed NotSent failure.
 #[test]
@@ -725,6 +806,19 @@ fn r6_recipe_authorization_header_is_refused() {
         SecretHeaderValue::new("x".repeat(8193)).err(),
         Some(Error::Invalid)
     );
+}
+
+/// R6, limits: a header set already at the limit cannot take the engine's
+/// `Authorization`; the attempt fails before any packet is bound.
+#[test]
+fn r6_bearer_that_overflows_the_header_limit_is_refused() {
+    let (mut e, shared) = engine(|shared| shared.crowded = true);
+    let issued = ask(&mut e, 1);
+    assert_eq!(issued.len(), 1);
+    assert!(bind(route(&mut e, NOW + 1., issued[0].0)).is_none());
+    let shared = shared.borrow();
+    assert_eq!(shared.failures.len(), 1);
+    assert_eq!(shared.failures[0].outcome, Some(Outcome::NotSent));
 }
 
 /// R6 control: an unbound request keeps its own `Authorization` header, so
