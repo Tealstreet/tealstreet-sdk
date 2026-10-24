@@ -475,3 +475,119 @@ fn finite_native_undecodable_stream_body_keeps_string_failure() {
         assert_eq!(e.health().auth_failures, 0);
     }
 }
+
+#[test]
+fn original_unsupported_interval_requires_valid_clock() {
+    for at in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut e = engine(Options::default());
+        command(&mut e, at, 17, Interval::M3);
+        let output: Vec<_> = e.drain_actions().collect();
+        assert_eq!(output.len(), 1);
+        failure(&output, 17, ErrorKind::InvalidInput, None);
+        command(&mut e, NOW, 17, Interval::M3);
+        let output: Vec<_> = e.drain_actions().collect();
+        assert_eq!(output.len(), 1);
+        assert_eq!(
+            terminals(&output, 17),
+            [Err(VenueError::new(Interval::M3.unsupported("Crypto.com")))]
+        );
+    }
+}
+#[test]
+fn original_unsupported_interval_requires_capacity_and_keeps_peers() {
+    let mut e = engine(Options::default());
+    let peers: Vec<_> = (100..356).map(|owner| book_peer(&mut e, owner)).collect();
+    command(&mut e, NOW, 356, Interval::M3);
+    let output: Vec<_> = e.drain_actions().collect();
+    assert_eq!(output.len(), 1);
+    failure(&output, 356, ErrorKind::Internal, None);
+    assert!(peers.iter().all(|p| e.http_preparation_pending(*p)));
+    e.http_preparation_failed(
+        NOW + 1.,
+        peers[0],
+        Error::State,
+        VenueError::new("free peer"),
+    );
+    let output: Vec<_> = e.drain_actions().collect();
+    assert_eq!(terminals(&output, 100).len(), 1);
+    assert!(terminals(&output, 356).is_empty());
+    command(&mut e, NOW + 2., 356, Interval::M3);
+    let output: Vec<_> = e.drain_actions().collect();
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        terminals(&output, 356),
+        [Err(VenueError::new(Interval::M3.unsupported("Crypto.com")))]
+    );
+    assert!(peers[1..].iter().all(|p| e.http_preparation_pending(*p)));
+}
+#[test]
+fn original_retired_bind_item_failure_and_timer_do_not_touch_reused_owner() {
+    let mut e = engine(Options::default());
+    let (preparation, first, timer) = parked(&mut e, NOW, 18);
+    e.http_prepared(
+        NOW + 1.,
+        preparation,
+        Prepared {
+            id: first.id.0,
+            expires_at: None,
+        },
+    );
+    let permit = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("real unclaimed bind permit");
+    e.handle(NOW + 20_000., Event::TimerFired { timer });
+    failure(
+        &e.drain_actions().collect::<Vec<_>>(),
+        18,
+        ErrorKind::Timeout,
+        Some(Outcome::NotSent),
+    );
+    let second = release(&mut e, NOW + 20_001., 18);
+    assert_ne!(first.id, second.id);
+    assert!(e.claim_http(NOW + 20_002., permit).is_err());
+    e.http_prepared(
+        NOW + 20_003.,
+        preparation,
+        Prepared {
+            id: first.id.0,
+            expires_at: None,
+        },
+    );
+    e.handle(
+        NOW + 20_004.,
+        Event::HttpStart {
+            request: first.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        NOW + 20_004.,
+        Event::HttpChunk {
+            request: first.id,
+            data: ROWS.as_bytes(),
+        },
+    );
+    e.handle(NOW + 20_004., Event::HttpEnd { request: first.id });
+    e.handle(
+        NOW + 20_005.,
+        Event::HttpFailed {
+            request: first.id,
+            error: "retired failure",
+        },
+    );
+    e.handle(NOW + 20_006., Event::TimerFired { timer });
+    assert!(e.drain_actions().next().is_none());
+    assert_eq!(
+        terminals(&reply(&mut e, NOW + 20_007., &second, 200, ROWS, true), 18).len(),
+        1
+    );
+    assert_eq!(e.health().auth_failures, 0);
+}

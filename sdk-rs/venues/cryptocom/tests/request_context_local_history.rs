@@ -252,3 +252,57 @@ fn repeated_local_results_release_owners_and_cannot_replace_a_live_managed_read(
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].as_ref().unwrap_err().message, "original owner");
 }
+
+fn private_error_admission(read: Query, message: &str, full: bool) {
+    let mut e = engine(true);
+    let peers: Vec<_> = if full {
+        (1..=256).map(|owner| book(&mut e, owner)).collect()
+    } else {
+        vec![]
+    };
+    let output = query(&mut e, if full { NOW } else { f64::NAN }, 605, read.clone());
+    rejection(
+        &output,
+        605,
+        if full {
+            ErrorKind::Internal
+        } else {
+            ErrorKind::InvalidInput
+        },
+    );
+    assert!(peers.iter().all(|p| e.http_preparation_pending(*p)));
+    if let Some(peer) = peers.first() {
+        e.http_preparation_failed(NOW + 1., *peer, Error::State, VenueError::new("free peer"));
+        let output: Vec<_> = e.drain_actions().collect();
+        assert_eq!(terminal(&output, 1).len(), 1);
+        assert!(terminal(&output, 605).is_empty());
+    }
+    native(&query(&mut e, NOW + 2., 605, read), 605, Err(message));
+    assert!(peers.iter().skip(1).all(|p| e.http_preparation_pending(*p)));
+    assert_eq!(e.health().auth_failures, 0);
+    assert!(e.take_frame(NOW + 2.).is_none());
+}
+#[test]
+fn original_private_range_error_requires_valid_clock() {
+    private_error_admission(fills(f64::NAN, 1., 0), "Invalid history time range", false);
+}
+#[test]
+fn original_private_range_error_requires_capacity() {
+    private_error_admission(fills(f64::NAN, 1., 0), "Invalid history time range", true);
+}
+#[test]
+fn original_private_nanosecond_error_requires_valid_clock() {
+    private_error_admission(
+        fills(1., 1e14, 0),
+        "History time range exceeds nanosecond bounds",
+        false,
+    );
+}
+#[test]
+fn original_private_nanosecond_error_requires_capacity() {
+    private_error_admission(
+        fills(1., 1e14, 0),
+        "History time range exceeds nanosecond bounds",
+        true,
+    );
+}

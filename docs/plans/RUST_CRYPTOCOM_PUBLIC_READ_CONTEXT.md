@@ -50,21 +50,27 @@ directly with Read/None/20000ms/Never, then done_context or fail_context. At mos
 one pure policy declaration is shared; no venue issuer/finalizer wrapper, owner
 map, numeric fallback or root timer. Retain unsupported lookup before credential
 validation, credential validation before time validation, exact nanosecond bounds
-and zero-limit/equal-bound [] after those checks. PublicTrades needs no credential
+and effective-zero-limit/equal-bound [] after those checks. Explicitly bounded
+Income retains its native usizeMAX effective limit: caller limit0 still uses
+signed HTTP unless its checked nanosecond bounds are equal. PublicTrades needs no credential
 and retains its native remote behavior when it is not a local empty result.
 
 Candles admit one command-owned Read Context, store it in Pending::Candles and
 submit unsigned request_managed with the same GET URL, escaped instrument, native
 interval mapping, optional exact start_ts/end_ts, empty headers and no body. The
 native limit remains ignored. Stream ArrayAt::Path(result,data) on the managed
-request. Its original20s bound begins before preparation; Never adds no retry.
+request. The new immutable20s whole-command bound begins at admission and includes
+preparation. Native code supplied no engine command deadline and used the host
+20s physical-HTTP fallback; this intentionally bounds the preparation-inclusive
+lifetime. Never adds no retry.
 Validate exact delivery before staging streamed rows and before response parsing;
 finish only through the original Context. Typed preparation and released HTTP
 failures preserve their cause and bounded native metadata through the existing
 engine errors. The established public-read NotSent outcome follows the standalone
 book consumer; initial admission refusal keeps outcome None. Native candle codec
-and response error messages, invalid-row handling, timestamp normalization and
-ordering remain unchanged. Preserve typed terminal metadata, with no auth-health
+and response error messages remain unchanged: preserve raw CandleRow.t, original
+response order and malformed numeric-string-to-zero coercion, with no timestamp
+conversion, sort or range filter. Preserve typed terminal metadata, with no auth-health
 evidence because no credential was carried; public-auth-health #1923 is actual.
 No per-venue code/status ladder or text retry rule is added.
 
@@ -86,6 +92,12 @@ The old source checkpoint7d2a5b2eb60 and public-auth regression27b051a8907 may b
 plain-merged only after independent plan review and the original RED checkpoint.
 Replace its old finish_local_history issuer wrapper with direct shared entry in
 each selected branch; that draft has never been published or claimed ready.
+
+Required original additions beyond reused targets: private invalid-range and
+nanosecond-overflow history, plus unsupported candle intervals, each at invalid
+clock and full genuine-owner capacity with peer liveness and recovery. Add stale
+item/failure/bind after ID reuse controls where not covered by reused tests.
+Do not claim the old target alone covers these new acceptance cases.
 
 Required controls: invalid-clock and full genuine-owner capacity for local results
 and candles; retained peer preparations and slot reuse; no I/O/timer/auth/Store
@@ -110,10 +122,34 @@ merge without an explicit window.
 Callers keep identical candle data, interval mapping and local history results
 when admitted. Initial invalid clock/capacity instead returns the typed shared
 Read refusal with outcome None. Async public reads retain typed transport/timeout
-metadata and their original20s bound through route preparation, exactly once
+metadata and the new immutable20s admission-to-settlement bound through route
+preparation (rather than only the old host HTTP fallback), exactly once
 across late callbacks and command-ID reuse. This changes no private auth evidence,
 SDK capability dispatch, discovery cadence or history retry policy.
 
 Architecture gate: No. The adapter consumes existing shared entry, immutable
 Context, managed delivery validation and terminal authority. It adds no venue
 issuer/finalizer, retry scheduler, classifier or auth-health workaround.
+
+The new plan supersedes the historical draft RUST_CRYPTOCOM_READ_COMMAND_CONTEXT
+contract where they differ (direct entry rather than a venue issuer wrapper,
+actual public-auth-health fix and explicit preparation-inclusive deadline). Its
+original plan/test commits remain in history and its README row is preserved.
+
+## Reviewed plan and original checkpoint
+
+Caller/full-map reviews corrected the deadline description: native candles have
+no engine whole-command deadline, so the preparation-inclusive20s Context bound
+is an intentional caller-visible change. Native raw timestamps/order and numeric
+string coercion, and bounded Income's effective limit override, are now explicit.
+Source review required original admission controls for private range/nanosecond
+refusals and unsupported intervals, plus retired bind/item/failure/timer coverage.
+Those seven controls are added before any production edit.
+
+Test-only branch b89ca9aaa52 is genuinely plain-merged at85d06a70a1d; README
+preserves the complete actual landing and both historical/current plan rows.
+Crypto production is byte-identical to actual6a6845c4491. The expanded original
+targets execute23 controls:16 behavioral assertion REDs plus seven native working
+positives, zero ignored. Both targets run with --no-fail-fast so neither is
+omitted after the first target's expected failure. This checkpoint changes only
+the plan and tests, not source or manifest.
