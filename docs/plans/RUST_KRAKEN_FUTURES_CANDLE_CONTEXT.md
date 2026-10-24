@@ -69,9 +69,13 @@ stream_response(ArrayAt::Field("candles")); exact root+leg delivery is checked
 before every streamed row, native envelope handling and result publication.
 Only original-root done_context/fail_context terminates the command.
 
-Each background physical page uses its own Background Read Context with the
-same explicit20000ms/Never/None/no-pacing policy. This retains the native per-call
-bound; it does NOT impose a new20s logical deadline across a poll's pages.
+The explicit20000ms admission-to-expiry child/background policy is a NEW caller
+contract: native candles_page emits HttpRequest.timeout_ms=None and makes no
+request_timeout declaration. The legacy engine/host default is not a native
+whole-admission bound. The new bound includes stuck Prepare/Bind time; CALLERS
+must state that change separately from the unchanged native wire/paging/polling.
+Each background page uses its own Background Read Context with this explicit
+20000ms/Never/None/no-pacing policy, without a20s logical deadline across pages.
 Validate exact background HTTP delivery plus subscription generation before
 staging/publishing, and finish that physical Context once. Preserve next_poll
 and in_flight cleanup on every queue/preparation/network/timeout/native failure.
@@ -79,9 +83,12 @@ No command root, Plan, Session or selected-key wrapper is fabricated for polls.
 
 Retire completed physical contexts with finish_http_context, never a child
 command terminal. Read DATA validation does not make a codec-valid candle.
-Queue/preparation/provider errors remain typed and strict, never transport retry
-evidence. Keep native Warn diagnostics and text alongside the typed Read failure;
-no Read carries a financial Outcome. Command root expiry is engine-owned strict
+Queue/preparation errors remain typed and strict, never transport retry
+evidence. Keep native Warn diagnostics and text alongside the typed Read failure.
+Preserve every shared typed failure field: pre-release denial/timeout can carry
+local NotSent under the shared1870 projection. Initial admission, released Read
+failure and original-root expiry keep their existing shared projections; no
+financial write fact is fabricated, and no blanket outcome stripping is allowed. Command root expiry is engine-owned strict
 Timeout: discard all staged pages, no candle/result/marker/continuation and no
 local stop flag or root renewal. Pending command rows are owned only by the
 retired root; use the existing retirement hook if any additional native parked
