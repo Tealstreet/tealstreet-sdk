@@ -14,7 +14,8 @@ use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Prec
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId,
+    Venue,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -1225,7 +1226,6 @@ impl Venue for Backpack {
                 }
             }
             Command::FetchCandles {
-                command,
                 symbol,
                 interval,
                 from_ms,
@@ -1233,7 +1233,27 @@ impl Venue for Backpack {
                 ..
             } => {
                 if !supported(interval) {
-                    cx.fail(command, interval.unsupported("Backpack"));
+                    match cx.command_wait() {
+                        Some(CommandWait::Remaining(_)) => {}
+                        Some(CommandWait::Expired) => {
+                            let _ = cx.reject_expired_command(Operation::Read);
+                            return;
+                        }
+                        None => {
+                            let _ = cx.reject_unstamped_command(Operation::Read);
+                            return;
+                        }
+                    }
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) else {
+                        return;
+                    };
+                    let _ = cx.fail_context(&context, interval.unsupported("Backpack"));
                     return;
                 }
                 let mut params: sign::Params = [
