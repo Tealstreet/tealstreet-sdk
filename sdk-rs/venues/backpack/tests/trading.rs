@@ -489,6 +489,8 @@ fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
 
     use safe_cex_venue_backpack::Options;
     let mut e = Driver::new(Options {
+        read_identity: None,
+        read_credentials_status: None,
         read_credentials: None,
         public_data_only: false,
         key: Some("public-test-key".into()),
