@@ -254,3 +254,11 @@ review is claude-4yjlw0 and selection review is claude-m26ps4. No recipe-only PR
 or CI push with knowingly failing native originals is made.
 
 The unchanged native secondary_get_keeps_primary_mutations control also passes.
+
+Actual `49f7d1857b6` is now plain-merged. Owned recipe/control and all shared
+dependency blobs remain exact the tested component checkpoint. The dedicated
+managed target re-executes 13 PASS/0 ignored on this integration; scoped strict
+Clippy, formatting and normal bans/ratchets pass. Every incoming inventory and
+checker is exact, and the native selection control remains GREEN. This is the
+local immutable handoff to the joint consumer, not a standalone PR or custody
+cutover.
