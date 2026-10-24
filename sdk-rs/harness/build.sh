@@ -5,8 +5,13 @@
 # pkg/{web,node}/<family>, which browser and Worker loaders fetch per venue.
 set -euo pipefail
 venues="breakoutprop, asterdex, binance, bitunix, kucoin, kucoinspot, bybit, hyperliquid, hyperliquidspot, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitgetusdc, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, krakenspot, paradex, coinbase, orderly or polymarket"
+mutation_barriers=false
+if [[ $# -eq 3 && $1 == --venue && $3 == --mutation-barriers ]]; then
+  mutation_barriers=true
+  set -- "$1" "$2"
+fi
 if [[ $# -gt 0 && ! ( $# -eq 2 && $1 == --venue ) && ! ( $# -eq 1 && $1 == --families ) ]]; then
-  echo "Usage: $0 [--venue VENUE | --families]" >&2
+  echo "Usage: $0 [--venue VENUE [--mutation-barriers] | --families]" >&2
   exit 2
 fi
 # WASM-only size profiles. Native release profiles in Cargo.toml stay unchanged.
@@ -33,6 +38,9 @@ family_args() {
     *) echo "Unsupported venue: $1 (expected $venues)" >&2; exit 2 ;;
   esac
   build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features "$family")
+  if [[ $mutation_barriers == true ]]; then
+    build_args+=(--features http-mutation-barriers)
+  fi
   # Use size defaults unless measured CPU margin requires speed defaults.
   # KuCoin Spot and WOO retain speed defaults after measured margin misses. Aster
   # takes size defaults since dispatch signing, with its venue crate at speed below.

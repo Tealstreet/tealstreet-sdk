@@ -926,6 +926,7 @@ impl ApexOmni {
                 &job.preflight,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Mutation,
                     credential: Some(Credential {
                         slot: CredentialSlot::Primary,
