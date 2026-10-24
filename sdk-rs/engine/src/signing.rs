@@ -163,6 +163,16 @@ impl CredentialSetupPolicy {
             {
                 return Err(SignError::InvalidRequest);
             }
+            // Supplied authority must be well-formed even where it is optional;
+            // a malformed ref is refused, never treated as absent or aliased.
+            if let Some(declared) = declared
+                && identity
+                    .extra
+                    .get(&declared.key)
+                    .is_some_and(|key| !valid_key_ref(key))
+            {
+                return Err(SignError::InvalidRequest);
+            }
             if let Some(declared) = declared {
                 let required = match declared.field {
                     ExtraFieldPolicy::Optional | ExtraFieldPolicy::AliasPrimary => false,
