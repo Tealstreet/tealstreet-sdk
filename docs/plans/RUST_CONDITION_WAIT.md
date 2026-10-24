@@ -95,6 +95,46 @@ impl<P> Cx<'_, P> {
   `None`. The venue releases the next one when the active job ends, and its
   ready hook admits it. Declared Plans keep their current surface.
 
+## Preflight form: reuse what exists
+
+The engine already parks a Preflight on a venue condition
+(`request_context_preflight_ready.rs`):
+
+- `park_preflight(handle)` relinquishes the genuine initial callback with no
+  I/O or time.
+- `request_preflight_ready(handle)` may be called from any callback. It queues
+  one wake, FIFO, and grants that callback nothing.
+- The wake is flushed in the same turn into `on_http_preflight_ready`, in
+  Preflight-ready custody. A ready callback that makes no progress is failed.
+- `fail_preflight` is allowed in that custody, and from any callback that
+  holds no loans (a venue timer), as failure-only cleanup.
+
+So the Preflight form adds no new release or expiry API.
+`preflight_condition_wait` is dropped. What is new:
+
+- **Re-park from ready custody.** `park_preflight` today accepts only the
+  Initial activation. A woken job that finds `!detected` again (after a
+  promotion) must park again. `park_preflight` also accepts Preflight-ready
+  custody, and that counts as progress.
+- **Bound.** `bound_ms: Some(_)` is an engine timer that, when it fires,
+  delivers `on_condition_wait_expired` in failure custody. `None` is the
+  existing unbounded park (ruled). Bitget passes its shared remaining bound.
+  A venue timer that calls `fail_preflight` stays legal by the existing rule,
+  but the engine bound is the ruled path.
+- **Native order.** Wakes are FIFO, so releases in queue order run in that
+  order.
+
+The serial-Plan form below is new: a Plan with released calls cannot be
+failed from a loan-free callback today (`validate_plan_seal_origin`).
+
+## Capacity
+
+Each parked Preflight is a live command owner, so it counts against the
+engine-wide limit of 256 concurrent commands (`CAPACITY`), as every migrated
+venue's commands already do. Native Bitget's queue has no limit, so a burst
+of more than about 256 queued commands becomes a Capacity refusal that
+native never had. Ruling needed: accept and disclose, or exempt.
+
 ## REDs (before source)
 
 1. A Preflight parks with no I/O. A release from a foreign Background read's
@@ -121,6 +161,15 @@ impl<P> Cx<'_, P> {
    wait is Capacity.
 9. An unbounded (`None`) park survives past the 120 s caller wait with no
    terminal and is released by the venue in a borrowed callback.
+11. Leak control (ruling): every `None` park ends through a release or one of
+    the stops. A release in queue order wakes in that order, and engine
+    teardown with parked owners leaves no owner, wait or timer.
+12. Detection expiry fan-out: in `on_condition_wait_expired` for the active
+    owner, the venue requests readiness for every queued Preflight. All of
+    them wake in the same flush, in order, and each `fail_preflight` there
+    projects NotSent.
+13. Re-park from ready custody counts as progress, so no "made no progress"
+    failure.
 10. A mid-Plan expiry after an earlier released and accepted call: `fail_plan`
     projects the accepted IDs and a failure that is not NotSent (native
     `trade_fail` keeps the IDs once anything was effective).
