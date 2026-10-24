@@ -306,3 +306,43 @@ A new physical retry resumed through #2037 Plan/Preflight session waiting
 reserves only in its own prepare; parking and Session readiness reserve nothing.
 A pending provider result omitting a required nonce is InvalidResult before
 apply. Bearer and route repairs do not consume the nonce-only eight-repair count.
+
+## Source-stage admission and hosted signing pins
+
+The existing mutable `on_http_release` can commit venue scheduler state. It
+cannot run under the global nonce mutex, and running it before a floor check
+would require rollback if another engine releases first. The first nonce slice
+therefore supports explicitly unscheduled venues only. Kraken Futures and Spot
+currently use the default unscheduled hook; scheduler and group support remain
+refused until their own prepare/commit proof exists.
+
+Per fe7's API disposition, replace the old trait hook directly with one
+`HttpRelease<V>` registration: either `Mutable(fn(&mut V, &mut Pending, ...))`
+or `NonceUnscheduled(fn(&V, &Pending, ...))`. `Engine::new` captures the one
+registration once; it cannot change between queue and Claim, and the enum
+cannot express both modes. Default is the existing mutable no-op Unscheduled
+admission. Convert the four existing fixture overrides without changing their
+admission bodies, and remove the old method in that same source change.
+
+A declared nonce claim on a venue without the pure registration refuses at
+queue admission before IDs, signing, activation, reservation or provider calls:
+InvalidRequest projects InvalidInput/NotSent. A hidden or changed claim refuses
+at prepare before reservation/provider. The pure admission check runs before
+the lock; under the lock only the floor check, infallible Lifecycle Released,
+floor max and pacing mark run. Observers and journal notifications follow.
+There is no mutable scheduler callback for a nonce-bearing release.
+
+The decimal receipt component has separate bounded schema/source CLEARs from
+fe7, m26 and 4y. It supplies no reservation, subject or Claim authority. Source
+controls must still prove missing/substituted provider nonces refuse before
+apply, and run MAX/MAX+1 parity through the real WASM signing path.
+
+Hosted signing must retain the exact engine-reserved nonce with its captured
+SignRequest and provider result. The legacy `Input::Http`/`hostedSigningClock`
+compatibility adapters currently reconstruct stamp-only receipts; adding
+`nonce: None` there does not make them support nonce-bearing requests. Before
+Kraken adoption, its full hosted path must carry the reserved canonical decimal
+nonce end to end, with no server-side second reservation or renewed stamp.
+An adapter that cannot carry that capture must refuse before private I/O;
+discovering the omission later as InvalidResult is not an admission policy.
+This is a consumer/hosted composition gate, separate from schema clearance.
