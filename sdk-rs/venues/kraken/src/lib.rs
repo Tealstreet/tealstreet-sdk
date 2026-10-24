@@ -4,6 +4,7 @@ mod spot;
 pub use spot::KrakenSpot;
 mod history;
 mod public_context;
+mod public_trades;
 pub mod sign;
 mod trading;
 mod wire;
@@ -43,6 +44,7 @@ pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
+    PublicTrades(Box<public_trades::Request>, Context),
     Markets {
         context: Context,
         rows: Vec<Market>,
@@ -775,6 +777,7 @@ impl Venue for Kraken {
         match pending {
             Pending::Account(r) => self.account_item(cx, r, item),
             Pending::History(r) => self.history_item(cx, r, item),
+            Pending::PublicTrades(r, child) => self.public_trades_item(cx, r, child, item),
             Pending::Trade(_) => {}
             Pending::Markets { rows, .. } => match serde_json::from_str::<Instrument<'_>>(item) {
                 Ok(m) => {
@@ -913,6 +916,10 @@ impl Venue for Kraken {
             }
             Pending::History(r) => {
                 self.history_http(cx, *r, response);
+                return;
+            }
+            Pending::PublicTrades(r, child) => {
+                self.public_trades_http(cx, *r, child, response);
                 return;
             }
             p => p,
@@ -1166,7 +1173,12 @@ impl Venue for Kraken {
         if matches!(pending, Pending::Candles { .. }) {
             self.candles_failed(cx, pending, error);
         } else {
-            self.on_sign_error(cx, pending, error);
+            match pending {
+                Pending::PublicTrades(r, child) => {
+                    self.public_trades_preparation_failed(cx, *r, Some(child), error)
+                }
+                pending => self.on_sign_error(cx, pending, error),
+            }
         }
     }
     fn on_http_failed(
@@ -1178,7 +1190,25 @@ impl Venue for Kraken {
         if matches!(pending, Pending::Candles { .. }) {
             self.candles_failed(cx, pending, error);
         } else {
-            self.on_request_failed(cx, pending, &error.message);
+            match pending {
+                Pending::PublicTrades(r, child) => {
+                    if !matches!(
+                        error.kind,
+                        Some(
+                            safe_cex_engine::ErrorKind::Network
+                                | safe_cex_engine::ErrorKind::Timeout
+                        )
+                    ) && !r.delivery(cx, &child)
+                    {
+                        let _ = cx.finish_http_context(&child);
+                        return;
+                    }
+                    let mut error = error;
+                    error.message = format!("Kraken history failed: {}", error.message);
+                    self.public_trades_failed(cx, *r, child, error)
+                }
+                pending => self.on_request_failed(cx, pending, &error.message),
+            }
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -1186,6 +1216,18 @@ impl Venue for Kraken {
             Pending::Account(r) => self.account_failed(cx, r, error),
             Pending::Trade(r) => self.trading_failed(cx, r, error),
             Pending::History(r) => self.history_failed(cx, *r, error),
+            Pending::PublicTrades(r, child) => {
+                if r.delivery(cx, &child) {
+                    self.public_trades_failed(
+                        cx,
+                        *r,
+                        child,
+                        safe_cex_engine::VenueError::new(format!("Kraken history failed: {error}")),
+                    );
+                } else {
+                    let _ = cx.finish_http_context(&child);
+                }
+            }
             p => self.public_failed(cx, p, error),
         }
     }
@@ -1250,7 +1292,10 @@ impl Venue for Kraken {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if self.trading_command(cx, &command) || self.history_command(cx, &command) {
+        if self.trading_command(cx, &command)
+            || self.public_trades_command(cx, &command)
+            || self.history_command(cx, &command)
+        {
             return;
         }
         match command {
