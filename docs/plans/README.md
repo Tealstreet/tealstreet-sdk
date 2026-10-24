@@ -387,6 +387,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | GRVT unsigned instrument catalog custody | Managed implementation; source review and CI pending | Before changing startup/refresh publication, the new 20-second bound or the dead options-arm deletion. | [RUST_GRVT_CATALOG_CONTEXT.md](RUST_GRVT_CATALOG_CONTEXT.md) |
 
 | TxFlow command candle snapshot | Managed source under review; 19 dedicated controls pass | Before managing the unsigned command candle read; excludes initial local refusals, discovery and account. | [RUST_TXFLOW_CANDLE_CONTEXT.md](RUST_TXFLOW_CANDLE_CONTEXT.md) |
+| BloFin managed HMAC dispatch recipe | Plan and original native controls | Before preparing the signing-entropy nonce and opaque Secondary-or-Primary GET recipe for FetchLeverage. | [RUST_BLOFIN_HMAC_DISPATCH_RECIPE.md](RUST_BLOFIN_HMAC_DISPATCH_RECIPE.md) |
 
 | Command-owned Read-Plan history authority | Implemented; source reviews and focused checks clear, CI pending | Before accepting Plan pages, settling Slots with accepted rows or recovering a released transport failure through the same Plan terminal. | [RUST_READ_PLAN_HISTORY_AUTHORITY.md](RUST_READ_PLAN_HISTORY_AUTHORITY.md) |
 
