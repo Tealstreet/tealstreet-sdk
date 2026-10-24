@@ -105,8 +105,8 @@ can run only at queue time, whereas DispatchContext has only stamp/clock/entropy
 Queue-time reservation cannot claim send-time monotonicity after reversed park/
 resume or re-preparation. Required shared design: a declaration-bound dispatch
 reservation from the trusted selected subject/NonceKey, using the native floor,
-without venue counters, clock allocators or raw material-derived identity. Owner/
-API/immutable review pin is OPEN. This is a shared prerequisite, not venue code.
+without venue counters, clock allocators or raw material-derived identity. Owner is codex-uufub4 by the overseer assignment; exact API/immutable review
+pin is OPEN. This is a shared prerequisite, not venue code.
 
 Trusted setup must supply the reviewed per-API-key stable namespace and alias
 same primary/read keys even with distinct signing secrets; no guessed stable_id,
@@ -114,10 +114,9 @@ secret digest, key hash, runtime fallback or forged issuer/subject proof. G2c
 provenance/retirement, C3 setup and provider boundary owners review the exact
 shape. A key change/engine replacement must not reset a still-valid domain.
 
-Boundary fit also remains OPEN: native nonce accepts finite nonnegative clocks
-up to checked u64/1000, while dispatch receipt stamp validation uses safe integer
-milliseconds. Preserve valid native bytes; any tighter external clock contract
-requires an explicit behavior ruling, never silent clamping. NaN/infinite/
+Native nonce accepts finite nonnegative clocks up to checked u64/1000. The
+overseer explicitly approved a tighter receipt MAX_SAFE millisecond ceiling as
+InvalidTime before private I/O; record this behavior change in CALLERS. NaN/infinite/
 negative/overflow must refuse before I/O, with no partial raw fallback.
 
 ## WS/session contract and held authority work
@@ -171,4 +170,86 @@ session/selection fit, original CLEAR and exact bootstrap grants if needed.
 Then direct custody cutover, independent HMAC+credential/source reviews, scoped
 native/strict checks, draft PR/full CI and actual landing window. Freeze does not
 stop plan/tests. Local cargo is scoped changed crate/target only, jobs4 and one
-build at a time; no workspace/all-feature sweep, WASM/timing or remote changes.
+build at a time; no workspace/all-feature sweep or local WASM/timing sweep.
+Production MUST enable safe-cex-crypto/hmac-sha512 in the Kraken dependency and
+correct the crypto feature comment. This is WASM/hosted provider feature wiring,
+not a size-budget change. Consume #2023 or tolerate either landing order: its
+removal of test-only algorithm support must not leave Kraken Unsupported.
+
+
+## Reviewed declarations and explicit behavior contracts
+
+m26ps4 reviewed setup/roles; 4yjlw0 reviewed HMAC/native bytes. Setup declares
+Base64 per slot and preserves both CONFIG_INVALID texts in order: "Kraken secret
+must be nonempty valid base64", then "Kraken secondary secret must be nonempty
+valid base64" with return on the latter. The low-level Futures selector can use Secondary without Primary
+(secondary_requires_primary=false), but native account_start/account_refresh
+require a primary signer: read-only configuration does NOT start the private
+account or socket. Preserve that gate independently of selector capability.
+Spot ignores read.
+Trusted setup supplies identical caller-assigned stable_id for identities sharing
+one API-key nonce subject; each retains its own signing ref and secret. The engine
+mints NonceSubject/NonceClaim; no venue key comparison, secret digest or fallback.
+The overseer approved refusing a missing stable_id before private I/O using the
+existing SignError::InvalidRequest -> InvalidInput/NotSent taxonomy, message
+"Invalid signing request" (m26ps4). Mint the nonce subject during selection,
+before request IDs, nonce reservations or provider batches; malformed stable IDs
+(blank, >256 bytes or control characters) get the same configuration refusal,
+with no auth/health counter changes, and approved Secondary egress for selected read-key GETs plus explicit
+Primary egress for Primary calls. Native used host default except streamed
+history; CALLERS must name this change as well as the MAX_SAFE clock ceiling.
+
+| Product and native call | Method | Declared role / native slot |
+| --- | --- | --- |
+| Futures openorders/openpositions/leveragepreferences/accounts refresh | GET | Read / Secondary if configured, else Primary |
+| Futures fills, /derivatives/api/v3/fills | GET | Read / Secondary if configured, else Primary |
+| Futures /api/history/v3/account-log and /api/history/v3/orders | GET | PrimaryRead(History) / Primary |
+| Futures sendorder/cancelorder/batchorder/editorder | POST | Mutation / Primary |
+| Futures leveragepreferences setting | PUT | Mutation / Primary |
+| Futures leveragepreferences command lookup | GET | Read / Secondary if configured, else Primary |
+| Futures WS key challenge and signed subscriptions | WS | SessionAuth / Primary |
+| Spot Balance/OpenOrders | POST | Read with Slots(primary,None) / Primary |
+| Spot GetWebSocketsToken | POST | SessionAuth / Primary |
+| Spot AddOrder/AmendOrder/CancelOrder | POST | Mutation / Primary |
+
+A method never selects authority at runtime: the table fixes each native caller.
+Role assertions must exercise these paths; private signed probes cannot claim a
+method-switch selector as the new API. Native public Futures trades and all Spot
+public calls remain unsigned. WS session generation binding remains #1896/#1897
+owner fit, not a property granted by a nonce claim.
+
+Independent HMAC literals (4yjlw0, Python), secret base64(kraken-test-secret),
+nonce1700000000000000, are pinned in originals: Futures sendorder sorted form,
+Spot Balance nonce-only body, and the native challenge. The new target uses only
+existing engines/provider APIs and leaves production/Cargo/checkers/maps intact.
+
+
+## Original checkpoint before actual 5b integration
+
+On unchanged actual9a757, the new isolated target compiles and executes 20 tests:
+9 intended assertion REDs, 11 GREEN, zero ignored. Six custody assertions stop at
+zero provider batches for Futures account/history/write/key challenge/challenge
+MAC and Spot balance/orders/token. Two refusal assertions expose actual raw
+signed HTTP despite a refusing installed provider. Missing stable_id exposes the
+legacy secret-digest fallback. Native GREEN controls independently pin all three
+Python vectors, real Futures secondary GET/MAC/header order, Spot primary-only
+POST/body/timeout/header order, public-only behavior, no private startup for
+read-only configuration, sorted UTF-8 form, invalid secrets/paths/clocks, signer
+recreation/backward clocks and 1002 sends within one millisecond.
+
+The initial compile correction (header names are borrowed str) and the mistaken
+read-only startup positive are fixture findings, excluded from the RED receipt.
+Native account_start/account_refresh require the primary signer even though the
+low-level selector accepts Secondary without Primary; that gate is now GREEN.
+No existing source, fixture, Cargo, checker or inventory changed. Provider
+capability is delegated to the real LocalSigner, never fabricated; HMAC-SHA512
+feature wiring stays a source prerequisite. Because native bypasses the provider,
+no successful managed-provider SHA512 batch is claimed by this checkpoint.
+
+The history/write/WS post-provider assertions are gated by their first RED, not
+counted executed. Exact deferred-provider release/reprepare and cross-engine
+nonce claims await uufub4's reviewed real-engine API controls; this target does
+not invent a nonce constructor or reservation fixture. Missing/malformed subject
+shared taxonomy and eight-repair proposal are documented requirements, not an
+executed native consumer migration. Production remains held for exact nonce and
+session fit, original review, and actual dependency integration.
