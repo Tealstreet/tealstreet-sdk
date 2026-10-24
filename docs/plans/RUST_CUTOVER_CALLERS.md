@@ -6924,3 +6924,30 @@ for admitted success. No arguments, signed wire bytes or remote write flow chang
 Empty order/cancel jobs and the asynchronous legacy trade terminals remain for
 the later managed-write conversion. Exactly eight request inventory occurrences
 are removed (Crypto.com 21 to 13); credential-selection inventory is unchanged.
+
+
+## Crypto.com public discovery Background custody
+
+Instrument and ticker discovery now use credential-free managed Background
+Reads with the existing 20 s physical bound starting before route preparation.
+Expired rows, including a live streamed prefix ending at the deadline, cannot
+publish markets/tickers, index metadata, warnings derived from failed DATA or
+startup side effects. Shared preparation/capacity/timeout failure returns to
+the existing jittered discovery backoff once; it supplies no command terminal
+or account-auth evidence. Native retry cadence and response/status policy stay
+unchanged, with no new arguments or private signing behavior.
+
+Accepted catalogue publication retires its HTTP Context before issuing the
+next ticker read, then private startup runs while tickers are pending. Ticker
+success publishes quotes before retiring and opening public subscriptions.
+Usable partial catalogues, refresh/index retention, malformed-exposure coverage,
+independent ticker recovery and cached quotes keep their native behavior. One
+legacy discovery sender is removed; key-selection sites remain unchanged.
+
+Public ticker preparation and private legacy HTTP use independent dispatch
+paths. Logical order remains ticker enqueue then private startup; if the public
+route is parked, private HTTP may leave before the ticker's physical release.
+The old eager path emitted the ticker HTTP first. Private startup remains
+independent of ticker readiness/success; no venue defer queue restores physical
+ordering. A raw-action parked-route control pins this consequence explicitly;
+the immediate-route fixture proves its own ordering only.

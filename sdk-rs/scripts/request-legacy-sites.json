@@ -425,9 +425,6 @@
     "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
   },
-  "venues/cryptocom/src/lib.rs": {
-    "121dc8add2c9a7d1d8fd691023a64c9ebb736360f0c97363cfc66956b0ec1405": 1
-  },
   "venues/cryptocom/src/trading.rs": {
     "8c1d78bb768fb392694ad91c49f963ab64ba87a71d151646bff0298b85a6b734": 1,
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
