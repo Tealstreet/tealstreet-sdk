@@ -412,3 +412,26 @@ foreign issuer and refs, absent/conflicting domains, genuine Secondary relation,
 Primary-only mutation, same binding through G1 activations and teardown of old
 Prepare/Bind/DATA/timers while released-write evidence remains conservative.
 Exact host/registry/G2b hooks remain reviewer source gates before implementation.
+
+## First new-contract boundary evidence
+
+Core review of `09fec34606b` clears the first host-boundary controls only. Both
+borrowed and owned `EngineHost.dispose` paths now have executable NEW-CONTRACT
+assertions in `hosts/wasm/js/host-identity-provenance.test.mjs`. Each reaches its
+final assertion and fails solely because `retireIdentitySnapshot` is never
+called: the observed cleanup/free sequence otherwise matches. Four working
+controls pass: public ingress is fenced during cleanup, borrowed engines remain
+unfreed, owned engines are freed once, and a throwing resource does not strand
+later cleanup. This is two assertion REDs and four GREENs on unchanged runtime,
+not missing-method/import failures or evidence of an existing native snapshot.
+No runtime source, subject codec, shared claim/group hook or host teardown path
+has been edited. Exact Rust/registry/host source and native codec reviews remain
+required before implementation. The hook-throw and poisoned-engine cases from
+core review must be added at that source stage; these first controls do not
+prove either property.
+
+G1 constructor review adds one precise borrow requirement:
+`BoundSelectedRead::selected(&self) -> &SelectedRead` is crate-private. It feeds
+the existing child queue helper without unwrapping or dropping the binding.
+Tasks and all children retain the whole bound value; there is no public method
+returning an unbound owned read or optional/plain compatibility constructor.
