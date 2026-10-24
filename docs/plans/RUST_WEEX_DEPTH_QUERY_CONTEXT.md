@@ -176,3 +176,12 @@ evidence, not a separately injected native transport control. No CI/size/CPU,
 production source-review or landing approval is claimed by this checkpoint.
 Engine, signing recipes, checker policy, STAGING and legacy TS/AWS runtime are
 unchanged. Fresh source/native reviews are the next gate.
+
+## Native and bridge review follow-up
+
+Native and bridge reviews of `c76762a859c` are CLEAR. The native archive run
+passed 264 WEEX tests; the independent bridge run passed 37 scoped controls.
+The now-unreachable generic BookQuery failure branch is removed. Native fixtures
+also assert the exact root/child timer and HTTP action counts, including pause
+and dequeue; decoder and output expectations are unchanged. The follow-up scoped
+run passed all 37 depth-query, custody and public-isolation tests.

@@ -27,7 +27,22 @@ fn ask_at(
             limit,
         }),
     );
-    let mut requests: Vec<_> = safe_cex_engine::test_support::prepared_actions(e, now)
+    let actions = safe_cex_engine::test_support::prepared_actions(e, now);
+    assert_eq!(
+        actions.len(),
+        3,
+        "only root timer, child timer and unsigned HTTP"
+    );
+    let mut deadlines: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { at_ms, .. } => Some(*at_ms),
+            _ => None,
+        })
+        .collect();
+    deadlines.sort_by(f64::total_cmp);
+    assert_eq!(deadlines, vec![now + 20_000., now + 120_000.]);
+    let mut requests: Vec<_> = actions
         .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
@@ -291,6 +306,16 @@ fn shared_rate_pause_defers_new_query_without_retrying_the_failed_owner() {
         }),
     );
     let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(
+        actions.len(),
+        2,
+        "only original root timer and native pause timer"
+    );
+    assert!(
+        actions
+            .iter()
+            .all(|action| matches!(action, Action::SetTimer { .. }))
+    );
     let (timer, at_ms) = actions
         .iter()
         .find_map(|action| match action {
@@ -299,7 +324,20 @@ fn shared_rate_pause_defers_new_query_without_retrying_the_failed_owner() {
         })
         .expect("native shared pause admission");
     e.handle(at_ms, Event::TimerFired { timer });
-    let mut requests: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, at_ms)
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, at_ms);
+    assert_eq!(
+        actions.len(),
+        2,
+        "only child timer and deferred unsigned HTTP"
+    );
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == 24_001.))
+            .count(),
+        1
+    );
+    let mut requests: Vec<_> = actions
         .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),

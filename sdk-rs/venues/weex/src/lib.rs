@@ -595,13 +595,6 @@ impl WeexFutures {
         cx.book_changed(&symbol);
     }
     fn fail(&mut self, cx: &mut Cx<'_, Pending>, task: Task, error: &str) {
-        if let Task::BookQuery(request) = task {
-            request.failed(
-                cx,
-                safe_cex_engine::VenueError::new(error).kind(ErrorKind::Network),
-            );
-            return;
-        }
         if let Task::Identity { context, .. } = &task {
             Self::identity_failed(cx, context, error);
             return;
