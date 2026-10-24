@@ -17,11 +17,11 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
         ..Default::default()
     });
     e.start(0.);
-    let market = prepared(&mut e, 0.).remove(0);
+    let market = take_http(&mut prepared(&mut e, 0.));
     reply(&mut e, &market, &envelope(MARKET), 1.);
     // Account config is requested alongside the ticker seed once markets load.
     let mut initial = prepared(&mut e, 1.);
-    let ticker = initial.remove(0);
+    let ticker = take_http(&mut initial);
     reply(&mut e, &ticker, &envelope(TICKER), 2.);
     initial.extend(prepared(&mut e, 2.));
     let config = initial
@@ -80,10 +80,10 @@ fn startup() -> (
     };
     let mut e = crate::support::engine(opts);
     e.start(0.0);
-    let a = prepared(&mut e, 0.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     let mut initial = prepared(&mut e, 1.0);
-    let a = initial.remove(0);
+    let a = take_http(&mut initial);
     reply(&mut e, &a, &envelope(TICKER), 2.0);
     initial.extend(prepared(&mut e, 2.0));
     let business = initial
@@ -838,7 +838,7 @@ fn reports_exposure_on_malformed_instrument(bad: &str) {
         ..Options::default()
     });
     e.start(0.0);
-    let a = prepared(&mut e, 0.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(&format!("{MARKET},{bad}")), 1.0);
     // Private startup begins once markets load, alongside the ticker read.
     let out = prepared(&mut e, 1.0);
@@ -907,7 +907,7 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = prepared(&mut e, 0.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(&format!("{MARKET},{bad}")), 1.0);
     assert!(e.store().loaded().markets);
     let out = prepared(&mut e, 1.0);
@@ -1003,7 +1003,7 @@ fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
             ..Options::default()
         });
         e.start(0.0);
-        let a = prepared(&mut e, 0.0).remove(0);
+        let a = take_http(&mut prepared(&mut e, 0.0));
         reply(
             &mut e,
             &a,

@@ -13,7 +13,7 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
         ..Options::default()
     });
     engine.start(0.);
-    let request = prepared(&mut engine, 0.).remove(0);
+    let request = take_http(&mut prepared(&mut engine, 0.));
     reply(
         &mut engine,
         &request,
@@ -37,7 +37,7 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
     assert!(!engine.store().loaded().tickers);
     let timer = retry_timer(&prepared(&mut engine, 2.), 2.0, 1_000.0).unwrap();
     engine.handle(1002., Event::TimerFired { timer });
-    let retry = prepared(&mut engine, 1002.).remove(0);
+    let retry = take_http(&mut prepared(&mut engine, 1002.));
     reply(
         &mut engine,
         &retry,
@@ -323,7 +323,7 @@ fn failed_account_config_is_retried_by_the_startup_backoff() {
         ..Options::default()
     });
     engine.start(0.);
-    let request = prepared(&mut engine, 0.).remove(0);
+    let request = take_http(&mut prepared(&mut engine, 0.));
     reply(&mut engine, &request, &envelope(MARKET), 1.);
     let config = prepared(&mut engine, 1.)
         .into_iter()
