@@ -636,7 +636,6 @@ impl Groups {
         self.complete(execution, |_| Err(error.clone()))
     }
 
-    #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
     pub(crate) fn progress(
         &mut self,
         execution: Execution,
