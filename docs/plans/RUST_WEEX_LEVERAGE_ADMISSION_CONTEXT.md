@@ -1,6 +1,6 @@
 # WEEX leverage initial managed admission
 
-Status: plan before compiling original assertions; production held.
+Status: plan and original assertion evidence; production held.
 Actual base: `9a757d406b8`.
 Required parent: #2055 `911d20cc06a` (local leverage refusals).
 Composition: plain merge `24494f352e8`, with both CALLERS append sections kept.
@@ -106,3 +106,39 @@ claim a complete public/private handshake. Keys are fixture placeholders.
 Run only this target, CARGO_BUILD_JOBS=4, serially, then scoped strict Clippy/fmt.
 No broad local workspace/all-feature build. Production and inventory updates are
 held for bounded native/core review and explicit production authorization.
+
+## Original assertion receipt
+
+Plan commit `46da29d787c` preceded the new target. Executed on stack `24494f352e8`
+with the existing #2055 parent source unchanged:
+
+```sh
+CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=2 cargo test --manifest-path sdk-rs/Cargo.toml \
+  -p safe-cex-venue-weex --test leverage_admission_context
+CARGO_BUILD_JOBS=4 cargo clippy --manifest-path sdk-rs/Cargo.toml \
+  -p safe-cex-venue-weex --test leverage_admission_context -- -D warnings
+```
+
+Result: three independent assertion REDs, seven GREEN controls, zero ignored.
+No compilation, setup, missing-method or missing-request failure. All REDs
+compare full VenueErrors. Capacity produces lifecycle Internal/NotSent instead
+of the actual overflow's canonical Read Capacity/outcome None. NaN and f64::MAX
+produce that same lifecycle error instead of Read Revoked/InvalidInput/None.
+
+The capacity RED first releases 256 real native accountConfig identity requests
+through Prepare/Bind/Claim; no fixture-only Context or substitute venue is used.
+The separate capacity GREEN completes the original native identity owner,
+issues a fresh leverage read in the freed slot and completes it successfully.
+The RED's subsequent settings and recovery suffix, and each invalid-clock RED's
+finite re-ask suffix, remain explicit post-cutover gates because their first
+error assertion stops today.
+
+Other GREENs pin primary, secondary and secondary-only full headers against the
+independent signature oracle and native output/settings; a configured 1234 ms
+host wait still has the native 20000 ms physical bound. Provider refusal keeps
+its exact typed NotSent error with no HTTP/auth/deactivation or Store effect.
+Duplicate command ownership preserves one original success and fresh ID reuse.
+No Start/private handshake, deferred-entry or queue-capacity fault injection is
+claimed. Scoped strict Clippy and rustfmt pass; CI/broad local builds were not
+run for this checkpoint. Its only own paths are this plan, README and the new
+test, compared with `24494f352e8`; runtime and inventories remain parent-exact.
