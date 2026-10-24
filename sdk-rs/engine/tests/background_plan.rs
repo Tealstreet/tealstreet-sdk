@@ -48,6 +48,7 @@ enum Control {
     Pause(f64),
     Cancel,
     Refresh,
+    RefreshRefused,
     Invalidate,
     RetireParent,
 }
@@ -56,6 +57,7 @@ struct Cycle {
     root: Option<Plan>,
     session: Option<safe_cex_engine::request_context::Session>,
     task: Option<BackgroundTask>,
+    refused_task: Option<BackgroundTask>,
     control: Arc<Mutex<Option<Control>>>,
     activations: usize,
     stage: usize,
@@ -171,7 +173,7 @@ impl Venue for Cycle {
     fn on_background_task_ready(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
-        _: &BackgroundTask,
+        task: &BackgroundTask,
         activation: &BackgroundActivation,
     ) {
         assert!(!self.panic_ready, "adversarial ready callback panic");
@@ -181,6 +183,7 @@ impl Venue for Cycle {
             Ok(plan) => self.root = Some(plan),
             Err(error) => {
                 self.admission_errors.push(error);
+                self.refused_task = Some(task.clone());
                 cx.decline_background_task(activation, error).unwrap();
                 return;
             }
@@ -217,6 +220,12 @@ impl Venue for Cycle {
                         .unwrap(),
                     Control::Cancel => cx
                         .cancel_background_task(self.task.as_ref().unwrap())
+                        .unwrap(),
+                    Control::RefreshRefused => cx
+                        .request_background_task(
+                            self.refused_task.as_ref().unwrap(),
+                            safe_cex_engine::read_scheduler::Demand::Refresh,
+                        )
                         .unwrap(),
                     Control::Refresh => cx
                         .request_background_task(
@@ -857,5 +866,38 @@ fn pause_during_the_third_admission_emits_budget_exhausted_without_a_fourth() {
         },
     );
     assert!(requests(&mut engine, 4000.).is_empty());
+    assert_eq!(engine.venue().activations, 3);
+}
+
+#[test]
+fn share_busy_is_retryable_but_only_new_caller_demand_reactivates_the_refused_task() {
+    let handle = Arc::new(Mutex::new(None));
+    let mut engine = support::seeded_engine(Cycle {
+        calls: 150,
+        second_task: true,
+        control: handle.clone(),
+        ..Default::default()
+    });
+    engine.start(0.);
+    let first = requests(&mut engine, 0.).pop().unwrap();
+    assert_eq!(engine.venue().activations, 2);
+    let error = engine.venue().last_failure.as_ref().unwrap();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+    assert_eq!(error.retry_after_ms, Some(1000.));
+    assert!(error.outcome.is_none());
+    reply(&mut engine, &first, 1.);
+    let second = requests(&mut engine, 1.).pop().unwrap();
+    reply(&mut engine, &second, 2.);
+    let (http, timers) = drain(&mut engine, 2.);
+    assert!(http.is_empty());
+    assert!(
+        timers.is_empty(),
+        "refused demand is cancelled, without a deferred admission timer"
+    );
+    assert_eq!(engine.venue().activations, 2);
+    assert!(requests(&mut engine, 1002.).is_empty());
+    assert_eq!(engine.venue().activations, 2);
+    control(&mut engine, &handle, 1003., Control::RefreshRefused);
+    assert_eq!(requests(&mut engine, 1003.).len(), 1);
     assert_eq!(engine.venue().activations, 3);
 }
