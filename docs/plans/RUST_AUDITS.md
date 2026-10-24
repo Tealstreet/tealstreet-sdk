@@ -2988,3 +2988,12 @@ by fail_context on that exact root. BloFin 23->21 occurrences / 19->17 fingerpri
 only the two singleton rows are removed. No signer, trading, history, closed
 position or successful private read is converted. The coherent custody cutover
 remains with codex-zs5e83. No per-venue admission/completion implementation.
+
+### Phemex dispatch-signing custody candidate
+
+Full native funnel and WS auth now use opaque provider recipes, removing14
+legacy lib credential/material fingerprints. Typed signer refusal preserves
+accepted-prefix IDs and native rollback revisions; actual-release raw expiry
+is accumulated as a maximum before the native5s reconciliation skew. Production
+wire/financial controls pass. Independent source/caller reviews are CLEAR;
+full-map/HMAC review, final CI and the combined #1970/#1974 landing remain gates.

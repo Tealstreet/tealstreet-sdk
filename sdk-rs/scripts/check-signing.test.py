@@ -31,7 +31,7 @@ class SigningBan(unittest.TestCase):
                         self.assertTrue(ban.main())
                 source.write_text('fn uses_provider_refs() {}\n')
                 self.assertFalse(ban.main())
-                for family in ['asterdex', 'binance', 'bingx', 'bybit']:
+                for family in ['asterdex', 'binance', 'bingx', 'bybit', 'phemex']:
                     migrated = ban.ROOT / f'venues/{family}/src/sign.rs'
                     migrated.parent.mkdir(parents=True)
                     for body in ['fn new_secret() {}', 'fn hmac_sha256() {}']:

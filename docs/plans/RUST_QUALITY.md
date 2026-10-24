@@ -1618,3 +1618,13 @@ financial state preservation, duplicate original-owner release, and 300 sequenti
 failures with 255 Background peers and one free Context slot. Capacity recovery
 releases exact Background roots. No fabricated Context, numeric fallback or
 missing-method compile failure is regression evidence.
+
+### Phemex full signer cutover evidence
+
+Original signer test checkpoint17b9ee461cb had6GREEN/16assertionRED/0ignored.
+All22 are now GREEN with the same assertions, plus2 malformed-provider controls
+and the trusted-setup security control. Native256 and extended signer24/security2,
+registry3 and SDK constructor5 pass; strict Phemex Clippy passes. The exact
+combined staging map is17F/18O ->16F/16O, with one temporary sign_http; trading
+stays4F/4O via its approved release-metadata re-expression. No checker predicate
+or negative assertion is weakened. Actual #1970/#1974 and final CI remain gates.
