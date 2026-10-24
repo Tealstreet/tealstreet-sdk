@@ -1,7 +1,8 @@
 # GRVT tape-time replay diagnostics
 
 Baseline: actual landing `ba3d7da1d3aaba26d6c40d6615fdc467d6ec185d`.
-Branch: `test/rust-grvt-replay-diagnostics`. Keep frozen #1944 and the WOO
+Development branch: `test/rust-grvt-replay-diagnostics`; CI/PR branch:
+`wip/harness-tape-time-grvt`. Keep frozen #1944 and the WOO
 diagnostic branch separate. This is a diagnosis and possible narrow declaration
 prune, not a claim that all native/reference differences are defects.
 
@@ -76,3 +77,34 @@ this is a capture-contract proof, not native/reference financial parity.
 Independent control review: `/tmp/codex-grvt-replay-controls-review.json`,
 SHA256 `0a9dd80af055efcf8366972235e66c5a51dc5e73183123c0f962fade74a0f0ca`.
 Declaration changes still require the separate raw evidence step.
+
+## Exact declaration evidence and batch
+
+Baseline #1902 run `40037292055` / artifact `12537971676` and candidate
+#1944 run `40040892521` / artifact `12538743583` contain the same private tape.
+Both archive lengths/digests, physical producer uploads and measured checkout
+parents/trees are authenticated. Complete TS and Rust raw objects are equal
+after omitting only top-level metrics and protocol errors. The baseline has
+three TS and six Rust protocol occurrences, covering six unique declared keys;
+the candidate has none. The other 27 ordered failures, fixers and strict FAIL
+are unchanged. Unserved, missing-write, invalid-signature and unused-write counters are zero,
+with six writes and nine checkpoints per receiver.
+
+Independent exact raw review is CLEAR:
+`/tmp/codex-grvt-replay-evidence/independent-review.json`, SHA256
+`0b1de5f1261505a046f5cd10647a02f5ea4b6f1f56e16b3f4a7bbf2e0f5d1b10`.
+Remove only that current tape's six-key protocol group; every other manifest
+byte is preserved, including the WOO prerequisite, historical and public cases.
+The real suite verifier retains one public PASS and one declared private FAIL,
+with zero unexpected or unobserved declarations. All 32 focused controls pass.
+
+The first prune attempt correctly stopped on an outdated review-receipt hash
+while the reviewer finished sealing it; no declaration changed in that attempt.
+The final sealed review above authorizes the applied exact prune.
+
+Evidence currently contains one correctness pair per role, not five-pair
+determinism. The original sweep branch from merged #1646 is fast-forwarded to
+this work; its existing workflow selects five private pairs without a workflow
+edit. The draft requires its fresh CI, complete per-implementation repeat check
+and actual #1944 integration before final qualification. No merge is requested
+by preparing this batch.

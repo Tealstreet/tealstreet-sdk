@@ -1382,3 +1382,14 @@ Both real replay callers and forgotten-final-flag mutations are checked.
 Native accepted-write snapshot races are separately reproduced by four REDs
 and two working controls; the identical six controls pass against queued #1788.
 Those venue changes and their tests are outside this standalone harness scope.
+
+## GRVT final-coverage replay controls
+
+Healthy final completion, pre-ACK checkpoint observation, genuine earlier
+private-data faults, late selector faults and incomplete replacement generations
+are controlled through the real shared audit/capture APIs. The scoped GRVT and
+declaration-policy run passes 32 tests. Verification of the authenticated reports
+with the narrowed manifest retains one public PASS and one declared private FAIL,
+zero unexpected failures and zero unobserved declarations. Five-pair repeatability
+and fresh composed CI remain separate qualification work; no native parity is
+implied by protocol coverage.
