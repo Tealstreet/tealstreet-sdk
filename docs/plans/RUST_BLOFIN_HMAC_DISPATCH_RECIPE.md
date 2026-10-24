@@ -195,3 +195,17 @@ credentials` branch remains source-inspected: immutable construction prevents
 this invalid private setup reaching it with resolved mode. Do not fabricate
 account state to claim an executed version of that branch. Native refusal order
 and texts stay a source-stage preservation requirement.
+
+Re-executed correction `a619c8cba58`: sixteen tests, six intended assertion REDs,
+ten GREEN controls, zero ignored, no compile or setup failure. All five earlier
+REDs remain at their original assertion boundary. The sixth is the disclosed
+entropy projection: native returns the fixture's string with no kind/outcome;
+the managed preparation contract requires the existing shared Internal/NotSent
+error. The source callback proves the same single 21-byte failure caused it.
+All three added native caller controls are GREEN. The six original wire/result
+controls retain their expected bytes/financial assertions through the new
+Prepare/Bind/Claim-capable collector. Scoped strict Clippy and formatting pass.
+Logs: `/tmp/codex-blofin-hmac-reviewed-original.log` and
+`/tmp/codex-blofin-hmac-reviewed-strict.log`. Production and every prior fixture,
+Cargo, map and checker remain exact the base; this is still local plan/original
+evidence, not a recipe implementation or a consumer source approval.
