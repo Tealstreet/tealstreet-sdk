@@ -1,6 +1,6 @@
 # WEEX candle query Read custody
 
-Status: plan and original compiling assertions; production held.
+Status: draft production source; scoped controls pass, source reviews pending.
 Base: actual `be710b3f2d7692244144b3f8f10810dc52790796`.
 
 ## Scope and train separation
@@ -183,11 +183,12 @@ Native public candle fixtures use managed drain and live monotonic timestamps;
 their exact financial output and WS interval assertions are retained.
 
 Only WEEX lib, the two candle-related test files and this standalone plan change.
-To honor the requested zero overlap with combo-5b, its shared inventory and
-RUST_CUTOVER_CALLERS.md remain untouched. A source-derived artifact confirms
-exactly the three declared removed occurrences, zero additions; apply that prune
-and the caller entry after the train's shared files are released. This local
-checkpoint is not READY and cannot claim inventory/CI/landing clearance yet.
+At source checkpoint `90cd9c79528`, shared inventory and CALLERS were held under
+the initial train-file constraint. The overseer clarified that this applies only
+to SOURCE files: the exact source-derived three-occurrence prune, CALLERS entry
+and index row are now included for mechanical train composition. Source still
+has zero overlap with combo-5b. This draft is not READY pending source review
+and fresh CI; no landing clearance is claimed.
 The original source compile import and a missing preparation-fixture argument
 were corrected; neither is counted as assertion RED evidence.
 
