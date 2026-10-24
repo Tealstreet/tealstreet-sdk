@@ -222,3 +222,39 @@ that existing released-interest callback. This refreshed draft is published with
 those two failures explicitly open; it is not READY and has no merge permission.
 The previously executed63 account controls and owner-cleared fixtures remain
 exact; fresh CI is requested for the integrated draft as directed.
+
+## Landed handoff adapter completion
+
+The two original dynamic/reconnect full-action REDs stay unchanged. They will
+observe the complete returned subscription batch, then a real #1943 timer ingress,
+then the existing native book request. This promises subsequent engine ingress,
+not peer acknowledgement or a particular host event-loop turn.
+
+Use one native seed-due bit per Depth plus its existing generation, and one
+Pending::SocketBookSeeds payload containing the due symbols/generations for a
+proposal. This is seed intent only, not transport, epoch, timer, retry or
+publication authority. New ladders get a fresh native generation before staging;
+retirement marks seeds due after the unchanged generation/buffer invalidation.
+All public desired-set changes re-register the complete remaining due set with
+set_socket_interests_then, using the exact canonical book keys. Shared custody
+therefore cancels/rematches replaced required interests; removing one book must
+not strand another due book. Refused proposals never clear intent.
+
+Ready registers the current due books rather than issuing HTTP. Native book
+retry timers mark intent due and use the same registration, with no new timer.
+The released callback checks exact current public epoch/open state and each
+current native generation/due bit, then invokes the unchanged book_request.
+Clear due only after that function transfers its unchanged Pending::Depth to the
+existing request/retry owner. An old or duplicate callback cannot clear newer
+intent or repeat a seed. No HTTP call occurs in the final socket drain.
+
+A synchronous continuation-capacity refusal retires only the captured current
+public epoch via shared Closed/backoff, retaining every due bit for a genuine
+reconnect. Other existing socket policy/codec refusals keep their explicit typed
+failure/stop disposition; no venue fallback sender, private change, local retry
+queue or lifecycle seam is introduced. Add real capacity/free/reconnect,
+unsubscribe/remove-readd/stale-wake, two-book replacement and duplicate-wake
+controls. Preserve native HTTP builders/reducer/buffer/revision fences and all
+original financial/wire/order assertions. Review exact source with uufub4 and
+native coupling with ih35js before READY; scoped tests only, jobs4 one build at
+a time, with CPU/memory/size and full validation in fresh CI.
