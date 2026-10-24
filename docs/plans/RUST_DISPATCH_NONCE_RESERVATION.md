@@ -450,3 +450,35 @@ The seeded CI feature-mode dictionary also names an explicit dispatch-nonce OFF
 control (`http-plans,order-locks,test-support`), alongside the existing seeds and
 the explicit nonce ON control. This runs ordinary selected reads and strict
 feature-off refusal without depending on family closure feature unification.
+
+
+### Combined bundle attribution and sharing
+
+The exact `94124690fa9` combined baseline measures 14,127,182 bytes; the
+same tip plus nonce core (`9d44163e682`) measures 14,188,376. Both Node and
+web binaries agree, using the unchanged combined profile and optimizer. The
+fixed budget is 14,155,776; nonce core adds 61,194 bytes and exceeds it by
+32,600. The paired receipt and named diagnostics remain outside Git.
+
+Twiggy's optimized named comparison finds 24,093 bytes of aggregate growth
+in final Claim paths and 9,559 in managed queue paths. These paths repeat for
+venue pending/engine types. Share only the nonce portions in concrete private
+helpers, marked out of line so combined LTO cannot duplicate them:
+
+- Capture and validate declared/expected authority in one non-generic helper,
+  taking the borrowed recipe, retained expected authority, installed identities,
+  captured release registration and exact Context. Preserve the single getter,
+  exact Arc check, installed identity/credential/intent checks and all refusal
+  precedence. Bind-once stays at its original point, before IDs.
+- Move the nonce-only Claim branch onto the concrete Managed type. A borrowed
+  pure-admission callback runs only before the floor lock. Keep ordinary Claim
+  unchanged; keep observation, floor-only stale classification and repair
+  accounting unchanged. The mutex still encloses only floor check, infallible
+  Lifecycle/pacing commit and floor maximum. No new callback runs under it.
+
+No public API, feature map, deadline, domain, parsing, wire, retry, credit or
+budget changes. Feature-off code stays unchanged. Obtain bounded consumer and
+engine custody review, then rerun original nonce/selected-read/native/JS controls,
+strict checks and exact combined measurement. Retain the real WASM recipe proof
+as a required gate for any adopted correction. Keep this work local with no
+push, retry or dispatch under the overseer's current instruction.
