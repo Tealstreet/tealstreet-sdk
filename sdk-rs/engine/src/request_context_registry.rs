@@ -1943,7 +1943,7 @@ impl<P> Cx<'_, P> {
             self.fence_absent_orders(context);
         }
         // Session writes get one attempt per operation: no resend grant.
-        if !resendable || !matches!(context.owner(), Owner::Command { .. }) {
+        if !resendable || matches!(context.owner(), Owner::Session { .. }) {
             return Ok(None);
         }
         match self.io.request_contexts.grant_resend(&delivery) {

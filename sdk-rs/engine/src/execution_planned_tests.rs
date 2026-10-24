@@ -84,6 +84,13 @@ mod planned_execution {
         reject_first: bool,
         /// The only write is definitively refused and the Plan completes.
         reject_only: bool,
+        /// Answers are resendable refusals; `resend_attempts` is the declared
+        /// budget, and `accept_resend` accepts the second attempt instead.
+        resend: bool,
+        resend_attempts: u16,
+        accept_resend: bool,
+        grants: Vec<bool>,
+        resends: Vec<Result<(), Error>>,
     }
 
     impl Shared {
@@ -123,7 +130,7 @@ mod planned_execution {
                 .unwrap();
             let calls = [CallBound {
                 timeout_ms: 20_000,
-                attempts: 1,
+                attempts: if self.resend { self.resend_attempts } else { 1 },
                 retry_window: RetryWindow::Shared,
                 after_refusal: &[],
             }];
@@ -266,6 +273,56 @@ mod planned_execution {
             if self.read {
                 cx.finish_plan_call(&plan, &slot, &context).unwrap();
                 cx.done_plan(&plan, "candles".into()).unwrap();
+                return;
+            }
+            if self.resend && self.accept_resend && self.delivered == 2 {
+                cx.http_write_result(
+                    &context,
+                    crate::request_context::WriteResult::Accepted {
+                        order_ids: vec!["native-resent".into()],
+                    },
+                )
+                .unwrap();
+                cx.finish_plan_call(&plan, &slot, &context).unwrap();
+                cx.done_plan(&plan, "placed".into()).unwrap();
+                return;
+            }
+            if self.resend {
+                use crate::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
+                const TABLE: CodeTable = CodeTable {
+                    rows: &[Row {
+                        key: Key::Int(10002),
+                        verdict: Verdict::RefusedResend(crate::ErrorKind::AuthInvalid),
+                        only: None,
+                    }],
+                    success: &[Key::Int(0)],
+                    unlisted: Verdict::Unknown(None),
+                    status: &[],
+                };
+                let native = Native {
+                    code: NativeCode::Int(10002),
+                    message: "request timestamp refused",
+                };
+                let (_, grant) = cx
+                    .http_write_failure(&context, &TABLE, Some(&native), "refused", None)
+                    .unwrap();
+                self.grants.push(grant.is_some());
+                if let Some(grant) = grant {
+                    // The Plan's declared attempt budget decides the resend.
+                    let resent = cx.plan_resend_context(&plan, &slot, &context, grant);
+                    self.resends.push(resent.as_ref().map(drop).map_err(|e| *e));
+                    if let Ok(leg) = resent {
+                        cx.request_signed_managed(
+                            leg.clone(),
+                            Method::Post,
+                            "https://venue.test/write".into(),
+                            None,
+                            Box::new(Recipe),
+                            leg,
+                        )
+                        .unwrap();
+                    }
+                }
                 return;
             }
             if self.reject_only {
@@ -421,6 +478,74 @@ mod planned_execution {
         release(&mut e, tokens[0], 0.);
         actions.extend(e.drain_actions());
         (e, tokens[0], actions)
+    }
+
+    fn resend_rig(attempts: u16, accept: bool, followers: &[CommandId]) -> (Engine<Shared>, Preparation) {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            resend: true,
+            resend_attempts: attempts,
+            accept_resend: accept,
+            ..Shared::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        for &follower in followers {
+            command(&mut e, 0., follower);
+        }
+        let first = prepared(&e.drain_actions().collect::<Vec<_>>());
+        assert_eq!(first.len(), 1);
+        release(&mut e, first[0], 0.);
+        (e, first[0])
+    }
+
+    fn answer(e: &mut Engine<Shared>, token: Preparation, at: f64, status: u16) -> Vec<Action> {
+        e.handle(
+            at,
+            Event::HttpResponse {
+                request: token.attempt().request,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: "{\"code\":10002}",
+                },
+            },
+        );
+        e.drain_actions().collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn a_refused_execution_write_gets_its_declared_resend_and_no_more() {
+        let (mut e, first) = resend_rig(2, false, &[]);
+        let second = prepared(&answer(&mut e, first, 1., 400));
+        assert_eq!(e.venue.grants, [true], "the declared second attempt");
+        assert_eq!(e.venue.resends, [Ok(())]);
+        assert_eq!(second.len(), 1, "the resend prepares its attempt");
+        release(&mut e, second[0], 2.);
+        answer(&mut e, second[0], 3., 400);
+        assert_eq!(e.venue.grants, [true, false], "the attempt limit grants nothing");
+    }
+
+    #[test]
+    fn a_single_attempt_execution_write_gets_no_resend() {
+        let (mut e, first) = resend_rig(1, false, &[]);
+        assert!(prepared(&answer(&mut e, first, 1., 400)).is_empty());
+        assert_eq!(
+            e.venue.resends,
+            [Err(Error::RetryForbidden)],
+            "one declared attempt"
+        );
+    }
+
+    #[test]
+    fn a_resent_execution_write_projects_one_result_to_every_observer() {
+        let (mut e, first) = resend_rig(2, true, &[FOLLOWER]);
+        let second = prepared(&answer(&mut e, first, 1., 400));
+        assert_eq!(e.venue.grants, [true]);
+        release(&mut e, second[0], 2.);
+        let actions = answer(&mut e, second[0], 3., 200);
+        for owner in [FOUNDER, FOLLOWER] {
+            assert_eq!(terminals(&actions, owner), vec![Ok("placed".into())], "owner {owner}");
+        }
     }
 
     #[test]
