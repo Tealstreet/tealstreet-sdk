@@ -758,29 +758,13 @@ def subset(counts, baseline):
     return all(count <= baseline.get(digest, 0) for digest, count in counts.items())
 
 
-# ApeX dispatch-time signing staging (#2008): three rehashed legacy staging calls plus
-# one sign_http (four exact digests, no canonical 6cf35cca), approved by claude-ddi2il;
-# removed by the ApeX read-path follow-up (managed Read/Background reads). Remove before
-# master. Still live for branches whose manifest predates #2008.
-STAGING_BOOTSTRAPS = {'venues/apexomni/src/lib.rs': ({'0adb175953636afd100d2ddc68ad421af677dc89c16a52471e5cb4c54aefe898': 1,
-    '49ba30affa9b727ea990dacbdef5a8033af5fbd08fe892e2fe8fcc8e080c596a': 1,
-    '97ed964385cc7a52fcd23993359dd831f672724592d73be7beda8c73e36fe2b9': 1},
-    {'43f0a5248e3c01a293d3738c30ea1e956206f0ee972b359917ab94cc8920b84b': 1,
-    '4d0bf337c43e368b2b3bb52928e8cfafdffba590f333fc8ccd63cdcff8059a5e': 1,
-    '50c383ad66e41296ad7968d1d004afce80581aa8183b7e393a28bce694028341': 1,
-    'beed17adaec269aa1ac580185fb6e9bc7f47d298ece6bffb103661f9da543ad0': 1})}
-
-
 def check(current, allowed, previous):
     failures = []
     if current != allowed:
         failures.append('current sites must exactly match the inventory (prune removals; no new sites)')
     for label, baseline in previous:
         for path, counts in allowed.items():
-            bound = baseline.get(path, {})
-            if path in STAGING_BOOTSTRAPS and bound == STAGING_BOOTSTRAPS[path][0]:
-                bound = STAGING_BOOTSTRAPS[path][1]
-            if not subset(counts, bound):
+            if not subset(counts, baseline.get(path, {})):
                 failures.append(f'{path}: inventory grew against {label}')
     return failures
 

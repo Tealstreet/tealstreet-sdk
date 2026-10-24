@@ -332,10 +332,24 @@ must reject a proc macro that generates Cx-taking fns.
 ## Carried onto the actual landing `bcaaa4acc56`
 
 This is a plain merge. The landing added an ApeX staging bootstrap (#2008).
-Unlike the removed historical maps, it stays live for in-flight branches whose
-manifest still equals its pre-#2008 map when they merge the landing. It is kept
-unchanged, in a minimal bootstrap hook with its own test. It is removed by the
-ApeX read-path follow-up. Rebaseline against
+Unlike the removed historical maps, it stayed live for in-flight branches whose
+manifest still equalled its pre-#2008 map, so it was kept until the ApeX
+read-path follow-up (#2066) removed it. See the final carry below. Rebaseline against
 `bcaaa4acc56` (696 entries): 629 kept in prod and 12 in test, both
 byte-identical, with 55 precision drops (macro 44, field read 8, other member
 2, qualified 1). Nothing grows against base.
+
+## Final carry onto `eb449c6adf8` (#2066 landed)
+
+This is a plain merge. #2066 removed the ApeX staging bootstrap and its test.
+Since that was the last bootstrap, the hook goes too, and `check()` is a plain
+per-ref subset again. #2066 also pruned ApeX's request sites (21 → 10).
+Recounted on the composed tree with this checker against the tip's 653
+entries:
+- kept byte-identical: 586 in prod and 12 in test;
+- dropped: 55 precision drops (macro 44, field read 8, other member 2,
+  qualified 1);
+- nothing grows.
+
+The tip's prunes, #2066's ApeX removals among them, are already absent from
+the tip manifest, so they are not counted as precision drops.

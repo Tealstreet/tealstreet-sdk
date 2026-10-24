@@ -42,7 +42,7 @@ fn refused_symbols_signature_reports_and_retries_startup_without_sending() {
     e.set_identities(identities).unwrap();
     e.set_signer(Some(Arc::new(Refusing(provider)))).unwrap();
     e.start(0.0);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(0.0).collect();
     assert!(
         !actions
             .iter()
