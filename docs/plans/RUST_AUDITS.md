@@ -2830,6 +2830,14 @@ control preserves AuthInvalid/Expired/Permission metadata while health stays0,
 without any venue workaround. Exact seven-fingerprint/nine-occurrence prune is
 unchanged; discovery's shared get sender and every private/retrying site remain.
 
+### Lighter local history command authority
+
+Seven synchronous legacy history terminals now consume genuine shared Read roots.
+Original test-only5a0303:4GREEN/15assertionRED/0ignored; all19 nowPASS. Native
+validation and credential-presence precedence remain unchanged; shared entry
+refusal owns capacity/clock failure without numeric fallback. Exact inventory
+history10->3, Lighter41->34occurrences; remote paging/auth/source untouched.
+
 ## Metadata/settings freshness core
 
 The engine/Store owner supplies BingX query coalescing, settings-write fences

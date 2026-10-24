@@ -1473,6 +1473,14 @@ is declared in CALLERS rather than hidden by stripping the engine's typed cause.
 HTTP500 still returns its native string-only error. Existing financial assertions
 remain; tests/public.rs only drives the genuine prepared executor at its old clocks.
 
+### Lighter local history Read evidence
+
+Genuine256peer roots exercise seven local terminal capacity refusals, slot/ID
+reuse and invalid-clock recovery. Native result/error precedence, all four
+Lighter/Robinhood deployments, duplicate custody, repeated immediate completion
+and saturated remote byte/schema controls remain covered. All19 focused tests
+PASS after original4GREEN/15RED. No shared policy, timer, wrapper or scanner change.
+
 Metadata/settings freshness: BingX query ownership and both adapters' background
 Store observations/write fences use the shared settings boundary. WEEX explicit
 leverage reads retain incoming managed Context/native-revision behavior and do
