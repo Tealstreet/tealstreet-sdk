@@ -349,13 +349,52 @@ impl InterestInput {
     }
 }
 
+/// Live physical epochs by socket id, sorted for binary search. At most one
+/// per registered feed, so a vector replaces a tree's rebalancing code.
+#[derive(Default)]
+struct SocketIndex(Vec<(u64, Epoch)>);
+
+impl SocketIndex {
+    fn find(&self, socket: u64) -> Result<usize, usize> {
+        self.0.binary_search_by_key(&socket, |(id, _)| *id)
+    }
+    fn get(&self, socket: &u64) -> Option<&Epoch> {
+        self.find(*socket).ok().map(|index| &self.0[index].1)
+    }
+    fn contains_key(&self, socket: &u64) -> bool {
+        self.find(*socket).is_ok()
+    }
+    fn insert(&mut self, socket: u64, epoch: Epoch) {
+        match self.find(socket) {
+            Ok(index) => self.0[index].1 = epoch,
+            Err(index) => self.0.insert(index, (socket, epoch)),
+        }
+    }
+    fn remove(&mut self, socket: &u64) -> Option<Epoch> {
+        let index = self.find(*socket).ok()?;
+        Some(self.0.remove(index).1)
+    }
+    #[cfg(test)]
+    fn keys(&self) -> impl Iterator<Item = &u64> {
+        self.0.iter().map(|(id, _)| id)
+    }
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 /// Internal state of one engine. No venue can construct or mutate this registry.
 #[derive(Default)]
 pub(crate) struct Lifecycle {
     feeds: Vec<Feed>,
     // Only live physical epochs. Central retirement removes entries before any
     // native invalidation/retry callback; size is bounded by registered feeds.
-    current_sockets: BTreeMap<u64, Epoch>,
+    current_sockets: SocketIndex,
     #[cfg(test)]
     socket_lookups: std::cell::Cell<usize>,
     pending_frames: usize,
