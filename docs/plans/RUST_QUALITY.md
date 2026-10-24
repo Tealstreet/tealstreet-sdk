@@ -1472,6 +1472,7 @@ unchanged native baseline is preserved in the original checkpoint; this change
 is declared in CALLERS rather than hidden by stripping the engine's typed cause.
 HTTP500 still returns its native string-only error. Existing financial assertions
 remain; tests/public.rs only drives the genuine prepared executor at its old clocks.
+
 ### Lighter local history Read evidence
 
 Genuine256peer roots exercise seven local terminal capacity refusals, slot/ID

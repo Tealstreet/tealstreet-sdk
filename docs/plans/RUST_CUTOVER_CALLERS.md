@@ -6547,6 +6547,7 @@ demote the kind to mimic legacy string-only callbacks. The20s Context lifetime
 is explicitly a new admission-through-preparation/response whole-command bound,
 distinct from the old host's physical HTTP timeout fallback. Raw candle t/order
 and malformed numeric-string-to-zero coercion remain unchanged.
+
 ## Lighter synchronous history Read custody
 
 The seven native local history replies (unsupported client ID/income category,

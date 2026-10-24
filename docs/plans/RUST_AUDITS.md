@@ -2829,6 +2829,7 @@ the original public_typed_route_auth_errors_keep_metadata_without_auth_health_ev
 control preserves AuthInvalid/Expired/Permission metadata while health stays0,
 without any venue workaround. Exact seven-fingerprint/nine-occurrence prune is
 unchanged; discovery's shared get sender and every private/retrying site remain.
+
 ### Lighter local history command authority
 
 Seven synchronous legacy history terminals now consume genuine shared Read roots.
