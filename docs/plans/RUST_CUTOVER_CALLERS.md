@@ -6866,3 +6866,17 @@ remain. Existing perps metadata is retained: an unreleased preparation failure o
 timeout carries NotSent; a released Read timeout has no financial outcome.
 No signer, Session, Plan or socket authority is introduced. Six real legacy
 terminal occurrences are removed (Hyperliquid37->31, lib9->3).
+
+
+### Orderly initial history refusals
+
+Only the initial unsupported client lookup, unsupported income kind and shared
+argument-validation refusals in history.rs now use genuine Read command entry
+and fail_context. Accepted history requests, paging, signing/selection, nonce,
+callbacks and queues retain their existing ownership. A finite valid entry
+preserves the exact native failure text and Read outcome None; an unstamped or
+expired genuine entry is rejected through the shared initial-entry helper.
+Capacity refusal produces one shared failure, with no numeric fallback or
+physical action. The local helper must never be called from a delayed funding
+callback, accepted page delivery or queued trading work. Inventory: Orderly
+28F/29O to 25F/26O, solely the three documented initial failure fingerprints.

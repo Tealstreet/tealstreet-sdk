@@ -2,12 +2,13 @@
 
 ## Scope and ownership
 
-Plan and original REDs only, based on actual `9d344d541d5068f6d34f43948d6c65773ab10029`.
+Original plan/RED checkpoint based on actual `9d344d541d5068f6d34f43948d6c65773ab10029`.
 Branch: `feat/rust-orderly-local-command-context`; owner: codex-5c57jl.
 Hcmq3f released Orderly source/fixture ownership. This slice excludes pending
 combo-5b Orderly lib.rs, sign.rs and Cargo.toml, all credential selection/nonce
 work, physical requests, callbacks, pagination, reducers, trading and sockets.
-No new core API is required. Production is not authorized by this checkpoint.
+No new core API is required. After hcmq3f's bounded plan/native review CLEAR,
+the overseer authorized production plus a draft PR and CI.
 
 ## Exact next slice
 
@@ -88,3 +89,22 @@ GET `/v1/public/market_trades?symbol=PERP_BTC_USDC&limit=2`.
 Log: `/tmp/codex-orderly-local-history-original.log` (not committed).
 Only plan, index and new test differ from actual9d; production, prior tests,
 Cargo, all inventories and checker algorithms remain unchanged.
+
+## Production adoption
+
+The three initial failure calls now use reject_local_history, which consumes
+only a genuine Read entry and finalizes its admitted Context. None/Expired
+receipts use the shared initial rejection helpers; refusal emits no second
+terminal. Existing 12 original controls are unchanged and now pass.
+New local_history_admission controls allocate 256 genuine Background peer roots
+in a preceding no-ID callback. Each branch proves one shared capacity rejection
+with Read outcome None, releases the peers, then proves native-message recovery.
+An actually retained command root rejects all three duplicate queries without
+finishing it; its own terminal then permits 810 fixed-clock local queries,
+followed by allocation of all 256 peer slots to prove credits were released.
+The fixture's generic Capacity error expectation was corrected to the native
+Read projection (no NotSent); runtime error projection was not changed.
+
+Physical history send/parse/page/retirement, native validation and all incoming
+5b source remain outside this delta. The inventory removes exactly the three
+listed fingerprints; no new entries, bootstrap rows or checker changes.
