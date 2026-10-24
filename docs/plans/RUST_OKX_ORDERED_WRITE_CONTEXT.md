@@ -78,19 +78,25 @@ The OKX crate must opt into `http-plans` explicitly at implementation time.
 ## Shared and behavior gates before production
 
 1. **Physical-credit bound:** `PlanBound::from_steps` enforces 256 attempts.
-   Native permits 10000 split lots: up to 500 plain-order batches, and additional
-   per-lot protective calls. No chunking/re-admission workaround is allowed.
-   The proposed new consumer contract refuses a job needing 257 or more calls
-   atomically, Capacity/NotSent, before Store/progress/I/O. It requires an
-   overseer ruling. Exactly 256 calls must admit when shared resources permit.
+   The overseer ruled no new 257-call refusal: native successful inputs stay
+   supported. fe7lgm owns sizing the shared increase and memory/WASM/CPU cost.
+   One plain input order permits 10000 split lots, or 500 twenty-row calls;
+   both protections make 30000 calls (entry, stop, take-profit per lot).
+   Important: that bound is per input order. `CommandIn::PlaceOrders.orders`
+   is a Vec decoded directly by serde, and `plan_place` has no input-count cap.
+   Thus 30000 is not a finite whole-command maximum. Report this distinction
+   to the shared owner before choosing a replacement bound. No chunking,
+   renewed authority or private limit is authorized.
 2. **Independent cancellation:** at this actual base `PlanPolicy` has no
-   `independent_calls` field. The Plan owner identifies G2b as the prerequisite
-   for refused independent-call continuation. Obtain its exact reviewed source
-   and disposition for mixed/all-refused cancellation before implementation.
+   `independent_calls` field. The prerequisite is #1956 landing (combo-6b),
+   carrying #1939; its non-landing frozen pin is `3745a230887`. Obtain its
+   actual source and disposition for mixed/all-refused cancellation before implementation.
    Do not copy a proposed flag or simulate journal success in the venue.
 3. **Terminal projection:** resolve the native all-refused `done[]` case with
-   the shared journal owner and overseer. Native continuation alone does not
-   prove matching final outcome. Preserve the original witness.
+   the shared journal owner and overseer. The owner confirms that an all-refused
+   journal currently projects failure, whereas native code can finish `[]`.
+   Native continuation alone does not prove matching final outcome. Preserve
+   the original witness; no terminal bypass is authorized.
 
 These gates also apply to the Bitget write consumer. Missing shared machinery
 is reported to its owner and built once; this branch changes no engine source.
@@ -105,8 +111,8 @@ Record actual assertion failures independently from working native witnesses.
 - Genuine full-capacity refusal before optimistic status/progress, with every
   unrelated live preparation still pending.
 - Duplicate live legacy ID cannot replace a retained job or its terminal.
-- Native split geometry accepts 256 and 257 physical-call jobs; after the
-  capacity ruling, the 257 witness becomes the explicit new-contract RED.
+- Native per-input-order split maximum (10000 lots) and maximum plus one,
+  plus two maximum inputs proving that the cap is not whole-command scope.
 - Native bracket entry/stop/take-profit order and Primary signed bytes.
 - Native all-refused cancellation diagnostics, final output and later sibling
   continuation, plus mixed rows and dependent replacement refusal.
@@ -123,3 +129,14 @@ bounded plan/original review, then source review after the gates close.
 Run only scoped OKX tests and strict checks locally with CARGO_BUILD_JOBS=4.
 CI supplies the full matrix and the exact OKX family WASM bytes. No budget,
 profile or CPU-policy change is part of this slice; size delta is unmeasured.
+
+## Executed original checkpoint
+
+On the unchanged `a77b8c37c42` production source, the dedicated target compiles
+and runs six tests: **two assertion REDs, four GREEN, zero ignored**. The REDs
+are missing managed route preparation and optimistic `Canceling` publication
+despite actual shared-capacity exhaustion; every parked peer remains live.
+Working controls pin 10000/10001 lots, two maximum inputs in one command,
+all-refused cancellation diagnostics/continuation/`done[]`, and code 50004
+stopping the protective chain while reconciliation starts without write retry.
+These are original-source receipts, not managed implementation proof.
