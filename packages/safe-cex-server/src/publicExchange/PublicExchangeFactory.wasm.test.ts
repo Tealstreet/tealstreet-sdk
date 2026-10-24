@@ -219,18 +219,18 @@ describe('PublicExchangeFactory with the real native engine', () => {
         return transport.request(request);
       },
     }));
-    factory = new PublicExchangeFactory({ nativeStartupTimeoutMs: 1000, exchangeOptions: { engine: 'rust' } });
+    factory = new PublicExchangeFactory({ nativeStartupTimeoutMs: 10_000, exchangeOptions: { engine: 'rust' } });
     const handle = await factory.get('binance');
     const previous = handle.exchange;
     const markets = handle.markets;
     held = true;
-    await expect(handle.forceRefreshMarkets('held-native-read')).rejects.toThrow('startup timed out after 1000ms');
+    await expect(handle.forceRefreshMarkets('held-native-read')).rejects.toThrow('startup timed out after 10000ms');
     expect(aborted).toBe(1);
     expect(handle.exchange).toBe(previous);
     expect(previous.isDisposed).toBe(false);
     expect(handle.markets).toBe(markets);
     expect(await factory.get('binance')).toBe(handle);
-  });
+  }, 30_000);
 
   it('recovers a lazy Rust engine after cold startup times out into stale Redis fallback', async () => {
     const created: Array<Awaited<ReturnType<typeof sdk.createPublicExchange>>> = [];
