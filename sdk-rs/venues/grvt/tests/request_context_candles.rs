@@ -751,3 +751,99 @@ fn invalid_caller_wait_refuses_before_native_issue() {
     );
     assert!(e.drain_actions().next().is_none());
 }
+
+fn integrity_failure(payload: &[u8]) {
+    let mut e = engine(false);
+    let actions = ask(&mut e, NOW, 60_000, None);
+    let r = release(&mut e, NOW, &actions);
+    e.handle(
+        NOW + 1.,
+        Event::HttpStart {
+            request: r.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        NOW + 2.,
+        Event::HttpChunk {
+            request: r.id,
+            data: payload,
+        },
+    );
+    let mut actions = e.drain_actions().collect::<Vec<_>>();
+    e.handle(NOW + 3., Event::HttpEnd { request: r.id });
+    actions.extend(e.drain_actions());
+    let prepared = actions
+        .iter()
+        .filter(|a| matches!(a,Action::ManagedHttp(a) if matches!(&**a,HttpAction::Prepare { .. })))
+        .count();
+    assert_eq!(
+        prepared,
+        0,
+        "integrity failure prepared another attempt; terminal count={}",
+        outcomes(&actions, OWNER).len()
+    );
+    assert_eq!(
+        outcomes(&actions, OWNER).len(),
+        1,
+        "malformed ingress must seal once"
+    );
+    no_io(&actions);
+    let failures = outcomes(&actions, OWNER);
+    let error = failures[0].as_ref().unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(error.outcome, None);
+    assert!(reply(&mut e, NOW + 4., &r, 200, ROWS).is_empty());
+}
+#[test]
+fn non_utf8_ingress_is_strict() {
+    integrity_failure(b"\xff");
+}
+#[test]
+fn unfinished_stream_is_strict() {
+    integrity_failure(
+        br#"{"r":[{"ot":"1700000000000000000","o":"1","h":"2","l":"1","c":"1","vb":"2"},"#,
+    );
+}
+
+#[test]
+fn late_failed_attempt_cannot_fail_the_live_replacement() {
+    let mut e = engine(false);
+    let actions = ask(&mut e, NOW, 60_000, None);
+    let first = release(&mut e, NOW, &actions);
+    let replacement = failed(&mut e, NOW + 1., &first);
+    prep(&replacement);
+    let late = failed(&mut e, NOW + 2., &first);
+    no_io(&late);
+    assert!(outcomes(&late, OWNER).is_empty());
+    let second = release(&mut e, NOW + 3., &replacement);
+    assert_eq!(
+        done(&reply(&mut e, NOW + 4., &second, 200, ROWS))
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn preparation_timeout_is_strict_while_the_caller_is_live() {
+    let mut e = engine(false);
+    let actions = ask(&mut e, NOW, 60_000, None);
+    let (preparation, _) = prep(&actions);
+    e.http_preparation_failed(
+        NOW + 1.,
+        preparation,
+        Error::TimedOut,
+        VenueError::new("preparation timed out").kind(ErrorKind::Timeout),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    no_io(&actions);
+    let values = outcomes(&actions, OWNER);
+    assert_eq!(values.len(), 1);
+    let error = values[0].as_ref().unwrap_err();
+    assert_eq!(error.message, "preparation timed out");
+    assert_eq!(error.kind, Some(ErrorKind::Timeout));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+}

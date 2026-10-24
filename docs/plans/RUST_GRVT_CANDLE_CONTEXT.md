@@ -238,3 +238,29 @@ fixture adaptation. The first ratchet run passed all 24 checker controls but
 reported foreign Backpack/BingX/Crypto.com/WEEX inventory drift against the
 new landing. Integrate actual before publishing; this is not a candle failure
 or permission to overwrite foreign manifests. Source review and CI follow.
+
+
+## Typed integrity failure correction
+
+Uuf's source review found a real gap in the inherited on_stream_malformed /
+on_http_failed / on_request_failed chain: dropping Internal caused a malformed
+stream to select ReadFailure. Two genuine ingress controls (non-UTF8 and an
+unfinished envelope) independently reproduced one new Prepare and zero terminals
+before the fix. Both are appended after the unchanged original 23-test prefix.
+
+Candles now keeps typed on_http_failed: only engine Network or physical Timeout
+may select retry; integrity and every other typed failure seal strictly. The
+untyped Candles failure callback is strict too, so strings confer no retry
+evidence. Every other Job delegates to exactly the old on_request_failed default.
+Preparation failures remain a separate strict typed callback. A preparation-
+Timeout control proves it cannot enter the released transport retry path.
+
+The two integrity controls now pin one Internal failure / Read outcome none,
+no new Prepare/Bind/raw HTTP and inert late replies. Existing network and physical
+timeout positives remain. A late old-attempt failure control preserves the live
+replacement; the retry helper returns silently on Revoked per fe7's P3. No
+checker, map, wire, native status, credential or Session contract changes here.
+
+After the correction, the changed-crate native run passes 236 controls, zero
+ignored. The original 23-test byte prefix is exact; four source-stage controls
+are appended. No existing financial/native assertion was changed.

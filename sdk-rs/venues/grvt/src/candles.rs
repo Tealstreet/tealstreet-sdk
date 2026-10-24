@@ -226,6 +226,7 @@ impl Grvt {
                 request.failed = false;
                 self.candle_send(cx, request);
             }
+            Err(Error::Revoked) => {}
             Err(_) => {
                 let _ = cx.fail_plan(&request.plan, "GRVT candle read failed");
             }

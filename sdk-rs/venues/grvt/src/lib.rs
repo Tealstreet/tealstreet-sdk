@@ -1089,7 +1089,7 @@ impl Venue for Grvt {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
         if let Job::Candles(request) = pending.job {
-            self.candle_failed(cx, *request);
+            let _ = cx.fail_plan(&request.plan, "GRVT candle read failed");
             return;
         }
         let read = match &pending.job {
@@ -1132,6 +1132,25 @@ impl Venue for Grvt {
             }
             Job::History(request) => self.history_failed(cx, *request, error),
             _ => self.fail_pending(cx, pending, error),
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Job::Candles(request) = pending.job {
+            if matches!(
+                error.kind,
+                Some(safe_cex_engine::ErrorKind::Network | safe_cex_engine::ErrorKind::Timeout)
+            ) {
+                self.candle_failed(cx, *request);
+            } else {
+                let _ = cx.fail_plan(&request.plan, error);
+            }
+        } else {
+            self.on_request_failed(cx, pending, &error.message);
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
