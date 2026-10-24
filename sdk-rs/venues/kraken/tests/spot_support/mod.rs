@@ -58,7 +58,7 @@ pub fn ready_with_payloads(
     let mut pubsocket = None;
     let mut private = None;
     for _ in 0..12 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
         if actions.is_empty() {
             break;
         }

@@ -38,6 +38,8 @@ ed25519 = []
 es256 = []
 secp256k1 = []
 stark = []
+# No venue signs HMAC-SHA512 through LocalSigner; keep it out of family builds.
+hmac-sha512 = []
 
 [dev-dependencies]
 alloy-signer = { workspace = true, features = ["eip712"] }

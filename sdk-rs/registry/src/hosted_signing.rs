@@ -16,13 +16,6 @@ pub enum OutputFormat {
     Base64Hex,
 }
 
-#[derive(Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
 pub enum Input {
     Credential {},
     Http {
@@ -34,6 +27,112 @@ pub enum Input {
         to_sign: String,
         output_format: OutputFormat,
     },
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum InputKind {
+    Credential,
+    Http,
+    WsAuth,
+}
+
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "camelCase")]
+enum InputField {
+    Kind,
+    Payload,
+    StampMs,
+    Revision,
+    ToSign,
+    OutputFormat,
+}
+
+/// Hand-written in place of serde's buffered internally-tagged enum, which
+/// cost wasm size. Accepts exactly what that derive accepted: a closed map
+/// keyed by `kind`, or a sequence of the tag followed by the variant's fields.
+struct InputVisitor;
+
+fn store<'de, A: serde::de::MapAccess<'de>, T: Deserialize<'de>>(
+    map: &mut A,
+    slot: &mut Option<T>,
+    name: &'static str,
+) -> Result<(), A::Error> {
+    if slot.is_some() {
+        return Err(serde::de::Error::duplicate_field(name));
+    }
+    *slot = Some(map.next_value()?);
+    Ok(())
+}
+
+fn element<'de, A: serde::de::SeqAccess<'de>, T: Deserialize<'de>>(
+    seq: &mut A,
+    index: usize,
+) -> Result<T, A::Error> {
+    seq.next_element()?
+        .ok_or_else(|| serde::de::Error::invalid_length(index, &"a hosted signing input"))
+}
+
+impl<'de> serde::de::Visitor<'de> for InputVisitor {
+    type Value = Input;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a hosted signing input")
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Input, A::Error> {
+        let (mut kind, mut payload, mut stamp_ms, mut revision, mut to_sign, mut output_format) =
+            (None, None, None, None, None, None);
+        while let Some(field) = map.next_key()? {
+            match field {
+                InputField::Kind => store(&mut map, &mut kind, "kind")?,
+                InputField::Payload => store(&mut map, &mut payload, "payload")?,
+                InputField::StampMs => store(&mut map, &mut stamp_ms, "stampMs")?,
+                InputField::Revision => store(&mut map, &mut revision, "revision")?,
+                InputField::ToSign => store(&mut map, &mut to_sign, "toSign")?,
+                InputField::OutputFormat => store(&mut map, &mut output_format, "outputFormat")?,
+            }
+        }
+        let kind = kind.ok_or_else(|| serde::de::Error::missing_field("kind"))?;
+        match (kind, payload, stamp_ms, revision, to_sign, output_format) {
+            (InputKind::Credential, None, None, None, None, None) => Ok(Input::Credential {}),
+            (InputKind::Http, Some(payload), Some(stamp_ms), Some(revision), None, None) => {
+                Ok(Input::Http {
+                    payload,
+                    stamp_ms,
+                    revision,
+                })
+            }
+            (InputKind::WsAuth, None, None, None, Some(to_sign), Some(output_format)) => {
+                Ok(Input::WsAuth {
+                    to_sign,
+                    output_format,
+                })
+            }
+            _ => Err(serde::de::Error::custom("invalid hosted signing input")),
+        }
+    }
+
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Input, A::Error> {
+        Ok(match element(&mut seq, 0)? {
+            InputKind::Credential => Input::Credential {},
+            InputKind::Http => Input::Http {
+                payload: element(&mut seq, 0)?,
+                stamp_ms: element(&mut seq, 1)?,
+                revision: element(&mut seq, 2)?,
+            },
+            InputKind::WsAuth => Input::WsAuth {
+                to_sign: element(&mut seq, 0)?,
+                output_format: element(&mut seq, 1)?,
+            },
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for Input {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(InputVisitor)
+    }
 }
 
 /// Formatting metadata remains bound to its one capture token.
@@ -119,7 +218,9 @@ fn family(venue: &str) -> bool {
             "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader"
         );
     let okx = cfg!(feature = "okx") && matches!(venue, "okx" | "okxeu" | "okxdemo" | "okxeudemo");
-    binance || bybit || okx || (cfg!(feature = "asterdex") && venue == "asterdex")
+    let bitget =
+        cfg!(feature = "bitget") && matches!(venue, "bitget" | "bitgetusdc" | "bitgetinverse");
+    binance || bybit || okx || bitget || (cfg!(feature = "asterdex") && venue == "asterdex")
 }
 
 pub fn prepare(
@@ -304,7 +405,7 @@ mod presentation_tests {
         let (identity, signer) = fixture();
         for (venue, names) in families() {
             let policy = crate::remote_signing_policy(venue);
-            assert_eq!(policy.enabled, venue == "okx");
+            assert!(policy.enabled && !policy.payload_supported);
             assert_eq!(policy.signature_encoding, SignatureEncoding::Base64);
             assert_eq!(policy.passphrase_header, Some(names[0]));
             let (work, kind) = prepared(&identity, policy);
@@ -330,7 +431,9 @@ mod presentation_tests {
                 },
                 Input::Credential {},
             );
-            if venue == "okx" && cfg!(feature = "okx") {
+            if (venue == "okx" && cfg!(feature = "okx"))
+                || (venue == "bitget" && cfg!(feature = "bitget"))
+            {
                 assert!(capture.is_ok());
             } else {
                 assert!(matches!(capture, Err(SignError::Unsupported)));
@@ -510,6 +613,111 @@ mod presentation_tests {
                 Some(MAC)
             );
             assert!(captures.is_empty());
+        }
+    }
+}
+
+#[cfg(test)]
+mod input_parse_tests {
+    use super::*;
+
+    /// The wasm host maps every parse failure to `InvalidRequest` this way.
+    fn parse(input: &str) -> Result<Input, SignError> {
+        serde_json::from_str(input).map_err(|_| SignError::InvalidRequest)
+    }
+
+    fn rejected(input: &str) {
+        assert!(
+            matches!(parse(input), Err(SignError::InvalidRequest)),
+            "{input}"
+        );
+    }
+
+    #[test]
+    fn each_kind_is_accepted_in_map_and_sequence_form() {
+        for input in [r#"{"kind":"credential"}"#, r#"["credential"]"#] {
+            assert!(matches!(parse(input), Ok(Input::Credential {})));
+        }
+        for input in [
+            r#"{"kind":"http","payload":"p","stampMs":1000.5,"revision":"7"}"#,
+            r#"{"revision":"7","stampMs":1000.5,"payload":"p","kind":"http"}"#,
+            r#"["http","p",1000.5,"7"]"#,
+        ] {
+            assert!(matches!(
+                parse(input),
+                Ok(Input::Http { payload, stamp_ms, revision })
+                    if payload == "p" && stamp_ms == 1000.5 && revision == "7"
+            ));
+        }
+        for (format, input) in [
+            (
+                "hex",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"hex"}"#,
+            ),
+            (
+                "base64",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"base64"}"#,
+            ),
+            ("hex-base64", r#"["wsAuth","x","hex-base64"]"#),
+        ] {
+            let Ok(Input::WsAuth {
+                to_sign,
+                output_format,
+            }) = parse(input)
+            else {
+                panic!("{input}");
+            };
+            assert_eq!(to_sign, "x");
+            assert_eq!(
+                format,
+                match output_format {
+                    OutputFormat::Hex => "hex",
+                    OutputFormat::Base64 => "base64",
+                    OutputFormat::Base64Hex => "hex-base64",
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_null_duplicate_wrong_kind_and_missing_fields_are_invalid_requests() {
+        for input in [
+            // Unknown fields, including another kind's field.
+            r#"{"kind":"credential","key":"ref:owned-primary"}"#,
+            r#"{"kind":"http","payload":"p","stampMs":1,"revision":"7","secondary":true}"#,
+            r#"{"kind":"wsAuth","toSign":"x","outputFormat":"hex","stamp_ms":1}"#,
+            r#"{"kind":"credential","toSign":"x"}"#,
+            r#"{"kind":"wsAuth","toSign":"x","outputFormat":"hex","payload":"p"}"#,
+            // Nulls are never absence.
+            r#"{"kind":null}"#,
+            r#"{"kind":"credential","payload":null}"#,
+            r#"{"kind":"http","payload":null,"stampMs":1,"revision":"7"}"#,
+            r#"{"kind":"http","payload":"p","stampMs":null,"revision":"7"}"#,
+            r#"{"kind":"wsAuth","toSign":"x","outputFormat":null}"#,
+            r#"["http",null,1,"7"]"#,
+            // Duplicates.
+            r#"{"kind":"credential","kind":"credential"}"#,
+            r#"{"kind":"http","payload":"p","payload":"p","stampMs":1,"revision":"7"}"#,
+            r#"{"kind":"wsAuth","toSign":"x","toSign":"x","outputFormat":"hex"}"#,
+            // Wrong or unknown kind and wrong value types.
+            r#"{"kind":"present"}"#,
+            r#"{"kind":"Http","payload":"p","stampMs":1,"revision":"7"}"#,
+            r#"{"kind":0}"#,
+            r#"{"kind":"http","payload":"p","stampMs":1,"revision":7}"#,
+            r#"{"kind":"wsAuth","toSign":"x","outputFormat":"raw"}"#,
+            // Missing required fields, extra sequence elements, non-objects.
+            r#"{}"#,
+            r#"{"payload":"p","stampMs":1,"revision":"7"}"#,
+            r#"{"kind":"http","payload":"p","stampMs":1}"#,
+            r#"{"kind":"wsAuth","toSign":"x"}"#,
+            r#"["http","p",1]"#,
+            r#"["credential","x"]"#,
+            r#"["wsAuth","x","hex",null]"#,
+            r#"[]"#,
+            r#""http""#,
+            "null",
+        ] {
+            rejected(input);
         }
     }
 }
