@@ -3184,6 +3184,15 @@ BookQuery became managed, per55's fixture direction; mutant distinction retained
 Exact six-site prune: lib11->8, depth_query3->0, family41->35, foreign map unchanged.
 Source review/CI are separate gates; no budget or actual-parent landing claim.
 
+## OKX history selected identity follow-up
+
+The closed-position local Slots construction and history's send-time
+slot-to-identity remap now use the shared declaration and SelectedRead root/legs.
+No selection witness is moved into lib.rs. Original actual credential-checker
+removal RED is green after adoption: closed1 to0, history2 to1, all foreign keys
+unchanged. Local cache/empty/error precedence and existing history authority are
+preserved; no shared checker exemption or source change.
+
 ## GRVT fixed setting terminal custody
 
 The margin-mode and hedged-mode refusals now admit genuine keyless Mutation

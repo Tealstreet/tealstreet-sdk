@@ -366,3 +366,265 @@ bans and both request-context checks. Independent source/adversarial, caller and
 full-map reviews must answer the architecture gate. No merge during the current
 MEXC/header-seam hold; genuinely integrate any newly landed shared engine seam
 and obtain fresh CI before a later venue window.
+
+
+## P0 write adoption, classifier pin 2026-10-23
+
+Audited actual source: `6741c1c6609437e32090c76745a56ca6c2262445`.
+This appendix supersedes the earlier draft WRITE API names. It is a plan and
+original-source regression specification; it does not migrate production code,
+close an audit row, prune inventory, or claim a managed signer is landed.
+
+### Reverified failures and native evidence
+
+| Classification audit row | Current source / trigger | Required caller result |
+| --- | --- | --- |
+| #5 | `src/lib.rs::api_response` recognizes code 20016/401 or any nonzero code whose message contains `sign`, before checking 408/5xx; `response` resends with legacy signing. | A released write with 408/5xx is Unknown and never earns a resend, including a signature-looking native body. |
+| #35 | `src/trading.rs::failure` leaves an unlisted numeric code with no outcome. | An unlisted code is explicitly Unknown, retains native code/message, and never proves refusal. |
+
+Existing numeric distinctions are 401 (AuthInvalid), 429 (RateLimited),
+20016 (signature refusal candidate), and success 0. There is no complete ApeX
+refusal table in current source. Move only independently justified existing
+codes into one `classify::CodeTable`: `success: &[Key::Int(0)]`, explicit
+`unlisted: Verdict::Unknown(None)`, and no bare-status refusal rows without a
+cited protocol guarantee. The old `contains("sign")` predicate is not native
+refusal evidence; do not turn it into a message row. Freeze the exact 20016
+refusal/resend mapping with the signer owner before implementation. Preserve
+native zkLink and primary/legacy HMAC bytes, never broaden retry eligibility.
+
+### Managed conversion and prerequisites
+
+1. After the signer/provider prerequisites (#1839/#1841), declare a genuine
+   command-owned Mutation with the real credential and immutable raw bound.
+   `admit_http_command(Policy)` is actual (#1830); queued preflight/multi-leg
+   commands still require the shared Plan/CallWindow admission design. No dummy
+   Read/Background context may authorize a write. Keep atomic native preflight,
+   entropy/ID allocation, virtual brackets and cancellation confirmation.
+2. Carry the exact Context through Pending and the managed signed request.
+   A native complete ID-bearing acknowledgement reports
+   `http_write_fact(ctx, WriteFact::Accepted { order_ids }, None)`. Decode the
+   integer code strictly, not through f64. A nominal success without a valid ID
+   reports `http_write_unproven`, not Accepted or an automatic retry.
+3. In the exact delivered callback, call `classify_write(ctx, &TABLE, native,
+   message)` and then `http_write_fact` with `WriteFact::Failed`, or use
+   `http_write_failure` for a whole failure. The engine supplies status, intent,
+   attempt provenance and 408/5xx precedence. Keep native code/message intact.
+   Only its opaque `ResendGrant` can feed `http_resend_context`; legacy signing
+   selection is a recipe input on that same logical leg and original deadline.
+4. Keep accepted sibling IDs as journal facts; use caller-ordered
+   `http_write_batch` only for a real single native batch acknowledgement.
+   Retain native stop/replacement sequencing and racing-fill sizing. Remove
+   `Job.effective` outcome demotion only with the full command journal adoption.
+   Narrow replacement Place intent with `http_write_leg_intent` when required.
+5. Complete once through `done_context`/`fail_context`; engine CommandWrites
+   aggregates prior releases, uncertain effects and reconciliation IDs. Never
+   call engine-test-only `http_write_result`, transitional `classify::write`,
+   local status ladders, text retries or a numeric completion fallback.
+
+Pre-release `request_context::Error::venue_error()` / preparation NotSent is
+valid for that attempt; a previously released sibling still determines the
+whole-command outcome. Released transport/integrity failures remain engine
+facts. Background session establishment belongs to claude-55ao7t; signer
+recipes and provider refs belong to claude-19pt8s. No production adoption in this
+slice until required shared seams actually land.
+
+### Original RED controls and acceptance
+
+Add isolated ignored contract tests to the unoccupied `tests/trading.rs` using
+its existing ready/order/request fixtures, without new test credentials. Run
+explicitly with `cargo test -p safe-cex-venue-apexomni --test trading
+p0_write_ -- --ignored --nocapture`. Each must compile and reach its behavioral
+assertion against the pinned original source: (a) a 500 + code 20016 signature
+body emits no resend; (b) an unlisted code returns Outcome::Unknown with its
+native code. The ignore reason declares the blocked adoption; remove the
+marker only in the eventual implementation, keeping assertions verbatim.
+
+Future GREEN controls also cover 408/503 signature bodies; documented 20016
+refusal permits at most one grant; malformed/empty/contradictory success cannot
+accept; retry grant from a sibling, old attempt or expired root is refused;
+earlier accepted IDs survive later refusal/timeout; duplicate/late callbacks
+produce one terminal; preparation failure after an earlier write does not
+claim the whole command NotSent. Recheck exact legacy fingerprints from the
+frozen inventory above at implementation time and prune only disappeared ApeX
+entries. This plan/tests slice prunes none and adds no CALLERS landed claim.
+
+Independent architecture gate: adoption must remain native codec facts plus
+engine policy. Any missing reusable admission, signing or retry mechanism is a
+shared prerequisite, never a second venue implementation. Implementation
+validation remains venue + Binance tests, scoped strict Clippy/fmt, bans, both
+request-context ratchets and exact-head CI; no local replay/timing sweep.
+
+Local evidence at the plan/test head: both original RED tests compile and fail
+by the intended assertion (extra HTTP resend; None instead of Unknown). The
+normal ApeX + Binance suites pass with these two controls explicitly ignored;
+scoped strict all-target Clippy, fmt and both request-context checks pass. This
+is regression preparation, not GREEN adoption evidence. The landed classifier
+source is #1837 (`e0322577e354739dde6d7e5011e74ab660145885`).
+
+
+## Actual write adoption, phase 1 (2026-10-23)
+
+Start exactly on reviewed #1874 head2891949d1e2. The overseer's subsequent
+scope ruling permits two steps: phase1 adopts managed Context/CodeTable/journal
+and proves positive remote HMAC cancel/settings; local zkLink placement keeps
+working through the shared provider, while remote/keyless placement refuses
+Unsupported/NotSent before foreground I/O until P8. The two placement REDs
+remain explicitly ignored with P8 named, then become active in phase2 with a
+positive remote zkLink order proof. No eager signing workaround is permitted.
+
+Owned files: lib.rs (Options identity, managed Pending/typed dispatch),
+trading.rs (native immutable plan, payload preparation, classifier facts and
+contextual settlement), owned test fixtures and new managed-write controls,
+this appendix, CALLERS and exact vanished ApeX manifest entries. Signer-owned
+sign.rs and its recipe test stay unchanged; #1839's Cargo change is consumed
+from its reviewed pin. The minimal public Options field is
+`identity: Option<safe_cex_engine::signing::Identity>` for the signer owner's
+registry admission. Opaque refs never enter the legacy eager signing path.
+
+Reviewed prerequisites: #1839 at3eaa22397d0 (extra zklinkSeed/base64Text/provider)
+and #1841 atcf70b07fac1 (Http::new/with_contracts, contract_payload and exactly
+once placeholders). Plan source0f06f289fe4 is independently reviewed but its
+feature-isolation pin is pending; use that owner's reviewed replacement before
+final proof. Missing registry/SDK/host admission and positive remote HMAC
+adapters stay with claude-19pt8s; P8 adds remote zkLink later. None is claimed
+actual merely because its branch is inspectable.
+
+1. Commit the Options identity handoff independently, then consume exact
+   reviewed signer/Plan source without editing shared engine/provider regions.
+2. Add original failing managed-HMAC cancel/settings controls before conversion:
+   no early HTTP/signing before trusted Prepare, exact bound release bytes,
+   real asynchronous remote-provider success, typed preparation refusal,
+   expired/stale/duplicate command and no resend after an uncertain reply.
+   Preserve native successful output, side effects and request/body/header bytes.
+3. Begin genuine WriteAfterReads preflight before native validation terminals,
+   retain the native FIFO/redo behavior, and admit a Plan only from the final
+   immutable step set. Compute raw bounds from checked native attempts and
+   pacing; no arbitrary120s root. Empty native work uses done_empty_plan before
+   any admitted Plan, not a dummy accepted Context. Multi-call/split/amend
+   execution must use the shared Plan API, never an invented Context loop.
+4. Replace eager contract signatures with pure 36-byte native payloads and
+   recipe placeholders. Release uses shared Http::with_contracts locally and
+   Http::new for HMAC-only writes. Credential/body/query/legacy flags remain
+   immutable recipe facts; exact delivery owns CodeTable/WriteFact settlement.
+   Keep unlisted Unknown, 408/5xx precedence and opaque resend grants central.
+5. Validate local zkLink regressions and actual positive remote HMAC behavior;
+   retain the two P8-dependent placement controls as tracked ignored debt.
+   Prune only fingerprints/counts that actually disappear; never rehash or
+   move a legacy call merely to shrink the ledger. Record exact before/after
+   totals and caller-visible limitations in the same PR.
+6. Run touched venue + Binance, strict scoped Clippy/fmt, bans and both ratchets;
+   obtain independent source/adversarial, caller and full-map reviews including
+   the architecture gate. Publish a separate ApeX PR, wait for exact-head CI,
+   and request a merge window. Then repeat Orderly, Backpack, Coinbase in order.
+
+Architecture gate: native facts and adoption only. Any missing signer-mode
+capability, admission, preflight, session or remote-wire support is requested
+from its shared owner; no venue policy replacement or stale-context bypass.
+
+
+### Plan-audit corrections and explicit shared dependencies
+
+The actual implementation uses Plan custody and settlement throughout:
+`validate_plan_delivery` before native reducers, classifier facts before
+`finish_plan_call`, `plan_resend_context` for a granted resend, and
+`done_plan`/`fail_plan` for the command. Context-only completion and resend
+APIs do not replace Plan completion. Pending state retains the exact Plan,
+Slot and Context; cleanup is fenced by owner and generation.
+
+Before releasing any managed mutation, implement the bounded native
+`capture_http_reconciliation` codec and restricted late-reply reducer. The
+default hook rejects dispatch. Capture only native correlation facts, never
+requests, recipes, credentials or signing material.
+
+Independent review identified three shared prerequisites; none is replaced
+with a venue workaround:
+
+- **Conditional mutation terminal.** An amend cancel may succeed while racing
+  fills eliminate its replacement. A declared conditional terminal must project
+  the existing journal and retire the unreleased suffix under exact current
+  delivery custody. `done_read_plan_after_data`, silent slot skips and
+  post-admission `done_empty_plan` cannot authorize this. Codex-hcmq3f owns a
+  separate engine follow-up after #1873; codex-uufub4 reviews API fit.
+- **FIFO activation.** Native job B may wait behind A. A's delivery or an
+  ordinary timer cannot admit B. Retained Preflight activation requires B's
+  own engine-issued readiness custody. Codex-hcmq3f owns a separate engine
+  follow-up, coordinated with the reconciliation-continuation owner.
+- **Whole-command signing capability.** Single placement refusal at recipe
+  preparation is sufficient for that attempt, but it cannot prevent an amend's
+  HMAC cancel from executing before a later unsupported zkLink replacement.
+  Claude-19pt8s owns a trusted identity-bound provider capability seam, queried
+  before the first foreground release. Neither KeyRef text, extra-ref presence,
+  raw Options secrets nor Signer::immediate proves provider capability.
+
+The shared Plan owner confirmed the first two gaps are outside reviewed
+#1873 and no composed implementation pin exists yet. Multi-request source
+remains held until reviewed contracts exist. Four original HMAC controls
+(cancel 503, setting 408, and unlisted-code cancel/setting) reproduce the
+phase-one classifier failures independently of the two P8 placement controls.
+The placement assertions remain unchanged and explicitly P8-gated.
+
+The opaque Options identity handoff does not establish account/startup/session
+readiness: those legacy paths still require their own managed conversion.
+Remote proof must state its actual scope and use the real async host/provider
+adapter, not relabel a local immediate signer as remote. No inventory entries
+are removed by this preparation.
+
+
+## Managed trading implementation checkpoint (2026-10-24, #1891)
+
+The trading queue now begins genuine Preflight ownership, prepares native payloads
+without signing, and admits the immutable serial Plan before release. Each write
+uses `plan_leg_context_with_intent` and the shared signer recipe; the provider
+checks all required algorithms before the first call of Place or Amend. Local
+zkLink remains supported. A provider lacking zkLink refuses the whole command
+before cancel/replacement I/O. A missing role-bound ref gives InvalidInput;
+unsupported algorithms give Unsupported. Both are typed NotSent.
+
+FIFO successors activate only through their retained Preflight readiness callback.
+Amend racing fills use predeclared conditional terminals, with all earlier facts
+projected by the common journal. The venue no longer demotes later rejection
+outcomes or creates pacing timers. Ten-cancel pauses are declared Plan waits.
+Retries remain the single native 20016 signature-refusal grant, with fresh native
+20-second attempt windows; message substrings and bare status codes cannot grant
+resend. Native integer strings use the same strict integer table as JSON integers.
+Only native code zero on a 2xx response enters successful write reducers.
+
+Bounded late metadata retains exact native cancellation targets and placement
+client correlation, never request bytes, recipes or credentials. Late ACKs emit no Store update, command terminal, retry or auth state. The shared
+Store revision fence alone cannot update ApeX's native account-read version fence;
+an older account snapshot could otherwise resurrect a canceled row. Until that
+composition is provided, late cancellation and placement evidence remain uncertain
+and no optimistic row is published. Active successes still use the native fence.
+
+All four original HMAC error controls are active. The three original provider
+controls now pass, as do non-2xx/code-zero, quoted-code, partial cancellation IDs
+and timeout/late-ACK revision controls. The native helper drives the existing
+Prepare/Bind/Claim fixture at each test's actual event time. This proves local
+provider behavior; the HmacOnly fixture is not a remote-signing proof. The native delegated-provider proof now drives real managed cancel and multipart
+setting commands through Prepare, out-of-band Sign work, independently computed
+apexomni-base64 HMAC answers, Bind and Claim. Literal Node vectors and remote-only
+credential/MAC sentinels distinguish the answer from local signing. It asserts exact payload/MAC/header/body
+bytes, no HTTP before the answer, duplicate receipt inertness and typed provider
+refusal. It uses the signer owner's approved test-only venue construction while
+registry admission is pending. SDK/browser wire proof remains separate.
+The two placement REDs remain explicitly P8-gated (#1926), unchanged.
+
+The exact ratchet prune removes only `venues/apexomni/src/trading.rs`: 11
+fingerprints / 17 occurrences to zero. The shared legacy lib sender, startup,
+account, history, public and session paths remain inventoried. Opaque identity
+registration and SDK admission are separately owned by claude-m26ps4; no raw
+fallback or registry migration is claimed by this checkpoint. Shared source
+composition includes actual Plan core 632da7717e2, conditional terminal
+cf6b2a89db8 and landing through 749a5677d0e. Retained-Preflight readiness #1896
+and signer schema/recipe/capability #1839/#1841/#1899 remain reviewed stacks;
+their actual landings must be integrated before final venue CI and a window.
+The recipe owns the immutable REST and contract capability requirements, and
+trading selects those declarations without a local algorithm policy.
+
+Verification: the full ApeX and Binance suites passed 478 tests with only the
+two directed P8 placement ignores. After the recipe declaration extraction,
+the focused trading suite passed 41 tests with the same two ignores. Strict
+ApeX Clippy/fmt, bans and both request-context checks passed locally.
+Incoming Bitrue/Bitunix inventory drift was resolved by integrating their actual
+landings through ae64150c89a, preserving their prunes. The signer owner independently approved the native delegated HMAC proof;
+source/adversarial, caller and full-map reviews found no remaining source blocker.
