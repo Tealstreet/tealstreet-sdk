@@ -103,7 +103,9 @@ impl Cycle {
                 Action::Http(request) => self.requests.push(request),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::AccountAuth { .. }) => self.auth_notices += 1,
+                Action::Notice(Notice::AccountAuth { .. } | Notice::Deactivate) => {
+                    self.auth_notices += 1
+                }
                 _ => {}
             }
             for action in self

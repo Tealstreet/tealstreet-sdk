@@ -42,7 +42,7 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
             _ => None,
         })
         .unwrap();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let expected = e.store().balance().clone();
     for scale in [f64::INFINITY, 15., 0.25] {
         e.handle(100., Event::PollScaleChanged { scale });
@@ -146,7 +146,7 @@ fn handoff_actions(engine: &mut Engine<Okx>, now: f64) -> Vec<Action> {
     output
 }
 
-fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str) {
+fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str, at: f64) {
     while let Some(a) = requests.pop() {
         let Action::Http(r) = &a else {
             continue;
@@ -160,9 +160,9 @@ fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str) {
         } else {
             envelope("")
         };
-        reply(e, &a, &body, 5.0);
+        reply(e, &a, &body, at);
         requests.extend(
-            prepared(e, 5.0)
+            prepared(e, at)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -172,7 +172,7 @@ fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str) {
 #[test]
 fn authenticates_two_sockets_and_maps_contract_units_and_balance() {
     let (mut e, _, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     assert!(
         e.store().loaded().balance && e.store().loaded().positions && e.store().loaded().orders
     );
@@ -202,7 +202,7 @@ fn terminal_push_wins_over_delayed_snapshot_and_fills_dedupe() {
     let frame = format!(r#"{{"arg":{{"channel":"orders"}},"data":[{filled}]}}"#);
     ws(&mut e, private, &frame);
     ws(&mut e, private, &frame);
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     assert_eq!(e.store().orders().len(), 1);
     assert_eq!(
         e.store().orders()[0].status,
@@ -237,7 +237,7 @@ fn position_tombstone_and_new_equity_win_over_inflight_rest() {
         private,
         r#"{"arg":{"channel":"account"},"data":[{"totalEq":"6000"}]}"#,
     );
-    complete(&mut e, pending, "");
+    complete(&mut e, pending, "", 5.0);
     assert!(e.store().positions().is_empty());
     assert_eq!(e.store().balance().total, 6000.0);
 }
@@ -263,7 +263,7 @@ fn failed_account_snapshot_preserves_existing_state() {
 #[test]
 fn stale_live_push_cannot_reopen_terminal_order() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let canceled = ORDER.replace("\"live\"", "\"canceled\"");
     ws(
         &mut e,
@@ -284,7 +284,7 @@ fn stale_live_push_cannot_reopen_terminal_order() {
 #[test]
 fn empty_and_unknown_position_pushes_preserve_balance() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, "");
+    complete(&mut e, pending, "", 5.0);
     let before = e.store().balance().clone();
     ws(
         &mut e,
@@ -440,7 +440,7 @@ fn resweep(
 #[test]
 fn bad_position_row_keeps_its_stored_copy_while_the_balance_commits() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let bad = POSITION.replace("\"pos\":\"5\"", "\"pos\":\"bad\"");
     resweep(
         &mut e,
@@ -462,7 +462,7 @@ fn bad_balance_currency_row_keeps_its_equity_while_positions_commit() {
         r#"{"balData":[{"ccy":"","eq":"6000"}]}"#,
     ] {
         let (mut e, private, _, pending) = startup();
-        complete(&mut e, pending, ORDER);
+        complete(&mut e, pending, ORDER, 5.0);
         let grown = POSITION.replace("\"pos\":\"5\"", "\"pos\":\"6\"");
         resweep(&mut e, private, risk, &grown, ORDER, 10.0);
         assert_eq!(e.store().positions()[0].contracts, 0.06, "{risk}");
@@ -481,7 +481,7 @@ fn bad_order_row_keeps_its_stored_copy_and_new_orders_commit() {
         r#"{"ordId":123}"#.to_string(),
     ] {
         let (mut e, private, _, pending) = startup();
-        complete(&mut e, pending, ORDER);
+        complete(&mut e, pending, ORDER, 5.0);
         let balance = r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#;
         resweep(
             &mut e,
@@ -564,7 +564,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
     assert!(e.store().orders().is_empty() && e.store().positions().is_empty());
     assert_eq!(e.store().balance().total, 6000.0);
     // The old page must not restart paging or replace the post-reconnect view.
-    complete(&mut e, stale, ORDER);
+    complete(&mut e, stale, ORDER, 10_001.0);
     assert!(e.store().orders().is_empty() && e.store().positions().is_empty());
     assert_eq!(e.store().balance().total, 6000.0);
 }
@@ -573,7 +573,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
 fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
     use safe_cex_engine::Command;
     let (mut e, private, _, initial) = startup();
-    complete(&mut e, initial, ORDER);
+    complete(&mut e, initial, ORDER, 5.0);
     // The SDK completes startup before commands; repeat authentication starts
     // another read sweep whose replies race the acknowledged settings write.
     ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
@@ -609,7 +609,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("orders")))
     );
     // Retired position reads cannot overwrite the acknowledged leverage.
-    complete(&mut e, stale, ORDER);
+    complete(&mut e, stale, ORDER, 7.0);
     assert_eq!(e.store().orders().len(), 1);
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
     complete_fresh(
@@ -638,7 +638,7 @@ fn fill_count(frame: &[u8]) -> u32 {
 #[test]
 fn distinct_earlier_fill_survives_terminal_order_guard_and_deduplicates() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let filled = ORDER.replace("\"live\"", "\"filled\"").replace(
         "\"accFillSz\":\"1\"",
         "\"accFillSz\":\"4\",\"fillSz\":\"2\",\"fillPx\":\"38000\",\"tradeId\":\"last\"",
@@ -664,7 +664,7 @@ fn distinct_earlier_fill_survives_terminal_order_guard_and_deduplicates() {
 #[test]
 fn invalid_execution_does_not_emit_or_consume_the_execution_identity() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let valid = ORDER.replace("\"live\"", "\"filled\"").replace(
         "\"accFillSz\":\"1\"",
         "\"accFillSz\":\"4\",\"fillSz\":\"3\",\"fillPx\":\"38000\",\"tradeId\":\"987\"",
@@ -693,7 +693,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
         envelope(r#"{"balData":[]},{"balData":[]}"#),
     ] {
         let (mut e, _, _, pending) = startup();
-        complete(&mut e, pending, ORDER);
+        complete(&mut e, pending, ORDER, 5.0);
         let balance = e.store().balance().clone();
         let positions = e.store().positions().to_vec();
         e.handle(
@@ -799,7 +799,7 @@ fn filtered_market_rows_are_skipped_and_the_rest_of_the_snapshot_commits() {
 #[test]
 fn partially_effective_algo_remains_visible_and_accepts_later_live_updates() {
     let (mut e, _, business, pending) = startup();
-    complete(&mut e, pending, "");
+    complete(&mut e, pending, "", 5.0);
     let algo = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo123","ordType":"conditional","state":"partially_effective","side":"sell","sz":"4","accFillSz":"0","slTriggerPx":"36000","slOrdPx":"-1","tpTriggerPx":"42000","tpOrdPx":"-1","reduceOnly":"true"}"#;
     ws(
         &mut e,
@@ -1062,6 +1062,7 @@ fn undecodable_out_of_scope_order_row_fails_the_order_read() {
         &mut e,
         pending,
         r#"{"instId":"BTC-USDT-SWAP","instType":"FUTURES","ordId":"9","sz":4}"#,
+        5.0,
     );
     assert!(e.store().loaded().positions);
     assert!(!e.store().loaded().orders);
@@ -1090,6 +1091,7 @@ fn market_maker_and_liquidity_program_orders_keep_their_ord_id() {
             &mut e,
             pending,
             &ORDER.replace(r#""ordType":"limit""#, &format!(r#""ordType":"{kind}""#)),
+            5.0,
         );
         let o = &e.store().orders()[0];
         assert_eq!(o.id, "123", "{kind}");
