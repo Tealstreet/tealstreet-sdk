@@ -1,6 +1,6 @@
 # Paradex command candle Read custody
 
-Status: local plan only. No originals, production, Cargo or inventory edits.
+Status: local plan and original controls; production, Cargo and maps unchanged.
 Owner: codex-9czdjh. Native reviewer: codex-hcmq3f.
 Base: actual `581bc2b77230c00ad6445dec23c78a9782370990`.
 
@@ -209,7 +209,7 @@ Exact source-derived manifest pruning and all foreign bytes/order require review
 
 ## Current checkpoint and priority
 
-This checkpoint creates only this plan. No tests/builds, originals, production,
+The plan-first checkpoint created only this plan. No tests/builds, originals, production,
 fixture, map, Cargo, shared index, push or CI dispatch have run or changed here.
 Send the immutable local plan to the overseer and codex-hcmq3f for review.
 The explicit plan-only instruction holds even if the plan is CLEAR.
@@ -218,3 +218,36 @@ Kraken recipe #2096 remains frozen at `ee270d49cb5`. It takes priority when
 uufub4 supplies the corrected gated #2093 dependency: return to that branch,
 plain-merge the exact corrected head without rebase, verify and take the one
 authorized fresh PR run before progressing this new Paradex slice.
+
+## Executed original checkpoint
+
+Plan `5c381e9931e` received hcmq3f's bounded native/caller/API geometry CLEAR.
+The overseer then authorized originals and production, scoped Paradex Cargo with
+CARGO_BUILD_JOBS=4 and before/after Paradex WASM measurements. That authorization
+supersedes the earlier plan-only hold; #2096 priority remains unchanged.
+
+On unchanged production, the new standalone target executes **24 controls:
+16 intended assertion REDs, 8 GREENs, zero ignored**. All compile and run; no
+setup failure or missing API is counted. A preceding 21-control run (15 REDs,
+6 GREENs) is superseded by the additive complete checkpoint.
+
+Working positives pin both network URLs/full OHLCV output, documented/wide wire
+time units, ignored limit/native ordering, all first-route status/list/row/API
+fallbacks with prefix discard, transport fallback/no third call, no_data and
+parallel-array failure, local validation precedence, absent bounds/defaults and
+an already-finished first call's inert late failure.
+
+Real REDs expose raw HTTP before Prepare (both initial routes and fallback),
+missing caller/child deadline enforcement, unclaimed DATA publication, original
+expiry during fallback and streamed-prefix completion, duplicate live command
+issuance, NaN entry and full peer pressure bypassing shared admission. Held
+Prepare/Bind, typed refusal, physical-timeout continuation and two-slot capacity
+recovery suffixes are explicitly gated by their first assertion; their intended
+later assertions are not claimed executed. All 256 pressure peers are genuine
+command Reads, with exact one-at-a-time retirements and surviving-peer validation
+in the recovery suffix. Source must execute those suffixes unchanged.
+
+Only this plan and the new test target differ from the plan-first tree. Existing
+fixtures, runtime, Cargo, inventories and shared files remain base-exact. Logs:
+`/tmp/codex-paradex-candle-originals.log` and
+`/tmp/codex-paradex-candle-original-clippy.log`. No push/CI or production claim.
