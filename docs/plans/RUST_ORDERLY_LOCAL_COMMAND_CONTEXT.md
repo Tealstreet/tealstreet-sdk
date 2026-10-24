@@ -70,3 +70,21 @@ Only scoped local Cargo is allowed, CARGO_BUILD_JOBS=4, one build at a time.
 Run the new target on unchanged source, record assertion REDs separately from
 working controls, and keep logs outside Git. CI owns broad workspace gates.
 No PR, ready, merge or production claim follows from an original RED run.
+
+## Original execution receipt
+
+Plan committed at 35eda6420f7, original test source at 0d59abe4901, and a fixture
+String-vs-Option compile correction at 7963ccf5d9b. The first attempt did not
+execute tests; it is not a RED receipt. Corrected unchanged-production run:
+
+`cargo test -p safe-cex-venue-orderly --test local_history_context`
+
+12 executed: **3 intended assertion RED / 9 GREEN / 0 ignored**. Each
+unstamped lookup/income/validation control reaches the typed-kind assertion:
+native kind None, expected Some(InvalidInput). Every full-batch/Store/Read-outcome
+assertion before it passed. All nine native controls passed, including exact
+messages and validation precedence, and the accepted unsigned public-history
+GET `/v1/public/market_trades?symbol=PERP_BTC_USDC&limit=2`.
+Log: `/tmp/codex-orderly-local-history-original.log` (not committed).
+Only plan, index and new test differ from actual9d; production, prior tests,
+Cargo, all inventories and checker algorithms remain unchanged.
