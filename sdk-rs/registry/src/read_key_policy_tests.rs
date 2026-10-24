@@ -94,15 +94,31 @@ mod setup {
 
     #[test]
     fn validate_only_records_the_result_and_installs_no_read_identity() {
+        for invalid_read in [
+            r#","readCredentials":{"key":"read"}"#,
+            r#","readCredentials":{"key":"","secret":"value"}"#,
+        ] {
+            let mut options = options(&format!(
+                r#"{{"key":"primary","secret":"value"{invalid_read}}}"#
+            ));
+            let Err(error) = prepare_local_signer_with_policy(
+                &mut options,
+                Default::default(),
+                false,
+                ValidateOnly,
+            ) else {
+                panic!("an invalid read key built");
+            };
+            assert_eq!(error.message, NATIVE);
+            assert!(
+                options.read_credentials.is_none(),
+                "material left in options"
+            );
+        }
         for (read, expected) in [
             (
                 r#","readCredentials":{"key":"read","secret":"value"}"#,
                 Some(true),
-            ),
-            (r#","readCredentials":{"key":"read"}"#, Some(false)),
-            (
-                r#","readCredentials":{"key":"","secret":"value"}"#,
-                Some(false),
             ),
             ("", None),
         ] {
@@ -124,6 +140,39 @@ mod setup {
                 assert!(identities.primary.is_some(), "primary construction changed");
             }
         }
+    }
+
+    #[test]
+    fn an_invalid_read_key_outranks_a_malformed_primary_as_natively() {
+        let base64 = safe_cex_engine::signing::CredentialSetupPolicy {
+            primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64),
+                ..Default::default()
+            }),
+            secondary: None,
+        };
+        let json = r#"{"key":"primary","secret":"not base64!","readCredentials":{"key":"read"}}"#;
+        let mut validate_only = options(json);
+        let Err(error) =
+            prepare_local_signer_with_policy(&mut validate_only, base64, false, ValidateOnly)
+        else {
+            panic!("a malformed primary and an invalid read key built");
+        };
+        assert_eq!(error.message, NATIVE);
+        assert!(
+            validate_only.read_credentials.is_none(),
+            "material left in options"
+        );
+        // Control: with a valid read key the primary decode failure surfaces.
+        let mut valid_read = options(
+            r#"{"key":"primary","secret":"not base64!","readCredentials":{"key":"read","secret":"value"}}"#,
+        );
+        let Err(primary) =
+            prepare_local_signer_with_policy(&mut valid_read, base64, false, ValidateOnly)
+        else {
+            panic!("a malformed primary built");
+        };
+        assert_ne!(primary.message, NATIVE);
     }
 
     #[test]
@@ -198,24 +247,39 @@ fn the_bridge_record_carries_the_policy_only_when_declared() {
 }
 
 #[test]
-fn a_raw_validate_only_key_becomes_its_result_on_every_path() {
-    for (read, valid) in [
-        (
-            r#"{"readCredentials":{"key":"read","secret":"value"}}"#,
-            Some(true),
-        ),
-        (r#"{"readCredentials":{"key":"read"}}"#, Some(false)),
-        ("{}", None),
-    ] {
-        let mut converted = options(read);
-        take_validate_only_read_key(ValidateOnly, &mut converted);
-        assert!(converted.read_credentials.is_none());
-        assert_eq!(converted.read_credentials_valid, valid, "{read}");
-        let mut kept = options(read);
-        take_validate_only_read_key(Install, &mut kept);
-        assert_eq!(kept.read_credentials.is_some(), valid.is_some());
-        assert_eq!(kept.read_credentials_valid, None);
-    }
+fn one_validation_converts_a_validate_only_key_and_keeps_the_native_refusal() {
+    let mut valid = options(r#"{"readCredentials":{"key":"read","secret":"value"}}"#);
+    validate_read_key(ValidateOnly, &mut valid).unwrap();
+    assert!(valid.read_credentials.is_none());
+    assert_eq!(valid.read_credentials_valid, Some(true));
+    let mut invalid_key = options(r#"{"readCredentials":{"key":"read"}}"#);
+    let error = validate_read_key(ValidateOnly, &mut invalid_key).unwrap_err();
+    assert_eq!(
+        (error.message.as_str(), error.kind, error.outcome),
+        (NATIVE, Some(ErrorKind::InvalidInput), None)
+    );
+    assert!(
+        invalid_key.read_credentials.is_none(),
+        "refused material kept"
+    );
+    let mut kept = options(r#"{"readCredentials":{"key":"read","secret":"value"}}"#);
+    validate_read_key(Install, &mut kept).unwrap();
+    assert!(kept.read_credentials.is_some() && kept.read_credentials_valid.is_none());
+    let mut refused = options(r#"{"readCredentials":{"key":"read"}}"#);
+    assert_eq!(
+        validate_read_key(Install, &mut refused)
+            .unwrap_err()
+            .message,
+        NATIVE
+    );
+    let mut doubled = options(
+        r#"{"readCredentials":{"key":"read","secret":"value"},"readCredentialsValid":true}"#,
+    );
+    assert!(validate_read_key(ValidateOnly, &mut doubled).is_err());
+    assert!(
+        doubled.read_credentials.is_none(),
+        "doubled input kept its material"
+    );
     assert!(
         read_key_options(
             ValidateOnly,
@@ -291,4 +355,22 @@ mod wiring {
         };
         assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
     }
+}
+
+#[test]
+fn the_preflight_refuses_only_a_false_validate_only_result() {
+    #[cfg(feature = "weex")]
+    {
+        let _declared = construction::test_policy::declare("weex", ValidateOnly);
+        let error =
+            read_key_preflight("weex", &options(r#"{"readCredentialsValid":false}"#)).unwrap_err();
+        assert_eq!(
+            (error.message.as_str(), error.kind, error.outcome),
+            (NATIVE, Some(ErrorKind::InvalidInput), None)
+        );
+        assert!(read_key_preflight("weex", &options(r#"{"readCredentialsValid":true}"#)).is_ok());
+    }
+    // Undeclared families and raw keys are left to build_with_signer.
+    assert!(read_key_preflight("weex", &options(r#"{"readCredentialsValid":false}"#)).is_ok());
+    assert!(read_key_preflight("weex", &options(r#"{"readCredentials":{"key":"read"}}"#)).is_ok());
 }
