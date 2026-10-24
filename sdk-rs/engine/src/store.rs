@@ -44,6 +44,7 @@ pub struct Store {
     currency_balances: Option<Vec<CurrencyBalance>>,
     /// Stable symbols retain account settings across market replacement/delisting.
     settings: HashMap<Box<str>, MarketSetting>,
+    #[cfg(feature = "metadata-freshness")]
     metadata: Option<Box<crate::metadata::State>>,
     hedged: bool,
     loaded: Loaded,
@@ -678,6 +679,7 @@ impl Store {
             })
             .collect();
         self.changes.settings = true;
+        #[cfg(feature = "metadata-freshness")]
         if let Some(metadata) = &mut self.metadata {
             metadata.changed(None);
         }
@@ -689,12 +691,16 @@ impl Store {
         update(setting);
         if *setting != before {
             self.changes.settings = true;
+            #[cfg(feature = "metadata-freshness")]
             if let Some(metadata) = &mut self.metadata {
                 metadata.changed(Some(symbol));
             }
         }
     }
+}
 
+#[cfg(feature = "metadata-freshness")]
+impl Store {
     fn metadata_state(&mut self) -> &mut crate::metadata::State {
         self.metadata.get_or_insert_with(Default::default)
     }
@@ -815,7 +821,9 @@ impl Store {
         }
         Some(completion)
     }
+}
 
+impl Store {
     pub fn hedged(&self) -> bool {
         self.hedged
     }
@@ -1417,6 +1425,7 @@ impl Store {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "metadata-freshness")]
     #[test]
     fn an_unrelated_read_terminal_does_not_allocate_metadata_state() {
         use crate::request_context::{Operation, Policy, RetryPolicy};

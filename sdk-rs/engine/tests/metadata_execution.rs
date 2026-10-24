@@ -1,5 +1,9 @@
 //! Publication tokens cannot replace the shared Plan's observer authority.
-#![cfg(all(feature = "http-plans", feature = "test-support"))]
+#![cfg(all(
+    feature = "http-plans",
+    feature = "test-support",
+    feature = "metadata-freshness"
+))]
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::engine::Window;

@@ -1,5 +1,9 @@
 //! Every exact terminal retires its Store write fence; stale Plans never do.
-#![cfg(all(feature = "http-plans", feature = "test-support"))]
+#![cfg(all(
+    feature = "http-plans",
+    feature = "test-support",
+    feature = "metadata-freshness"
+))]
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{

@@ -19,6 +19,7 @@ mod id_map;
 pub(crate) use id_map::IdMap;
 pub mod json;
 pub mod log;
+#[cfg(feature = "metadata-freshness")]
 pub mod metadata;
 pub mod model;
 pub mod nonce;
