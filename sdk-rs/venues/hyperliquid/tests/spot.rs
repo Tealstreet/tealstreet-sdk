@@ -74,6 +74,15 @@ fn take_http(e: &mut Engine<Hyperliquid>) -> HttpRequest {
         })
         .unwrap()
 }
+fn take_prepared_http(e: &mut Engine<Hyperliquid>, now: f64) -> HttpRequest {
+    safe_cex_engine::test_support::prepared_actions(e, now)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .expect("prepared native candle HTTP")
+}
 #[test]
 fn metadata_joins_by_coin_and_uses_token_size_precision() {
     let (e, _) = ready(false);
@@ -526,7 +535,7 @@ fn spot_candles_use_native_at_coin_and_documented_rest_shape() {
             to_ms: Some(10_000.0),
         }),
     );
-    let r = take_http(&mut e);
+    let r = take_prepared_http(&mut e, 10_000.);
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     assert_eq!(p["req"]["coin"], "@1");
     assert_eq!(p["type"], "candleSnapshot");
@@ -914,7 +923,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
                 to_ms: None,
             }),
         );
-        let r = take_http(&mut e);
+        let r = take_prepared_http(&mut e, 2000.);
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(r.body.as_ref().unwrap()).unwrap()["req"]["coin"],
             coin

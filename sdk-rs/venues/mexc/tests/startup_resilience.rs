@@ -14,8 +14,8 @@ fn public_engine() -> Engine<MexcFutures> {
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = support::prepared(&mut engine, 0.)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("contract/detail") => Some(request),
             _ => None,
@@ -46,8 +46,8 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
             .expect("shared exponential retry timer");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = support::prepared(&mut engine, now)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) if request.url.contains("contract/detail") => Some(request),
                 _ => None,
@@ -79,8 +79,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
         ..Default::default()
     }));
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = support::prepared(&mut engine, 0.)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("contract/detail") => Some(request),
             _ => None,
@@ -99,8 +99,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
     );
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
-    let reads = engine
-        .drain_actions()
+    let reads = support::prepared(&mut engine, 0.)
+        .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -129,8 +129,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
 fn public_blank_ticker_numbers_follow_ts_zero_and_last_price_fallbacks() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = support::prepared(&mut engine, 0.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -147,8 +147,8 @@ fn public_blank_ticker_numbers_follow_ts_zero_and_last_price_fallbacks() {
             },
         },
     );
-    let ticker = engine
-        .drain_actions()
+    let ticker = support::prepared(&mut engine, 0.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.contains("contract/ticker") => Some(r),
             _ => None,
@@ -176,8 +176,8 @@ fn public_blank_ticker_numbers_follow_ts_zero_and_last_price_fallbacks() {
 fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = support::prepared(&mut engine, 0.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -194,8 +194,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
             },
         },
     );
-    let ticker = engine
-        .drain_actions()
+    let ticker = support::prepared(&mut engine, 0.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -221,8 +221,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
         .expect("failed public ticker read uses shared retry backoff");
     assert!(engine.store().loaded().markets);
     engine.handle(1000.0, Event::TimerFired { timer });
-    let retry = engine
-        .drain_actions()
+    let retry = support::prepared(&mut engine, 1000.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url == ticker.url => Some(r),
             _ => None,
@@ -240,8 +240,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
         for cached in [false, true] {
             let mut engine = public_engine();
             engine.start(0.0);
-            let catalogue = engine
-                .drain_actions()
+            let catalogue = support::prepared(&mut engine, 0.)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) => Some(request),
                     _ => None,
@@ -258,8 +258,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
                     },
                 },
             );
-            let ticker = engine
-                .drain_actions()
+            let ticker = support::prepared(&mut engine, 0.)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url.contains("/contract/ticker") => {
                         Some(request)
@@ -300,8 +300,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
                 })
                 .expect("unusable successful HTTP body must back off");
             engine.handle(1000.0, Event::TimerFired { timer });
-            let retry = engine
-                .drain_actions()
+            let retry = support::prepared(&mut engine, 1000.)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url == ticker.url => Some(request),
                     _ => None,

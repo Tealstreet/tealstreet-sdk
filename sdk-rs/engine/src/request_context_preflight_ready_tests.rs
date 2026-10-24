@@ -23,6 +23,7 @@ enum SessionAttack {
     Ready,
     Failed,
     Wait,
+    Scoped,
 }
 #[derive(Default)]
 struct ScopeProbe {
@@ -71,6 +72,12 @@ fn session_policy() -> SessionPolicy {
     SessionPolicy {
         credential: None,
         repeat_safe: true,
+        // Private egress, so the scoped-context attack reaches issuance.
+        private_egress: crate::credential_selection::Slots::new(Some(()), None, Default::default())
+            .select(crate::credential_selection::CredentialRole::SessionAuth)
+            .unwrap()
+            .0
+            .session_egress(),
     }
 }
 impl ScopeProbe {
@@ -103,6 +110,13 @@ impl ScopeProbe {
                 assert!(
                     cx.session_failed(session, VenueError::new("foreign"))
                         .is_empty()
+                );
+            }
+            SessionAttack::Scoped => {
+                assert_eq!(
+                    cx.session_scoped_context(session, Scope::Command(30), policy())
+                        .err(),
+                    Some(Error::State),
                 );
             }
             SessionAttack::Wait => {
@@ -533,6 +547,12 @@ fn retained_ready_cannot_issue_foreign_session_work_before_ids() {
 #[test]
 fn retained_ready_cannot_derive_foreign_session_legs_before_ids() {
     session_attack_preserves_waiter(SessionAttack::Leg);
+}
+#[test]
+fn readiness_cannot_issue_work_on_a_foreign_session_egress() {
+    for plan_ready in [false, true] {
+        session_attack_preserves_waiter_in_scope(SessionAttack::Scoped, plan_ready);
+    }
 }
 #[test]
 fn plan_readiness_cannot_consume_foreign_session_authority() {

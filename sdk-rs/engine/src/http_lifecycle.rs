@@ -45,6 +45,17 @@ impl Managed {
         registry.validate(self.lifecycle.context(), now)
     }
 
+    /// `validate` plus the session-egress retirement fence, for physical
+    /// send steps only; responses and facts keep plain `validate`.
+    fn validate_send(
+        &self,
+        registry: &request_context_registry::ContextRegistry,
+        now: f64,
+    ) -> Result<(), Error> {
+        self.validate(registry, now)?;
+        registry.egress_live(self.lifecycle.context())
+    }
+
     pub(super) fn delivery(&self) -> request_context_registry::Delivery {
         request_context_registry::Delivery {
             context: self.lifecycle.context().clone(),
@@ -172,7 +183,7 @@ impl<P> Cx<'_, P> {
             ManagedRecipe::Unsigned(headers) => (None, headers),
             ManagedRecipe::Signed(step) => (Some(step), &[][..]),
         };
-        if let Err(error) = self.io.request_contexts.validate(&context, self.now) {
+        if let Err(error) = self.io.request_contexts.validate_send(&context, self.now) {
             return Err((pending, error));
         }
         #[cfg(feature = "http-mutation-barriers")]
@@ -560,7 +571,7 @@ impl<V: Venue> Engine<V> {
             return;
         }
         let prepared_result = managed
-            .validate(&self.io.request_contexts, now)
+            .validate_send(&self.io.request_contexts, now)
             .and_then(|()| {
                 if prepared.expires_at.is_some_and(|at| at <= now) {
                     return Err(Error::TimedOut);
@@ -704,7 +715,7 @@ impl<V: Venue> Engine<V> {
             return;
         };
         let token = managed.lifecycle.preparation();
-        if let Err(reason) = managed.validate(&self.io.request_contexts, now) {
+        if let Err(reason) = managed.validate_send(&self.io.request_contexts, now) {
             if let Some(action) = outbound.as_mut() {
                 crate::signing_dispatch::wipe(action);
             }
@@ -883,7 +894,7 @@ impl<V: Venue> Engine<V> {
             return Err(Error::Revoked);
         }
         let preparation = managed.lifecycle.preparation();
-        if let Err(error) = managed.validate(&self.io.request_contexts, now) {
+        if let Err(error) = managed.validate_send(&self.io.request_contexts, now) {
             self.http_preparation_failed(
                 now,
                 preparation,
@@ -900,10 +911,7 @@ impl<V: Venue> Engine<V> {
         // Session writes change no orders: no reconciliation record and no
         // write-revision fence over unrelated command reconciliation.
         let journal = managed.lifecycle.context().operation() == Operation::Mutation
-            && matches!(
-                managed.lifecycle.context().owner(),
-                Owner::Command { .. } | Owner::Execution { .. }
-            );
+            && !matches!(managed.lifecycle.context().owner(), Owner::Session { .. });
         if journal {
             let capture = if self.io.streams.contains_key(&request) {
                 Err(Error::Invalid)
@@ -1023,7 +1031,7 @@ impl<V: Venue> Engine<V> {
         if managed.lifecycle.preparation() != token || managed.lifecycle.release().is_some() {
             return;
         }
-        if let Err(error) = managed.validate(&self.io.request_contexts, now) {
+        if let Err(error) = managed.validate_send(&self.io.request_contexts, now) {
             self.http_preparation_failed(
                 now,
                 token,
