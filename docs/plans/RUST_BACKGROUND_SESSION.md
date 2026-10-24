@@ -387,6 +387,47 @@ source):
 to `test_support::prepared_actions` at each event's time, with no assertion
 changed. They also pass on the legacy source, where only the two REDs fail.
 
+### BreakoutProp password login (stacked on #1897 and #1885 `6ead08efef0`)
+
+**Scope: transport only (owner and overseer ruling, 2026-10-23).** The DXtrade
+`/login` moves onto the session core. The existing password body rides the
+approved private session egress, with no new holder, no logging and no echo.
+- **Still OPEN:** provider send-time presentation (claude-19pt8s) and remote
+  readiness. Both are required before any signer-migrated claim; see CALLERS.
+- **Inventory: no prune.** Login shares the generic `drive` sender
+  (`34b6cbe6…`, the DISPATCH row), which stays for every other operation.
+
+**Original REDs:**
+- #1885's `p0_write_login_{401,403}_*` controls, un-ignored with their
+  assertions unchanged. A waiter keeps `AuthInvalid`/`AuthPermission`,
+  `AUTH_REJECTED` is logged, the venue deactivates, and nothing leaks.
+- New `tests/login_session.rs`: the login is prepared with intent `Primary`,
+  no route, the configured `timeout_ms`, and exact URL, body and header.
+
+All three fail on the legacy source.
+
+**Shape.**
+- **Session.** One keyless session with private egress (a `SessionAuth`
+  selection) owns logins.
+  - Each login is a session Mutation with `RetryPolicy::Never`, dispatched
+    from `drive`, so venue pacing (rolling 5/1000 ms) and queue order are
+    unchanged.
+  - **Not repeat-safe**, per the contract above. Any login that does not
+    succeed (transport failure, expiry, non-2xx, a 2xx whose token is
+    unusable, or refusal) retires the session. Only an accepted token records
+    `Accepted`. A reissue (the existing 1/2/3 s network retries) opens a new
+    generation, so the engine drops late answers to an abandoned login.
+- **Typed failure.** A login 401/403 is `http_failure(status)`. Queued waiters,
+  including candle commands, get NotSent errors carrying
+  `AuthInvalid`/`AuthPermission`. Every other login or discover failure
+  leaves waiters untyped as before (pinned by
+  `only_a_credential_refusal_types_the_waiters_it_never_sent`).
+- **Not included.** Discover and token-bearing reads and writes stay on the
+  generic sender. They adopt `session_scoped_context` with their slices.
+
+**Fixtures.** `tests/support.rs` drains through
+`test_support::prepared_actions`, with no assertion changed.
+
 ### Cadence and socket linkage (Phase C, after #1771 merges)
 
 The keepalive interval, failure backoff and expiry-driven recreation are
