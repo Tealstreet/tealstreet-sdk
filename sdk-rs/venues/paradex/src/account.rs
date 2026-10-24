@@ -1220,7 +1220,6 @@ impl Account {
                 let _ = cx.finish_http_context(context);
                 return;
             }
-            let _ = cx.finish_http_context(context);
         }
         if let Err(error) = crate::success(response) {
             self.on_failed(cx, request, &error);
@@ -1260,6 +1259,7 @@ impl Account {
                             });
                         }
                         self.margins(cx, true);
+                        let _ = cx.finish_http_context(&context);
                     }
                     Err(error) => self.on_failed(cx, Request::Config(context), &error),
                 }

@@ -45,8 +45,8 @@ honored by LocalSetting. Successful remote fallthrough remains native.
 Replace the raw config request with one real Background Read root and managed
 Prepare/Bind/Claim. Retain the root in Request::Config and validate exact live
 read delivery BEFORE HTTP status, JSON decode, credential installation, socket
-connect, setting publication or auth/snapshot scheduling. Retire the root before
-native success continuation and on every failed/preparation/timeout path. Keep
+connect, setting publication or auth/snapshot scheduling. Retire the root after
+synchronous validated native publication and on every failed/preparation/timeout path. Keep
 GET URL, empty headers/body, mainnet/testnet selection and native 2s retry.
 Each retry is a new attempt with a fresh root after retirement; no engine retry
 or venue expiry timer. Admission failure follows the same native retry path.
