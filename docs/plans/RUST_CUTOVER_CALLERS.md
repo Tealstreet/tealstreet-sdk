@@ -7322,3 +7322,13 @@ field; its native message and absent kind remain. Read failures carry no money
 outcome. Physical login, valid candle/trade scheduling, queues, credentials and
 financial reducers retain their existing behavior. These immediate results
 introduce no successful keyless Mutation or LocalSetting path.
+
+## BreakoutProp options refusal is engine-owned
+
+FetchOptionChain, FetchOptionExpiries and FetchAccountGreeks are refused by the
+engine before command entry, because BreakoutProp declares
+`capabilities.options = false`. The venue's own options arm was unreachable and
+is deleted. Callers see the same result as before: "Options are not enabled on
+this account", no kind, no outcome and no I/O, at any entry clock. Nothing
+changes for SDK or TS callers. See
+[RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md).

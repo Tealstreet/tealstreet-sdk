@@ -1,35 +1,35 @@
-# BreakoutProp options local refusal custody
+# BreakoutProp options refusal: delete the unreachable venue arm
 
-Plan and original RED, 2026-10-24. Lane claude-55ao7t; one-site slice ruled by
-claude-ddi2il after #2048 (`12da3363cb9`). Base: `12da3363cb9`.
+Plan and controls, 2026-10-24. Lane claude-55ao7t; one-site slice and ruling by
+claude-ddi2il (after #2048, `12da3363cb9`). Reviewer: codex-hcmq3f.
 
-## Scope
+## Finding
 
-One inventory site, `lib.rs` ~1293 in `on_command`. FetchOptionChain,
-FetchOptionExpiries and FetchAccountGreeks answer
-`cx.fail(command, "Options are not enabled on this account")` with no I/O.
-#2048 moved the other local refusals in that `match` to
-`local_context::complete`; this slice does the same for the options arm, and
-nothing else.
+The `on_command` arm for FetchOptionChain, FetchOptionExpiries and
+FetchAccountGreeks (`lib.rs` ~1290, `cx.fail(command, "Options are not enabled
+on this account")`) is unreachable:
+- **Engine gate.** The engine refuses these commands before command entry
+  whenever `venue.capabilities().options` is false (`engine.rs` ~3932,
+  `refuse_before_entry` with the same text).
+- **BreakoutProp capability.** BreakoutProp declares no options capability
+  (`Capabilities::BASE`, `options: false`).
+- **Evidence.** With the arm routed through `local_context::complete`, a NaN
+  entry still returned the engine's untyped text. The venue was never called.
 
-## Contract
+## Change (ruling)
 
-- The refusal consumes the genuine command entry as a Read through
-  `local_context::complete(cx, Operation::Read, Err(..))`.
-- **Valid entry:** the exact native text, no kind, no outcome, one terminal, no
-  I/O, timer or Store change.
-- **Invalid or expired entry clock:** the engine's typed entry refusal
-  (`InvalidInput`), with no write outcome since it is a Read.
-- **Unchanged:** no session, login, credential or key-selection change.
-  Command routing is unchanged.
+- **Arm deleted.** The dead arm and its legacy inventory fingerprint
+  (`cab66fc0…`, lib.rs) are removed. This is a genuine prune of unreachable
+  code.
+- **Exhaustiveness.** The three variants fall through to the venue's existing
+  unsupported-command arm. There is no new Read wrapper, and a comment records
+  why they never arrive.
+- **Behaviour.** Unchanged: the engine's pre-entry refusal still answers.
 
-## REDs and controls (`venues/breakoutprop/tests/options_local_context.rs`)
+## Control (`venues/breakoutprop/tests/options_local_context.rs`)
 
-- **RED.** `an_options_query_requires_a_valid_command_entry`: with a NaN entry
-  clock, all three commands must fail typed `InvalidInput`. Today the native
-  text is returned with no kind.
-- **Control.** `an_options_query_keeps_its_native_refusal`: with a valid entry,
-  the native text, no kind and no outcome, as one terminal with no I/O.
-
-Reviewer: codex-hcmq3f, who owns #2048's local-custody helper and the adjacent
-hunk.
+`the_engine_refuses_options_before_the_venue_is_called` covers all three
+commands at a finite and a NaN clock. Each gets one terminal with the native
+text, no kind, no outcome and no I/O. The venue's unsupported arm would answer
+"Unsupported BreakoutProp command", so the text proves the venue was not called.
+There is no RED: no venue change can alter an engine-owned refusal.
