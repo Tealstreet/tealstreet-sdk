@@ -208,7 +208,8 @@ impl LocalSigner {
     /// Consumes bytes; neither this provider nor its keys implement Debug/export.
     /// Replaced material is undeclared: a declaration describes the bytes setup
     /// installed, never later ones. A ref an aliased slot shares keeps its
-    /// slots' algorithm, like a role, so its type never changes this way.
+    /// slots' algorithm, and a role ref keeps its role (its declaration), so
+    /// neither changes type this way.
     pub fn insert(&mut self, reference: KeyRef, bytes: Vec<u8>) {
         match self.shared.get(&reference) {
             Some(Some(algorithm)) => {
@@ -399,35 +400,22 @@ impl LocalSigner {
         self.shared.remove(reference);
     }
     /// Ordinary material declared for exactly this asymmetric algorithm.
+    /// A role is its own declaration; ordinary refs need trusted policy's.
     fn declared_key(&self, reference: &KeyRef, algorithm: Algorithm) -> Result<&[u8], SignError> {
+        if self.roles.contains_key(reference) {
+            return self.sign_key(reference, algorithm);
+        }
         if self.algorithms.get(reference) != Some(&algorithm) {
             return Err(SignError::InvalidRequest);
         }
         self.key(reference)
     }
-    /// Ordinary material only; extra refs require `role_key`.
+    /// Ordinary material only; extra refs go through `sign_key`.
     fn key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
         if self.roles.contains_key(reference) {
             return Err(SignError::InvalidRequest);
         }
         self.raw_key(reference)
-    }
-    /// Signing material, typed before any arm runs: an asymmetric algorithm
-    /// needs trusted policy's matching declaration, and a declared key never
-    /// MACs. Undeclared refs keep MAC behaviour; zkLink stays role-only.
-    fn sign_key(&self, reference: &KeyRef, algorithm: Algorithm) -> Result<&[u8], SignError> {
-        if algorithm == Algorithm::ZkLinkContract {
-            return self.role_key(reference, ExtraKey::ZklinkSeed);
-        }
-        let declared = self.algorithms.get(reference).copied();
-        if asymmetric(algorithm) {
-            if declared != Some(algorithm) {
-                return Err(SignError::InvalidRequest);
-            }
-        } else if declared.is_some() {
-            return Err(SignError::InvalidRequest);
-        }
-        self.key(reference)
     }
     /// Trusted installation of asymmetric material with its declaration, in one
     /// step. A ref an aliased slot shares is never retyped, because both slots
@@ -451,11 +439,28 @@ impl LocalSigner {
         self.algorithms.insert(reference, algorithm);
         Ok(())
     }
-    fn role_key(&self, reference: &KeyRef, role: ExtraKey) -> Result<&[u8], SignError> {
-        if self.roles.get(reference) != Some(&role) {
+    /// Signing material, typed before any arm runs. A role ref serves only its
+    /// role's one algorithm (#1973), and a role-only algorithm never reads
+    /// ordinary material. An ordinary asymmetric key needs trusted policy's
+    /// matching declaration, and a declared key never MACs (#1990).
+    fn sign_key(&self, reference: &KeyRef, algorithm: Algorithm) -> Result<&[u8], SignError> {
+        match self.roles.get(reference) {
+            Some(role) if role.algorithm() == algorithm => return self.raw_key(reference),
+            Some(_) => return Err(SignError::InvalidRequest),
+            None if algorithm == Algorithm::ZkLinkContract => {
+                return Err(SignError::InvalidRequest);
+            }
+            None => {}
+        }
+        let declared = self.algorithms.get(reference).copied();
+        if asymmetric(algorithm) {
+            if declared != Some(algorithm) {
+                return Err(SignError::InvalidRequest);
+            }
+        } else if declared.is_some() {
             return Err(SignError::InvalidRequest);
         }
-        self.raw_key(reference)
+        self.key(reference)
     }
     fn raw_key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
         self.keys
@@ -1590,7 +1595,7 @@ mod tests {
             &format!(r#""encoding":"hex"}},"zklinkSeed":{{"value":"{seed}"}}}}"#),
         );
         assert!(LocalSigner::from_json_with_policy(duplicate, zklink_policy()).is_err());
-        let unknown = zklink_setup(&seed).replace("zklinkSeed", "l1Wallet");
+        let unknown = zklink_setup(&seed).replace("zklinkSeed", "unknownRole");
         assert!(LocalSigner::from_json_with_policy(unknown, zklink_policy()).is_err());
         let missing = r#"{"primary":{"key":"apex-key","secret":"apex-secret"}}"#.to_owned();
         assert_eq!(
@@ -2200,5 +2205,170 @@ mod tests {
             wallet.can_sign(&key, Algorithm::Ed25519),
             Capability::Unsupported
         );
+    }
+
+    // P6b REDs: the l1Wallet role reaches the provider through the existing
+    // policy and setup decode; its one algorithm is Secp256k1Digest.
+    fn l1_wallet_setup(wallet: &str) -> (LocalSigner, serde_json::Value) {
+        let policy: CredentialSetupPolicy = serde_json::from_value(serde_json::json!({
+            "primary": {"extra": {"key": "l1Wallet", "field": "requiredForPrivate", "encoding": "hex"}}
+        }))
+        .unwrap();
+        let setup = serde_json::json!({"primary": {
+            "key": "account", "secret": "l2", "extra": {"l1Wallet": {"value": wallet, "encoding": "hex"}}
+        }});
+        let (signer, ids) = LocalSigner::from_json_with_policy(setup.to_string(), policy).unwrap();
+        let role = serde_json::to_value(ids.primary.unwrap()).unwrap()["extra"]["l1Wallet"].clone();
+        assert!(role.is_string());
+        (signer, role)
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn l1_wallet_role_answers_its_ethers_address() {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/ethereum/primitives.json"))
+                .unwrap();
+        for case in corpus["cases"].as_array().unwrap() {
+            let wallet = case["privateKey"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("0x");
+            let (signer, role) = l1_wallet_setup(wallet);
+            let request =
+                public_request(serde_json::json!([{"kind": "publicAddress", "key": role}]));
+            let result = signer.sign_now(&request).unwrap();
+            let expected = case["recovered"].as_str().unwrap().to_ascii_lowercase();
+            assert_eq!(format!("0x{}", crate::hex(&result.values[0])), expected);
+        }
+    }
+
+    #[test]
+    fn l1_wallet_role_is_refused_outside_its_algorithm() {
+        let (signer, role) = l1_wallet_setup(SCALAR);
+        for operation in [
+            serde_json::json!({"kind": "present", "key": role}),
+            serde_json::json!({"kind": "sign", "algorithm": "hmacSha256", "key": "primary.signing",
+                "payload": [{"kind": "credential", "key": role}]}),
+            serde_json::json!({"kind": "sign", "algorithm": "hmacSha256", "key": role, "payload": []}),
+            serde_json::json!({"kind": "sign", "algorithm": "zkLinkContract", "key": role,
+                "payload": [{"kind": "bytes", "bytes": vec![0u8; 36]}]}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "ed25519", "key": role}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "starkDigest", "key": role}),
+        ] {
+            let request = public_request(serde_json::json!([operation]));
+            assert_eq!(
+                signer.sign_now(&request),
+                Err(SignError::InvalidRequest),
+                "{operation}"
+            );
+        }
+        // The zkLink role answers no public operation and signs nothing else.
+        let (seed, _, _) = zklink_case();
+        let (zklink, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let seed_ref = ids.primary.unwrap().extra[&ExtraKey::ZklinkSeed].clone();
+        for operation in [
+            serde_json::json!({"kind": "publicAddress", "key": seed_ref}),
+            serde_json::json!({"kind": "sign", "algorithm": "secp256k1Digest", "key": seed_ref,
+                "payload": [{"kind": "bytes", "bytes": vec![7u8; 32]}]}),
+        ] {
+            let request = public_request(serde_json::json!([operation]));
+            assert_eq!(
+                zklink.sign_now(&request),
+                Err(SignError::InvalidRequest),
+                "{operation}"
+            );
+        }
+        // The L1 wallet belongs to the primary identity only.
+        let policy: CredentialSetupPolicy = serde_json::from_value(serde_json::json!({
+            "secondary": {"extra": {"key": "l1Wallet", "encoding": "hex"}}
+        }))
+        .unwrap();
+        let setup = serde_json::json!({"secondary": {
+            "key": "read", "secret": "l2", "extra": {"l1Wallet": {"value": SCALAR, "encoding": "hex"}}
+        }});
+        assert!(matches!(
+            LocalSigner::from_json_with_policy(setup.to_string(), policy),
+            Err(SignError::InvalidRequest)
+        ));
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn l1_wallet_signs_digests_that_recover_to_its_own_address() {
+        let (signer, role) = l1_wallet_setup(SCALAR);
+        let digest = vec![9u8; 32];
+        let request = public_request(serde_json::json!([
+            {"kind": "publicAddress", "key": role},
+            {"kind": "sign", "algorithm": "secp256k1Digest", "key": role,
+             "payload": [{"kind": "bytes", "bytes": digest}]},
+        ]));
+        let result = signer.sign_now(&request).unwrap();
+        let address = format!("0x{}", crate::hex(&result.values[0]));
+        assert!(crate::ethereum::signed_by(
+            &digest,
+            &result.values[1],
+            &address
+        ));
+        assert_eq!(
+            address,
+            crate::ethereum::private_key_address(SCALAR)
+                .unwrap()
+                .to_ascii_lowercase()
+        );
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn l1_wallet_material_is_refused_at_use_and_required_where_declared() {
+        // Zero, the curve order and a short scalar answer nothing.
+        for wallet in [
+            "0".repeat(64),
+            "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141".into(),
+            "11".repeat(31),
+        ] {
+            let (signer, role) = l1_wallet_setup(&wallet);
+            for operation in [
+                serde_json::json!({"kind": "publicAddress", "key": role}),
+                serde_json::json!({"kind": "sign", "algorithm": "secp256k1Digest", "key": role,
+                    "payload": [{"kind": "bytes", "bytes": vec![9u8; 32]}]}),
+            ] {
+                let request = public_request(serde_json::json!([operation]));
+                assert_eq!(
+                    signer.sign_now(&request),
+                    Err(SignError::InvalidRequest),
+                    "{wallet}"
+                );
+            }
+        }
+        let policy = || -> CredentialSetupPolicy {
+            serde_json::from_value(serde_json::json!({
+                "primary": {"extra": {"key": "l1Wallet", "field": "requiredForPrivate", "encoding": "hex"}}
+            }))
+            .unwrap()
+        };
+        // A complete private identity requires the wallet; empty is absent.
+        for setup in [
+            serde_json::json!({"primary": {"key": "account", "secret": "l2"}}),
+            serde_json::json!({"primary": {"key": "account", "secret": "l2",
+                "extra": {"l1Wallet": {"value": "", "encoding": "hex"}}}}),
+        ] {
+            assert!(matches!(
+                LocalSigner::from_json_with_policy(setup.to_string(), policy()),
+                Err(SignError::InvalidRequest)
+            ));
+        }
+        // Pre-import, the wallet alone is the whole account: no L2 fields.
+        let wallet_only = serde_json::json!({"primary": {
+            "extra": {"l1Wallet": {"value": SCALAR, "encoding": "hex"}}
+        }});
+        let (signer, ids) =
+            LocalSigner::from_json_with_policy(wallet_only.to_string(), policy()).unwrap();
+        let ids = ids.primary.unwrap();
+        assert!(ids.credential.0.is_empty() && ids.signing.0.is_empty());
+        let role = ids.extra[&ExtraKey::L1Wallet].clone();
+        let request = public_request(serde_json::json!([{"kind": "publicAddress", "key": role}]));
+        assert_eq!(signer.sign_now(&request).unwrap().values[0].len(), 20);
     }
 }
