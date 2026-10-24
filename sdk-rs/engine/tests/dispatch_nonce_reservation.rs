@@ -1,14 +1,15 @@
-//! Compiling original evidence; no prospective nonce API is mocked into the engine.
-//! QueueTime uses Cx today. PrepareProbe uses the legacy allocator at prepare to
-//! isolate the missing fence; it is not trusted subject or raw-clock evidence.
+//! Original ordering assertions ported to trusted selected send-time claims.
+//! Queue reservation and arithmetic probe ports are disclosed in the plan.
 #![cfg(feature = "test-support")]
 
 use safe_cex_engine::book::Book;
-use safe_cex_engine::nonce::{HYPERLIQUID_AGENT, NonceKey, reserve_kraken_legacy};
+use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+use safe_cex_engine::nonce::{KRAKEN, NonceClaim};
 use safe_cex_engine::request_context::{
     Claim, Credential, Error, HttpAction, Operation as HttpOperation, Permit, Policy, Preparation,
     Prepared, RetryPolicy, Scope,
 };
+use safe_cex_engine::signing::Identity;
 use safe_cex_engine::signing::{
     Algorithm, Context, KeyRef, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
     SignResult,
@@ -17,7 +18,6 @@ use safe_cex_engine::{
     Action, Command, CredentialSlot, Cx, DispatchContext, Engine, Event, HttpRequest, Method,
     RequestId, Response, SignStep, SocketId, TimerId, Venue, VenueError,
 };
-use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
 const START: f64 = 1_000.;
@@ -30,17 +30,21 @@ enum Allocation {
 }
 #[derive(Default)]
 struct Trace {
-    queued: Vec<(u8, u64)>,
     prepared: Vec<(u8, u64)>,
     applied: Vec<u8>,
+    deny_release: bool,
+    reserve_twice: bool,
+    command_root: Option<safe_cex_engine::request_context::Context>,
 }
 struct Recipe {
     owner: u8,
-    queued: Option<u64>,
-    subject: [u8; 32],
+    claim: NonceClaim,
     trace: Arc<Mutex<Trace>>,
 }
 impl SignStep for Recipe {
+    fn nonce_claim(&self) -> Option<&NonceClaim> {
+        Some(&self.claim)
+    }
     fn prepare(
         &mut self,
         action: &mut Action,
@@ -49,16 +53,16 @@ impl SignStep for Recipe {
         let Action::Http(request) = action else {
             return Err(SignError::InvalidRequest);
         };
-        // This probe deliberately has no release fence. Replace the adapter,
-        // retaining the assertions, once the reviewed DispatchContext API exists.
-        let nonce = if let Some(nonce) = self.queued {
-            nonce
-        } else {
-            let floor = (context.now_ms.floor() as u64)
-                .checked_mul(1000)
-                .ok_or(SignError::InvalidRequest)?;
-            reserve_kraken_legacy(self.subject, floor).map_err(|_| SignError::Unavailable)?
-        };
+        let nonce = context
+            .reserve_nonce(&self.claim)
+            .map_err(|error| match error {
+                safe_cex_engine::nonce::NonceError::InvalidTime
+                | safe_cex_engine::nonce::NonceError::InvalidClaim => SignError::InvalidRequest,
+                _ => SignError::Unavailable,
+            })?;
+        if self.trace.lock().unwrap().reserve_twice {
+            let _ = context.reserve_nonce(&self.claim);
+        }
         self.trace
             .lock()
             .unwrap()
@@ -68,7 +72,7 @@ impl SignStep for Recipe {
         request.body = Some(body.clone());
         Ok(SignRequest {
             receipt: SignReceipt {
-                nonce: None,
+                nonce: Some(nonce),
                 stamp_ms: Some(context.stamp_ms()),
                 expiry_ms: None,
             },
@@ -94,27 +98,57 @@ impl SignStep for Recipe {
         10_000.
     }
 }
-struct Probe {
-    allocation: Allocation,
+struct NonceProbe<const SUPPORTED: bool> {
     subject: &'static str,
     count: u8,
     trace: Arc<Mutex<Trace>>,
     errors: Vec<VenueError>,
+    pacing: Option<safe_cex_engine::request_context::Pacing>,
 }
-impl Venue for Probe {
+type Probe = NonceProbe<true>;
+impl<const SUPPORTED: bool> Venue for NonceProbe<SUPPORTED> {
     type Pending = u8;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
+
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        if SUPPORTED {
+            safe_cex_engine::HttpRelease::NonceUnscheduled(|this, _, _| {
+                if this.trace.lock().unwrap().deny_release {
+                    Err(Error::Invalid)
+                } else {
+                    Ok(())
+                }
+            })
+        } else {
+            safe_cex_engine::HttpRelease::Mutable(|_, _, _| {
+                Ok(safe_cex_engine::request_context::Admission::Unscheduled)
+            })
+        }
+    }
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        self.pacing.as_slice()
+    }
     fn start(&mut self, cx: &mut Cx<'_, u8>) {
         for owner in 0..self.count {
-            let queued = match self.allocation {
-                Allocation::QueueTime => Some(
-                    cx.reserve_nonce(&HYPERLIQUID_AGENT, &NonceKey::stable_id(self.subject))
-                        .unwrap(),
-                ),
-                Allocation::PrepareProbe => None,
-            };
-            if let Some(nonce) = queued {
-                self.trace.lock().unwrap().queued.push((owner, nonce));
-            }
+            let slots = Slots::new(
+                Some(Identity {
+                    credential: KeyRef(KEY.into()),
+                    signing: KeyRef(KEY.into()),
+                    passphrase: None,
+                    stable_id: Some(self.subject.into()),
+                    extra: Default::default(),
+                }),
+                None,
+                SlotPolicy::default(),
+            );
+            let (_, _, claim) = slots
+                .select_with_nonce(CredentialRole::Read { scope: None }, &KRAKEN)
+                .unwrap();
             let context = cx
                 .http_context(
                     Scope::Background,
@@ -125,29 +159,33 @@ impl Venue for Probe {
                             reference: KeyRef(KEY.into()),
                         }),
                         timeout_ms: 20_000,
-                        pacing: None,
+                        pacing: self.pacing,
                         retry: RetryPolicy::Never,
                     },
                 )
                 .unwrap();
             let recipe = Recipe {
                 owner,
-                queued,
-                subject: Sha256::digest(self.subject.as_bytes()).into(),
+                claim,
                 trace: self.trace.clone(),
             };
-            cx.request_signed_managed(
+            if let Err((_, error)) = cx.request_signed_managed(
                 context,
                 Method::Post,
                 format!("https://nonce.test/{owner}"),
                 None,
                 Box::new(recipe),
                 owner,
-            )
-            .unwrap_or_else(|_| panic!("fixture request must queue"));
+            ) {
+                self.errors.push(error.venue_error());
+            }
         }
     }
-    fn on_sign_error(&mut self, _: &mut Cx<'_, u8>, _: u8, error: VenueError) {
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, u8>, _: u8, error: VenueError) {
+        let root = self.trace.lock().unwrap().command_root.clone();
+        if let Some(root) = root {
+            cx.fail_context(&root, error.clone()).unwrap();
+        }
         self.errors.push(error);
     }
     fn on_http_failed(&mut self, _: &mut Cx<'_, u8>, _: u8, error: VenueError) {
@@ -161,7 +199,51 @@ impl Venue for Probe {
         panic!("fixture expects typed failure");
     }
     fn on_timer(&mut self, _: &mut Cx<'_, u8>, _: TimerId) {}
-    fn on_command(&mut self, _: &mut Cx<'_, u8>, _: Command) {}
+    fn on_command(&mut self, cx: &mut Cx<'_, u8>, command: Command) {
+        let Command::FetchAccount { .. } = command else {
+            panic!("fixture command");
+        };
+        let slots = Slots::new(
+            Some(Identity {
+                credential: KeyRef(KEY.into()),
+                signing: KeyRef(KEY.into()),
+                passphrase: None,
+                stable_id: Some(self.subject.into()),
+                extra: Default::default(),
+            }),
+            None,
+            SlotPolicy::default(),
+        );
+        let (_, _, claim) = slots
+            .select_with_nonce(CredentialRole::Read { scope: None }, &KRAKEN)
+            .unwrap();
+        let root = cx
+            .admit_http_command(Policy {
+                operation: HttpOperation::Read,
+                credential: Some(Credential {
+                    slot: CredentialSlot::Primary,
+                    reference: KeyRef(KEY.into()),
+                }),
+                timeout_ms: 20000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            })
+            .unwrap();
+        self.trace.lock().unwrap().command_root = Some(root.clone());
+        cx.request_signed_managed(
+            root,
+            Method::Post,
+            "https://nonce.test/0".into(),
+            None,
+            Box::new(Recipe {
+                owner: 0,
+                claim,
+                trace: self.trace.clone(),
+            }),
+            0,
+        )
+        .unwrap();
+    }
     fn book(&self, _: &str) -> Option<&Book> {
         None
     }
@@ -200,6 +282,8 @@ struct Batch {
     routes: Vec<Route>,
     work: Vec<Work>,
     bound: Vec<Bound>,
+    failed: Vec<(u32, VenueError)>,
+    done: Vec<u32>,
 }
 fn drain(engine: &mut Engine<Probe>) -> Batch {
     let mut batch = Batch::default();
@@ -225,6 +309,12 @@ fn drain(engine: &mut Engine<Probe>) -> Batch {
             },
             Action::Sign { attempt, work, .. } => batch.work.push(Work { attempt, work }),
             Action::Http(_) => panic!("managed packet escaped final Claim"),
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
+                batch.failed.push((command, error))
+            }
+            Action::Notice(safe_cex_engine::Notice::CommandDone { command, .. }) => {
+                batch.done.push(command)
+            }
             _ => {}
         }
     }
@@ -232,16 +322,35 @@ fn drain(engine: &mut Engine<Probe>) -> Batch {
 }
 fn fixture(
     subject: &'static str,
-    allocation: Allocation,
+    _allocation: Allocation,
     count: u8,
 ) -> (Engine<Probe>, Vec<Route>) {
+    fixture_with_pacing(subject, count, None)
+}
+fn fixture_with_pacing(
+    subject: &'static str,
+    count: u8,
+    pacing: Option<safe_cex_engine::request_context::Pacing>,
+) -> (Engine<Probe>, Vec<Route>) {
     let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
-        allocation,
         subject,
         count,
         trace: Arc::default(),
         errors: vec![],
+        pacing,
     });
+    engine
+        .set_identities(safe_cex_engine::signing::Identities {
+            primary: Some(Identity {
+                credential: KeyRef(KEY.into()),
+                signing: KeyRef(KEY.into()),
+                passphrase: None,
+                stable_id: Some(subject.into()),
+                extra: Default::default(),
+            }),
+            secondary: None,
+        })
+        .unwrap();
     engine.start(START);
     let mut batch = drain(&mut engine);
     assert_eq!(batch.routes.len(), usize::from(count));
@@ -300,10 +409,9 @@ fn send(engine: &mut Engine<Probe>, packet: &Bound, now: f64) -> u64 {
 #[test]
 fn queue_time_reservation_cannot_reverse_nonce_order_when_routes_resume_backwards() {
     let (mut engine, routes) = fixture("nonce-original/reverse-route", Allocation::QueueTime, 2);
-    let queue = engine.venue().trace.lock().unwrap().queued.clone();
     assert!(
-        queue[0].1 < queue[1].1,
-        "native queue reservation is monotonic"
+        engine.venue().trace.lock().unwrap().prepared.is_empty(),
+        "parking reserves nothing"
     );
     let b = ready(&mut engine, &routes[1], 1_001.);
     let b = bind(&mut engine, b, 1_002.);
@@ -451,40 +559,31 @@ fn duplicate_claim_and_late_provider_are_inert() {
 #[test]
 fn queue_store_continues_across_engines_and_recreation() {
     let subject = "nonce-control/queue-continuity";
-    let (a, _) = fixture(subject, Allocation::QueueTime, 1);
-    let first = a.venue().trace.lock().unwrap().queued[0].1;
-    let (b, _) = fixture(subject, Allocation::QueueTime, 1);
-    let second = b.venue().trace.lock().unwrap().queued[0].1;
+    let (mut a, ar) = fixture(subject, Allocation::QueueTime, 1);
+    let _ = ready(&mut a, &ar[0], START);
+    let first = a.venue().trace.lock().unwrap().prepared[0].1;
+    let (mut b, br) = fixture(subject, Allocation::QueueTime, 1);
+    let _ = ready(&mut b, &br[0], START);
+    let second = b.venue().trace.lock().unwrap().prepared[0].1;
     drop(a);
-    let (a, _) = fixture(subject, Allocation::QueueTime, 1);
-    let third = a.venue().trace.lock().unwrap().queued[0].1;
+    let (mut a, ar) = fixture(subject, Allocation::QueueTime, 1);
+    let _ = ready(&mut a, &ar[0], START);
+    let third = a.venue().trace.lock().unwrap().prepared[0].1;
     assert!(first < second && second < third);
 }
 
 #[test]
 fn distinct_subjects_have_independent_sequences() {
-    let (a, _) = fixture("nonce-control/independent-a", Allocation::QueueTime, 2);
-    let (b, _) = fixture("nonce-control/independent-b", Allocation::QueueTime, 1);
+    let (mut a, ar) = fixture("nonce-control/independent-a", Allocation::QueueTime, 2);
+    let (mut b, br) = fixture("nonce-control/independent-b", Allocation::QueueTime, 1);
+    let _ = ready(&mut a, &ar[0], START);
+    let _ = ready(&mut a, &ar[1], START);
+    let _ = ready(&mut b, &br[0], START);
     assert_eq!(
-        a.venue().trace.lock().unwrap().queued,
-        vec![(0, 1000), (1, 1001)]
+        a.venue().trace.lock().unwrap().prepared,
+        vec![(0, 1000000), (1, 1000001)]
     );
-    assert_eq!(b.venue().trace.lock().unwrap().queued, vec![(0, 1000)]);
-}
-
-#[test]
-fn existing_counter_is_exact_for_regression_more_than_one_thousand_and_exhaustion() {
-    let key: [u8; 32] = Sha256::digest(b"nonce-control/regression-overflow").into();
-    let mut previous = reserve_kraken_legacy(key, 1_000_000).unwrap();
-    for _ in 0..2002 {
-        let nonce = reserve_kraken_legacy(key, 999_000).unwrap();
-        assert_eq!(nonce, previous + 1);
-        previous = nonce;
-    }
-    let large = reserve_kraken_legacy(key, 9_007_199_254_740_993).unwrap();
-    assert_eq!(large.to_string(), "9007199254740993");
-    assert_eq!(reserve_kraken_legacy(key, u64::MAX).unwrap(), u64::MAX);
-    assert!(reserve_kraken_legacy(key, 0).is_err());
+    assert_eq!(b.venue().trace.lock().unwrap().prepared, vec![(0, 1000000)]);
 }
 
 #[test]
@@ -528,4 +627,350 @@ fn malformed_nonce_receipts_fail_closed_on_original_schema() {
     ] {
         assert!(serde_json::from_str::<SignReceipt>(&format!("{{\"nonce\":{value}}}")).is_err());
     }
+}
+
+fn repair(engine: &mut Engine<Probe>, mut batch: Batch, now: f64) -> Bound {
+    assert_eq!(
+        batch.routes.len(),
+        1,
+        "one fresh preparation for same physical attempt"
+    );
+    assert!(batch.bound.is_empty() && batch.work.is_empty());
+    let route = batch.routes.remove(0);
+    let work = ready(engine, &route, now);
+    bind(engine, work, now)
+}
+#[test]
+fn reversed_claim_repairs_same_physical_attempt_once_and_releases_above_floor() {
+    let (mut engine, routes) = fixture("nonce-source/repair", Allocation::PrepareProbe, 2);
+    let work = ready(&mut engine, &routes[0], START);
+    let a = bind(&mut engine, work, START);
+    let work = ready(&mut engine, &routes[1], START);
+    let b = bind(&mut engine, work, START);
+    let floor = send(&mut engine, &b, START);
+    assert_eq!(engine.claim_http(START, a.permit), Err(Error::Stale));
+    let batch = drain(&mut engine);
+    let fresh = repair(&mut engine, batch, START);
+    assert_eq!(fresh.request.id, a.request.id);
+    assert!(send(&mut engine, &fresh, START) > floor);
+    assert_eq!(engine.venue().trace.lock().unwrap().prepared.len(), 3);
+    assert!(engine.venue().errors.is_empty());
+}
+#[test]
+fn thirty_two_reverse_bound_claims_each_repair_at_most_once_without_exhaustion() {
+    let (mut engine, routes) = fixture("nonce-source/burst32", Allocation::PrepareProbe, 32);
+    let mut packets = Vec::new();
+    for route in &routes {
+        let work = ready(&mut engine, route, START);
+        packets.push(bind(&mut engine, work, START));
+    }
+    let mut previous = 0;
+    let mut repairs = 0;
+    for packet in packets.iter().rev() {
+        let nonce = match engine.claim_http(START, packet.permit) {
+            Ok(Claim::Released(_)) => packet.nonce(),
+            Err(Error::Stale) => {
+                repairs += 1;
+                let batch = drain(&mut engine);
+                let fresh = repair(&mut engine, batch, START);
+                assert_eq!(fresh.request.id, packet.request.id);
+                send(&mut engine, &fresh, START)
+            }
+            other => panic!("unexpected claim: {other:?}"),
+        };
+        assert!(nonce > previous);
+        previous = nonce;
+    }
+    assert_eq!(repairs, 31);
+    assert_eq!(engine.venue().trace.lock().unwrap().prepared.len(), 63);
+    assert!(engine.venue().errors.is_empty());
+}
+#[test]
+fn thirty_two_paced_fifo_claims_do_not_repair() {
+    let (mut engine, routes) = fixture_with_pacing(
+        "nonce-source/fifo32",
+        32,
+        Some(safe_cex_engine::request_context::Pacing {
+            group: 741,
+            minimum_gap_ms: 1.,
+        }),
+    );
+    let mut packets = Vec::new();
+    for route in &routes {
+        let work = ready(&mut engine, route, START);
+        packets.push(bind(&mut engine, work, START));
+    }
+    let mut previous = 0;
+    for (index, packet) in packets.iter().enumerate() {
+        if index > 0 {
+            assert_eq!(
+                engine.claim_http(START + index as f64 - 1., packet.permit),
+                Ok(Claim::WaitUntil(START + index as f64))
+            );
+        }
+        let nonce = send(&mut engine, packet, START + index as f64);
+        assert!(nonce > previous);
+        previous = nonce;
+    }
+    assert_eq!(engine.venue().trace.lock().unwrap().prepared.len(), 32);
+    assert!(engine.venue().errors.is_empty());
+}
+#[test]
+fn nine_hostile_supersessions_exhaust_only_the_eight_nonce_repairs() {
+    let subject = "nonce-source/exhaust8";
+    let (mut a, ar) = fixture(subject, Allocation::PrepareProbe, 1);
+    let work = ready(&mut a, &ar[0], START);
+    let mut packet = bind(&mut a, work, START);
+    for iteration in 0..9 {
+        let (mut b, br) = fixture(subject, Allocation::PrepareProbe, 1);
+        let work = ready(&mut b, &br[0], START);
+        let higher = bind(&mut b, work, START);
+        send(&mut b, &higher, START);
+        if iteration == 8 {
+            assert_eq!(a.claim_http(START, packet.permit), Err(Error::State));
+            let batch = drain(&mut a);
+            assert!(batch.routes.is_empty() && batch.bound.is_empty() && batch.work.is_empty());
+        } else {
+            assert_eq!(a.claim_http(START, packet.permit), Err(Error::Stale));
+            let batch = drain(&mut a);
+            packet = repair(&mut a, batch, START);
+        }
+    }
+    assert_eq!(a.venue().trace.lock().unwrap().prepared.len(), 9);
+    assert_eq!(a.venue().errors.len(), 1);
+    assert_eq!(
+        a.venue().errors[0].kind,
+        Some(safe_cex_engine::ErrorKind::Internal)
+    );
+    assert_eq!(
+        a.venue().errors[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+}
+
+#[test]
+fn missing_or_substituted_provider_nonce_refuses_before_apply() {
+    for (subject, changed) in [
+        ("nonce-source/missing-result", None),
+        ("nonce-source/changed-result", Some(7)),
+    ] {
+        let (mut engine, routes) = fixture(subject, Allocation::PrepareProbe, 1);
+        let work = ready(&mut engine, &routes[0], START);
+        let mut receipt = work.work.receipt;
+        receipt.nonce = changed;
+        engine.handle(
+            START,
+            Event::Signed {
+                attempt: work.attempt,
+                result: Ok(SignResult::new(vec![vec![7; 32]], receipt)),
+            },
+        );
+        let batch = drain(&mut engine);
+        assert!(batch.bound.is_empty() && batch.routes.is_empty() && batch.work.is_empty());
+        assert!(engine.venue().trace.lock().unwrap().applied.is_empty());
+        assert_eq!(engine.venue().errors.len(), 1);
+        assert_eq!(engine.venue().errors[0].message, "Invalid signing result");
+        assert_eq!(
+            engine.venue().errors[0].outcome,
+            Some(safe_cex_engine::Outcome::NotSent)
+        );
+    }
+}
+
+#[test]
+fn unsupported_release_registration_refuses_before_reservation_or_provider() {
+    let subject = "nonce-source/unsupported";
+    let mut engine = safe_cex_engine::test_support::seeded_engine(NonceProbe::<false> {
+        subject,
+        count: 1,
+        trace: Arc::default(),
+        errors: vec![],
+        pacing: None,
+    });
+    engine
+        .set_identities(safe_cex_engine::signing::Identities {
+            primary: Some(Identity {
+                credential: KeyRef(KEY.into()),
+                signing: KeyRef(KEY.into()),
+                passphrase: None,
+                stable_id: Some(subject.into()),
+                extra: Default::default(),
+            }),
+            secondary: None,
+        })
+        .unwrap();
+    engine.start(START);
+    assert!(!engine.drain_actions().any(|a| matches!(
+        a,
+        Action::Sign { .. } | Action::ManagedHttp(_) | Action::Http(_)
+    )));
+    assert!(engine.venue().trace.lock().unwrap().prepared.is_empty());
+    assert_eq!(engine.venue().errors.len(), 1);
+    assert_eq!(
+        engine.venue().errors[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        engine.venue().errors[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    let (mut supported, routes) = fixture(subject, Allocation::PrepareProbe, 1);
+    let work = ready(&mut supported, &routes[0], START);
+    assert_eq!(
+        work.work.receipt.nonce,
+        Some(1000000),
+        "refusal reserved nothing"
+    );
+}
+#[test]
+fn forged_selected_subject_refuses_against_the_installed_identity() {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
+        subject: "nonce-source/forged",
+        count: 1,
+        trace: Arc::default(),
+        errors: vec![],
+        pacing: None,
+    });
+    engine
+        .set_identities(safe_cex_engine::signing::Identities {
+            primary: Some(Identity {
+                credential: KeyRef(KEY.into()),
+                signing: KeyRef(KEY.into()),
+                passphrase: None,
+                stable_id: Some("nonce-source/installed".into()),
+                extra: Default::default(),
+            }),
+            secondary: None,
+        })
+        .unwrap();
+    engine.start(START);
+    let batch = drain(&mut engine);
+    assert!(batch.bound.is_empty() && batch.work.is_empty() && batch.routes.is_empty());
+    assert!(engine.venue().trace.lock().unwrap().prepared.is_empty());
+    assert_eq!(engine.venue().errors.len(), 1);
+    assert_eq!(
+        engine.venue().errors[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+}
+#[test]
+fn fallible_pure_admission_does_not_advance_the_released_floor() {
+    let subject = "nonce-source/admission-refusal";
+    let (mut a, ar) = fixture(subject, Allocation::PrepareProbe, 1);
+    let work = ready(&mut a, &ar[0], START);
+    let low = bind(&mut a, work, START);
+    let (mut b, br) = fixture(subject, Allocation::PrepareProbe, 1);
+    let work = ready(&mut b, &br[0], START);
+    let high = bind(&mut b, work, START);
+    b.venue().trace.lock().unwrap().deny_release = true;
+    assert_eq!(b.claim_http(START, high.permit), Err(Error::Invalid));
+    assert_eq!(send(&mut a, &low, START), low.nonce());
+    assert_eq!(b.venue().errors.len(), 1);
+    assert_eq!(
+        b.venue().errors[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+}
+
+#[test]
+fn exhausted_command_has_one_terminal_and_late_provider_cannot_revive_it() {
+    let subject = "nonce-source/command-exhaust8";
+    let (mut a, _) = fixture(subject, Allocation::PrepareProbe, 0);
+    a.handle(START, Event::Command(Command::FetchAccount { command: 71 }));
+    let mut batch = drain(&mut a);
+    assert_eq!(batch.routes.len(), 1);
+    let work = ready(&mut a, &batch.routes.remove(0), START);
+    let mut packet = bind(&mut a, work, START);
+    for iteration in 0..9 {
+        let (mut b, br) = fixture(subject, Allocation::PrepareProbe, 1);
+        let work = ready(&mut b, &br[0], START);
+        let higher = bind(&mut b, work, START);
+        send(&mut b, &higher, START);
+        if iteration == 8 {
+            assert_eq!(a.claim_http(START, packet.permit), Err(Error::State));
+            let batch = drain(&mut a);
+            assert_eq!(batch.failed.len(), 1);
+            assert_eq!(batch.failed[0].0, 71);
+            assert_eq!(
+                batch.failed[0].1.kind,
+                Some(safe_cex_engine::ErrorKind::Internal)
+            );
+            assert_eq!(
+                batch.failed[0].1.outcome,
+                Some(safe_cex_engine::Outcome::NotSent)
+            );
+            assert!(
+                batch.done.is_empty()
+                    && batch.routes.is_empty()
+                    && batch.bound.is_empty()
+                    && batch.work.is_empty()
+            );
+        } else {
+            assert_eq!(a.claim_http(START, packet.permit), Err(Error::Stale));
+            let batch = drain(&mut a);
+            packet = repair(&mut a, batch, START);
+        }
+    }
+    assert_eq!(a.venue().trace.lock().unwrap().prepared.len(), 9);
+    assert_eq!(a.venue().errors.len(), 1);
+    assert_eq!(a.claim_http(START, packet.permit), Err(Error::Revoked));
+    let late = drain(&mut a);
+    assert!(late.failed.is_empty() && late.done.is_empty() && late.bound.is_empty());
+}
+
+#[test]
+fn missing_nonce_remains_invalid_result_even_after_another_engine_releases() {
+    let subject = "nonce-source/stale-missing-result";
+    let (mut a, ar) = fixture(subject, Allocation::PrepareProbe, 1);
+    let old = ready(&mut a, &ar[0], START);
+    let (mut b, br) = fixture(subject, Allocation::PrepareProbe, 1);
+    let work = ready(&mut b, &br[0], START);
+    let higher = bind(&mut b, work, START);
+    send(&mut b, &higher, START);
+    let mut receipt = old.work.receipt;
+    receipt.nonce = None;
+    a.handle(
+        START,
+        Event::Signed {
+            attempt: old.attempt,
+            result: Ok(SignResult::new(vec![vec![7; 32]], receipt)),
+        },
+    );
+    let batch = drain(&mut a);
+    assert!(batch.bound.is_empty() && batch.routes.is_empty() && batch.work.is_empty());
+    assert!(a.venue().trace.lock().unwrap().applied.is_empty());
+    assert_eq!(a.venue().errors.len(), 1);
+    assert_eq!(a.venue().errors[0].message, "Invalid signing result");
+}
+
+#[test]
+fn ignored_second_reserve_refuses_before_provider_or_handoff() {
+    let (mut engine, routes) = fixture("nonce-source/double-reserve", Allocation::PrepareProbe, 1);
+    engine.venue().trace.lock().unwrap().reserve_twice = true;
+    engine.http_prepared(
+        START,
+        routes[0].token,
+        Prepared {
+            id: routes[0].token.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let batch = drain(&mut engine);
+    assert!(
+        batch.work.is_empty(),
+        "a failed reservation poisons the whole prepare"
+    );
+    assert!(batch.bound.is_empty() && batch.routes.is_empty());
+    let trace = engine.venue().trace.lock().unwrap();
+    assert_eq!(trace.prepared.len(), 1, "first reserve succeeded");
+    assert!(trace.applied.is_empty());
+    assert_eq!(engine.venue().errors.len(), 1);
+    assert_eq!(
+        engine.venue().errors[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        engine.venue().errors[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
 }

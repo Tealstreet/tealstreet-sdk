@@ -7,7 +7,12 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-type NonceMap = HashMap<(&'static str, [u8; 32]), u64>;
+#[derive(Default)]
+struct NonceState {
+    reserved: u64,
+    released: Option<u64>,
+}
+type NonceMap = HashMap<(&'static str, [u8; 32]), NonceState>;
 static NONCES: OnceLock<Mutex<NonceMap>> = OnceLock::new();
 
 /// A nonce domain's signer identity. Built only from non-secret material, so
@@ -17,7 +22,7 @@ pub struct NonceKey([u8; 32]);
 
 impl NonceKey {
     /// Trusted, caller-assigned `Identity.stable_id`; tagged apart from public ids.
-    pub fn stable_id(id: &str) -> Self {
+    pub(crate) fn stable_id(id: &str) -> Self {
         let mut hash = Sha256::new();
         hash.update(b"safe-cex stable id\0");
         hash.update(id.as_bytes());
@@ -52,6 +57,18 @@ pub const HYPERLIQUID_AGENT: NonceDomain = NonceDomain {
     limit: (1 << 53) - 1,
 };
 
+/// Kraken Spot and Futures share a counter for the same trusted stable subject.
+pub const KRAKEN: NonceDomain = NonceDomain {
+    name: "kraken",
+    floor: NonceFloor::RawMs { scale: 1000 },
+    limit: u64::MAX,
+};
+
+#[path = "nonce_claim.rs"]
+mod claim;
+pub(crate) use claim::{ClaimAuthority, NonceReservation};
+pub use claim::{NonceClaim, NonceSelectionError, NonceSubject};
+
 /// Clock floor for a reservation, in the family's wire unit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NonceFloor {
@@ -63,6 +80,7 @@ pub enum NonceFloor {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NonceError {
+    InvalidClaim,
     InvalidTime,
     Exhausted,
     Unavailable,
@@ -71,6 +89,7 @@ pub enum NonceError {
 impl NonceError {
     pub fn message(&self) -> &'static str {
         match self {
+            Self::InvalidClaim => "Invalid signing nonce claim",
             Self::InvalidTime => "Invalid signing time",
             Self::Exhausted => "Signing nonce exhausted",
             Self::Unavailable => "Signing nonce state unavailable",
@@ -89,12 +108,15 @@ pub(crate) fn reserve(
         .get_or_init(Mutex::default)
         .lock()
         .map_err(|_| NonceError::Unavailable)?;
-    let previous = nonces.entry((domain, key)).or_default();
-    let nonce = floor.max(previous.checked_add(1).ok_or(NonceError::Exhausted)?);
+    if !nonces.contains_key(&(domain, key)) {
+        nonces.try_reserve(1).map_err(|_| NonceError::Unavailable)?;
+    }
+    let state = nonces.entry((domain, key)).or_default();
+    let nonce = floor.max(state.reserved.checked_add(1).ok_or(NonceError::Exhausted)?);
     if nonce > limit {
         return Err(NonceError::Exhausted);
     }
-    *previous = nonce;
+    state.reserved = nonce;
     Ok(nonce)
 }
 
