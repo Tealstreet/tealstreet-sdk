@@ -30,7 +30,7 @@ not re-admit. No lib/history/closed/signer source changes.
 ## Exact remaining inventory and ownership
 
 At this base: account 7 fingerprints/7 occurrences; closed 1/1; history 4/7;
-trading 7/8. Venue total 19 fingerprints/23 occurrences. Preserve the complete
+trading 7/8. Venue total 19 fingerprints / 23 occurrences. Preserve the complete
 original source map in RUST_BLOFIN_REQUEST_CONTEXT.md and all remaining owners.
 
 | Converted site | Fingerprint | Count |
@@ -38,7 +38,7 @@ original source map in RUST_BLOFIN_REQUEST_CONTEXT.md and all remaining owners.
 | account.rs unknown market | `37bc238a40045dda234a3daaf68329976cef33caee8f13734a73f526bfef32cd` | 1 |
 | account.rs margin/mode unavailable | `e2c8da59c7ed525a6d5342feecd9df9ef825904a02af1c97de61f39d1a7abf89` | 1 |
 
-Remove only those two singleton rows. Account 7->5 and venue23->21 occurrences,
+Remove only those two singleton rows. Account 7->5 and venue 23->21 occurrences,
 19->17 fingerprints. Other account read/completion sites plus all closed/history/
 trading entries remain under the coherent signer/custody migration; no renamed
 binding, synthetic signer, inventory exemption or unrelated prune.
@@ -68,3 +68,11 @@ capacity expectation clears the generic Error::venue_error Mutation outcome:
 Read admission owns no Outcome. Duplicate diagnostic is an existing GREEN;
 sequential failures with only one Context slot free pin retirement. No compile
 failure is counted as regression evidence. Tests stay identical after adoption.
+
+## Focused verification
+
+On the source adoption: BloFin all-features 213 tests and Binance 305 tests pass;
+the five new controls also pass with optional engine features off. Strict scoped
+Clippy, fmt, diff whitespace and both request-context checks pass (15 scanner
+controls). Full CI is requested separately. Source and caller review are CLEAR;
+full-map preservation review is recorded in the PR after completion.

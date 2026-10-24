@@ -2529,7 +2529,7 @@ strict stream failure, preparation/network denial and original deadline expiry.
 Native partial-row acceptance and per-symbol WS revision dominance are retained.
 Six original legacy-dispatch assertion REDs precede the move; controls cover four
 deployments/six envelopes, early response/stream fencing, malformed prefixes,
-route/transport/expiry recovery, capacity peer isolation and300 retirements.
+route/transport/expiry recovery, capacity peer isolation and 300 retirements.
 Only2bbebb…:1 is pruned (Lighter42→41/lib2→1); catalog remains counted.
 Architecture No: existing shared Context/HTTP authority and startup Backoff.
 
@@ -2579,7 +2579,7 @@ The same eight tests pass after source adoption, without assertion changes.
 Native controls retain public-only precedence, exact JSON and error metadata,
 Unicode client-ID bounds, all three history range validators, pre-auth no-symbol
 Fills, PublicTrades bypass, real256-peer isolation and recovery, duplicate-owner
-protection, and300 fixed-clock completions followed by full capacity refill.
+protection, and 300 fixed-clock completions followed by full capacity refill.
 Inventory removes four single-occurrence hashes only in Paradex `history.rs`:
 55->51 total,13->9 in that file. Other paths and same-hash trading siblings stay
 intact. The rejected settings proposal remains held on genuine keyless Mutation
@@ -2658,7 +2658,7 @@ The seven inline terminals now use shared initial Read admission and checked
 Context completion. The unchanged eleven controls pass, including native
 credential-presence/validation order, exact error metadata, equal/one-sided/
 safe-integer bounds, budget boundaries, remote signed/public wire controls at
-full capacity, peer isolation, recovery and300 fixed-clock completions/refill.
+full capacity, peer isolation, recovery and 300 fixed-clock completions/refill.
 Exact own inventory prune is WEEX51->44/history10->3 occurrences; all remote
 macro records, foreign maps and held trading/dispatch regions are preserved.
 
@@ -2866,7 +2866,7 @@ held for their separately owned migrations/seam.
 ## BloFin local leverage refusal custody
 
 Two account.rs numeric failures now use shared genuine Read admission followed
-by fail_context on that exact root. BloFin 23->21 occurrences /19->17 fingerprints;
+by fail_context on that exact root. BloFin 23->21 occurrences / 19->17 fingerprints;
 only the two singleton rows are removed. No signer, trading, history, closed
 position or successful private read is converted. The coherent custody cutover
 remains with codex-zs5e83. No per-venue admission/completion implementation.
