@@ -64,6 +64,13 @@ struct Shared {
     revision: u64,
     session: Option<Session>,
     retired: Option<Session>,
+    /// A second live Session, opened at start when set.
+    two_sessions: bool,
+    second: Option<Session>,
+    /// New requests bind the second Session.
+    bind_second: bool,
+    /// A fenced failure callback retires the second Session.
+    retire_second_on_failure: bool,
     retire_timer: Option<TimerId>,
     /// Token the venue caches for the generation it opens on retire.
     next_generation_token: Option<&'static str>,
@@ -97,6 +104,10 @@ impl Shared {
             revision: 1,
             session: None,
             retired: None,
+            two_sessions: false,
+            second: None,
+            bind_second: false,
+            retire_second_on_failure: false,
             retire_timer: None,
             next_generation_token: None,
             bearer: true,
@@ -127,9 +138,11 @@ impl Shared {
     /// The venue maps a raw generation to its own cache: an old generation's
     /// packet is never served by a new generation's token.
     fn serves(&self, generation: u64) -> bool {
-        self.session
-            .as_ref()
-            .is_some_and(|session| session.owner() == Owner::Session { generation })
+        [&self.session, &self.second].into_iter().any(|session| {
+            session
+                .as_ref()
+                .is_some_and(|session| session.owner() == Owner::Session { generation })
+        })
     }
 }
 
@@ -201,6 +214,7 @@ impl Probe {
         let mut shared = self.shared.borrow_mut();
         let session = match (shared.bearer && !retried, shared.bind_retired) {
             (false, _) => None,
+            (true, _) if shared.bind_second => shared.second.clone(),
             (true, false) => shared.session.clone(),
             (true, true) => shared.retired.clone(),
         };
@@ -328,6 +342,15 @@ impl Venue for Probe {
             .unwrap();
         let timer = cx.set_timer(60_000.);
         let mut shared = self.shared.borrow_mut();
+        if shared.two_sessions {
+            shared.second = Some(
+                cx.open_session(SessionPolicy {
+                    credential: None,
+                    repeat_safe: true,
+                })
+                .unwrap(),
+            );
+        }
         shared.session = Some(session);
         shared.retire_timer = Some(timer);
     }
@@ -405,6 +428,16 @@ impl Venue for Probe {
         _: Error,
         error: VenueError,
     ) {
+        let second = {
+            let mut shared = self.shared.borrow_mut();
+            shared
+                .retire_second_on_failure
+                .then(|| shared.second.take())
+                .flatten()
+        };
+        if let Some(second) = second {
+            cx.retire_session(&second).unwrap();
+        }
         self.fail(cx, pending, error);
     }
     fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
@@ -723,6 +756,47 @@ fn r3_one_owner_with_two_bound_packets_fails_once() {
     }
     e.drain_actions().for_each(drop);
     assert_eq!(shared.borrow().failures.len(), 1);
+}
+
+/// R3, cascade: a fenced failure callback that retires a second Session has
+/// that Session's bound packet failed in the same flush, not a later event.
+#[test]
+fn r3_retire_inside_a_fenced_failure_callback_is_drained_in_the_same_flush() {
+    let (mut e, shared) = engine(|shared| {
+        shared.two_sessions = true;
+        shared.retire_second_on_failure = true;
+    });
+    let first = ask(&mut e, 1);
+    let first = prepared(&mut e, NOW + 1., first[0].0)
+        .expect("bound packet")
+        .0;
+    shared.borrow_mut().bind_second = true;
+    let second = ask(&mut e, 2);
+    let second = prepared(&mut e, NOW + 1., second[0].0)
+        .expect("bound packet")
+        .0;
+    retire(&mut e, &shared, NOW + 2.);
+    e.drain_actions().for_each(drop);
+    {
+        let shared = shared.borrow();
+        assert!(
+            shared.second.is_none(),
+            "the callback retired the second Session"
+        );
+        assert_eq!(shared.failures.len(), 2, "both owners failed in one flush");
+        assert!(
+            shared
+                .failures
+                .iter()
+                .all(|failure| failure.outcome == Some(Outcome::NotSent))
+        );
+    }
+    for permit in [first, second] {
+        assert!(!matches!(
+            e.claim_http(NOW + 3., permit),
+            Ok(Claim::Released(_))
+        ));
+    }
 }
 
 /// R4: a venue that is NotReady at prepare gets no HTTP; the Read owner gets

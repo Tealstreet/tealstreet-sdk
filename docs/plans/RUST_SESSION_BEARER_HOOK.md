@@ -364,6 +364,34 @@ preparation failure, so changing it would change every venue's projection.
 - A whole-command terminal still comes from `failure_projection`, so prior
   released attempts and receipt/journal aggregation dominate (R8, phase 2).
 
+**Source review, session seam (claude-55ao7t, CLEAR at `86e27534785`).** The
+fence flush loops in place until empty. A pin covers a failure callback that
+retires a second Session in the same flush. Composition with combo-5b
+(#1896/#1897), which lands first:
+1. `retire_session` order: `session_scope` → `validate_session` → Bearer
+   reservation → `drain_waits` → … → `sessions.retire` → G1 background
+   cascade → Bearer fence. The reservation stays ahead of every mutation.
+2. #1897's engine tests take the `None` bearer argument at integration.
+3. A bound request with explicit `Egress::Session` (#1897's
+   `session_scoped_context`) is private, so it is allowed as Primary. Only
+   public egress refuses, and a control pins it at integration.
+4. R14's refusal half lands once `session_scope` is on this base.
+
+**Source review, Plan owner (claude-fe7lgm, CLEAR at `86e27534785`).**
+- A refused binding fails through `fail_owned_admission`, because a selected
+  Plan or Preflight call cannot be un-selected. The lower-effect path is the
+  venue's: check that the Session is live, or park with `plan_session_wait`,
+  before issuing a bound leg.
+- Gate for G2b group composition: `claim_http_group` must check every member's
+  bearer in its validation pass. A dead or moved member fails the whole group
+  at precommit, never through a single-member reprepare.
+- Phase 2: drain `bearer_fenced` at the top of each `flush_plan_session_waits`
+  pass and at the tail of `flush_http_plans`. That covers delivery exit, the
+  Plan timer and `drain_actions`, which do not run `finish_event_scope`.
+- P3, phase 2: a pending Bind removed from `io.actions` before the host drains
+  it is not zeroized; wipe it on that removal. The fence flush already drains
+  in place.
+
 **Engine facts the source must follow:**
 - **The real prepare point.** `queue_managed` emits `HttpAction::Prepare` at
   issue, with headers snapshotted from static slices (`http_lifecycle.rs:180`).

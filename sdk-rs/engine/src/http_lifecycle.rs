@@ -938,11 +938,11 @@ impl<V: Venue> Engine<V> {
 
     /// Fail the attempts a Session retire fenced, each through the common
     /// preparation-failure path after the retiring callback has returned.
+    /// Runs until the queue is empty, in place to keep the storage reserved at
+    /// retire: a failure callback that retires another Session is drained here.
     pub(super) fn flush_bearer_fences(&mut self, now: f64) {
-        if self.io.bearer_fenced.is_empty() {
-            return;
-        }
-        for token in std::mem::take(&mut self.io.bearer_fenced) {
+        while !self.io.bearer_fenced.is_empty() {
+            let token = self.io.bearer_fenced.remove(0);
             self.http_preparation_failed(
                 now,
                 token,
