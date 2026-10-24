@@ -85,7 +85,7 @@ fn failure(out: &[Action]) -> &VenueError {
 
 fn lookup() -> Query {
     Query::OrderByClientId {
-        symbol: Some("BTCUSDC".into()),
+        symbol: "BTCUSDC".into(),
         client_order_id: "fixture-client".into(),
     }
 }
