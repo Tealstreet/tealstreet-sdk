@@ -5,8 +5,10 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub(crate) struct OrderLocks {
     active: Vec<(CommandId, Scope)>,
-    /// Deferred commands: failed flag and the caller-wait receipt each carries.
-    waiting: Vec<(Command, bool, Option<u64>)>,
+    /// Deferred cancel-all commands (ID and symbol): failed flag and the
+    /// caller-wait receipt each carries. Only the fields are kept, so no
+    /// whole Command is cloned.
+    waiting: Vec<(CommandId, String, bool, Option<u64>)>,
     uncertain: HashMap<String, u64>,
     epoch: u64,
 }
@@ -41,7 +43,7 @@ fn native(id: &str) -> &str {
 impl OrderLocks {
     pub fn contains(&self, command: CommandId) -> bool {
         self.active.iter().any(|(id, _)| *id == command)
-            || self.waiting.iter().any(|(c, ..)| matches!(c, Command::CancelSymbolOrders { command: id, .. } if *id == command))
+            || self.waiting.iter().any(|(id, ..)| *id == command)
     }
 
     pub fn acquire(
@@ -148,7 +150,7 @@ impl OrderLocks {
     }
 
     pub fn defer(&mut self, command: &Command, receipt: Option<u64>) -> bool {
-        if let Command::CancelSymbolOrders { symbol, .. } = command
+        if let Command::CancelSymbolOrders { command, symbol } = command
             && self.active.iter().any(|(_, held)| {
                 held.placing && (symbol.is_empty() || held.symbols.contains(symbol))
             })
@@ -156,7 +158,8 @@ impl OrderLocks {
             if self.waiting.len() >= 64 {
                 return false;
             }
-            self.waiting.push((command.clone(), false, receipt));
+            self.waiting
+                .push((*command, symbol.clone(), false, receipt));
             return true;
         }
         false
@@ -168,28 +171,25 @@ impl OrderLocks {
     }
 
     pub fn ready(&mut self) -> Vec<(Command, bool, Option<u64>)> {
-        let mut ready = Vec::new();
-        let uncertain = &self.uncertain;
-        self.waiting.retain(|(command, failed, receipt)| {
-            let Command::CancelSymbolOrders { symbol, .. } = command else {
-                return false;
-            };
-            let blocked = self.active.iter().any(|(_, held)| {
-                held.placing && (symbol.is_empty() || held.symbols.contains(symbol))
-            });
-            if !blocked {
-                ready.push((
-                    command.clone(),
-                    *failed
-                        || uncertain.contains_key("")
-                        || uncertain.contains_key(symbol)
-                        || symbol.is_empty() && !uncertain.is_empty(),
-                    *receipt,
-                ));
-            }
-            blocked
-        });
-        ready
+        let (active, uncertain) = (&self.active, &self.uncertain);
+        self.waiting
+            .extract_if(.., |(_, symbol, ..)| {
+                !active.iter().any(|(_, held)| {
+                    held.placing && (symbol.is_empty() || held.symbols.contains(symbol))
+                })
+            })
+            .map(|(command, symbol, failed, receipt)| {
+                let failed = failed
+                    || uncertain.contains_key("")
+                    || uncertain.contains_key(&symbol)
+                    || symbol.is_empty() && !uncertain.is_empty();
+                (
+                    Command::CancelSymbolOrders { command, symbol },
+                    failed,
+                    receipt,
+                )
+            })
+            .collect()
     }
 
     /// Returns the symbols this finish newly marks uncertain (an empty symbol
@@ -215,10 +215,8 @@ impl OrderLocks {
                 self.uncertain.insert(String::new(), self.epoch);
                 marked.push(String::new());
             }
-            for (waiting, failed, _) in &mut self.waiting {
-                if matches!(waiting, Command::CancelSymbolOrders { symbol, .. }
-                    if symbol.is_empty() || scope.symbols.contains(symbol))
-                {
+            for (_, symbol, failed, _) in &mut self.waiting {
+                if symbol.is_empty() || scope.symbols.contains(symbol) {
                     *failed = true;
                 }
             }
