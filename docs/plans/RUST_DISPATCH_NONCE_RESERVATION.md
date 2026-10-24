@@ -604,3 +604,11 @@ changes. The ordinary entry preserves SigningRelease-before-admit and full
 Admission, and the nonce entry preserves its existing order and mutex body.
 This addresses the engine review's duplicated-ordinary-path note and requires
 the same ordinary/nonce/capture/barrier controls and exact measurement.
+
+
+The shared ordinary entry has the same private function-pointer signature as
+the nonce entry, including an unused nonce-stale output. Its out-of-line
+attribute preserves the reviewed sharing; selection may leave one indirect
+call per Claim. The static default removes the capability branch, but this
+work makes no CPU improvement claim. Existing CPU certification remains a CI
+gate after the local size and correctness gates pass.
