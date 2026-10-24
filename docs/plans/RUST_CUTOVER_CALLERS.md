@@ -7209,3 +7209,6 @@ remain unchanged. No new runtime policy or key-selection path is introduced.
 The credential inventory removes closed1 and reduces history2 to1; the remaining
 history mention is the protected snapshot-presence gate. lib/account/discovery,
 signer/host/engine code and existing fixtures are unchanged.
+Local early answers use a credential-free root: malformed opaque credential
+references no longer override a bad-range, unknown-symbol, empty-fills or cached
+lookup result. Remote reads still require shared selection and credential admission.
