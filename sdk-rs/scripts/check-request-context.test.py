@@ -238,6 +238,11 @@ class RequestContextBan(unittest.TestCase):
         # Owner approvals: exact added fingerprints and exact entry sizes.
         sign_http = '6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219'
         approved = {
+            'venues/apexomni/src/lib.rs': ({
+                '43f0a5248e3c01a293d3738c30ea1e956206f0ee972b359917ab94cc8920b84b',
+                '4d0bf337c43e368b2b3bb52928e8cfafdffba590f333fc8ccd63cdcff8059a5e',
+                '50c383ad66e41296ad7968d1d004afce80581aa8183b7e393a28bce694028341',
+                'beed17adaec269aa1ac580185fb6e9bc7f47d298ece6bffb103661f9da543ad0'}, 3, 4),
             'venues/bingx/src/lib.rs': ({sign_http}, 10, 9),
             'venues/weex/src/lib.rs': ({sign_http}, 19, 17),
             # claude-ddi2il: one temporary Phemex legacy attachment, remove before master.
