@@ -277,3 +277,35 @@ retry/owner/credential authority. Constructor/source freeze and actual landing
 remain gates. Production stays held on #1993, that reviewed shared seam and the
 existing shared-file and lifecycle/transition approvals. No new STAGING row,
 raw REST fallback, inventory delta, pushed branch or migrated-family claim.
+
+## Authorized production composition
+
+The overseer authorized production on reviewed #2024 b062c3a5d03; this branch
+plain-merged actual #2017/#2019 through e4059dc9738. Their LocalSetting source
+and refusal controls remain intact. StampFloor is inherited, with no seam edits.
+Core and independent caller fit review require preserving explicit legacy
+account/catalogue/coalesced/session/trade custody: these requests keep their
+recorded request funnel, immutable Slots/Selection and opaque dispatch signing.
+No logical twenty-second root is imposed on their native multi-attempt chains.
+
+The first genuine managed signed read is FetchMaxLeverage/Brackets. It admits
+SelectedRead::command_root at the genuine callback once, carrying its immutable
+selection and raw caller deadline through the entire chain. Each eligible send
+or reissue retires the previous physical leg, then derives a new Read/Never
+20,000ms child from that original root. Validate root/leg delivery before codec
+publication; only root completes. No invented 100s lifetime, retry renewal,
+method-based credential selection or background issuer is introduced.
+
+Every staged reissue retains its original selection and receives its stamp floor
+only from that attempt's genuine SigningRelease. One CodeTable gates native
+signature refusal; unknown HTTP500/408 cannot authorize replay. Staged writes
+remain explicitly without managed journal/ResendGrant authority; this custody
+cutover does not claim P0 accepted-ID aggregation or zero legacy completion.
+Exact actual staging/policy maps must be measured and granted before changing
+any bootstrap row. Hosted family admission remains disabled.
+
+Verification: preserve all original 25 assertions and their native interleavings;
+fixture-only trusted setup changes are permitted for opaque Options. Add a
+near-20s bracket failure/reissue witness, provider rejection and immutable selection
+controls. Independently review source/custody, caller behavior and exact maps;
+run scoped Bitrue/Binance, strict/fmt/checker gates, then full CI on the PR head.
