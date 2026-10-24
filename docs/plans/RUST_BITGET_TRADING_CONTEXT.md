@@ -137,9 +137,14 @@ whole command has no input-count cap; request count is
 3. 40085: the replan is a plain continuation (`continue_serial_plan` with the
    re-read calls, then the replanned job). No seal, no second root or
    admission.
-4. Detection wait: the WriteAfterReads command wait parks the queue before
-   planning, with the native 10 s bound failing queued commands as native
-   does. It is never a root cap.
+4. Detection wait: a scoped engine wait on a venue condition with the native
+   10 s venue bound, never a receipt or root cap (fe7lgm plan item, after
+   dazzy3 R6). Detection completes in a borrowed account-read callback
+   (`private_detected`, account.rs:286, from the Settings probe in
+   lib.rs:795-806, 960-968, 1005-1012); expiry fails the job and the queue
+   NotSent (trading.rs:2255-2267). It is needed both before admission and
+   between calls of a live Plan: `promote_uta` (account.rs:1041-1052, also
+   reached from history.rs:771 and account.rs:658) clears detection mid-job.
 5. Reads in the job are `SerialCall` Read operations under the admitted
    credential; native read retries use `continue_serial_plan_after(250·n)`
    on the Plan's own timer. The Unknown reconcile mirrors OKX.
