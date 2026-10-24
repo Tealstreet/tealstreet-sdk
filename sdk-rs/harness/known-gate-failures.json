@@ -1408,15 +1408,6 @@
             "checkpoint 1 account.orders[0]",
             "checkpoint 5 account.orders[1].status"
           ]
-        },
-        {
-          "divergence": "Private protocol/authentication/stream coverage is incomplete in this fixture; this known FAIL is not authenticated lifecycle or complete private parity evidence.",
-          "keys": [
-            "rust: Binance Spot request never acknowledged",
-            "rust: Binance Spot subscription never acknowledged",
-            "ts: Binance Spot request never acknowledged",
-            "ts: Binance Spot subscription never acknowledged"
-          ]
         }
       ]
     },
