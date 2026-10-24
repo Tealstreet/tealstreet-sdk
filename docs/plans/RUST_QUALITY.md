@@ -1739,6 +1739,28 @@ constructor fields, preserving every original assertion. Scoped unit tests and
 all-target Clippy now cover this constructor as well as integration targets.
 
 
+## Crypto.com PublicTrades original and managed controls
+
+Plan preceded original compiling controls on actual1e2458b1c98. The expanded
+original checkpoint ran21 controls:10 assertion RED/11 working GREEN/0ignored;
+code/message40101 collisions are pinned separately from transport retry limits.
+The two new failure boundaries drive actual preparation refusal and actual
+physical-child deadline, with their first original failure gates identified.
+Adoption coverage adds delayed prepare/final-claim10ms pacing, expired readiness,
+reused-id late DATA and credential-free typed auth metadata/health isolation.
+All original financial/wire assertions remain. Broad size/CPU/replay gates and
+independent implementation reviews remain CI/review requirements.
+
+
+PublicTrades validation refresh:27 dedicated and218 scoped Crypto.com tests
+across18 targets pass, zero ignored; strict all-target Clippy/fmt, bans and both
+request-context checks pass on actual landing integration. Two raw/escaped
+missing-array hint controls pass on an independently archived native source;
+one exposed the candidate's narrower decoded-field retry projection. The fix
+retains the exact approved minimum compatibility input, not a new retry policy.
+Source/caller closure is CLEARf0ecc; full-map carryover is pending for that delta.
+
+
 ## GRVT unsigned candle Read Plan controls
 
 The original 23 candle controls now pass, including all formerly Prepare-gated
