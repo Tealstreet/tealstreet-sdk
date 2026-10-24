@@ -584,3 +584,10 @@ with managed sockets and Plan core in Plans-only plus combined modes. The exact
 core-reviewed archive. This closes the unlanded composition's phase-dependent
 wake defect. The prior rejection and original RED receipts above remain evidence;
 `d09267a67c0b` is superseded. Native artifact and final CI/readiness remain separate.
+
+The exact frozen #1939 dependency `73ac9431b1f944b88c9af9c292be632ed81dd9a3`
+is genuinely merged, replacing the earlier reviewed/unfrozen 0abc label. The
+pacing owner's actual-landing carry `e5fda51769f` is also merged. Both integrations
+preserve the reviewed G2b engine and host sources byte for byte; only document
+conflicts needed resolution. Neither dependency is described as an actual
+landing. Native source review and final integrated CI remain open.
