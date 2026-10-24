@@ -24,7 +24,7 @@ impl Harness {
         }
     }
     fn collect(&mut self) {
-        for a in self.e.drain_actions() {
+        for a in safe_cex_engine::test_support::prepared_actions(&mut self.e, NOW) {
             if let Action::Http(r) = a {
                 self.requests.push(r);
             } else {
