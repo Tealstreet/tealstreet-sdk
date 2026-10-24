@@ -18,7 +18,7 @@ checked. Preserve these exact behaviors, including keyless/public-only setup:
 
 | Native branch | Store projection | Result |
 | --- | --- | --- |
-| KuCoin Spot `SetLeverage` | Update an existing symbol setting to leverage 1, buy/sell leverage Some(1); ignore the requested leverage as today | `[]` |
+| KuCoin Spot `SetLeverage` | Update the symbol setting through Store::update_setting to leverage 1, buy/sell leverage Some(1); ignore the requested leverage as today | `[]` |
 | KuCoin Spot `SetMarginType` / `SetPositionMode` | None; preserve the successful native no-op policy | `[]` |
 | Bitrue `SetPositionMode(false)` | `set_hedged(false)` | `[]` |
 
@@ -106,8 +106,9 @@ commit original REDs before implementing the shared seam.
 ## Review pins before source
 
 9czdjh cleared the native mapping at `9191103b598`. Unknown-symbol leverage
-updates must retain `Store::update_setting` behavior: do not create a synthetic
-setting. The combined KuCoin branch uses an empty projection.
+updates retain `Store::update_setting` behavior, including its existing
+`entry(...).or_default()` insertion. Do not create additional synthetic settings
+beyond that native method. The combined KuCoin branch uses an empty projection.
 
 cxxyqr cleared the direction at that pin with these required details:
 
