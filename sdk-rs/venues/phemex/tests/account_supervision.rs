@@ -1,8 +1,10 @@
 //! Private aop_p socket liveness, snapshot deadline and reconnect backoff.
+mod support;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketChannel, SocketId};
 use safe_cex_engine::{RequestId, TimerId};
-use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+use safe_cex_venue_phemex::PhemexPerpetuals;
 use std::collections::HashMap;
+use support::Options;
 
 const NOW: f64 = 1_700_000_000_000.;
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1000","maxLeverage":"100"}]}}"#;
@@ -29,11 +31,11 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         let mut h = Self {
-            e: safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+            e: support::engine(Options {
                 key: Some("key".into()),
                 secret: Some("secret".into()),
                 ..Options::default()
-            })),
+            }),
             now: NOW,
             timers: HashMap::new(),
             http: vec![],
@@ -214,14 +216,15 @@ fn reconnect_reauthenticates_resubscribes_and_ignores_retired_frames() {
 }
 
 #[test]
-fn pings_every_five_seconds_after_open() {
+fn pings_every_five_seconds_after_accepted_login() {
     let mut h = Harness::new();
     let socket = h.socket();
     h.advance(NOW + 4_000.);
     assert!(h.sent_to(socket, "server.ping") == 0);
     h.open();
-    assert_eq!(h.sent_to(socket, "server.ping"), 1);
+    assert_eq!(h.sent_to(socket, "server.ping"), 0);
     h.message(AUTHED);
+    assert_eq!(h.sent_to(socket, "server.ping"), 1);
     h.message(&snapshot(1));
     let opened = h.now;
     for n in 1..=6 {
@@ -289,6 +292,7 @@ fn snapshot_ends_the_deadline_and_stable_traffic_resets_backoff() {
         h.host_close();
         h.reconnect();
     }
+    let closed_before_ready = h.closed.len();
     h.open();
     h.message(AUTHED);
     h.message(&snapshot(1));
@@ -297,7 +301,7 @@ fn snapshot_ends_the_deadline_and_stable_traffic_resets_backoff() {
         h.advance(ready + f64::from(n) * 5_000.);
         h.message(PONG);
     }
-    assert!(h.closed.is_empty());
+    assert_eq!(h.closed.len(), closed_before_ready);
     h.host_close();
     assert_backoff(h.reconnect(), 1_000.);
 }

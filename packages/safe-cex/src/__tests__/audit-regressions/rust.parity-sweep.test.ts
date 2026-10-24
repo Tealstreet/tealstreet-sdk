@@ -43,7 +43,7 @@ const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => 
     httpFailed: empty,
     timer: empty,
   };
-  const construct = vi.fn(function (_venue: string, _options: string) {
+  const construct = vi.fn(function (_venue: string, _options: string, _signerSetup?: string) {
     return engine;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
@@ -113,8 +113,23 @@ describe('Rust parity query forwarding', () => {
     ]);
     expect(commands[0]).not.toHaveProperty('symbol');
   });
-  it.each(['phemex', 'bitunix'] as const)('%s forwards secondary credentials separately from the primary account', async (venue) => {
-    const { exchange, construct } = fixture(venue, { secondary_key: 'read-key', secondary_secret: 'read-secret' });
+  it('phemex provisions separate primary and read credentials through trusted signer setup', async () => {
+    const { exchange, construct } = fixture('phemex', { secondary_key: 'read-key', secondary_secret: 'read-secret' });
+    await exchange.start();
+    expect(construct).toHaveBeenCalledOnce();
+    const [, options, signerSetup] = construct.mock.calls[0]!;
+    expect(JSON.parse(signerSetup!)).toEqual({
+      primary: { key: 'primary-key', secret: 'primary-secret', passphrase: 'primary-pass' },
+      secondary: { key: 'read-key', secret: 'read-secret' },
+    });
+    for (const field of ['key', 'secret', 'passphrase', 'readCredentials', 'secondary_key', 'secondary_secret', 'secondary_passphrase']) {
+      expect(JSON.parse(options)).not.toHaveProperty(field);
+      expect(exchange.options).not.toHaveProperty(field);
+    }
+  });
+
+  it('bitunix forwards secondary credentials separately from the primary account', async () => {
+    const { exchange, construct } = fixture('bitunix', { secondary_key: 'read-key', secondary_secret: 'read-secret' });
     await exchange.start();
     expect(construct).toHaveBeenCalledOnce();
     expect(JSON.parse(construct.mock.calls[0]![1] as string)).toMatchObject({

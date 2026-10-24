@@ -59,13 +59,19 @@ fn parse(response: Response<'_>) -> Result<Identity, String> {
     Ok(Identity { user_id })
 }
 
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
-    let result = result
-        .and_then(|identity| serde_json::to_string(&identity).map_err(|error| error.to_string()));
+fn finish(
+    cx: &mut Cx<'_, Pending>,
+    command: CommandId,
+    result: Result<Identity, safe_cex_engine::VenueError>,
+) {
+    let result = result.and_then(|identity| {
+        serde_json::to_string(&identity)
+            .map_err(|error| safe_cex_engine::VenueError::new(error.to_string()))
+    });
     match result {
         Ok(data) => cx.done(command, data),
         Err(error) => {
-            cx.command_error(command, &error);
+            cx.command_error(command, &error.message);
             cx.fail(command, error);
         }
     }
@@ -103,13 +109,13 @@ impl PhemexPerpetuals {
         command: CommandId,
         response: Response<'_>,
     ) {
-        finish(cx, command, parse(response));
+        finish(cx, command, parse(response).map_err(Into::into));
     }
     pub(crate) fn identity_failed(
         &self,
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
-        error: &str,
+        error: impl Into<safe_cex_engine::VenueError>,
     ) {
         finish(cx, command, Err(error.into()));
     }
