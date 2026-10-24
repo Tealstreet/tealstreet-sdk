@@ -86,6 +86,51 @@ and a step whose packet loses its generation fails `NotSent` under the step's
 existing settlement. That needs a joint review with claude-fe7lgm and
 claude-55ao7t.
 
+## Plan-owner review (claude-fe7lgm, folded)
+
+Decided:
+- The binding is a parameter on `request_managed` / `request_signed_managed`.
+- The hook returns the full header value.
+- WS auth stays venue-owned for this slice.
+
+The five P2s:
+1. **Failure path.** "Fails `NotSent`" refuses the *attempt* through the
+   existing common preparation-failure path (`http_preparation_failed` → venue
+   callback → `finish_owned_read_failure` / `finish_failed_plan_call` /
+   `fail_plan`). The command's terminal still comes from `failure_projection`.
+   A previously released, unanswered attempt stays `Unknown`, and #2016's
+   inherited fact projects `Unknown`. Bearer code adds no new terminal and no
+   outcome override.
+2. **Ordering.** The prepare-time and claim-time generation/revision checks run
+   *after* the existing `expire_plan_before_http_failure` / `expire_read_roots`
+   ordering, so root expiry wins and a retired session never relabels an
+   expired Plan.
+3. **Retire is bounded and re-entrancy-safe.** `retire_session` usually runs
+   from a venue callback.
+   - It queues the bound-packet failures and flushes them after the callback
+     exits, as G1 does for background cleanup. They are never nested venue
+     callbacks.
+   - Each owner is failed once. A Plan is sealed by its first failure through
+     the common seal, and the seal retires its remaining bound legs.
+   - Storage is reserved before any effect.
+4. **Mutation groups (G2b).** For an announced-but-unbound group, a dead
+   generation or a moved revision on *any* member fails the whole group through
+   the precommit failure (the State path in the 100d guard). A single member is
+   never reprepared, which avoids the stuck-siblings case. The hook is checked
+   for every member in the group validation pass, before any declaration-order
+   activation.
+5. **Claim-path discipline.** The claim-time hook call is `&self`,
+   non-allocating at the call boundary, and runs before any release effect; a
+   panic poisons as for every other hook. `SecretHeaderValue` lives only in the
+   prepared packet, never in Body, Slot, journal or Context, and is wiped on
+   drop and on reprepare (GroupPacket discipline).
+
+Also:
+- Retry and resend inherit the binding but keep the existing attempt, retry
+  budget and grants. The hook never widens a retry window.
+- Planned executions (#1919) need no special case: a failed bound leg projects
+  through the execution journal to the founder and every observer.
+
 ## REDs (engine; compile REDs where the API is new)
 
 - **R1 (just-in-time read).** A bound request issued while the venue holds
@@ -107,19 +152,27 @@ claude-55ao7t.
   the original root, Slot and attempt lineage.
 - **R6 (custody).** A recipe-supplied `Authorization` header is refused, and the
   value never appears in `Debug` or notices.
+- **R8 (P2-1, projection).** A first attempt is released and unanswered, then
+  the Session is retired before a second attempt releases. The command
+  terminal is `Unknown`, not `NotSent`.
+- **R9 (P2-2, ordering).** Plan root expiry and Session retire land in the same
+  event: the Plan fails as expired and is not relabelled.
+- **R10 (P2-3, retire fan-out).** One Plan with two bound unreleased legs plus
+  one Command, all on one Session, is retired:
+  - one terminal per owner;
+  - zero HTTP;
+  - no venue-callback re-entry.
+- **R11 (P2-4, groups).** An announced mutation group sees a moved revision on
+  one member: the whole group fails precommit, and no single member is
+  reprepared.
 - **R7 (no authority).** Binding to a retired Session refuses `Revoked`, and a
   bound request without a live Session never sends.
 
-## Open questions for the consumer and owners
+## Open questions
 
-- Binding API: `bind_session_bearer(request, &Session)` after issue, or a
-  parameter on `request_managed`. I prefer the parameter, so a request can
-  never be issued unbound and then bound.
-- Header name: Paradex needs only `Authorization: Bearer`. Should the hook
-  return the full value (`Bearer <jwt>`), or should the engine prefix `Bearer `?
-  The plan says the full value, so the engine stays scheme-agnostic.
-- WS auth (`send_auth` with `bearer`) stays venue-owned socket work for now;
-  this plan covers REST only.
+Answered by claude-fe7lgm: the binding is a parameter, the hook returns the
+full value, and WS stays venue-owned. Still waiting on codex-zs5e83 (consumer)
+and claude-55ao7t (session seam).
 
 ## Ownership
 
