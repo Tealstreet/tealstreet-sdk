@@ -51,6 +51,7 @@ mod planned_calls {
         /// Park a failed call's retry on this Session in its failure callback.
         park_retry_on: Option<crate::request_context::Session>,
         retry_parks: Vec<Result<(), Error>>,
+        repark_retry_on: Option<crate::request_context::Session>,
         wait_ended: Vec<(Context, VenueError)>,
         wait_expired: Vec<(Context, VenueError)>,
         /// Whether the Plan was still registered when a pending came back.
@@ -432,6 +433,20 @@ mod planned_calls {
             self.wait_ended.push((pending.clone(), error));
             if std::mem::take(&mut self.fail_in_ended) {
                 cx.fail_plan(plan, "venue gave up after login failed").unwrap();
+                return;
+            }
+            if let Some(session) = self.repark_retry_on.take() {
+                let slot = self.slot.clone().unwrap();
+                cx.plan_retry_session_wait(
+                    plan,
+                    &slot,
+                    &pending,
+                    crate::request_context::RetryEvidence::ReadFailure,
+                    &session,
+                    pending.clone(),
+                )
+                .map_err(|(_, error)| error)
+                .unwrap();
                 return;
             }
             if let Some(session) = self.retire_in_ended.take() {
@@ -1843,5 +1858,33 @@ mod planned_calls {
         assert_eq!(e.venue.wait_ended.len(), 1);
         assert_eq!(e.venue.wait_expired.len(), 1, "the still-parked sibling returned in the same flush");
         assert_eq!(e.venue.expired_while_live, [false]);
+    }
+
+    /// A parked retry whose Session retires re-parks from its Plan's ready
+    /// custody on the replacement, then resumes as one attempt.
+    #[test]
+    fn a_parked_retry_reparks_after_its_session_retires() {
+        let mut e = crate::test_support::seeded_engine(Plans::default());
+        e.start(0.);
+        let old = open(&mut e, 0.);
+        e.venue.park_retry_on = Some(old.clone());
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        e.handle(1., Event::HttpFailed { request: first.attempt().request, error: "login expired" });
+        assert_eq!(e.venue.retry_parks, [Ok(())]);
+        e.drain_actions().for_each(drop);
+        let replacement = open(&mut e, 2.);
+        e.venue.repark_retry_on = Some(replacement.clone());
+        let _ = Cx { now: 2., store: &mut e.store, io: &mut e.io }.retire_session(&old).unwrap();
+        let actions = flush(&mut e, 3.);
+        assert_eq!(prepares(&actions), 0);
+        assert_eq!(e.venue.wait_ended.len(), 1, "ended once, re-parked in ready custody");
+        let mut cx = Cx { now: 4., store: &mut e.store, io: &mut e.io };
+        let Some(crate::request_context::Waiter::Ready(leg, _)) = cx.session_ready(&replacement).into_iter().next() else {
+            panic!("the re-parked retry resumes on the replacement");
+        };
+        queue(&mut cx, leg, false).unwrap();
+        assert_eq!(prepares(&e.drain_actions().collect::<Vec<_>>()), 1);
     }
 }

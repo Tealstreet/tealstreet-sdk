@@ -581,8 +581,108 @@ impl<P> Cx<'_, P> {
         session: &crate::request_context::Session,
         pending: P,
     ) -> Result<(), (P, Error)> {
-        let _ = (plan, slot, context, evidence, session);
-        Err((pending, Error::State))
+        let checked = (|| {
+            let generation = self.io.request_contexts.validate_session(session)?;
+            if !matches!(plan.owner(), Owner::Command { .. }) {
+                return Err(Error::State);
+            }
+            // Only a Read retry; a write keeps its classified resend grant.
+            if evidence == RetryEvidence::DefinitiveRefusal
+                || context.operation() != Operation::Read
+            {
+                return Err(Error::RetryForbidden);
+            }
+            context.retry(evidence, self.now)?;
+            let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+            self.io.request_contexts.validate(context, self.now)?;
+            let index = body.schedule.ordinal(slot)?;
+            let entry = &body.entries[index];
+            let call = entry
+                .call
+                .as_ref()
+                .filter(|call| call.context == *context)
+                .ok_or(Error::Revoked)?;
+            // The failed delivery's own callback, or a re-park of an ended
+            // retry from the Plan's ready custody.
+            let delivered = self.io.http_delivery.as_ref().is_some_and(|delivery| {
+                call.matches(delivery) && matches!(call.stage, Stage::Active { .. })
+            });
+            let reparked =
+                matches!(call.stage, Stage::Parked) && self.plan_issue_custody(plan, body);
+            if entry.parked || !(delivered || reparked) {
+                return Err(Error::Revoked);
+            }
+            if call.selected >= call.terms.attempts {
+                return Err(Error::RetryForbidden);
+            }
+            call.window.physical_deadline(self.now)?;
+            if self.io.session_waits.len() >= super::CAPACITY {
+                return Err(Error::Capacity);
+            }
+            self.io.session_waits.reserve_ended()?;
+            Ok((generation, index))
+        })();
+        let (generation, index) = match checked {
+            Ok(checked) => checked,
+            Err(error) => return Err((pending, error)),
+        };
+        self.io.retire_http_leg(context);
+        let entry = &mut self
+            .io
+            .request_contexts
+            .plan_body_mut(plan)
+            .expect("validated parked Plan")
+            .entries[index];
+        entry.parked = true;
+        entry.call.as_mut().expect("validated call").stage = Stage::Parked;
+        self.io.session_waits.park_retry(
+            generation,
+            plan.clone(),
+            slot.clone(),
+            context.clone(),
+            pending,
+        );
+        Ok(())
+    }
+
+    /// Select a parked retry's next attempt at its Session's resume, under the
+    /// drain's delivery, inside the existing budget and declared window.
+    pub(in crate::engine) fn resume_plan_retry(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<Context, Error> {
+        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        self.io.request_contexts.validate(context, self.now)?;
+        let index = body.schedule.ordinal(slot)?;
+        let entry = &body.entries[index];
+        let call = entry
+            .call
+            .as_ref()
+            .filter(|call| call.context == *context && matches!(call.stage, Stage::Parked))
+            .ok_or(Error::Revoked)?;
+        if !entry.parked {
+            return Err(Error::Revoked);
+        }
+        if call.selected >= call.terms.attempts {
+            return Err(Error::RetryForbidden);
+        }
+        call.window.physical_deadline(self.now)?;
+        let predecessor = self.io.http_delivery.clone();
+        let body = self.io.request_contexts.plan_body_mut(plan)?;
+        body.schedule
+            .retry(slot)
+            .expect("remaining declared credit");
+        let entry = &mut body.entries[index];
+        entry.parked = false;
+        entry
+            .call
+            .as_mut()
+            .expect("validated call")
+            .select(self.now, predecessor)
+            .expect("validated retry");
+        Ok(context.clone())
     }
 
     /// Issue a parked Slot's leg at its Session's resume, under the drain's

@@ -185,6 +185,13 @@ enum Unit {
         slot: crate::request_context::plan::Slot,
         intent: Option<crate::classify::Intent>,
     },
+    /// A failed Read call's declared retry, selected only at resume.
+    #[cfg(feature = "http-plans")]
+    Retry {
+        plan: crate::request_context::Plan,
+        slot: crate::request_context::plan::Slot,
+        context: Context,
+    },
 }
 
 impl Unit {
@@ -192,7 +199,15 @@ impl Unit {
         match self {
             Unit::Owner(owner) => owner.deadline(),
             #[cfg(feature = "http-plans")]
-            Unit::Slot { plan, .. } => plan.deadline(),
+            Unit::Slot { plan, .. } | Unit::Retry { plan, .. } => plan.deadline(),
+        }
+    }
+
+    #[cfg(feature = "http-plans")]
+    fn plan(&self) -> Option<&crate::request_context::Plan> {
+        match self {
+            Unit::Owner(_) => None,
+            Unit::Slot { plan, .. } | Unit::Retry { plan, .. } => Some(plan),
         }
     }
 }
@@ -241,7 +256,7 @@ impl<P> Waits<P> {
         let parked = self
             .entries
             .iter()
-            .filter(|wait| matches!(wait.unit, Unit::Slot { .. }))
+            .filter(|wait| wait.unit.plan().is_some())
             .count();
         // Additional to the current length: every parked Slot, plus this one.
         self.ended
@@ -265,17 +280,33 @@ impl<P> Waits<P> {
         });
     }
 
+    pub(in crate::engine) fn park_retry(
+        &mut self,
+        session: u64,
+        plan: crate::request_context::Plan,
+        slot: crate::request_context::plan::Slot,
+        context: Context,
+        pending: P,
+    ) {
+        self.entries.push(Wait {
+            session,
+            unit: Unit::Retry {
+                plan,
+                slot,
+                context,
+            },
+            timer: None,
+            pending,
+        });
+    }
+
     #[cfg(test)]
     pub(in crate::engine) fn ended_capacity(&self) -> usize {
         self.ended.capacity()
     }
 
     fn has_slot_work(&self) -> bool {
-        !self.ended.is_empty()
-            || self
-                .entries
-                .iter()
-                .any(|wait| matches!(wait.unit, Unit::Slot { .. }))
+        !self.ended.is_empty() || self.entries.iter().any(|wait| wait.unit.plan().is_some())
     }
 }
 
@@ -458,6 +489,20 @@ impl<P> Cx<'_, P> {
                         )),
                     }
                 }
+                #[cfg(feature = "http-plans")]
+                Unit::Retry {
+                    plan,
+                    slot,
+                    context,
+                } => match self.resume_plan_retry(&plan, &slot, &context) {
+                    Ok(leg) => waiters.push(Waiter::Ready(leg, wait.pending)),
+                    Err(reason) => self.io.session_waits.ended.push((
+                        plan,
+                        slot,
+                        wait.pending,
+                        owner_error(reason),
+                    )),
+                },
             }
         }
         waiters
@@ -485,7 +530,7 @@ impl<P> Cx<'_, P> {
                 // A parked Slot ends after this callback, in its Plan's ready
                 // custody, where the venue can re-park it or fail the Plan.
                 #[cfg(feature = "http-plans")]
-                Unit::Slot { plan, slot, .. } => {
+                Unit::Slot { plan, slot, .. } | Unit::Retry { plan, slot, .. } => {
                     self.io
                         .session_waits
                         .ended
@@ -563,13 +608,13 @@ impl<V: Venue> Engine<V> {
             }
             let registry = &self.io.request_contexts;
             let sealed = self.io.session_waits.entries.iter().position(|wait| {
-                matches!(&wait.unit, Unit::Slot { plan, .. } if !registry.plan_registered(plan))
+                wait.unit
+                    .plan()
+                    .is_some_and(|plan| !registry.plan_registered(plan))
             });
             if let Some(index) = sealed {
                 let wait = self.io.session_waits.entries.remove(index);
-                let Unit::Slot { plan, .. } = &wait.unit else {
-                    unreachable!()
-                };
+                let plan = wait.unit.plan().expect("swept parked Plan unit");
                 let reason = if now >= plan.deadline() {
                     Error::TimedOut
                 } else {

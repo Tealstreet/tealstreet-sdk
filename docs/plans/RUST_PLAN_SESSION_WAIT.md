@@ -269,7 +269,17 @@ New-contract REDs follow the API review:
      the event scope. It routes the ended hook in ready custody, or the
      expiry hook when the Plan is sealed.
    - Covered by N1, N3, N4b, N6 and N8, plus controls C1-C4.
-2. **Retry park.** `plan_retry_session_wait` (N2), next.
+2. **Retry park (this change).** `plan_retry_session_wait(plan, slot, context,
+   evidence, session, pending)`.
+   - Read retries only. A write keeps its classified resend grant, and
+     DefinitiveRefusal or non-Read is `RetryForbidden`.
+   - It runs in the failed delivery's custody, or as a re-park of an ended
+     retry from ready custody. It checks the evidence, budget and window
+     without selecting. The failed leg is retired, and the call moves to
+     `Stage::Parked`, so the default failure tail leaves the Plan alive.
+   - Resume selects exactly one attempt with the drain's delivery as
+     predecessor.
+   - Covered by N2 and by the retire-then-re-park control.
 3. **Preflight park.** `preflight_session_wait` and its retry twin (N7).
 4. **Bearer composition.** N8b and R10b' land with or after the Bearer hook's
    packet fence.
