@@ -480,6 +480,35 @@ fn genuine_capacity_refuses_command_before_http_and_recovers_after_peer_retireme
     assert_eq!(error.outcome, None);
     retire(&mut e);
     let actions = fetch(&mut e, NOW, 60_000);
+    let error = terminal(&actions).unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(error.message, "Engine request capacity reached");
+    no_next_page(&actions);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Notice(Notice::CommandError { .. })))
+    );
+    assert_eq!(e.venue().peers.len(), 255);
+    e.handle(
+        NOW,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["__retire".into()],
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(action,
+        Action::Notice(Notice::CommandFailed { command: 1001, error })
+            if error.message == "original peer retired"))
+            .count(),
+        1
+    );
+    assert_eq!(e.venue().peers.len(), 254);
+    let actions = fetch(&mut e, NOW, 60_000);
     let request = native_packet(&mut e, actions, NOW);
     assert_eq!(
         terminal(&outcome(&mut e, NOW + 1., &request, empty())).unwrap(),

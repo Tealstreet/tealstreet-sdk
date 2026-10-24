@@ -1665,3 +1665,15 @@ original deadline, preparation failure, clock/capacity recovery and duplicate
 owner/delivery. All pass with zero ignored. Existing candle and spot fixtures
 retain native assertions while driving managed preparation. The new probe opens
 no socket, so it makes no standalone socket-composition claim.
+
+### Kraken Futures candle custody controls
+
+Twenty-eight isolated controls pin command/background Prepare before HTTP, exact
+fractional caller deadline, original-root and live-root child expiry, stuck
+Prepare/Bind under a longer live root, typed metadata and inert late completion,
+second-page strict failure with no prefix/third page, duplicate/clock/capacity
+refusal and exact surviving-peer recovery. Native working controls cover wire,
+codec/default bounds, sorting/duplicates, ten-page/no-progress limits, empty
+success, five-second polling, stale subscription generations and validation
+precedence. All28 and47 unchanged native controls pass; strict/fmt and inventory
+checks are scoped locally, with full workspace/WASM/replay proof delegated to CI.

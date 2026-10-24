@@ -172,3 +172,35 @@ pins no HTTP or Prepare after its first failed terminal assertion. Primary
 original boundaries and all native assertions are unchanged. Current target28
 executes **17 intended assertion REDs / 11 GREEN / zero ignored** against10d.
 The final review delta requires the root owner's bounded closure before source.
+
+## Source-stage capacity suffix correction
+
+Fe7lgm cleared the28 original controls at f0f8f9711dd for source. The first
+implementation run passed27/28 and exposed one previously gated fixture
+assumption: a command walk needs TWO registry Context slots (original root and
+one physical child), whereas the suffix freed only one of256 peers. Original
+initial-capacity assertions remain unchanged. After one retirement the root
+admission succeeds, the first child correctly refuses Capacity, and the command
+seals once with typed Internal/localNotSent, no command_error, HTTP or Prepare.
+Every255 retained peer validates. Retire exactly one additional peer, validate
+all254, then a fresh command succeeds: this also proves the refused root slot
+was released. Root admission reserves its own slot only; there is no new shared
+reservation or engine bypass. The root owner cleared this honest suffix fix.
+
+## Implementation checkpoint
+
+All28 controls now pass without ignored tests, including the corrected capacity
+suffix. Existing public17, public_local_context13, socket_supervision15 and
+startup_resilience2 pass unchanged (47 total). Source change is confined to
+Futures lib.rs candle ownership/callbacks, preserving foreign typed callback
+defaults. Physical contexts retire between pages; background publication occurs
+synchronously after exact delivery/generation validation and before retirement.
+Only the lib.rs manifest block (four occurrences/three fingerprints) is pruned.
+No shared, Spot, private signing, existing fixture or Cargo edit. Source reviews
+and CI are requested separately; no landing/ready claim.
+
+Scoped strict Clippy passes after the capacity correction. The15 request checker
+controls and8 selection controls pass. Bans/ratchet currently reports only
+incoming prunes since10d (Backpack trading, Crypto.com trading, WEEX depth/lib);
+those four sources and manifest sections are unchanged from10d. Integrate actual
+landing to inherit those prunes before CI; do not edit their inventory manually.

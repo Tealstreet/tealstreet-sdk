@@ -3021,3 +3021,15 @@ two working controls plus nine compiling assertion REDs on unchanged production.
 All eleven now pass alongside ten existing candle and43 spot controls. Two gated
 new-test metadata expectations were corrected to the existing perps NotSent
 contract; primary RED boundaries and native wire/result assertions are retained.
+
+### Kraken Futures public candle custody
+
+Four lib.rs legacy request occurrences are adopted: the chart send, numeric
+failure, and final numeric done/fail. Family27->23, lib4->0; only that exact
+manifest block is removed. No Spot, signing/key-selection, account, history,
+trading, shared engine or existing fixture changes. Plan and original assertion
+checkpoints precede source; the28 controls began17 assertionRED/11GREEN.
+Source-stage recovery suffix correction records the required root+child two-slot
+geometry without altering the original initial-capacity assertions. The28 now
+pass, plus47 existing public/startup/socket/local-context controls. Architecture
+gate No; bounded source review and full family CI remain pending.
