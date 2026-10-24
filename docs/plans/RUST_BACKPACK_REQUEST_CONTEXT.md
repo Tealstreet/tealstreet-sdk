@@ -1021,3 +1021,33 @@ missing/configuration refusals remain immediate keyless completions, not
 physical roots. Registry/seed/Slots rules carry unchanged; lib pending/callback
 ownership and identity root issuance require fresh hcmq3f source review.
 No runtime source applied, compile/readiness or CI claim for this proposal.
+
+
+### Applied identity source and current integration
+
+The applied source composes the registry-owner-reviewed secondary provider and
+seed gate with the full-fit-reviewed command-root/read-leg proposal (114cfd3f).
+The real command receipt clips the single 20-second leg; Pending retains both
+handles, and the exact delivery check precedes response parsing. Native ID
+precision, read-key selection, primary window and local error metadata remain
+unchanged. Only the two identity terminal fingerprints are removed.
+
+Actual landing 8010a2843368d8a64ba01d7f0fa52f54a60c3157 is genuinely merged.
+The only source conflict was adjacent imports: retain CommandWait from incoming
+interval custody and remove the orphan CommandId import. Incoming candle,
+trading, registry and foreign inventory changes remain intact.
+
+Existing native identity fixtures now install the real primary/secondary
+LocalSigner and drive provider Prepare/Bind/Claim. All existing economic and
+wire assertions remain. A delivered failure may clear its managed timer and cancel its exact request,
+so that control collects notices after rejecting every other action;
+local-refusal no-work assertions remain exact. Additional source-stage controls
+pin expiry equality and the primary window on a secondary GET. These are
+working boundary checks, not additional original regression REDs.
+
+The first applied build exposed only an orphan CommandId import, removed here;
+that compile failure is not RED evidence. After the disk cleanup a test attempt
+selected a broken stable rustc sysroot before venue compilation; reruns pin
+Cargo, rustc and rustdoc to the installed 1.99.0 toolchain. The subsequent
+21/22 context result exposed the timer-retirement fixture assumption above;
+all six existing native identity controls passed on that attempt.

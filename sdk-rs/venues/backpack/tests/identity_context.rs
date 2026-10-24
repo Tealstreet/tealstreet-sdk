@@ -368,8 +368,21 @@ fn native_signed_identity_success_and_failure_preserve_store() {
         if let Some(expected) = expected {
             assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result }) if result == expected)).count(), 1);
         } else {
+            let notices: Vec<_> = actions
+                .into_iter()
+                .filter_map(|action| match action {
+                    Action::Notice(_) => Some(action),
+                    Action::ClearTimer { .. } => None,
+                    Action::ManagedHttp(action) if matches!(*action,
+                        HttpAction::Cancel { preparation, .. } if preparation.attempt().request == r.id
+                    ) => None,
+                    _ => panic!(
+                        "delivered identity refusal permits only notices and exact request retirement"
+                    ),
+                })
+                .collect();
             assert_eq!(
-                failure(&actions, 7).message,
+                failure(&notices, 7).message,
                 "Backpack account response did not include an account ID or user ID"
             );
         }
@@ -493,6 +506,21 @@ fn genuine_short_caller_wait_cannot_publish_native_identity_after_expiry() {
             Action::Notice(Notice::CommandDone { command: 7, .. })
         )),
         "the original37ms receipt cannot become a fresh20s wait"
+    );
+    unchanged(&e);
+}
+
+#[test]
+fn genuine_short_caller_wait_cannot_publish_identity_at_expiry() {
+    let mut e = live();
+    let request = identity_request_with_wait(&mut e, 37);
+    let actions = identity_response(&mut e, request.id, 1037., r#"{"accountId":"boundary"}"#);
+    assert!(
+        !actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 7, .. })
+        )),
+        "the genuine caller bound is exclusive at its expiry"
     );
     unchanged(&e);
 }

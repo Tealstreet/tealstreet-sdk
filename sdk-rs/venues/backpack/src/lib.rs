@@ -223,7 +223,7 @@ impl Backpack {
             options.read_credentials_status = options
                 .read_credentials
                 .as_ref()
-                .map(sign::validate_read_credentials);
+                .map(|read| sign::validate_read_credentials(read.validate(), &read.secret));
         }
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {

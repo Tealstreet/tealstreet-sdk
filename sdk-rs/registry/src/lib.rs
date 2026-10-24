@@ -311,10 +311,9 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     use safe_cex_engine::signing::{Algorithm, Identities, KeyEncoding, Operation, PayloadPart};
     let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
     // Validation metadata survives public-only setup; no signing material does.
-    let read_status = options
-        .read_credentials
-        .as_ref()
-        .map(safe_cex_venue_backpack::sign::validate_read_credentials);
+    let read_status = options.read_credentials.as_ref().map(|read| {
+        safe_cex_venue_backpack::sign::validate_read_credentials(read.validate(), &read.secret)
+    });
     if options.public_data_only {
         return Ok(BackpackSignerSetup {
             provider: None,

@@ -275,11 +275,11 @@ impl ReadCredentialsError {
 }
 
 pub fn validate_read_credentials(
-    read: &safe_cex_engine::ReadCredentials,
+    configuration: Result<(), &'static str>,
+    secret: &str,
 ) -> Result<(), ReadCredentialsError> {
-    read.validate()
-        .map_err(ReadCredentialsError::Configuration)?;
-    validate_seed(&read.secret).map_err(ReadCredentialsError::Seed)
+    configuration.map_err(ReadCredentialsError::Configuration)?;
+    validate_seed(secret).map_err(ReadCredentialsError::Seed)
 }
 
 impl Credentials {
