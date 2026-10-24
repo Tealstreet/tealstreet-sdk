@@ -80,8 +80,6 @@
     "59986a25934dee446e195bbc70a37615fcbaf0fd4e657cbe1bb7f4fbeebeee1d": 1
   },
   "venues/bingx/src/account.rs": {
-    "29e80488342dd1d485fc314630b169041c758cdb285d6713600ce2c41bdf9bca": 1,
-    "b8981ba6ded29689d47b26a8a93c34eb801bdbb171693c719f0eef8a920e632c": 1,
     "f025fc43a750a2590ced1ab109e5ee504164bf8505fdfb4ffec28b246dacd511": 2,
     "4fd69fe1e61d7806268e180e1316430a4f1412b5b180eee8a9d78451ac57c7d9": 1,
     "5a3ecde1bdd5b82ea5d3f97b6da8fa145ee3d7db5f208cc0f5157b22ac098f3c": 1
@@ -284,22 +282,6 @@
     "e81908cb0fae07346d55748a9e80db822d8af6006cc38fbc4aaaef11041c0283": 1,
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
     "c6af5062b90ca20c0fe8e6184bfb2a01dae165494623878deef5314fbced6e8e": 2
-  },
-  "venues/cryptocom/src/account.rs": {
-    "83c6b712d19379913a85bf575a1a1834358d1b5f84d4c7a04a2f241487399a9c": 1,
-    "a77d14858a6b097716fd945cddafa2c827e671194bbe1122e95c60b698c56006": 1
-  },
-  "venues/cryptocom/src/history.rs": {
-    "dfb17bdf89f16befd8bb7566ac05d0bddf2980c6627b642f20e1f1b5a4859508": 1
-  },
-  "venues/cryptocom/src/identity.rs": {
-    "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-  },
-  "venues/cryptocom/src/trading.rs": {
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
-    "f32eb32f491028d71654d8ec05bbdf592328cd7f7156d848a17d430553a77638": 1,
-    "8c1d78bb768fb392694ad91c49f963ab64ba87a71d151646bff0298b85a6b734": 1
   },
   "venues/grvt/src/account.rs": {
     "b2484206c084e77bdc1752247eb37ee88a35a6844eee77dc2d8d8076872cde71": 1,
@@ -551,10 +533,8 @@
     "d04c9c210338abd029de862338a9937ff19e38f96097cbfba0efb4bbf2728caf": 1
   },
   "venues/paradex/src/public.rs": {
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
     "094a464645386463fbc12779495700591cd0fc4570d7257183d9928fc29b60f5": 1,
     "f4ff4cf72ac7033d5f05a949c3bebdf69840234f87e83ff025e63bdb7d7999b6": 1,
-    "9eb2532ffa305903307527ed26561752ae2716a465c7347f6bb03d38987efb3d": 1,
     "d5350d6b7eb9bb6083de59c2c42f6ec4de997ccda8d28c277c0803969d9f2a77": 1
   },
   "venues/paradex/src/trading.rs": {
@@ -612,9 +592,6 @@
     "9abef505f5f9a1664cdae8b3c966edfebd4748240d5855c984067457d1b77499": 1,
     "3d7ff71d016e5adcb86b686890425c0fc0777ed3e15fb49d43910e0ef97553b7": 1
   },
-  "venues/polymarket/src/lib.rs": {
-    "3c2518cd3efa9ec044158c6dd5008cc36722ff550877663df294c8c8c2d55621": 1
-  },
   "venues/polymarket/src/trading.rs": {
     "df3c1d81952c8a455f966081ae19fcca364d48093c5893e69a82108cac16906d": 1,
     "69079e4a19d7256b68a25a10c7f12140a2b4229ab7411ecf4894bd5a511774fb": 1,
@@ -622,9 +599,6 @@
     "81a211396ad294f6b186e78e613ecfa112d1b4452823ff28eadb89ec37be690f": 1,
     "6c356bc987bef30ec8929663a2849ca69e0f04b910a2e4838a3d947c8a96b3ec": 2,
     "5b02bb983a5e994687c385c6cbe7676982daf9cf00a067f01bf5aa35a2a29067": 1
-  },
-  "venues/txflow/src/account.rs": {
-    "433b39542c0b7e8d83e35d3e897cccc64377df2f741272c2b8a3ec51f571b6e1": 1
   },
   "venues/txflow/src/lib.rs": {
     "17292f7e8ba96b8ca495e3a6d66f3451c5c670f2658c3ccb7117b49878c06dd0": 1

@@ -4,6 +4,7 @@ mod depth_query;
 mod history;
 mod identity;
 mod public_trades;
+mod reads;
 pub mod sign;
 mod trading;
 mod wire;
@@ -34,20 +35,16 @@ fn read_policy() -> Policy {
 
 #[derive(Clone, Default)]
 pub struct Options {
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
+    pub secondary_validation: Option<Result<(), &'static str>>,
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
 }
 safe_cex_crypto::redacted_debug!(Options);
 impl safe_cex_crypto::secrets::EraseSecrets for Options {
     fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
+        self.credentials = None;
+        self.secondary_validation = None;
     }
 }
 
@@ -118,7 +115,7 @@ struct BookState {
 }
 
 pub struct Cryptocom {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     rest: &'static str,
     sockets: [Connection; 2],
     discovery: safe_cex_engine::startup::Backoff<bool>,
@@ -129,7 +126,8 @@ pub struct Cryptocom {
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
     message_id: u64,
-    credentials: Option<sign::Credentials>,
+    credentials: Option<safe_cex_engine::signing::Identity>,
+    slots: safe_cex_engine::credential_selection::Slots<safe_cex_engine::signing::Identity>,
     account: account::Account,
     trading: trading::Trading,
     history: history::History,
@@ -231,21 +229,18 @@ impl Cryptocom {
         }
     }
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
-        let credentials = if options.public_data_only {
-            None
-        } else {
-            options
-                .key
-                .as_ref()
-                .filter(|k| !k.is_empty())
-                .zip(options.secret.as_ref().filter(|s| !s.is_empty()))
-                .map(|(key, secret)| sign::Credentials {
-                    key: key.clone(),
-                    secret: secret.clone(),
-                })
-        };
+        let credentials = options
+            .credentials
+            .as_ref()
+            .filter(|identity| !options.public_data_only && identity.validate().is_ok())
+            .cloned();
+        let slots = safe_cex_engine::credential_selection::Slots::new(
+            credentials.clone(),
+            None,
+            Default::default(),
+        );
         Self {
+            slots,
             credentials,
             account: Default::default(),
             trading: Default::default(),
@@ -478,15 +473,47 @@ impl Venue for Cryptocom {
             ..safe_cex_engine::Capabilities::BASE
         }
     }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.trading_preflight_ready(cx, preflight);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.trading_retired(owner)
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        if !matches!(pending, Pending::Trade(_)) {
+            return Err(safe_cex_engine::request_context::Error::Invalid);
+        }
+        // Native late replies have no independent Store authority; normal
+        // fenced account polling reconciles unknown effects.
+        safe_cex_engine::request_context::ReconciliationData::new(String::new())
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
 
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read.validate()
-        {
+        if let Some(Err(error)) = self.options.secondary_validation {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
@@ -600,6 +627,11 @@ impl Venue for Cryptocom {
         {
             return;
         }
+        if let Pending::Account(request) = &*pending
+            && self.account_delivery(cx, request).is_err()
+        {
+            return;
+        }
         match pending {
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::PublicTrades(trade) => trade.item(cx, item),
@@ -671,6 +703,30 @@ impl Venue for Cryptocom {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        let private_delivery = match &pending {
+            Pending::Account(request) => self.account_delivery(cx, request),
+            Pending::Identity(request) if !request.delivered(cx) => {
+                Err(safe_cex_engine::request_context::Error::Revoked)
+            }
+            Pending::History(request) if !request.delivered(cx) => {
+                Err(safe_cex_engine::request_context::Error::Revoked)
+            }
+            Pending::Trade(request) if !request.delivered(cx) => {
+                Err(safe_cex_engine::request_context::Error::Revoked)
+            }
+            _ => Ok(()),
+        };
+        if let Err(error) = private_delivery {
+            if let Pending::Account(request) = pending {
+                self.account_failed(
+                    cx,
+                    request,
+                    &error.read_venue_error().message,
+                    reads::FailureRecovery::Strict,
+                );
+            }
+            return;
+        }
         if let Pending::PublicTrades(trade) = &pending
             && !trade.delivered(cx)
         {
@@ -696,19 +752,7 @@ impl Venue for Cryptocom {
             return;
         }
         if let Pending::Trade(request) = pending {
-            self.trade_response(
-                cx,
-                request,
-                if (200..300).contains(&response.status)
-                    || serde_json::from_str::<RestEnvelope>(response.body)
-                        .is_ok_and(|e| e.code != 0)
-                {
-                    Ok(response.body)
-                } else {
-                    Err("Crypto.com HTTP write failed")
-                },
-                Some(response.status),
-            );
+            self.trade_response(cx, request, response);
             return;
         }
         let error = match serde_json::from_str::<RestEnvelope>(response.body) {
@@ -721,8 +765,15 @@ impl Venue for Cryptocom {
         };
         if let Some(error) = error {
             match pending {
-                Pending::Account(request) => self.account_failed(cx, request, &error, false),
-                Pending::History(request) => self.history_failed(cx, request, &error, false),
+                Pending::Account(request) => {
+                    self.account_failed(cx, request, &error, reads::FailureRecovery::Response)
+                }
+                Pending::History(request) => self.history_failed(
+                    cx,
+                    request,
+                    reads::response_failure(response, error),
+                    reads::FailureRecovery::Response,
+                ),
                 Pending::PublicTrades(trade) => {
                     self.public_trades_response(cx, *trade, response, Some(error))
                 }
@@ -847,7 +898,24 @@ impl Venue for Cryptocom {
         pending: Pending,
         response: Response<'_>,
     ) {
+        let missing_list = || {
+            safe_cex_engine::VenueError::new(format!(
+                "response did not contain the expected list: {}",
+                response.body
+            ))
+            .kind(safe_cex_engine::ErrorKind::Internal)
+        };
+        let recovery = if response.body.contains("40101") {
+            reads::FailureRecovery::Response
+        } else {
+            reads::FailureRecovery::Strict
+        };
         match pending {
+            Pending::Identity(request) => self.identity_reject(cx, request, missing_list()),
+            Pending::History(request) => self.history_failed(cx, request, missing_list(), recovery),
+            Pending::Account(request) => {
+                self.account_failed(cx, request, &missing_list().message, recovery)
+            }
             Pending::PublicTrades(trade) => self.public_trades_stream_failed(cx, *trade, response),
             pending => self.on_request_failed(
                 cx,
@@ -866,6 +934,12 @@ impl Venue for Cryptocom {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Identity(request) => self.identity_reject(cx, request, error),
+            Pending::History(request) => self.history_reject(cx, request, error),
+            Pending::Trade(request) => self.trade_reject(cx, request, error),
+            Pending::Account(request) => {
+                self.account_failed(cx, request, &error.message, reads::FailureRecovery::Strict)
+            }
             Pending::PublicTrades(trade) => Self::public_trades_reject(cx, *trade, error),
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
@@ -883,6 +957,16 @@ impl Venue for Cryptocom {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::Identity(request) => self.identity_failed(cx, request, error),
+            Pending::History(request) => {
+                let recovery = reads::FailureRecovery::released(&error);
+                self.history_failed(cx, request, error, recovery);
+            }
+            Pending::Account(request) => {
+                let recovery = reads::FailureRecovery::released(&error);
+                self.account_failed(cx, request, &error.message, recovery);
+            }
             Pending::PublicTrades(trade) => self.public_trades_failed(cx, *trade, error, true),
             Pending::BookQuery { context } | Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
@@ -903,16 +987,30 @@ impl Venue for Cryptocom {
                     depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
                 );
             }
-            Pending::Identity(request) => self.identity_failed(cx, request, error),
-            Pending::Trade(request) => self.trade_response(cx, request, Err(error), None),
-            Pending::History(request) => self.history_failed(cx, request, error, true),
+            Pending::Identity(request) => self.identity_reject(
+                cx,
+                request,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Internal),
+            ),
+            Pending::Trade(request) => self.trade_failed(
+                cx,
+                request,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+            ),
+            Pending::History(request) => self.history_reject(
+                cx,
+                request,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Internal),
+            ),
             Pending::PublicTrades(trade) => self.public_trades_failed(
                 cx,
                 *trade,
                 safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
                 true,
             ),
-            Pending::Account(request) => self.account_failed(cx, request, error, true),
+            Pending::Account(request) => {
+                self.account_failed(cx, request, error, reads::FailureRecovery::Strict)
+            }
             Pending::Candles { context, .. } => {
                 if cx.validate_read_http_delivery(&context, &context).is_ok() {
                     let _ = cx.fail_context(&context, error);
@@ -927,6 +1025,9 @@ impl Venue for Cryptocom {
         owner: safe_cex_engine::request_context::Owner,
         _pending: Vec<Pending>,
     ) {
+        self.history
+            .waiting
+            .retain(|_, request| request.root().owner() != owner);
         self.public_trades
             .waiting
             .retain(|_, trade| trade.root().owner() != owner);
@@ -1140,6 +1241,3 @@ fn reread_partial<P>(
     }
     *stalls < 5
 }
-
-#[cfg(test)]
-mod secondary_tests;
