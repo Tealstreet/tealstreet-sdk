@@ -1618,3 +1618,16 @@ financial state preservation, duplicate original-owner release, and 300 sequenti
 failures with 255 Background peers and one free Context slot. Capacity recovery
 releases exact Background roots. No fabricated Context, numeric fallback or
 missing-method compile failure is regression evidence.
+
+
+## Lighter identity Read controls
+
+The21 compiling originals at445754db356 executed15 assertion REDs and6 working
+controls on unchangedbe710 production, with no ignored tests. All21 are retained
+byte-for-byte and pass after adoption; three added controls cover strict
+preparation/unclaimed-permit failures and stale candidate replies. Eight existing
+identity tests retain their assertions through a real shared preparation driver.
+The32 focused tests pass, including all four deployment wires, four-candidate
+order, first-row/first-present-field precedence, retained capacity recovery,
+clock refusal, caller expiry and released physical-timeout continuation. Local
+checks are scoped with four jobs; broader builds and performance remain in CI.

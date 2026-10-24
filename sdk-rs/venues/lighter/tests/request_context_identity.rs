@@ -686,3 +686,107 @@ fn root_equality_expiry_never_falls_through_to_another_native_candidate() {
     );
     assert!(outcomes(&reply(&mut e, NOW + 20_001., &request, 200, ROW)).is_empty());
 }
+
+#[test]
+fn old_candidate_reply_cannot_consume_the_next_candidate() {
+    let mut e = engine(Options {
+        application_id: Some(ADDRESS_A.into()),
+        public_data_only: true,
+        ..Default::default()
+    });
+    let actions = ask(&mut e, NOW, 60_000);
+    let first = released(&mut e, NOW, &actions);
+    let actions = reply(&mut e, NOW + 1., &first, 404, "missing");
+    let (next, _) = prep(&actions);
+    let old = reply(&mut e, NOW + 2., &first, 200, ROW);
+    assert!(outcomes(&old).is_empty());
+    no_io(&old);
+    let (permit, request) = bind(&mut e, NOW + 3., next);
+    assert!(matches!(
+        e.claim_http(NOW + 3., permit),
+        Ok(Claim::Released(_))
+    ));
+    let actions = reply(
+        &mut e,
+        NOW + 4.,
+        &request,
+        200,
+        r#"{"sub_accounts":[{"index":5}]}"#,
+    );
+    assert_eq!(outcomes(&actions), [Ok(r#"{"userId":"5"}"#.into())]);
+}
+
+#[test]
+fn preparation_timeout_is_strict_before_any_native_candidate_reaches_transport() {
+    let mut e = engine(Options {
+        application_id: Some(ADDRESS_A.into()),
+        public_data_only: true,
+        ..Default::default()
+    });
+    let actions = ask(&mut e, NOW, 60_000);
+    let (p, request) = prep(&actions);
+    e.http_preparation_failed(
+        NOW + 1.,
+        p,
+        Error::TimedOut,
+        VenueError::new("identity preparation timeout").kind(ErrorKind::Timeout),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let results = outcomes(&actions);
+    assert_eq!(results.len(), 1);
+    let failure = results[0].as_ref().unwrap_err();
+    assert_eq!(
+        (failure.kind, failure.outcome),
+        (Some(ErrorKind::Timeout), Some(Outcome::NotSent))
+    );
+    for action in &actions {
+        if let Action::ManagedHttp(action) = action {
+            assert_eq!(
+                action.as_ref(),
+                &HttpAction::Cancel {
+                    preparation: p,
+                    signing: None
+                }
+            );
+        }
+        assert!(!matches!(action, Action::Http(_)));
+    }
+    assert!(outcomes(&reply(&mut e, NOW + 2., &request, 200, ROW)).is_empty());
+}
+
+#[test]
+fn expired_unreleased_permit_is_strict_even_when_the_caller_root_is_live() {
+    let mut e = engine(Options {
+        application_id: Some(ADDRESS_A.into()),
+        public_data_only: true,
+        ..Default::default()
+    });
+    let actions = ask(&mut e, NOW, 60_000);
+    let (p, _) = prep(&actions);
+    let (permit, request) = bind(&mut e, NOW, p);
+    assert!(matches!(
+        e.claim_http(NOW + 20_000., permit),
+        Err(Error::TimedOut)
+    ));
+    let actions: Vec<_> = e.drain_actions().collect();
+    let results = outcomes(&actions);
+    assert_eq!(results.len(), 1);
+    let failure = results[0].as_ref().unwrap_err();
+    assert_eq!(
+        (failure.kind, failure.outcome),
+        (Some(ErrorKind::Timeout), Some(Outcome::NotSent))
+    );
+    for action in &actions {
+        if let Action::ManagedHttp(action) = action {
+            assert_eq!(
+                action.as_ref(),
+                &HttpAction::Cancel {
+                    preparation: p,
+                    signing: None
+                }
+            );
+        }
+        assert!(!matches!(action, Action::Http(_)));
+    }
+    assert!(outcomes(&reply(&mut e, NOW + 20_001., &request, 200, ROW)).is_empty());
+}

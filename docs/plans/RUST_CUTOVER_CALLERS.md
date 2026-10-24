@@ -6796,3 +6796,16 @@ fallback or extra terminal occurs. Duplicate live ids preserve their diagnostic
 and original owner. No Store change, HTTP, provider, timer or private credential
 is introduced. Valid signed leverage queries retain their original issuance,
 path, request fields, revision checks, response handling and native retries.
+
+
+## Lighter unsigned FetchAccount identity
+
+FetchAccount now admits one caller-bound unsigned Read before selector validation.
+Its native index/address candidates retain their order and each has its own20s
+physical window capped by the original caller receipt. Shared capacity, clock,
+duplicate and expiry refusals precede native diagnostics. Released transport
+failure or physical timeout can advance to a different native candidate only
+while that exact original root remains live; preparation refusal cannot. Existing
+native status/row/error/referrer semantics remain unchanged. The single checked
+companion diagnostic and command terminal use that root. No new caller parameter,
+credential, Session, signer or private lifecycle activity is needed.

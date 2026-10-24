@@ -1,8 +1,9 @@
 # Lighter unsigned identity Read custody
 
 Plan-first base: actual `be710b3f2d7692244144b3f8f10810dc52790796`.
-This checkpoint is plan plus compiling original runtime assertions only. No
-production, existing fixture, Cargo, checker or manifest edit is authorized.
+The initial checkpoint contained only the plan and compiling original runtime
+assertions. Production follows the reviewed originals and the overseer's explicit
+continuation ruling; the implementation receipt is below.
 
 ## Slice and ownership
 
@@ -174,3 +175,49 @@ real timer dispatch, bounded next Prepare and terminal effects without an access
 The root-equality sibling executes as the21st compiling original: current
 source reports15 intended assertion REDs/6 GREEN/0ignored. Its first failure is
 also Prepare, so the same-event timer/terminal suffix remains a source gate.
+
+
+## Managed implementation and verification
+
+Production follows original checkpoint445754db356. Fe7's bounded plan/original/API
+CLEAR at97e909 and9cz's original/native CLEAR precede the source change. Both
+requested refinements were committed before production. Uuf's separate API answer
+agrees with the failure-only continuation; it is not a second originals execution
+receipt.
+
+FetchAccount retains one genuine caller Read root. Each native candidate is a
+separate unsigned20s/Never child. DATA validation precedes status and parsing;
+released failure continuation validates the exact caller root and retires the
+exact old child before taking a different candidate. Typed preparation, provider
+and unclaimed-permit failures stop the query and retain their shared fields,
+including the engine's existing preparation NotSent. They never authorize a
+candidate fallback. Root expiry is strict, including equality and timer-only
+expiry; late or duplicate delivery cannot publish or extend it. Native candidate
+construction and parsing remain byte-exact, as do all other private/public paths.
+The checked companion diagnostic remains immediately before the single owned
+failure terminal.
+
+The21 original controls are an unchanged byte prefix of the dedicated target.
+Three source-stage controls additionally pin an old-candidate response while the
+next is pending, a preparation Timeout before release, and an expired unclaimed
+permit under a still-live longer root. All24 pass. The existing identity target's
+eight tests pass with every original wire/result/financial assertion retained:
+its driver now performs actual shared Prepare/Bind/Claim, and consumes only
+validated20s/default-caller Context timers plus their clear actions. No synthetic
+response, signer, Session or bypass is introduced. The first implementation run
+passed the21 original controls but exposed this old raw-action driver assumption
+in all eight existing tests; those are fixture adaptations, not native result
+regressions or new original RED evidence.
+
+The exact three singleton identity inventory rows disappear (identity3->0,
+family33->30), with no other manifest key change and no new fingerprint. No
+engine, host, crypto, Cargo, signer, account, history or socket body changes.
+Only Identity command dispatch, typed failure/preparation/sign callbacks and the
+identity implementation change in production. Non-Identity typed callbacks
+retain their previous default delegation. The later Bearer hook adds its
+mechanical None argument at composition; no Session is required here.
+
+Local verification uses CARGO_BUILD_JOBS=4, sequential scoped cargo targets.
+The24 new and8 existing identity tests pass. Workspace, all-feature, WASM,
+replay and performance validation belong to CI under the machine-load ruling.
+Production source review remains distinct from the earlier plan/API clearances.

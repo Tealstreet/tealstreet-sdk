@@ -313,3 +313,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Paradex public refusals and Lighter catalog | Implementation under review; original REDs recorded | Before converting the last four immediately workable public request sites. | [RUST_PUBLIC_READ_TAIL.md](RUST_PUBLIC_READ_TAIL.md) |
 
 | BloFin local leverage Read refusals | Shared Read admission adoption under review | Before changing the two pre-credential local FetchLeverage refusal sites independently of signer cutover. | [RUST_BLOFIN_LOCAL_LEVERAGE_REFUSALS.md](RUST_BLOFIN_LOCAL_LEVERAGE_REFUSALS.md) |
+
+| Lighter unsigned identity Read | Managed implementation under review | Before changing FetchAccount candidate custody, original caller expiry or the exact three-site identity prune. | [RUST_LIGHTER_IDENTITY_CONTEXT.md](RUST_LIGHTER_IDENTITY_CONTEXT.md) |

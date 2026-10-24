@@ -2988,3 +2988,15 @@ by fail_context on that exact root. BloFin 23->21 occurrences / 19->17 fingerpri
 only the two singleton rows are removed. No signer, trading, history, closed
 position or successful private read is converted. The coherent custody cutover
 remains with codex-zs5e83. No per-venue admission/completion implementation.
+
+
+## Lighter identity caller and physical custody
+
+The complete unsigned identity candidate chain uses a tracked caller Read root
+and unsigned20s/Never children. Exact live DATA validation precedes decoding;
+failure-only continuation uses the engine's typed released callback, validates
+the original root and retires the expired current child before the next candidate.
+Preparation refusals are strict. Candidate construction, parsing and private
+account/signing paths remain unchanged. Exact inventory identity3->0/family33->30
+removes one physical request and two numeric terminals, with no rename prune or
+new engine helper. Original plan/API receipts do not substitute for source review.
