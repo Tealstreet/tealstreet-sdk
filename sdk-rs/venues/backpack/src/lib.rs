@@ -69,7 +69,7 @@ pub enum Pending {
         generation: u64,
     },
     Candles {
-        command: CommandId,
+        context: Context,
         rows: Vec<Candle>,
         invalid: bool,
     },
@@ -641,6 +641,11 @@ impl Venue for Backpack {
         self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Pending::Candles { context, .. } = &*pending
+            && cx.validate_read_http_delivery(context, context).is_err()
+        {
+            return;
+        }
         let result = match pending {
             Pending::Identity(_) => return,
             Pending::History(request) => {
@@ -780,6 +785,11 @@ impl Venue for Backpack {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Candles { context, .. } = &pending
+            && cx.validate_read_http_delivery(context, context).is_err()
+        {
+            return;
+        }
         if let Pending::BookQuery { context } = pending {
             self.book_query_response(cx, &context, response);
             return;
@@ -985,11 +995,15 @@ impl Venue for Backpack {
                 }
             }
             Pending::Candles {
-                command,
+                context,
                 rows,
                 invalid: false,
-            } => cx.done(command, serde_json::to_string(&rows).unwrap()),
-            Pending::Candles { command, .. } => cx.fail(command, "Backpack invalid candles"),
+            } => {
+                let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
+            }
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, "Backpack invalid candles");
+            }
             _ => cx.notice(
                 safe_cex_engine::Level::Error,
                 code::STREAM_MALFORMED,
@@ -1015,6 +1029,9 @@ impl Venue for Backpack {
     ) {
         match pending {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::BookQuery { context } => {
                 // Preserve the public query's existing error presentation from #1680.
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
@@ -1030,6 +1047,9 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::BookQuery { context } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
@@ -1100,7 +1120,9 @@ impl Venue for Backpack {
             {
                 self.recover_book(cx, &symbol)
             }
-            Pending::Candles { command, .. } => cx.fail(command, error),
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::Markets { .. } => self.retry_seed(cx, SeedRead::Markets, error),
             Pending::Daily { .. } => self.retry_seed(cx, SeedRead::Daily, error),
             Pending::Marks { .. } => self.retry_seed(cx, SeedRead::Marks, error),
@@ -1228,17 +1250,33 @@ impl Venue for Backpack {
                 if let Some(to) = to_ms {
                     params.insert("endTime".into(), format!("{:.0}", (to / 1000.0).floor()));
                 }
-                self.get(
-                    cx,
-                    "/api/v1/klines",
-                    params,
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
+                let url = format!("{REST}/api/v1/klines?{}", sign::query(&params));
+                match cx.request_managed_with_headers(
+                    context.clone(),
+                    Method::Get,
+                    url,
+                    PUBLIC_READ_HEADERS,
+                    None,
                     Pending::Candles {
-                        command,
+                        context,
                         rows: vec![],
                         invalid: false,
                     },
-                    true,
-                );
+                ) {
+                    Ok(request) => cx.stream_response(request, ArrayAt::Root),
+                    Err((pending, reason)) => {
+                        self.on_http_preparation_failed(cx, pending, reason, reason.venue_error())
+                    }
+                }
             }
             Command::FetchOrderBook { symbol, .. } => {
                 let Ok(context) = cx.admit_http_command(Policy {
