@@ -978,7 +978,9 @@ enable `session-bearer` when they adopt, with their own budget review.
   - The OFF control runs in the baseline and every Plan family row, which
     stay without the feature after an adopter enables it (F2).
 - Results:
-  - OFF: lib 877; session_bearer_off 1 (default), 2 (http-plans, barriers).
+  - (At `3f366a44dd1`; superseded by the final results under the size
+    follow-ups below.) OFF: lib 877; session_bearer_off 1 (default), 2
+    (http-plans, barriers).
   - ON: session_bearer 55 / 61, lib 1092, barrier 14.
   - Clippy `-D warnings` clean in five modes: none, http-plans,
     barriers + test-support, session-bearer, and the full ON row.
