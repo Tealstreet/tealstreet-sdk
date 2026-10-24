@@ -378,3 +378,60 @@ Both request-context commands pass (15 ratchet tests), as do bans including the
 socket inventory controls. An initial ratchet failure identified the incoming
 Lighter prune before its integration; no foreign entry was changed locally.
 Fresh CI on the pushed integrated head remains required before the next READY.
+
+## Combo integration: expiry cleanup and intent narrowing
+
+Actual combo-3b `b9d8142261f` introduces a Plan expiry cleanup scope and the
+protection-cancel intent entry. The common intent helper retains the exact ready
+owner guard for both entry points. Signed and signing-timeout paths retain the
+incoming reconciliation drain before readiness; the reconcile timer retains its
+full end-of-event cleanup before readiness.
+
+Readiness activation, failure cleanup and drainage now refuse the active Plan
+expiry scope. A queued successor stays queued until every predecessor call has
+received its typed cleanup, its terminal has been emitted and physical retirement
+has completed. The real two-call unreleased-expiry control fails without the
+cold expiry guard: readiness sees only one of two cleanup callbacks. With the
+guard it passes unchanged. A direct scope control also pins failure-custody and
+activation refusal, and the foreign-owner control covers protection-cancel intent
+narrowing. The earlier six readiness controls remain active.
+
+## Combo-4a2 Session composition
+
+Actual fade3aa0a41 is genuinely merged. Source merged automatically, and the
+CALLERS conflict retains incoming sections first plus this lane's section once.
+Independent integration review found a new custody gap: Session entry points can
+allocate foreign work or drain another owner's waiters inside a ready callback,
+before the later physical-send guard rejects the foreign Context.
+
+Original controls at 8c46492af04 fail on Session Context issuance, Session-parent
+leg issuance and waiter drainage. Their GREEN matrix covers open_session,
+session_context, http_leg_context, retire_session, session_ready, session_failed
+and session_wait. Refusal must precede IDs, timer changes, holds or partial drain;
+pure session_live remains available. A legitimate later Session callback must
+still receive A's single continuation and complete A once. The existing ordinary
+Session waiter-drain control passes independently.
+
+The overseer moved #1896 to combo-5b and assigned the Session runtime guard to
+claude-55ao7t with codex-uufub4 review. The guard denies Session lifetime/drain
+operations only during retained-Preflight/Plan activation, with Error::State;
+session_wait returns its pending unchanged without parking it in that scope.
+Start, Session response/failure, socket and timer callbacks retain their normal
+Session authority. #1897's future session_scoped_context adopts the same guard
+in its own owner branch.
+
+Owner-authored guard eb233c1c7f3 is now merged. A further genuine Plan-ready
+control at df486b0bc24 exposed the same drain-before-denial path through
+on_http_plan_ready; its native 1ms Plan wait and TimerFired reach that callback.
+Owner follow-up cfbec2c7c4c extends the single predicate to either readiness
+marker, leaving the seven call sites unchanged. It is merged without local
+runtime edits. Both markers refuse Session work before mutation; the active
+Plan's own leg and readiness APIs remain available.
+
+The three original Preflight assertions and the additional Plan-ready assertion
+now pass. The first failing Plan-ready case proved waiter drainage; the remaining
+six operations execute in the GREEN matrix, not as independently reproduced REDs.
+Recovery proves the preserved waiter and one Context terminal, without claiming
+a physical send. Focused checks also retain ordinary Session callbacks and
+positive own-Plan behavior. Core review and fresh exact-head CI remain required
+before freezing for combo-5b; this checkpoint grants no merge permission.

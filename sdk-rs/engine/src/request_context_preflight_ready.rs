@@ -102,6 +102,7 @@ impl<P> Cx<'_, P> {
         if self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
             !ready.issued_by(&self.io.request_contexts.issuer) || ready.owner() != handle.owner()
         }) || self.io.http_plan_ready.is_some()
+            || self.io.http_plan_expiring.is_some()
         {
             return Err(Error::Revoked);
         }
@@ -135,6 +136,7 @@ impl<P> Cx<'_, P> {
         // Failure-only cleanup outside all active loans never grants progress.
         if self.io.http_delivery.is_none()
             && self.io.http_plan_ready.is_none()
+            && self.io.http_plan_expiring.is_none()
             && self.io.http_preflight_ready.is_none()
             && self.io.command_entry.is_none()
         {
@@ -225,6 +227,7 @@ impl<V: Venue> Engine<V> {
             || self.io.command_entry.is_some()
             || self.io.http_delivery.is_some()
             || self.io.http_plan_ready.is_some()
+            || self.io.http_plan_expiring.is_some()
             || self.io.http_preflight_ready.is_some()
             || !self.io.request_contexts.plan_scope_clear()
         {

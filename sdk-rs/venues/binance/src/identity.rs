@@ -1,7 +1,8 @@
 //! Rare identity reads are independent of recurring account reconciliation.
 use crate::{BinanceFutures, Pending, Variant};
-use safe_cex_engine::request_context::{Context, Credential};
-use safe_cex_engine::{CommandId, CredentialSlot, Cx, Response, VenueError};
+use safe_cex_engine::credential_selection::CredentialRole;
+use safe_cex_engine::request_context::Context;
+use safe_cex_engine::{Cx, Response, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -42,63 +43,44 @@ fn parse(response: Response<'_>) -> Result<Identity, String> {
         .ok_or("Binance balance response did not include an account alias")?;
     Ok(Identity { user_id })
 }
-fn finish_unissued(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
-    let result = result
-        .and_then(|identity| serde_json::to_string(&identity).map_err(|error| error.to_string()));
-    match result {
-        Ok(data) => cx.done(command, data),
-        Err(error) => {
-            cx.command_error(command, &error);
-            cx.fail(command, error);
-        }
-    }
-}
 impl BinanceFutures {
-    pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+    fn reject_identity(&self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        let Ok(context) = Self::read_context(cx, None) else {
+            return;
+        };
+        self.identity_error(cx, &context, error);
+    }
+
+    pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
-            finish_unissued(cx, command, Err(error.into()));
+            self.reject_identity(cx, error.into());
             return;
         }
         let path = match self.options.variant {
             Variant::UsdM => "/fapi/v3/balance",
             Variant::PortfolioMargin => "/papi/v1/balance",
             _ => {
-                finish_unissued(
+                self.reject_identity(
                     cx,
-                    command,
-                    Err("Binance account identity is unsupported for this product".into()),
+                    "Binance account identity is unsupported for this product".into(),
                 );
                 return;
             }
         };
-        if self.options.public_data_only
-            || self
-                .credentials
-                .as_ref()
-                .is_none_or(|c| c.credential.0.is_empty() || c.signing.0.is_empty())
-        {
-            finish_unissued(
-                cx,
-                command,
-                Err("Binance account identity requires credentials".into()),
-            );
+        if self.options.public_data_only || !self.credentials.has_primary() {
+            self.reject_identity(cx, "Binance account identity requires credentials".into());
             return;
         }
-        let (credentials, slot) = match &self.options.read_credentials {
-            Some(credentials) => (credentials.clone(), CredentialSlot::Secondary),
-            None => (
-                self.credentials.as_ref().expect("validated above").clone(),
-                CredentialSlot::Primary,
-            ),
-        };
+        let (selection, credentials) = self
+            .credentials
+            .select(CredentialRole::Read { scope: None })
+            .expect("validated above");
+        let credentials = credentials.clone();
         let context = match Self::read_context(
             cx,
-            Some(Credential {
-                slot,
-                reference: credentials.credential.clone(),
-            }),
+            Some(selection.credential(credentials.credential.clone())),
         ) {
             Ok(context) => context,
             Err(_) => return, // Engine owns initial admission rejection.

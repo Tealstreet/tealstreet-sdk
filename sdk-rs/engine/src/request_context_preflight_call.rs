@@ -6,6 +6,7 @@ use crate::request_context::{RetryPolicy, plan::CallTerms};
 
 pub(in super::super) struct State {
     pub(super) policy: PreflightPolicy,
+    pub(super) receipt_cap: Option<(u64, f64)>,
     // At most one entry; storage is reserved fallibly before ID admission.
     pub(super) call: Vec<Call>,
     pub(super) handoff: Option<Delivery>,
@@ -16,6 +17,7 @@ impl State {
     pub(super) fn new(policy: PreflightPolicy) -> Self {
         Self {
             policy,
+            receipt_cap: None,
             call: Vec::new(),
             handoff: None,
             activation: super::ready::Activation::Initial,
@@ -64,6 +66,22 @@ impl State {
 }
 
 impl ContextRegistry {
+    pub(in super::super) fn preflight_receipt_cap(
+        &self,
+        preflight: &Preflight,
+    ) -> Result<Option<(u64, f64)>, Error> {
+        Ok(self.preflight_state(preflight)?.receipt_cap)
+    }
+
+    pub(in super::super) fn bind_preflight_receipt(
+        &mut self,
+        preflight: &Preflight,
+        cap: (u64, f64),
+    ) -> Result<(), Error> {
+        self.preflight_state_mut(preflight)?.receipt_cap = Some(cap);
+        Ok(())
+    }
+
     pub(super) fn owner_from_context(&self, context: &Context) -> Result<Preflight, Error> {
         let Owner::Command { id, generation } = context.owner() else {
             return Err(Error::Invalid);

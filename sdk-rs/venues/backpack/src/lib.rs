@@ -3,7 +3,7 @@ mod account;
 mod depth_query;
 mod history;
 mod identity;
-mod sign;
+pub mod sign;
 mod trading;
 mod wire;
 
@@ -26,6 +26,7 @@ const PUBLIC_READ_HEADERS: &[(&str, &str)] = &[("X-Broker-Id", "1200")];
 
 #[derive(Default)]
 pub struct Options {
+    pub identity: Option<safe_cex_engine::signing::Identity>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -996,6 +997,16 @@ impl Venue for Backpack {
             ),
         }
     }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Pending::Trade(request) = pending {
+            request.unproven_evidence(response, evidence);
+        }
+    }
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1003,6 +1014,7 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::BookQuery { context } => {
                 // Preserve the public query's existing error presentation from #1680.
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
@@ -1022,6 +1034,42 @@ impl Venue for Backpack {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
             pending => self.on_sign_error(cx, pending, error),
+        }
+    }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trade_plan_ready(cx, plan);
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.trade_retired(owner);
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {

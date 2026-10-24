@@ -1,10 +1,11 @@
 //! Query-order covers closed orders; only native 51603 is authoritative absence.
 #![allow(dead_code)]
 mod support;
+use crate::support::FixtureOptions as Options;
+use crate::support::{MARKET, TICKER, actions, envelope, prepared};
 use safe_cex_engine::{Action, Command, Engine, Event, Method, Notice, Query, Response};
-use safe_cex_venue_okx::{Okx, Options};
+use safe_cex_venue_okx::Okx;
 use serde::Deserialize;
-use support::{MARKET, TICKER, actions, envelope};
 const ROW: &str = r#"{"instId":"BTC-USDT-SWAP","ordId":"9007199254740993","clOrdId":"caller1","ordType":"post_only","state":"partially_filled","side":"sell","sz":"3","accFillSz":"1","px":"41000","avgPx":"40999","uTime":"1710000000123","reduceOnly":"true","posSide":"net"}"#;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,7 +43,7 @@ struct Info {
     pos_side: String,
 }
 fn ready(eea: bool, testnet: bool, private: bool) -> Engine<Okx> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         key: private.then(|| "lookup-key".into()),
         read_credentials: Some(safe_cex_engine::ReadCredentials {
             key: "secondary-key".into(),
@@ -54,10 +55,12 @@ fn ready(eea: bool, testnet: bool, private: bool) -> Engine<Okx> {
         eea,
         testnet,
         public_data_only: !private,
-    }));
-    e.start(1_710_000_000_000.0);
+    });
+    let mut now = 1_710_000_000_000.0;
+    e.start(now);
     for _ in 0..30 {
-        let out = actions(&mut e);
+        let out = prepared(&mut e, now);
+        now = 1_710_000_000_001.0;
         let mut requests = 0;
         for a in out {
             if let Action::Http(r) = a {
@@ -337,7 +340,7 @@ fn cached_order_lookup_stays_read_only_without_private_credentials() {
     // This local-only shortcut is safe when no secondary account can have
     // populated the cache.
     let markets = ready(false, false, false).store().markets().to_vec();
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let mut e = crate::support::engine(Options::default());
     e.store_mut().set_markets(markets);
     e.store_mut()
         .set_orders(vec![safe_cex_engine::model::Order {

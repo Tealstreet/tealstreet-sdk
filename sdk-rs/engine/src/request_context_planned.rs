@@ -15,6 +15,7 @@ pub(super) struct State {
 
 struct Body {
     handle: Plan,
+    receipt_cap: Option<(u64, f64)>,
     policy: PlanPolicy,
     timer: TimerId,
     schedule: Schedule,
@@ -133,28 +134,11 @@ impl ContextRegistry {
         delivery: Option<&Delivery>,
         error: Option<VenueError>,
     ) -> Result<conditional::PreparedPlanSeal, Error> {
-        if !now.is_finite() {
-            return Err(Error::Invalid);
-        }
-        let body = self.plan_body(plan)?;
+        self.validate_plan_seal_origin(plan, now, delivery)?;
         let Owner::Command { id, generation } = plan.owner() else {
             unreachable!()
         };
         let owner = &self.commands[&id];
-        let admitted = delivery.is_none() && owner.deliveries == 0
-            || delivery.is_some_and(|delivery| {
-                body.handoff.as_ref() == Some(delivery)
-                    || body.entries.iter().any(|entry| {
-                        entry.call.as_ref().is_some_and(|call| {
-                            call.matches(delivery)
-                                || (matches!(call.stage, Stage::Ready)
-                                    && call.admission.predecessor.as_ref() == Some(delivery))
-                        })
-                    })
-            });
-        if !admitted {
-            return Err(Error::Revoked);
-        }
         let mut reports = Vec::new();
         let (journal, legacy) = if let Some(writes) = owner.writes.as_ref() {
             let prepared = writes.prepare_seal(error)?;
@@ -180,6 +164,37 @@ impl ContextRegistry {
             legacy,
             reports,
         })
+    }
+
+    fn validate_plan_seal_origin(
+        &self,
+        plan: &Plan,
+        now: f64,
+        delivery: Option<&Delivery>,
+    ) -> Result<(), Error> {
+        if !now.is_finite() {
+            return Err(Error::Invalid);
+        }
+        let body = self.plan_body(plan)?;
+        let Owner::Command { id, .. } = plan.owner() else {
+            unreachable!()
+        };
+        let owner = &self.commands[&id];
+        let admitted = delivery.is_none() && owner.deliveries == 0
+            || delivery.is_some_and(|delivery| {
+                body.handoff.as_ref() == Some(delivery)
+                    || body.entries.iter().any(|entry| {
+                        entry.call.as_ref().is_some_and(|call| {
+                            call.matches(delivery)
+                                || (matches!(call.stage, Stage::Ready)
+                                    && call.admission.predecessor.as_ref() == Some(delivery))
+                        })
+                    })
+            });
+        if !admitted {
+            return Err(Error::Revoked);
+        }
+        Ok(())
     }
 
     fn commit_plan_seal(
@@ -234,7 +249,11 @@ impl ContextRegistry {
             return Err(Error::Revoked);
         };
         let body = &state.body[0];
-        if body.handle.deadline() != handle.deadline() {
+        if body.handle.deadline() != handle.deadline()
+            || body
+                .receipt_cap
+                .is_some_and(|(receipt, cap)| receipt == 0 || handle.deadline() > cap)
+        {
             return Err(Error::Revoked);
         }
         Ok(body)
@@ -315,10 +334,18 @@ impl<P> Cx<'_, P> {
         if policy.operation != operation || policy.credential != credential {
             return Err(Error::Invalid);
         }
+        let receipt_cap = self.io.request_contexts.preflight_receipt_cap(preflight)?;
+        if receipt_cap.is_some() && operation != Operation::Read {
+            return Err(Error::Invalid);
+        }
+        if receipt_cap.is_some_and(|(_, cap)| !self.now.is_finite() || cap - self.now < 1.) {
+            return Err(Error::TimedOut);
+        }
         let schedule = Schedule::from_steps(steps)?;
         let terminals = terminal_ordinals(steps, &policy, terminals)?;
         let bound = schedule.bound();
-        let deadline = bound.deadline(self.now)?;
+        let native_deadline = bound.deadline(self.now)?;
+        let deadline = receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap));
         Context::new(
             preflight.owner(),
             1,
@@ -436,6 +463,7 @@ impl<P> Cx<'_, P> {
         let handle = Plan::new(preflight, deadline);
         body.push(Body {
             handle: handle.clone(),
+            receipt_cap,
             policy,
             timer,
             schedule,
@@ -582,7 +610,7 @@ impl<P> Cx<'_, P> {
         };
         let owner = self.io.request_contexts.commands.get_mut(&id).unwrap();
         let narrowed = match intent {
-            Some(intent) if owner.prepare_leg_intent(&context, intent)? => Some(intent),
+            Some(intent) if owner.prepare_leg_intent(&context, intent, false)? => Some(intent),
             _ => None,
         };
         // Journal enrollment precedes headers, recipe preparation and all queue
@@ -810,6 +838,19 @@ impl<P> Cx<'_, P> {
 
     /// Failure-only retirement; expired authority never creates fresh sends.
     pub fn fail_plan(&mut self, plan: &Plan, error: impl Into<VenueError>) -> Result<(), Error> {
+        if self
+            .io
+            .http_plan_expiring
+            .as_ref()
+            .is_some_and(|current| current.same_plan(plan))
+        {
+            self.io.request_contexts.validate_plan_seal_origin(
+                plan,
+                self.now,
+                self.io.http_delivery.as_ref(),
+            )?;
+            return Ok(());
+        }
         self.seal_plan(plan, None, Some(error.into()))
     }
 

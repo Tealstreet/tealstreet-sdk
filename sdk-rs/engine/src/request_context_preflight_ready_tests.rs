@@ -3,7 +3,7 @@ use crate::engine::*;
 use crate::engine::{ExecutionHandle, Window};
 use crate::request_context::{
     Context, Error, Operation, Plan, PlanPolicy, Policy, Preflight, PreflightPolicy,
-    PreflightPurpose, RetryPolicy, Scope,
+    PreflightPurpose, RetryPolicy, Scope, Session, SessionPolicy,
     plan::{CallBound, RetryWindow, Slot, StepBound},
 };
 
@@ -13,6 +13,16 @@ enum ForeignKind {
     Context,
     Plan,
     Execution,
+}
+#[derive(Clone, Copy)]
+enum SessionAttack {
+    Open,
+    Context,
+    Leg,
+    Retire,
+    Ready,
+    Failed,
+    Wait,
 }
 #[derive(Default)]
 struct ScopeProbe {
@@ -28,6 +38,12 @@ struct ScopeProbe {
     retired: usize,
     hold_parked: bool,
     last_refusal: Option<Error>,
+    expiry_cleanup: bool,
+    cleaned: usize,
+    session_attack: Option<SessionAttack>,
+    session: Option<Session>,
+    session_parent: Option<Context>,
+    session_plan_ready: bool,
     #[cfg(feature = "managed-sockets")]
     socket_mode: bool,
     #[cfg(feature = "managed-sockets")]
@@ -49,6 +65,62 @@ fn preflight_policy() -> PreflightPolicy {
         purpose: PreflightPurpose::ReadOnly,
         read_credential: None,
         write_credential: None,
+    }
+}
+fn session_policy() -> SessionPolicy {
+    SessionPolicy {
+        credential: None,
+        repeat_safe: true,
+    }
+}
+impl ScopeProbe {
+    fn assert_session_scope(&self, cx: &mut Cx<'_, Context>) {
+        let attack = self.session_attack.unwrap();
+        let session = self.session.as_ref().unwrap();
+        let before = (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len());
+        match attack {
+            SessionAttack::Open => {
+                assert_eq!(cx.open_session(session_policy()).err(), Some(Error::State));
+            }
+            SessionAttack::Context => {
+                assert_eq!(
+                    cx.session_context(session, policy()).err(),
+                    Some(Error::State)
+                );
+            }
+            SessionAttack::Leg => {
+                assert_eq!(
+                    cx.http_leg_context(self.session_parent.as_ref().unwrap(), policy())
+                        .err(),
+                    Some(Error::State),
+                );
+            }
+            SessionAttack::Retire => {
+                assert_eq!(cx.retire_session(session).err(), Some(Error::State));
+            }
+            SessionAttack::Ready => assert!(cx.session_ready(session).is_empty()),
+            SessionAttack::Failed => {
+                assert!(
+                    cx.session_failed(session, VenueError::new("foreign"))
+                        .is_empty()
+                );
+            }
+            SessionAttack::Wait => {
+                let owner = self.leg.as_ref().unwrap();
+                assert_eq!(
+                    cx.session_wait(session, owner, owner.clone())
+                        .err()
+                        .map(|(_, error)| error),
+                    Some(Error::State),
+                );
+            }
+        }
+        assert_eq!(
+            (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len(),),
+            before,
+            "foreign Session work must refuse before IDs, timers, holds or waiters change",
+        );
+        assert!(cx.session_live(session));
     }
 }
 impl Venue for ScopeProbe {
@@ -75,6 +147,44 @@ impl Venue for ScopeProbe {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Context>, command: Command) {
         let id = command.completion_id().unwrap();
+        if id == 10 && self.session_attack.is_some() {
+            let owner = cx.admit_http_command(policy()).unwrap();
+            let other = cx.http_context(Scope::Background, policy()).unwrap();
+            let session = cx.open_session(session_policy()).unwrap();
+            self.session_parent = Some(cx.session_context(&session, policy()).unwrap());
+            cx.session_wait(&session, &owner, owner.clone()).unwrap();
+            self.root = Some(owner);
+            self.leg = Some(other);
+            self.session = Some(session);
+            return;
+        }
+        if id == 20 && self.session_plan_ready {
+            let preflight = cx.begin_preflight(preflight_policy()).unwrap();
+            let calls = [CallBound {
+                timeout_ms: 100,
+                attempts: 1,
+                retry_window: RetryWindow::Shared,
+                after_refusal: &[],
+            }];
+            let plan = cx
+                .admit_plan(
+                    &preflight,
+                    &[StepBound {
+                        wait_ms: 1,
+                        calls: &calls,
+                    }],
+                    PlanPolicy {
+                        operation: Operation::Read,
+                        credential: None,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            assert!(cx.plan_slots(&plan).unwrap().is_empty());
+            self.plan = Some(plan);
+            return;
+        }
         if id == 20 || self.hold_parked {
             let parked = match cx.begin_preflight(preflight_policy()) {
                 Ok(handle) => handle,
@@ -111,12 +221,15 @@ impl Venue for ScopeProbe {
             }
             ForeignKind::Plan => {
                 let preflight = cx.begin_preflight(preflight_policy()).unwrap();
-                let calls = [CallBound {
-                    timeout_ms: 100,
-                    attempts: 1,
-                    retry_window: RetryWindow::Shared,
-                    after_refusal: &[],
-                }];
+                let count = if self.expiry_cleanup { 2 } else { 1 };
+                let calls = (0..count)
+                    .map(|_| CallBound {
+                        timeout_ms: 100,
+                        attempts: 1,
+                        retry_window: RetryWindow::Shared,
+                        after_refusal: &[],
+                    })
+                    .collect::<Vec<_>>();
                 let plan = cx
                     .admit_plan(
                         &preflight,
@@ -132,8 +245,20 @@ impl Venue for ScopeProbe {
                         },
                     )
                     .unwrap();
-                let slot = cx.plan_slots(&plan).unwrap().remove(0);
+                let mut slots = cx.plan_slots(&plan).unwrap();
+                let slot = slots.remove(0);
                 let leg = cx.plan_leg_context(&plan, &slot).unwrap();
+                for slot in slots {
+                    let other = cx.plan_leg_context(&plan, &slot).unwrap();
+                    cx.request_managed(
+                        other.clone(),
+                        Method::Get,
+                        "https://read.test/other".into(),
+                        None,
+                        other,
+                    )
+                    .unwrap();
+                }
                 self.plan = Some(plan);
                 self.slot = Some(slot);
                 leg
@@ -151,6 +276,26 @@ impl Venue for ScopeProbe {
     }
     fn on_http_preflight_ready(&mut self, cx: &mut Cx<'_, Context>, preflight: &Preflight) {
         self.ready += 1;
+        if self.session_attack.is_some() {
+            self.assert_session_scope(cx);
+            cx.done_preflight(preflight, "ready owner only".into())
+                .unwrap();
+            return;
+        }
+        if self.expiry_cleanup {
+            assert_eq!(
+                self.cleaned, 2,
+                "all predecessor cleanup precedes readiness"
+            );
+            assert_eq!(self.retired, 1, "physical retirement precedes readiness");
+            assert!(cx.io.http_plan_expiring.is_none());
+            assert!(cx.io.actions.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 10, .. })
+            )));
+            cx.done_preflight(preflight, "after expiry".into()).unwrap();
+            return;
+        }
         #[cfg(feature = "managed-sockets")]
         if self.socket_mode {
             if self.socket_plan_tail {
@@ -199,6 +344,10 @@ impl Venue for ScopeProbe {
             );
             assert_eq!(cx.finish_http_context(leg), Err(Error::Revoked));
             assert_eq!(
+                cx.http_write_protection_cancel_leg(leg),
+                Err(Error::Revoked)
+            );
+            assert_eq!(
                 cx.request_managed(
                     leg.clone(),
                     Method::Get,
@@ -239,9 +388,14 @@ impl Venue for ScopeProbe {
         }
         cx.done_preflight(preflight, "cached".into()).unwrap();
     }
-    #[cfg(feature = "managed-sockets")]
     fn on_http_plan_ready(&mut self, cx: &mut Cx<'_, Context>, plan: &Plan) {
-        if self.socket_plan_tail {
+        if self.session_plan_ready {
+            self.ready += 1;
+            self.assert_session_scope(cx);
+            cx.fail_plan(plan, "Plan readiness tested").unwrap();
+        }
+        #[cfg(feature = "managed-sockets")]
+        if !self.session_plan_ready && self.socket_plan_tail {
             self.retire_ready_sockets(cx);
             cx.fail_plan(plan, "tail callback completed").unwrap();
         }
@@ -274,6 +428,19 @@ impl Venue for ScopeProbe {
     fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {
         self.retired += 1;
     }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Context>,
+        _: Context,
+        _: Error,
+        error: VenueError,
+    ) {
+        assert!(self.expiry_cleanup);
+        self.cleaned += 1;
+        cx.request_preflight_ready(self.parked.as_ref().unwrap())
+            .unwrap();
+        cx.fail_plan(self.plan.as_ref().unwrap(), error).unwrap();
+    }
     fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, error: &str) {
         panic!("unexpected {error}");
     }
@@ -299,6 +466,84 @@ fn command(e: &mut Engine<ScopeProbe>, id: CommandId, at: f64) {
 }
 fn terminal(actions: &[Action], id: CommandId) -> usize {
     actions.iter().filter(|a|matches!(a,Action::Notice(Notice::CommandDone{command,..}|Notice::CommandFailed{command,..}) if *command==id)).count()
+}
+fn session_attack_preserves_waiter(attack: SessionAttack) {
+    session_attack_preserves_waiter_in_scope(attack, false);
+}
+fn session_attack_preserves_waiter_in_scope(attack: SessionAttack, plan_ready: bool) {
+    let mut e = crate::test_support::seeded_engine(ScopeProbe {
+        session_attack: Some(attack),
+        session_plan_ready: plan_ready,
+        ..Default::default()
+    });
+    command(&mut e, 10, 0.);
+    let initial = crate::test_support::prepared_actions(&mut e, 0.);
+    assert_eq!(terminal(&initial, 10), 0);
+    command(&mut e, 20, 1.);
+    let mut ready = crate::test_support::prepared_actions(&mut e, 1.);
+    if plan_ready {
+        let timer = ready
+            .iter()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms == 2. => Some(*timer),
+                _ => None,
+            })
+            .expect("native Plan delay arms readiness");
+        e.handle(2., Event::TimerFired { timer });
+        ready.extend(crate::test_support::prepared_actions(&mut e, 2.));
+    }
+    assert_eq!(terminal(&ready, 20), 1);
+    assert_eq!(terminal(&ready, 10), 0);
+    let session = e.venue.session.clone().unwrap();
+    let drained = with_cx(&mut e, 2., |cx| cx.session_ready(&session));
+    assert_eq!(
+        drained.len(),
+        1,
+        "legitimate Session callback retains A's continuation"
+    );
+    let crate::request_context::Waiter::Ready(owner, _) = drained.into_iter().next().unwrap()
+    else {
+        panic!("A remains live after B's ready callback");
+    };
+    with_cx(&mut e, 2., |cx| cx.done_context(&owner, "A intact".into())).unwrap();
+    let done = crate::test_support::prepared_actions(&mut e, 2.);
+    assert_eq!(terminal(&done, 10), 1);
+    assert!(with_cx(&mut e, 2., |cx| cx.session_ready(&session)).is_empty());
+}
+#[test]
+fn retained_ready_cannot_drain_or_retire_another_sessions_waiters() {
+    for attack in [
+        SessionAttack::Ready,
+        SessionAttack::Failed,
+        SessionAttack::Retire,
+        SessionAttack::Wait,
+    ] {
+        session_attack_preserves_waiter(attack);
+    }
+}
+#[test]
+fn retained_ready_cannot_issue_foreign_session_work_before_ids() {
+    for attack in [SessionAttack::Context, SessionAttack::Open] {
+        session_attack_preserves_waiter(attack);
+    }
+}
+#[test]
+fn retained_ready_cannot_derive_foreign_session_legs_before_ids() {
+    session_attack_preserves_waiter(SessionAttack::Leg);
+}
+#[test]
+fn plan_readiness_cannot_consume_foreign_session_authority() {
+    for attack in [
+        SessionAttack::Ready,
+        SessionAttack::Failed,
+        SessionAttack::Retire,
+        SessionAttack::Wait,
+        SessionAttack::Context,
+        SessionAttack::Open,
+        SessionAttack::Leg,
+    ] {
+        session_attack_preserves_waiter_in_scope(attack, true);
+    }
 }
 #[test]
 fn ready_cannot_mutate_a_foreign_legacy_plan_or_execution_owner() {
@@ -598,4 +843,99 @@ impl ScopeProbe {
             .unwrap();
         cx.stop_socket_feed(fresh);
     }
+}
+
+#[test]
+fn expiry_cleanup_cannot_activate_or_fail_a_different_parked_preflight() {
+    let mut e = crate::test_support::seeded_engine(ScopeProbe {
+        kind: ForeignKind::Plan,
+        hold_parked: false,
+        ..Default::default()
+    });
+    command(&mut e, 10, 0.);
+    crate::test_support::prepared_actions(&mut e, 0.);
+    e.venue.hold_parked = true;
+    command(&mut e, 20, 1.);
+    let handle = e.venue.parked.clone().unwrap();
+    let plan = e.venue.plan.clone().unwrap();
+    with_cx(&mut e, 2., |cx| cx.request_preflight_ready(&handle)).unwrap();
+    e.io.http_plan_expiring = Some(plan);
+    with_cx(&mut e, 2., |cx| {
+        assert_eq!(
+            cx.validate_preflight_activation(&handle),
+            Err(Error::Revoked)
+        );
+        assert_eq!(
+            cx.fail_preflight(&handle, "foreign expiry"),
+            Err(Error::Revoked)
+        );
+    });
+    e.flush_preflight_readiness(2.);
+    assert_eq!(e.venue.ready, 0);
+    assert!(matches!(
+        e.io.request_contexts
+            .preflight_state(&handle)
+            .unwrap()
+            .activation,
+        Activation::Queued
+    ));
+    e.io.http_plan_expiring = None;
+    e.flush_preflight_readiness(2.);
+    assert_eq!(e.venue.ready, 1);
+}
+
+#[test]
+fn queued_successor_waits_for_all_unreleased_expiry_cleanup_and_terminal() {
+    let mut e = crate::test_support::seeded_engine(ScopeProbe {
+        kind: ForeignKind::Plan,
+        expiry_cleanup: true,
+        ..Default::default()
+    });
+    command(&mut e, 10, 0.);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(action,
+        Action::ManagedHttp(http) if matches!(http.as_ref(),
+            crate::request_context::HttpAction::Prepare { .. })))
+            .count(),
+        2
+    );
+    let plan = e.venue.plan.as_ref().unwrap();
+    let deadline = plan.deadline();
+    let timer = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == deadline => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.venue.hold_parked = true;
+    command(&mut e, 20, 1.);
+    e.handle(deadline, Event::TimerFired { timer });
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(e.venue.cleaned, 2);
+    assert_eq!(e.venue.ready, 1);
+    assert_eq!(terminal(&actions, 10), 1);
+    assert_eq!(terminal(&actions, 20), 1);
+    let predecessor = actions
+        .iter()
+        .position(|action| {
+            matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 10, .. })
+            )
+        })
+        .unwrap();
+    let successor = actions
+        .iter()
+        .position(|action| {
+            matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 20, .. })
+            )
+        })
+        .unwrap();
+    assert!(predecessor < successor);
 }

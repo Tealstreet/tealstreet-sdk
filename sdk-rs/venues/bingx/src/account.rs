@@ -10,6 +10,7 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::request_context::{Session, SessionPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json::ArrayAt};
@@ -83,6 +84,8 @@ pub struct Account {
     epoch: u64,
     key_in_flight: bool,
     key: Option<String>,
+    /// Listen-key create/keepalive owner; retiring it drops their outcomes.
+    session: Option<Session>,
     socket: Option<SocketId>,
     open: bool,
     supervisor: Supervisor,
@@ -392,7 +395,61 @@ impl Account {
         self.poll = Some(cx.set_poll_timer(POLL_MS));
     }
 
-    /// Session and metadata requests keep their legacy signed transport.
+    /// Each create opens a new session; keepalive reuses the live one. BingX
+    /// listen keys expire 60 minutes after their last keepalive, so an extra
+    /// create or keepalive after an unknown outcome is harmless: repeat-safe.
+    fn listen_key_write(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: &Credentials,
+        method: Method,
+        params: Params,
+        request: Request,
+    ) {
+        if method == Method::Post || self.session.is_none() {
+            self.retire_session(cx);
+            match cx.open_session(SessionPolicy {
+                credential: Some(crate::managed::session_credential(credentials, method)),
+                repeat_safe: true,
+            }) {
+                Ok(session) => self.session = Some(session),
+                Err(_) => {
+                    let error = "BingX listen key session is unavailable";
+                    return self.on_request_failed(cx, request, error, credentials);
+                }
+            }
+        }
+        let session = self.session.clone().expect("opened above");
+        let queued = crate::managed::session_write(
+            cx,
+            credentials,
+            &session,
+            method,
+            LISTEN_KEY,
+            params,
+            Pending::Account(request),
+        );
+        if let Err((pending, error)) = queued {
+            let pending = match *pending {
+                Pending::Signed(signed) => {
+                    crate::managed::finish(cx, signed.context);
+                    signed.inner
+                }
+                pending => pending,
+            };
+            if let Pending::Account(request) = pending {
+                self.on_request_failed(cx, request, &error.message, credentials);
+            }
+        }
+    }
+    fn retire_session(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(session) = self.session.take() {
+            // Nothing parks on a listen-key session: it never has waiters.
+            let _ = cx.retire_session(&session);
+        }
+    }
+
+    /// Metadata requests keep their legacy signed transport.
     fn request(
         cx: &mut Cx<'_, Pending>,
         credentials: &Credentials,
@@ -468,14 +525,12 @@ impl Account {
         }
         self.key_in_flight = true;
         self.supervisor.connecting(cx);
-        Self::request(
+        self.listen_key_write(
             cx,
             credentials,
             Method::Post,
-            LISTEN_KEY,
             Params::new(),
             Request::ListenKey { epoch: self.epoch },
-            false,
         );
     }
     fn fetch_mode(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
@@ -568,6 +623,7 @@ impl Account {
         }
     }
     fn invalidate_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.retire_session(cx);
         self.epoch = self.epoch.wrapping_add(1);
         self.key_in_flight = false;
         self.key = None;
@@ -635,15 +691,13 @@ impl Account {
         }
         if self.keepalive == Some(timer) {
             self.keepalive = None;
-            if let Some(key) = self.key.as_deref() {
-                Self::request(
+            if let Some(key) = self.key.clone() {
+                self.listen_key_write(
                     cx,
                     credentials,
                     Method::Put,
-                    LISTEN_KEY,
-                    Params::new().str("listenKey", key),
+                    Params::new().str("listenKey", &key),
                     Request::Keepalive { epoch: self.epoch },
-                    false,
                 );
             } else {
                 self.fresh_key(cx, credentials);
