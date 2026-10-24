@@ -71,6 +71,8 @@ No manifest, checker, exemption or fingerprint rehash belongs in this checkpoint
   means a typed strict failure; nonempty accepted output means only that prefix
   plus the existing owned INCOMPLETE marker. Failed-page staged rows never enter
   the output. Recovery depends on accepted output, not a page-number heuristic.
+  Closed stages every raw item; a valid empty page ends this endpoint. Do not
+  fabricate an empty-page continuation to simulate an unreachable native case.
 - Native closed_sign_failed uses the same recovery: first/no-accepted-output
   provider refusal is strict, while a refusal after accepted rows recovers that
   prefix. Preserve this original policy and pin both cases; the latest overseer
@@ -94,6 +96,8 @@ Retire the completed physical leg before deriving the next; never derive from
 the previous child, renew the caller receipt, or add retry/Plan/session work.
 Validate selected delivery and history admission before raw count, oldest,
 staging or cursor/progress mutation. Timers alone grant no DATA/send authority.
+Keep existing engine429 rate/health evidence outside the new Closed DATA gates;
+the native Closed callback contains no separate429 pause to transplant or add.
 
 Root = the engine's exact original caller receipt deadline: absent host wait was
 already stamped120000 ms; supplied rustCommandTimeoutMs is immutable. Missing
@@ -133,7 +137,7 @@ After this plan commit add real Engine<Okx> tests, running unchanged production:
 3. Explicit short-root expiry during a page and during native100ms queue wait:
    equality fails strict, without partial rows/marker/new page.
 4. Several successful15s pages cannot renew the default120s root. Exercise
-   root expiry before response and queue timer, plus reversed equal-time order.
+   response at root equality and root expiry before native queue dequeue.
 5. Dequeue capacity refusal preserves unrelated peer preparations and strictly
    drops accepted output. Expired command reuse plus old timer/DATA cannot
    publish into or retire the new owner.
@@ -143,8 +147,9 @@ After this plan commit add real Engine<Okx> tests, running unchanged production:
    control; no contradictory strict-provider RED is included. Existing
    cap/cycle/unknown-time controls remain untouched and run independently.
 7. After adoption add exact child-deadline/preparation metadata and live child-
-   timeout controls through the real managed adapter, keeping original RED
-   checkpoints and existing financial assertions. No ignored/compile-error REDs.
+   timeout controls, plus reversed equal-time timer/response order, through the
+   real managed adapter. Keep original RED checkpoints, existing financial
+   assertions and native429 evidence. No ignored/compile-error REDs.
 
 Commit the plan first, then original executed assertion REDs separately, and
 open a draft. Obtain independent source/adversarial, caller and full-map review
@@ -156,3 +161,35 @@ Architecture gate: No per-venue replacement of a cross-cutting concern. Native
 closed-position encoding/cursor facts consume shared selected Read admission,
 root expiry, child delivery, history rows/completeness and terminal authority.
 No local root timer, issuer/finalizer wrapper, retry loop or classifier is added.
+
+## Original executed checkpoint
+
+The initial plan was committed at `a76769e5d6a`, before any new test file.
+The subsequent ruling correction preserves native provider recovery; no
+strict-provider RED or caller deviation survives the final owner decision.
+
+On exact unchanged `2371f5439a3` production, the new real Engine<Okx> target
+executes **10 behavioral assertion REDs / 6 working controls / zero ignored**.
+The existing closed_positions target separately passes all9 tests unchanged;
+both targets ran together with --no-fail-fast. No compiler/fixture failure is
+counted as a RED. Strict Clippy for the new target, scoped fmt and both
+request-context checks (15 checker controls) pass.
+
+The REDs pin missing/invalid receipt, full actual peer-root capacity at local
+completion and paced dequeue, unmanaged dispatch, response at caller equality,
+queued/default root expiry and command-ID reuse. The two reuse controls stop on
+the native shared COMMAND_DUPLICATE diagnostic because the old owner never
+retires at the caller deadline; their later stale-timer/DATA and replacement-row
+assertions become reachable after adoption. This receipt does not claim those
+later assertions executed on the original runtime.
+
+Working controls pin native local precedence, exact Secondary/demo wire and raw
+row bytes, accepted-only failed-page recovery with owned notice order, real
+provider refusal before/after nonempty accepted output, host receipt rejection,
+and429 health evidence before rejected Closed payload. The provider gate wraps
+the actual pre-start installed trusted provider; the capacity controls retain
+genuine managed candle preparations and verify unrelated peers remain pending.
+
+All existing runtime, existing tests/fixtures, dependencies, checkers and
+inventories stay byte-exact to the pinned landing. Direct manifest shrink
+remains0; production adoption and green runtime/CI certification are later work.
