@@ -7516,3 +7516,23 @@ kind and absent write outcome. The Read policy has a 20-second maximum, no
 pacing and Never retry. Refusals create no transport or paging work, and retain
 native validation precedence. Supported history requests use their existing
 selection, signing, paging and completion paths.
+
+
+## GRVT unsigned FetchCandles caller bounds
+
+FetchCandles retains the original caller receipt through one unsigned Read Plan,
+with initial plus five immediate transport attempts. The explicit 20 s attempt
+bound (including route, Prepare, Bind and physical transport) and derived 120 s
+logical ceiling are NEW caller contracts: native Candles set timeout_ms=None.
+The original caller deadline always wins; retries never renew it, and a late
+selected attempt has a shortened window or refuses below 1 ms remaining.
+Unclaimed DATA, expired callers and stale attempts cannot publish candle rows.
+
+Status, malformed data and preparation refusals stay strict. Only released
+transport failures or physical timeouts can select a declared Read retry. The
+sixth failure terminates with no seventh request; rows staged by a failed attempt
+are discarded. Preparation errors retain shared typed fields and NotSent. Local
+interval/market/bounds precedence, wire, sorting and native errors are unchanged.
+The public request selects no credentials and waits on no Session or signer.
+All non-Candles preparation failures retain the inherited engine callback chain.
+The second integrator of this slice and #1905 runs its login-specific control.

@@ -361,3 +361,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Receipt-bound stamp floor | Focused gates/reviews clear; full CI pending | Before monotonic per-request signature or transport reissues; floor grants no resend authority. | [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md) |
 
 | Bitrue dispatch signing | Production candidate; original REDs green, review and CI pending | Before replacing inline Bitrue HMAC, selection or native signature resend. | [RUST_BITRUE_DISPATCH_SIGNER.md](RUST_BITRUE_DISPATCH_SIGNER.md) |
+
+| GRVT unsigned candle Read Plan | Managed adoption under review | Before changing candle caller limits, streaming or the six-attempt transport budget. | [RUST_GRVT_CANDLE_CONTEXT.md](RUST_GRVT_CANDLE_CONTEXT.md) |
