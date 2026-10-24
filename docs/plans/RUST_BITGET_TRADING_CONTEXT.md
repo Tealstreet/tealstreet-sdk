@@ -147,7 +147,10 @@ whole command has no input-count cap; request count is
    `read_retries` stays venue job state.
 3. 40085: the replan is a plain continuation (`continue_serial_plan` with the
    re-read calls, then the replanned job). No seal, no second root or
-   admission.
+   admission. While re-detection is pending it parks with
+   `serial_plan_condition_wait(plan, slot, context, next, bound_ms)`, where
+   `next` is the re-read Read call; the release lands in
+   `on_http_plan_ready`, which issues it (fe7lgm `fbddb4851f7`, condition_24).
 4. Detection wait: a scoped engine wait on a venue condition with the native
    10 s venue bound, never a receipt or root cap (fe7lgm plan item, after
    dazzy3 R6). Detection completes in a borrowed account-read callback
@@ -196,8 +199,10 @@ TS-visible results are unchanged except two new bounds:
 - More than 256 concurrent commands (the active job plus queued writes) are
   refused Capacity, NotSent, before any send. Native queued without limit.
 - Placements are bound tighter, by 64 active order-lock scopes: the 65th
-  queued placement is refused at engine entry, NotSent, before any send
-  (`order_locks.rs:131`; fe7lgm condition RED23, `fa9ec033d2d`). This is
+  queued placement gets the existing entry refusal "Order amendment or
+  cancellation is already in flight", with no outcome, before any send
+  (`order_locks.rs:131`, `engine.rs:3931`; fe7lgm condition RED23,
+  `fa9ec033d2d`). This is
   already live at `49f7d1857b6`, because Bitget sets
   `guard_order_mutations` (lib.rs:612), but native queued without limit.
   Other commands stay bound by the 256-owner limit. Recorded in
