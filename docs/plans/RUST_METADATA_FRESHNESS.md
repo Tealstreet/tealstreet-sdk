@@ -1004,3 +1004,21 @@ formatting, bans and ratchets with four jobs and serial builds. Source review
 by uufub4 must preserve the existing custody verdict. After plan/source review
 and local gates, push one freeze candidate and retain its one fresh PR-triggered
 Rust run. No budget, compiler profile, dependency version or host protocol edit.
+
+The feature boundary is implemented at `4f6e8a75088` and has uufub4's bounded
+source/API/custody CLEAR. Only BingX and WEEX opt in; Bitget's actual standalone
+graph omits it. The original metadata/work/release bodies and integration
+assertions are unchanged. The named OFF seed supplement `357bf6c195d` is also
+review-CLEAR and preserves both existing seed rows and both metadata ON controls.
+
+On the actual `581bc2b7723` composition, pinned Bitget web and Node both measure
+1,362,772 bytes: five above the local base, 3,831 below the ungated candidate,
+and 1,196 below the unchanged allowance. Later venue/docs merges preserve all
+Bitget build inputs exactly. The 318 scoped controls pass with zero ignored
+(53 metadata-only, the original 235, and 30 standalone Bitget account controls).
+The exact named OFF row passes strict engine all-targets Clippy and 1,060 tests,
+zero ignored. On actual `cc5ab6aed5d`, native workspace all-targets, wasm32
+workspace check, strict wasm32 Clippy, formatting, full bans and ratchets pass.
+The live checker retains only the two original BingX production removals; its
+separate test inventory is incoming-exact. These are local receipts; official
+WASM size, CPU and full-CI readiness await the one fresh PR-triggered run.
