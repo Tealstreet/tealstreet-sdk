@@ -40,7 +40,7 @@ fn native(id: &str) -> &str {
 
 /// Concurrent order-command scopes; a scope conflict is reported first.
 pub(crate) const ACTIVE_SCOPES: usize = 64;
-/// A new placement refused only by `ACTIVE_SCOPES`; nothing was sent.
+/// An order command refused only by `ACTIVE_SCOPES`; nothing was sent.
 pub(crate) const CAPACITY_REACHED: &str =
     "Order command capacity reached: 64 order commands are in flight; retry after one finishes";
 

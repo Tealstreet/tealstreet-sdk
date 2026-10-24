@@ -116,6 +116,7 @@ fn original_a_new_placement_at_the_scope_cap_is_not_sent_with_a_capacity_message
     let errors = failures(&actions, 65);
     assert_eq!(errors.len(), 1, "{actions:?}");
     assert_eq!(errors[0].legacy_text(), CAPACITY_MESSAGE);
+    assert!(CAPACITY_MESSAGE.contains(&crate::order_locks::ACTIVE_SCOPES.to_string()));
     assert_eq!(errors[0].kind, Some(ErrorKind::Internal));
     assert_eq!(errors[0].outcome, Some(crate::Outcome::NotSent));
     assert!(nothing_sent(&actions));
@@ -189,7 +190,7 @@ fn control_a_conflict_at_the_cap_keeps_the_conflict_refusal() {
 }
 
 #[test]
-fn control_amend_and_cancel_at_the_cap_keep_the_existing_refusal() {
+fn amend_and_cancel_refused_only_by_the_cap_are_not_sent_with_the_capacity_message() {
     for command in [
         Command::CancelOrders {
             command: 65,
@@ -208,10 +209,39 @@ fn control_amend_and_cancel_at_the_cap_keep_the_existing_refusal() {
         let actions = e.drain_actions().collect::<Vec<_>>();
         let errors = failures(&actions, 65);
         assert_eq!(errors.len(), 1, "{actions:?}");
-        assert_eq!(errors[0].legacy_text(), CONFLICT_MESSAGE);
-        assert_eq!(errors[0].outcome, None);
+        assert_eq!(errors[0].legacy_text(), CAPACITY_MESSAGE);
+        assert_eq!(errors[0].kind, Some(ErrorKind::Internal));
+        assert_eq!(errors[0].outcome, Some(crate::Outcome::NotSent));
         assert!(nothing_sent(&actions));
+        assert!(!e.io.order_locks.contains(65));
     }
+}
+
+#[test]
+fn control_an_amend_behind_an_in_flight_cancel_of_its_order_keeps_the_conflict_refusal() {
+    let mut e = started();
+    e.handle(
+        1.,
+        Event::Command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["x".into()],
+        }),
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2.,
+        Event::Command(Command::AmendOrder {
+            command: 2,
+            id: "x".into(),
+            price: Some(2.),
+            amount: None,
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let errors = failures(&actions, 2);
+    assert_eq!(errors.len(), 1, "{actions:?}");
+    assert_eq!(errors[0].legacy_text(), CONFLICT_MESSAGE);
+    assert_eq!(errors[0].outcome, None);
 }
 
 #[test]

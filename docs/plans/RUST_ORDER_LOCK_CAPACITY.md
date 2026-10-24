@@ -30,8 +30,8 @@ public API change.
   and uncertain cancel-all fence) or `Capacity` (the 64-scope cap). The
   conflict checks run first, so a command that both conflicts and meets the
   cap keeps today's conflict refusal.
-- At entry, a `PlaceOrders` refused for `Capacity` ends through
-  `refuse_before_entry` with:
+- At entry, an order command (placement, amend or cancel) refused for
+  `Capacity` ends through `refuse_before_entry` with:
   - the message "Order command capacity reached: 64 order commands are in
     flight; retry after one finishes";
   - `kind: Internal` and `outcome: NotSent`, the same kind and outcome as the
@@ -40,20 +40,16 @@ public API change.
   - Every conflict refusal, including a placement behind an in-flight
     cancel-all.
   - The uncertain cancel-all refusal.
-  - Amend and cancel refusals at the cap. These keep "already in flight"
-    with no outcome, as assigned. Whether they should take the capacity
-    refusal too is the open question below.
   - The 64-entry deferred cancel-all queue (`defer`).
-- Nothing is sent and the venue never sees the refused placement. The 64
+- Nothing is sent and the venue never sees the refused command. The 64
   held scopes are unaffected.
 
-## Open question (for claude-ddi2il)
+## Ruling (claude-ddi2il)
 
-An amend or cancel refused only by the cap also reports "already in flight",
-which is false in the same way: nothing it targets is in flight. The same
-`Capacity` variant would fix it with one more match arm. It is out of scope by
-assignment. The control `control_amend_and_cancel_at_the_cap_keep_the_existing_refusal`
-pins today's behaviour until there is a ruling.
+An amend or cancel refused only by the cap reported "already in flight" too,
+which was false in the same way. Ruled: it gets the same capacity refusal and
+`NotSent`. A genuine conflict (an amend or cancel behind an in-flight command
+on the same order) keeps the existing text with no outcome.
 
 ## Original REDs and controls
 
@@ -70,8 +66,12 @@ with a venue that holds every order command in flight:
    conflict refusal and no outcome.
 4. Control: a placement that both conflicts and meets the cap keeps the
    conflict refusal (precedence).
-5. Control: amend and cancel at the cap keep today's refusal, pending the
-   ruling.
+5. Amend and cancel refused only by the cap take the capacity refusal and
+   `NotSent` (flipped by the ruling).
+6. Control: an amend behind an in-flight cancel of its order keeps the
+   conflict refusal and no outcome.
+7. Control: a venue that guards mutations but not pending placements takes
+   no scope for placements, so its 65th placement enters.
 
 ## Gates
 

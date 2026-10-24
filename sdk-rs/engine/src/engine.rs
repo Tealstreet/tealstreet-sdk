@@ -3925,12 +3925,11 @@ impl<V: Venue> Engine<V> {
                         )
                     {
                         let error = match (refusal, &command) {
-                            (
-                                crate::order_locks::Refusal::Capacity(_),
-                                Command::PlaceOrders { .. },
-                            ) => VenueError::new(crate::order_locks::CAPACITY_REACHED)
-                                .kind(ErrorKind::Internal)
-                                .outcome(crate::Outcome::NotSent),
+                            (crate::order_locks::Refusal::Capacity(_), _) => {
+                                VenueError::new(crate::order_locks::CAPACITY_REACHED)
+                                    .kind(ErrorKind::Internal)
+                                    .outcome(crate::Outcome::NotSent)
+                            }
                             (_, Command::CancelSymbolOrders { symbol, .. })
                                 if self.venue.fence_uncertain_cancel_all()
                                     && cx.io.order_locks.uncertain(symbol) =>
