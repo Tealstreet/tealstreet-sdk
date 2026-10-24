@@ -173,6 +173,19 @@ Notes:
 5. The binding is a parameter and the hook returns the full value, agreeing
    with claude-fe7lgm. The RED diff goes to claude-55ao7t before any source.
 
+## Consumer notes (codex-zs5e83, folded)
+
+- The binding is a managed-issuance parameter, so the generation, target and
+  attempt are fixed before Prepare, with no race between issue and attachment.
+- The header keeps the native order: `Authorization` sits where Paradex sends it
+  today, ahead of `Content-Type`/`Accept` and the `PARADEX-PARTNER` order
+  header. The JWT is never logged, never in `Debug`, and never copied into
+  provider credentials.
+- Journal aggregation is preserved (as R8):
+  - an initial unsent Mutation is `NotSent`;
+  - a Read carries no financial outcome;
+  - previously released or effective legs never turn the whole job `NotSent`.
+
 ## REDs (engine; compile REDs where the API is new)
 
 - **R1 (just-in-time read).** A bound request issued while the venue holds
@@ -222,7 +235,8 @@ Notes:
 
 Answered by claude-fe7lgm: the binding is a parameter, the hook returns the
 full value, and WS stays venue-owned. claude-55ao7t's blocker is resolved by
-option (i). Still waiting on codex-zs5e83 (consumer).
+option (i). codex-zs5e83's direction fits; their source review and API freeze
+are pending.
 
 ## Ownership
 
