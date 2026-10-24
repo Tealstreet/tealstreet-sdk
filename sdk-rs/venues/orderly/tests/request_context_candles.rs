@@ -18,14 +18,32 @@ fn engine() -> TestEngine {
         ..Default::default()
     }));
     engine.start(0.);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
         })
         .expect("legacy startup catalogue");
-    response(&mut engine, &catalogue, 0., support::MARKETS);
+    engine.handle(
+        0.,
+        Event::HttpResponse {
+            request: catalogue.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: support::MARKETS,
+            },
+        },
+    );
+    let tickers = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with("/v1/public/futures") => Some(request),
+            _ => None,
+        })
+        .expect("complete startup before saturating command reads");
+    response(&mut engine, &tickers, 0., support::TICKERS);
     engine
 }
 

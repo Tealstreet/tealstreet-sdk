@@ -8061,6 +8061,36 @@ candle validation sites, Instruments discovery and Daily seed remain held for
 retained command ownership and coordinated native REST release. Coinbase's
 legacy inventory decreases from 34 to 24 occurrences.
 
+## Order-lock capacity refusal
+
+For venues with `guard_order_mutations`, entry holds at most 64 order-lock
+scopes (`RUST_ORDER_LOCK_CAPACITY.md`). An order command refused only by that
+cap (a new placement, amend or cancel) now fails before entry with "Order
+command capacity reached: 64 order commands are in flight; retry after one
+finishes", `kind: Internal` and `outcome: NotSent`, and nothing is sent.
+Before, it reported "Order amendment or cancellation is already in flight"
+with no outcome. Placements take a scope only where `guard_pending_placements`
+is set: AsterDEX, Bitget, Bitrue, BloFin, BreakoutProp, OKX and Phemex at this
+base. Native queues have no such cap, so the 65th concurrent order command is a
+disclosed difference. Genuine conflicts are unchanged: an amend or cancel
+behind an in-flight command on the same order, or a placement behind an
+in-flight cancel-all, still report "Order amendment or cancellation is already
+in flight" with no outcome, and the uncertain cancel-all refusal is unchanged.
+
+
+## Orderly unsigned startup seed custody
+
+Markets and Tickers now admit independent keyless Background Read contexts for
+`/v1/public/info` and `/v1/public/futures`. Each physical leg has a new 20-second
+admission bound covering Prepare, Bind and streamed response; there is no aggregate
+startup-chain bound, signing, pacing or managed retry. Native per-Seed Backoff
+remains the recovery owner. Exact DATA validation precedes decoding and global
+effects; matching failure cleanup retires its returned Context even at expiry.
+Markets and Tickers retain live DATA custody through native map/Store publication,
+then retire before native account startup/ticker admission or socket/funding hooks. Independently issued reads retain independent custody.
+Only the common unsigned seed sender is pruned; key selection and other funnels
+are unchanged.
+
 ## Crypto.com private dispatch and Plan custody
 
 Private REST remains POST through Primary with no route or account-read tag,

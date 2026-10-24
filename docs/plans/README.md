@@ -380,6 +380,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | TxFlow immediate local command custody | Draft adoption; original controls green | Before migrating local history/candle/trading completion or composing with the ticker CPU slice. | [RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md](RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md) |
 | OKX history selected identity | Implemented; scoped checks pass, review pending | Before removing the closed/history credential-selection legacy sites. | [RUST_OKX_HISTORY_SELECTED_IDENTITY.md](RUST_OKX_HISTORY_SELECTED_IDENTITY.md) |
+| Order-lock capacity refusal | Implemented; scoped checks pass, source review pending | Before changing order-lock entry refusals or the 64-scope cap. | [RUST_ORDER_LOCK_CAPACITY.md](RUST_ORDER_LOCK_CAPACITY.md) |
 
 - [Polymarket midpoint seed custody](RUST_POLYMARKET_MIDPOINT_READ_CONTEXT.md): one unsigned Background Read site; plan and original controls before production.
 
@@ -412,4 +413,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | CPU evidence transport retrieval retry | Plan and originals | Before changing GitHub evidence retrieval retries; provenance and CPU verdicts stay exact. | [RUST_CPU_EVIDENCE_TRANSPORT_RETRY.md](RUST_CPU_EVIDENCE_TRANSPORT_RETRY.md) |
 | Coinbase local command custody | Draft adoption; ten sites and original controls pass | Before adopting immediate local completions or distinguishing deferred/queued public-read gates. | [RUST_COINBASE_LOCAL_CONTEXT.md](RUST_COINBASE_LOCAL_CONTEXT.md) |
+| Orderly public seed custody | Plan and original REDs; source held on actual 5b | Before managing the shared unsigned markets/tickers seed sender and its per-leg timeout. | [RUST_ORDERLY_PUBLIC_SEED_CONTEXT.md](RUST_ORDERLY_PUBLIC_SEED_CONTEXT.md) |
 | Crypto.com full private dispatch and RequestContext | Plan and original controls; shared source after 5b | Before removing the final eight private witnesses and raw signing funnel. | [RUST_CRYPTOCOM_PRIVATE_REQUEST_CONTEXT.md](RUST_CRYPTOCOM_PRIVATE_REQUEST_CONTEXT.md) |
