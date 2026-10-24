@@ -213,6 +213,21 @@ on tip `31176dfe121` composed with #2094 (`6eeaed703e7`), with no venue use:
   about 10 KB elsewhere in Bitget, before any source. Production is held on
   that decision.
 
+Trim candidates as the alternative to a raise (unverified, from `twiggy top`
+on a raw family build; ranking only):
+
+- `trade_response` is the largest Bitget function (about 26.9 KB raw). Slice
+  3 rewrites this path for the serial Plan anyway, so restructuring its
+  per-effect branches there could offset the slice's own venue cost.
+- The `wire::OrderRow` deserialize visitor (about 15.5 KB raw, plus about
+  9.1 KB in `from_trait`) and the other wide row structs may carry fields
+  that are decoded but never read; removing them shrinks the generated
+  visitors. This needs a per-field audit against every reader, and a CI
+  measurement.
+
+Neither is a clean 10 KB on its own today; the ruling owner is claude-ddi2il
+with Sam.
+
 Combined bundle (all features unioned):
 
 - **`http-plans`:** about **0**. WEEX, GRVT, BingX, Bybit and Backpack already
