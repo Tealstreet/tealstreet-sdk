@@ -19,10 +19,11 @@ Revoked produces no extra numeric terminal. Do not manufacture a Context,
 credential, write attempt, timer or money fact.
 
 Add real-venue controls for keyless and public-only settings, preserving Store
-state and emitting one terminal with no I/O. Add NEW-CONTRACT expired-receipt
+state and emitting one terminal with no I/O. Add NEW-CONTRACT invalid-clock
 controls before cutover: the current numeric path is a native compatibility
 control, not a claim that these no-op settings execute a remote effect.
-The new seam refuses an expired initial receipt with Timeout/NotSent.
+The new seam refuses an invalid clock with InvalidInput/NotSent.
+Expired-receipt behavior remains covered by the landed seam tests.
 Prune exactly the two removed occurrence counts in the checker inventory.
 Run both venue history/trading tests, the dedicated controls, strict Clippy and
 both request-context checker commands; full SDK and WASM size gates run in CI.
