@@ -746,7 +746,10 @@ fn rest_queries_do_not_publish_or_repair_live_book_or_account_state() {
                 limit: None,
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1700000000011.)
+            .into_iter()
+            .filter(|action| !matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+            .collect::<Vec<_>>();
         assert_eq!(actions.len(), 1);
         let Action::Http(request) = &actions[0] else {
             panic!("public REST query")
@@ -798,8 +801,8 @@ fn rest_queries_do_not_publish_or_repair_live_book_or_account_state() {
             limit: None,
         }),
     );
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1700000000013.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
