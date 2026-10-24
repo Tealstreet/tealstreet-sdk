@@ -561,7 +561,7 @@ still has the gap.
 **Declarations for families that sign asymmetric today** (tip `6a6845c4491`):
 - **AsterDEX V3** signs `Secp256k1Digest`; V1 is HMAC on the same slot. The
   declaration therefore depends on the resolved API version.
-  - `construction::signer_setup_policy_for(venue, &EngineOptions)` refines the
+  - The registry's `signer_setup_policy_for(venue, &EngineOptions)` refines the
     static policy for setup-mapped families. For Aster V3 it declares
     `secp256k1Digest` on both slots: the primary wallet, and the read agent's
     own wallet or the primary alias. V1 declares nothing.
@@ -594,14 +594,17 @@ still has the gap.
 `LocalSigner::insert_declared(ref, bytes, algorithm)`.
 - It accepts only asymmetric algorithms.
 - It is atomic: it replaces any old declaration in the same step.
-- It refuses a role ref, and an algorithm that differs from an alias's
-  existing declaration.
+- It refuses a role ref, and an algorithm that differs from the one setup
+  declared for a ref an aliased secondary shares. That binding survives a
+  plain `insert`, which keeps a shared ref's algorithm the way a role keeps
+  its role, and only `remove` ends it. Unshared raw refs may be retyped.
 
 Plain `insert` stays undeclared (P4).
 
-**Version parity.** The Aster refinement uses the same resolution as venue
-construction, defaults and overrides included, so setup and the venue can
-never disagree about V1 and V3.
+**Version parity.** The refinement reads the same explicit
+`asterdex.api_version` field the venue reads, so setup and the venue never
+disagree about V1 and V3. Native setup resolves it, defaults and overrides
+included, before the policy is built. With `None`, both refuse.
 
 **REDs** (existing API, shown failing first). Each one is its own test per
 algorithm or case, so every variant runs. In the default build every RED

@@ -6,7 +6,7 @@ use safe_cex_engine::signing::{
     Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
 use sha2::{Digest, Sha256, Sha512};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use zeroize::Zeroizing;
 mod key_material;
 mod primitives;
@@ -196,8 +196,10 @@ pub struct LocalSigner {
     /// Trusted setup policy's asymmetric declarations; only these refs answer
     /// public operations, so a MAC secret is never fingerprinted.
     algorithms: HashMap<KeyRef, Algorithm>,
-    /// Refs an aliased secondary shares with the primary; never retyped.
-    shared: HashSet<KeyRef>,
+    /// Refs an aliased secondary shares with the primary, with the algorithm
+    /// setup declared for both slots (if any). It outlives a plain `insert`
+    /// that undeclares the material; only `remove` ends it.
+    shared: HashMap<KeyRef, Option<Algorithm>>,
 }
 impl LocalSigner {
     pub fn new() -> Self {
@@ -205,9 +207,17 @@ impl LocalSigner {
     }
     /// Consumes bytes; neither this provider nor its keys implement Debug/export.
     /// Replaced material is undeclared: a declaration describes the bytes setup
-    /// installed, never later ones.
+    /// installed, never later ones. A ref an aliased slot shares keeps its
+    /// slots' algorithm, like a role, so its type never changes this way.
     pub fn insert(&mut self, reference: KeyRef, bytes: Vec<u8>) {
-        self.algorithms.remove(&reference);
+        match self.shared.get(&reference) {
+            Some(Some(algorithm)) => {
+                self.algorithms.insert(reference.clone(), *algorithm);
+            }
+            _ => {
+                self.algorithms.remove(&reference);
+            }
+        }
         self.keys.insert(reference, Zeroizing::new(bytes));
     }
     pub fn from_setup(
@@ -336,9 +346,6 @@ impl LocalSigner {
         if let Some(secondary) = secondary {
             secondary.install(&mut signer, "secondary");
         }
-        if alias && let Some(primary) = identities.primary.as_ref() {
-            signer.shared.insert(primary.signing.clone());
-        }
         for (identity, rule) in [
             (identities.primary.as_ref(), policy.primary),
             (identities.secondary.as_ref(), policy.secondary),
@@ -350,6 +357,11 @@ impl LocalSigner {
                     .algorithms
                     .insert(identity.signing.clone(), algorithm);
             }
+        }
+        // After declarations, so the shared binding keeps the slots' algorithm.
+        if alias && let Some(primary) = identities.primary.as_ref() {
+            let declared = signer.algorithms.get(&primary.signing).copied();
+            signer.shared.insert(primary.signing.clone(), declared);
         }
         Ok((signer, identities))
     }
@@ -428,11 +440,10 @@ impl LocalSigner {
     ) -> Result<(), SignError> {
         if !asymmetric(algorithm)
             || self.roles.contains_key(&reference)
-            || self.shared.contains(&reference)
-                && self
-                    .algorithms
-                    .get(&reference)
-                    .is_some_and(|declared| *declared != algorithm)
+            || self
+                .shared
+                .get(&reference)
+                .is_some_and(|expected| *expected != Some(algorithm))
         {
             return Err(SignError::InvalidRequest);
         }
@@ -1978,6 +1989,28 @@ mod tests {
         aliased
             .insert_declared(shared.clone(), vec![0x33; 32], Algorithm::Secp256k1Digest)
             .unwrap();
+        // A plain insert rotates the shared material but keeps its type, so it
+        // never downgrades to a MAC key or opens a later retype (second and
+        // third repros, from codex-uufub4 and claude-m26ps4).
+        aliased.insert(shared.clone(), vec![0x44; 32]);
+        assert!(
+            aliased
+                .sign_now(&sign_request("secp256k1Digest", &shared, vec![7; 32]))
+                .is_ok()
+        );
+        assert_eq!(
+            aliased.sign_now(&sign_request("hmacSha256", &shared, b"m".to_vec())),
+            Err(SignError::InvalidRequest)
+        );
+        assert_eq!(
+            aliased.insert_declared(shared.clone(), vec![0x55; 32], Algorithm::Ed25519),
+            Err(SignError::InvalidRequest)
+        );
+        // Removal ends the binding; the ref is then unshared raw material.
+        aliased.remove(&shared);
+        aliased
+            .insert_declared(shared.clone(), vec![0x55; 32], Algorithm::Ed25519)
+            .unwrap();
         // A role ref is its own declaration and refuses another.
         let (seed, _, _) = zklink_case();
         let (mut zklink, ids) =
@@ -1986,6 +2019,29 @@ mod tests {
         assert_eq!(
             zklink.insert_declared(role, scalar(), Algorithm::Secp256k1Digest),
             Err(SignError::InvalidRequest)
+        );
+    }
+
+    // can_sign is the same typing check, so admission agrees with signing.
+    #[test]
+    fn can_sign_mirrors_key_typing() {
+        let (mac, key) = undeclared_mac_secret();
+        assert_eq!(
+            mac.can_sign(&key, Algorithm::HmacSha256),
+            Capability::Supported
+        );
+        assert_eq!(
+            mac.can_sign(&key, Algorithm::Secp256k1Digest),
+            Capability::Unsupported
+        );
+        let (wallet, key) = public_setup("secp256k1Digest", SCALAR);
+        assert_eq!(
+            wallet.can_sign(&key, Algorithm::HmacSha256),
+            Capability::Unsupported
+        );
+        assert_eq!(
+            wallet.can_sign(&key, Algorithm::Ed25519),
+            Capability::Unsupported
         );
     }
 }
