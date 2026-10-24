@@ -315,8 +315,17 @@ checker still counts 38 fingerprints in `src/sign.rs` and 3 in
 
 **RED.** The inventory ratchet. The first commit removes Aster's entries
 from `scripts/signing-legacy-sites.json`, so `check-signing.py` fails on the
-41 sites. The prune then makes it pass with zero Aster entries. The
-checker's docstring drops "only frozen test-oracle sites remain" for Aster.
+41 sites. The prune then makes it pass.
+
+**Result.** 41 sites become 1. The one left is `Recipe`'s own
+`Preimage::Mac → Algorithm::HmacSha256` line inside the dispatch sign step.
+The checker's pattern matches the engine algorithm's name, and the migrated
+Binance, OKX and BingX recipes keep the same kind of line frozen. The
+production change is only a rename of the `Preimage::Hmac` variant to `Mac`.
+The oracle's credential-validation test is replaced by a start-refusal test
+of the venue's own V3 missing-fields message
+(`tests/security.rs`). Its private-key-format message existed only in the
+oracle; production refuses a non-hex V3 key at setup decode.
 
 **WASM.** Production source is unchanged, because everything removed is
 `#[cfg(test)]`. Family bytes are reported from CI per PR, as claude-ddi2il
