@@ -134,3 +134,142 @@ Source SHA256: `b4c769a3981e26ec1a469b99a79826f0886d42cf6ab8d99f2f6c92579d4fd4eb
 | `5da66136fae2982361da17d1fe866e3dfd910ad30333a4eeee8a1e3fc8bd4899` | 1 | 740 `pump_trades` → WRITE | `cx.request( Method::Post, format!("{}/exchange", self.rest()), vec![ ("Content-Type", "application/json".into()), ("x...` |
 | `06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3` | 1 | 878 `finish_trade` → WRITE | `cx.fail(job.command, error)` |
 | `604f28d91adfdb4cd0caac06047abd9569f9a6c248b698a784032256d7cf8047` | 1 | 880 `finish_trade` → WRITE | `cx.done(job.command, serde_json::to_string(&job.ids).unwrap())` |
+
+
+## P0 write adoption, classifier pin 2026-10-23
+
+Reverified actual `258c880656f9714f14b498e046b8ee52658e702a`; venue
+production source matches the 6741c1c audit. Plan and original tests only.
+
+| Audit row | Reverified source | Required caller contract |
+| --- | --- | --- |
+| #18 | `trading.rs::finish_trade` drops job.ids when any later chunk fails. `trading_reconcile` additionally collects Option<Vec>, losing individually resolved IDs until every placement resolves. | Preserve each authoritative native ID in structured Partial even if another leg/chunk or identity lookup remains unresolved. |
+| #28 | `lib.rs::on_response` discards every non-2xx body into a generic string; `trade_response` treats it as Network/Unknown, before `parse_reply` can decode it. | Decode native evidence on delivered errors, preserve native text, and classify through engine precedence; bare/unproven status remains Unknown, not an invented effects-free rejection. |
+
+Keep whole-action response semantics: status=ok, confirm=executed, code=0,
+matching response type and exactly one success status acknowledge execution of
+the action, but carry no native order IDs. IDs require authoritative
+frontendOpenOrders/client identity reconciliation; never turn a submitted
+client ID into an accepted native ID. `status:err`/single status.error is a
+native error envelope. Move only already-justified finite exact message rows
+into one code-less CodeTable, no arbitrary free-text refusal default. Retain
+unlisted Unknown(None), no invented status rows and no mixed Message/Int table
+(code=0 is a codec success condition, not a failure-code mapping). If a code
+branch becomes independently meaningful, resolve the family table shape with
+the classifier owner first. Keep unmatched messages uncertain; the present
+Insufficient margin fixture does not by itself prove an entire protocol table.
+
+### Landed classifier and write-journal boundary
+
+Use actual #1837 (`e0322577e354739dde6d7e5011e74ab660145885`), not the
+older draft signatures. Declare one family `classify::CodeTable` with `rows`,
+`success`, explicit `unlisted: Verdict::Unknown(None)` and evidence-backed
+`status` entries only. `Key::Message` is exact and code-less; never mix message
+and code rows or introduce substring/prefix inference. Decode integer codes
+strictly via the native codec / `classify::decode_int`, never through f64.
+Engine precedence owns transport, 408/5xx, native evidence, status and malformed
+success. A native code or 2xx alone never proves successful execution.
+
+A genuine command Context uses the actual command entry and real credential;
+managed signed HTTP carries it through Pending. At the exact delivered attempt,
+`classify_write(&ctx, &TABLE, native, message)` creates the failure Fact.
+`http_write_fact(&ctx, WriteFact::Failed { fact, known_effects }, reports)`
+records it; `http_write_failure` is the whole-failure shortcut. Complete native
+success reports `WriteFact::Accepted { order_ids }`; malformed success uses
+`http_write_unproven`. A real batch acknowledgement uses `http_write_batch`
+with caller-ordered items and the native expected count. The codec proves
+identity/uniqueness and correlation; preserve individually known IDs as
+reconciliation evidence without invented caller counts on an incomplete reply.
+
+Only the engine's opaque resend grant may feed `http_resend_context`, retaining
+the original root, deadline and one-shot budget. Use `http_write_leg_intent`
+only for permitted intent narrowing before release. Finish once through
+`done_context`/`fail_context`; CommandWrites owns aggregation, partial IDs and
+whole-command demotion. Do not use private engine-test-only `http_write_result`,
+transitional unmanaged `classify::write`, local status/outcome ladders or a
+numeric completion fallback. A preparation refusal's local NotSent fact is
+valid, but prior released siblings still determine the whole-command outcome.
+
+No runtime conversion is authorized in this plan/tests slice. Missing reusable
+signing, session, Plan/CallWindow or reconciliation ownership remains a shared
+prerequisite; no per-venue replacement. On adoption, reverify actual seam pins,
+remove RED ignore markers while retaining behavior assertions, prune only the
+venue's genuinely removed legacy fingerprints, and add a landed CALLERS
+appendix. Plan/tests preparation neither prunes inventory nor closes P0 rows.
+
+### Phases, blockers and original RED controls
+
+Managed writes need the jointly reviewed Hyperliquid/TxFlow action hash +
+nonce domain and claude-19pt8s provider recipe, plus the exact existing JSON,
+Content-Type/x-api-version, vault/application identity and confirm bytes.
+#1852/#1866 own trading.rs; do not add a local counter or change their region.
+Multi-chunk placement, bracket cancellation/replacement, settings preflight and
+identity reconciliation require shared Plan/journal ownership. Release pacing
+retains the existing 110ms behavior through the common scheduler. PublicCors
+reads need actual #1833, and Background exact delivery needs #1856; static
+headers #1820 alone do not make reconciliation ownership ready. #1788 owns
+account source/tests and #1794 owns history source/tests at this audit.
+
+Append ignored regressions only to unoccupied `tests/trading.rs`, using its
+existing native engine fixture: (1) place 51 distinct client identities; first
+50-order action succeeds, authoritative frontendOpenOrders resolves all 50
+native IDs, pace advances, second action loses transport. One Unknown failure
+must retain the exact 50 IDs in caller order and release no replay. (2) single
+placement receives HTTP 400 status:err/message; preserve decoded native message
+and uncertainty, with no new write. Run `cargo test -p safe-cex-venue-txflow
+--test trading p0_write_ -- --ignored --nocapture`. Both must compile and fail
+behavior assertions, not missing prospective APIs. Reuse existing key fixture;
+no new signing credentials, authority objects or production changes.
+
+Further GREEN controls: one of two authoritative IDs resolves then lookup
+budget expires; retain that ID as evidence without fabricated counts. Wrong
+response type, missing/extra statuses, queued 202, malformed 2xx and 408/5xx
+remain uncertain; native refusal metadata survives non-2xx; exact documented
+message row may prove refusal only after review. Prior accepted effects cannot
+be erased by a later local NotSent/refusal. Duplicate/late/stale deliveries,
+nonce replay and missing route admission cannot finalize or send twice.
+Preserve the native reconciliation window and Store publication fences; share
+retry/deadline/owner policy rather than recreate it in this venue.
+
+This preparation prunes no manifest entries, closes no row and adds no CALLERS
+landed claim. Recheck the full frozen inventory above at actual adoption.
+Future gates: TxFlow + Binance, scoped strict Clippy/fmt, bans, both ratchets,
+three independent reviews and exact-head CI. Architecture gate: No. Native
+codec facts stay here; nonce, signing, routing, admission, journal and read
+ownership stay shared prerequisites.
+
+Local plan/test evidence: 2 original-source controls compile and fail
+by the intended behavior assertions; normal venue suites pass
+(109 tests, 2 explicit ignored RED controls).
+Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
+pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
+controls expose defects; they are not GREEN adoption or P0 closure evidence.
+
+
+### Separate deferred-identity settlement prerequisite
+
+Independent review and both shared owners (codex-uufub4 / claude-dazzy3)
+confirmed that even Plan #1873 does not supply TxFlow identity settlement.
+At the exact write ACK, the native codec can prove execution but has no native
+IDs. Actual #1837 rejects `WriteFact::Accepted { order_ids: [] }` for Place,
+and the later authoritative Read callback cannot call `http_write_fact` with
+the old write Context: exact current-delivery provenance correctly refuses it.
+Never fabricate an ID, cast the root, weaken validation or publish against an
+old callback to bypass this gap.
+
+The owners will review a separate opaque identity-continuation token minted at
+the exact validated ACK. It must bind owner/generation/write leg/attempt,
+native correlation and expected-ID scope, designated authoritative read
+root/leg and the immutable original bound. Settlement validates the exact
+current read delivery plus that token. Proven execution awaiting identity is
+an effect, never resendable and never success-sealable. Failed/expired lookup
+must seal Unknown while retaining individually resolved IDs. This is a future
+contract, not an available `AwaitingIdentity` or settlement API; classifier
+source is held until its journal contract is reviewed after #1873 CPU/size work.
+
+The existing partial-50-ID RED remains the public oracle. Adoption must also
+prove multi-chunk isolation, deduplication, wrong-generation and wrong-read
+rejection, original-bound expiry, duplicate/late receipts and retention of the
+50 resolved IDs when subsequent work fails. List membership alone cannot clear
+an unresolved write. Keep TxFlow production adoption blocked on this separate
+shared prerequisite even after general Plan and signer seams land.

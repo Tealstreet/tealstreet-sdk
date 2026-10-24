@@ -613,3 +613,131 @@ fn separate_engines_with_the_same_signer_cannot_reuse_action_nonces() {
     let second = second["nonce"].as_u64().unwrap();
     assert!(second > first);
 }
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for nonce/signer and Plan seams"]
+fn p0_write_accepted_chunk_ids_survive_later_transport_loss() {
+    let mut e = engine();
+    place(
+        &mut e,
+        741,
+        (0..51).map(|i| limit(&format!("p0-{i}"))).collect(),
+    );
+    let first = write(&mut e);
+    let sent: Value = serde_json::from_str(first.body.as_deref().unwrap()).unwrap();
+    assert_eq!(sent["action"]["orders"].as_array().unwrap().len(), 50);
+    ack(
+        &mut e,
+        &first,
+        200,
+        r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":["success"]}}}"#,
+    );
+    let read = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Http(request)
+                if request
+                    .body
+                    .as_ref()
+                    .is_some_and(|body| body.contains("frontendOpenOrders")) =>
+            {
+                Some(request)
+            }
+            _ => None,
+        })
+        .expect("authoritative native identity read");
+    let rows: Vec<_> = (0..50)
+        .map(|i| {
+            json!({
+                "asset":1, "oid":1000+i, "side":"B", "orderType":"Limit", "limitPx":"50000",
+                "origSz":"0.01", "sz":"0.01", "timestamp":NOW, "cloid":format!("p0-{i}"),
+                "state":"Open", "tif":"GTC", "children":null,
+            })
+        })
+        .collect();
+    ack(
+        &mut e,
+        &read,
+        200,
+        &json!({"success":true,"code":0,"data":rows,"hasMore":false}).to_string(),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let timer = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 110.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("native write pacing timer");
+    e.handle(NOW + 110.0, Event::TimerFired { timer });
+    let second = write(&mut e);
+    e.handle(
+        NOW + 111.0,
+        Event::HttpFailed {
+            request: second.id,
+            error: "response lost",
+        },
+    );
+    let out: Vec<_> = e.drain_actions().collect();
+    let failures: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 741,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].outcome, Some(Outcome::Unknown));
+    let expected: Vec<String> = (1000..1050).map(|id| id.to_string()).collect();
+    assert_eq!(
+        failures[0]
+            .partial
+            .as_ref()
+            .map(|partial| partial.order_ids.as_slice()),
+        Some(expected.as_slice())
+    );
+    assert!(!out.iter().any(
+        |action| matches!(action, Action::Http(request) if request.url.ends_with("/exchange"))
+    ));
+    assert!(!out.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 741, .. })
+    )));
+}
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for nonce/signer and Plan seams"]
+fn p0_write_non_2xx_keeps_decoded_native_evidence() {
+    let mut e = engine();
+    place(&mut e, 742, vec![limit("p0-native-error")]);
+    let request = write(&mut e);
+    ack(
+        &mut e,
+        &request,
+        400,
+        r#"{"status":"err","message":"Insufficient margin"}"#,
+    );
+    let out: Vec<_> = e.drain_actions().collect();
+    let failures: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 742,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        failures[0].venue_message.as_deref(),
+        Some("Insufficient margin")
+    );
+    assert!(!out.iter().any(
+        |action| matches!(action, Action::Http(request) if request.url.ends_with("/exchange"))
+    ));
+}
