@@ -538,7 +538,9 @@ The foundation retains `HashMap<u64, CommandOwner>` for both command and physica
 entries. Each physical entry stores its full `Owner`, and immutable/mutable
 lookup, terminal retirement and Execution-only projection compare that exact
 variant. This avoids a new `HashMap<Owner, CommandOwner>` instantiation without
-relying on cross-variant numeric uniqueness. The same-generation adversarial
+relying on a lookup-time numeric uniqueness assumption. Insertions still use the
+shared monotonic ID allocator and assert numeric vacancy before mutation; a
+collision cannot replace another owner. The same-generation adversarial
 control covers both directions, including denied mutable access and retirement.
 No family WASM size result is claimed before CI.
 
@@ -558,3 +560,12 @@ arithmetic and typed projection. Scoped request-context 287 and execution 123
 controls pass. These are not the full G1 activation/saturation proof: public task
 admission, 150-share enforcement, original assertion conversion, parent cascade
 and cleanup-before-scheduler-ack controls still follow in this draft.
+
+The bounded source audit found simultaneous namespace exhaustion could be
+misclassified as deferred pool pressure. Plan and preflight-call admission now
+check both finite ID namespaces without spending before classifying the pool.
+A paired control drives both real admission APIs against a full pool with 150
+registered Background contexts: available namespaces produce Deferred, while
+exhausted I/O or signing IDs produce hard Capacity, with no IDs, credits,
+Contexts or actions consumed. Five foundation controls pass, including the
+physical-map collision assertion preserving the original entry.

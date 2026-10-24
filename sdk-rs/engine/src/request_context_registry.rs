@@ -807,6 +807,17 @@ impl ContextRegistry {
         }
     }
 
+    #[cfg(feature = "http-plans")]
+    fn insert_physical(&mut self, identity: u64, entry: CommandOwner) {
+        assert!(matches!(entry.physical,
+            Some(Owner::Execution { generation } | Owner::Background { generation }) if generation == identity));
+        assert!(
+            !self.physical.contains_key(&identity),
+            "physical Plan identity already registered"
+        );
+        assert!(self.physical.insert(identity, entry).is_none());
+    }
+
     /// Full owner identity, including its variant, for a physical Plan.
     fn physical_owner(&self, owner: Owner) -> bool {
         #[cfg(feature = "http-plans")]

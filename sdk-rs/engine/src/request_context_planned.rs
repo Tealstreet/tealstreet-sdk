@@ -558,7 +558,7 @@ impl<P> Cx<'_, P> {
                 };
                 owner.last_deadline = deadline;
                 registry.contexts.insert(root.leg(), root.clone());
-                registry.physical.insert(identity, physical);
+                registry.insert_physical(identity, physical);
                 registry.plan_index.push(handle.owner());
                 Some((identity, root))
             }
