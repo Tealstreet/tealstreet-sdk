@@ -476,4 +476,8 @@ private requests carry a session token can use it.
   the egress directly; `session_scoped_context` refuses `Invalid` for a
   Session without private egress, so the setup forces it.
 - Independent review CLEAR at `a24df874c8f` (not a per-venue fix of a
-  cross-cutting concern); its Preflight-scope P3 is folded above.
+  cross-cutting concern); its Preflight-scope P3 is folded above.- Session seam (claude-55ao7t) CLEAR at `3a0590d6606`. Forward pin for G1
+  (codex-zs5e83): whichever of G1's background-parent cascade and this branch
+  composes second keeps `retire_session` ending `sessions.retire` → G1
+  background cascade → Bearer fence. Both are queued cleanup, so the order is
+  pinned rather than load-bearing.
