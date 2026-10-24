@@ -22,6 +22,12 @@ selection, cursor/range geometry and pacing are unchanged.
 Lighter's funding/trade walks need this bridge. Paradex additionally waits for its
 Bearer/session prerequisites; BloFin background history waits for G1/G2 and is
 not admitted through this command-only slice. No consumer migration is included.
+A consumer audit at `17e93c3038e` confirms that all intended Lighter remote
+history families enter through the genuine Command::Query callback. The current
+numeric Completion retains no receipt cap: adoption must call
+`begin_preflight_with_command_wait` there before any page, signing or wait and
+retain that exact cap across Trades/Funding stage changes. Missing or expired
+receipts use shared refusal; no uncapped or default-timeout exception is allowed.
 
 ## Existing authority and dependencies
 
@@ -76,7 +82,10 @@ settle a history-bound page independently of acceptance. Enforce this on the
 shared validation paths, not just in the new wrapper. Ordinary send/selection
 rights remain subject to their existing Plan checks. Private history rejection,
 default failure and engine expiry retain exact validated failure-only access;
-there is no public unchecked terminal or way to unbind the Body.
+there is no public unchecked terminal or way to unbind the Body. Preserve
+`fail_plan`'s existing successful no-op while `http_plan_expiring` is set: native
+failure callbacks may unwrap it during the engine sweep. The binding check must
+not turn that inert call into a panic or an independent seal.
 
 The page guard exclusively borrows both history and mutable Cx, with no Cx
 accessor. Its private binding contains Plan identity, Slot identity, Context and
@@ -129,7 +138,14 @@ ReleasedPhysicalTimeout only after observing an actual lifecycle release.
 The callback-scoped witness is minted from that recorded cause and exact call.
 `http_preparation_failed` records an unreleased failure even when its error kind
 is Timeout; a logical-deadline-derived Timeout in failed-call settlement never
-becomes a physical proof. Integrating these recording sites is a source gate.
+becomes a physical proof. The shared HttpFailed tail also receives integrity
+Internal failures: only the exact `io.http_failure_kind == Network` path may
+record ReleasedNetwork. Record ReleasedPhysicalTimeout in expire_http_timer
+before event dispatch so a shared tail cannot overwrite it. Neither site records
+recovery authority while `http_plan_expiring` is set, including when the Plan
+sweep enters the released physical-timeout branch. Root expiry therefore stays
+strict independently of a later deadline check. Integrating these recording
+sites is a source gate.
 
 Preparation, provider, integrity, native status/codec failure and root expiry
 remain strict even after accepted pages. HTTP408/5xx classification does not
@@ -191,9 +207,12 @@ no accepted rows, INCOMPLETE marker or successful encoding/finalization.
    denials. Keep valid live-root recovery as the working control.
    Separately deny an engine-stamped logical-deadline Timeout and an unreleased
    preparation Timeout; neither may be mistaken for the recorded physical cause.
+   Deny an integrity Internal HttpFailed after accepted pages too.
 5. Pin caller/Plan expiry in both timer orders, fractional predeadline liveness
    and equality, late DATA/Bind, finalizer-count zero on expiry versus one on
-   valid recovery, and no marker outside exact command membership. Check the
+   valid recovery, and no marker outside exact command membership. In both root
+   timer orders, a native callback unwrapping fail_plan during the expiry sweep
+   must remain inert and successful. Check the
    optional final shaping that filters all accepted rows without losing proof.
 6. Test strict typed encoding refusal, pure guard refusal, reserve-all terminal
    storage, panic/fail-stop behavior, and unchanged Context history. Review exact
