@@ -283,7 +283,7 @@ impl Backpack {
             Kind::Trades => "/api/v1/trades",
         };
         if request.kind == Kind::Trades {
-            self.get(cx, path, params, Pending::History(Box::new(request)), true);
+            self.get(cx, path, params, Pending::History(Box::new(request)));
         } else {
             params.insert("sortDirection".into(), "Desc".into());
             if request.walk.offset() > 0 {

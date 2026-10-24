@@ -738,3 +738,31 @@ an existing managed-root vulnerability. The Prepare-count assertion after the
 first raw-release failure and the no-Prepare/book assertions after the NaN
 failure are unexecuted until GREEN. Only plan+new controls differ from7501;
 all production, inventories, keys and combo5b files remain byte-identical.
+
+Book-seed bounded plan/original/native fit CLEAR at c06a3d35410 from hcmq3f,
+read-only/no builds. Standing authorization permits implementation and draft
+CI parallel with exact applied-source review. Source implements the proposed
+Background Read directly in snapshot, retains Context in Pending::Depth,
+validates before DATA parsing and retires on every terminal/stale-generation
+path. The native book application body is moved intact to a private helper so
+its early returns cannot bypass Context retirement. The obsolete get flag/raw
+branch and only always-true arguments are removed; public history changes by
+one mechanical argument deletion only. Manifest removes only9d039db0 count1.
+
+All six original controls now pass with their assertions unchanged. Four
+additional source-stage controls pin typed precommit Unsupported/NotSent
+metadata plus original1000ms recovery, released Network/Timeout with no write
+outcome, shared Context capacity refusal and exact stale/current Context
+retirement through engine-minted background reservations. All10 pass with
+jobs4/0ignored. Extra-control fixture shadowing/borrow compile corrections
+are excluded from RED evidence. No engine source or public API was added.
+
+Book-seed scoped compatibility: existing public and public-supervision action
+collectors now use shared prepared_actions at the actual event/timer clock.
+Retry responses follow their emitted timer bound rather than backdating to0.
+All original wire, book, recovery and socket assertions remain in place.
+The scoped Backpack suite passes, including all10 book controls; one existing
+ignored trading control is retained. Scoped strict Clippy and fmt pass.
+Local bans execution on this older integration reports only incoming Orderly
+and Phemex request/socket prunes against the advancing landing; no Backpack
+map discrepancy. Genuine actual-tip integration remains required before CI.
