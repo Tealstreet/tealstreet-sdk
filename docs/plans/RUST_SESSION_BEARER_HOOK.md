@@ -243,8 +243,11 @@ packets behaving correctly today.
   session-wait unit and one bound unreleased leg on the same Session, and the
   Session is retired. The shared queued flush handles bound-packet failures
   first. That seals the Plan, the seal retires the parked unit, and
-  `on_plan_session_wait_ended` is not called after the seal. Result: exactly
-  one terminal and no re-entry.
+  `on_plan_session_wait_ended` is not called after the seal. The parked pending
+  is still returned once through `on_session_wait_expired` (`NotSent`, no
+  custody, no grant), so venue bookkeeping is never stranded. Result: exactly
+  one terminal, zero HTTP and no re-entry. This mirrors claude-fe7lgm's N8
+  (`RUST_PLAN_SESSION_WAIT.md` at `be77e754233`).
 - **R11 (P2-4, groups).** An announced mutation group sees a moved revision on
   one member: the whole group fails precommit, and no single member is
   reprepared.
@@ -265,6 +268,35 @@ Answered by claude-fe7lgm: the binding is a parameter, the hook returns the
 full value, and WS stays venue-owned. claude-55ao7t's blocker is resolved by
 option (i). codex-zs5e83's direction fits; their source review and API freeze
 are pending.
+
+## RED checkpoint (`sdk-rs/engine/tests/session_bearer.rs`)
+
+**Status today:**
+- **Runtime REDs (7):** R1, R2, R3, R4, R5, R6 (the refusal half) and R12.
+- **Passing controls (3):** an unbound request releases and delivers, an
+  unbound sibling leg prepares Public, and R13 (a packet released before retire
+  still delivers).
+- **Not written yet:**
+  - R7 and R14 need the binding API.
+  - R8, R10, R10b and R11 would fail only on R3's assertion until the fence
+    exists, and need Plan/group scaffolding.
+  - R9 passes today; it is a guard, not a RED.
+  - R6's redaction half needs `SecretHeaderValue`.
+
+These are added with the source.
+
+**Engine facts the source must follow:**
+- **The real prepare point.** `queue_managed` emits `HttpAction::Prepare` at
+  issue, with headers snapshotted from static slices (`http_lifecycle.rs:180`).
+  So the contract's "prepare" is `http_prepared`: after `managed.validate`, the
+  hook writes the header into the Bind's clone of `managed.original`.
+- **Where Primary is decided.** Routing intent comes from
+  `context.routing_intent()` at queue time (`http_lifecycle.rs:283`), so a
+  bound packet's Primary intent is decided in `queue_managed`.
+- **Retire.** `retire_http_owner` removes only Session-owned entries; R3 proves
+  that command-owned packets are not fenced today.
+- **Header rule.** `validate_unsigned` has no header-name rule, so the
+  `Authorization` refusal is new.
 
 ## Ownership
 
