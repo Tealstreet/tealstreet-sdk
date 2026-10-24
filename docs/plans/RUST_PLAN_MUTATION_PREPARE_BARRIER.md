@@ -621,3 +621,53 @@ and thirty-three JS host controls, all without ignored cases. Native scoped
 strict Clippy, formatting and the full bans script pass. Final CI remains a
 separate gate; this checkpoint does not claim READY, a family custody cutover
 or landing.
+
+## Capability isolation proposal after CI size failure
+
+Exact-head Rust run `40056140003` found compile omissions in four old fixture
+adapters. Test-only `c59f38b6c5a` adds one explicit BindGroup panic arm to each;
+stripping those three lines restores every parent blob exactly. Workspace test
+compilation with all features and twenty-nine affected fixture controls pass,
+with scoped strict checks and formatting. Engine and host runtime trees remain
+exactly `a01dbc4caee`. The original CI failures are retained as compile failures,
+not runtime execution evidence.
+
+The same run measures Bybit web and Node at 1,345,004 bytes against the unchanged
+1,343,488-byte limit: 1,516 bytes over. Replay/CPU collection did not run past
+that size failure; its missing-output error supplies no CPU diagnosis. The
+composition's size attribution is not measured yet. No profile, budget, feature
+closure or assertion has been changed to conceal the failure.
+
+Core direction allows a separate default-off Mutation-barrier capability.
+Proposed engine feature `http-mutation-barriers` depends on `http-plans` and is
+enabled explicitly by real barrier adopters and group proof targets. The chosen
+off-build contract is absence of `admit_plan_with_barriers`: an ordinary Plan
+consumer cannot declare a barrier. Private admission still rejects any nonempty
+barrier declaration before origin validation, credits or IDs, including physical
+admission. Uniform and conditional constructors continue passing empty barriers.
+
+Gate the complete runtime: normalized Body membership, Managed member storage,
+submission checks, route/signing activation pump, wait ownership, grouped claim,
+group-only response insertion and pure release hook. Preserve the common single
+Lifecycle prepare/commit extraction, canonical pacing resolver, ordinary Plan
+admission, founder custody and journal/seal behavior in off builds. Stable
+protocol metadata types may remain for exhaustive host/fixture matches; they
+grant no owner, admission or release authority. Off-build pending/claim probes
+are inert false/Invalid stubs without clock, staging, credit or ID effects.
+
+Native and WASM hosts expose the same explicit feature forwarding to the engine.
+WASM group exports/serialization and native group state, wake and handoff code
+are gated coherently. A host built without support rejects a received group
+before resource bind or claim; it never invokes individual release as fallback.
+The JS helper already refuses missing group exports before binding resources.
+Future family adoption must opt its host and engine into the capability in that
+consumer's feature closure; ordinary Bybit/BingX consumers do not opt in.
+
+Before source application, send exact conditional hunks to core and host/Plan
+owners. Required checks retain all existing assertions: ordinary http-plans-only
+single/Plan controls and feature-off compilation; explicit capability-on group,
+native and JS proofs; off-host refusal; expanded pacing alias rejection before
+IDs; and same-composed-head Bybit feature-off/on CI size measurement with pinned
+profiles/tools. The full capability-on group behavior must remain byte-equivalent
+except for conditional compilation. This is a proposal, not an applied feature,
+an attribution result, a size fix or permission to freeze.
