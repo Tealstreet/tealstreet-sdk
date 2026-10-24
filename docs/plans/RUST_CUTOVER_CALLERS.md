@@ -6816,3 +6816,13 @@ Hosts continue using the existing connect/send/close/timer interface. WOO's
 private auth frame and fixed subscriptions keep their native field order, with
 the post-auth ping following subscription release. Other venue families keep
 their current adapters, including Sam's excluded Bitunix boundary.
+
+WOO dynamic and reconnect book seeds now use the landed released-interest
+continuation: the complete subscription batch is returned first, then a genuine
+subsequent timer ingress may issue the native HTTP seed. This is host handoff,
+not peer acknowledgement. Current-epoch deltas received between those steps
+remain buffered for the existing snapshot join. Required-interest removal,
+retirement and stale or expired wakes cannot issue a seed for newer work.
+Native one-second snapshot retry timing and request/reducer freshness stay with
+their existing owners. A synchronous shared admission-capacity refusal retires
+the matching public feed with shared backoff; due seeds survive its reconnect.

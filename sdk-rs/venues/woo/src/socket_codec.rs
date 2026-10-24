@@ -4,7 +4,7 @@ use safe_cex_engine::VenueError;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
-    Interest, Invalidation, LifecycleEvent, SocketError, TrafficPolicy,
+    Interest, Invalidation, LifecycleEvent, RetireReason, SocketError, TrafficPolicy,
 };
 
 impl Woo {
@@ -156,12 +156,44 @@ impl Woo {
         );
     }
 
-    pub(super) fn sync_public_interests(&self, cx: &mut Cx<'_, Pending>) {
-        if let Some(feed) = self.public.feed
-            && let Err(error) =
-                cx.set_socket_interests(feed, self.desired_interests(cx.store, false))
-        {
-            self.socket_error(cx, false, error);
+    pub(super) fn sync_public_interests(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(feed) = self.public.feed else {
+            return;
+        };
+        let desired = self.desired_interests(cx.store, false);
+        let seeds: Vec<_> = self
+            .depth
+            .iter()
+            .filter(|(symbol, state)| state.seed_due && cx.store.market(symbol).is_some())
+            .map(|(symbol, state)| (symbol.clone(), state.generation))
+            .collect();
+        let epoch = cx.socket_epoch(feed);
+        let result = if self.public.open && !seeds.is_empty() {
+            let required: Vec<_> = seeds
+                .iter()
+                .map(|(symbol, _)| {
+                    format!(
+                        "{}@orderbookupdate",
+                        native(cx.store.market(symbol).unwrap())
+                    )
+                })
+                .collect();
+            let keys: Vec<_> = required.iter().map(String::as_str).collect();
+            cx.set_socket_interests_then(feed, desired, &keys, Pending::SocketBookSeeds(seeds))
+        } else {
+            cx.set_socket_interests(feed, desired)
+        };
+        if let Err(error) = result {
+            if error == SocketError::Capacity && epoch.is_some() && cx.socket_epoch(feed) == epoch {
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    format!("WOO socket admission failed: {error:?}"),
+                );
+                cx.retire_socket(feed, RetireReason::Closed);
+            } else {
+                self.socket_error(cx, false, error);
+            }
         }
     }
 
@@ -223,10 +255,7 @@ impl Woo {
                 }
             }
             LifecycleEvent::Ready { epoch, .. } if !self.private_feed(epoch.feed())? => {
-                let symbols: Vec<_> = self.depth.keys().cloned().collect();
-                for symbol in symbols {
-                    self.book_request(cx, &symbol);
-                }
+                self.sync_public_interests(cx);
             }
             LifecycleEvent::Authenticated { epoch, first: true } => {
                 cx.send_after_socket_interests(epoch.feed(), r#"{"event":"ping"}"#.into())?;
@@ -248,6 +277,7 @@ impl Woo {
                         cx.book_changed(symbol);
                         self.generation += 1;
                         state.generation = self.generation;
+                        state.seed_due = true;
                         state.book.clear();
                         state.sync = Sync::Buffer(Vec::new());
                     }

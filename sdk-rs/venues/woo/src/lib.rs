@@ -61,6 +61,7 @@ pub enum Pending {
         symbol: String,
         generation: u64,
     },
+    SocketBookSeeds(Vec<(String, u64)>),
     Candles {
         command: CommandId,
         rows: Vec<Candle>,
@@ -86,6 +87,7 @@ enum Sync {
 struct Depth {
     count: u32,
     generation: u64,
+    seed_due: bool,
     book: Book,
     sync: Sync,
 }
@@ -337,7 +339,9 @@ impl Woo {
         };
         self.generation += 1;
         state.generation = self.generation;
-        state.sync = Sync::Buffer(Vec::new());
+        if !matches!(state.sync, Sync::Buffer(_)) {
+            state.sync = Sync::Buffer(Vec::new());
+        }
         cx.request(
             Method::Get,
             format!("{}/v1/public/orderbook/{}", self.rest, native(m)),
@@ -348,6 +352,7 @@ impl Woo {
                 generation: state.generation,
             },
         );
+        state.seed_due = false;
     }
     fn book_retry(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         let Some(state) = self.depth.get_mut(symbol) else {
@@ -358,6 +363,7 @@ impl Woo {
         }
         self.generation += 1;
         state.generation = self.generation;
+        state.seed_due = false;
         state.book.clear();
         state.sync = Sync::Retry(cx.set_timer(1000.0));
         cx.book_changed(symbol);
@@ -404,19 +410,18 @@ impl Woo {
             state.count += 1;
             return;
         }
+        self.generation += 1;
         self.depth.insert(
             symbol.clone(),
             Depth {
                 count: 1,
-                generation: 0,
+                generation: self.generation,
+                seed_due: true,
                 book: Book::default(),
                 sync: Sync::Buffer(Vec::new()),
             },
         );
         self.sync_public_interests(cx);
-        if self.public.open && cx.store.market(&symbol).is_some() {
-            self.book_request(cx, &symbol);
-        }
     }
     fn stream_candle(
         &mut self,
@@ -617,6 +622,31 @@ impl Venue for Woo {
         event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.managed_event(cx, event)
+    }
+    fn on_socket_interests_released(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        epoch: safe_cex_engine::socket_lifecycle::Epoch,
+        pending: Pending,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        if self.public.feed != Some(epoch.feed())
+            || !self.public.open
+            || cx.socket_epoch(epoch.feed()) != Some(epoch)
+        {
+            return Ok(());
+        }
+        if let Pending::SocketBookSeeds(seeds) = pending {
+            for (symbol, generation) in seeds {
+                if self
+                    .depth
+                    .get(&symbol)
+                    .is_some_and(|state| state.seed_due && state.generation == generation)
+                {
+                    self.book_request(cx, &symbol);
+                }
+            }
+        }
+        Ok(())
     }
     fn encode_socket_interests(
         &self,
@@ -846,7 +876,7 @@ impl Venue for Woo {
                     *bad = true;
                 }
             }
-            Pending::Depth { .. } => (),
+            Pending::Depth { .. } | Pending::SocketBookSeeds(_) => (),
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -874,6 +904,7 @@ impl Venue for Woo {
             return;
         }
         match pending {
+            Pending::SocketBookSeeds(_) => (),
             Pending::Identity(_) | Pending::History(_) | Pending::Trade(_) => unreachable!(),
             Pending::Account(_) => unreachable!(),
             Pending::Markets {
@@ -1055,6 +1086,7 @@ impl Venue for Woo {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::SocketBookSeeds(_) => (),
             Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
@@ -1101,7 +1133,11 @@ impl Venue for Woo {
             }
         });
         if let Some(symbol) = retry {
-            self.book_request(cx, &symbol);
+            if let Some(state) = self.depth.get_mut(&symbol) {
+                state.seed_due = true;
+                state.sync = Sync::Buffer(Vec::new());
+            }
+            self.sync_public_interests(cx);
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {

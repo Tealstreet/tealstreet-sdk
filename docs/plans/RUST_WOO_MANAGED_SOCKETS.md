@@ -258,3 +258,31 @@ controls. Preserve native HTTP builders/reducer/buffer/revision fences and all
 original financial/wire/order assertions. Review exact source with uufub4 and
 native coupling with ih35js before READY; scoped tests only, jobs4 one build at
 a time, with CPU/memory/size and full validation in fresh CI.
+
+Book deltas arriving after the returned subscription but before the later wake
+stay in the existing Sync::Buffer; book_request must retain that buffer when it
+transfers Pending::Depth. A native Sync::Retry keeps seed_due false until its
+existing one-second timer fires, so an unrelated interest change cannot shorten
+that backoff. The retry timer then restores Buffer, marks due and registers the
+same shared handoff. No timer or retry authority moves into the due bit.
+
+The implementation's scoped execution is account63, managed_sockets18, public29
+and public_supervision6:116 PASS, zero ignored. Both unchanged original
+combined-action order assertions now pass after real timer ingress. Seven added
+controls cover the intervening delta, duplicate wake, admitted retirement,
+remove/readd, two-book required-set replacement, real byte-capacity refusal and
+freed-capacity reconnect, native retry isolation, and expired delivery. The
+existing refcount fixture's re-subscribe now occurs at52 after unsubscribe51,
+rather than rewinding to40; all financial assertions remain unchanged. The
+support driver fires only returned exact-now timers at explicit book boundaries;
+it does not auto-advance watchdog, funding, auth or backoff timers.
+
+The initial local invocation named a nonexistent private_supervision target;
+no tests ran in that invocation. It was corrected to the four existing targets
+above. One two-book fixture initially cloned BTC's native base as well as its
+metadata, producing a genuine InvalidInterest duplicate-key refusal; giving ETH
+its correct native base fixes the fixture without changing production policy.
+Normal bans' signing/request/socket controls pass, but the first full ratchet run
+rejects foreign Kraken/Polymarket maps pruned by the advancing actual landing.
+Integrate those actual changes before publication; no checker exception or
+foreign map restoration is authorized.
