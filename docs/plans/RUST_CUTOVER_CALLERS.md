@@ -6736,6 +6736,67 @@ other callers; this semantic caller conversion has zero lexical inventory delta.
 | --- | --- | --- |
 | `cancelOrdersWithSymbols` on any Bybit variant | Typed `NotSent` `unsupported` before any request (was accepted and never finished) | Use `cancelOrders` with order ids. |
 
+## Flat-position realized PnL evidence
+
+Replay comparison includes flat-position realized PnL only when the producer
+reports a finite value. Native unavailable NaN and TS absent/null values produce
+no flat-PnL evidence row. Actual zero, losses and profits remain comparable,
+including the existing numeric-string conversion; losing or changing actual PnL
+still fails comparison. This corrects shared replay evidence without changing
+venue account state or the native frame's unavailable-value encoding.
+
+## Paradex public Read refusals and Lighter catalog custody
+
+Paradex candle requests keep unsupported-interval-before-market validation and
+native messages. Their two immediate refusals now require a genuine Read root.
+The existing managed public book read uses shared command entry, so clock/capacity
+rejection yields one typed failure with no financial outcome. Revoked entry/live
+duplicates preserve the existing owner without a second terminal. Remote candle
+klines/TradingView fallback, polling, book GET bytes and book schema stay native.
+
+Lighter/Robinhood public startup catalogs now await managed Prepare/Bind/Claim
+and validate their exact Background Read callback before decoding or publishing.
+Their20s budget includes host preparation/claim delay; a delayed custom transport
+can expire before outbound. Each native orderBookDetails/orderBooks attempt has
+its own budget. Native endpoint fallback and shared startup backoff are retained,
+with the old attempt retired before follow-up. No command result is introduced.
+All four deployments keep their headers/body, route, catalog codec and metadata.
+
+## WOO and Crypto.com joined order-snapshot freshness
+
+Rust WOO and Crypto.com retain the last accepted order rows when a regular/algo
+or regular/advanced REST census crosses an accepted native order mutation.
+The shared Store token rejects the entire joined publication before changing
+native algo classification, advanced-list membership or startup fill baselines.
+Accepted ACKs invalidate older reads even when their IDs have no stored copy;
+malformed/refused order responses and leverage/mode operations keep their
+existing acceptance and outcome rules. Successful members of a batch retain
+their fence if a later member fails. Bounded Crypto.com retries keep the original
+read's token and collected regular half, so retrying after an ACK cannot renew
+old authority.
+
+Per-ID WS version/timestamp/terminal fences remain in force: newer live rows
+survive while healthy snapshot peers progress, and snapshot publication does
+not invalidate sibling read tokens. A discarded WOO join waits its ordinary
+account cadence rather than publishing caches or issuing an immediate repair;
+Crypto.com releases its reconciliation cycle and schedules its ordinary timer.
+When capture for a new census is exhausted, no new order census starts; stored
+rows and readiness are preserved. Existing in-flight retries can finish but cannot
+publish exhausted authority. Positions, balances and normal polling continue. Public wire
+payloads, signing, commands/results, IDs and frame shapes keep their contracts.
+No wrapper, SDK, CLI, MCP or server caller needs a new parameter or outcome type.
+
+## BloFin local FetchLeverage Read refusals
+
+Unknown market still precedes margin/mode-not-loaded before credentials, with
+exact native messages and absent kind/outcome fields. Each of these two local
+refusals now acquires its genuine shared Read owner; capacity refusal supersedes
+the native error with one typed Read failure and no write Outcome. No numeric
+fallback or extra terminal occurs. Duplicate live ids preserve their diagnostic
+and original owner. No Store change, HTTP, provider, timer or private credential
+is introduced. Valid signed leverage queries retain their original issuance,
+path, request fields, revision checks, response handling and native retries.
+
 ### Receipt-bound stamp floor (dispatch signing)
 
 Plan: [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md). This is an additive engine API.

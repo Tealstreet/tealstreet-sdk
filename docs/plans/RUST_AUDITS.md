@@ -2938,6 +2938,57 @@ remain unchanged. No venue-local admission, owner or completion algorithm.
 Bitrue inventory 30 -> 29 occurrences, 18 -> 17 fingerprints; all private
 signing/read/write migrations remain separate.
 
+## Finite flat-position PnL evidence
+
+Plan-first `1fadf14a790` and original-control commit `bae23010581` isolate a
+shared evidence bug: unavailable native NaN passed the flat-row admission test
+and became a null-valued PnL row. Original controls report five PASS/two assertion
+FAIL; the finite-conversion predicate makes all seven PASS. The scoped financial,
+comparison and declaration-policy checks pass 28 controls. Zero, negative and
+numeric-string PnL remain evidence, genuine PnL changes still fail, and inputs
+remain immutable. Native state and all other comparison fields are untouched.
+The fourteen inverse declaration keys require fresh raw CI proof before pruning.
+
+### Remaining immediately workable public Read sites
+
+Paradex removes two local candle terminals and its numeric book issuance-refusal
+fallback. Lighter's final public lib request becomes a managed Background catalog
+read with exact delivery validation and retirement before fallback/retry. No
+signer, private authority, session or engine policy is changed. Original new
+targets execute seven native controls PASS and15 intended assertion REDs, zero
+ignored. Exact own prune is four singleton occurrences across three keys.
+
+## WOO and Crypto.com shared snapshot-token fan-out
+
+~~Their joined order censuses publish native cache state and Store rows without
+using the engine's explicit financial write fence.~~ Both now capture one Store
+token per logical join, preserve it across pages/bounded retries and admit native
+cache updates plus rows at one commit boundary. Existing per-ID WS clocks remain
+protocol-owned; no venue epoch copy, universal WS invalidation or new engine API.
+
+Two native original-code controls expose the accepted-write crossing: WOO's
+older empty join removes retained orders after a validated cancel ACK, and
+Crypto.com's older nonempty join inserts an absent order after a validated
+cancel-all ACK. The shared boundary keeps the previous accepted rows until a
+fresh read. This is a snapshot authority correction; it does not invent a new
+native ACK payload, optimistic terminal row, execution or command outcome.
+Explicit Store invalidation/exhaustion and startup-cache controls are adoption
+controls, not additional original financial-defect claims. WS-peer compatibility
+controls pass on the original code and after adoption.
+
+BloFin remains a separate design item: startup execution-prefix seeding can be
+valid even when newer WS order-state revisions reject row replacement, and the
+seed path releases queued executions. Preserve that dual evidence policy before
+moving it to a shared admission boundary; this pair changes no BloFin source.
+
+## BloFin local leverage refusal custody
+
+Two account.rs numeric failures now use shared genuine Read admission followed
+by fail_context on that exact root. BloFin 23->21 occurrences / 19->17 fingerprints;
+only the two singleton rows are removed. No signer, trading, history, closed
+position or successful private read is converted. The coherent custody cutover
+remains with codex-zs5e83. No per-venue admission/completion implementation.
+
 ## Receipt-bound StampFloor shared primitive
 
 Opaque release-derived stamp metadata and one opt-in dispatch helper replace no
