@@ -2,7 +2,7 @@
 
 Owner: codex-cxxyqr, transferred from codex-uufub4 by the overseer.
 Baseline: actual `ba3d7da1d3aaba26d6c40d6615fdc467d6ec185d`.
-Branch: `feat/rust-weex-history-context`. Status: plan first; no runtime claim.
+Branch: `feat/rust-weex-history-context`. Status: source checkpoint; readiness review pending.
 
 ## Scope and dependencies
 
@@ -21,6 +21,9 @@ issuers, and its private identity cannot be bound to a caller-root child by
 venue code. Do not emulate it or remint a command root. Original-source REDs
 can run on this baseline; production conversion waits for the actual #1983
 landing and its owner's current pin. #1992's `scoped` addition is not this seam.
+
+Update: actual #1983 `a2533f5761f` was plain-merged at `9fd6e5afe47`. The source
+checkpoint now consumes its ReadRoot/ReadLeg API; the dependency is satisfied.
 
 Keep #1997 account-cycle work on its separate branch. Shared WEEX lib routing
 edits must compose with its owner; `send_account`, trading, socket custody,
@@ -207,3 +210,35 @@ query until Retry-After, then releases it with no headers and completes.
 Expanded target: **6 original assertion RED / 7 GREEN / 0 ignored**. The six
 original test bodies and expected failures are unchanged. These five controls
 are native preservation evidence, not additional original REDs.
+
+## Actual #1983 source checkpoint
+
+The conversion retains one selected signed ReadRoot (or unsigned caller root)
+alongside each native walk. Exact delivery validation precedes streamed row and
+response codecs; ReadCursorHistory/ReadRangeHistory guards own identity, stage,
+coverage and accepted output. Physical legs retire before continuation, while
+the original root survives all windows. The no-Cx expiry hook removes only the
+matching Owner generation's native state. Provider refusals retain their exact
+typed error and reject strictly; physical failure while live keeps native
+accepted-only semantics. Local mint/queue refusal is strict and typed.
+
+All 13 original/new preservation controls and all 40 existing history fixtures
+pass on the source checkpoint. Existing fixtures now drive real managed
+Prepare/Bind/Claim at their event time. The 10,000-request income-budget fixture
+declares a 2,000,000 ms caller wait so it tests the unchanged native budget and
+100 ms pacing rather than the new default 120 s root expiry. The provider
+preparation control now refuses through an installed real provider, preserving
+the immutable selection snapshot instead of mutating trusted credentials;
+managed timers may be emitted then cleared, but none may survive refusal.
+
+The actual lexical inventory is unchanged: neither legacy history Completion
+constructors nor the physical wrappers are scanner members. Scanner and its 15
+controls pass without manifest/checker/STAGING edits. Further admission,
+generation and timeout-boundary controls, independent source review and fresh
+CI/replay/size gates remain required before READY.
+
+The old local-history remote-fallthrough capacity control intentionally changes
+with this cutover: remote paging now requires a retained root plus one physical
+child. Full capacity refuses once; one freed slot admits the root but strictly
+refuses its child with no leak; two freed slots allow the unchanged native wire.
+The existing local-query precedence/capacity controls remain unchanged.

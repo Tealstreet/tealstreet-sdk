@@ -917,6 +917,12 @@ impl Venue for WeexFutures {
                 .paused_until
                 .max(cx.now + rate::delay(response, cx.now));
         }
+        if let Task::History(request) = &p.task
+            && !self.history_delivery_current(cx, request)
+        {
+            Self::finish_history_page(cx, request);
+            return;
+        }
         if let Task::BookQuery(command) = p.task {
             self.book_query_response(cx, command, response);
             return;
@@ -1080,6 +1086,13 @@ impl Venue for WeexFutures {
         } else {
             self.on_request_failed(cx, p, &error.message);
         }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.retire_history(owner);
     }
     fn on_http_owner_retired(
         &mut self,

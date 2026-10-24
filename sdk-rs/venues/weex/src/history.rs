@@ -4,13 +4,22 @@ use crate::sign::encode;
 use crate::wire::{Str, number, optional_number, timestamp};
 use crate::{Pending, Task, WeexFutures};
 use safe_cex_engine::Level;
-use safe_cex_engine::history::{Completion, CursorHistory, RangeHistory};
+use safe_cex_engine::credential_selection::{PrimaryReason, SlotPolicy, Slots};
+use safe_cex_engine::history::{
+    ReadCompletion as Completion, ReadCursorHistory as CursorHistory,
+    ReadRangeHistory as RangeHistory,
+};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorWalk, PageRow, RangeWalk, Step, WindowOrder};
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
-use safe_cex_engine::{CommandId, Cx, Method, Outcome, Query, Response, TimerId, VenueError};
+use safe_cex_engine::request_context::{Context, Error, Operation, Owner, Policy, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot, SelectedRead,
+};
+use safe_cex_engine::{
+    CommandId, CommandWait, Cx, Method, Outcome, Query, Response, TimerId, VenueError,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 
@@ -25,6 +34,7 @@ pub struct State {
 }
 enum Read {
     List {
+        root: Root,
         pending: VecDeque<Fetch>,
         owner: Box<CursorHistory<ListRow>>,
         kind: Kind,
@@ -34,6 +44,7 @@ enum Read {
         delay: Option<TimerId>,
     },
     Income {
+        root: Root,
         symbol: Option<String>,
         kind: Option<String>,
         limit: u32,
@@ -45,6 +56,38 @@ enum Read {
 enum IncomeHistory {
     Range(RangeHistory<Income>),
     Single(CursorHistory<Income>),
+}
+
+enum Root {
+    Signed(ReadRoot),
+    Public(Context),
+}
+impl Root {
+    fn context(&self) -> &Context {
+        match self {
+            Self::Signed(root) => root.context(),
+            Self::Public(root) => root,
+        }
+    }
+}
+impl Read {
+    fn root(&self) -> &Root {
+        match self {
+            Self::List { root, .. } | Self::Income { root, .. } => root,
+        }
+    }
+}
+enum Leg {
+    Signed(ReadLeg),
+    Public(Context),
+}
+impl Leg {
+    fn context(&self) -> &Context {
+        match self {
+            Self::Signed(leg) => leg.context(),
+            Self::Public(leg) => leg,
+        }
+    }
 }
 
 struct Fetch {
@@ -62,6 +105,7 @@ enum Kind {
     Income,
 }
 pub struct Request {
+    leg: Option<Leg>,
     command: CommandId,
     kind: Kind,
     window: (Option<f64>, Option<f64>),
@@ -356,6 +400,217 @@ fn windows(from: Option<f64>, to: Option<f64>, span: f64) -> Vec<(Option<f64>, O
 }
 
 impl WeexFutures {
+    fn history_root(&self, cx: &mut Cx<'_, Pending>, kind: Kind) -> Option<Root> {
+        match cx.command_wait() {
+            Some(CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return None;
+            }
+            None => {
+                let _ = cx.reject_unstamped_command(Operation::Read);
+                return None;
+            }
+            Some(CommandWait::Remaining(_)) => {}
+        }
+        if matches!(kind, Kind::Trades) {
+            return cx.admit_caller_read_root(None, None).ok().map(Root::Public);
+        }
+        let slots = Slots::new(
+            self.credentials.primary.clone(),
+            self.credentials.read.clone(),
+            SlotPolicy::default(),
+        );
+        let role = if matches!(kind, Kind::Income) {
+            ReadRole::Primary {
+                reason: PrimaryReason::History,
+                scope: None,
+            }
+        } else {
+            ReadRole::Read { scope: None }
+        };
+        SelectedRead::command_root(
+            cx,
+            SelectedRead::select(&slots, role),
+            LocalRefusal {
+                diagnostic: None,
+                error: VenueError::new("WEEX history signing unavailable")
+                    .outcome(Outcome::NotSent),
+            },
+        )
+        .ok()
+        .map(Root::Signed)
+    }
+
+    pub(crate) fn history_delivery_current(&self, cx: &Cx<'_, Pending>, request: &Request) -> bool {
+        let Some(read) = self.history.reads.get(&request.command) else {
+            return false;
+        };
+        let Some(leg) = request.leg.as_ref() else {
+            return false;
+        };
+        let root = read.root();
+        let valid = match (root, leg) {
+            (Root::Signed(root), Leg::Signed(leg)) => root.validate_delivery(cx, leg).is_ok(),
+            (Root::Public(root), Leg::Public(leg)) => {
+                cx.validate_read_http_delivery(root, leg).is_ok()
+            }
+            _ => false,
+        };
+        valid
+            && match read {
+                Read::List { owner, .. } => owner.validate_delivery(cx, leg.context()).is_ok(),
+                Read::Income { owner, .. } => match owner.as_ref() {
+                    IncomeHistory::Range(owner) => {
+                        owner.validate_delivery(cx, leg.context()).is_ok()
+                    }
+                    IncomeHistory::Single(owner) => {
+                        owner.validate_delivery(cx, leg.context()).is_ok()
+                    }
+                },
+            }
+    }
+
+    pub(crate) fn finish_history_page(cx: &mut Cx<'_, Pending>, request: &Request) {
+        if let Some(leg) = &request.leg {
+            let _ = cx.finish_http_context(leg.context());
+        }
+    }
+
+    fn history_admission_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        error: Error,
+    ) {
+        let Some(read) = self.history.reads.get(&command) else {
+            return;
+        };
+        if error == Error::Revoked
+            && cx.validate_read_root_context(read.root().context()) == Err(Error::Revoked)
+        {
+            return;
+        }
+        if matches!(read, Read::Income { .. }) {
+            self.finish_income(cx, command, Err(error.read_venue_error()), true);
+        } else {
+            self.finish_list(cx, command, Err(error.read_venue_error()), true);
+        }
+    }
+
+    fn send_history_page(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        wire: ReadRequest,
+        path_query: String,
+    ) {
+        let command = request.command;
+        let Some(read) = self.history.reads.get(&command) else {
+            return;
+        };
+        let stream = wire.stream;
+        let queued = match read.root() {
+            Root::Signed(root) => {
+                let leg = match root.leg(
+                    cx,
+                    ReadLegPolicy {
+                        timeout_ms: 20_000,
+                        pacing: None,
+                    },
+                ) {
+                    Ok(leg) => leg,
+                    Err(error) => {
+                        self.history_admission_failed(cx, command, error);
+                        return;
+                    }
+                };
+                let method = wire.method;
+                let body = wire.body.clone();
+                let seed_generation = self.seed_generation;
+                leg.queue(
+                    cx,
+                    wire,
+                    |identity| {
+                        Box::new(crate::dispatch_signing::Http::new(
+                            identity.clone(),
+                            method,
+                            path_query,
+                            body,
+                        ))
+                    },
+                    |leg| {
+                        request.leg = Some(Leg::Signed(leg));
+                        Pending {
+                            task: Task::History(request),
+                            invalid: false,
+                            skipped: Vec::new(),
+                            seed_generation,
+                        }
+                    },
+                )
+            }
+            Root::Public(root) => {
+                let context = match cx.http_leg_context(
+                    root,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                ) {
+                    Ok(context) => context,
+                    Err(error) => {
+                        self.history_admission_failed(cx, command, error);
+                        return;
+                    }
+                };
+                request.leg = Some(Leg::Public(context.clone()));
+                let pending = Pending {
+                    task: Task::History(request),
+                    invalid: false,
+                    skipped: Vec::new(),
+                    seed_generation: self.seed_generation,
+                };
+                cx.request_managed_with_headers(
+                    context,
+                    wire.method,
+                    wire.url,
+                    &[],
+                    wire.body,
+                    pending,
+                )
+            }
+        };
+        match queued {
+            Ok(id) => {
+                if let Some(at) = stream {
+                    cx.stream_response(id, at);
+                }
+            }
+            Err((pending, error)) => {
+                if let Task::History(request) = pending.task {
+                    Self::finish_history_page(cx, &request);
+                    self.history_admission_failed(cx, command, error);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn retire_history(&mut self, owner: Owner) {
+        self.history
+            .reads
+            .retain(|_, read| read.root().context().owner() != owner);
+        self.deferred_gets.retain(|deferred| match &deferred.task {
+            Task::History(page) => !page
+                .leg
+                .as_ref()
+                .is_some_and(|leg| leg.context().owner() == owner),
+            _ => true,
+        });
+    }
+
     pub(crate) fn history_query(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -532,17 +787,28 @@ impl WeexFutures {
                     return;
                 }
                 let ranged = matches!((from_ms,to_ms),(Some(a),Some(b)) if b>a);
+                let Some(root) = self.history_root(cx, Kind::Income) else {
+                    return;
+                };
+                let completion = match Completion::from_context(cx, command, root.context().clone())
+                {
+                    Ok(completion) => completion,
+                    Err(error) => {
+                        let _ = cx.fail_context(root.context(), error.read_venue_error());
+                        return;
+                    }
+                };
                 let owner = if let (Some(a), Some(b)) = (from_ms, to_ms)
                     && b > a
                 {
                     IncomeHistory::Range(RangeHistory::new(
-                        Completion::new(command), RangeWalk::new(a,b,INCOME_WINDOW,100),
+                        completion, RangeWalk::new(a,b,INCOME_WINDOW,100),
                         |gaps| format!("WEEX income history is INCOMPLETE: {gaps} chunk(s) could not be walked to completion; totals are a lower bound"),
                         |rows| serde_json::to_string(rows).map_err(|e|VenueError::new(e.to_string())),
                     ).with_request_budget(INCOME_BUDGET, "WEEX income history is INCOMPLETE: lifetime request budget exhausted; totals are a lower bound"))
                 } else {
                     IncomeHistory::Single(CursorHistory::new(
-                        Completion::new(command),
+                        completion,
                         CursorWalk::new(1),
                         |_| "WEEX income history page budget exhausted".into(),
                         |rows| {
@@ -553,6 +819,7 @@ impl WeexFutures {
                 self.history.reads.insert(
                     command,
                     Read::Income {
+                        root,
                         symbol,
                         kind,
                         limit: if ranged {
@@ -586,12 +853,23 @@ impl WeexFutures {
             let _ = cx.fail_context(&context, "WEEX history range exceeds request budget");
             return;
         }
+        let Some(root) = self.history_root(cx, kind) else {
+            return;
+        };
+        let completion = match Completion::from_context(cx, command, root.context().clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(root.context(), error.read_venue_error());
+                return;
+            }
+        };
         self.history.reads.insert(
             command,
             Read::List {
+                root,
                 pending: requests,
                 owner: Box::new(CursorHistory::new(
-                    Completion::new(command),
+                    completion,
                     CursorWalk::new(1),
                     |_| "WEEX history stage page budget exhausted".into(),
                     |rows| {
@@ -633,6 +911,7 @@ impl WeexFutures {
             ArrayAt::Root
         });
         let request = Request {
+            leg: None,
             command,
             kind: fetch.kind,
             window: fetch.window,
@@ -643,25 +922,24 @@ impl WeexFutures {
             invalid: false,
             missing_fill_id: false,
         };
-        if matches!(fetch.kind, Kind::Trades) {
-            self.get(cx, fetch.path, &fetch.query, Task::History(request), stream);
-        } else if !self.signed_request(
+        let path_query = if fetch.query.is_empty() {
+            fetch.path.into()
+        } else {
+            format!("{}?{}", fetch.path, fetch.query)
+        };
+        self.send_history_page(
             cx,
-            Method::Get,
-            fetch.path,
-            &fetch.query,
-            None,
-            Task::History(request),
-            stream,
-        ) {
-            self.finish_list(
-                cx,
-                command,
-                Err(VenueError::new("WEEX history signing unavailable").outcome(Outcome::NotSent)),
-                true,
-            );
-        }
+            request,
+            ReadRequest {
+                method: Method::Get,
+                url: format!("{}{}", crate::paths::REST, path_query),
+                body: None,
+                stream,
+            },
+            path_query,
+        );
     }
+
     fn history_income_request(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -708,6 +986,7 @@ impl WeexFutures {
         })
         .expect("validated income bounds");
         let request = Request {
+            leg: None,
             command,
             kind: Kind::Income,
             window: (from, to),
@@ -718,23 +997,19 @@ impl WeexFutures {
             invalid: false,
             missing_fill_id: false,
         };
-        if !self.signed_request(
+        self.send_history_page(
             cx,
-            Method::Post,
-            "/capi/v3/account/income",
-            "",
-            Some(body),
-            Task::History(request),
-            Some(ArrayAt::Field("items")),
-        ) {
-            self.finish_income(
-                cx,
-                command,
-                Err(VenueError::new("WEEX history signing unavailable").outcome(Outcome::NotSent)),
-                true,
-            );
-        }
+            request,
+            ReadRequest {
+                method: Method::Post,
+                url: format!("{}/capi/v3/account/income", crate::paths::REST),
+                body: Some(body),
+                stream: Some(ArrayAt::Field("items")),
+            },
+            "/capi/v3/account/income".into(),
+        );
     }
+
     fn history_next_income(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
         let Some(Read::Income { owner, delay, .. }) = self.history.reads.get_mut(&command) else {
             return;
@@ -768,13 +1043,17 @@ impl WeexFutures {
             cx.clear_timer(timer);
         }
         match (*owner, strict, result) {
-            (IncomeHistory::Range(owner), true, Err(error)) => owner.reject(cx, error),
-            (IncomeHistory::Single(owner), true, Err(error)) => owner.reject(cx, error),
+            (IncomeHistory::Range(owner), true, Err(error)) => {
+                let _ = owner.reject(cx, error);
+            }
+            (IncomeHistory::Single(owner), true, Err(error)) => {
+                let _ = owner.reject(cx, error);
+            }
             (IncomeHistory::Range(owner), _, result) => {
-                owner.finish_with(cx, result, encode_income)
+                let _ = owner.finish_with(cx, result, encode_income);
             }
             (IncomeHistory::Single(owner), _, result) => {
-                owner.finish_with(cx, result, encode_income)
+                let _ = owner.finish_with(cx, result, encode_income);
             }
         }
     }
@@ -795,8 +1074,12 @@ impl WeexFutures {
             cx.clear_timer(timer);
         }
         match (strict, result) {
-            (true, Err(error)) => owner.reject(cx, error),
-            (_, result) => owner.finish_with(cx, result, |rows| encode_list(kind, rows)),
+            (true, Err(error)) => {
+                let _ = owner.reject(cx, error);
+            }
+            (_, result) => {
+                let _ = owner.finish_with(cx, result, |rows| encode_list(kind, rows));
+            }
         }
     }
     fn missing_fill_identity(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
@@ -822,10 +1105,13 @@ impl WeexFutures {
     }
     pub(crate) fn history_item(
         &mut self,
-        _cx: &mut Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         request: &mut Request,
         item: &str,
     ) -> bool {
+        if !self.history_delivery_current(cx, request) {
+            return true;
+        }
         request.raw_rows += 1;
         let ok = match &mut request.rows {
             Rows::Fills(rows) => serde_json::from_str::<FillRow<'_>>(item)
@@ -944,6 +1230,10 @@ impl WeexFutures {
         request: Request,
         response: Response<'_>,
     ) {
+        if !self.history_delivery_current(cx, &request) {
+            Self::finish_history_page(cx, &request);
+            return;
+        }
         if !(200..300).contains(&response.status) || request.invalid {
             let error = if request.invalid {
                 "malformed WEEX history row".into()
@@ -992,48 +1282,65 @@ impl WeexFutures {
         };
         match read {
             Read::List { owner, pending, .. } => {
-                match request.rows {
-                    Rows::Fills(page) => {
-                        for row in page {
-                            if owner.fresh(format!("{}|{}", row.symbol, row.id)) {
-                                owner.stage(ListRow::Fill(row));
+                let Some(leg) = request.leg.as_ref() else {
+                    return;
+                };
+                let context = leg.context().clone();
+                {
+                    let mut admission = match owner.admit(cx, &context) {
+                        Ok(admission) => admission,
+                        Err(_) => return,
+                    };
+                    match request.rows {
+                        Rows::Fills(page) => {
+                            for row in page {
+                                if admission.fresh(format!("{}|{}", row.symbol, row.id)) {
+                                    admission.stage(ListRow::Fill(row));
+                                }
                             }
                         }
-                    }
-                    Rows::Orders(page) => {
-                        for row in page {
-                            if owner.fresh(format!("{}|{}", row.symbol, row.id)) {
-                                owner.stage(ListRow::Order(row));
+                        Rows::Orders(page) => {
+                            for row in page {
+                                if admission.fresh(format!("{}|{}", row.symbol, row.id)) {
+                                    admission.stage(ListRow::Order(row));
+                                }
                             }
                         }
-                    }
-                    Rows::Trades(page) => {
-                        for row in page {
-                            owner.stage(ListRow::Trade(row));
+                        Rows::Trades(page) => {
+                            for row in page {
+                                admission.stage(ListRow::Trade(row));
+                            }
                         }
+                        Rows::Income(_) => unreachable!("list response"),
                     }
-                    Rows::Income(_) => unreachable!("list response"),
                 }
                 let count = owner.staged_len();
-                let gap = if request.missing_fill_id {
-                    Some("WEEX fill history is INCOMPLETE: row missing native fill id".into())
-                } else if has_more {
-                    Some(
+                {
+                    let mut admission = match owner.admit(cx, &context) {
+                        Ok(admission) => admission,
+                        Err(_) => return,
+                    };
+                    let gap = if request.missing_fill_id {
+                        Some("WEEX fill history is INCOMPLETE: row missing native fill id".into())
+                    } else if has_more {
+                        Some(
                         "WEEX order history is INCOMPLETE: venue advertises additional algo orders"
                             .into(),
                     )
-                } else {
-                    None
-                };
-                owner.advance_with_coverage(
-                    CursorPage {
-                        next: None,
-                        rows: request.raw_rows,
-                        fresh: count,
-                        want_more: false,
-                    },
-                    gap,
-                );
+                    } else {
+                        None
+                    };
+                    admission.advance_with_coverage(
+                        CursorPage {
+                            next: None,
+                            rows: request.raw_rows,
+                            fresh: count,
+                            want_more: false,
+                        },
+                        gap,
+                    );
+                }
+                let _ = cx.finish_http_context(&context);
                 if !pending.is_empty() && !owner.restart_stage() {
                     self.finish_list(
                         cx,
@@ -1058,30 +1365,52 @@ impl WeexFutures {
                 });
                 match owner.as_mut() {
                     IncomeHistory::Range(owner) => {
-                        for row in page {
-                            let facts = PageRow {
-                                timestamp: row.timestamp,
-                                identity: income_identity(&row),
+                        let Some(leg) = request.leg.as_ref() else {
+                            return;
+                        };
+                        let context = leg.context().clone();
+                        {
+                            let mut admission = match owner.admit(cx, &context) {
+                                Ok(admission) => admission,
+                                Err(_) => return,
                             };
-                            owner.stage(row, facts);
+                            for row in page {
+                                let facts = PageRow {
+                                    timestamp: row.timestamp,
+                                    identity: income_identity(&row),
+                                };
+                                admission.stage(row, facts);
+                            }
+                            admission.accept_page_with_coverage(gap);
                         }
-                        owner.accept_page_with_coverage(gap);
+                        let _ = cx.finish_http_context(&context);
                         *delay = Some(cx.set_timer(PAGE_DELAY));
                     }
                     IncomeHistory::Single(owner) => {
-                        let count = page.len();
-                        for row in page {
-                            owner.stage(row);
+                        let Some(leg) = request.leg.as_ref() else {
+                            return;
+                        };
+                        let context = leg.context().clone();
+                        {
+                            let mut admission = match owner.admit(cx, &context) {
+                                Ok(admission) => admission,
+                                Err(_) => return,
+                            };
+                            let count = page.len();
+                            for row in page {
+                                admission.stage(row);
+                            }
+                            admission.advance_with_coverage(
+                                CursorPage {
+                                    next: None,
+                                    rows: count,
+                                    fresh: count,
+                                    want_more: false,
+                                },
+                                gap,
+                            );
                         }
-                        owner.advance_with_coverage(
-                            CursorPage {
-                                next: None,
-                                rows: count,
-                                fresh: count,
-                                want_more: false,
-                            },
-                            gap,
-                        );
+                        let _ = cx.finish_http_context(&context);
                         self.finish_income(cx, command, Ok(()), false);
                     }
                 }
@@ -1113,6 +1442,16 @@ impl WeexFutures {
         strict: bool,
     ) {
         let command = request.command;
+        let current = self.history.reads.get(&command).is_some_and(|read| {
+            request
+                .leg
+                .as_ref()
+                .is_some_and(|leg| leg.context().owner() == read.root().context().owner())
+        });
+        Self::finish_history_page(cx, &request);
+        if !current {
+            return;
+        }
         if matches!(self.history.reads.get(&command), Some(Read::Income { .. })) {
             self.finish_income(cx, command, Err(error), strict);
         } else if matches!(self.history.reads.get(&command), Some(Read::List { .. })) {
