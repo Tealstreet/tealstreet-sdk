@@ -30,11 +30,12 @@ credential/queue/signing work may run. Context admission and caller receipt,
 capacity, duplicate ownership and finite clock precede the native diagnostic.
 CALLERS must disclose that precedence and label the dead-arm change DELETION.
 
-OPEN source/API gate: an admitted Mutation may project empty-journal NotSent
-where today's raw generic refusal has no outcome. Preserve native metadata as
-granted; prove the native outcome in originals and obtain core/overseer disposition
-before source if the existing shared terminal cannot represent that contract.
-No local projection override, fake Read or new engine seam is authorized here.
+Overseer ruling: accept the established shared pre-release contract, Read outcome
+None / Mutation NotSent. The CancelOrdersWithSymbols and SetStpMode native
+outcome None becomes NotSent after genuine admission, with text and kind
+unchanged. CALLERS must explicitly cite this precedent. The original native
+metadata assertion is superseded only for these Mutation outcomes; no shared API
+change, fake Read or local projection override is permitted.
 
 ## Inventory and preservation
 
@@ -62,8 +63,8 @@ shared capacity failure, no I/O or Store effects. Recover by retiring the exact
 first peer, repeat the native result, and validate all255 remaining peers. Pin
 NaN external Event, checked zero caller wait and duplicate-owner retention.
 Shared Read failures carry no outcome; Mutation admission failures carry NotSent.
-Original native metadata controls remain unchanged unless the overseer explicitly
-rules on the OPEN outcome gate. No missing-method/setup failures count as REDs;
+Original text/kind/code/hint assertions remain unchanged; the overseer explicitly
+superseded only the two Mutation outcome assertions as described above. No missing-method/setup failures count as REDs;
 disclose suffixes gated by the first capacity or clock assertion.
 
 Commit plan before compiling originals; independent native and core CLEAR are
@@ -87,7 +88,16 @@ Symbol-aware amendment is refused before venue entry; a subsequent ordinary
 Read proves forwarding is wired. Every one of the nine dead-group variants
 reaches its earlier native handler and never emits the private-phase diagnostic.
 
-The OPEN Mutation metadata gate is confirmed by execution, not hypothetical:
-CancelOrdersWithSymbols and SetStpMode today have outcome None. Shared admitted
-Mutation completion projects NotSent. No production change is authorized until
-the core owner and overseer settle this contract; Reads have no such mismatch.
+Execution confirmed the original Mutation metadata mismatch: native cancel and
+setting refusals have outcome None. The overseer then accepted shared Mutation
+NotSent as the precise pre-release disposition. Supersede the native helper's
+outcome assertion with command-classified Read None / Mutation NotSent, keeping
+every text/kind/code/hint assertion. This produces additional genuine assertion
+REDs on unchanged production; record their exact count before source.
+
+Revised original checkpoint after the ruling:18 execute12 intended assertion
+REDs/6 GREEN/0ignored. Four added REDs are precisely the two native Mutation
+cases and configured/public-only loops reaching their Mutation outcome check
+(None versus NotSent); the original eight capacity/NaN REDs are unchanged.
+The prior native-None evidence remains immutable at2161420eaec. No production,
+fixture setup or non-outcome expectation changed during this supersession.

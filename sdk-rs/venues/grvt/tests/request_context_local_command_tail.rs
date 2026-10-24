@@ -216,7 +216,7 @@ fn native(engine: &Engine<Probe>, actions: &[Action], case: Case) {
     let error = result[0].as_ref().unwrap_err();
     assert_eq!(error.message, case.message());
     assert_eq!(error.kind, None);
-    assert_eq!(error.outcome, None);
+    assert_eq!(error.outcome, case.shared_outcome());
     assert_eq!(error.venue_code, None);
     assert_eq!(error.retry_after_ms, None);
     unchanged(engine);
