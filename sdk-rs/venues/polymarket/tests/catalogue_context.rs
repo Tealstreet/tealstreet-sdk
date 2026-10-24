@@ -396,3 +396,87 @@ fn malformed_row_preserves_valid_neighbour_and_empty_catalogue_retries() {
     no_catalogue(&empty);
     retry(&a, 20.);
 }
+
+#[test]
+fn catalogue_retry_and_midpoint_timeout_keep_separate_current_owners() {
+    let mut e = public();
+    let first = start(&mut e);
+    e.handle(
+        20.,
+        Event::HttpFailed {
+            request: first.id,
+            error: "catalogue transport",
+        },
+    );
+    let failed = actions(&mut e, 20.);
+    no_catalogue(&e);
+    no_gamma(&failed);
+    let catalogue_retry = retry(&failed, 20.);
+    e.handle(
+        1020.,
+        Event::TimerFired {
+            timer: catalogue_retry,
+        },
+    );
+    let current = gamma(actions(&mut e, 1020.));
+    let completed = answer(&mut e, &current, 1021., 200, &good());
+    assert!(e.store().loaded().markets);
+    let midpoint = completed
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("/midpoints") => Some(r),
+            _ => None,
+        })
+        .expect("catalogue completion releases the first managed midpoint");
+    e.handle(
+        1022.,
+        Event::HttpFailed {
+            request: first.id,
+            error: "duplicate old catalogue failure",
+        },
+    );
+    let stale = actions(&mut e, 1022.);
+    assert!(!stale.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    assert!(e.store().tickers().is_empty());
+    let deadline = 1021. + 20_000.;
+    let timed_out = answer(&mut e, &midpoint, deadline, 200, r#"{"2":"0.4"}"#);
+    assert!(e.store().tickers().is_empty());
+    assert!(!e.store().loaded().tickers);
+    no_gamma(&timed_out);
+    let midpoint_retry = retry(&timed_out, deadline);
+    e.handle(
+        deadline + 1.,
+        Event::HttpFailed {
+            request: midpoint.id,
+            error: "duplicate old midpoint failure",
+        },
+    );
+    let duplicate = actions(&mut e, deadline + 1.);
+    assert!(
+        !duplicate
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+    e.handle(
+        deadline + 1000.,
+        Event::TimerFired {
+            timer: midpoint_retry,
+        },
+    );
+    let retry_actions = actions(&mut e, deadline + 1000.);
+    no_gamma(&retry_actions);
+    let retry = retry_actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("/midpoints") => Some(r),
+            _ => None,
+        })
+        .expect("only the failed midpoint offset retries");
+    assert_ne!(retry.id, midpoint.id);
+    let body = format!(r#"{{"{TOKEN}":"0.5","2":"0.4"}}"#);
+    let done = answer(&mut e, &retry, deadline + 1001., 200, &body);
+    assert!(e.store().loaded().tickers);
+    assert_eq!(e.store().tickers().len(), 2);
+    no_gamma(&done);
+    no_command_or_sign(&done);
+}

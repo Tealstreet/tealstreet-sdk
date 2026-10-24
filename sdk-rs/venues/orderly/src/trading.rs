@@ -5,11 +5,40 @@ use crate::{
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, CommandWait, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
+
+fn reject_unsupported_order_controls(cx: &mut Cx<'_, Pending>) {
+    match cx.command_wait() {
+        Some(CommandWait::Remaining(_)) => {}
+        Some(CommandWait::Expired) => {
+            let _ = cx.reject_expired_command(Operation::Mutation);
+            return;
+        }
+        None => {
+            let _ = cx.reject_unstamped_command(Operation::Mutation);
+            return;
+        }
+    }
+    let Ok(context) = cx.admit_http_command(Policy {
+        operation: Operation::Mutation,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }) else {
+        return;
+    };
+    let _ = cx.fail_context(
+        &context,
+        not_sent("Bybit BBO and TickSize controls are not supported by Orderly")
+            .kind(ErrorKind::Unsupported),
+    );
+}
 
 pub struct Request {
     pub command: CommandId,
@@ -1000,11 +1029,7 @@ impl Orderly {
                 .iter()
                 .any(|o| o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some())
         {
-            cx.fail(
-                id,
-                not_sent("Bybit BBO and TickSize controls are not supported by Orderly")
-                    .kind(ErrorKind::Unsupported),
-            );
+            reject_unsupported_order_controls(cx);
             return;
         }
         if self.account.credentials.is_none()

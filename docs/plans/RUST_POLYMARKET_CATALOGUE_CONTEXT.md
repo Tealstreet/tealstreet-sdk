@@ -144,3 +144,47 @@ are token-exact, including the existing private-startup proof. Fresh integrated
 bans (including request/signing/socket inventory controls) pass. CI owns full
 feature/WASM/size/performance evidence; exact native/caller and committed core
 reviews are requested in parallel with the draft publication.
+
+
+## Actual midpoint composition
+
+Plain composition integrates actual midpoint landing
+`2d0460e4b6b8ccde68db9837069b04e03dbc37cf` into the reviewed catalogue head
+`be48faa06cc3a036f40e837dd74c443df233153c`. The only runtime conflict is the
+failure match: preserve catalogue exact-owner retirement before its native
+whole-walk Backoff, and preserve incoming midpoint offset/context retirement
+before native per-offset recovery. Both reviewers clear resolution SHA256
+`0dc0f185de0d7c09c3b4181662f53fd8d053e480e4d46a792e74b9c0888874ea`;
+the complete runtime blob is `35b3f7af9b228eaf6cb5abe1c3dc23b4aa9fc1a5`.
+Both pre-status DATA gates and catalogue retirement of old midpoint owners are
+automatic composition. Docs retain incoming plus the own section once; the
+manifest removes only the catalogue sender from actual inventory 13 to 12.
+
+The original twelve catalogue controls remain an exact prefix. One additive
+control proves catalogue failure/retry followed by midpoint equality Timeout,
+with duplicate old callbacks inert and only the correct recovery path active.
+The incoming midpoint pressure fixture initially fails because Gamma now owns
+one registry slot: the old pre-response setup can reserve only 255 peers.
+The corrected setup uses real preparation refusals for both 102-token batches,
+then saturates all 256 peers before a genuine retry. It preserves no-I/O
+capacity refusal, bounded native second Backoff, exact 100/2 request bodies and
+all-credit reclamation. It follows the native replacement timer for an overdue
+sibling key; a draft assertion incorrectly assumed incremental publication
+kept loaded=false and was corrected to the exact accepted row. These fixture
+failures are disclosed, not runtime adoption REDs. No production change follows.
+
+The exact composition passes 28 focused custody controls and 172 scoped native
+Polymarket tests, zero ignored; strict all-target Clippy and package formatting
+pass with jobs=4. Initial patch checking differed only in conflict marker label
+(HEAD versus full SHA); the applied result is byte-exact to the reviewed blob.
+Full merge whitespace checking finds an incoming blank EOF line in the OKX
+plan; own-path whitespace checks pass and the foreign document stays exact.
+Pressure-fixture delta review and fresh composed PR CI/size remain freeze and
+readiness gates; no previous green run is claimed for this source composition.
+
+
+The first inventory check rejects an empty per-file map after the last lib.rs
+sender is removed; removing that empty path entry restores the canonical map.
+The next full bans run finds only advanced foreign Backpack/WEEX inventories
+against the moving remote landing. This composition will genuinely merge that
+landing and rerun bans rather than editing foreign manifests.
