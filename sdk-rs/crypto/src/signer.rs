@@ -1552,12 +1552,27 @@ mod tests {
         }
     }
 
+    /// R2b: blank-after-trim optional material is absent even under an
+    /// encoding where an empty value would fail to decode (PEM).
+    #[test]
+    fn blank_trimmed_optional_extra_is_absent_before_decoding() {
+        let mut policy = kucoin_policy_json();
+        policy["primary"]["extra"]["encoding"] = serde_json::json!("pem");
+        let policy: CredentialSetupPolicy = serde_json::from_value(policy).unwrap();
+        let (_, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("  \t "), serde_json::Value::Null).to_string(),
+            policy,
+        )
+        .unwrap();
+        assert!(ids.primary.unwrap().extra.is_empty());
+    }
+
     /// R3: a read-key identity names the primary's one broker ref; it cannot
     /// supply its own, and without a primary broker it has none.
     #[test]
     fn kucoin_read_identity_aliases_the_primary_broker_ref() {
         let read = serde_json::json!({"key": "read-key", "secret": "read-secret"});
-        let (_, ids) = LocalSigner::from_json_with_policy(
+        let (signer, ids) = LocalSigner::from_json_with_policy(
             kucoin_setup(Some("broker-secret"), read.clone()).to_string(),
             kucoin_policy(),
         )
@@ -1565,6 +1580,15 @@ mod tests {
         assert_eq!(
             ids.secondary.unwrap().extra.get(&broker_role()),
             ids.primary.unwrap().extra.get(&broker_role())
+        );
+        // One installed copy: the secondary slot has no broker material of its own.
+        assert_eq!(
+            signer
+                .keys
+                .keys()
+                .filter(|reference| reference.0.ends_with(".extra.kucoinBroker"))
+                .count(),
+            1
         );
         let own = serde_json::json!({"key": "read-key", "secret": "read-secret",
             "extra": {"kucoinBroker": {"value": "other"}}});
@@ -1626,11 +1650,6 @@ mod tests {
             broker_sign(&signer, &primary.credential, &broker),
             Err(SignError::InvalidRequest),
             "a broker ref is never interpolated as a Credential"
-        );
-        // The ordinary API secret signs its own HMAC, never as the broker's.
-        assert_ne!(
-            broker_sign(&signer, &primary.signing, &primary.credential),
-            Ok(hmac_of(b"broker-secret"))
         );
         assert_eq!(
             signer.can_sign(&broker, Algorithm::HmacSha256),

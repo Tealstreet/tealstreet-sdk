@@ -150,6 +150,17 @@ impl CredentialSetupPolicy {
             {
                 return Err(SignError::InvalidRequest);
             }
+            // An alias holds exactly the primary's ref for that key, or nothing.
+            if let Some(declared) = declared.filter(|d| d.field == ExtraFieldPolicy::AliasPrimary)
+                && let Some(reference) = identity.extra.get(&declared.key)
+                && identities
+                    .primary
+                    .as_ref()
+                    .and_then(|primary| primary.extra.get(&declared.key))
+                    != Some(reference)
+            {
+                return Err(SignError::InvalidRequest);
+            }
             if let Some(declared) = declared {
                 let required = match declared.field {
                     ExtraFieldPolicy::Optional | ExtraFieldPolicy::AliasPrimary => false,
