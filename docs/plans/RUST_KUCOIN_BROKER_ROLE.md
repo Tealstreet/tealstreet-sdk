@@ -28,8 +28,9 @@ refused.
     `PayloadPart::Credential`.
   - The provider gains no special case and no rule of its own.
 - **Material.** The broker secret is UTF-8.
-  - Trusted setup trims it as native does (JavaScript `String.prototype.trim`,
-    including U+FEFF).
+  - Trusted setup trims it exactly as the native Rust venue does today
+    (`str::trim` in `venues/kucoin/src/sign.rs`, Unicode White_Space only), so
+    U+FEFF is kept.
   - A value that is blank after trimming mints no ref and is not an error,
     because the broker is optional.
 - **Selected identity.** Setup mints one broker ref. The primary's
@@ -39,8 +40,9 @@ refused.
   - The recipe reads the broker ref from whichever identity `Selection` chose,
     so it never reaches across slots.
   - A secondary that supplies its own broker material is refused.
-- **Non-secret parts.** Partner, name and verify are trimmed `EngineOptions`
-  values owned by the venue. They never enter the signer. Suppressing a
+- **Non-secret parts.** Partner and name are trimmed `EngineOptions` strings.
+  Verify is an `Option<bool>` (default `true`, explicit `false` kept). All
+  three are owned by the venue. They never enter the signer. Suppressing a
   partial triplet (missing ref, empty partner or empty name) is the venue's
   rule, in codex-9czdjh's cutover.
 
@@ -77,8 +79,9 @@ style) rather than at compile time.
 - R1 (crypto): a `kucoinBroker` extra under the KuCoin policy installs one ref,
   and that ref signs `HmacSha256` over `[stamp, partner, Credential(api key)]`
   equal to an independently computed HMAC. Fails today: no such `ExtraKey`.
-- R2 (crypto): trimming. `"  b\u{feff} "` installs `b`; `"   "` and `""` mint
-  no ref and do not error; without `trim` (ApeX), behaviour is unchanged.
+- R2 (crypto): trimming matches native `str::trim`. `"  b \t"` installs `b`;
+  `"\u{feff}b"` keeps U+FEFF (control); `"   "` and `""` mint no ref and do not
+  error; without `trim` (ApeX), behaviour is unchanged.
 - R3 (crypto): alias.
   - The secondary's `extra[kucoinBroker]` equals the primary's ref, and the
     material is installed once.

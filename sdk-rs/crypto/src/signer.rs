@@ -1421,12 +1421,12 @@ mod tests {
         );
     }
 
-    /// R2: native trim (including U+FEFF) before install; blank after trim
-    /// is absent, not an error.
+    /// R2: the native Rust `str::trim` before install (U+FEFF is not trimmed);
+    /// blank after trim is absent, not an error.
     #[test]
     fn kucoin_broker_material_is_trimmed_and_blank_mints_nothing() {
         let (signer, ids) = LocalSigner::from_json_with_policy(
-            kucoin_setup(Some("  b\u{feff} "), serde_json::Value::Null).to_string(),
+            kucoin_setup(Some("  b \t"), serde_json::Value::Null).to_string(),
             kucoin_policy(),
         )
         .unwrap();
@@ -1435,6 +1435,18 @@ mod tests {
         assert_eq!(
             broker_sign(&signer, &broker, &primary.credential),
             Ok(hmac_of(b"b"))
+        );
+        // Control: native str::trim keeps U+FEFF, so its bytes are kept too.
+        let (signer, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("\u{feff}b"), serde_json::Value::Null).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        let primary = ids.primary.unwrap();
+        let broker = primary.extra[&broker_role()].clone();
+        assert_eq!(
+            broker_sign(&signer, &broker, &primary.credential),
+            Ok(hmac_of("\u{feff}b".as_bytes()))
         );
         for blank in ["   ", ""] {
             let (_, ids) = LocalSigner::from_json_with_policy(
