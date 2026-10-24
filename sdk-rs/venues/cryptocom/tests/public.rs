@@ -208,8 +208,8 @@ fn failed_candle_reads_complete_with_error() {
             to_ms: None,
         }),
     );
-    let request = engine
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r.id),
             _ => None,

@@ -100,3 +100,42 @@ does not assign every mismatch to Rust. Exact paths and raw reports carry the de
   The frozen Binance lifecycle fixture is sanitized, scripted and Rust-driven.
   No live credentialed private, frozen-master TS, peak-memory or browser cutover
   proof is claimed by these results.
+
+## Audited native-correct divergences (2026-10-24)
+
+These classifications supplement the historical collection above. Keep the
+matching declarations: strict FAIL records a TS/Rust difference, not necessarily
+a Rust defect. Do not change correct native economics to imitate TS. Reopen a
+classification only when its wire facts, producer behavior or projection change;
+it does not certify unrelated paths or historical tape versions.
+
+| Declaration family and audited cases | Classification and verified native behavior |
+| --- | --- |
+| Binance USD-M: `710a58aa511ed26bfe55bad1fef6b67a2544e5a119178560763261675d8862bf` (11 keys), `8066c3b4de3742be5345977c9f66d270898b1b8ebbf220f1cffc384f433f6ba8` (43) | TS-side missing client IDs, average-price substitution and zero-margin placeholder. Rust retains reported IDs, emits execution `L=2999` rather than cumulative `ap=2999.2`, and carries isolated wallet `iw=301.72`. |
+| Binance Spot: `17f14a131f0240857e7a0866432587f8929a9aea084d1f619c65a88bb4309c67` (28 economic/identity/lifecycle keys) | TS-side missing client IDs/TIF and startup order visibility; TS uses limit `p=2800` instead of execution `L=2799` and changes a filled order to canceled. Rust retains reported metadata/open-order rows and preserves Closed after the later cancel. The four separate protocol keys are outside this classification. |
+| Binance COIN-M: `a0a35640cbdb5fdd8f43a14188cc4113290683b1e625e131f6da0e9b8b38f94b` (34 native-correct keys, 14 harness keys) | TS-side missing client IDs/TIF/native contract count and filled-to-canceled transition. Rust retains seven native contracts and Closed. The fourteen `flatPositionPnl` paths are a shared harness defect: unavailable native NaN becomes a null-valued row while TS absence produces none. They are not native PnL defects; pruning requires fresh proof from the projection fix (#2015). |
+| Binance PM: `aef98183e725ca464ac67b55e40ee27f826d785a705a6dbb728e4717d5b853b1` (26) | TS-side missing client IDs/TIF. Rust preserves the reported fields; no native economic correction is justified by these paths. |
+| Hyperliquid perps: `7b13a769157f3523faf2f64109c8594ffaca9e681561e43b59ae7f426d1aeb2e` (6); perps with spot enabled: `7b2e2323e0e367eaf716b9a80dc458cf6d3f2e00643cc021504dd3e8e7590f46` (8) | TS-side initial HIP-3 position/settings omission or default, transient resting-order visibility and missing client ID. Rust publishes wire FOO size 4 at 50, leverage 10 and margin 20; positive resting ACKs justify orders 3001/3005, and the reported cloid survives. Preserve these values rather than copying TS absence/default 20. |
+| TxFlow: `0dc0d15f920189c2c708efb537aca6df5f5cb3342decb03df03306587a22976b` (3) | TS-side stale directional leverage/margin at accepted-command boundaries. Executed `updateLeverage=7`, `updateMarginMode(isCross=false)` and post-command readback support Rust's leverage 7 and isolated mode, including common one-way rails. |
+
+Evidence scope: the Binance audit checked all 156 full failures in the five
+private reports from [run 40040892521](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/40040892521),
+with relevant native/TS/projection sources unchanged through `2371f5439a3`.
+The Hyperliquid/TxFlow wire/source review is pinned to `f8163b7b852` and checks all
+six-plus-eight Hyperliquid and three current TxFlow paths. Scoped native controls
+pass 22 Binance account-variant, 25 Hyperliquid account and six TxFlow settings
+tests. These are bounded economic classifications, not fresh whole-matrix parity
+or automatic declaration-prune receipts.
+
+The additional 78-key historical USD-M tape and TxFlow hash
+`ea153d7daf90578ce6aaaf66ae426a32d4e6dec464d0f0764364afa377415d0f`
+were not reauthenticated by this audit; retain them without extending the
+native-correct finding to their whole raw outputs. The separate Hyperliquid
+Spot alias's 17-record PASS is a different workload from the 62-record
+spot-enabled perps case above and cannot justify pruning its eight keys.
+
+The durable source checks are the native account/account-variant tests and
+`private-tape.mjs`, `private-tape-binance-variants.mjs`,
+`private-tape-hyperliquid.mjs` and `private-tape-txflow.mjs`. The manifest remains
+the sole machine-readable exact-key list; this docs-only classification neither
+changes those keys nor weakens comparison.
