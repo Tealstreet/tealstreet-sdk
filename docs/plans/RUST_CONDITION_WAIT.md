@@ -282,6 +282,9 @@ non-placement commands.
   call eligible now, so delivery is the normal flush into
   `on_http_plan_ready`. A declined expiry seals through `fail_plan`: the
   streamed IDs are projected, with no fence.
+- **WASM bytes** (release, against the frozen serial Plan `d4efb3f6b15`):
+  Bybit 1,336,171 to 1,338,378 (+2,207); WOO 1,240,977 (+0); Bitget 1,331,269
+  (+0). Bybit pays for the Preflight-ready paths it already links.
 - **Changes from the frozen REDs.** `serial_plan_condition_wait` gains `next`
   (Bitget's 40085 replan re-reads after release), and the tests pass
   `mutation()`. RED24 is a new control: a parked Plan issues the Read it named.
