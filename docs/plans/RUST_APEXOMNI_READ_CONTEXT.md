@@ -6,6 +6,7 @@ Source pin: unit head `aa824213600`; production edits wait until that unit
 lands after combo-5b, and then start from the actual landing.
 Reviewers requested: codex-uufub4 (engine custody), claude-m26ps4
 (credential semantics), codex-hcmq3f (RequestContext plan owner).
+claude-m26ps4: CLEAR at `e9b37e81da2`, with two pins incorporated below.
 
 This carries out phases 3 and 4 of
 [RUST_APEXOMNI_REQUEST_CONTEXT.md](RUST_APEXOMNI_REQUEST_CONTEXT.md) (single
@@ -51,8 +52,20 @@ and attaches `cx.sign_http`. Wrapper state lives in `Pending::SignedAuth`.
   - `finish_http_context` on every terminal before replacement work.
   - Balance stays independent after commit; a failed balance cannot roll
     back the committed pair.
-- **Symbols.** Background Read with the 20 s native timeout and
-  `RetryPolicy::Never`. The seed `Backoff` remains the sole retry, as today.
+- **Symbols.** Select first, then branch on the selected identity (m26ps4
+  pin 1).
+  - A passphrase ref means signed `request_signed_managed` with
+    `sign::Http::new` unchanged.
+  - No passphrase ref, or no identity, means unsigned `request_managed` whose
+    Policy has `credential: None`, so no Credential or Selection residue
+    remains.
+  - A missing identity stays public discovery for symbols only. Every other
+    read keeps the typed refusal "ApeX API key, signing key and passphrase are
+    required" through `LocalRefusal`, before any action.
+  - The passphrase test reads the trusted `Identity.passphrase` ref only,
+    never presence of material (m26ps4 pin 2). Its comment stays, and the
+    ApeX expectation in the credential-selection checker records it.
+  - Background Read with the 20 s native timeout and `RetryPolicy::Never`. The seed `Backoff` remains the sole retry, as today.
   A signer refusal keeps the #2008 control behavior: `request.failed`, then
   the startup retry is scheduled, with nothing sent.
 - **Identity command.** Use `SelectedRead::command` with the original
@@ -97,7 +110,9 @@ handoff.
 
 1. Symbols with a passphrase: signed headers present, then
    `(legacy, Prepare, Claim) == (1,0,0)` instead of `(0,1,1)` (RED).
-2. Symbols without a passphrase: no `APEX-` headers, then the same RED.
+2. Symbols without a passphrase: no `APEX-` headers, then the same RED. After
+   conversion the Prepare intent must be `Public` (no credential in the
+   context); the signed case must be `Primary`.
 3. Snapshot positions/orders: both signed, `(2,0,0)` vs `(0,2,2)` (RED).
 4. Balance after commit: signed, `(1,0,0)` vs `(0,1,1)` (RED).
 5. `FetchAccount`: signed, `(1,0,0)` vs `(0,1,1)` (RED).

@@ -2,7 +2,7 @@
 //! (RUST_APEXOMNI_READ_CONTEXT.md). Each independent case is its own test.
 mod support;
 
-use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+use safe_cex_engine::request_context::{Claim, HttpAction, Prepared, RoutingIntent};
 use safe_cex_engine::{Action, Command, ErrorKind, Event, HttpRequest, Notice, Query, Response};
 use safe_cex_venue_apexomni::Options;
 use support::*;
@@ -18,6 +18,7 @@ struct Output {
     requests: Vec<HttpRequest>,
     actions: Vec<Action>,
     legacy: usize,
+    intents: Vec<RoutingIntent>,
     prepared: usize,
     claimed: usize,
 }
@@ -36,10 +37,11 @@ fn drain(engine: &mut TestEngine, now: f64) -> Output {
             Action::ManagedHttp(action) => match *action {
                 HttpAction::Prepare {
                     preparation,
+                    intent,
                     request,
-                    ..
                 } => {
                     assert!(engine.http_preparation_pending(preparation));
+                    output.intents.push(intent);
                     output.prepared += 1;
                     engine.http_prepared(
                         now,
@@ -186,6 +188,7 @@ fn startup_symbols_with_a_passphrase_is_a_managed_signed_background_read() {
     assert_eq!(output.requests.len(), 1);
     signed(&output.requests[0], "/v3/symbols");
     managed(&output, 1);
+    assert_eq!(output.intents, [RoutingIntent::Primary]);
 }
 
 #[test]
@@ -203,6 +206,8 @@ fn startup_symbols_without_a_passphrase_is_a_managed_unsigned_read() {
             .all(|(key, _)| !key.starts_with("APEX-"))
     );
     managed(&output, 1);
+    // No Credential or Selection residue: the context routes as Public.
+    assert_eq!(output.intents, [RoutingIntent::Public]);
 }
 
 #[test]
