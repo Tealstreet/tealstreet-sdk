@@ -2958,6 +2958,48 @@ signer, private authority, session or engine policy is changed. Original new
 targets execute seven native controls PASS and15 intended assertion REDs, zero
 ignored. Exact own prune is four singleton occurrences across three keys.
 
+## WOO and Crypto.com shared snapshot-token fan-out
+
+~~Their joined order censuses publish native cache state and Store rows without
+using the engine's explicit financial write fence.~~ Both now capture one Store
+token per logical join, preserve it across pages/bounded retries and admit native
+cache updates plus rows at one commit boundary. Existing per-ID WS clocks remain
+protocol-owned; no venue epoch copy, universal WS invalidation or new engine API.
+
+Two native original-code controls expose the accepted-write crossing: WOO's
+older empty join removes retained orders after a validated cancel ACK, and
+Crypto.com's older nonempty join inserts an absent order after a validated
+cancel-all ACK. The shared boundary keeps the previous accepted rows until a
+fresh read. This is a snapshot authority correction; it does not invent a new
+native ACK payload, optimistic terminal row, execution or command outcome.
+Explicit Store invalidation/exhaustion and startup-cache controls are adoption
+controls, not additional original financial-defect claims. WS-peer compatibility
+controls pass on the original code and after adoption.
+
+BloFin remains a separate design item: startup execution-prefix seeding can be
+valid even when newer WS order-state revisions reject row replacement, and the
+seed path releases queued executions. Preserve that dual evidence policy before
+moving it to a shared admission boundary; this pair changes no BloFin source.
+
+## BloFin local leverage refusal custody
+
+Two account.rs numeric failures now use shared genuine Read admission followed
+by fail_context on that exact root. BloFin 23->21 occurrences / 19->17 fingerprints;
+only the two singleton rows are removed. No signer, trading, history, closed
+position or successful private read is converted. The coherent custody cutover
+remains with codex-zs5e83. No per-venue admission/completion implementation.
+
+## OKX closed-position request ownership
+
+Closed pages now consume shared SelectedRead command roots/legs and the original
+ReadCompletion/ReadCursorHistory authority. Delivery admission precedes raw row
+count, oldest timestamp, staging and cursor changes. The engine owns whole-call
+expiry; exact-Owner retirement removes native delayed pages, with no local root
+timer or numeric terminal fallback. Native accepted-prefix provider/physical
+recovery remains separate from strict root/local refusal. Shared list/sign
+consumer deletion is deferred to the remaining account/discovery/write owners;
+this conversion does not remove or relax any staging/checker inventory row.
+
 ## MEXC unsigned discovery and depth Context adoption
 
 The public catalogue/ticker streamed sender and subscription-depth GET sender
