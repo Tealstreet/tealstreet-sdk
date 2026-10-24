@@ -2758,18 +2758,6 @@ producer/source, archive and restored-runtime ownership are unchanged. The faile
 Bybit attempt remains failed and supplies no timing or mean; transport recovery
 creates no physical retry or third sample.
 
-<<<<<<< HEAD
-## Metadata/settings freshness core
-
-The engine/Store owner supplies BingX query coalescing, settings-write fences
-and background settings publication observations. WEEX retains its incoming
-managed Context leverage reader and native settings revision; only background
-settings proposals and Store write fences use this shared boundary. No WEEX
-query coalescing or joined managed adoption is claimed. Native financial fences
-remain separate. BingX Plan/observer production wiring still requires the
-reviewed planned-execution seam and independent-observer controls.
-[Implementation and limits](RUST_METADATA_FRESHNESS.md).
-=======
 ## Selected root and physical page custody
 
 The shared selected-read module now couples one original caller-receipt Read
@@ -2819,4 +2807,14 @@ failures; no release inference, root timer, retry loop or error table is added.
 The exact prune is history.rs14F/18O plus History's lib signing-failure1F/1O.
 Discovery's two list/sign sites and the OKX staging entry remain because actual
 Markets/Tickers consumers still use them, confirmed with the signer owner.
->>>>>>> cf05cf13663
+
+## Metadata/settings freshness core
+
+The engine/Store owner supplies BingX query coalescing, settings-write fences
+and background settings publication observations. WEEX retains its incoming
+managed Context leverage reader and native settings revision; only background
+settings proposals and Store write fences use this shared boundary. No WEEX
+query coalescing or joined managed adoption is claimed. Native financial fences
+remain separate. BingX Plan/observer production wiring still requires the
+reviewed planned-execution seam and independent-observer controls.
+[Implementation and limits](RUST_METADATA_FRESHNESS.md).

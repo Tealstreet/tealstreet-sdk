@@ -278,10 +278,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | BingX FetchAccount selected Read | Plan; original REDs next | Before replacing identity entry/failure custody with the frozen shared selected-read helper or pruning its two terminals. | [RUST_BINGX_IDENTITY_CONTEXT.md](RUST_BINGX_IDENTITY_CONTEXT.md) |
 | [Bitget CPU option-B follow-up](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md) | Shared second-runner CPU remeasurement, two-run mean and fail-closed certification; enabled for every CPU-gated suite, with unchanged tapes and thresholds. |
 | Caller-wait Read root expiry | Plan under review (claude-fe7lgm) | Before relying on engine-owned expiry of a tracked caller-wait Read root, or refusing a missing command receipt. | [RUST_READ_ROOT_EXPIRY.md](RUST_READ_ROOT_EXPIRY.md) |
-<<<<<<< HEAD
-
-| Metadata/settings freshness | BingX query owner; WEEX background freshness; Plan composition pending | Before metadata read coalescing, per-symbol write fences or atomic settings publication. | [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md) |
-=======
 | Store order fence domains | Keep-both documentation plan | Before changing the broad late-ACK revision or selective logical snapshot epoch. | [RUST_ORDER_FENCE_DOMAINS.md](RUST_ORDER_FENCE_DOMAINS.md) |
 | Selected Read roots and page legs | Shared implementation; final dependency integration pending | Before retaining one selected caller-wait root across native physical history pages. | [RUST_SELECTED_READ_LEGS.md](RUST_SELECTED_READ_LEGS.md) |
 
@@ -289,4 +285,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Replay protocol audit finalization | Shared harness correction | Before changing checkpoint capture, terminal protocol coverage or the final replay boundary. | [RUST_REPLAY_AUDIT_FINALIZATION.md](RUST_REPLAY_AUDIT_FINALIZATION.md) |
 | OKX history request custody | Plan and original REDs; waits for #1945 | Before converting OKX history transport, native soft failure or caller-root deadlines. | [RUST_OKX_HISTORY_REQUEST_CONTEXT.md](RUST_OKX_HISTORY_REQUEST_CONTEXT.md) |
->>>>>>> cf05cf13663
+
+| Metadata/settings freshness | BingX query owner; WEEX background freshness; Plan composition pending | Before metadata read coalescing, per-symbol write fences or atomic settings publication. | [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md) |

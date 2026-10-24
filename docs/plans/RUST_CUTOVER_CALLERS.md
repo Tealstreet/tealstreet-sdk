@@ -6329,60 +6329,6 @@ distinguish the following:
 | Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
 | Engine Timeout terminal | The root expired. No further work is issued. |
 
-<<<<<<< HEAD
-## Retained command readiness
-
-With the engine's `http-plans` feature, native FIFO commands can park their own
-Preflight during genuine entry and activate it once after a predecessor physically
-retires. They keep their original command generation; waiting creates no request,
-timer or artificial deadline. Final native Plan admission establishes its bound.
-A predecessor's HTTP DATA cannot donate command-entry or response authority to
-the next command. Cleanup returns only an already-parked handle; actual activation
-runs after cleanup, callback exit and the execution sweep.
-
-A ready callback must finish, submit a bounded prerequisite read or admit its Plan.
-An unhandled callback or a selected read with no submitted HTTP fails once with
-Internal. ReadOnly has no write outcome; a truly unissued mutation is NotSent.
-NX consumes that one terminal and keeps any prior uncertain effects for ordinary
-reconciliation. Ready custody cannot submit or retire another command's work.
-Root expiry and preparation refusal wake the successor in the same engine event;
-no unrelated feed event is needed. No host wire or signer capability is added.
-
-While either retained-Preflight readiness or Plan readiness owns the callback,
-Session creation, derived legs, retirement and waiter changes refuse with State
-before reserving IDs or consuming timers/continuations. Session-ready/failed
-drains return empty; session_wait returns its pending unchanged. Read-only
-session_live and the active Plan's own APIs remain available. Ordinary Session,
-socket, timer and startup callbacks retain their existing Session authority.
-
-## Shared metadata/settings owner: WEEX and BingX
-
-BingX same-symbol metadata calls at the same eligible settings revision share
-one leverage read followed by one margin read, retaining each command's native
-result or typed failure. Later sequential calls remain fresh. Settings writes,
-changed eligibility and background settings proposals invalidate stale Store
-publication independently of native financial position fences. A read admitted
-during a pending write cannot become publishing merely because that write ends.
-
-WEEX background settings proposals use the shared Store observation and write
-fences, including last-valid duplicate configuration handling. Explicit WEEX
-leverage reads retain the incoming managed Context path and native
-`settings_revision` fence: each command issues its own symbol configuration
-read. They do not join the shared metadata query owner. Their native codec,
-credential selection, retry policy, typed completion and cache update order stay
-with that managed adapter.
-
-Store metadata tokens and background observations bind to the Store issuer;
-foreign, default or exhausted authority cannot publish. These settings fences
-provide no HTTP delivery, observer or command completion authority. BingX's
-joined commands now receive the shared Plan's uniform result or typed failure,
-once per surviving observer. Each observer can expire or detach independently;
-a live peer retains the physical work, while the last observer leaving revokes
-its unsent work and publication authority. Store contains no numeric command
-waiter list or terminal fan-out. Callers retain native fallback and error
-handling; no numeric fallback stands in for managed completion.
-See [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md).
-=======
 ## Selected caller-wait roots and physical history pages
 
 Signed plain command reads can retain one selected identity, slot, route and
@@ -6568,4 +6514,56 @@ are unchanged. Plain page-cap/stall results retain their own incomplete notice;
 EEA composite cap/stall still rejects. Only successful native51603 is definitive
 lookup absence. FetchClosedPositions/okxJournal remains its separate unchanged
 source. Discovery still uses the retained legacy list/sign funnel.
->>>>>>> cf05cf13663
+
+## Retained command readiness
+
+With the engine's `http-plans` feature, native FIFO commands can park their own
+Preflight during genuine entry and activate it once after a predecessor physically
+retires. They keep their original command generation; waiting creates no request,
+timer or artificial deadline. Final native Plan admission establishes its bound.
+A predecessor's HTTP DATA cannot donate command-entry or response authority to
+the next command. Cleanup returns only an already-parked handle; actual activation
+runs after cleanup, callback exit and the execution sweep.
+
+A ready callback must finish, submit a bounded prerequisite read or admit its Plan.
+An unhandled callback or a selected read with no submitted HTTP fails once with
+Internal. ReadOnly has no write outcome; a truly unissued mutation is NotSent.
+NX consumes that one terminal and keeps any prior uncertain effects for ordinary
+reconciliation. Ready custody cannot submit or retire another command's work.
+Root expiry and preparation refusal wake the successor in the same engine event;
+no unrelated feed event is needed. No host wire or signer capability is added.
+
+While either retained-Preflight readiness or Plan readiness owns the callback,
+Session creation, derived legs, retirement and waiter changes refuse with State
+before reserving IDs or consuming timers/continuations. Session-ready/failed
+drains return empty; session_wait returns its pending unchanged. Read-only
+session_live and the active Plan's own APIs remain available. Ordinary Session,
+socket, timer and startup callbacks retain their existing Session authority.
+
+## Shared metadata/settings owner: WEEX and BingX
+
+BingX same-symbol metadata calls at the same eligible settings revision share
+one leverage read followed by one margin read, retaining each command's native
+result or typed failure. Later sequential calls remain fresh. Settings writes,
+changed eligibility and background settings proposals invalidate stale Store
+publication independently of native financial position fences. A read admitted
+during a pending write cannot become publishing merely because that write ends.
+
+WEEX background settings proposals use the shared Store observation and write
+fences, including last-valid duplicate configuration handling. Explicit WEEX
+leverage reads retain the incoming managed Context path and native
+`settings_revision` fence: each command issues its own symbol configuration
+read. They do not join the shared metadata query owner. Their native codec,
+credential selection, retry policy, typed completion and cache update order stay
+with that managed adapter.
+
+Store metadata tokens and background observations bind to the Store issuer;
+foreign, default or exhausted authority cannot publish. These settings fences
+provide no HTTP delivery, observer or command completion authority. BingX's
+joined commands now receive the shared Plan's uniform result or typed failure,
+once per surviving observer. Each observer can expire or detach independently;
+a live peer retains the physical work, while the last observer leaving revokes
+its unsent work and publication authority. Store contains no numeric command
+waiter list or terminal fan-out. Callers retain native fallback and error
+handling; no numeric fallback stands in for managed completion.
+See [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md).
