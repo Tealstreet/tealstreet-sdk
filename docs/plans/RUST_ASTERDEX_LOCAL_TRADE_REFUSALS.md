@@ -253,3 +253,23 @@ Three independent bounded implementation reviews are CLEAR at that pin, with
 no findings; architecture gate No. Accepted placement now performs a second
 bounded acknowledgement scan to keep planning immutable; fresh CI owns size
 and performance certification, with no adoption-byte forecast from review.
+
+## Combined composition after the CI planner repair
+
+Plain merge `a3b3c4ec9c0` integrates lean #1987 head `0e2f833c0c6` and actual
+`bcaaa4acc56`, including the landed #2004/#2006 engine size changes. Trading
+source and the entire33-control file are byte-exact to reviewed `5685ec67f7f`;
+the lean history/lib and original26 Read controls are incoming-exact. Only four
+shared append docs required incoming-first plus the own suffix once.
+
+On this combined tree the33 original controls,26 local Read controls and35
+native trading tests pass with jobs4. Scoped library/test strict Clippy,
+crate formatting and full bans/ratchets pass. The only request-map delta versus
+the lean parent is the declared Aster trading3F/3O removal. The first test
+attempt found Cargo absent from PATH; using the installed rustup path passed.
+Formatting was rerun successfully from sdk-rs after an initial root-directory
+invocation found no Cargo manifest. No runtime changes followed these checks.
+
+Fresh CI must certify the combined Aster family size. Historical standalone
+#2027 bytes do not certify this composition, and no local WASM build, budget
+change or profile change is used. One PR-triggered Rust run follows the push.
