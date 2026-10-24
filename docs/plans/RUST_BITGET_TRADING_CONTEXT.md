@@ -49,8 +49,12 @@ engine PR; this plan invents no names. Bitget-specific:
 1. At command entry, `begin_preflight(WriteAfterReads, read None, write
    Primary)`. The job's metadata, position and amend-identity reads run as
    preflight reads or as read calls of the same streamed owner (gate 2).
-2. Plan the full native job without publishing Store, progress or I/O.
-   Native checks readiness before surfacing a planning error.
+2. Keep native entry precedence (`trade_command`, :247-277): missing
+   credentials refuse first, then input validation (`preflight`) refuses,
+   both NotSent and immediately, before the queue. Only a valid command is
+   queued, and only then can the detection wait (:416-418) or metadata reads
+   run. A valid-credential invalid input never waits for mode detection.
+   Then plan the full native job without publishing Store, progress or I/O.
 3. Admit one command-owned streamed serial Plan: one live call, 20 000 ms per
    call, attempts one, Never, except the 40009 grant below. No step cap.
 4. Only after admission apply native optimistic status (`Canceling`, amend
@@ -81,20 +85,32 @@ is measured first (gate 5).
 - **Amend.** Modify, with a cancel-and-replace fallback (:1458-1480); UTA adds
   a rollback place (:1442-1447). Identity resolution issues up to four GETs
   (`ResolveAmend`).
-- **Reads in the job.** Metadata and amend-resolve reads retry three times at
-  250·n ms (`retry_read`, :2245-2252).
+- **Reads in the job.** Both retry at most three times at 250·n ms
+  (`retry_read`, :2245-2252), with different triggers:
+  - Metadata retries a transport failure only (:1536-1544). An HTTP non-200
+    or malformed metadata body fails the job (:1574-1580, :1614-1620).
+  - ResolveAmend retries any not-ready response: transport, non-200, non-zero
+    code or absent row (:1630-1640).
+  So the engine retry must cover exact `HttpFailed` custody for transport
+  retries, not DATA only.
 - **Accepted IDs.** Appended as received, no dedup: `success_list` order IDs
   with empty strings filtered, else one orderId, else clientOid
   (:1739-1754); amend pushes the new ID (:2020, :2081). `done` serialises
   `job.ids` (:474). A non-empty `failure_list` keeps the success IDs and fails
   the job (:1756-1760).
 - **40009 (signature).** Resent once per call, never twice (`signature_retry`,
-  :1652-1658).
+  :1652-1658). The check reads the parsed body code with no HTTP-status
+  guard, so a 408/5xx body carrying 40009 also resends natively. If the
+  resend's own preparation or signing then fails, the failure is Unknown,
+  never NotSent, because the first attempt reached the venue (:2175-2178).
 - **40085 (UTA required).** Promotes to UTA, restores `Canceling` rows, and
   replans the whole job only when `job.ids` is empty (:1501-1534). After
-  partial success it fails with the acknowledged IDs.
+  partial success it fails with the acknowledged IDs. It is checked on the
+  body code before HTTP-status classification, so any status carrying 40085
+  promotes.
 - **Unknown.** Network, 408, 5xx, malformed bodies and codes 40010, 40725 and
-  45001 are Unknown (:1643-1650, :1928-1946). Reconciliation is
+  45001 are Unknown (:1643-1650, :1928-1946), after the 40085 and 40009
+  checks above. Reconciliation is
   `refresh_orders` plus the write note. `trade_fail` drops Rejected and NotSent
   once any effect landed (:2196-2203).
 - **Detection wait.** If Classic/UTA mode is unknown, the queue waits 10 s
@@ -170,7 +186,14 @@ GREEN native controls:
   with the IDs.
 - A mixed `failure_list` keeps success IDs and fails.
 - Codes 40010/40725/45001 and 5xx are Unknown and reconcile without resend.
-- Readiness wins over a planning error.
+- Entry precedence: missing credentials win over invalid input; invalid
+  input refuses immediately while the account mode is still undetected.
+- Status/code corners: HTTP 500 with body 40009 resends once; HTTP 500 with
+  body 40085 promotes and replans. If the managed path cannot preserve
+  either, it needs an explicit overseer disposition, not a silent change.
+- A 40009 resend whose preparation fails ends Unknown.
+- Metadata HTTP 500 fails without retry; metadata transport failure retries
+  three times; ResolveAmend retries a non-ready 200.
 
 Source-stage gates, not original claims: the 10 000-call UTA run, the
 detection-wait parking, amend fallback and rollback under the streamed
