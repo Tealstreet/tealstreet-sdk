@@ -204,3 +204,21 @@ controls PASS and all63 account controls PASS, zero ignored; scoped strict
 account Clippy and formatting/whitespace checks PASS. No token/reducer/trading,
 request/socket map or shared source edit. The two seed-ordering REDs remain open
 and separate. Exact commit/log were sent to mxb4mq for bounded causal review.
+
+## Current landing refresh for PR publication
+
+Plain merge `4fe4652eb86` integrates actual `be710b3f2d7` after actual #1788.
+Only AUDITS/CALLERS/QUALITY conflict; each resolution is incoming entire bytes
+plus the unchanged adapter suffix once. All WOO source/tests equal causal-reviewed
+`d43c5107486`. The request manifest is exact incoming; socket maps preserve every
+foreign row and remove only the two WOO sites/family. Full normal bans pass,
+including the signing control,15 request ratchet controls and8 socket controls.
+No local Cargo run was started for this integration under the machine directive.
+
+#1943 is already MERGED at `8cb17fe09a03e6cd47b2ea84a8276d7511c3a813`,
+owned by this socket lane. There is no outstanding shared-core merge dependency
+for the two combined-action seed-order REDs: the WOO adapter still must adopt
+that existing released-interest callback. This refreshed draft is published with
+those two failures explicitly open; it is not READY and has no merge permission.
+The previously executed63 account controls and owner-cleared fixtures remain
+exact; fresh CI is requested for the integrated draft as directed.
