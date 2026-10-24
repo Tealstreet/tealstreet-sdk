@@ -278,6 +278,11 @@ class RequestContextBan(unittest.TestCase):
                 '2e9218906fd923fa6c83c648873ea2527c33dd1068d609c8c1ec343630b36911',
                 'b1761cdefa174ea70037cfceab33b91ad7279e59d22ccecb872e996dd5b0c32c',
                 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa'}, 8, 11),
+            'venues/bitget/src/lib.rs': ({
+                '5b44116449d06833b5f091cb3866ced7f16f181fd1226b31ad977eff6bf26ac9',
+                '6c77d608b079104cc5338cbabb01a7c4a0e24f112ef91ea5483c423808d92bad',
+                'a921be85fe127dcd74b1718af170b7309b86f0b4f66469353f73cc86c722be28',
+                'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa'}, 4, 8),
         }
         self.assertEqual(set(ban.STAGING_BOOTSTRAPS), set(approved))
         for path, (old_map, new_map) in ban.STAGING_BOOTSTRAPS.items():
