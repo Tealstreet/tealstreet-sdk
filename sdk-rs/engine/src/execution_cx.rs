@@ -185,10 +185,28 @@ impl<P> Cx<'_, P> {
     /// callback of one of this execution's legs; late joiners replay them.
     pub fn execution_progress(
         &mut self,
-        _execution: &ExecutionHandle,
-        _receipts: Vec<OrderIdentityReceipt>,
+        execution: &ExecutionHandle,
+        receipts: Vec<OrderIdentityReceipt>,
     ) -> Result<(), Error> {
-        Err(Error::State)
+        if self
+            .io
+            .http_delivery
+            .as_ref()
+            .is_none_or(|delivery| delivery.context.owner() != execution.0.owner())
+        {
+            return Err(Error::Revoked);
+        }
+        if receipts.is_empty() {
+            return Ok(());
+        }
+        let observers = self
+            .io
+            .request_contexts
+            .execution_progress(&execution.0, receipts)?;
+        for (command, _, receipts) in observers {
+            self.command_progress(command, receipts);
+        }
+        Ok(())
     }
 
     /// Seal every live observer with one error, outside any delivery or in
