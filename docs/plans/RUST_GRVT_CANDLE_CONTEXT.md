@@ -196,3 +196,17 @@ slice second; public candles do not depend on a login capability.
 
 The corrected plan/diagnostic target re-executes the same23 controls:15 intended
 assertion REDs/8 GREEN/0ignored. Assertion conditions and runtime APIs are unchanged.
+
+
+## Login-independent preparation delegation control
+
+Before production, a real non-Candles managed Prepare is refused through GRVT
+and compared with the engine's inherited on_sign_error default chain. Both keep
+the same native BookQuery continuation, exact wire and no terminal. A deliberately
+direct fail_pending disposition produces no continuation and differs, proving
+the control detects that callback regression. Exactly one unsigned Cancel and
+duplicate-refusal inertness are pinned. This preserves an existing legacy path;
+it grants no managed fallback to Candles. The control passes with four build jobs.
+Fixture compilation omissions and initial assumptions about command terminals
+were corrected against both real paths before this receipt; neither is RED proof.
+55 accepted the conditional login-specific gate: the second integrator runs it.

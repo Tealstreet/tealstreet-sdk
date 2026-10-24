@@ -3,6 +3,8 @@ mod account;
 mod depth_query;
 mod history;
 mod identity;
+#[cfg(test)]
+mod preparation_delegation_tests;
 mod sign;
 mod trading;
 mod wire;
