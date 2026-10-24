@@ -662,3 +662,75 @@ Backpack trading fingerprint removal. Key-selection maps are unchanged.
 Fresh CI and exact committed preservation review are in flight; no merge or
 full-package proof is claimed. Architecture gate: No shared policy copy, only
 native refusal messages composed through existing shared custody APIs.
+
+
+## Next plan/RED slice: FetchAccount identity custody, 2026-10-24
+
+Owner mxb4mq. Fresh plan/control branch fix/rust-backpack-identity-context
+is advanced without rebasing to actual9a757d406b8340b23dac71e20a35ac151de3956a.
+The priority CPU diagnostic source #2054 is pushed and independently CLEAR;
+its CI and the separate Backpack2047/2053 cohorts keep their sole120s watches.
+This checkpoint authorizes plan and original controls only, no production or
+inventory/key-selection change, no push or new PR/CI.
+
+Target is the two numeric terminal occurrences in identity.rs finish:
+
+| Existing call | Fingerprint, one occurrence each |
+| --- | --- |
+| cx.done(command, data) | c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa |
+| cx.fail(command, error) | c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548 |
+
+The numeric command_error alongside failure also needs genuine custody, but is
+not a counted scanner site. Actual Backpack inventory has6paths/15fingerprints/
+15occurrences; a complete two-terminal adoption would yield5paths/13/13. The
+queued interval/history branches' prunes stay separate. A partial local-refusal
+wrapper cannot claim those two removals while delivered identity still uses
+the original finish. No manifest edit belongs in these plan/RED commits.
+
+The open-PR file map leaves identity.rs and new tests/identity_context.rs clear.
+Future lib scope is only Pending::Identity payload, its response/failure routing
+and genuine FetchAccount entry. #2047's FetchCandles arm is separate; #2053
+history.rs and #2044 trading.rs remain untouched. Do not edit any combo5b
+engine/selection source, account.rs signed helper, sign.rs, registry, secondary
+selection tests, key-choice site or key map. Preserve incoming imports/arms.
+
+## Identity source gates and native contract
+
+Three immediate failure causes are secondary-read configuration rejection,
+public-only refusal and unavailable credentials. Preserve their precedence,
+exact messages, absent kind/outcome, correlated diagnostic before terminal,
+keyless public/private refusal and no Store/physical effects on valid entry.
+Existing exact accountId/userId parsing, fallback, integer precision, native
+HTTP/decode errors, JSON shape, sign recipe/path/header/body/egress and absence
+of recurring-account effects remain native truth. No local issuer or numeric
+fallback may replace the two terminals.
+
+Proposed custody is the full command receipt gate before admission: None ->
+reject_unstamped_command(Read), Expired -> reject_expired_command(Read),
+Remaining -> genuine Read authority. Keyless local refusals may use no
+credential, a20s maximum, no pacing and Never retry. Rejected already emitted
+a terminal; Revoked grants no diagnostic or fallback. Delivered success and
+failure must retain the original engine-issued authority and exact live read
+delivery witness before parsing, correlated errors or completion.
+
+IMPORTANT SOURCE GATE: the valid private path still uses the legacy signed
+helper and options-local secondary credentials. This plan does not authorize
+a keyless Context for signed transport, fabricated KeyRef/Identity, caller
+generation, raw-request wrapper or a credential-selection edit before5b lands.
+Before implementation, the owners must review the exact already-landed
+selection/provider/managed-read composition and its Context payload/terminal
+hooks. If those contracts are unavailable within this slice, report the
+blocker and keep production unchanged. New-contract API absence is never
+manufactured into an original RED.
+
+Commit this plan before controls against unchanged native source. Working
+controls cover all three local native failures and precedence, no physical/
+Store changes, immediate ID reuse, genuine prior book-owner delivery, and
+ordinary valid identity success/failure bytes. Original assertion RED targets
+are shared invalid-clock/capacity rejection per failure cause and zero
+diagnostic/terminal leakage into a duplicate prior owner. Also probe delivery
+after the original20s maximum using a real signed native request; retain its
+actual observed result, without inventing a missing API or claiming assertions
+past the first failure ran. Scoped tests use CARGO_BUILD_JOBS=4, one local
+build at a time. Applied source, two prunes, independent source review, draft
+and fresh full CI all require the later implementation stage.
