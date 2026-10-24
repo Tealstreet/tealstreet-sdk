@@ -1870,6 +1870,17 @@ formatting and request/credential ratchets cover the scoped change. Existing
 financial assertions and fixtures are unchanged. Independent source/caller/map
 reviews and fresh exact-head CI remain required before READY.
 
+## GRVT fixed local setting controls
+
+Plan-first originals execute16 controls on unchanged production:7 intended
+assertion REDs/9 working GREENs/0 ignored. All16 now pass, including four real
+256-command capacity cases and exact first-peer retirement followed by native
+recovery and validation of all255 survivors. Separate NaN Event cases cover
+margin, hedged refusal and one-way projection. Native keyless/public-only,
+zero-wait and duplicate-owner assertions remain intact. The42 existing trading
+tests pass unchanged. Scoped strict GRVT Clippy and formatting are required;
+workspace, feature, WASM and performance coverage stays in CI.
+
 ## GRVT local leverage Read refusal controls
 
 Plan-first12 originals execute4 intended assertion REDs/8 working GREENs on

@@ -3193,6 +3193,15 @@ removal RED is green after adoption: closed1 to0, history2 to1, all foreign keys
 unchanged. Local cache/empty/error precedence and existing history authority are
 preserved; no shared checker exemption or source change.
 
+## GRVT fixed setting terminal custody
+
+The margin-mode and hedged-mode refusals now admit genuine keyless Mutation
+owners before fail_context. One-way mode uses LocalSetting, with hedged=false
+projected only inside the prepared commit closure. All three exits retain native
+order before trade_plan, credentials, builders and queues. Only trading8->5 is
+pruned; every foreign inventory byte and retained hash count stays unchanged.
+Valid trading, queued revalidation, signing and private lifecycle are excluded.
+
 ## GRVT initial leverage refusal authority
 
 The unknown-market and missing-authenticated-account FetchLeverage branches now
