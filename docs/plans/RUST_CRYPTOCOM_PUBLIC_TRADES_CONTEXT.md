@@ -41,8 +41,13 @@ unaccepted page; no accepted prefix or INCOMPLETE marker exists for this one
 page. Existing history.rs and tests/history.rs public positives remain intact.
 
 The native per-path next_by_path queue spaces submissions by 10ms across callers.
-Charge that slot only after successful child issuance/submission. Do not add a
-scheduler: retain native timers/queue while the engine owns root/child lifetime.
+This is dequeue eligibility, not proof of release spacing after asynchronous
+preparation. Preserve native eligibility and give the original root and each
+child the same canonical Context Pacing group with minimum_gap_ms=10.0, so
+actual releases also keep the bound. No venue release clock/ledger/timer is
+added. Charge the native queue slot only after successful child submission;
+engine pacing owns release reservations. Pin delayed preparation/claim plus
+two callers in adoption controls before claiming physical spacing.
 Transport failure has at most three retries/four requests, each after exactly
 1000ms; failed streamed staging is discarded before retry. The existing 40101
 native-response case grants one retry after 1000ms and stays unsigned. Other
@@ -53,7 +58,7 @@ required shared classifier decision reviewed before implementation. Public
 
 ## Shared authority and callback shape
 
-Use genuine admit_caller_read_root(None,None) at command entry, then
+Use genuine admit_caller_read_root(None,Some(public-trades Pacing)) at entry, then
 ReadCompletion::from_context plus ReadHistoryRows for the one response. One
 immutable receipt deadline spans path-queue wait and all native retries; absent
 host timeout is already stamped with the SDK default. Missing receipt refuses
@@ -108,3 +113,15 @@ small draft and let CI certify family bytes/CPU/replay. No merge without GO.
 Architecture gate: No if shared entry/root/leg/row algorithms suffice. If native
 retry composition needs a new engine seam, stop and report before source rather
 than add a per-venue issuer, lifetime, finalizer or retry-authority algorithm.
+
+
+## Bounded API direction
+
+Uufub4 confirms original-root/new-child composition on actual 1e2458b1c98 fits
+without Plan. Failure-only consumes the returned Pending, validates the live
+root, retires the old child even at physical expiry and resets failed staging
+before a native retry. Preparation failure and root expiry are strict. This is
+API direction, not source or executed-control clearance. One exclusive public
+Read authority is required; use a distinct PublicTrades request/Pending instead
+of retaining legacy and managed terminals for the same public query. Native
+private authority remains in its existing closed branch.
