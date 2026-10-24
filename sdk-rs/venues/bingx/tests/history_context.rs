@@ -903,3 +903,85 @@ fn child_capacity_refusal_after_accepted_rows_is_strict_and_releases_its_root() 
     );
     assert_eq!(terminals(&done), [Ok("[]")]);
 }
+
+#[test]
+fn rejected_signature_staging_cannot_leak_rows_or_errors_into_the_resend() {
+    let mut engine = engine();
+    let first = query(&mut engine, fills(), 10_000);
+    let refused_page = FILLS
+        .replace("\"code\":0", "\"code\":100001")
+        .replace("\"tradeId\":\"b\"", "\"tradeId\":\"\"");
+    let resent = reply(&mut engine, NOW + 1., &first.requests[0], &refused_page);
+    assert_eq!((resent.legacy, resent.prepared, resent.claimed), (0, 1, 1));
+    assert!(terminals(&resent).is_empty());
+    let done = reply(
+        &mut engine,
+        NOW + 2.,
+        &resent.requests[0],
+        r#"{"code":0,"data":[]}"#,
+    );
+    assert_eq!(terminals(&done), [Ok("[]")]);
+    assert_eq!(markers(&done), 0);
+}
+
+#[test]
+fn range_walk_rejects_its_native_truncated_chunk_at_finished_without_partial_rows() {
+    let mut engine = engine();
+    let mut output = query(
+        &mut engine,
+        Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: Some(NOW),
+            to_ms: Some(NOW + 1000.),
+            limit: Some(1),
+        },
+        120_000,
+    );
+    let mut now = NOW;
+    for page in 1..=50 {
+        assert_eq!((output.legacy, output.prepared, output.claimed), (0, 1, 1));
+        assert_eq!(output.requests.len(), 1);
+        let parameter = |name: &str| {
+            output.requests[0]
+                .url
+                .split_once('?')
+                .unwrap()
+                .1
+                .split('&')
+                .find_map(|part| {
+                    part.split_once('=')
+                        .filter(|(key, _)| *key == name)
+                        .map(|(_, value)| value.parse::<f64>().unwrap())
+                })
+                .unwrap()
+        };
+        let from = parameter("startTime");
+        let to = parameter("endTime");
+        assert!(NOW <= from && from <= to && to <= NOW + 1000.);
+        let timestamp = (from + to) / 2.;
+        let body = format!(
+            r#"{{"code":0,"data":[{{"orderId":"{page}","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"FILLED","price":"1","origQty":"1","executedQty":"1","time":{timestamp}}}]}}"#
+        );
+        now += 1.;
+        let accepted = reply(&mut engine, now, &output.requests[0], &body);
+        assert!(
+            terminals(&accepted).is_empty(),
+            "no early truncation terminal at page{page}"
+        );
+        let timer = delay(&accepted, now + 200.);
+        now += 200.;
+        engine.handle(now, Event::TimerFired { timer });
+        output = drain(&mut engine, now);
+        if page < 50 {
+            assert!(terminals(&output).is_empty());
+        }
+    }
+    let results = terminals(&output);
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0].unwrap_err().message,
+        "history is incomplete: time window could not be fully paged"
+    );
+    assert_eq!(markers(&output), 0);
+    assert!(output.requests.is_empty());
+}

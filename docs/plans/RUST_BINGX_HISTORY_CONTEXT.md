@@ -226,3 +226,10 @@ Strict all-target/all-feature Clippy, fmt and current-base bans/ratchets pass.
 The inventory is exactly four removed history terminal hashes/occurrences;
 all other keys/order and checker/STAGING are unchanged. Source/preservation
 review, fresh CI and BingX CPU/WASM size remain separate readiness gates.
+
+Two additional scoped controls pass on unchanged production: a signature-refused
+response containing both a staged row and decode error cannot contaminate the
+resend, and an actual 50-page RangeWalk exhausts its native chunk budget before
+strict rejection at Finished, with no partial rows or marker. The custody target
+now passes 25/25; strict target Clippy passes. The earlier all-target receipt is
+258 pass / 2 pre-existing ignored, before these two test-only additions.
