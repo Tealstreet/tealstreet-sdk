@@ -110,3 +110,13 @@ The exact first-peer retirement, native recovery and all255-survivor validation
 remain gated suffixes on original source. Production, existing fixtures, Cargo
 and every inventory stay byte-exact the actual base. No plan/RED checkpoint is
 pushed for CI.
+
+## Production checkpoint
+
+After core and native original CLEAR, the two refusal branches admit keyless
+Read20s/Never and fail_context with the exact native string. All12 original
+controls pass, including the previously gated recovery/255-survivor suffixes;
+all44 existing account controls pass unchanged. No test expectation changed.
+Only account imports/two local exits and the exact two account inventory rows
+change in production. CALLERS discloses newly enforced admission precedence.
+Immutable source review and intended-head CI remain required before READY.

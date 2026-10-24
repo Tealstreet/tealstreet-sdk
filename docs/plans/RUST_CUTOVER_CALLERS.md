@@ -7570,3 +7570,15 @@ capability refusal; its unreachable native arm stays held. Physical HTTP,
 pagination, signed writes, queues, account/socket state and financial reducers
 are outside this slice. Inventory decreases from25 to10; #2031's ticker CPU
 change lands first and must be preserved on actual integration before freeze.
+
+## GRVT initial FetchLeverage refusals
+
+Unknown market still precedes missing authenticated account. Both local Read
+failures keep the native text and absent kind, financial outcome, venue code and
+retry hint, including public-only and configured-but-unestablished accounts.
+Shared admission, capacity, clock, duplicate and caller receipt now precede the
+native diagnostic. Shared rejection owns one typed failure with no fallback or
+Store/private side effect: foreground-only capacity is Internal/Read outcome
+None, and invalid-clock admission is InvalidInput/None. Keyless20s/Never Read
+admission completes immediately; it adds no HTTP, Plan, retry or root renewal.
+The valid private request and account/session/signing/queue behavior are unchanged.

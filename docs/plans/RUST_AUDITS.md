@@ -3183,3 +3183,12 @@ Library default-delegation control moved to genuine public-trades state after
 BookQuery became managed, per55's fixture direction; mutant distinction retained.
 Exact six-site prune: lib11->8, depth_query3->0, family41->35, foreign map unchanged.
 Source review/CI are separate gates; no budget or actual-parent landing claim.
+
+## GRVT initial leverage refusal authority
+
+The unknown-market and missing-authenticated-account FetchLeverage branches now
+admit genuine keyless Read owners before fail_context. Native market-before-account
+precedence, exact strings and kind/outcome/code/hint None are retained. Only the
+two account singletons disappear (11->9); all retained and foreign inventory
+bytes/order stay exact. Valid private body/issuance, account/login Sessions,
+callbacks, signing/selection, reconciliation and queues are excluded.

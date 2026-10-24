@@ -1857,3 +1857,14 @@ NotSent, clamped hint/code/message, no outbound or deferral timer. All260 GRVT
 tests and scoped strict Clippy/fmt pass with four jobs and sequential cargo.
 Native depth/public/trading fixture changes only drive real managed release;
 all previous assertions remain. Full workspace/features/WASM/replay belong to CI.
+
+## GRVT local leverage Read refusal controls
+
+Plan-first12 originals execute4 intended assertion REDs/8 working GREENs on
+unchanged actual5d825. The exact target now passes12/12, including both real256
+Command Read capacity cases, exact first-peer retirement/native recovery and
+validation of all255 surviving peers. Genuine NaN Event, native metadata and
+market-before-account precedence, public-only/configured-but-unestablished,
+checked zero-wait and duplicate-owner assertions are retained. All44 existing
+account controls pass unchanged. Local Cargo remains scoped with four jobs;
+workspace/features, WASM and performance are CI gates.
