@@ -1567,3 +1567,11 @@ constant projection, unknown symbols, configuration precedence, Background-only
 capacity and duplicate original-owner release. Tests use genuine command
 receipts; no missing-method compile failure or fabricated Context is evidence.
 Exact Spot trading inventory removes only the two-occurrence success row.
+
+## Bitrue local one-way setting controls
+
+Seven native controls retain two original assertion REDs plus five working
+controls: command-owner capacity/recovery, expired/sub-ms receipt, duplicate
+original owner/diagnostic, Background Context independence, all credential
+configurations, true-mode refusal and absent symbol behavior. No fabricated
+Context or missing-method compile failure is evidence.

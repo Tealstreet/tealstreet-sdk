@@ -6703,6 +6703,15 @@ command-owner capacity before projection and success; there is no numeric
 fallback or duplicate terminal. Duplicate live ids retain their original owner
 and diagnostic. No transport, signer, timer, Context or journal is added.
 
+## Bitrue local one-way setting completion
+
+SetPositionMode(false) still returns `[]` and stores hedged=false before
+credentials, including public-only/keyless setup and missing or unknown symbols.
+The shared LocalSetting seam now refuses exhausted command-owner capacity and
+expired/sub-ms waits before that projection or success. It adds no Context,
+HTTP, signer, timer or journal. Duplicate live ids retain the original owner
+and diagnostic; SetPositionMode(true) retains its Unsupported/NotSent refusal.
+
 ## Retained command readiness
 
 With the engine's `http-plans` feature, native FIFO commands can park their own
