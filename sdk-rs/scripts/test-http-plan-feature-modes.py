@@ -21,8 +21,10 @@ def modes():
         raise RuntimeError('expected at least one venue family')
     closures = {}
     grouped = {(): ['engine baseline'], ('order-locks', 'test-support'): ['explicit CI control'],
-               # No family enables serial Plans before adoption; keep them compiled and tested.
-               ('http-plans', 'order-locks', 'serial-plans', 'test-support'): ['serial Plan control']}
+               # No family enables serial Plans or condition waits before adoption; one
+               # control keeps both compiled and tested (condition-waits implies serial-plans).
+               ('condition-waits', 'http-plans', 'order-locks', 'serial-plans', 'test-support'):
+               ['serial Plan and condition wait control']}
     for family in families:
         tree = subprocess.check_output([
             'cargo', 'tree', '--locked', '--target', 'wasm32-unknown-unknown',

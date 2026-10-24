@@ -153,6 +153,7 @@ impl HttpOwnerRetirement {
 
 /// Release handle for a serial Plan parked on a venue condition. It carries the
 /// Plan's issuer and command generation, so it grants nothing by itself.
+#[cfg(feature = "condition-waits")]
 #[derive(Clone, Debug)]
 pub struct ConditionWait {
     pub(crate) plan: Plan,
@@ -160,6 +161,7 @@ pub struct ConditionWait {
 }
 
 /// The parked owner whose engine-bounded condition wait expired.
+#[cfg(feature = "condition-waits")]
 #[derive(Clone, Debug)]
 pub enum ConditionOwner {
     Preflight(Preflight),

@@ -16,7 +16,9 @@ pub(in super::super) struct State {
     pub(super) session_parked: bool,
     /// Parked by `park_preflight_for`: failable from any callback while it
     /// holds nothing; `condition` is its engine bound's timer.
+    #[cfg(feature = "condition-waits")]
     pub(super) condition_park: bool,
+    #[cfg(feature = "condition-waits")]
     pub(super) condition: Option<TimerId>,
 }
 
@@ -29,7 +31,9 @@ impl State {
             handoff: None,
             activation: super::ready::Activation::Initial,
             session_parked: false,
+            #[cfg(feature = "condition-waits")]
             condition_park: false,
+            #[cfg(feature = "condition-waits")]
             condition: None,
         }
     }

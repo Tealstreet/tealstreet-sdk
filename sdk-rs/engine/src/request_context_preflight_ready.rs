@@ -2,6 +2,7 @@
 use super::super::owned_call::Stage;
 use super::*;
 use crate::engine::{Engine, Venue};
+#[cfg(feature = "condition-waits")]
 use crate::{Action, TimerId};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -45,6 +46,7 @@ impl ContextRegistry {
         Ok(())
     }
 
+    #[cfg(feature = "condition-waits")]
     fn next_preflight_ready(&mut self) -> Option<(Preflight, Option<TimerId>)> {
         while let Some(handle) = self.preflight_ready.pop_front() {
             if let Ok(state) = self.preflight_state_mut(&handle)
@@ -58,8 +60,21 @@ impl ContextRegistry {
         }
         None
     }
+    #[cfg(not(feature = "condition-waits"))]
+    fn next_preflight_ready(&mut self) -> Option<Preflight> {
+        while let Some(handle) = self.preflight_ready.pop_front() {
+            if let Ok(state) = self.preflight_state_mut(&handle)
+                && state.activation == Activation::Queued
+            {
+                state.activation = Activation::Activating;
+                return Some(handle);
+            }
+        }
+        None
+    }
 
     /// A condition-parked Preflight holding nothing may fail from any callback.
+    #[cfg(feature = "condition-waits")]
     pub(in crate::engine) fn condition_parked(&self, handle: &Preflight) -> bool {
         self.preflight_state(handle).is_ok_and(|state| {
             state.condition_park
@@ -70,6 +85,7 @@ impl ContextRegistry {
     }
 
     /// Forget a Preflight's engine bound; the caller clears the host timer.
+    #[cfg(feature = "condition-waits")]
     pub(in crate::engine) fn take_preflight_condition(
         &mut self,
         handle: &Preflight,
@@ -85,6 +101,7 @@ impl ContextRegistry {
             return true;
         };
         // A condition re-park from ready custody is progress: it waits again.
+        #[cfg(feature = "condition-waits")]
         if state.condition_park && state.activation == Activation::Parked {
             return true;
         }
@@ -200,6 +217,7 @@ impl<P> Cx<'_, P> {
     /// Park in genuine entry or Preflight-ready custody, with no I/O. `None` is
     /// unbounded; `Some(ms)` arms one engine timer that expires into
     /// `on_condition_wait_expired`. Release with `request_preflight_ready`.
+    #[cfg(feature = "condition-waits")]
     pub fn park_preflight_for(
         &mut self,
         handle: &Preflight,
@@ -226,6 +244,7 @@ impl<P> Cx<'_, P> {
         self.park_preflight_condition(handle, bound_ms)
     }
 
+    #[cfg(feature = "condition-waits")]
     #[inline(never)]
     fn park_preflight_condition(
         &mut self,
@@ -260,6 +279,31 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// A condition-parked owner holds no call or loan: any callback may end it.
+    #[cfg(feature = "condition-waits")]
+    pub(in crate::engine) fn seal_condition_preflight(
+        &mut self,
+        preflight: &Preflight,
+        error: VenueError,
+    ) -> Result<Seal, Error> {
+        let parked = self.io.request_contexts.condition_parked(preflight);
+        if !parked {
+            self.validate_preflight_failure_custody(preflight)?;
+        }
+        let delivery = if parked {
+            None
+        } else {
+            self.io.http_delivery.as_ref()
+        };
+        let seal =
+            self.io
+                .request_contexts
+                .seal_preflight(preflight, self.now, delivery, Some(error))?;
+        self.clear_preflight_condition(preflight);
+        Ok(seal)
+    }
+
+    #[cfg(feature = "condition-waits")]
     pub(in crate::engine) fn clear_preflight_condition(&mut self, handle: &Preflight) {
         if let Some(timer) = self.io.request_contexts.take_preflight_condition(handle) {
             self.io.timers.remove(&timer);
@@ -315,8 +359,29 @@ impl<P> Cx<'_, P> {
 }
 
 impl<V: Venue> Engine<V> {
+    /// The next queued wake. A condition park's engine bound ends with it.
+    #[cfg(feature = "condition-waits")]
+    fn next_ready_preflight(&mut self) -> Option<Preflight> {
+        let (handle, timer) = self.io.request_contexts.next_preflight_ready()?;
+        if let Some(timer) = timer {
+            self.io
+                .request_contexts
+                .condition_preflights
+                .retain(|(own, _)| *own != timer);
+            self.io.timers.remove(&timer);
+            self.io.actions.push(Action::ClearTimer { timer });
+        }
+        Some(handle)
+    }
+    #[cfg(not(feature = "condition-waits"))]
+    #[inline]
+    fn next_ready_preflight(&mut self) -> Option<Preflight> {
+        self.io.request_contexts.next_preflight_ready()
+    }
+
     /// An engine-bounded Preflight condition wait expired: the venue fails it in
     /// failure custody, or the engine seals it once as NotSent.
+    #[cfg(feature = "condition-waits")]
     #[inline(never)]
     pub(in crate::engine) fn expire_preflight_condition(
         &mut self,
@@ -396,15 +461,7 @@ impl<V: Venue> Engine<V> {
         self.sweep_executions(now);
         self.flush_http_owner_retirements();
         loop {
-            while let Some((handle, timer)) = self.io.request_contexts.next_preflight_ready() {
-                if let Some(timer) = timer {
-                    self.io
-                        .request_contexts
-                        .condition_preflights
-                        .retain(|(own, _)| *own != timer);
-                    self.io.timers.remove(&timer);
-                    self.io.actions.push(Action::ClearTimer { timer });
-                }
+            while let Some(handle) = self.next_ready_preflight() {
                 self.assert_live();
                 self.io.http_preflight_ready = Some(handle.clone());
                 self.io.http_plan_poison = true;

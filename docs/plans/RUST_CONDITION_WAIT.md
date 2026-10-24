@@ -293,6 +293,17 @@ non-placement commands.
   guards order mutations. The fixture fixes are RED11 (answer every prepared
   call in a batch) and RED14 (entry refusals counted apart from parks).
 
+## Feature gate (overseer ruling)
+
+The condition wait is linked only by adopting families, behind the
+non-default engine feature `condition-waits` (it implies `serial-plans`).
+With it off, `fail_preflight`, the readiness flush, Plan wakes and the timer
+expiry path compile exactly as before, so non-adopting families keep their
+pre-#2092 WASM sizes. `Venue::on_condition_wait_expired` exists only with the
+feature, because its `ConditionOwner` argument does. The adopter (Bitget)
+enables the feature in its own slice, with its own budget review. CI covers
+it through the explicit control mode in `scripts/test-http-plan-feature-modes.py`.
+
 ## Gates
 
 Engine-focused tests under `http-plans` and `http-plans,order-locks`; clippy

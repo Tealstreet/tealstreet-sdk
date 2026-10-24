@@ -18,7 +18,9 @@ pub(super) struct Serial {
     read: Option<Credential>,
     /// A pending condition wait: its generation and engine deadline (ROOT when
     /// unbounded). `waits` numbers every wait this Plan has taken.
+    #[cfg(feature = "condition-waits")]
     pub(super) condition: Option<(u64, f64)>,
+    #[cfg(feature = "condition-waits")]
     pub(super) waits: u64,
 }
 
@@ -28,10 +30,23 @@ pub(super) enum Next {
     Now,
     After(u32),
     /// Held on a venue condition until `release_condition_wait`.
+    #[cfg(feature = "condition-waits")]
     Parked,
 }
 
+impl Next {
+    #[cfg(feature = "condition-waits")]
+    fn parks(self) -> bool {
+        self == Self::Parked
+    }
+    #[cfg(not(feature = "condition-waits"))]
+    fn parks(self) -> bool {
+        false
+    }
+}
+
 impl Serial {
+    #[cfg(feature = "condition-waits")]
     pub(super) fn condition_deadline(&self) -> Option<f64> {
         self.condition.map(|(_, at)| at).filter(|at| *at < ROOT)
     }
@@ -145,7 +160,9 @@ impl<P> Cx<'_, P> {
                 refusals_complete: policy.refusals_complete,
                 call: first,
                 read: intent.read_credential,
+                #[cfg(feature = "condition-waits")]
                 condition: None,
+                #[cfg(feature = "condition-waits")]
                 waits: 0,
             }),
         )?;
@@ -265,7 +282,9 @@ impl<P> Cx<'_, P> {
         let steps = [StepBound {
             wait_ms: match wake {
                 Next::After(delay_ms) => delay_ms,
-                Next::Now | Next::Parked => 0,
+                Next::Now => 0,
+                #[cfg(feature = "condition-waits")]
+                Next::Parked => 0,
             },
             calls: &calls,
         }];
@@ -340,12 +359,13 @@ impl<P> Cx<'_, P> {
             eligible_at: match wake {
                 Next::Now => Some(eligibility(now, 0, ROOT)),
                 Next::After(delay_ms) => Some(eligibility(now, delay_ms, ROOT)),
+                #[cfg(feature = "condition-waits")]
                 Next::Parked => None,
             },
             // An immediate call is issued in this custody; a delayed one
             // wakes the venue through the Plan timer, a parked one on release.
             notified: wake == Next::Now,
-            parked: wake == Next::Parked,
+            parked: wake.parks(),
         };
         body.handoff = handoff;
         body.serial.as_mut().expect("validated serial Plan").call = next;

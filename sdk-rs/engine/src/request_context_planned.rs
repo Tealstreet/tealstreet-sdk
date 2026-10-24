@@ -1479,6 +1479,7 @@ impl Body {
             }
         }
     }
+    #[cfg(feature = "condition-waits")]
     fn next_wake(&self) -> f64 {
         let wake = self
             .entries
@@ -1490,6 +1491,14 @@ impl Body {
             .as_ref()
             .and_then(|serial| serial.condition_deadline())
             .map_or(wake, |at| wake.min(at))
+    }
+    #[cfg(not(feature = "condition-waits"))]
+    fn next_wake(&self) -> f64 {
+        self.entries
+            .iter()
+            .filter(|entry| entry.credit == Credit::Unissued && !entry.notified && !entry.parked)
+            .filter_map(|entry| entry.eligible_at)
+            .fold(self.handle.deadline(), f64::min)
     }
 }
 
@@ -1912,6 +1921,7 @@ mod history;
 #[path = "request_context_serial_plan.rs"]
 mod serial;
 
+#[cfg(feature = "condition-waits")]
 #[path = "request_context_condition_wait.rs"]
 mod condition_wait;
 
