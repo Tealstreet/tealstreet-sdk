@@ -1,9 +1,12 @@
-import type { Signer, SignReceipt, SignResult } from '@tealstreet/safe-cex-wasm/host';
+import type { SignAlgorithm, Signer, SignReceipt, SignResult } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from '../../types';
 
 import { nanoid } from 'nanoid';
 
 import { deriveRemoteSigningPolicy } from './construction';
+
+/** Everything this provider signs; the engine's capability admission reads it. */
+export const REMOTE_SIGNER_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256']);
 
 export interface RemoteSignerIdentity {
   credential: string;
@@ -169,12 +172,19 @@ function payloadReceiver(options: Partial<ExchangeOptions> | undefined, key: str
 /** Decode only the declared prepared WS grammar; never use advisory context as
  * authority or draw a new timestamp. HTTP work keeps ordinary correlation ids.
  */
-function wsMetadata(codec: 'bybitExpiry' | 'binanceSpot' | undefined, payload: string, key: string, receipt: SignReceipt, credentialDelimited: boolean): Record<string, unknown> | undefined {
+function wsMetadata(codec: 'bybitExpiry' | 'binanceSpot' | 'okxTimestamp' | undefined, payload: string, key: string, receipt: SignReceipt, credentialDelimited: boolean, okxDelimited: boolean): Record<string, unknown> | undefined {
   // Native WS recipes delimit the owned public key as a Credential part;
   // hosted WS captures have no HTTP stamp. An HTTP query can share WS grammar.
-  if (receipt.stampMs !== undefined && !credentialDelimited) return undefined;
+  if (receipt.stampMs !== undefined && !credentialDelimited && !(codec === 'okxTimestamp' && okxDelimited)) return undefined;
   const stamp = (text: string) => /^(0|[1-9][0-9]*)$/.test(text) && Number.isSafeInteger(Number(text)) ? Number(text) : undefined;
-  if (codec === 'bybitExpiry') {
+  if (codec === 'okxTimestamp') {
+    const suffix = 'GET/users/self/verify';
+    if (!payload.endsWith(suffix)) return undefined;
+    const timestamp = stamp(payload.slice(0, -suffix.length));
+    if (timestamp === undefined || !Number.isSafeInteger(timestamp * 1000)
+      || (receipt.stampMs !== undefined && receipt.stampMs !== timestamp * 1000)) throw refused();
+    return { timestamp };
+  } else if (codec === 'bybitExpiry') {
     if (!payload.startsWith('GET/realtime')) return undefined;
     const expiry = stamp(payload.slice('GET/realtime'.length));
     if (expiry === undefined || (receipt.expiryMs !== undefined && receipt.expiryMs !== expiry)) throw refused();
@@ -259,7 +269,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
           if (total > MAX_PAYLOAD) throw refused();
           return { kind: 'present' as const, key: operation.key, passphrase: item === undefined, bytes: material.slice() };
         }
-        if (operation.kind !== 'sign' || operation.algorithm !== 'hmacSha256') throw refused();
+        if (operation.kind !== 'sign' || !REMOTE_SIGNER_ALGORITHMS.includes(operation.algorithm)) throw refused();
         const entry = owned.get(operation.key);
         if (!entry || entry.identity.signing !== operation.key || (remoteSigner && !entry.primary)
           || !Array.isArray(operation.payload) || operation.payload.length > MAX_PARTS) throw refused();
@@ -284,7 +294,12 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
         for (const part of parts) { payload.set(part, offset); offset += part.length; }
         const text = decodeUtf8(payload);
         const credentialDelimited = operation.payload.length === 3 && operation.payload[1].kind === 'credential';
-        const extraData = remoteSigner ? wsMetadata(wire?.extraData, text, entry.identity.publicCredential, receipt, credentialDelimited) : undefined;
+        const asciiPart = (part: number[], expected: string) => part.length === expected.length
+          && part.every((byte, index) => byte === expected.charCodeAt(index));
+        const okxDelimited = wire?.extraData === 'okxTimestamp' && operation.payload.length === 3
+          && operation.payload.every((part) => part.kind === 'bytes')
+          && asciiPart(parts[1], 'GET') && asciiPart(parts[2], '/users/self/verify');
+        const extraData = remoteSigner ? wsMetadata(wire?.extraData, text, entry.identity.publicCredential, receipt, credentialDelimited, okxDelimited) : undefined;
         return { kind: 'sign' as const, entry, payload: text, extraData };
       });
       for (const item of work) {

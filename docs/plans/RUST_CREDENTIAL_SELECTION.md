@@ -242,11 +242,16 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
 - Domains stay distinct: HL/TxFlow share `hyperliquid-agent` deliberately;
   Kraken and Aster keep their own. Each family keeps its current floor clock;
   clock policy is codex-5c57jl's lane.
-- Remote-signed families that need a monotonic domain require
-  `Identity.stable_id` (typed unavailable when absent). The hosted signing
-  facade passes `stable_id: None` today, so those families cannot be hosted
-  until trusted setup supplies one; the facade's caller-supplied `stamp_ms`
-  stays unchanged.
+- Remote-signed families that need a monotonic domain require a non-secret
+  key:
+  - `Identity.stable_id`, or
+  - a public identifier when the venue's own sequence is public (Aster V3
+    signer address, HL agent address).
+  
+  It is never a hash of key material, and never an address derived from a key
+  inside a venue. A family whose only identity is secret material (Kraken)
+  gets a typed unavailable when `stable_id` is absent. The hosted signing
+  facade's caller-supplied `stamp_ms` stays unchanged.
 - Kraken's secret-digest key moves to `stable_id` with its signer migration
   (codex-5c57jl, #1718). Today slots with an equal API key share one sequence
   even when their secrets differ (`kraken/account.rs:403-415`), so trusted
@@ -288,8 +293,17 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
   integer arithmetic.
 - Hyperliquid and TxFlow reserve through one `reserve_agent_nonce` helper.
   `crypto::nonce::ethereum_agent` is removed.
+- Lighter reserves from an engine `VenueCounter`:
+  - one per engine, as before. Two engines on one API key still rely on
+    Lighter's 21104 resync: sharing the counter would change allocation, and
+    the owner ruled nonce limits document-only;
+  - it is bounded by the signer's safe-integer range;
+  - it is seeded only from a validated `nextNonce` reply whose request epoch is
+    still current;
+  - `take` reserves before signing;
+  - sign errors, refusals, uncertain sends and the 21104 resync invalidate it,
+    which bumps the epoch.
 - Still to come:
-  - Lighter `VenueCounter`;
   - Aster V3 (`asterdex-v3`, ProtocolMs x1000), after its open PRs;
   - `DispatchContext::reserve_nonce`, after #1771.
 

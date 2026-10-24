@@ -1682,3 +1682,279 @@ fn wire_stamp_floors_after_fractional_calibration_without_changing_clock_domains
         .is_ok()
     );
 }
+
+/// Answers per ref from a fixed table, like a provider reporting installed state.
+struct Declares(Vec<(&'static str, crate::signing::Algorithm)>);
+impl crate::signing::Signer for Declares {
+    fn sign(&self, _: SignRequest) -> crate::signing::SignFuture {
+        panic!("capability admission must never sign")
+    }
+    fn can_sign(
+        &self,
+        key: &crate::signing::KeyRef,
+        algorithm: crate::signing::Algorithm,
+    ) -> crate::signing::Capability {
+        if self.0.contains(&(key.0.as_str(), algorithm)) {
+            crate::signing::Capability::Supported
+        } else {
+            crate::signing::Capability::Unsupported
+        }
+    }
+}
+fn capability_identities() -> crate::signing::Identities {
+    let key = |name: &str| crate::signing::KeyRef(name.into());
+    crate::signing::Identities {
+        primary: Some(crate::signing::Identity {
+            credential: key("api"),
+            signing: key("hmac"),
+            passphrase: None,
+            stable_id: None,
+            extra: [(crate::signing::ExtraKey::ZklinkSeed, key("seed"))].into(),
+        }),
+        secondary: None,
+    }
+}
+fn can_sign_with(
+    engine: &mut Engine<TestVenue>,
+    slot: crate::CredentialSlot,
+    needs: &[crate::signing::Need],
+) -> Result<(), SignError> {
+    let cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    cx.can_sign(slot, needs)
+}
+const AMEND_NEEDS: [crate::signing::Need; 2] = [
+    crate::signing::Need {
+        key: crate::signing::KeyUse::Signing,
+        algorithm: crate::signing::Algorithm::HmacSha256,
+    },
+    crate::signing::Need {
+        key: crate::signing::KeyUse::Extra(crate::signing::ExtraKey::ZklinkSeed),
+        algorithm: crate::signing::Algorithm::ZkLinkContract,
+    },
+];
+
+#[test]
+fn capability_admission_requires_every_need_supported_for_the_registered_slot() {
+    use crate::CredentialSlot::{Primary, Secondary};
+    use crate::signing::Algorithm::{HmacSha256, ZkLinkContract};
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine
+        .set_signer(Some(std::sync::Arc::new(Declares(vec![
+            ("hmac", HmacSha256),
+            ("seed", ZkLinkContract),
+        ]))))
+        .unwrap();
+    engine.set_identities(capability_identities()).unwrap();
+    assert_eq!(can_sign_with(&mut engine, Primary, &AMEND_NEEDS), Ok(()));
+    // An unregistered slot is refused; the venue's claim is never trusted.
+    assert_eq!(
+        can_sign_with(&mut engine, Secondary, &AMEND_NEEDS[..1]),
+        Err(SignError::InvalidRequest)
+    );
+
+    let mut hmac_only = crate::test_support::seeded_engine(TestVenue::default());
+    hmac_only
+        .set_signer(Some(std::sync::Arc::new(Declares(vec![(
+            "hmac", HmacSha256,
+        )]))))
+        .unwrap();
+    hmac_only.set_identities(capability_identities()).unwrap();
+    assert_eq!(
+        can_sign_with(&mut hmac_only, Primary, &AMEND_NEEDS[..1]),
+        Ok(())
+    );
+    assert_eq!(
+        can_sign_with(&mut hmac_only, Primary, &AMEND_NEEDS),
+        Err(SignError::Unsupported)
+    );
+    assert_eq!(
+        SignError::Unsupported.venue_error().outcome,
+        Some(crate::Outcome::NotSent)
+    );
+}
+
+#[test]
+fn capability_admission_fails_closed_for_missing_refs_and_undeclared_hosts() {
+    use crate::CredentialSlot::Primary;
+    use crate::signing::Algorithm::HmacSha256;
+    let mut identities = capability_identities();
+    identities.primary.as_mut().unwrap().extra.clear();
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine.set_identities(identities).unwrap();
+    // No Rust provider: the host fulfils Action::Sign and declared nothing.
+    assert_eq!(
+        can_sign_with(&mut engine, Primary, &AMEND_NEEDS[..1]),
+        Err(SignError::Unsupported)
+    );
+    assert_eq!(
+        can_sign_with(&mut engine, Primary, &AMEND_NEEDS),
+        Err(SignError::InvalidRequest)
+    );
+    engine.set_host_algorithms(Some(vec![HmacSha256])).unwrap();
+    assert_eq!(
+        can_sign_with(&mut engine, Primary, &AMEND_NEEDS[..1]),
+        Ok(())
+    );
+    // A later undeclared install clears the earlier declaration.
+    engine.set_host_algorithms(None).unwrap();
+    assert_eq!(
+        can_sign_with(&mut engine, Primary, &AMEND_NEEDS[..1]),
+        Err(SignError::Unsupported)
+    );
+
+    let mut provider_default = crate::test_support::seeded_engine(TestVenue::default());
+    provider_default
+        .set_signer(Some(std::sync::Arc::new(Ready)))
+        .unwrap();
+    provider_default
+        .set_identities(capability_identities())
+        .unwrap();
+    assert_eq!(
+        can_sign_with(&mut provider_default, Primary, &AMEND_NEEDS[..1]),
+        Err(SignError::Unsupported)
+    );
+
+    let mut started = crate::test_support::seeded_engine(TestVenue::default());
+    started.start(1000.);
+    assert!(started.set_identities(capability_identities()).is_err());
+    assert!(started.set_host_algorithms(Some(vec![HmacSha256])).is_err());
+}
+
+/// Admitted everything, then lost capability after its first signature.
+#[derive(Default)]
+struct CapabilityLostAfterFirst(std::sync::atomic::AtomicUsize);
+impl crate::signing::Signer for CapabilityLostAfterFirst {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign(&self, request: SignRequest) -> crate::signing::SignFuture {
+        let result = self.sign_ready(&request).unwrap();
+        Box::pin(std::future::ready(result))
+    }
+    fn sign_ready(&self, _: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        let signed = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Some(if signed == 0 {
+            result()
+        } else {
+            Err(SignError::Refused)
+        })
+    }
+    fn can_sign(
+        &self,
+        _: &crate::signing::KeyRef,
+        _: crate::signing::Algorithm,
+    ) -> crate::signing::Capability {
+        crate::signing::Capability::Supported
+    }
+}
+
+#[test]
+fn admission_is_evidence_only_release_still_validates_and_earlier_effects_stand() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine
+        .set_signer(Some(std::sync::Arc::new(
+            CapabilityLostAfterFirst::default(),
+        )))
+        .unwrap();
+    engine.set_identities(capability_identities()).unwrap();
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    assert_eq!(
+        cx.can_sign(crate::CredentialSlot::Primary, &AMEND_NEEDS),
+        Ok(())
+    );
+    let cancel = cx.request(
+        Method::Post,
+        "https://venue.test/cancel".into(),
+        vec![],
+        None,
+        (),
+    );
+    cx.sign_http(cancel, Box::new(Step));
+    let replace = cx.request(
+        Method::Post,
+        "https://venue.test/replace".into(),
+        vec![],
+        None,
+        (),
+    );
+    cx.sign_http(replace, Box::new(Step));
+    let released: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(http) => Some(http.id),
+            _ => None,
+        })
+        .collect();
+    // The first release went out; the later refusal fails only its own request.
+    assert_eq!(released, [cancel]);
+    assert_eq!(engine.venue.failed, 1);
+}
+
+#[test]
+fn public_operations_validate_refs_algorithms_and_exact_result_widths() {
+    let key = || KeyRef("primary.signing".into());
+    let request = |operations| SignRequest {
+        receipt: Default::default(),
+        operations,
+        context: Default::default(),
+    };
+    let public = request(vec![
+        Operation::PublicAddress { key: key() },
+        Operation::PublicKey {
+            algorithm: Algorithm::Ed25519,
+            key: key(),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::StarkDigest,
+            key: key(),
+        },
+    ]);
+    assert_eq!(public.validate(), Ok(()));
+    let answer = |widths: [usize; 3]| {
+        SignResult::new(
+            widths.map(|width| vec![1; width]).to_vec(),
+            Default::default(),
+        )
+    };
+    assert_eq!(public.validate_result(&answer([20, 32, 32])), Ok(()));
+    for widths in [[32, 32, 32], [20, 33, 32], [20, 32, 31]] {
+        assert_eq!(
+            public.validate_result(&answer(widths)),
+            Err(SignError::InvalidResult)
+        );
+    }
+    for operation in [
+        Operation::PublicAddress {
+            key: KeyRef(String::new()),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::Ed25519,
+            key: KeyRef(String::new()),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::Es256,
+            key: key(),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::Secp256k1Digest,
+            key: key(),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::HmacSha256,
+            key: key(),
+        },
+    ] {
+        assert_eq!(
+            request(vec![operation]).validate(),
+            Err(SignError::InvalidRequest)
+        );
+    }
+}
