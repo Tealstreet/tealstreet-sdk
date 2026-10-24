@@ -314,7 +314,11 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     let read_status = options.read_credentials.as_ref().map(|read| {
         safe_cex_venue_backpack::sign::validate_read_credentials(read.validate(), &read.secret)
     });
-    if options.public_data_only {
+    // Declared PublicRead keeps a valid read key signing in public-only mode,
+    // with no primary ever built or probed (docs/plans/RUST_BACKPACK_PUBLIC_READ_PROVIDER.md).
+    let public_read = construction::read_credentials_policy("backpack")
+        == construction::ReadCredentialsPolicy::PublicRead;
+    if options.public_data_only && !public_read {
         return Ok(BackpackSignerSetup {
             provider: None,
             identities: Identities::default(),
@@ -323,12 +327,16 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     }
     let undecodable = || invalid("Invalid Backpack base64 seed");
     let wrong_width = || invalid("Backpack Ed25519 seed must be 32 bytes");
-    let primary = (present(&options.key) && present(&options.secret)).then(|| LocalIdentity {
-        key: Secret::new(options.key.clone().unwrap_or_default()),
-        secret: Secret::new(options.secret.clone().unwrap_or_default()),
-        secret_encoding: KeyEncoding::Base64,
-        ..Default::default()
-    });
+    let primary_allowed = !options.public_data_only;
+    let primary =
+        (primary_allowed && present(&options.key) && present(&options.secret)).then(|| {
+            LocalIdentity {
+                key: Secret::new(options.key.clone().unwrap_or_default()),
+                secret: Secret::new(options.secret.clone().unwrap_or_default()),
+                secret_encoding: KeyEncoding::Base64,
+                ..Default::default()
+            }
+        });
     let secondary = options
         .read_credentials
         .as_ref()

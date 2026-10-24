@@ -15,7 +15,8 @@ three private history GETs.
   - codex-mxb4mq's parity control `c5a8ebbd4bf`.
 - #2073 and #2078 are not landed. The branch is re-composed on their actual
   landings before any push.
-- Plan and REDs only. No source change.
+- Plan and REDs at `268b3288497`. The source seam is committed locally after
+  codex-mxb4mq's plan CLEAR (see below).
 
 ## Gap
 
@@ -75,3 +76,27 @@ gate 2/2, strict clippy.
 - No private startup from a read-only provider.
 - Read evidence stays secondary/Read-scoped.
 - Each of these is a control with the source.
+
+## Source (local)
+
+`backpack_provider` checks the declared policy. Undeclared public-only returns
+no provider, as before. Declared PublicRead in public-only mode never builds or
+probes the primary (`primary_allowed`) and installs only a read identity that
+passes the typed gate.
+
+Controls added for codex-mxb4mq's source pins:
+- A **real signature**: the provider's inline Ed25519 signature under the read
+  identity equals an independent `safe_cex_crypto::ed25519::sign` over the
+  same read material.
+- A malformed primary in public-only mode is never decoded.
+- Configuration precedes Seed: an empty key gives the native validate message.
+  Absent, empty, malformed and 31-byte reads are each typed.
+- No hosted admission, and no signing work at public-only startup.
+
+Results:
+- 7/7 seam tests, all 27 library tests, #2073's admission tests 11/11 and the
+  parity gate 2/2.
+- Strict clippy is clean.
+- Mutation check: allowing the primary in public-only mode fails 4 tests.
+- Read-scoped evidence for managed history is a control in codex-mxb4mq's
+  history adoption, where the read actually issues.

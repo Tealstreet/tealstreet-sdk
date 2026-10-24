@@ -26,9 +26,28 @@ fn options(public: bool, primary: bool, read: Option<&str>) -> EngineOptions {
 fn setup(public: bool, primary: bool, read: Option<&str>) -> BackpackSignerSetup {
     backpack_provider(&options(public, primary, read)).unwrap()
 }
-/// The provider holds material for exactly the identities it reports.
 fn installed(setup: &BackpackSignerSetup) -> bool {
     setup.provider.is_some()
+}
+/// A real signature from the installed provider under `key`, inline.
+fn signature(setup: &BackpackSignerSetup, key: &safe_cex_engine::signing::KeyRef) -> Vec<u8> {
+    let request = safe_cex_engine::signing::SignRequest {
+        receipt: Default::default(),
+        context: Default::default(),
+        operations: vec![safe_cex_engine::signing::Operation::Sign {
+            algorithm: safe_cex_engine::signing::Algorithm::Ed25519,
+            key: key.clone(),
+            payload: vec![safe_cex_engine::signing::PayloadPart::Bytes {
+                bytes: b"instruction=fillHistoryQueryAll".to_vec(),
+            }],
+        }],
+    };
+    let provider = setup.provider.as_ref().expect("a provider");
+    let result = provider
+        .sign_ready(&request)
+        .expect("the local provider signs inline")
+        .expect("the read identity signs");
+    result.values[0].clone()
 }
 
 /// RED: a valid saved read key gets a read-only provider in public-only mode.
@@ -46,8 +65,10 @@ fn public_only_installs_a_provider_holding_only_the_valid_read_identity() {
             .secondary
             .as_ref()
             .expect("the read identity");
-        assert!(installed(&setup), "no provider for the read identity");
-        assert!(!read.signing.0.is_empty());
+        // Independent oracle: the same Ed25519 signature over the read seed.
+        let expected =
+            safe_cex_crypto::ed25519::sign(b"instruction=fillHistoryQueryAll", &[9u8; 32]).unwrap();
+        assert_eq!(signature(&setup, &read.signing), expected.to_vec());
         assert!(matches!(setup.read_status, Some(Ok(()))));
     }
 }
@@ -86,7 +107,27 @@ fn public_only_selection_serves_reads_only() {
 #[test]
 fn public_only_with_an_invalid_read_key_installs_nothing_and_keeps_the_typed_status() {
     let _declared = test_policy::declare("backpack", PublicRead);
+    let configuration = "Secondary read credentials require a nonempty key and secret";
+    let empty_key: EngineOptions = serde_json::from_str(&format!(
+        r#"{{"publicDataOnly":true,"readCredentials":{{"key":"","secret":"{READ_SEED}"}}}}"#
+    ))
+    .unwrap();
+    let empty = backpack_provider(&empty_key).unwrap();
+    assert!(empty.provider.is_none());
+    let Some(Err(error)) = empty.read_status else {
+        panic!("no typed status for an empty key");
+    };
+    assert_eq!(
+        error.message(),
+        configuration,
+        "Configuration precedes Seed"
+    );
+    assert!(
+        setup(true, true, None).read_status.is_none(),
+        "absent read key"
+    );
     for (seed, expected) in [
+        ("", configuration),
         ("not base64!", "Invalid Backpack base64 seed"),
         (SHORT_SEED, "Ed25519 seed must be 32 bytes"),
     ] {
@@ -121,4 +162,51 @@ fn private_mode_is_unchanged_with_the_declaration() {
     let bad_read = setup(false, true, Some(SHORT_SEED));
     assert!(bad_read.identities.primary.is_some() && bad_read.identities.secondary.is_none());
     assert!(installed(&bad_read));
+}
+
+/// The primary is never built or probed in public-only mode, even malformed.
+#[test]
+fn public_only_never_decodes_a_primary() {
+    let _declared = test_policy::declare("backpack", PublicRead);
+    let malformed: EngineOptions = serde_json::from_str(&format!(
+        r#"{{"publicDataOnly":true,"key":"primary-key","secret":"not base64!","readCredentials":{{"key":"read-key","secret":"{READ_SEED}"}}}}"#
+    ))
+    .unwrap();
+    let setup = backpack_provider(&malformed).expect("a malformed primary was decoded");
+    assert!(setup.identities.primary.is_none() && setup.identities.secondary.is_some());
+}
+
+/// No hosted admission, and no private signing work at startup.
+#[test]
+fn public_only_read_provider_grants_no_hosted_or_startup_authority() {
+    let _declared = test_policy::declare("backpack", PublicRead);
+    assert!(!hosted_signing::admitted(
+        "backpack",
+        &options(true, true, Some(READ_SEED))
+    ));
+    struct Started;
+    impl Visit for Started {
+        type Output = Vec<safe_cex_engine::Action>;
+        fn visit<V: safe_cex_engine::Venue + 'static>(
+            self,
+            mut engine: safe_cex_engine::Engine<V>,
+        ) -> Self::Output {
+            engine.start(0.0);
+            safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        }
+    }
+    let actions = build(
+        "backpack",
+        options(true, true, Some(READ_SEED)),
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Started,
+    )
+    .unwrap();
+    assert!(
+        !actions.iter().any(|action| matches!(
+            action,
+            safe_cex_engine::Action::Sign { .. } | safe_cex_engine::Action::SignedOutbound { .. }
+        )),
+        "public-only startup produced signing work"
+    );
 }
