@@ -2577,6 +2577,32 @@ pub enum SigningTarget<'a, P> {
     },
 }
 
+/// Exactly one final HTTP admission mode, fixed at engine construction.
+/// Mutable scheduler admission cannot participate in an atomic nonce release.
+pub enum HttpRelease<V: Venue> {
+    Mutable(
+        fn(
+            &mut V,
+            &mut V::Pending,
+            &crate::request_context::HttpRelease,
+        ) -> Result<crate::request_context::Admission, crate::request_context::Error>,
+    ),
+    NonceUnscheduled(
+        fn(
+            &V,
+            &V::Pending,
+            &crate::request_context::HttpRelease,
+        ) -> Result<(), crate::request_context::Error>,
+    ),
+}
+
+impl<V: Venue> Copy for HttpRelease<V> {}
+impl<V: Venue> Clone for HttpRelease<V> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
     /// Read-only native evidence from an unproven managed mutation envelope.
@@ -2666,14 +2692,12 @@ pub trait Venue {
         &[]
     }
 
-    /// Final synchronous admission. This callback cannot queue more work or
-    /// alter the engine's clocks, preparation/signing state or original bound.
-    fn on_http_release(
-        &mut self,
-        _pending: &mut Self::Pending,
-        _release: &crate::request_context::HttpRelease,
-    ) -> Result<crate::request_context::Admission, crate::request_context::Error> {
-        Ok(crate::request_context::Admission::Unscheduled)
+    /// Captured once at engine construction; the two admission modes are exclusive.
+    fn http_release() -> HttpRelease<Self>
+    where
+        Self: Sized,
+    {
+        HttpRelease::Mutable(|_, _, _| Ok(crate::request_context::Admission::Unscheduled))
     }
 
     /// Typed setup/bind/denial failures are pre-send facts, distinct from a
@@ -2962,6 +2986,7 @@ fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
 
 pub struct Engine<V: Venue> {
     venue: V,
+    http_release: HttpRelease<V>,
     store: Store,
     io: Io<V::Pending>,
     started: bool,
@@ -3006,8 +3031,10 @@ impl<V: Venue> Engine<V> {
             crate::request_context::SendPacing::new(venue.http_pacing()).map_err(|_| {
                 VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput)
             })?;
+        let http_release = V::http_release();
         Ok(Self {
             venue,
+            http_release,
             store,
             io: Io {
                 entropy: Some(entropy),

@@ -25,6 +25,7 @@ pub mod hosted_signing {
             vec![bytes(exact_encoded_query.into_bytes())],
             context,
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(stamp_ms),
                 expiry_ms: None,
             },
@@ -81,6 +82,7 @@ pub mod hosted_signing {
             assert_eq!(
                 work.receipt,
                 SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(1_709_209_849_123.),
                     expiry_ms: None
                 }
@@ -304,6 +306,7 @@ impl SignStep for SpotSubscribe {
                 ..Default::default()
             },
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(self.timestamp),
                 expiry_ms: None,
             },

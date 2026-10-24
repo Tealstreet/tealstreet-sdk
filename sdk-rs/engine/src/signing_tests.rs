@@ -1349,6 +1349,7 @@ impl crate::SignStep for ReceiptStep {
     ) -> Result<SignRequest, SignError> {
         let mut request = Step.prepare(action, context)?;
         request.receipt = crate::signing::SignReceipt {
+            nonce: None,
             stamp_ms: (!self.expiry_only).then_some(context.now_ms.floor()),
             expiry_ms: Some(context.now_ms.floor() + 20.),
         };
@@ -1397,14 +1398,17 @@ fn wrong_missing_or_invalid_receipt_is_refused_before_apply_or_publication() {
     for receipt in [
         SignReceipt::default(),
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(999.),
             expiry_ms: Some(1020.),
         },
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(1000.),
             expiry_ms: Some(1021.),
         },
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(f64::NAN),
             expiry_ms: Some(1020.),
         },
@@ -1554,22 +1558,27 @@ fn receipt_bounds_and_provider_json_fail_closed_without_timing_unit_guessing() {
     use crate::signing::SignReceipt;
     for receipt in [
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(-1.),
             expiry_ms: None,
         },
         SignReceipt {
+            nonce: None,
             stamp_ms: None,
             expiry_ms: Some(1.5),
         },
         SignReceipt {
+            nonce: None,
             stamp_ms: None,
             expiry_ms: Some(f64::INFINITY),
         },
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(9_007_199_254_740_992.),
             expiry_ms: None,
         },
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(1000.),
             expiry_ms: Some(1000.),
         },
@@ -1584,6 +1593,7 @@ fn receipt_bounds_and_provider_json_fail_closed_without_timing_unit_guessing() {
     assert!(serde_json::from_str::<SignResult>("[[1]]").is_err());
     assert_eq!(
         SignReceipt {
+            nonce: None,
             stamp_ms: None,
             expiry_ms: Some(1_000_000.)
         }
@@ -1675,6 +1685,7 @@ fn wire_stamp_floors_after_fractional_calibration_without_changing_clock_domains
     assert_eq!(context.stamp_ms(), 2002.0);
     assert!(
         crate::signing::SignReceipt {
+            nonce: None,
             stamp_ms: Some(context.stamp_ms()),
             expiry_ms: None
         }
