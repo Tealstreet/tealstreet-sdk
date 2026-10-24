@@ -1738,7 +1738,7 @@ fn replacement_failure_keeps_retired_original_root_authority_and_rejects_superse
     let mut registry = ContextRegistry::default();
     let root = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
     let parent = registry
-        .issue_bound(2, Scope::Command(7), policy(), 0., Some(&root))
+        .issue_with_egress(2, Scope::Command(7), policy(), 0., Some(&root), None)
         .unwrap();
     let delivery = refusal(&mut registry, &parent, 11);
     let children = registry
