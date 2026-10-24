@@ -82,7 +82,7 @@ valid catalogue/ticker financial values; 1000/2000/4000 jittered backoff;
 independent ticker failure and cached-quote retention; no command/auth/signing
 notices; partial catalogue peers commit; private startup precedes ticker success;
 old physical callbacks after retry are inert. Real capacity peers use the
-already-managed public book command, never fabricated Contexts/receipts.
+already-managed public candle command, never fabricated Contexts/receipts.
 Preserve original assertions in a separate RED commit and record executed
 RED/GREEN counts independently from planned adoption coverage.
 
@@ -105,3 +105,23 @@ an explicit overseer GO.
 Architecture gate: **No**. Venue codecs consume the actual shared Background
 Read and startup Backoff choke points. No local selection, lifetime, retry,
 issuer, finalizer or scheduling algorithm is added.
+
+
+## Original execution checkpoint
+
+On unchanged actual db6fa45bbb7 production, the dedicated target compiles and
+executes 15 controls: 8 assertion RED / 7 working GREEN / zero ignored. REDs
+cover two eager route-preparation sites, parked expiry, preparation refusal,
+response equality/timer-first expiry, ticker expiry and full owner capacity.
+The timer-first/preparation bodies first fail at original eager dispatch, so
+later assertions are declared adoption controls, not separate original proof.
+
+Working controls pin exact unsigned production/testnet wire, financial values,
+1000/2000/4000 retry cadence and old callback inertness, independent ticker
+failure, usable catalogue/private startup ordering, capacity handoff and failure
+recovery after a newer managed sibling issues beyond the old expiry. Capacity
+peers are genuine public candle command reads and need no loaded-Store mutation.
+The initial fixture compile mistakes (nonexistent Store setter, then missing
+FetchCandles limit) were corrected before this executable receipt; neither is
+RED evidence. Production, existing fixtures/tests, Cargo, checkers, key selection
+and inventories remain byte-exact to the requested actual tip.
