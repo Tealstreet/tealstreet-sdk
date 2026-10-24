@@ -57,8 +57,8 @@ Ingress and control observation retain their current expiry check BEFORE the
 codec, progress, receive mutation or native publication. Equality expires: a
 challenge at OPEN+15s cannot revive the connection when timer ingress is delayed.
 A challenge just before that boundary can renew to its receipt+15s, and equality
-at the renewed bound still fences provider results and sends. Invalid/nonfinite
-or regressing clocks grant nothing. No timeout, physical signing attempt or
+at the renewed bound still fences provider results and sends. Invalid/nonfinite clocks grant nothing. The hook uses the host-provided raw
+receipt clock under the existing monotonic host-clock contract. No timeout, physical signing attempt or
 signer freshness is renewed by this operation; send_signed retains its existing
 current-epoch and final-release gates.
 
@@ -111,3 +111,27 @@ source/API review. CARGO_BUILD_JOBS=4, one local Cargo process; no full workspac
 or all-feature local sweep. Push only a freeze candidate; one PR-triggered Rust
 run, no explicit duplicate. No budget/threshold/profile or production release
 change is authorized.
+
+
+## Original-source receipt
+
+Plan commit `51358649777` precedes the new dedicated target. On unchanged a109
+runtime, thirteen tests execute: five intended timing assertions RED, eight
+working controls GREEN, zero ignored. The explicit progress mapping is still
+Control::Other; no runtime enum/hook or venue code has been edited.
+
+RED boundaries are survival beyond the original deadline, final ACK release
+inside the renewed window, renewed-bound live twin, canceled-watch custody, and
+one accepted challenge versus duplicate renewal. Assertions beyond each first
+failure remain source-stage gates. Working controls pin delayed OPEN, original
+equality before callback, empty challenge/pong, normal final auth release,
+default no-auth behavior, snapshot-bound isolation, genuine reconnect epochs,
+and nonfinite clock rejection.
+
+The first fixture compile used TimerId in an ordered map; corrected to the
+existing hash-key contract before executable evidence. An added clock probe
+showed that regressing finite host timestamps are not rejected by the existing
+socket clock gate; the plan now retains its existing monotonic host-clock
+contract rather than adding an unrelated chronological ledger. That exploratory
+assertion is not part of the five adoption REDs. Scoped source-stage strict
+Clippy and reviewer/API clearance remain pending. No push or CI is claimed.
