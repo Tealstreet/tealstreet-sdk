@@ -147,3 +147,21 @@ use shared prepared_actions at their exact original event time, retaining all
 wire/financial/timer expectations. The backoff fixture tracks its unchanged last
 event time for transport preparation; no native timer timestamp is altered.
 Only the four singleton manifest sites are removed; foreign bytes stay exact.
+
+
+Final gates: all236 Lighter,225 Paradex and305 Binance native tests PASS (766
+unique tests, zero ignored), including all22 new controls and every formerly
+blocked recovery suffix. The first full run found only two missed old startup
+drains (public-review/public_feed);3aa5edec0bd changes just those drains and the
+focused12-test rerun passed before the final full run. Strict Clippy found one
+new-test string-slicing lint;81727f688ba uses the same prefix bytes directly.
+Both touched crates' all-target/all-feature strict Clippy now PASS. Scoped fmt,
+whitespace, bans, request scanner and15 negative tests PASS.
+
+Independent source/adversarial, caller and full-map reviews CLEAR through the
+fixture follow-up. Every unowned incoming source/test/engine/checker blob is
+preserved. All14 existing Lighter fixture predicates and timer expectations are
+retained; only the transport drain expression in one fallback assertion changes.
+Exact manifest shrink is four singletons, with all foreign bytes preserved.
+Architecture gate: No. CI/replay/size/timing and a green authorized venue train
+window remain separate gates; no merge has been requested or performed.
