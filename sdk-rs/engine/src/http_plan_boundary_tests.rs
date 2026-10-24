@@ -77,6 +77,7 @@ impl Venue for Probe {
                     calls: &calls,
                 }],
                 PlanPolicy {
+                    independent_calls: false,
                     operation: if write {
                         Operation::Mutation
                     } else {

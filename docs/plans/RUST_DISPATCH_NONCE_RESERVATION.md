@@ -346,3 +346,27 @@ nonce end to end, with no server-side second reservation or renewed stamp.
 An adapter that cannot carry that capture must refuse before private I/O;
 discovering the omission later as InvalidResult is not an admission policy.
 This is a consumer/hosted composition gate, separate from schema clearance.
+
+## Retained selected-read nonce mint
+
+Credential-core owner m26 approved `queue_with_nonce(domain, recipe)` on
+AdmittedRead and ReadLeg. The recipe receives the retained `&Identity` and a
+fresh non-Clone NonceClaim minted by the same crate-private factory as Slots.
+The private Selection/Identity snapshot has no public constructor or mutable
+accessor. Each physical queue, including a native retry, mints a fresh claim;
+no key reselection or reservation happens while a read is retained.
+
+The ordinary selected-read queue refuses a declared nonce claim before queue
+IDs. The nonce queue requires the exact minted authority, refusing a missing
+or substituted declaration before IDs. Missing stable_id refuses InvalidInput
+through the existing typed queue error, before recipe/provider work. Both
+return the exact pending wrapper for the caller's contextual settlement.
+Direct managed requests with a trusted Slots claim remain supported for
+non-selected-read operations, including Kraken mutations; the raw non-managed
+signing boundary continues to refuse nonce claims.
+
+Source controls must cover both wrappers, retained Secondary identity despite
+venue-slot replacement, missing subject before recipe construction, plain-queue
+refusal even for an otherwise valid claim, substituted/missing nonce authority,
+and a real ReadFailure retry with fresh signing/request IDs and increasing nonce.
+This is an additional API/source review gate before Kraken account adoption.

@@ -557,3 +557,6 @@ async fn parked_resources_stop_control(fatal: bool) {
     assert!(host.managed_http.resources.is_empty());
     assert!(sent.lock().unwrap().is_empty());
 }
+
+#[path = "managed_http_nonce_tests.rs"]
+mod nonce_tests;

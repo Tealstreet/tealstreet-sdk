@@ -3,6 +3,7 @@ use crate::credential_selection::{
     CredentialRole, CredentialUnavailable, PrimaryReason, Selection, Slots,
 };
 use crate::json::ArrayAt;
+use crate::nonce::{ClaimAuthority, NonceClaim, NonceDomain};
 use crate::request_context::{
     CommandEntryError, Context, Credential, Error, Operation, Pacing, Policy, RetryEvidence,
     RetryPolicy, Scope,
@@ -127,6 +128,17 @@ pub struct RetryRefusal<T> {
 }
 
 impl SelectedRead {
+    fn nonce_recipe(
+        &self,
+        domain: &'static NonceDomain,
+        recipe: impl FnOnce(&Identity, NonceClaim) -> Box<dyn SignStep>,
+    ) -> Result<(Box<dyn SignStep>, Arc<ClaimAuthority>), Error> {
+        let claim =
+            NonceClaim::mint(domain, self.selection, &self.identity).map_err(|_| Error::Invalid)?;
+        let authority = claim.authority();
+        Ok((recipe(&self.identity, claim), authority))
+    }
+
     pub fn select(slots: &Slots<Identity>, role: ReadRole) -> Result<Self, CredentialUnavailable> {
         let (role, scope) = match role {
             ReadRole::Read { scope } => (CredentialRole::Read { scope }, scope),
@@ -236,8 +248,36 @@ impl AdmittedRead {
         recipe: impl FnOnce(&Identity) -> Box<dyn SignStep>,
         pending: impl FnOnce(Self) -> P,
     ) -> Result<RequestId, (P, Error)> {
-        let context = self.context.clone();
         let step = recipe(&self.selected.identity);
+        self.queue_recipe(cx, request, step, None, pending)
+    }
+
+    /// Mint from the retained selection once for this physical queue.
+    /// Missing subject or a recipe declaring a different claim refuses before IDs.
+    pub fn queue_with_nonce<P>(
+        self,
+        cx: &mut Cx<'_, P>,
+        request: ReadRequest,
+        domain: &'static NonceDomain,
+        recipe: impl FnOnce(&Identity, NonceClaim) -> Box<dyn SignStep>,
+        pending: impl FnOnce(Self) -> P,
+    ) -> Result<RequestId, (P, Error)> {
+        let (step, authority) = match self.selected.nonce_recipe(domain, recipe) {
+            Ok(recipe) => recipe,
+            Err(error) => return Err((pending(self), error)),
+        };
+        self.queue_recipe(cx, request, step, Some(authority), pending)
+    }
+
+    fn queue_recipe<P>(
+        self,
+        cx: &mut Cx<'_, P>,
+        request: ReadRequest,
+        step: Box<dyn SignStep>,
+        authority: Option<Arc<ClaimAuthority>>,
+        pending: impl FnOnce(Self) -> P,
+    ) -> Result<RequestId, (P, Error)> {
+        let context = self.context.clone();
         let scope = self.selected.scope;
         let slot = self.selected.selection.slot();
         queue_read(
@@ -245,6 +285,7 @@ impl AdmittedRead {
             context,
             request,
             step,
+            authority,
             scope.map(|scope| (slot, scope)),
             pending(self),
         )
@@ -314,13 +355,49 @@ impl ReadLeg {
         recipe: impl FnOnce(&Identity) -> Box<dyn SignStep>,
         pending: impl FnOnce(Self) -> P,
     ) -> Result<RequestId, (P, Error)> {
-        let context = self.context.clone();
         let step = recipe(&self.selected.identity);
+        self.queue_recipe(cx, request, step, None, pending)
+    }
+
+    /// Mint from the retained selection once for this physical queue.
+    /// Missing subject or a recipe declaring a different claim refuses before IDs.
+    pub fn queue_with_nonce<P>(
+        self,
+        cx: &mut Cx<'_, P>,
+        request: ReadRequest,
+        domain: &'static NonceDomain,
+        recipe: impl FnOnce(&Identity, NonceClaim) -> Box<dyn SignStep>,
+        pending: impl FnOnce(Self) -> P,
+    ) -> Result<RequestId, (P, Error)> {
+        let (step, authority) = match self.selected.nonce_recipe(domain, recipe) {
+            Ok(recipe) => recipe,
+            Err(error) => return Err((pending(self), error)),
+        };
+        self.queue_recipe(cx, request, step, Some(authority), pending)
+    }
+
+    fn queue_recipe<P>(
+        self,
+        cx: &mut Cx<'_, P>,
+        request: ReadRequest,
+        step: Box<dyn SignStep>,
+        authority: Option<Arc<ClaimAuthority>>,
+        pending: impl FnOnce(Self) -> P,
+    ) -> Result<RequestId, (P, Error)> {
+        let context = self.context.clone();
         let evidence = self
             .selected
             .scope
             .map(|scope| (self.selected.selection.slot(), scope));
-        queue_read(cx, context, request, step, evidence, pending(self))
+        queue_read(
+            cx,
+            context,
+            request,
+            step,
+            authority,
+            evidence,
+            pending(self),
+        )
     }
 }
 
@@ -329,15 +406,17 @@ fn queue_read<P>(
     context: Context,
     request: ReadRequest,
     step: Box<dyn SignStep>,
+    authority: Option<Arc<ClaimAuthority>>,
     evidence: Option<(CredentialSlot, AccountReadScope)>,
     pending: P,
 ) -> Result<RequestId, (P, Error)> {
-    let id = cx.request_signed_managed(
+    let id = cx.request_selected_read_managed(
         context,
         request.method,
         request.url,
         request.body,
         step,
+        authority,
         pending,
     )?;
     if let Some(at) = request.stream {
