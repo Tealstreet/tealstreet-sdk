@@ -2988,3 +2988,36 @@ by fail_context on that exact root. BloFin 23->21 occurrences / 19->17 fingerpri
 only the two singleton rows are removed. No signer, trading, history, closed
 position or successful private read is converted. The coherent custody cutover
 remains with codex-zs5e83. No per-venue admission/completion implementation.
+
+## OKX closed-position request ownership
+
+Closed pages now consume shared SelectedRead command roots/legs and the original
+ReadCompletion/ReadCursorHistory authority. Delivery admission precedes raw row
+count, oldest timestamp, staging and cursor changes. The engine owns whole-call
+expiry; exact-Owner retirement removes native delayed pages, with no local root
+timer or numeric terminal fallback. Native accepted-prefix provider/physical
+recovery remains separate from strict root/local refusal. Shared list/sign
+consumer deletion is deferred to the remaining account/discovery/write owners;
+this conversion does not remove or relax any staging/checker inventory row.
+
+## MEXC unsigned discovery and depth Context adoption
+
+The public catalogue/ticker streamed sender and subscription-depth GET sender
+now use existing Background Read issuance and managed HTTP. Exact delivery is
+validated before row decoding, metadata edits and publication; native generation,
+response and financial checks remain. Failure-only retirement permits expired
+current cleanup without DATA or newer-owner authority. The exact removal-only
+manifest delta is two MEXC lib fingerprints/occurrences,18 to16 in the venue.
+No private signer, account/history/trading reducer, scheduler or engine code
+changes in this slice. Family performance/size evidence remains a CI gate.
+
+
+### Hyperliquid spot candle tail
+
+The six spot candle terminals now reuse the existing perps managed Read path.
+The obsolete pending owner and its numeric completions are removed; generic info,
+Builder, History and socket paths remain unchanged. The original checkpoint ran
+two working controls plus nine compiling assertion REDs on unchanged production.
+All eleven now pass alongside ten existing candle and43 spot controls. Two gated
+new-test metadata expectations were corrected to the existing perps NotSent
+contract; primary RED boundaries and native wire/result assertions are retained.
