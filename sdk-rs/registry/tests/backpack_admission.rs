@@ -93,6 +93,44 @@ fn registry_installs_the_provider_and_identity_from_the_configured_seed() {
     assert!(identities.secondary.is_none());
 }
 
+// RFC 8032 section 7.1, test 1: the seed's public key.
+const RFC_PUBLIC: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+
+/// Key typing: the seed is declared Ed25519, so it answers its own public key
+/// and never MACs. The valid-seed case above also guards the setup probe,
+/// which would mask a missing declaration as a width error.
+#[test]
+fn the_backpack_seed_is_declared_ed25519() {
+    let (identities, signer) = construct(json!({
+        "key": "public-api-key",
+        "secret": base64(&hex(RFC_SEED)),
+    }))
+    .unwrap();
+    let primary = identities.primary.unwrap();
+    let signer = signer.unwrap();
+    let request = |operation| SignRequest {
+        receipt: Default::default(),
+        context: Default::default(),
+        operations: vec![operation],
+    };
+    let public = signer
+        .sign_ready(&request(Operation::PublicKey {
+            algorithm: Algorithm::Ed25519,
+            key: primary.signing.clone(),
+        }))
+        .unwrap()
+        .map(|result| result.values.clone());
+    assert_eq!(public, Ok(vec![hex(RFC_PUBLIC)]));
+    let mac = signer
+        .sign_ready(&request(Operation::Sign {
+            algorithm: Algorithm::HmacSha256,
+            key: primary.signing,
+            payload: vec![PayloadPart::Bytes { bytes: vec![] }],
+        }))
+        .unwrap();
+    assert!(mac.is_err());
+}
+
 #[test]
 fn malformed_or_wrong_length_seeds_are_refused_at_setup() {
     for (secret, message) in [

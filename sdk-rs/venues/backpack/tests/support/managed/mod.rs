@@ -11,8 +11,8 @@ pub struct Driver {
 }
 impl Driver {
     pub fn new(mut options: Options) -> Self {
-        let (provider, identities) =
-            safe_cex_crypto::signer::LocalSigner::from_setup(safe_cex_crypto::signer::LocalSetup {
+        let (provider, identities) = safe_cex_crypto::signer::LocalSigner::from_setup_with_policy(
+            safe_cex_crypto::signer::LocalSetup {
                 primary: Some(safe_cex_crypto::signer::LocalIdentity {
                     key: safe_cex_crypto::signer::Secret::new(options.key.clone().unwrap()),
                     secret: safe_cex_crypto::signer::Secret::new(options.secret.clone().unwrap()),
@@ -20,8 +20,16 @@ impl Driver {
                     ..Default::default()
                 }),
                 secondary: None,
-            })
-            .unwrap();
+            },
+            safe_cex_engine::signing::CredentialSetupPolicy {
+                primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                    signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+                    ..Default::default()
+                }),
+                secondary: None,
+            },
+        )
+        .unwrap();
         options.identity = identities.primary.clone();
         let mut inner = safe_cex_engine::test_support::seeded_engine(Backpack::new(options));
         inner

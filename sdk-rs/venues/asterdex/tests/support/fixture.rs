@@ -4,7 +4,9 @@
 use super::sign::{Version, resolve_version};
 use super::{AsterDex, VenueOptions};
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
-use safe_cex_engine::signing::KeyEncoding;
+use safe_cex_engine::signing::{
+    Algorithm, CredentialSetupPolicy, IdentitySetupPolicy, KeyEncoding,
+};
 
 #[derive(Clone, Default)]
 pub struct Options {
@@ -71,7 +73,17 @@ impl Options {
                     signing_from_primary: alias,
                     ..Default::default()
                 });
-        let (provider, identities) = LocalSigner::from_setup(LocalSetup { primary, secondary })?;
+        // Trusted setup declares V3 wallets secp256k1; V1 secrets stay MACs.
+        let declared = (version == Version::V3).then(|| IdentitySetupPolicy {
+            signing_algorithm: Some(Algorithm::Secp256k1Digest),
+            ..Default::default()
+        });
+        let policy = CredentialSetupPolicy {
+            primary: declared,
+            secondary: declared,
+        };
+        let (provider, identities) =
+            LocalSigner::from_setup_with_policy(LocalSetup { primary, secondary }, policy)?;
         let venue = AsterDex::new(VenueOptions {
             testnet: self.testnet,
             public_data_only: self.public_data_only,

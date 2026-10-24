@@ -119,6 +119,7 @@ enum SigningAlgorithm {
     Es256,
     Secp256k1Digest,
     StarkDigest,
+    SchnorrDigest,
 }
 
 #[derive(Debug, Deserialize)]
@@ -395,6 +396,8 @@ mod tests {
         assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }) }"));
         assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: None }"));
         assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest) }), secondary: None }"));
+        // Lighter's Schnorr key is declarable for Sign typing.
+        assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"schnorrDigest"}}}}}"#).unwrap().contains("Algorithm::SchnorrDigest"));
         // MAC algorithms are never declarable.
         assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"hmacSha256"}}}}}"#).is_err());
         assert!(output.contains("CredentialSetupPolicy { primary: None, secondary: None }"));
