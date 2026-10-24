@@ -211,12 +211,15 @@ fails at an assertion.
    recorded; and a foreign Plan's delivery.
 4. An Unknown fact (a released write with an unproven reply) refuses
    continuation with State. `fail_plan` then projects Unknown with every
-   earlier accepted ID, and nothing more is sent.
+   earlier accepted ID, and nothing more is sent. The Plan-held order lock
+   converts to the uncertain-write fence at that terminal (asserted through
+   `order_locks.uncertain`), not merely released.
 5. Root expiry mid-chain, two cases. (a) The live call is unreleased: one
    Timeout (NotSent) terminal, the call retired, no further issue. (b) The
    live call is released: its fact is Unknown, the projection carries Unknown
    with every streamed accepted ID, and the uncertain-write fence is armed, as
-   in RED4. An expired root refuses continuation in both.
+   in RED4, including the order-lock to fence conversion. An expired root
+   refuses continuation in both.
 6. Accepted IDs: 10,000 IDs over 500 calls appear in exact order, untruncated,
    in both `partial.order_ids` (after an uncertain stop at call 501) and the
    venue's `done_plan` result path. No `[truncated IDs …]` marker.
