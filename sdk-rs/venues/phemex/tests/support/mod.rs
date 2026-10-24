@@ -80,3 +80,40 @@ pub fn engine(options: Options) -> Engine<PhemexPerpetuals> {
     engine.set_signer(Some(provider)).unwrap();
     engine
 }
+
+/// Immediate native fixtures use real routes at their most recent ingress time.
+/// Managed-boundary tests keep the raw Engine and control each host transition.
+pub struct PreparedEngine<V: safe_cex_engine::Venue> {
+    inner: Engine<V>,
+    now: f64,
+}
+impl<V: safe_cex_engine::Venue> std::ops::Deref for PreparedEngine<V> {
+    type Target = Engine<V>;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+impl<V: safe_cex_engine::Venue> std::ops::DerefMut for PreparedEngine<V> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+impl<V: safe_cex_engine::Venue> PreparedEngine<V> {
+    pub fn start(&mut self, now: f64) {
+        self.now = now;
+        self.inner.start(now);
+    }
+    pub fn handle(&mut self, now: f64, event: safe_cex_engine::Event<'_>) {
+        self.now = now;
+        self.inner.handle(now, event);
+    }
+    pub fn drain_actions(&mut self) -> std::vec::IntoIter<safe_cex_engine::Action> {
+        safe_cex_engine::test_support::prepared_actions(&mut self.inner, self.now).into_iter()
+    }
+}
+pub fn prepared_engine(options: Options) -> PreparedEngine<PhemexPerpetuals> {
+    PreparedEngine {
+        inner: engine(options),
+        now: 0.,
+    }
+}

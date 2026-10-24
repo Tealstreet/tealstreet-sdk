@@ -37,7 +37,7 @@ fn engine() -> Engine<TxFlow> {
             },
         },
     );
-    let mut startup = e.drain_plain().collect::<Vec<_>>();
+    let mut startup = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
     let ticker = startup
         .iter()
         .find_map(|action| match action {

@@ -1088,11 +1088,14 @@ impl TxFlow {
                 coin,
                 context,
             } => {
-                if !self.finish_setting_context(cx, &fence, &context) {
+                if !self.setting_current(&fence, &context) {
+                    let _ = cx.finish_http_context(&context);
                     return;
                 }
-                self.schedule_setting(cx);
                 if fence.revision != self.account.settings_revision {
+                    if self.finish_setting_context(cx, &fence, &context) {
+                        self.schedule_setting(cx);
+                    }
                     return;
                 }
                 match serde_json::from_str::<Envelope<AssetData>>(response.body)
@@ -1110,6 +1113,9 @@ impl TxFlow {
                         cx.store.update_setting(&symbol, |s| *s = setting);
                     }
                     Err(e) => cx.notice(Level::Warn, code::STREAM_MALFORMED, e),
+                }
+                if self.finish_setting_context(cx, &fence, &context) {
+                    self.schedule_setting(cx);
                 }
             }
         }

@@ -1,9 +1,9 @@
 # TxFlow unsigned account-setting poll custody
 
-Plan and original controls, owner codex-hcmq3f, 2026-10-25. Base is actual
-`49f7d1857b66fc14f5164c8ca82ce42d48a53c1d`. No production, inventory, Cargo or
-existing fixture changes belong to this checkpoint. The preceding ticker-seed
-slice is draft #2075 at `05878ca91f0`, not an actual landing dependency yet.
+Owner codex-hcmq3f, 2026-10-25. The original plan/control checkpoint used actual
+`49f7d1857b66fc14f5164c8ca82ce42d48a53c1d`. The source checkpoints below record
+its later implementation and actual command-candle/ticker integration. Current
+composition includes the actual #2075, #2086 and #2091 landings.
 
 ## Size and inventory
 
@@ -189,3 +189,29 @@ Prepare retry, exactly one native 100 ms Setting continuation, and the second
 coin's real managed request without candle retry. The unchanged setting11 and
 candle19 targets also pass. Final actual ticker-seed composition, scoped strict
 checks and composed CI remain gates before readiness.
+
+### Actual ticker integration and live publication
+
+The final composition plain-merges actual #2075 through #2086 and #2091 at
+`cc5ab6aed5d749185eeccd4e0efad5e523540b0d`. m26ps4 and 5c57jl independently
+cleared the one-hunk guard union, patch SHA256
+`1e0bc67cc560b849c736c3020e6205e527f4a7145f856ddd73521b2cb499128b`.
+Account, Ticker and Candles keep separate early-return DATA guards before common
+status/codec. Typed candle preparation/released handlers are identical on both
+parents and remain unchanged; native Setting/Ticker failure cleanup is retained.
+
+The Setting success path now retains the exact current DATA Context through
+native parse and synchronous settings/hedged Store publication. It retires that
+Context only afterward, before the single native 100 ms successor. An old owner
+retires only its own handle without affecting a replacement or scheduling work.
+Revision-stale current replies retire then schedule once without parsing; invalid
+parse retains its native notice and one retirement/successor. Failure callbacks
+and disconnect are unchanged. Both reviewers independently cleared correction
+patch `e51a076d1152788774365e5efc51cf367b97aaeec24eb3c05fca8e6dd6708042`,
+complete account blob `91bf32aabc744bca9e562b5b168bdbefdc175424`.
+
+Original setting/candle/ticker targets and both same-engine failure targets are
+retained unchanged. The new checker must recount both request inventories with
+zero growth; the sole remaining prune is account.rs `433b3954` count one, actual
+family 6 to 5. Exact committed preservation, scoped native/strict/fmt/bans and
+one fresh frozen-head PR run remain verification gates at this source commit.
