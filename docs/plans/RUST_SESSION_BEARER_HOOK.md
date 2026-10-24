@@ -239,6 +239,12 @@ packets behaving correctly today.
   - one terminal per owner;
   - zero HTTP;
   - no venue-callback re-entry.
+- **R10b (with claude-fe7lgm's Plan session wait).** A Plan holds one parked
+  session-wait unit and one bound unreleased leg on the same Session, and the
+  Session is retired. The shared queued flush handles bound-packet failures
+  first. That seals the Plan, the seal retires the parked unit, and
+  `on_plan_session_wait_ended` is not called after the seal. Result: exactly
+  one terminal and no re-entry.
 - **R11 (P2-4, groups).** An announced mutation group sees a moved revision on
   one member: the whole group fails precommit, and no single member is
   reprepared.
