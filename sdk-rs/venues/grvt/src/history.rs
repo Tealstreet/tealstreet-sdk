@@ -9,6 +9,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{CommandId, Cx, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -367,7 +368,16 @@ impl Grvt {
                     None | Some("FUNDING_FEE") => Kind::Funding,
                     Some("COMMISSION" | "REALIZED_PNL") => Kind::IncomeFills,
                     _ => {
-                        cx.fail(command, "Unsupported GRVT income category");
+                        let Ok(context) = cx.admit_http_command(Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 20_000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        }) else {
+                            return;
+                        };
+                        let _ = cx.fail_context(&context, "Unsupported GRVT income category");
                         return;
                     }
                 };
@@ -400,12 +410,30 @@ impl Grvt {
         };
         if kind != Kind::Trades && (self.options.public_data_only || self.account.session.is_none())
         {
-            cx.fail(command, "GRVT query requires an authenticated session");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "GRVT query requires an authenticated session");
             return;
         }
         let selected = symbol.as_ref().and_then(|s| cx.store.market(s));
         if symbol.is_some() && selected.is_none() {
-            cx.fail(command, "Unknown GRVT query market");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "Unknown GRVT query market");
             return;
         }
         let result =
@@ -413,12 +441,30 @@ impl Grvt {
         let (from, to) = match result {
             Ok(v) => v,
             Err(e) => {
-                cx.fail(command, e);
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
+                let _ = cx.fail_context(&context, e);
                 return;
             }
         };
         if from.is_some_and(|f| f > to) || order_id.as_ref().is_some_and(String::is_empty) {
-            cx.fail(command, "Invalid GRVT query range or order ID");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "Invalid GRVT query range or order ID");
             return;
         }
         if kind == Kind::Lookup
@@ -426,12 +472,30 @@ impl Grvt {
                 id.parse::<u64>().ok().is_none_or(|n| n == 0) || id.starts_with('0')
             })
         {
-            cx.fail(command, "Invalid GRVT client order ID");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "Invalid GRVT client order ID");
             return;
         }
         let account = self.account.trading_account_id.clone();
         if kind != Kind::Trades && account.is_none() {
-            cx.fail(command, "GRVT query requires a subaccount");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "GRVT query requires a subaccount");
             return;
         }
         let target_created = order_id

@@ -1,9 +1,14 @@
 //! Typed, streamed rare reads. Native derivative quantities are contract counts.
-use crate::{Okx, Pending};
+use crate::{Okx, Pending, sign};
 use safe_cex_engine::Level;
+use safe_cex_engine::history::ReadCompletion;
+use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Order, OrderExtra, OrderSide, OrderStatus, OrderType, TimeInForce};
 use safe_cex_engine::num::parse_decimal;
+use safe_cex_engine::request_context::{
+    CommandEntryError, Context, Credential, Operation, Owner, Policy, RetryPolicy,
+};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, num};
 use serde::{Deserialize, Serialize};
@@ -20,7 +25,8 @@ pub struct HistoryState {
 
 pub struct Request {
     lookup: Option<String>,
-    pub(crate) command: CommandId,
+    completion: ReadCompletion,
+    leg: Option<Context>,
     endpoint: &'static str,
     symbol: Option<String>,
     instrument: Option<String>,
@@ -286,6 +292,14 @@ fn id_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 impl Request {
+    pub(crate) fn root(&self) -> &Context {
+        self.completion.root()
+    }
+    pub(crate) fn valid_delivery(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.leg
+            .as_ref()
+            .is_some_and(|leg| self.completion.validate_delivery(cx, leg).is_ok())
+    }
     pub(crate) fn is_lookup(&self) -> bool {
         self.lookup.is_some()
     }
@@ -338,11 +352,10 @@ impl Request {
             Rows::Trades(rows) => serde_json::to_string(rows),
         };
         {
-            let result: Result<String, String> = json.map_err(|e| e.to_string());
-            match result {
-                Ok(data) => cx.done(self.command, data),
-                Err(error) => cx.fail(self.command, error),
-            }
+            let _ = self.completion.finish(
+                cx,
+                json.map_err(|e| safe_cex_engine::VenueError::new(e.to_string())),
+            );
         };
     }
 }
@@ -354,12 +367,28 @@ impl Okx {
         command: CommandId,
         query: Query,
     ) {
+        let credential = match &query {
+            Query::PublicTrades { .. } => None,
+            Query::OrderByClientId { .. } => self.credentials.as_ref().map(|identity| Credential {
+                slot: safe_cex_engine::CredentialSlot::Primary,
+                reference: identity.credential.clone(),
+            }),
+            _ => self.read_credential(),
+        };
+        let root = match cx.admit_caller_read_root(credential, None) {
+            Ok(root) => root,
+            Err(CommandEntryError::Rejected(_)) => return,
+            Err(CommandEntryError::Revoked) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+        };
         if let Query::OrderByClientId {
             symbol,
             client_order_id,
         } = query
         {
-            self.start_lookup(cx, command, symbol, client_order_id);
+            self.start_lookup(cx, command, root, symbol, client_order_id);
             return;
         }
         if self.credentials.is_none()
@@ -368,7 +397,7 @@ impl Okx {
                 Query::PublicTrades { .. } | Query::OrderByClientId { .. }
             )
         {
-            cx.done(command, "[]".into());
+            let _ = cx.done_context(&root, "[]".into());
             return;
         }
         let (endpoint, symbol, order_id, income_kind, from, to, limit, rows) = match query {
@@ -381,7 +410,7 @@ impl Okx {
                 limit,
             } => {
                 if symbol.is_none() {
-                    cx.done(command, "[]".into());
+                    let _ = cx.done_context(&root, "[]".into());
                     return;
                 }
                 (
@@ -444,7 +473,7 @@ impl Okx {
         if [from, to].into_iter().flatten().any(|v| !v.is_finite())
             || from.zip(to).is_some_and(|(from, to)| from > to)
         {
-            cx.fail(command, "invalid OKX history time bounds");
+            let _ = cx.fail_context(&root, "invalid OKX history time bounds");
             return;
         }
         let instrument = symbol
@@ -452,18 +481,26 @@ impl Okx {
             .and_then(|s| cx.store.market(s))
             .map(|m| m.id.clone());
         if symbol.is_some() && instrument.is_none() {
-            cx.done(command, "[]".into());
+            let _ = cx.done_context(&root, "[]".into());
             return;
         }
         let inst_type = instrument
             .as_deref()
             .map_or("SWAP", |id| self.instrument_type(id));
         let next_type = self.options.eea && instrument.is_none();
+        let completion = match ReadCompletion::from_context(cx, command, root.clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(&root, error.read_venue_error());
+                return;
+            }
+        };
         self.history_request(
             cx,
             Request {
                 lookup: None,
-                command,
+                completion,
+                leg: None,
                 endpoint,
                 symbol,
                 instrument,
@@ -490,6 +527,7 @@ impl Okx {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
+        root: Context,
         symbol: String,
         client_order_id: String,
     ) {
@@ -497,11 +535,11 @@ impl Okx {
             || client_order_id.len() > 32
             || !client_order_id.bytes().all(|b| b.is_ascii_alphanumeric())
         {
-            cx.fail(command, "Invalid OKX client order ID");
+            let _ = cx.fail_context(&root, "Invalid OKX client order ID");
             return;
         }
         let Some(market) = cx.store.market(&symbol) else {
-            cx.done(command, UNKNOWN.into());
+            let _ = cx.done_context(&root, UNKNOWN.into());
             return;
         };
         // Secondary GET snapshots may belong to another account. Their cached
@@ -514,14 +552,18 @@ impl Okx {
             {
                 let result: Result<String, String> = found(order.clone(), None);
                 match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                    Ok(data) => {
+                        let _ = cx.done_context(&root, data);
+                    }
+                    Err(error) => {
+                        let _ = cx.fail_context(&root, error);
+                    }
                 }
             };
             return;
         }
         if self.credentials.is_none() || self.options.public_data_only {
-            cx.fail(command, "OKX client order lookup requires credentials");
+            let _ = cx.fail_context(&root, "OKX client order lookup requires credentials");
             return;
         }
         let instrument = market.id.clone();
@@ -530,37 +572,40 @@ impl Okx {
             encode(&instrument),
             encode(&client_order_id)
         );
-        let headers = self.headers(Method::Get);
-        let request = cx.request(
-            Method::Get,
-            format!("{}{path}", self.rest()),
-            headers,
-            None,
-            Pending::History(Request {
-                lookup: Some(client_order_id),
-                command,
-                endpoint: "/api/v5/trade/order",
-                symbol: Some(symbol),
-                instrument: Some(instrument),
-                inst_type: "SWAP",
-                next_type: false,
-                order_id: None,
-                income_kind: None,
-                from: None,
-                to: None,
-                limit: 1,
-                pages: 0,
-                rows_seen: 0,
-                count: 0,
-                after: None,
-                oldest: None,
-                invalid: false,
-                indices: HashMap::new(),
-                rows: Rows::Orders(Vec::new()),
-            }),
-        );
-        self.sign_request(cx, request, Method::Get, &path, true, true);
-        cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
+        let completion = match ReadCompletion::from_context(cx, command, root.clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(&root, error.read_venue_error());
+                return;
+            }
+        };
+        let read = Request {
+            lookup: Some(client_order_id),
+            completion,
+            leg: None,
+            endpoint: "/api/v5/trade/order",
+            symbol: Some(symbol),
+            instrument: Some(instrument),
+            inst_type: "SWAP",
+            next_type: false,
+            order_id: None,
+            income_kind: None,
+            from: None,
+            to: None,
+            limit: 1,
+            pages: 0,
+            rows_seen: 0,
+            count: 0,
+            after: None,
+            oldest: None,
+            invalid: false,
+            indices: HashMap::new(),
+            rows: Rows::Orders(Vec::new()),
+        };
+        let Some(leg) = self.history_leg(cx, &read) else {
+            return;
+        };
+        self.send_history(cx, read, leg, &path, false);
     }
 
     pub(crate) fn history_lookup_response(
@@ -569,6 +614,9 @@ impl Okx {
         r: Request,
         response: Response<'_>,
     ) {
+        if !r.valid_delivery(cx) {
+            return;
+        }
         let result = (|| {
             let envelope: crate::wire::Envelope<'_> = serde_json::from_str(response.body)
                 .map_err(|e| format!("Malformed OKX lookup: {e}"))?;
@@ -691,12 +739,19 @@ impl Okx {
             found(order, Some(rows[0]))
         })();
         match result {
-            Ok(data) => cx.done(r.command, data),
-            Err(error) => cx.fail(r.command, error),
+            Ok(data) => {
+                let _ = cx.done_context(r.root(), data);
+            }
+            Err(error) => {
+                let _ = cx.fail_context(r.root(), error);
+            }
         };
     }
 
     fn history_request(&self, cx: &mut Cx<'_, Pending>, mut r: Request) {
+        let Some(leg) = self.history_leg(cx, &r) else {
+            return;
+        };
         r.count = 0;
         r.oldest = None;
         r.pages += 1;
@@ -734,11 +789,13 @@ impl Okx {
         if let Some(after) = &r.after {
             path.push_str(&format!("&after={after}"));
         }
-        let private = !matches!(r.rows, Rows::Trades(_));
-        self.list(cx, &path, private, Pending::History(r));
+        self.send_history(cx, r, leg, &path, true);
     }
 
     pub(crate) fn history_item(&self, cx: &mut Cx<'_, Pending>, r: &mut Request, item: &str) {
+        if !r.valid_delivery(cx) {
+            return;
+        }
         r.count += 1;
         match r.rows {
             Rows::Fills(_) => {
@@ -979,6 +1036,9 @@ impl Okx {
         mut r: Request,
         _response: Response<'_>,
     ) {
+        if !r.valid_delivery(cx) {
+            return;
+        }
         if r.invalid {
             self.history_failed(cx, r, "malformed OKX history list item");
             return;
@@ -1018,8 +1078,8 @@ impl Okx {
         }
         if r.pages >= cap {
             if self.options.eea && r.instrument.is_none() {
-                cx.fail(
-                    r.command,
+                let _ = cx.fail_context(
+                    r.root(),
                     "OKX composite history hit page cap; incomplete source",
                 );
                 return;
@@ -1028,7 +1088,10 @@ impl Okx {
                 Level::Warn,
                 code::HISTORY_INCOMPLETE,
                 format!("OKX history hit {cap}-page cap; older rows were not fetched"),
-                vec![("command", safe_cex_engine::Value::Num(f64::from(r.command)))],
+                vec![(
+                    "command",
+                    safe_cex_engine::Value::Num(f64::from(r.completion.command())),
+                )],
             );
             r.finish(cx);
             return;
@@ -1040,8 +1103,8 @@ impl Okx {
                 .is_some_and(|old| !id_cmp(next, old).is_lt())
         }) {
             if self.options.eea && r.instrument.is_none() {
-                cx.fail(
-                    r.command,
+                let _ = cx.fail_context(
+                    r.root(),
                     "OKX composite history cursor did not advance; incomplete source",
                 );
                 return;
@@ -1050,7 +1113,10 @@ impl Okx {
                 Level::Warn,
                 code::HISTORY_INCOMPLETE,
                 "OKX history cursor did not advance; older rows were not fetched",
-                vec![("command", safe_cex_engine::Value::Num(f64::from(r.command)))],
+                vec![(
+                    "command",
+                    safe_cex_engine::Value::Num(f64::from(r.completion.command())),
+                )],
             );
             r.finish(cx);
             return;
@@ -1060,27 +1126,115 @@ impl Okx {
         self.history.delayed.push((timer, r));
     }
 
-    pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
-        cx.command_error(r.command, format!("OKX history: {error}"));
+    pub(crate) fn history_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        r: Request,
+        error: impl Into<safe_cex_engine::VenueError>,
+    ) {
+        let error = error.into();
+        if cx
+            .command_error_context(r.root(), format!("OKX history: {}", error.message))
+            .is_err()
         {
-            let result: Result<String, String> = if r.is_lookup() {
-                Err(error.into())
-            } else {
-                Ok("[]".into())
-            };
-            match result {
-                Ok(data) => cx.done(r.command, data),
-                Err(error) => cx.fail(r.command, error),
+            return;
+        }
+        if r.is_lookup() {
+            let _ = cx.fail_context(r.root(), error);
+        } else {
+            let _ = cx.done_context(r.root(), "[]".into());
+        }
+    }
+    pub(crate) fn history_sign_failed(
+        cx: &mut Cx<'_, Pending>,
+        r: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        let _ = cx.fail_context(r.root(), error);
+    }
+    pub(crate) fn retire_history(&mut self, owner: Owner) {
+        self.history
+            .delayed
+            .retain(|(_, read)| read.root().owner() != owner);
+    }
+    fn history_leg(&self, cx: &mut Cx<'_, Pending>, read: &Request) -> Option<Context> {
+        match cx.http_leg_context(
+            read.root(),
+            Policy {
+                operation: Operation::Read,
+                credential: read.root().credential().cloned(),
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(leg) => Some(leg),
+            Err(error) => {
+                let _ = cx.fail_context(read.root(), error.read_venue_error());
+                None
             }
+        }
+    }
+    fn send_history(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        mut read: Request,
+        leg: Context,
+        path: &str,
+        streamed: bool,
+    ) {
+        read.leg = Some(leg.clone());
+        let url = format!("{}{path}", self.rest());
+        let sent = if leg.credential().is_some() {
+            let identity = match leg.credential().map(|credential| credential.slot) {
+                Some(safe_cex_engine::CredentialSlot::Secondary) => {
+                    self.options.read_credentials.clone()
+                }
+                _ => self.credentials.clone(),
+            };
+            let recipe = sign::Http::new(identity, path.into()).demo(self.options.testnet);
+            cx.request_signed_managed(
+                leg,
+                Method::Get,
+                url,
+                None,
+                Box::new(recipe),
+                Pending::History(Box::new(read)),
+            )
+        } else if self.options.testnet {
+            cx.request_managed_with_headers(
+                leg,
+                Method::Get,
+                url,
+                sign::DEMO_HEADERS,
+                None,
+                Pending::History(Box::new(read)),
+            )
+        } else {
+            cx.request_managed(
+                leg,
+                Method::Get,
+                url,
+                None,
+                Pending::History(Box::new(read)),
+            )
         };
+        match sent {
+            Ok(id) if streamed => cx.stream_response(id, ArrayAt::EnvelopeField("data")),
+            Ok(_) => {}
+            Err((Pending::History(read), error)) => {
+                Self::history_sign_failed(cx, *read, error.read_venue_error())
+            }
+            Err(_) => unreachable!("history submission retains its pending"),
+        }
     }
 
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         let Some(index) = self.history.delayed.iter().position(|(id, _)| *id == timer) else {
             return false;
         };
-        let (_, request) = self.history.delayed.swap_remove(index);
-        self.history_request(cx, request);
+        let (_, read) = self.history.delayed.swap_remove(index);
+        self.history_request(cx, read);
         true
     }
 }
