@@ -1154,7 +1154,7 @@ impl Venue for Grvt {
                 error.kind,
                 Some(safe_cex_engine::ErrorKind::Network | safe_cex_engine::ErrorKind::Timeout)
             ) {
-                self.book_query_failed(cx, *request, &error.message);
+                self.book_query_failed(cx, *request, error);
             } else {
                 let _ = cx.fail_plan(&request.plan, error);
             }

@@ -313,7 +313,7 @@ impl Grvt {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut request: Request,
-        error: &str,
+        error: VenueError,
     ) {
         match cx.plan_retry_context(
             &request.plan,
@@ -326,8 +326,13 @@ impl Grvt {
                 self.book_query_send(cx, request);
             }
             Err(Error::Revoked) => {}
-            Err(_) => {
-                let _ = cx.fail_plan(&request.plan, failure(error, ErrorKind::Network));
+            Err(reason) => {
+                let error = if reason == Error::TimedOut {
+                    error.kind(ErrorKind::Timeout)
+                } else {
+                    error
+                };
+                let _ = cx.fail_plan(&request.plan, error.outcome(Outcome::NotSent));
             }
         }
     }

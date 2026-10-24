@@ -217,3 +217,11 @@ working control observes a positive 0.5 ms caller remainder: the packet rounds
 to 1 ms but DATA at the original caller equality still fails Timeout. An initial
 probe incorrectly expected that positive remainder to refuse before Prepare;
 the observed shared behavior is retained instead. Original24 assertions remain.
+
+
+The retry helper now retains the typed engine VenueError through exhaustion;
+only an explicit retry-selection TimedOut replaces its kind with Timeout.
+Existing native NotSent terminal metadata remains. The new physical-timeout
+control is now GREEN; library6, depth-query11 and book26 pass, zero ignored.
+Scoped strict Clippy and all ratchets pass. The original24 assertions remain.
+No change to DATA, preparation, native codec or retry eligibility is involved.
