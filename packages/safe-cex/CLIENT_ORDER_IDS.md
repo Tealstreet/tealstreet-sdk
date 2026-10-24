@@ -21,6 +21,7 @@ caller IDs before any engine command.
 | ---------------------------- | ------------------------ | ------------------- | -------------------- | --------------------------------------------------------- |
 | Binance                      | `[.A-Z:/a-z0-9_-]{1,36}` | `x-s3vFFRQp…`       | in the ID            | `info.clientOrderId` (REST), `info.c` (WS)                |
 | Binance Spot                 | `[A-Za-z0-9_-]{1,36}`    | `x-s3vFFRQp…`       | in the ID            | **`Order.id`**                                            |
+| Binance Options              | `[A-Za-z0-9_-]{1,36}`    | generic, no prefix  | none                 | `Order.clientOrderId`                                     |
 | Binance PM                   | `[.A-Z:/a-z0-9_-]{1,32}` | `x-s3vFFRQp…`       | in the ID            | **`Order.id`**                                            |
 | OKX (+EU, demo)              | `[A-Za-z0-9]{1,32}`      | `e847386590ce4dBC…` | ID + `tag`           | `info.clOrdId`                                            |
 | BloFin                       | `[A-Za-z0-9]{1,32}`      | `b3cdedc0a20880ba…` | ID + body `brokerId` | `info.clientOrderId`                                      |

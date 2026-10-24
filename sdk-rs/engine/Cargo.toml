@@ -5,6 +5,10 @@ edition.workspace = true
 publish.workspace = true
 
 [features]
+# Whole-plan HTTP admission is linked only by adopting venue families.
+http-plans = []
+# Temporary migration boundary; remove after all legacy socket families adopt.
+managed-sockets = []
 order-locks = []
 # Prediction venues opt in; other standalone builds omit metadata storage and frames.
 prediction = []
@@ -35,6 +39,7 @@ test-support = []
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 zeroize.workspace = true
 
 [lints]

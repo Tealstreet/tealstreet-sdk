@@ -754,6 +754,7 @@ fn trigger_order_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     let mut e = safe_cex_engine::test_support::seeded_engine(
         safe_cex_venue_backpack::Backpack::new(safe_cex_venue_backpack::Options {
+            identity: None,
             read_credentials: None,
             public_data_only: false,
             key: Some("test-public-key".into()),
@@ -1044,4 +1045,240 @@ fn unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without
     }
     reread(&mut e, socket, POSITIONS, "[]");
     assert!(e.store().orders().is_empty());
+}
+
+/// Keep the actual startup ticker replies parked while the private account chain completes.
+fn snapshot_unpriced_trigger() -> (Driver, SocketId, Vec<safe_cex_engine::HttpRequest>) {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let mut e = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_backpack::Backpack::new(safe_cex_venue_backpack::Options {
+            identity: None,
+            read_credentials: None,
+            public_data_only: false,
+            key: Some("test-public-key".into()),
+            secret: Some(STANDARD.encode([7u8; 32])),
+            recv_window: None,
+        }),
+    );
+    e.start(1000.0);
+    let markets = requests(&mut e).pop().unwrap();
+    reply(&mut e, &markets, 200, MARKETS);
+    let trigger = r#"[{"id":"tp","symbol":"SOL_USDC_PERP","side":"Ask","orderType":"Market","triggerPrice":"150","triggerBy":"MarkPrice","quantity":"5","executedQuantity":"0","status":"TriggerPending","createdAt":1000}]"#;
+    let mut seeds = vec![];
+    let mut private = None;
+    for _ in 0..6 {
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        for action in actions {
+            match action {
+                Action::Http(r) if r.url.contains("/tickers") || r.url.contains("/markPrices") => {
+                    seeds.push(r)
+                }
+                Action::Http(r) => {
+                    let body = if r.url.ends_with("/account") {
+                        r#"{"leverageLimit":"10"}"#
+                    } else if r.url.ends_with("/position") {
+                        POSITIONS
+                    } else if r.url.ends_with("/collateral") {
+                        BALANCE
+                    } else {
+                        assert!(
+                            r.url.ends_with("/orders"),
+                            "unexpected startup request {}",
+                            r.url
+                        );
+                        trigger
+                    };
+                    reply(&mut e, &r, 200, body);
+                }
+                Action::WsConnect {
+                    socket,
+                    channel: Some(safe_cex_engine::SocketChannel::Private),
+                    ..
+                } => private = Some(socket),
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(seeds.len(), 2);
+    assert_eq!(
+        e.store().order("tp").unwrap().kind,
+        safe_cex_engine::model::OrderType::StopLoss
+    );
+    (e, private.unwrap(), seeds)
+}
+
+fn snapshot_finish_ticker_seed(e: &mut Driver, seeds: Vec<safe_cex_engine::HttpRequest>) {
+    for r in seeds {
+        let body = if r.url.contains("/tickers") {
+            r#"[{"symbol":"SOL_USDC_PERP","lastPrice":"141","priceChangePercent":"0.01","volume":"10","quoteVolume":"1410"}]"#
+        } else {
+            "[]"
+        };
+        reply(e, &r, 200, body);
+    }
+    assert_eq!(e.store().ticker(SYMBOL).unwrap().last, 141.0);
+}
+
+#[test]
+fn snapshot_stale_streamed_orders_cannot_erase_accepted_trigger_relabeling() {
+    snapshot_rejected_stream_keeps_trigger_relabeling(false);
+}
+
+#[test]
+fn snapshot_failed_streamed_orders_cannot_erase_accepted_trigger_relabeling() {
+    snapshot_rejected_stream_keeps_trigger_relabeling(true);
+}
+
+fn snapshot_rejected_stream_keeps_trigger_relabeling(failed: bool) {
+    let (mut e, socket, seeds) = snapshot_unpriced_trigger();
+    e.handle(1000.0, Event::WsOpened { socket });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/orders"))
+        .unwrap();
+    // Stale-only and failed-current controls exercise independent rejection paths.
+    if !failed {
+        ws(
+            &mut e,
+            socket,
+            "account.orderUpdate",
+            r#"{"e":"orderAccepted","i":"peer","E":2000000,"X":"New","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"0","f":"GTC"}"#,
+        );
+        assert!(e.store().order("peer").is_some());
+    }
+    e.handle(
+        2000.0,
+        Event::HttpStart {
+            request: read.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    let stale = ORDER.replace("\"id\":\"123\"", "\"id\":\"tp\"");
+    let chunk = format!("[{stale}]");
+    e.handle(
+        2000.0,
+        Event::HttpChunk {
+            request: read.id,
+            data: chunk.as_bytes(),
+        },
+    );
+    if failed {
+        e.handle(
+            2000.0,
+            Event::HttpFailed {
+                request: read.id,
+                error: "stream interrupted",
+            },
+        );
+    } else {
+        e.handle(2000.0, Event::HttpEnd { request: read.id });
+    }
+    assert_eq!(
+        e.store().order("tp").unwrap().side,
+        safe_cex_engine::model::OrderSide::Sell
+    );
+    assert_eq!(e.store().order("peer").is_some(), !failed);
+    snapshot_finish_ticker_seed(&mut e, seeds);
+    assert_eq!(
+        e.store().order("tp").unwrap().kind,
+        safe_cex_engine::model::OrderType::TakeProfit,
+        "a discarded read must not remove the accepted trigger's pending relabel"
+    );
+}
+
+#[test]
+fn snapshot_explicit_store_invalidation_discards_native_rows_and_repairs() {
+    let (mut e, socket) = ready_orders(&format!("[{ORDER}]"));
+    e.handle(1000.0, Event::WsOpened { socket });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/orders"))
+        .unwrap();
+    let before = e.store().orders().to_vec();
+    e.store_mut().invalidate_order_snapshots();
+    // A missing triggerBy would otherwise dispatch a cancel/replace repair.
+    let repair = ORDER.replace(
+        "\"orderType\":\"Limit\"",
+        "\"orderType\":\"Market\",\"triggerPrice\":\"130\"",
+    );
+    reply(&mut e, &read, 200, &format!("[{repair}]"));
+    assert_eq!(e.store().orders(), before);
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+    );
+}
+
+#[test]
+fn snapshot_exhaustion_keeps_writes_and_recurring_account_continuation() {
+    let (mut e, socket, _, timers) = ready_catalogue(MARKETS, POSITIONS, &format!("[{ORDER}]"));
+    let (mut timer, mut at) = timers
+        .into_iter()
+        .find(|(_, at)| jittered(*at - 1000.0, POLL_MS))
+        .unwrap();
+    safe_cex_engine::test_support::exhaust_order_snapshots(e.store_mut());
+    ws(
+        &mut e,
+        socket,
+        "account.orderUpdate",
+        r#"{"e":"orderAccepted","i":"live","E":2000000,"X":"New","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"142","q":"5","z":"0","f":"GTC"}"#,
+    );
+    assert!(e.store().order("live").is_some());
+    e.drain_actions().for_each(drop);
+    for _ in 0..2 {
+        e.handle(at, Event::TimerFired { timer });
+        let mut next = None;
+        let mut discarded = 0;
+        let mut domains = 0;
+        for _ in 0..6 {
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            for action in actions {
+                match action {
+                    Action::Http(r) => {
+                        assert!(
+                            !r.url.ends_with("/orders"),
+                            "exhausted reads never dispatch"
+                        );
+                        let body = if r.url.ends_with("/account") {
+                            r#"{"leverageLimit":"10"}"#
+                        } else if r.url.ends_with("/position") {
+                            POSITIONS
+                        } else {
+                            assert!(r.url.ends_with("/collateral"));
+                            BALANCE
+                        };
+                        domains += 1;
+                        e.handle(
+                            at,
+                            Event::HttpResponse {
+                                request: r.id,
+                                response: safe_cex_engine::Response {
+                                    status: 200,
+                                    headers: "",
+                                    body,
+                                },
+                            },
+                        );
+                    }
+                    Action::Notice(Notice::Event(event))
+                        if event.code == safe_cex_engine::log::code::SNAPSHOT_DISCARDED =>
+                    {
+                        assert_eq!(event.level, safe_cex_engine::Level::Error);
+                        assert_eq!(event.message, "Backpack order snapshot authority exhausted");
+                        discarded += 1;
+                    }
+                    Action::SetTimer { timer, at_ms } if jittered(at_ms - at, POLL_MS) => {
+                        next = Some((timer, at_ms))
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(domains, 3, "unrelated account domains still refresh");
+        assert_eq!(discarded, 1);
+        assert!(e.store().order("live").is_some());
+        assert!(e.store().order("123").is_some());
+        (timer, at) = next.expect("continuation schedules the next native poll");
+    }
 }

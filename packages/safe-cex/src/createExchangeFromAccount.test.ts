@@ -74,6 +74,19 @@ vi.mock('./exchangeMetadata', async (importOriginal) => ({
         enforceWsTunnel: false,
         privateProxyRegions: { SG: ['1.2.3.4'] },
       },
+      binanceinverse: {
+        exchangeName: 'binanceinverse',
+        requiresCors: true,
+        requiresPassphrase: false,
+        requiresApplicationId: false,
+        requiresApiKeyIndex: false,
+        supportsVault: false,
+        requiresOmniKeySeed: false,
+        requiresParadexAddress: false,
+        supportsSubaccount: false,
+        enforceWsTunnel: false,
+        privateProxyRegions: { JA: ['5.6.7.8'] },
+      },
       grvt: {
         exchangeName: 'grvt',
         requiresCors: false,
@@ -369,6 +382,21 @@ describe('accountToExchangeOptions', () => {
       const options = accountToExchangeOptions(account);
 
       expect(options.tealstreetTunnel).toBe(true);
+    });
+
+    it('should force Binance inverse through proxy and tunnel because COIN-M writes fail browser CORS', () => {
+      const account: ExchangeAccountConfig = {
+        exchange: 'binanceinverse',
+        name: 'test-binance-inverse',
+        apiKey: 'test-key',
+        apiSecret: 'test-secret',
+      };
+
+      const options = accountToExchangeOptions(account);
+
+      expect(options.tealstreetProxy).toBe(true);
+      expect(options.tealstreetTunnel).toBe(true);
+      expect(options.proxyRegion).toBe('JA');
     });
 
     it('should set tealstreetProxy when exchange enforces WS tunnel', () => {

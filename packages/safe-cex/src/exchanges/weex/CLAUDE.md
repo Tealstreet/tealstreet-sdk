@@ -10,8 +10,11 @@ launched on 2026-03-18; V2 is no longer maintained.
 - Availability: development-only (`enabled: false`, `enabledInDev: true`,
   `enableInPreview: false`). Preview and production are both production lanes;
   do not enable this adapter there without a fresh release review.
-- Testnet/demo: the adapter does not expose testnet support. WEEX documents a
-  limited demo API, but it is not wired into this integration.
+- Testnet/demo: the adapter does not expose testnet support
+  (`supportsTestnet: false`). WEEX's 2026-10-15 docs say Futures simulation now
+  lives at `https://api-sim.weex.com` and keeps the same paths/signing rules.
+  Do not set `options.testnet` or promote demo/UAT flows until `BASE_URL.testnet`
+  is changed to the simulation host and covered by routing/signing tests.
 
 ## Local Smoke Test Keys
 
@@ -82,6 +85,8 @@ immediately with `{ "method": "PONG", "id": n }`. Public pings instead use
 - [Contract V3 changelog](https://www.weex.com/api-doc/contract/changelog)
 - [Contract V3 access restrictions](https://www.weex.com/api-doc/contract/QuickStart/AccessRestrictions)
 - [Contract V3 signature](https://www.weex.com/api-doc/contract/QuickStart/Signature)
+- [Contract V3 API domain](https://www.weex.com/api-doc/products/futures/QuickStart/APIDomain)
+- [Get API trading symbols](https://www.weex.com/api-doc/products/futures/Market_API/GetApiTradingSymbols)
 - [Place orders in batch](https://www.weex.com/api-doc/contract/Transaction_API/PlaceOrdersBatch)
 - [Modify TP/SL conditional order](https://www.weex.com/api-doc/contract/Transaction_API/ModifyTpSlOrder)
 - [CCXT WEEX reference](https://github.com/ccxt/ccxt/wiki/weex)
@@ -113,12 +118,19 @@ Contract V3 signing helpers shared by the REST and private WebSocket paths.
   require `triggerPrice`; an execution `price` selects STOP (limit), while its
   absence selects STOP_MARKET. They are read back as opening conditionals and
   cancel through `/algoOrder`, distinct from position-protective TP/SL plans.
-- Reduce-only request parameters are not documented for normal order
-  placement. Prefer `POST /capi/v3/closePositions` for full close flows and
-  use `reduceOnly` only where WEEX documents or echoes it.
+- WEEX added `reduceOnly` to normal order, batch order, conditional order, and
+  TP/SL placement docs on 2026-09-01. The current adapter sends it only on the
+  regular single-order path; regular batches intentionally skip reduce-only,
+  opening conditionals force opening semantics, and standalone TP/SL does not
+  include `reduceOnly`. Do not broaden reduce-only support without request-shape
+  regressions and a credentialed smoke test.
 - Public symbols are already Tealstreet/Binance-style (`BTCUSDT`).
 - WEEX sizes in V3 REST public examples are base-asset quantities; still keep
   `contractVal` from `exchangeInfo` in `market.info` for smoke-test auditing.
+- WEEX 24h REST ticker `priceChangePercent` is ratio-shaped in live public data
+  (`0.001476` means about `0.1476%`), even though the generated docs examples
+  can look percent-shaped. Keep the multiply-by-100 normalizer unless a fresh
+  live capture proves the wire changed.
 - Order preflight failures, response-level rejections, and transport failures
   emit through `emitAndLogError` at their point of origin before rejecting the
   caller. Keep the POST catch narrow so response parsing is not double-emitted.
@@ -163,9 +175,13 @@ financial values retain the existing strict failure behavior.
 - Klines: `GET /capi/v3/market/klines`,
   `GET /capi/v3/market/historyKlines`
 - Public trades: `GET /capi/v3/market/trades`
+- API-tradable symbols: `GET /capi/v3/market/apiTradingSymbols`
+- Open interest: `GET /capi/v3/market/openInterest` (documented, not wired)
+- Risk limits: `GET /capi/v3/market/riskLimits` (documented, not wired)
 - Balance: `GET /capi/v3/account/balance`
 - Account config: `GET /capi/v3/account/accountConfig`
 - Symbol config: `GET /capi/v3/account/symbolConfig`
+- Commission rate: `GET /capi/v3/account/commissionRate` (documented, not wired)
 - Positions: `GET /capi/v3/account/position/allPosition`
 - Margin type: `POST /capi/v3/account/marginType`
 - Leverage: `POST /capi/v3/account/leverage`
@@ -181,6 +197,72 @@ financial values retain the existing strict failure behavior.
 - Cancel all algo: `DELETE /capi/v3/algoOpenOrders`
 - User trades: `GET /capi/v3/userTrades`
 - Income: `POST /capi/v3/account/income`
+
+## 2026-10 Audit Findings
+
+WEEX is implemented, not a stub: REST startup, public WS, private WS, market
+data, balances, positions, orders, order writes, batch writes, conditional
+orders, TP/SL, fills, and income all have adapter code plus targeted regression
+coverage. It remains development-only and must not be enabled for preview or
+production without a fresh release review.
+
+Current official docs and live public reads agree with most local Contract V3
+endpoint shapes. CCXT is a useful reference for parsing/order fields, but it is
+not the source of truth for WEEX batch placement or simulation: the current
+official changelog says batch placement launched on 2026-05-28, while CCXT still
+contains stale comments that `POST /capi/v3/batchOrders` was unsupported.
+
+Release blockers for a collaboration or production enablement:
+
+- **Non-crypto listings:** WEEX now lists tradfi-style contracts beside crypto
+  perps. Live `apiTradingSymbols` returned symbols such as `AAPLUSDT`,
+  `QQQUSDT`, `XAUUSDT`, and `NATGASUSDT`, and `exchangeInfo` documents
+  `contractType: TRADIFI_PERPETUAL`. The current `fetchMarkets` filter only
+  checks `quoteAsset === 'USDT'` and `marginAsset === 'USDT'`; it does not filter
+  tradfi contracts or implement a WEEX `instrument-class` classifier. Before a
+  launch, choose one policy explicitly: crypto-only filtering, or a classifier
+  and user-facing tradfi preflight.
+- **Cancel response handling:** normal batch cancel and cancel-all endpoints
+  return per-row `{ success, errorCode, errorMessage }`, but the adapter marks
+  local orders canceled without validating those rows. Production code should
+  fail or partially update based on venue-confirmed results.
+- **Order reconciliation safety:** `fetchOrders` currently uses
+  `Promise.allSettled` and can commit a partial snapshot when either normal or
+  algo order fetching fails. A failed leg is not an authoritative empty order
+  list; preserve last-known-good state or throw.
+- **Private WS runtime:** WEEX private sockets require upgrade headers. Browser
+  workers cannot provide them, so web accounts rely on the 2-second REST safety
+  loop for private state unless a header-capable route is added and tested.
+- **Private WS position aliases:** the docs use `marginMode` on WS position
+  payloads, while the normalizer currently reads REST's `marginType`. REST
+  refresh should correct this, but a Node/Bun private WS path can briefly mark
+  isolated positions as cross.
+- **Paging/history gaps:** open orders and open algo orders read only the first
+  page. `userTrades` is limited by the venue to 7-day windows and is not paged.
+  Income history has the shared time-window pager, but it does not use WEEX's
+  `nextKeyId` / `nextKeyTime` cursor.
+- **Credentialed UAT gap:** repository notes still say WEEX has no credential in
+  the local key sheet. Deterministic tests cover shapes, but account validation,
+  private snapshots, writes, cancels, TP/SL, reconnect behavior, and REST routing
+  need a live credentialed smoke pass before release.
+
+## Open Features / Upgrade Candidates
+
+- Wire Futures simulation via `https://api-sim.weex.com` and add a regression
+  that `options.testnet` cannot hit production.
+- Decide how to handle non-crypto contracts: filter them out, or implement a
+  WEEX classifier from `contractType`, `underlyingType`, and
+  `underlyingSubType` with the shared tradfi preflight copy.
+- Support documented trailing conditional orders (`TRAILING_MARKET`) only after
+  mapping activation/callback fields and lifecycle/cancel behavior.
+- Wire open interest and risk-limit/notional-bracket endpoints if product needs
+  them; metadata currently advertises no open-interest support.
+- Add account-specific fee-rate support from
+  `GET /capi/v3/account/commissionRate` if `supportsFeeRates` is meant to mean
+  user-specific futures fees rather than static market fees.
+- Replace first-page-only order reads and 7-day fills reads with paged range
+  walkers before relying on WEEX for history/reconciliation modules.
+- Inspect cancel/close response rows before mutating local store state.
 
 ## WebSocket Channels
 

@@ -724,3 +724,897 @@ accepted-only partial output plus the engine warning. Existing tests retain
 exact native window request sequence, units/IDs, funding and public-trade shapes,
 deduplication, and limited newest-first reads. No local release WASM/replay timing
 run substitutes for the current-head CI and final artifact proof.
+
+## Phemex bounded non-income shared owner
+
+Fills, orders and public trades reuse HistoryRows/Completion with one page and
+strict response admission. Four original-source assertion-RED groups pin typed
+Internal terminal failure; all 28 prior controls and three new compatibility
+controls pass on the original source. Compatibility covers valid empty/full
+native caps with no continuation, stable equal-time ordering, peer isolation
+and unchanged lookup classification. Corrected controls exercise transport,
+HTTP, invalid-prefix and oversized failures in direct/streamed modes, same-ID
+slot reuse and zero partial/gap publication. Endpoint codecs, requests, signing,
+account and income source remain outside this change.
+
+## WOO shared owner across native history routes
+
+All WOO history axes adopt existing CursorHistory without an engine API change.
+A continuous owner counts every physical native continuation, including empty/
+failed alternative transitions; no empty/no-new-row stall flags are installed.
+Eight original-source assertion-RED groups cover typed failures, accepted-only
+later recovery, filtered-only refusal, mixed-page coverage and strict native
+refusal classification. Three additional compatibility controls pass on the
+original source, including the terminal-1000 versus required-1001 boundary,
+combined alternative/legacy budget and streamed failed-prefix identity reuse.
+Native builder/codec precision, symbol aliases, row isolation, ledger pacing and
+zero Store publication remain pinned. Caller controls distinguish the unchanged
+immediate row warning from the owned terminal coverage marker.
+
+## Explicit non-pageable history results
+
+The three non-pageable adapters use existing HistoryRows/Completion without new
+engine API or result schema. Six original-source assertion-RED groups prove the
+previous missing owner coverage and untyped public-trade refusal; all 110 prior
+selected controls plus three new lookup compatibility controls pass on original
+source. Corrected controls require exactly one command-owned Warn before Done,
+including Error log level, [] shape despite live cached orders, zero I/O or Store
+mutation, distinct command IDs and explicit pre-I/O Unsupported/NotSent. Native
+unsupported capabilities remain unsupported and no numeric managed fallback is
+introduced. Caller polling guidance retains coverage while deduplicating UI
+alerts.
+
+
+## Paradex managed REST book area
+
+The independent Paradex public snapshot query adopts the existing engine
+preparation/claim, original read bound, exact delivery check and Context
+completion. Public wire/codec behavior and the existing eight snapshot contract
+tests remain; fixture adaptation uses shared prepared-actions and explicitly
+checks the one new original-deadline timer before preserving outbound-only
+assertions. Original-RED controls cover premature delivery, typed denial,
+expiry, reused/concurrent owners, duplicates and capacity refusal/recovery.
+No private credential, Starknet, candle fallback or live-book mechanism moves.
+The venue-only inventory loses five occurrences; pre-authority refusal remains
+counted for the shared engine entry seam rather than hidden in another API.
+
+The existing public-SBE and private-JWT snapshot isolation fixtures also use the
+shared prepared-action helper for this query only. Both keep their original
+clocks, request bodies, native-state and protocol assertions; the public fixture
+checks the new original-deadline timer explicitly before its no-extra-actions
+control. Held account/trading source and tests/account are untouched.
+
+## Lighter command-entry regression proof
+
+The separately committed candle controls reproduce two native admission errors:
+capacity returned a generic adapter message, and invalid clock admission reported
+Internal instead of the engine's InvalidInput. Both are assertion-RED on the
+original implementation. The live-duplicate control allows the pre-existing
+COMMAND_DUPLICATE diagnostic and proves no request/terminal replacement; it is a
+compatibility control, not an original failure. All seven earlier candle controls
+remain. New controls exercise both aliases/networks, denial before invalid market
+validation, one terminal/no resource allocation, peer completion, freed-slot
+reuse and NaN/positive-infinity/negative-infinity admission followed by a finite
+command. The adapter uses shared command entry only for its genuine command
+caller; background generation cleanup and native query/stream behavior remain.
+
+## KuCoin Spot candle managed-read controls
+
+Tests-first controls distinguish unreleased, bound-but-unclaimed and claimed
+responses, timer-first and response-first exact-deadline expiry, typed preparation
+and transport failures, initial admission refusal and immediate physical queue
+refusal. Genuine saturation fixtures assert256 separate background roots or256
+queued physical requests under one background root in a prior no-ID callback, then explicitly retire them and recover at
+one clock. Fixed-clock repetition pins preflight and success retirement, duplicate
+command preservation and stale-generation rejection.
+
+Native compatibility controls preserve complete candle fields, both timestamp
+units, duplicate timestamps, oversized responses, volume column5 with extra columns, permissive
+unknown symbols, exact headers/query calculations and separate malformed-row
+versus envelope error timelines. Corrected native fixtures ran unchanged source
+with eleven RED and three compatibility GREEN controls before the managed source
+made all fourteen GREEN.
+
+## MEXC initial Plan refusal regressions
+
+Separate original-source tests reproduce two failures: no typed initial Plan
+startup terminal, and resumed HTTP through late pagination/asset refresh. Two
+negative controls already pass on original production, preserving transient and
+post-startup retries. Coverage includes AuthInvalid/AuthExpired/AuthPermission,
+native code/message, deactivation policy, exactly one startup terminal, stale
+poll delivery, late sibling failure/login, a 100-row late page and asset timers.
+Both normal empty-list error envelopes and errors missing data are covered;
+successful missing/null lists retain retry behavior. Existing account assertions remain
+intact, and the legacy request inventory has no venue delta.
+
+Verification on the integrated startup fix passes456 MEXC+Binance tests across
+40 targets, including all44 account tests. Scoped fmt/strict all-target Clippy
+and both ratchets (14 controls) pass. Three independent reviews are clean;
+architecture No. Source/test files held by history #1793 remain untouched.
+
+## Phemex unsigned candle request regressions
+
+Committed plan05988416603 precedes separate original-source tests2a1a008bc7c:
+six lifecycle regressions fail and primary/secondary/dual signing compatibility
+already passes. Controls cover preparation/binding/one release, parked and
+released expiry, stale callbacks with ID reuse, typed setup/network failures,
+genuine invalid-time admission and native sorted output. Additional native
+error/malformed-row/missing-list comparisons match the credentialed path, and
+an expired429 reply cannot pause another read. Existing public assertions are
+retained with the shared prepared fixture; only the daily response clock moves
+forward to its command's timestamp. No scanner/manifest change or credentialed
+signer migration is included.
+
+## MEXC managed book regressions
+
+Plan531195b3a8c precedes separate original-source RED0213bd8e13a: all7 lifecycle
+controls fail on original production and pass with Context custody. They cover
+prepared binding/one release, parked and released expiry, setup metadata, claim
+at deadline, stale callbacks with command-ID reuse, genuine invalid-clock entry
+and expired429 non-interference with both depth and account cooldowns.
+Native result/auth assertions retain payloads and expected values while using
+the shared prepared fixture and forward response/WS clocks. Successful dispatch
+asserts exactly one engine20s deadline and no retry timer/socket send; immediate
+input/cooldown refusals still forbid timers and managed dispatch. Native decoder,
+large IDs, scaling, overflow beyond limit, code510 and live cooldown controls
+remain independently exercised. Inventory shrinks by exactly8 occurrences and
+7 entries, with no unowned map or scanner change.
+
+### Shared order-snapshot admission: Backpack/Paradex
+
+Both families replace whole-order snapshot counters with the existing opaque
+Store token. Backpack preserves newer-read supersession by invalidating before
+capture. Paradex keeps single-read busy ownership and all lagging-replica,
+terminal and amend-evidence semantics. Native cache changes and Store rows now
+publish under one admission boundary; repair HTTP actions remain outside the
+callback and run only after acceptance. Other domain and per-ID clocks stay
+native. Permanent exhaustion performs no order GET and does not strand either
+family's account continuation.
+
+The original four-crate baseline passes1157 tests; final native controls include
+four original Backpack assertion REDs across two proven defects, native malformed
+Pair and Paradex ACK compatibility positives, and distinct token API/exhaustion
+controls. The inventory ratchet keeps1253 sites: only the existing Paradex order
+request's pending-field hash rebinds10-to-10, with exact whole-map substitution,
+source/hash pins and growth/unrelated/pruned-parent negative controls. No rule,
+path or site-kind allowlist is added. Architecture gate: YES, consumers adopt the
+existing engine choke point. No all-venue completion or private parity claim.
+
+### Lighter synchronous cached Read Context controls
+
+Plan2a093966518 precedes original RED commit ffef6eaf580. Against actual732cf8
+production, five assertions fail: capacity for present/missing leverage and tier,
+plus invalid-clock leverage/tier; three compatibility controls pass. After the
+shared admission/terminal move all eight pass, retaining duplicate-owner isolation,
+all aliases/networks, finite recovery, no-I/O/no-Store publication, slot reuse and
+300 immediate completions without owner accumulation. Existing account_limits
+controls remain unchanged, including cached standard tier and SetAccountTier.
+Independent plan source/adversarial, caller and full-map reviews are CLEAN;
+architecture gate No: no new local capacity, clock, retry or completion mechanism.
+
+Cached-slice verification passes504 Lighter+Binance native tests (48 result groups),
+strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both request
+checks/14 controls. Actual e233cb05dfb is genuinely integrated; its incoming
+KuCoin/MEXC source and prunes are preserved. CI owns WASM/replay/size/timing;
+native success alone does not claim these broad gates or whole-venue closure.
+
+## WOO family compiler throughput controls
+
+A plan and baseline named profile preceded the WOO-only compiler change.
+Five interleaved baseline/candidate Rust pairs alternate execution order:
+medians23.105/18.957ms, four of five pairs improve. Every run serves77 frames
+without protocol errors or unserved requests. One correctness replay per
+artifact has identical final snapshots and all five checkpoints; every
+nonmetric output field also matches. The normal candidate grows61,376 bytes
+(1,142,442→1,203,818), within the unchanged1,343,488-byte ceiling. Inventory,
+tape, clocks, budgets, comparison rules and runtime/shared paths are unchanged.
+Local medians and sparse overlapping profiles do not establish the TS/Rust1.10x
+CI target or private runtime proof. The exact-head CI build and replay gates
+remain required. [Reproduction and evidence](RUST_WOO_PUBLIC_CPU.md).
+
+Production WOO CI at f564c7b50f1 (run 39977265913, job 120495031043) passes the
+nine-pair public gate at reported TS 15.8 ms / Rust 8.9 ms steady CPU, 1.78x.
+Its actual CI WASM is 1,197,465 bytes within the unchanged 1,343,488-byte ceiling;
+manifest hashes and the CI checkout tree match the tested head. Strict
+verification records one public PASS, one existing declared known-private FAIL
+and zero unexpected failures. This does not establish private authenticated
+lifecycle parity. The tested head has 43 successful checks and one browser skip;
+source-equivalent current integration, final guard and merge GO remain separate.
+The fixed gates and comparison policies are unchanged.
+
+## SDK master venue parity controls
+
+Separate original-RED commit637fe5832d6 pins seven assertion failures: three
+Hyperliquid fee-subject/startup controls, Lighter timestamp candidate and48-bit
+exhaustion, Robinhood approval preflight and signed attribution. The zero-candidate
+compatibility control remains positive1,2. Native private master/vault fee rates,
+empty-vault fallback, missing/empty applicationId agent discovery, public/default
+fee retention, both Robinhood networks and explicit builder overrides are covered.
+Existing Lighter split/bracket/batch, receipt and failed-send controls remain.
+Shared ProbeVenue tests seed boundary state privately without a production test
+hook. Master TS sources, prepared tape/harness and all incoming inventories remain
+unchanged. Native local checks and independent reviews precede the #1869 handoff;
+its owner supplies the full CI replay evidence.
+
+## Robinhood frozen CI fixture receipt
+
+CI39953255157/1845 supplies the frozen LightRobinhood engine and three reports.
+The original boundary control reproduces one NotSent builder-approval failure
+with21 other cases passing. The corrected fixture preserves every existing
+native assertion and adds exact signed attribution. Independent and executable
+provenance checks reproduce both old and new37-record tape hashes: only three
+approved account indices and seven order-attribute objects differ per tape.
+Existing assessGateReport finds eleven unknown diagnostics per private report
+before the two-hash refresh, and zero errors/eleven known afterward; the public
+report remains186 known. Every diagnostic path/rationale and all other manifest
+entries are byte-preserved; the original reports remain strict FAIL. No replay,
+local release build, new declaration, threshold or comparison-policy change.
+
+## Shared ticker index compatibility and measurement
+
+Tests and generic benchmark were committed before the representation change. All
+29 Store controls pass before and after, including duplicate-winner dirty masks,
+append-only recovery and repeated large/small/empty replacements releasing obsolete
+capacity. The unchanged-source nine-pair KuCoin Spot gate miss supplies performance
+RED; functional compatibility is intentionally GREEN on the baseline.
+
+The same965-symbol sequence and2,500,000 native lookups retain checksum1236723300:
+99.489 to23.099ns per lookup in elapsed wall time. Native index-only allocation
+measurement reports3860 to59603 retained bytes and7720 to119206 replacement-peak
+bytes; both release all index capacity at empty replacement. This is a measured
+memory tradeoff, not whole-venue or WASM allocation accounting. Full CI checks
+all venue memory and WASM size budgets, including Aster, and paired CPU medians.
+
+## Draft Engine socket lifecycle references
+
+OKX adopt one Engine registry/driver for epoch admission, typed auth,
+shared Supervisor deadlines/backoff, transactional complete interests, replay,
+retirement and required Store invalidation. Native codecs retain venue payloads
+and role policies. Original runtime controls pin retired open/close rejection
+and expiry-before-late-pong; shared controls cover bounded queues, health,
+retry revocation, signed-output retirement and transactional same-interest book
+repair. This is a OKX-only preparation, using the landed physical-ID seam; final CI evidence is separate; other families remain open.
+
+The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
+temporary socket inventory records that deferred family. No source or gate
+claim is inherited from the historical two-family experiment.
+
+### Lighter depth Background Read controls
+
+Plan8b700d2ffc8/caf6e4cf1b3/c7a1d352046 precedes RED362e8edb77f (seven compiled
+assertion failures on native dispatch). Fixture correction6311e52cfe0 preserves
+the existing testnet REST host; all original admission assertions remain. All
+seven pass after managed adoption: exact aliases/networks, no preclaim publish,
+original deadline, strict transport/malformed cleanup, stale generation/revision,
+capacity isolation/recovery and300 retirements. All33 focused public/depth tests
+pass, with six original supervision tests and held candle fixtures unchanged.
+Unheld public drivers use shared prepared_actions at their existing event clocks,
+retaining every old data/error/continuity assertion. No local transport helper,
+retry policy or outcome mechanism is added; broad CI remains a separate gate.
+
+Depth frozen source81ac295d25a passes511 Lighter+Binance native tests (49 result
+groups), strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both
+request checks/15 controls. Held request_context_candles.rs and trading.rs remain
+byte-exact to actualdb32; ticker/catalog runtime remains unchanged. Independent
+implementation review and CI do not derive readiness solely from native tests.
+
+## KuCoin local history authority controls
+
+Tests precede production. The fixture delegates the native mutation guard so
+Query tracking follows real KuCoin, then exercises genuine Engine callbacks.
+Corrected original source produces five assertion REDs and six compatibility
+GREENs: missing typed local metadata, capacity bypass, invalid-clock bypass and
+fixed-clock metadata/reuse assertions. Saturation genuinely allocates all256
+Background roots in a separate no-ID callback, repeatedly denies every reachable
+local path, explicitly retires those roots and recovers at one clock. No fake
+command-origin or opaque request is used to manufacture admission pressure.
+Native precedence, numeric boundaries, both zero-limit results, Store stability,
+signed order/funding wire requests and clipped long-range paging are preserved.
+Three defensive branches remain explicitly outside native witness claims.
+## Bitunix local history admission controls
+
+Tests-first native controls reproduced five assertion RED and three compatibility
+GREEN before all eight passed with the authority adoption. Both credential modes,
+all five local terminal expressions, native branch precedence, typed refusals and
+companion-free timelines are covered. Initial capacity fixtures assert256 genuine
+background roots before270 rounds of command refusals, explicitly retire them,
+and recover at one clock. Invalid-clock denial and more than256 fixed-clock local
+completions cover both empty-result paths as well as refusals. An unchanged valid
+signed private history request and empty response remain a compatibility control.
+
+## Bitrue local history command admission controls
+
+Tests-first genuine Engine callbacks delegate both native mutation guards and
+cover all five local refusals, including missing/unknown symbols. Original source
+produces five assertion REDs and three compatibility GREENs. Capacity setup uses
+a prior no-ID callback with256 asserted Background roots; repeated denials retain
+peers, explicit retirement recovers at one clock and fixed-clock reuse exercises
+terminal cleanup. Invalid raw clocks and typed local metadata are distinguished
+from native text/precedence, Store stability and signed-fill preservation.
+Aliases, fractional-time flooring, default/clamped limits, native headers and
+empty results remain covered; no fake HTTP or command origin supplies authority.
+
+## Bitrue local leverage admission controls
+
+Tests-first fixtures delegate both native guards and use genuine commands for
+all four local refusals. Original production gives four assertion REDs and three
+compatibility GREENs. The bounded owner probe allocates256 Background roots in
+a separate no-ID callback, repeatedly denies work while preserving peers, then
+explicitly retires roots and recovers at one clock. Fixed-clock reuse and invalid
+raw clocks distinguish shared admission from native messages and Store stability.
+Valid bracket/account requests retain their signed dispatch; existing account
+suite assertions continue to own successful caller completion/group behavior.
+
+## Phemex local history admission controls
+
+A separate original-RED commit adds nine integration controls on unchanged
+661427d10b3 production: four assertion failures and five passing compatibility
+controls. The same REDs reproduce after actual 1e8f600da75 integration. All nine
+pass with Context-owned local terminals. Real unsigned candle preparations fill
+all 256 managed owners; terminal preparation failure frees one slot and local
+results recover while the other owners remain pending. NaN and both infinities
+reject, then finite command-ID reuse succeeds. All eleven local branches retain
+their finite payload/error contract, with active-capacity, duplicate-ID,
+precedence, resource reuse and valid signed/public continuation controls.
+No existing assertion, fixture, engine, host, signer or shared policy changes.
+Both request-context ratchets verify only the exact eleven-entry Phemex prune.
+Local Phemex and Binance verification passes 491 tests across 39 targets with
+zero failed or ignored, strict all-target Clippy, scoped formatting, and both
+request-context checks (fifteen ratchet controls). CI supplies replay/size gates.
+
+## MEXC local read refusal controls
+
+The committed original tests plus fixture correction compile against untouched
+c4e02c production with 9 assertion REDs and 6 passing native controls in an
+isolated target. Eight independent capacity REDs cover every selected site;
+nonfinite command-clock rejection is the ninth. Duplicate-ID protection is a
+native control, preserving the shared COMMAND_DUPLICATE diagnostic and pending
+original owner. The from-only bound stays invalid through recovery. Excluded
+evidence: an initial duplicate-diagnostic expectation mismatch and an anomalous
+archive replay sharing the edited tree's build target. No compilation failure
+counts as a RED, no old assertion changed, and no test is ignored.
+
+All 15 controls pass after adoption, including real 256-book-peer capacity and
+physical peer settlement/recovery, a real account 429 pause established after
+book peers park, invalid clocks/finite reuse, repeated local settlement, full
+native error fields/precedence and valid signed/public continuations. Scoped
+MEXC/Binance tests pass 487 across 42 targets with zero failed/ignored; strict
+all-target Clippy and formatting pass. Both request-context checks pass, with
+15 ratchet controls and exact unowned-map equality; 8 entries/8 occurrences are
+removed only from MEXC. Full CI owns WASM/replay/size and performance evidence.
+
+### Paradex second native Read-history consumer controls
+
+Original plan dec36cfa468 and seven original REDs efafc26dedc retain their assertions
+on reviewed #1848 f471 plus actual e233. All seven fail on legacy dispatch before
+implementation and pass through real managed release afterward. Controls preserve
+unsigned query/body/headers/native codec, limit geometry, encounter order/dedupe,
+forced single page, strict malformed/failed prefixes, typed preparation/transport,
+original deadline and stale token/ID reuse without marker or Store leakage.
+Only one public sender fingerprint is pruned; private authority and shared bridge
+blobs remain unchanged. Full native/strict/CI and independent review are separate
+readiness gates; this native receipt alone does not claim bridge landing.
+
+The public-trades frozen source38836aad176 passes501 Paradex+Binance native tests
+(41 result groups), strict all-target/all-feature Paradex Clippy and scoped fmt;
+all three frozen implementation reviews are CLEAN/architectureNo. Incoming
+actual2badd1cb0e3 preserves tested dependency blobs and all foreign prunes. Both
+request checks/14 controls and bans pass on the integrated head; bridge blobs
+remain exact to authorized f471. This is executed native consumer evidence, not
+an actual bridge landing or complete WASM/replay/size proof.
+
+## Hyperliquid local lookup entry controls
+
+Six original REDs require clock/capacity refusal before cached or non-definitive
+local lookup success. Companion controls preserve the entire cached Order wire,
+cache precedence in perps/spot and public/private deployments, symbol/client-ID
+matching, private REST and public-only/spot fallthrough, active-owner isolation,
+finite ID reuse and 900 synchronous retirements followed by 256 real parked
+managed candle owners. No marker or Store mutation is introduced. Exact inventory
+removes only two local done sites; native/strict checks and independent reviews
+are required on the committed source before merge readiness.
+
+## KuCoin local Read original-source controls
+
+Tests committed before production on frozen661427d10b3 produce ten assertion
+failures and six passing compatibility controls. Standalone failures show
+capacity/invalid-clock leverage mutation and saturated cached publication before
+adoption. Genuine256-owner saturation, fixed-clock recovery/reuse and duplicate
+command protection use real callbacks, not fabricated Context or HTTP authority.
+
+Compatibility controls preserve cache aliases/sentinels, full order results,
+constant leverage fields and unknown-symbol handling, successful setting no-ops
+and capability declarations. Private/pager requests preserve native URLs, headers
+and completion while all256 background roots can coexist without an added owner.
+No steady WS/ticker/book path changes; current post-#1888 CI must pass the
+shared speed gate and report the fresh KCS ratio. The1.20x figure remains a
+headroom target, not a merge gate, per the overseer clarification.
+
+### Lighter ticker managed-entry controls
+
+Committed plan and six compiled assertion REDs precede managed ticker source.
+The previously held candle deadline driver was corrected first: every captured
+same-deadline timer fires at its original raw timestamp; all ten candle controls
+pass on legacy ticker source with every original assertion retained. Ticker
+controls preserve native fields/aliases/partial-row semantics and symbol-specific
+WS precedence through actual prepare/bind/claim, reject preclaim publication,
+discard failed prefixes, and prove failure/capacity recovery and300 Background
+retirements without completing unrelated commands. Existing fixture drains use
+shared preparation at original event times only where the new ticker requires it.
+No runtime timer/retry policy or production ordering workaround is introduced.
+
+
+
+## BloFin PublicTrades managed history regressions
+
+The native test-first controls exercise preparation/binding/claim, unreleased
+responses, original-deadline expiry, typed preparation and released transport
+failures, duplicate commands and stale responses. Fixed-clock repetition beyond
+the 256-owner bound covers preflight, success and immediate managed-queue
+refusal, so elapsed time cannot conceal missing terminal retirement.
+
+Compatibility controls assert every Trade field, native row order, cross-market
+rows, identity consumption before unknown-market skipping, timestamp precedence
+and milliseconds, numeric defaults, signed quantities and the wire-only limit.
+Malformed or refused first pages discard their streamed prefix without an
+incomplete marker. Six original-source assertion failures preceded production;
+five native compatibility controls already passed that original source.
+
+## BloFin PublicTrades actual bridge receipt
+
+The genuine actual-#1848/current-landing integration retains incoming candle
+entry and all six shared history/authority blobs. The capacity message mismatch
+is reproduced on the actual engine, then its expected text is obtained from
+Error::Capacity without weakening kind/outcome, no-I/O or retirement assertions.
+The 32 focused BloFin controls and three shared bridge controls pass; scoped
+strict Clippy/fmt and request-context checks with 15 regressions pass. The historical
+run of 501 native tests is distinct; fresh CI and a venue merge window remain gates.
+
+## WOO local history custody controls
+
+Real Engine<Woo> controls cover each original local refusal at invalid engine
+time, finite native error metadata/precedence, repeated settlement and same-ID
+reuse, zero I/O/Store effects, Fills aliases, unchanged private credential refusal
+and unchanged unsigned public GET dispatch. Three original assertion REDs plus
+four compatibility passes become seven passes without assertion changes. Shared
+capacity and revoked-entry mechanics retain the existing engine-suite coverage.
+
+### Paradex local history admission controls
+
+Original RED checkpoint `45c743903b8` adds one focused fixture without editing
+production, shared support or inventory: four local branches emit their old
+result/error instead of a shared capacity refusal; the clock control likewise
+exposes unowned completion. Three native compatibility controls pass alongside
+those five REDs. After adoption all eight original tests pass unchanged.
+The test uses real Engine callbacks,256 unclaimed managed book peers and exact
+terminal metadata, never a manufactured Context. Recovery reuses the freed slot
+and individually retires every remaining peer. Fixed-clock300-cycle reuse and
+refill exercise owner retirement without deadline expiry hiding a leak.
+The original managed public-trades and private history suite stays unchanged.
+Exact inventory target is Paradex55->51/history13->9; broader native, strict,
+ratchet, independent review and CI evidence will be recorded separately.
+
+Local history verification on reviewed integration `56dacc36562` genuinely
+includes actual landing `23d0d490009` (#1892 background executions and #1817
+credential selection). All513 Paradex/Binance tests pass across42 targets,
+none ignored, including the same eight original local-history controls.
+Strict all-target/all-feature Paradex Clippy, scoped formatting, bans, the
+request-context scanner and all15 ratchet tests pass. Source/adversarial,
+caller and full-map reviews are CLEAN on this actual integration; architecture
+No. The seven-path diff preserves every unowned incoming blob and all foreign
+manifest entries, with only the four planned Paradex history occurrences pruned.
+CI and an authorized train slot remain separate gates.
+
+
+## Subscription handoff ordering controls
+
+The assertion-only real OKX private reconnect test fails on the original
+managed adapter (HTTP index 2 before subscription index 5); the identical native
+pre-#1771 control passes in an isolated source/target. The corrected control
+compares the complete concatenated action batches and fires the actual queued
+wakeup, preserving the subscription-before-refresh assertion.
+
+Seventeen engine controls cover actual managed Prepare/Bind/Claim, final-batch
+fencing, callback retirement/replacement, required-interest removal and wire
+changes, refusal, additive supersession, pacing, repair/no-op, auth and delayed
+signing, bounded atomic admission, last-safe ID/rearm, duplicate/early/expired
+wakeups, HTTP-delivery isolation, command-entry refusal and caught fatal state.
+Existing OKX account, product and reconciliation fixtures drive genuine wakeups
+at their native reconnect times; their financial assertions stay unchanged.
+The focused engine/OKX all-target/all-feature run passes 1,241 tests.
+
+Three actual EngineHost bookkeeping controls fail against the original host
+and pass with inline/cleared/superseded timer ownership repaired. The full scoped
+host-unit command passes 194 tests. These local correctness results do not make
+a CPU, memory, size or replay-parity claim; those measurements belong to CI.
+
+Engine feature modes pass: feature-off 718, managed-sockets 820, http-plans 806,
+and combined 908 tests. Strict focused Clippy is clean. The initial bans run
+fails because the newer remote landing has already pruned unrelated Paradex
+and Phemex history inventory; this branch must integrate those actual changes
+before a current-landing ratchet pass is claimed.
+
+Runtime review added an eighteenth control: an early host one-shot must return
+an explicit rearm at the unchanged handoff time, run no early callback, run
+exactly one later callback and release its credit. This assertion fails on the
+initial implementation. A fourth actual-host control covers inline early
+rearming without losing the subsequent handle. The integrated predecessor run
+passes 1,269 focused tests, strict Clippy, formatting and bans; its initial stale
+inventory failure is resolved by genuine actual-landing integration.
+
+The refreshed complete host-unit command passes 195 tests, including all four
+handoff controls. Uufub4 independently executes the archived handoff file 4/4;
+ih35js's source/control clearance carries no independent build claim.
+
+The nineteenth handoff control covers #1932 composition: both initial arming and
+a previously armed wake remain blocked during the exact expiry barrier, retain
+the pending credit and barrier, and resume once afterward with a fresh timer.
+The unguarded integrated source is assertion RED at aa6613f7677.
+
+
+### Bitunix public REST managed Read proof
+
+Plan756a precedes original tests fda4818/c2aa (10 then14 assertion REDs, five
+compatibility controls GREEN); public source follows. Native authority tests
+cover Prepare/Bind/Claim, stale/duplicate/reused command IDs, invalid clock,
+entry capacity, typed provider refusal, expiry, parser versus transport failure,
+public auth isolation and both seeds' repeated fixed-clock retirement. Existing
+private/socket native assertions are preserved through genuine preparation
+fixtures. Immediate managed queue-capacity is reviewed defense/shared-engine
+coverage, explicitly not a native execution receipt (owner ruling in plan).
+
+### WEEX local history original REDs and typed Read completion
+
+The new dedicated local-history target compiled against unchanged actual
+`a828ede7ebb`:3native controls passed and8intended assertion REDs exposed seven
+capacity bypasses plus invalid-clock publication. Test-only commit
+`d5746d2d490` and the committed plan received three independent CLEAN reviews.
+After the seven scoped terminal replacements, the same11controls pass without
+changing their assertions. A genuine retained-root probe covers the keyless
+case without credential fabrication; duplicate/recovery/300-cycle refill and
+full-capacity native remote wire controls keep custody and fallthrough explicit.
+No new per-venue lifecycle, retry, signer, history finalizer or engine seam.
+
+Scoped WEEX/Binance native verification passes506tests,0failed/ignored;
+strict WEEX all-target/all-feature Clippy, scoped formatting, source scan and
+all15request-context checker tests pass. Implementation review/CI remain separate.
+
+### WEEX FetchAccount local and remote Read custody
+
+Original identity controls on actual `a828ede7ebb` expose five full-capacity
+entry failures and invalid-clock numeric publication. Three native controls
+PASS beside six intentional assertion REDs; test-only `902335f2b6f` is the
+reviewed strict-Clippy refinement of original `a55a561b921`. The same nine
+controls now PASS, with genuine engine-root capacity/recovery/peer isolation,
+300fixed-clock local completions/refill, exact native diagnostics and metadata,
+independent primary/secondary HMAC wire, primary stableId attribution and Store
+preservation. Plan, original REDs and the refinement each have three independent
+CLEAN reviews. No new provider key, fabricated Context, engine API or venue
+lifecycle/helper was introduced. Broader native/strict/ratchet/final review and
+CI evidence are separate gates.
+
+Pre-integration native504WEEX/Binance tests and strict WEEX Clippy/fmt pass.
+Whole-map provenance is blocked by newer Aster inventory shrink in origin;
+actual integration and fresh gates follow, with no foreign manifest edits.
+
+Actual integration e336f67b7de genuinely includes15bd7821b52; all unowned incoming
+blobs and foreign prunes are preserved. Fresh504native tests, strict Clippy/fmt,
+full bans and both request-context checks (15tests) PASS. Three independent
+implementation reviews are CLEAN; architecture No. Exact own identity2F/2O
+prune is verified; the parallel #1951 history prune is not credited here.
+
+### Binance identity preflight Read admission
+
+Plan `3a0598f1892` precedes original-control commit `84e327e2c8f`.
+With unchanged production, four real full-registry controls are assertion RED:
+missing/disabled/incomplete-primary/incomplete-secondary identity preflights
+publish local messages rather than the engine's capacity refusal. The existing
+valid-command capacity control and all six identity compatibility controls are
+GREEN, including 300 same-clock/same-command local refusals and exact selected
+signer request bytes. The same eleven tests pass after conversion, with no
+transport, extra diagnostic or Store mutation on initial admission refusal.
+No manufactured Context or fixture bypass is used.
+
+## Phemex unsigned public-trades custody controls
+
+Original checkpoint fc1b87973fa compiles13 controls on unchanged15bd production:
+8 behavioral assertion REDs and5 native passes, zero ignored. The dedicated
+public target retains those selected assertions; held signed REDs remain on
+feat/rust-phemex-bounded-history-context at321992b680c. Additional controls pin
+invalid-entry refusal, typed route metadata without auth evidence and cleanup
+after a pause exceeds the original20s root. Existing native history fixtures
+use the shared prepared-action driver and monotonic response clocks; only the
+unsigned transport-kind expectation changes to Network, while strict financial
+rows, errors, no-prefix/no-gap and signed-path assertions remain. Rebuilt CI
+continues to own replay, CPU, size and retained-memory certification.
+
+## Selected managed signed Read custody
+
+One non-Clone engine wrapper retains selected opaque identity, egress/evidence
+and original Context through queue and retry, with exact typed refusal and
+pending return. Missing-selection command diagnostics precede a single typed
+terminal under genuine local authority. Provider/prepare metadata and ordered
+recipe headers remain unchanged. Genuine engine controls cover capacity,
+duplicate entry, phase custody, expiry, retry, streaming and account evidence;
+native compatibility controls do not substitute for later venue adoption.
+
+## BingX identity original Read owner
+
+One AdmittedRead couples selection, credential and terminal authority without a
+venue admission or numeric fallback. Exact managed delivery is checked before
+native response decoding/publication. Local config precedence and 20s/Never
+remain native; typed transport/refusal errors keep checked diagnostic ordering.
+Only identity.rs loses two legacy terminal occurrences; other inventory is intact.
+
+
+## Shared CPU remeasurement controls
+
+Policy controls cover mean passing and failing, missing/failed second samples,
+5% boundaries, all three objectives, category changes, output/report tampering
+and unchanged strict failures. Runtime controls cover archive/path/type/link
+validation, prevalidated restoration, exact Node/dependency/module identities
+and initial/final loader cache snapshots. Coordinator controls reject foreign
+same-source run/job payloads, substituted physical runners and missing runtime
+authority, duplicate/retried second jobs and incomplete suite/case rosters.
+Workflow controls pin all 32 final required names and 110 original workloads,
+allow only an eligible projection to schedule a second runner, and require final
+certification even after missing or failed upstream work. Declared public FAILs
+remain declared results without CPU rescue. Measurements in CI report first and
+second samples separately; this methodology makes no runtime speedup claim.
+
+The first real second-runner archive exposed a mismatched transport bound. The
+shared size validator preserves the original bound in an extraction before
+regressions are committed: 5 RED with 16 working controls. The observed
+743,167,768-byte runtime case is checked without allocating a giant buffer;
+metadata/log/ordinary bounds, 4 GiB overflow, empty response recovery/exhaustion,
+mixed socket/empty budgets and CDN credential stripping remain explicit controls.
+Routing tests cover every registered suite and reject unknown runtime names.
+
+## Selected multi-page Read contract controls
+
+New-contract Engine controls cover exact receipt bounds, distinct page legs,
+immutable selection, wrong-root/foreign-engine delivery, queue/provider refusal,
+discard/requeue, streamed order, stale staged rows, typed root retirement and
+physical-timeout recovery. Existing single-leg controls remain unchanged. API
+privacy doctests distinguish original roots from children without claiming that
+borrowed Contexts lose generic core authority. Native consumers remain separate.
+
+
+### Replay audit finalization controls
+
+The behavior-preserving extraction has four working controls and two assertion
+REDs matching the historical WOO false protocol diagnostics. After final-only
+aggregation, all 31 focused audit/finalization/checkpoint/WOO protocol controls
+pass. Genuine late private violations remain visible; audit exceptions propagate.
+Both real replay callers and forgotten-final-flag mutations are checked.
+
+Native accepted-write snapshot races are separately reproduced by four REDs
+and two working controls; the identical six controls pass against queued #1788.
+Those venue changes and their tests are outside this standalone harness scope.
+
+## Hyperliquid perps history custody regressions
+
+Original test-only04e6ee356ad ran16 real-engine controls on unchanged venue
+production:11 assertion REDs,5 working native positives,0 ignored. All16 now
+pass. Four adoption controls add real root/page timer ordering, strict forced
+dequeue-capacity refusal with zero reservation charge, exact-owner cleanup with
+Account/History FIFO in both orders, and typed public Auth* metadata without
+private health evidence. Existing22 native history and11 cached-lookup fixtures
+retain financial assertions through shared managed preparation; long page-cap
+fixtures request the maximum caller wait and drive the actual native budget wake.
+Focused Hyperliquid+Binance suites pass568 tests/45 targets; the request-context
+checker unit suite passes15. Full inventory provenance awaits the replacement
+#1976 composition carrying current incoming Aster/OKX prunes. Independent source, caller
+and full-map reviews and fresh CI remain required before freezing this consumer.
+
+## OKX history caller-root controls
+
+Revised test-only916a3e65f5a runs15 controls on unchanged OKX production:9 genuine
+assertion REDs and6 native positives, zero ignored. This retains the original
+fourteen-control checkpoint and updates two whole-root expiry expectations to
+the newer strict engine contract; the added parked-root timer assertion pins
+the missing shared tracked-root behavior. Subsequent review counts all correlated
+terminals and forbids owned incompleteness on expiry. The implementation target
+now passes20 controls, adding Primary preparation intent, pre-release versus
+released20s child expiry, typed preparation metadata (query/lookup/public), real
+registry-capacity refusal at paced dequeue with peer preservation, and retired
+pacing/late-data isolation after command-ID reuse.
+
+Existing17 history,8 lookup and5 dispatch-signer controls pass with financial,
+identity, signature and absence assertions retained. Fixtures perform actual
+managed preparation; deferred-provider refusal drives the route-then-sign seam
+explicitly, since the immediate fixture deliberately rejects parked signing.
+History response clocks use their original relative offsets on the command's
+absolute epoch instead of running backward. Primary physical routeNone is checked
+as the host's default primary route, and the dedicated intent control proves the
+same primary egress before signing. Fresh complete native, strict/fmt and inventory
+provenance results are recorded in the plan checkpoint; CI and replacement#1976
+composition remain separate readiness gates.
+
+## Crypto.com managed candles and local history controls
+
+Original regression commit cc2916a8037 precedes source edits. Fixture correction
+b89ca9aaa52 permits only engine Cancel cleanup and preserves native streamed
+malformed-body behavior; its independent original-source rerun proves nine
+assertion REDs and seven native controls, with no compile failure counted. All
+sixteen pass after the cutover. The discarded Internal expectation on ordinary
+malformed text is explicitly excluded from RED evidence.
+
+Actual managed book peers fill256 owners; local and candle admissions refuse
+without dispatch, then recover after one peer settles. Controls cover invalid
+clocks/finite ID reuse, single preparation/bind/claim, parked/released expiry,
+stale callbacks, typed setup/network errors, native full error fields/auth health,
+raw candle order/timestamps/numeric coercion, all timeframes/live-UAT roots and
+credential combinations. All five local branches, native validation precedence,
+explicitly ranged Income limit0, and valid private/public history continuations
+remain controlled. Exact scanner prune removes only Crypto lib/history entries;
+no existing assertion is removed. Full native/replay/size verification follows.
+Local Crypto.com/Binance verification passes432 tests across41 targets, strict
+Clippy/fmt and fifteen ratchet controls. A later independent-review callback
+control exposes the engine's credential-free public typed-error auth-health
+accounting defect (health1 versus0); shared-owner closure remains required.
+The adapter preserves kind/metadata and adds no local demotion or exemption.
+
+### Crypto.com refreshed original and managed controls
+
+The test-only original branch is genuinely merged onto actual6a6845c4491; its
+expanded checkpoint1d576566cb4 runs both targets with --no-fail-fast and proves
+16 behavioral assertion REDs plus seven native positives, zero ignored. Seven
+added controls pin private range/nanosecond and unsupported-interval admission
+at bad clock/full capacity, retained genuine peers and real settlement recovery,
+and stale bind/item/failure/timer isolation with a distinct exact replacement row.
+The original public-auth-health regression from27b051a8907 is retained verbatim
+and passes against the actual shared fix. Managed targets pass24 controls.
+
+One original working expectation is intentionally updated: malformed delivered
+text at200 keeps its exact message but now carries shared Internal/NotSent. The
+unchanged native baseline is preserved in the original checkpoint; this change
+is declared in CALLERS rather than hidden by stripping the engine's typed cause.
+HTTP500 still returns its native string-only error. Existing financial assertions
+remain; tests/public.rs only drives the genuine prepared executor at its old clocks.
+
+### Lighter local history Read evidence
+
+Genuine256peer roots exercise seven local terminal capacity refusals, slot/ID
+reuse and invalid-clock recovery. Native result/error precedence, all four
+Lighter/Robinhood deployments, duplicate custody, repeated immediate completion
+and saturated remote byte/schema controls remain covered. All19 focused tests
+PASS after original4GREEN/15RED. No shared policy, timer, wrapper or scanner change.
+
+### GRVT local history Read evidence
+
+Seven capacity controls use256 genuine retained Read peers. Invalid-clock,
+retirement/reuse, duplicate-owner and2800 immediate-terminal controls accompany
+native precision/error-precedence checks on both deployments. Saturated public
+trades retains exact legacy POST route, headers, body and nonempty output schema.
+All19 focused tests pass after15 original assertion failures. Existing source
+outside the seven branches, held fixtures and foreign inventory stay unchanged.
+
+## KuCoin refusal admission controls
+
+Ten original assertion REDs cover eight lexical local refusals, including all
+three Spot unsupported variants. They pass after admission conversion, alongside
+native error/credential ordering, UUID entropy, Store preservation and public
+wire controls. Duplicate ownership and more than 256 fixed-clock reuses pin
+retirement; saturated-registry valid private wire controls pin unchanged signed
+fallthrough. The isolated suite contains 18 executed controls, with no ignores.
+
+## Bitrue initial refusal regression controls
+
+Three original compiling capacity assertion REDs pass after shared entry
+adoption. Seven isolated controls also pin keyed/keyless/public-only ordering,
+Store preservation, capacity recovery, successful native one-way mode, saturated
+signed wire and genuine duplicate-owner protection with 270 fixed-clock reuses.
+No original test is ignored or rewritten to claim a legacy removal.
+
+## GRVT final-coverage replay controls
+
+Healthy final completion, pre-ACK checkpoint observation, genuine earlier
+private-data faults, late selector faults and incomplete replacement generations
+are controlled through the real shared audit/capture APIs. The scoped GRVT and
+declaration-policy run passes 32 tests. Verification of the authenticated reports
+with the narrowed manifest retains one public PASS and one declared private FAIL,
+zero unexpected failures and zero unobserved declarations. Five-pair repeatability
+and fresh composed CI remain separate qualification work; no native parity is
+implied by protocol coverage.
+
+### Crypto.com terminal audit controls
+
+Twelve real-audit controls cover healthy authentication and heartbeat exchange,
+pre-ACK checkpoint observation, persistent invalid HMAC and early subscription
+faults, a final missing heartbeat before memory collection, and the distinct
+TS four-channel/Rust five-channel requirements. The original capture has two
+assertion REDs with ten working GREEN controls; final-only capture passes all
+twelve. Full raw comparison excludes only top-level metrics and protocol errors,
+retaining all other receiver fields and the sixty ordered financial/identity
+failures. The nine removed protocol declarations each require exact current-tape
+absence; every other manifest byte is preserved.
+
+### Binance Spot acknowledgement coverage controls
+
+Sixteen actual-audit controls preserve independently signed subscription bytes,
+exact typed ACK correlation, pre-ACK event rejection, explicit closed/connected
+generations and final unanswered requests captured before memory settling.
+The original capture has two final-assertion REDs and fourteen GREEN controls;
+terminal-only capture passes all sixteen. Full raw comparison omits only
+metrics and protocolErrors, retains every financial field and ordered fixer,
+and proves each of the four removed current-tape protocol keys absent. Other
+public/private Binance cases keep their exact declarations and verifier status.
+
+## MEXC local write admission controls
+
+Original test-only checkpoint2c0755b5607 executes13 actual-Engine controls on
+unchanged production: nine behavioral assertion REDs plus four working native
+positives, zero ignored. A diagnostic-fixture mismatch was corrected before
+qualifying REDs. The same13 controls pass after source conversion.
+
+Both reachable branches are exercised at invalid clock and full256-peer capacity;
+additional placement shapes prove UUID entropy ran before validation/key refusal.
+Controls retain every real peer preparation, unchanged Store snapshot and exact
+recovery after one real peer failure, duplicate-ID isolation,300 ID/lock reuses,
+exact diagnostic/terminal order and validation-before-key precedence. A supported
+private Mode command still emits its native legacy POST/body. Credential-free
+AuthInvalid keeps its fields but supplies zero auth-health evidence.
+508 MEXC/Binance native tests across43 targets, strict all-target/all-feature
+Clippy, scoped fmt, full bans and both provenance checks (15 checker tests) pass.
+No existing financial/identity/signature assertion changes. CI remains the
+WASM/replay/CPU/size/memory authority; no performance/readiness claim here.
+
+## KuCoin Spot fixed-setting admission evidence
+
+Ten native LocalSetting controls cover six original capacity/expired-wait REDs,
+constant projection, unknown symbols, configuration precedence, Background-only
+capacity and duplicate original-owner release. Tests use genuine command
+receipts; no missing-method compile failure or fabricated Context is evidence.
+Exact Spot trading inventory removes only the two-occurrence success row.
+
+## Bitrue local one-way setting controls
+
+Seven native controls retain two original assertion REDs plus five working
+controls: command-owner capacity/recovery, expired/sub-ms receipt, duplicate
+original owner/diagnostic, Background Context independence, all credential
+configurations, true-mode refusal and absent symbol behavior. No fabricated
+Context or missing-method compile failure is evidence.
+
+## Flat-position unavailable PnL projection
+
+Original financial-evidence controls reproduce two assertion failures: native
+NaN creates a null-PnL row, and native/TS unavailable evidence differs. Five
+working controls retain real finite PnL, numeric strings, non-flat positions and
+genuine PnL mismatches. Admission now uses the same finite conversion as the
+projection, preserving zero and losses while excluding unavailable sentinels.
+Declaration pruning requires fresh inverse replay evidence for each removed key.
+
+### Public refusal and catalog custody controls
+
+Paradex uses genuine retained peers to pin local candle and book-entry capacity,
+clock/reuse and duplicate custody, with native GET/schema and saturated candle
+fallthrough controls. Lighter pins exact public catalog wire across four hosts,
+spot filtering/precision, endpoint fallback/backoff, real Prepare/Bind/Claim,
+preclaim/released expiry, failed streamed prefixes and inert stale/duplicate work.
+A255-peer registry-pressure control forces each catalog attempt to retire before
+fallback/retry and successful slot reuse; expiry cannot conceal a root leak.
+Existing startup fixtures retain their assertions while using shared preparation.
+
+## Joined order-read authority: WOO and Crypto.com
+
+WOO's regular/algo pages and Crypto.com's regular/advanced reads carry one owned
+Store token across the logical census. All native classification/membership and
+initial execution-baseline publication is inside the admitted callback; later
+metadata/repair HTTP and timers stay outside. ACK invalidation follows the
+existing validated order-only success boundaries, including absent rows and
+partial success. Per-ID WS progress, terminal fences and rejection retention
+remain unchanged. Capture/late exhaustion, accepted/refused/malformed ACKs,
+both WOO arrival orders, Crypto auth/transport retry after ACK, WS peer progress
+and later WOO amend/fill behavior have bounded native controls. Native original
+RED receipts distinguish the two accepted-write crossings from API-adoption
+controls; no live/private or full-parity claim follows from local tests.
+
+## BloFin local leverage Read controls
+
+Five native tests retain two compiling original capacity assertion REDs plus
+three working controls: exact validation/credential precedence, Store/empty
+financial state preservation, duplicate original-owner release, and 300 sequential
+failures with 255 Background peers and one free Context slot. Capacity recovery
+releases exact Background roots. No fabricated Context, numeric fallback or
+missing-method compile failure is regression evidence.

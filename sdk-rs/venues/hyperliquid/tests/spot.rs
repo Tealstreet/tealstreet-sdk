@@ -1617,3 +1617,171 @@ fn a_spot_market_without_a_positive_step_is_skipped_as_malformed() {
     assert!(e.store().market("PURR/USDC").is_some());
     assert!(e.store().market("HFUN/USDC").is_none());
 }
+
+mod owned_nonpageable {
+    use super::*;
+    use safe_cex_engine::{Action, ErrorKind, Event, Level, Notice, Outcome, Value, log::code};
+
+    fn queries() -> [Query; 3] {
+        [
+            Query::Fills {
+                symbol: None,
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+            Query::OrderHistory {
+                symbol: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+            Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        ]
+    }
+    fn incomplete(output: &[Action], command: u32) {
+        let [
+            Action::Notice(Notice::Event(marker)),
+            Action::Notice(Notice::CommandDone {
+                command: owner,
+                result,
+            }),
+        ] = output
+        else {
+            panic!("one coverage marker before one result, and no I/O: {output:?}");
+        };
+        assert_eq!(*owner, command);
+        assert_eq!(result, "[]");
+        assert_eq!(marker.code, code::HISTORY_INCOMPLETE);
+        assert_eq!(marker.level, Level::Warn);
+        assert!(marker.message.contains("INCOMPLETE"));
+        assert!(marker.message.contains("Hyperliquid spot"));
+        assert!(
+            matches!(marker.fields.as_slice(), [("command", Value::Num(owner))] if *owner == f64::from(command))
+        );
+    }
+
+    #[test]
+    fn history_has_owned_incomplete_coverage_even_with_cached_orders_and_error_log_level() {
+        let (mut e, _) = placed();
+
+        e.drain_actions().for_each(drop);
+        let before = e.store().orders().to_vec();
+        assert!(
+            !before.is_empty(),
+            "live orders do not establish history completeness"
+        );
+        let balance = e.store().balance().clone();
+        e.set_log_level(Level::Error);
+        for (index, query) in queries().into_iter().enumerate() {
+            let command = 100 + index as u32;
+            e.handle(5000., Event::Command(Command::Query { command, query }));
+            incomplete(&e.drain_actions().collect::<Vec<_>>(), command);
+            assert_eq!(e.store().orders(), before);
+            assert_eq!(e.store().balance(), &balance);
+        }
+    }
+
+    #[test]
+    fn public_trade_refusal_is_typed_not_sent_with_original_text_and_no_coverage() {
+        let (mut e, _) = placed();
+        e.drain_actions().for_each(drop);
+        e.handle(
+            5000.,
+            Event::Command(Command::Query {
+                command: 200,
+                query: Query::PublicTrades {
+                    symbol: "HFUN/USDC".into(),
+                    limit: Some(10),
+                },
+            }),
+        );
+        let output: Vec<_> = e.drain_actions().collect();
+        let [
+            Action::Notice(Notice::CommandFailed {
+                command: 200,
+                error,
+            }),
+        ] = output.as_slice()
+        else {
+            panic!("one refusal, no I/O or unrelated coverage: {output:?}");
+        };
+        assert_eq!(
+            error.message,
+            "Hyperliquid spot public trades query is not supported"
+        );
+        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+    }
+
+    #[test]
+    fn lookup_miss_remains_nondefinitive_without_a_history_marker_or_io() {
+        let (mut e, _) = placed();
+        e.drain_actions().for_each(drop);
+        e.handle(
+            5000.,
+            Event::Command(Command::Query {
+                command: 300,
+                query: Query::OrderByClientId {
+                    symbol: "HFUN/USDC".into(),
+                    client_order_id: "0x11111111111111111111111111111111".into(),
+                },
+            }),
+        );
+        let output: Vec<_> = e.drain_actions().collect();
+        let [
+            Action::Notice(Notice::CommandDone {
+                command: 300,
+                result,
+            }),
+        ] = output.as_slice()
+        else {
+            panic!("one explicit nondefinitive lookup, no history marker or I/O: {output:?}");
+        };
+        assert_eq!(result, r#"{"found":false,"definitive":false}"#);
+    }
+    #[test]
+    fn existing_local_lookup_hit_stays_separate_from_unavailable_history() {
+        let (mut e, _) = placed();
+        e.drain_actions().for_each(drop);
+        let cached = e.store().orders()[0].clone();
+        let client_order_id = cached
+            .client_order_id
+            .clone()
+            .expect("placement retains its client identity");
+        e.handle(
+            5000.,
+            Event::Command(Command::Query {
+                command: 400,
+                query: Query::OrderByClientId {
+                    symbol: cached.symbol.clone(),
+                    client_order_id,
+                },
+            }),
+        );
+        let output: Vec<_> = e.drain_actions().collect();
+        let [
+            Action::Notice(Notice::CommandDone {
+                command: 400,
+                result,
+            }),
+        ] = output.as_slice()
+        else {
+            panic!(
+                "cache lookup retains its own positive contract, no history marker/I/O: {output:?}"
+            );
+        };
+        let result: serde_json::Value = serde_json::from_str(result).unwrap();
+        assert_eq!(result["found"], true);
+        assert_eq!(result["order"]["id"], cached.id);
+        assert!(result.get("definitive").is_none());
+        assert_eq!(e.store().orders(), &[cached]);
+    }
+}

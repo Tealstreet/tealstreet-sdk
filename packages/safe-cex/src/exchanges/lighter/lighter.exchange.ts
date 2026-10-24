@@ -216,6 +216,7 @@ export class LighterExchange extends BaseExchange {
   private signerRetryBlockedUntil = 0;
   private lastSignerWarningAt = 0;
   private placedOrderHints: Map<string, LighterPlacedOrderHint> = new Map();
+  private lastClientOrderIndex = 0n;
   private ohlcvFallbackFetchByKey: Map<string, Promise<Candle | undefined>> = new Map();
   private ohlcvFallbackCooldownUntilByKey: Map<string, number> = new Map();
   private marginModeBySymbol: Map<string, 0 | 1> = new Map();
@@ -258,6 +259,19 @@ export class LighterExchange extends BaseExchange {
     } catch {
       return undefined;
     }
+  };
+
+  private reserveClientOrderIndex = (): bigint => {
+    const maxIndex = (1n << 48n) - 1n;
+    const candidate = (BigInt(Date.now()) * 100n + BigInt(Math.floor(Math.random() * 100))) % maxIndex;
+    const next = candidate > this.lastClientOrderIndex ? candidate : this.lastClientOrderIndex + 1n;
+    if (next > maxIndex) {
+      return this.rejectPreflight('Lighter client order index namespace exhausted.');
+    }
+    // Reserve synchronously, including failed/unknown sends. Split and bracket
+    // legs and batched placements must share this instance-local namespace.
+    this.lastClientOrderIndex = next;
+    return next;
   };
 
   private rememberPlacedOrderHint = (orderId: bigint, hint: Omit<LighterPlacedOrderHint, 'createdAt'>) => {
@@ -2428,9 +2442,7 @@ export class LighterExchange extends BaseExchange {
     }
 
     const marketId = parseInt(market.id, 10);
-    const maxClientOrderIndex = (1n << 48n) - 1n;
-    // Keep client order index within protocol int48 bounds.
-    const orderId = (BigInt(Date.now()) * 100n + BigInt(Math.floor(Math.random() * 100))) % maxClientOrderIndex;
+    const orderId = this.reserveClientOrderIndex();
     const orderType: 'market' | 'limit' | 'stop_loss' | 'take_profit' = isConditionalOrderType
       ? opts.type === OrderType.StopLoss
         ? 'stop_loss'
@@ -2498,7 +2510,7 @@ export class LighterExchange extends BaseExchange {
 
     // Create orders in lots if needed.
     for (let i = 0; i < lotAmounts.length; i++) {
-      const lotOrderId = orderId + BigInt(i);
+      const lotOrderId = i === 0 ? orderId : this.reserveClientOrderIndex();
       const lotAmount = toLighterScaledInt(lotAmounts[i], amountDecimals);
       this.rememberPlacedOrderHint(lotOrderId, {
         type: opts.type,
@@ -2617,8 +2629,6 @@ export class LighterExchange extends BaseExchange {
     const builderFeeConfig = resolveLighterBuilderFeeConfig(this.options, this.name);
     await this.ensurePartnerAttributionTierEligible(builderFeeConfig);
     await this.ensurePartnerAttributionApproved(builderFeeConfig);
-    const maxClientOrderIndex = (1n << 48n) - 1n;
-    const baseOrderId = (BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000))) % maxClientOrderIndex;
 
     const preparedOrders: Array<{
       orderId: bigint;
@@ -2642,8 +2652,7 @@ export class LighterExchange extends BaseExchange {
         );
       }
 
-      const candidateOrderId = (baseOrderId + BigInt(index) + 1n) % maxClientOrderIndex;
-      const orderId = candidateOrderId === 0n ? BigInt(index + 1) : candidateOrderId;
+      const orderId = this.reserveClientOrderIndex();
       const normalizedTimeInForce = order.timeInForce;
       preparedOrders.push({
         orderId,

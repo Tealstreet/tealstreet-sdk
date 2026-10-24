@@ -19,6 +19,8 @@ const createExchange = () =>
 describe('audit regression: Lighter observability and endpoint inventory', () => {
   it('surfaces channel-less public websocket errors with code and message', () => {
     const exchange = createExchange();
+    // A frame without hydrated prices also starts the REST ticker fallback.
+    vi.spyOn(exchange.lighterApiClient, 'get').mockResolvedValue({ market_stats: {} });
     const log = vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
     const recordStats = vi.spyOn(exchange.publicWebsocket as any, 'recordMessageHandlerStats');
 

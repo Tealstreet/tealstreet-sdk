@@ -1,10 +1,16 @@
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CAPABILITY_METHODS } from '../../exchanges/base';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { DefaultStore } from '../../store/store.base';
+
+// Capability discovery needs no Starknet account or remote SDK configuration.
+vi.mock('../../exchanges/paradex/paradex.sdk', async (original) => ({
+  ...await original<typeof import('../../exchanges/paradex/paradex.sdk')>(),
+  initializeParadexSDK: vi.fn(async () => null),
+}));
 
 /**
  * A base capability stub must be *branded*, or support cannot be detected.

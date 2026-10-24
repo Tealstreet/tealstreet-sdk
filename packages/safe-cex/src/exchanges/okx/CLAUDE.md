@@ -11,7 +11,7 @@ This directory contains the OKX exchange integration for Tealstreet. Regular OKX
 - **Base URL in code**: `https://www.okx.com` (`okxeu` uses `https://eea.okx.com`; `okxdemo` uses the official Demo REST host `https://openapi.okx.com`; `okxeudemo` uses `https://eea.okx.com`; demo variants add `x-simulated-trading: 1` and route REST through Tealstreet's OKX REST proxy path). OKX Global now documents `https://openapi.okx.com` as its primary REST domain; `www.okx.com` remains supported for live global REST.
 - **Latency domain**: `www.okx.com` (`okxdemo`: `openapi.okx.com`; `okxeu` / `okxeudemo`: `eea.okx.com`)
 - **Browser transport**: `okxeu` requires the Tealstreet REST/WS proxy route. Direct Node requests to `eea.okx.com` can authenticate, but browser private REST fails CORS preflight (`OPTIONS`) before OKX can process the signed request. `okxdemo` and `okxeudemo` require the Tealstreet REST proxy route, while demo WebSockets stay direct to `wspap.okx.com` / `wseeapap.okx.com`. Keep `okxeu.requiresCors = true` and demo metadata `requiresCors = true`; regular `okx` remains direct-capable by metadata.
-- **okxeu WS tunnel paths**: private/business sockets tunnel via dedicated `okxeu/private` / `okxeu/business` paths (see `transport/tealstreet/routing/routingTable.ts`), which the python ws-proxy must terminate on `wss://wseea.okx.com`. Do NOT reuse the global `okx/*` paths — they terminate on `ws.okx.com`, where EEA credentials fail auth. `eea.okx.com` + `wseea.okx.com` are allowlisted in tradetunnel `ALLOWED_URLS` and in every live HAProxy proxy config (July 2026 rollout).
+- **okxeu WS tunnel paths**: private/business sockets tunnel via dedicated `okxeu/private` / `okxeu/business` paths (see `transport/tealstreet/routing/routingTable.ts`), whose legacy Python ws-proxy configuration targets `wss://wseea.okx.com:8443` (the upstream must move to 443; this SDK change does not deploy it). Do NOT reuse the global `okx/*` paths — they terminate on `ws.okx.com`, where EEA credentials fail auth. `eea.okx.com` + `wseea.okx.com` are allowlisted in tradetunnel `ALLOWED_URLS` and in every live HAProxy proxy config (July 2026 rollout).
 
 ## API Documentation
 
@@ -194,9 +194,15 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 ## WebSocket Implementation
 
-OKX uses **three separate WebSocket connections** on the default TLS port (443).
-Explicit port 8443 retires on October 31, 2026 for public-internet connections;
-see the [OKX changelog](https://www.okx.com/docs-v5/log_en/).
+OKX uses **three separate WebSocket connections**, all on the default TLS port 443.
+
+The SDK direct URLs and global private/business relay targets omit the port,
+so secure WebSockets use 443. The Python ws-proxy upstreams for both
+`ws.okx.com` and `wseea.okx.com`, the `okx-proxy-ja` Caddy passthrough upstream,
+and tradetunnel's `RELAY_ALLOWED_UPSTREAMS` host/path allowlist must also be
+checked and moved to 443 before OKX retires 8443 on 2026-10-31. Changing these
+SDK constants does not deploy those infrastructure updates.
+See the [OKX changelog](https://www.okx.com/docs-v5/log_en/).
 
 ### URLs
 
@@ -262,7 +268,7 @@ this.ws = this.createWebsocket(baseUrl);
 `directFallback` is a `WsDirectFallback` (`utils/wsDirectFallback.ts`; `protected`
 on the private class because the business class extends it). After two consecutive
 connects that produced zero messages it dials `route.fallback` — the athena Caddy
-passthrough `okx-proxy-ja.tealstreet.io` —
+passthrough `okx-proxy-ja.tealstreet.io` (legacy upstream 8443, pending an infrastructure change to 443) —
 for the rest of the socket's lifetime and emits `grafana-info`. The resolver attaches
 `fallback` only to a DIRECT resolution, so with `tealstreetProxy` on the private and
 business sockets keep the chosen EKS tunnel and never degrade to the passthrough.
@@ -1225,3 +1231,29 @@ Rust closed-position caps and ordinary history caps/cursor stalls emit
 The host flags only the owning result and routes its warning to that caller.
 EEA composite-source cap/cursor failures still reject; strict financial rows,
 caps, cursors and retained-row policies are unchanged.
+
+
+## Rust signer migration checkpoint
+
+The draft Rust adoption stages native private HTTP and private/business login
+through the engine SignStep/provider. Venue options contain opaque identity refs;
+trusted setup owns key, secret and passphrase material, including absent-only
+secondary passphrase fallback. Native GET reads prefer secondary; client-ID lookup,
+ordered writes and both WS login channels stay primary. Public requests remain
+unsigned. Setup validation may report sanitized `Invalid local signer setup`
+before startup rather than the TS client error text.
+
+The draft integrates the landed shared encoding/passphrase presentation core.
+Hosted HTTP reuses `okx.signing.ts`, a standalone request serializer also used by
+the TS API interceptor; no TS venue is constructed. Four-alias browser and
+keyless RemoteSigner captures use owned primary refs and Base64 output.
+Native private/business WS work has three typed byte parts (seconds, GET,
+/users/self/verify), whose concatenation and MAC are unchanged. The bridge
+decodes them only against the declared `secondsTimestamp`/`secondsSuffix` wire
+codec, which Bitget shares with its own `/user/verify` suffix. That shape lets
+the shared bridge preserve numeric legacy `extraData.timestamp` from the exact
+prepared receipt without confusing an HTTP preimage with WS work. Native login
+JSON keeps its existing string timestamp. Private PayloadSigner remains typed
+unsupported/notSent; RemoteSigner wins and cannot fall back. Hosted admission
+still requires positive actual-WASM tests and final CI/replay proof before merge.
+No caller may restore raw secrets to sanitized options or use a local fallback.

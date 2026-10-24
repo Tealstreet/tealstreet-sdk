@@ -44,7 +44,11 @@ package setting; measured performance evidence covers WASM.
 
 Migrated Rust signing uses the shared dispatch-time Signer (`docs/plans/RUST_SIGNER.md`).
 The construction-rules `dispatchSigning` flag selects provider setup, currently
-Binance's four aliases, Bybit's five aliases and WEEX (hosted admission disabled). High-level credential input is consumed by a trusted
+Binance's four aliases, Bybit's five aliases, WEEX (hosted admission disabled)
+and AsterDEX. AsterDEX first maps its account through `asterdexSignerSetup.ts`
+(resolved API version, hex V3 wallet keys, read agent aliasing the primary
+wallet); native setup and `asterdex-signer-setup.golden.json` pin the same
+mapping. High-level credential input is consumed by a trusted
 `LocalSignerSetup` before `BaseExchange` retains options; generic options contain
 no primary/secondary signing credentials. The WASM constructor's optional third
 argument is private provider setup, separate from engine-options JSON. Cached
@@ -102,7 +106,8 @@ For families with enabled hosted-signing admission, browser-facing `signHttpRequ
 and `signWsAuth` use the same owned provider through bounded signing-only captures, without
 starting account discovery or venue transport work. The default synchronized
 clock can still initialize its existing time-source calibration. The original HTTP config/WS response
-wire stays intact. Shared standalone Binance/Bybit request-shape interceptors,
+wire stays intact. Shared standalone Binance/Bybit and AsterDEX V1 (an explicit,
+setup-resolved `apiVersion: v1` only; never V3 wallet keys) request-shape interceptors,
 their codec/site tables and the capture utility are the TS retained for remote
 signing after TS venue classes are deleted; no TS venue/API factory is created.
 They retain real qs/Axios serialization and caller-owned WS preimages. Capture
@@ -461,7 +466,7 @@ SDK.
   new venue to its tables. That test found HyroTrader's own `placeOrders`
   override placing the first order of a batch before the second one's ID was
   checked.
-- **Honoring venues** (rule in each venue's CLAUDE.md): Binance USD-M/PM/Spot,
+- **Honoring venues** (rule in each venue's CLAUDE.md): Binance USD-M/PM/Spot/Options,
   OKX (+EU/demo), Bybit linear/inverse/spot (+demo), Bitget (+inverse/USDC),
   KuCoin futures/spot, Phemex, BloFin, BingX, WEEX, Bitunix, Bitrue, Backpack,
   Coinbase (+spot), Crypto.com, WOO, Orderly family, Paradex, GRVT, ApeX Omni,
@@ -564,6 +569,14 @@ upstream specifications, verified audit evidence, or an explicit runtime
 contract documented in this CLAUDE.md tree. Tests committed to the package must
 be deterministic and must not require network access, API keys, or local secret
 files. Live probes belong outside the test runner and outside `src/exchanges/`.
+
+The shared Vitest setup denies and records unstubbed fetch, XHR send and socket
+connections. Cleanup rejects recorded attempts even when exchange code catches
+the immediate error. Supply explicit local fixture facts instead of relying on
+an endpoint response. An intentional in-process socket fixture must bind loopback
+and use the test guard's exact-port allowance, revoked in `finally`; there is no
+blanket localhost or exchange-host exception. See
+`docs/plans/TS_UNIT_TRANSPORT_ISOLATION.md` for the test-only boundary.
 
 Vitest discovers deterministic `*.test.*` files throughout `src/` and excludes
 only explicitly named `*.integration.test.*` and `*.network.test.*` suites.
@@ -1019,7 +1032,12 @@ structuredClone, which throws on a function, and exchange-server's `INIT_FIELDS`
 allowlist silently drops it. Pinned by `__tests__/transport-adapter-selection.characterization.test.ts`
 plus the two routing snapshots.
 
-**Routing source of truth (`src/transport/tealstreet/routing/`).** Which actual _host_ a request/socket uses — the REST CORS pool (jp/asia/tiny), the HOW egress region, and each exchange's public/private/business WS host — is declared per-exchange in `transport/tealstreet/routing/routingTable.ts` and resolved by `resolveExchangeRouting(exchangeName, options)`. REST (`getProxyForAxios`) and every per-exchange `ws-*.ts` class read their host from the resolver instead of hardcoding `wss://fsjnpy143pbz.*` literals. To change where an exchange's traffic egresses, edit the table — not the ws class. The Rust direct-provider WS warning uses `console.warn` on wasm (including Workers) and stderr on native, once per exchange; host logging runs after releasing the dedup lock. A poisoned warning-cache mutex is recovered, so logging bookkeeping cannot prevent subsequent socket routing. Rust callers derive `RoutingOptions` with `From<&ExchangeOptions>` (or the owned conversion); the live routing oracle exercises this account boundary for every golden case. The conversion exhaustively destructures account fields without `..`, so adding a field requires an explicit routing decision. The Rust routing input uses the account model’s `ExchangeOptionsBybitSiteId` enum and rejects misspelled serialized site IDs before resolving a host. The site-id doctest uses plain `compile_fail`; the ignored Node/Rustc gate compiles that exact example against the actual Cargo library and requires an E0308 JSON diagnostic. An unrelated error or removed type guard fails this gate; rustdoc error-code annotations carry no authority. The routing golden matrix pins 24 flag/region/site combinations per exchange, including Brazil no-op cases, and also supplies the Rust routing generator. Behavior is locked by `src/transport/tealstreet/routing/__tests__/routing.equivalence.test.ts` + `src/transport-resolution.characterization.test.ts` (the snapshots must not move except for intentional changes). Variant exchanges that reuse a parent's ws class (bitgetinverse/usdc→bitget, coinbasespot→coinbase, bybit family) get their parent's routing because the table declares them with the same shared `WsGroup`. **Exception: okxeu shares OKX's ws classes but has its own `WsGroup`** — its private/business tunnels go to `okxeu/*` paths that terminate on the EEA entity's hosts (`wseea.okx.com`), because EEA credentials do not authenticate on the global `ws.okx.com`. A channel may also declare an optional `fallback` host (the athena Caddy passthroughs `bybit-proxy-ja` / `okx-proxy-ja`); the resolver attaches it **only to a DIRECT resolution**, and the class's `WsDirectFallback` (`utils/wsDirectFallback.ts`) dials it after two consecutive silent connects. Bitget's older inline counters do the same job with `fallbackOnly`. A PRIVATE channel may additionally declare `relayUpstream`, which the resolver turns into a tunnel `rpc.relay` url (`relay` on `ResolvedWs`, `RelayWebSocket` in http-over-websocket, dialled through the PRIVATE proxy fleet so the socket egresses from a whitelisted IP). The class walks the chain direct → relay → athena, but only offers the relay while `transport/tealstreet/wsRelay` is on — pushed by the host app from the `WS_RELAY_PRIVATE` flag via `__workerConfig`, which safe-cex forwards to host handlers (`registerWorkerConfigHandler` in `store.webworker`; apps/web registers it in `StoreWorkerEntry.ts`), off by default. `createWebsocket` recognises a relay url (`isRelayUrl`) and hands `RelayWebSocket` to the reconnecting socket as its `WebSocket` option.
+**Routing source of truth (`src/transport/tealstreet/routing/`).** Which actual _host_ a request/socket uses — the REST CORS pool (jp/asia/tiny), the HOW egress region, and each exchange's public/private/business WS host — is declared per-exchange in `transport/tealstreet/routing/routingTable.ts` and resolved by `resolveExchangeRouting(exchangeName, options)`. REST (`getProxyForAxios`) and every per-exchange `ws-*.ts` class read their host from the resolver instead of hardcoding `wss://fsjnpy143pbz.*` literals. To change where an exchange's traffic egresses, edit the table — not the ws class. The Rust direct-provider WS warning uses `console.warn` on wasm (including Workers) and stderr on native, once per exchange; host logging runs after releasing the dedup lock. A poisoned warning-cache mutex is recovered, so logging bookkeeping cannot prevent subsequent socket routing. Rust callers derive `RoutingOptions` with `From<&ExchangeOptions>` (or the owned conversion); the live routing oracle exercises this account boundary for every golden case. The conversion exhaustively destructures account fields without `..`, so adding a field requires an explicit routing decision. The Rust routing input uses the account model’s `ExchangeOptionsBybitSiteId` enum and rejects misspelled serialized site IDs before resolving a host. The site-id doctest uses plain `compile_fail`; the ignored Node/Rustc gate compiles that exact example against the actual Cargo library and requires an E0308 JSON diagnostic. An unrelated error or removed type guard fails this gate; rustdoc error-code annotations carry no authority. The routing golden matrix pins 24 flag/region/site combinations per exchange, including Brazil no-op cases, and also supplies the Rust routing generator. Behavior is locked by `src/transport/tealstreet/routing/__tests__/routing.equivalence.test.ts` + `src/transport-resolution.characterization.test.ts` (the snapshots must not move except for intentional changes). Variant exchanges that reuse a parent's ws class (bitgetinverse/usdc→bitget, coinbasespot→coinbase, bybit family) get their parent's routing because the table declares them with the same shared `WsGroup`. **Exception: okxeu shares OKX's ws classes but has its own `WsGroup`** — its private/business tunnels go to `okxeu/*` paths that terminate on the EEA entity's hosts (`wseea.okx.com`), because EEA credentials do not authenticate on the global `ws.okx.com`. A channel may also declare an optional `fallback` host (the athena Caddy passthroughs `bybit-proxy-ja` / `okx-proxy-ja`); the resolver attaches it **only to a DIRECT resolution**, and the class's `WsDirectFallback` (`utils/wsDirectFallback.ts`) dials it after two consecutive silent connects. Bitget's public classes still do the same job with older inline counters and `fallbackOnly`. A PRIVATE channel may additionally declare `relayUpstream`, which the resolver turns into a tunnel `rpc.relay` url (`relay` on `ResolvedWs`, `RelayWebSocket` in http-over-websocket, dialled through the PRIVATE proxy fleet so the socket egresses from a whitelisted IP). The class walks the chain direct → relay → athena, but only offers the relay while `transport/tealstreet/wsRelay` is on — pushed by the host app from the `WS_RELAY_PRIVATE` flag via `__workerConfig`, which safe-cex forwards to host handlers (`registerWorkerConfigHandler` in `store.webworker`; apps/web registers it in `StoreWorkerEntry.ts`), off by default. **Bitget is the exception**: it declares `relayWhenTunnelled`
+(the relay rides a tunnelled route too) and offers it regardless of the flag,
+because Bitget rejects a private login from an IP the key is not bound to
+(40018) — see `exchanges/bitget/CLAUDE.md` → "Private WS egress". It also
+declares a separate `privateUta` channel, resolved as the optional
+`wsPrivateUta`. `createWebsocket` recognises a relay url (`isRelayUrl`) and hands `RelayWebSocket` to the reconnecting socket as its `WebSocket` option.
 
 **`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned families (bitmex always, bybit when tunnelling) whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 

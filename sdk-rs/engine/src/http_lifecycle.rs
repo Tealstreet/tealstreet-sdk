@@ -24,11 +24,32 @@ pub(super) struct Managed {
 }
 
 impl Managed {
+    fn validate(
+        &self,
+        registry: &request_context_registry::ContextRegistry,
+        now: f64,
+    ) -> Result<(), Error> {
+        if !now.is_finite() {
+            return Err(Error::Invalid);
+        }
+        if now >= self.lifecycle.deadline() {
+            return Err(Error::TimedOut);
+        }
+        registry.validate(self.lifecycle.context(), now)
+    }
+
     pub(super) fn delivery(&self) -> request_context_registry::Delivery {
         request_context_registry::Delivery {
             context: self.lifecycle.context().clone(),
             attempt: self.lifecycle.attempt(),
         }
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(super) fn released_delivery(&self, delivery: &request_context_registry::Delivery) -> bool {
+        self.delivery() == *delivery
+            && self.lifecycle.release().is_some()
+            && self.lifecycle.accepts_response()
     }
 }
 
@@ -107,6 +128,43 @@ impl<P> Cx<'_, P> {
         recipe: ManagedRecipe,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
+        #[cfg(feature = "http-plans")]
+        let admission = match self
+            .io
+            .request_contexts
+            .owned_admission(&context, self.io.http_delivery.as_ref())
+        {
+            Ok(admission) => admission,
+            Err(error) => return Err((pending, error)),
+        };
+        let result = self.queue_managed_admitted(
+            context,
+            method,
+            url,
+            body,
+            recipe,
+            pending,
+            #[cfg(feature = "http-plans")]
+            admission.as_ref(),
+        );
+        #[cfg(feature = "http-plans")]
+        if let (Some(admission), Err((_, error))) = (admission.as_ref(), &result) {
+            self.fail_owned_admission(admission, *error);
+        }
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn queue_managed_admitted(
+        &mut self,
+        context: Context,
+        method: Method,
+        url: String,
+        body: Option<String>,
+        recipe: ManagedRecipe,
+        pending: P,
+        #[cfg(feature = "http-plans")] admission: Option<&request_context_registry::OwnedAdmission>,
+    ) -> Result<RequestId, (P, Error)> {
         let (step, public_headers) = match recipe {
             ManagedRecipe::Unsigned(headers) => (None, headers),
             ManagedRecipe::Signed(step) => (Some(step), &[][..]),
@@ -134,31 +192,69 @@ impl<P> Cx<'_, P> {
             .collect();
         // Preflight both namespaces before committing either. An admission
         // refusal must not partially allocate a request, generation or timer.
-        if !self.io.next_id.available(3) || (step.is_some() && !self.io.signing.available_id()) {
+        #[cfg(feature = "http-plans")]
+        let needs_ids = admission.is_none();
+        #[cfg(not(feature = "http-plans"))]
+        let needs_ids = true;
+        if needs_ids
+            && (!self.io.next_id.available(3)
+                || (step.is_some() && !self.io.signing.available_id()))
+        {
             return Err((pending, Error::Capacity));
         }
-        let ids = self.io.reserve_ids(3).expect("preflighted HTTP identities");
-        let request = RequestId(ids.start);
-        let generation = ids.start + 1;
-        let timer = TimerId(ids.start + 2);
+        #[cfg(feature = "http-plans")]
+        let (request, generation, timer, deadline) = if let Some(admission) = admission {
+            if !self.now.is_finite() || self.now >= admission.deadline {
+                return Err((pending, Error::TimedOut));
+            }
+            (
+                admission.attempt.request,
+                admission.attempt.generation,
+                admission.timer,
+                admission.deadline,
+            )
+        } else {
+            let ids = self.io.reserve_ids(3).expect("preflighted HTTP identities");
+            (
+                RequestId(ids.start),
+                ids.start + 1,
+                TimerId(ids.start + 2),
+                context.deadline(),
+            )
+        };
+        #[cfg(not(feature = "http-plans"))]
+        let (request, generation, timer, deadline) = {
+            let ids = self.io.reserve_ids(3).expect("preflighted HTTP identities");
+            (
+                RequestId(ids.start),
+                ids.start + 1,
+                TimerId(ids.start + 2),
+                context.deadline(),
+            )
+        };
         let http = HttpRequest {
             id: request,
             method,
-            route: None,
-            timeout_ms: Some((context.deadline() - self.now).ceil().max(1.) as u32),
+            route: context.route(),
+            timeout_ms: Some((deadline - self.now).ceil().max(1.) as u32),
             url,
             headers,
             signer_headers: vec![],
             body,
         };
         let signing_attempt = if let Some(step) = step {
+            #[cfg(feature = "http-plans")]
+            let attempt = admission
+                .and_then(|admission| admission.signing)
+                .unwrap_or_else(|| self.io.signing.next_id());
+            #[cfg(not(feature = "http-plans"))]
             let attempt = self.io.signing.next_id();
             if let Err(error) = self.io.signing.stage_managed(
                 attempt,
                 Action::Http(http.clone()),
                 step,
                 self.now,
-                context.deadline(),
+                deadline,
             ) {
                 return Err((
                     pending,
@@ -183,15 +279,21 @@ impl<P> Cx<'_, P> {
             }
             return Err((pending, error));
         }
+        #[cfg(feature = "http-plans")]
+        if let Some(admission) = admission {
+            self.io.request_contexts.commit_owned_admission(admission);
+        }
         let intent = context.routing_intent();
-        let deadline = context.deadline();
-        let lifecycle = Lifecycle::new(
+        let lifecycle = Lifecycle::with_deadline(
             context,
             Attempt {
                 request,
                 generation,
             },
-        );
+            self.now,
+            deadline,
+        )
+        .expect("validated physical HTTP window");
         let preparation = lifecycle.preparation();
         self.io.managed_http.insert(
             request,
@@ -239,10 +341,7 @@ impl<P> Io<P> {
         self.managed_http.get(&request).is_some_and(|managed| {
             managed.lifecycle.preparation() == token
                 && managed.lifecycle.accepts_response()
-                && self
-                    .request_contexts
-                    .validate(managed.lifecycle.context(), now)
-                    .is_ok()
+                && managed.validate(&self.request_contexts, now).is_ok()
         })
     }
 
@@ -266,10 +365,29 @@ impl<P> Io<P> {
     }
 
     pub(super) fn retire_http_command(&mut self, command: CommandId) {
+        #[cfg(feature = "http-plans")]
+        if let Some(timer) = self.request_contexts.plan_timer(command) {
+            self.timers.remove(&timer);
+            self.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            self.actions.push(Action::ClearTimer { timer });
+        }
         let requests = self.managed_http.iter().filter_map(|(request, managed)| {
             matches!(managed.lifecycle.context().owner(), Owner::Command {id, ..} if id == command)
                 .then_some(*request)
         }).collect::<Vec<_>>();
+        for request in requests {
+            self.discard_managed(request);
+        }
+    }
+
+    pub(super) fn retire_http_owner(&mut self, owner: Owner) {
+        let requests = self
+            .managed_http
+            .iter()
+            .filter_map(|(request, managed)| {
+                (managed.lifecycle.context().owner() == owner).then_some(*request)
+            })
+            .collect::<Vec<_>>();
         for request in requests {
             self.discard_managed(request);
         }
@@ -299,7 +417,7 @@ impl<P> Io<P> {
     fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
         self.request_contexts
-            .retire_attempt(managed.lifecycle.context());
+            .retire_attempt(managed.lifecycle.context(), request);
         self.rearm_execution_timer();
         self.signing.remove_request(request);
         self.timers.remove(&managed.timer);
@@ -314,7 +432,7 @@ impl<P> Io<P> {
         Some(managed)
     }
 
-    fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
+    pub(super) fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
         let managed = self.take_managed(request)?;
         if managed.lifecycle.context().operation() == Operation::Mutation
             && managed.lifecycle.release().is_some()
@@ -348,6 +466,7 @@ impl<V: Venue> Engine<V> {
     pub fn http_prepared(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
         let request = token.attempt().request;
         let Some(managed) = self.io.managed_http.get_mut(&request) else {
             return;
@@ -355,10 +474,8 @@ impl<V: Venue> Engine<V> {
         if managed.lifecycle.preparation() != token {
             return;
         }
-        let prepared_result = self
-            .io
-            .request_contexts
-            .validate(managed.lifecycle.context(), now)
+        let prepared_result = managed
+            .validate(&self.io.request_contexts, now)
             .and_then(|()| {
                 if prepared.expires_at.is_some_and(|at| at <= now) {
                     return Err(Error::TimedOut);
@@ -371,7 +488,7 @@ impl<V: Venue> Engine<V> {
             let ready = managed.lifecycle.begin_signing().and_then(|_| {
                 self.io
                     .signing
-                    .activate_managed(attempt)
+                    .activate_managed(attempt, managed.lifecycle.deadline())
                     .map_err(|_| Error::State)
             });
             if let Err(error) = ready {
@@ -388,14 +505,18 @@ impl<V: Venue> Engine<V> {
             .and_then(|()| managed.lifecycle.unsigned())
             .and_then(|()| managed.lifecycle.permit());
         match prepared_result {
-            Ok(permit) => self
-                .io
-                .actions
-                .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
-                    preparation: token,
-                    permit,
-                    request: managed.original.clone(),
-                }))),
+            Ok(permit) => {
+                let mut request = managed.original.clone();
+                request.timeout_ms =
+                    Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
+                self.io
+                    .actions
+                    .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
+                        preparation: token,
+                        permit,
+                        request,
+                    })));
+            }
             Err(Error::State) => {} // Duplicate readiness cannot replace an issued permit.
             Err(error) => self.http_preparation_failed(
                 now,
@@ -427,6 +548,22 @@ impl<V: Venue> Engine<V> {
             return;
         };
         let token = managed.lifecycle.preparation();
+        if let Err(reason) = managed.validate(&self.io.request_contexts, now) {
+            if let Some(action) = outbound.as_mut() {
+                crate::signing_dispatch::wipe(action);
+            }
+            self.http_preparation_failed(
+                now,
+                token,
+                reason,
+                if reason == Error::TimedOut {
+                    crate::signing::SignError::TimedOut.venue_error()
+                } else {
+                    VenueError::new("HTTP signing result is no longer valid")
+                },
+            );
+            return;
+        }
         if let Some(error) = error {
             let reason = if error == crate::signing::SignError::TimedOut {
                 Error::TimedOut
@@ -441,11 +578,9 @@ impl<V: Venue> Engine<V> {
             self.reprepare_http(now, token);
             return;
         }
-        let prepared = self
-            .io
-            .request_contexts
-            .validate(managed.lifecycle.context(), now)
-            .and_then(|()| pending.managed_freshness().ok_or(Error::State))
+        let prepared = pending
+            .managed_freshness()
+            .ok_or(Error::State)
             .and_then(|(revision, until)| {
                 managed
                     .lifecycle
@@ -453,7 +588,12 @@ impl<V: Venue> Engine<V> {
             })
             .and_then(|()| managed.lifecycle.permit());
         match (prepared, outbound) {
-            (Ok(permit), Some(Action::Http(packet))) if packet.id == request => {
+            (Ok(permit), Some(Action::Http(mut packet))) if packet.id == request => {
+                packet.timeout_ms = Some(
+                    (managed.lifecycle.deadline().min(pending.deadline) - now)
+                        .ceil()
+                        .max(1.) as u32,
+                );
                 managed.recipe = Some(pending);
                 self.io
                     .actions
@@ -488,7 +628,18 @@ impl<V: Venue> Engine<V> {
     ) {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
         let request = token.attempt().request;
+        #[cfg(feature = "http-plans")]
+        if self
+            .io
+            .managed_http
+            .get(&request)
+            .is_some_and(|managed| managed.lifecycle.preparation() == token)
+            && self.expire_plan_before_http_failure(now, request)
+        {
+            return;
+        }
         let Some(managed) = self.io.managed_http.get(&request) else {
             return;
         };
@@ -510,6 +661,9 @@ impl<V: Venue> Engine<V> {
                 crate::request_context::WriteResult::Failed(error.clone()),
             );
         }
+        self.io
+            .request_contexts
+            .record_owned_read_failure(&delivery);
         self.io.request_contexts.enter_delivery(&delivery);
         if let Some(pending) = self.io.discard_managed(request) {
             self.begin_event_scope();
@@ -522,8 +676,14 @@ impl<V: Venue> Engine<V> {
                 },
                 pending.value,
                 reason,
-                error,
+                error.clone(),
             );
+            Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            }
+            .finish_owned_read_failure(&delivery, error);
             self.io.http_delivery = previous;
         }
         self.io.request_contexts.exit_delivery(&delivery);
@@ -539,6 +699,7 @@ impl<V: Venue> Engine<V> {
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
         let request = permit.attempt().request;
         let managed = self
             .io
@@ -549,11 +710,7 @@ impl<V: Venue> Engine<V> {
             return Err(Error::Revoked);
         }
         let preparation = managed.lifecycle.preparation();
-        if let Err(error) = self
-            .io
-            .request_contexts
-            .validate(managed.lifecycle.context(), now)
-        {
+        if let Err(error) = managed.validate(&self.io.request_contexts, now) {
             self.http_preparation_failed(
                 now,
                 preparation,
@@ -567,8 +724,11 @@ impl<V: Venue> Engine<V> {
             .request_contexts
             .release_flag(managed.lifecycle.context(), request)?;
         let pending = self.io.pending.get_mut(&request).ok_or(Error::Revoked)?;
-        let mutation = managed.lifecycle.context().operation() == Operation::Mutation;
-        if mutation {
+        // Session writes change no orders: no reconciliation record and no
+        // write-revision fence over unrelated command reconciliation.
+        let journal = managed.lifecycle.context().operation() == Operation::Mutation
+            && matches!(managed.lifecycle.context().owner(), Owner::Command { .. });
+        if journal {
             let capture = if self.io.streams.contains_key(&request) {
                 Err(Error::Invalid)
             } else {
@@ -580,7 +740,7 @@ impl<V: Venue> Engine<V> {
                         managed.lifecycle.context().owner(),
                         managed.lifecycle.context().leg(),
                         managed.lifecycle.attempt(),
-                        managed.lifecycle.context().deadline(),
+                        managed.lifecycle.deadline(),
                         data,
                     ),
                     now,
@@ -601,10 +761,13 @@ impl<V: Venue> Engine<V> {
             protocol_ms: self.io.protocol_clock.at(now),
             revision: self.io.protocol_clock.revision(),
         };
+        let mut signing_release = None;
         let result =
             managed
                 .lifecycle
                 .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
+                    signing_release =
+                        Some(crate::SigningRelease::new(release.signature, release.time)?);
                     self.venue.on_http_release(&mut pending.value, release)
                 });
         if let Ok(Claim::Released(release)) = result {
@@ -616,7 +779,10 @@ impl<V: Venue> Engine<V> {
                 .execution_leg_released(managed.lifecycle.context());
             managed.recipe = None;
             managed.signing_attempt = None;
-            if mutation {
+            self.io
+                .request_contexts
+                .session_released(managed.lifecycle.context(), request);
+            if journal {
                 self.io.http_write_revision = self.io.http_write_revision.saturating_add(1);
                 let record = self
                     .io
@@ -635,20 +801,23 @@ impl<V: Venue> Engine<V> {
                     self.io.order_locks.note_command_write(id);
                 }
                 if managed.lifecycle.context().operation() == Operation::Read {
-                    self.io
-                        .order_read_tokens
-                        .insert(request, self.io.order_locks.token());
+                    let owner = managed.lifecycle.context().owner();
+                    let token = self
+                        .io
+                        .request_contexts
+                        .read_mark(owner, self.io.order_locks.token());
+                    self.io.order_read_tokens.insert(request, token);
                 }
             }
-            self.venue.on_signing_receipt(
+            self.venue.on_signing_release(
                 SigningTarget::Http {
                     request,
                     pending: &mut pending.value,
                 },
-                release.signature,
+                signing_release.expect("release metadata checked before admission"),
             );
         }
-        if mutation && !matches!(result, Ok(Claim::Released(_))) {
+        if journal && !matches!(result, Ok(Claim::Released(_))) {
             self.io.http_responses.remove(request);
         }
         if let Err(error) = result {
@@ -670,6 +839,15 @@ impl<V: Venue> Engine<V> {
         if managed.lifecycle.preparation() != token || managed.lifecycle.release().is_some() {
             return;
         }
+        if let Err(error) = managed.validate(&self.io.request_contexts, now) {
+            self.http_preparation_failed(
+                now,
+                token,
+                error,
+                VenueError::new("HTTP preparation window expired"),
+            );
+            return;
+        }
         // Do not advance a lifecycle generation or take its retained recipe
         // unless a fresh signing attempt can also be allocated.
         if managed.signing_attempt.is_some() && !self.io.signing.available_id() {
@@ -681,11 +859,7 @@ impl<V: Venue> Engine<V> {
             );
             return;
         }
-        let next = self
-            .io
-            .request_contexts
-            .validate(managed.lifecycle.context(), now)
-            .and_then(|()| managed.lifecycle.reprepare());
+        let next = managed.lifecycle.reprepare();
         if let Err(error) = next {
             self.http_preparation_failed(
                 now,
@@ -712,11 +886,7 @@ impl<V: Venue> Engine<V> {
                 signing: old_signing,
             })));
         let mut http = managed.original.clone();
-        http.timeout_ms = Some(
-            (managed.lifecycle.context().deadline() - now)
-                .ceil()
-                .max(1.) as u32,
-        );
+        http.timeout_ms = Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
         self.io
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
@@ -745,16 +915,21 @@ impl<V: Venue> Engine<V> {
             .iter()
             .find(|(_, managed)| managed.timer == *timer)
         else {
-            return false;
+            return self.expire_session_wait(now, *timer);
         };
         let request = *request;
-        if now.is_finite() && now < managed.lifecycle.context().deadline() {
+        if now.is_finite() && now < managed.lifecycle.deadline() {
             self.io.actions.push(Action::SetTimer {
                 timer: *timer,
-                at_ms: managed.lifecycle.context().deadline(),
+                at_ms: managed.lifecycle.deadline(),
             });
             return true;
         }
+        #[cfg(feature = "http-plans")]
+        if self.expire_plan_before_http_failure(now, request) {
+            return true;
+        }
+        let managed = &self.io.managed_http[&request];
         if managed.lifecycle.release().is_some() {
             let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Timeout);
             self.handle_event(
@@ -789,7 +964,7 @@ impl<V: Venue> Engine<V> {
         let Some(managed) = self.io.managed_http.get(&request) else {
             return true;
         };
-        if !now.is_finite() || now >= managed.lifecycle.context().deadline() {
+        if !now.is_finite() || now >= managed.lifecycle.deadline() {
             let timer = managed.timer;
             self.expire_http_timer(now, &Event::TimerFired { timer });
             return false;
@@ -925,13 +1100,27 @@ impl<V: Venue> Engine<V> {
                     |evidence| venue.unproven_http_evidence(&pending.value, response, evidence),
                 );
                 if recorded.is_ok() {
-                    let sealed = Cx {
+                    #[cfg(feature = "http-plans")]
+                    let plan = self
+                        .io
+                        .request_contexts
+                        .plan_from_context(&delivery.context);
+                    let mut cx = Cx {
                         now,
                         store: &mut self.store,
                         io: &mut self.io,
-                    }
-                    .fail_context(&delivery.context, error);
-                    if sealed.is_ok() {
+                    };
+                    #[cfg(feature = "http-plans")]
+                    let sealed = if let Some(plan) = &plan {
+                        cx.fail_plan(plan, error)
+                    } else {
+                        cx.fail_context(&delivery.context, error)
+                    };
+                    #[cfg(feature = "http-plans")]
+                    let context_sealed = sealed.is_ok() && plan.is_none();
+                    #[cfg(not(feature = "http-plans"))]
+                    let context_sealed = cx.fail_context(&delivery.context, error).is_ok();
+                    if context_sealed {
                         self.venue
                             .discard_unproven_http_command(delivery.context.owner());
                     }
@@ -1000,9 +1189,30 @@ impl<V: Venue> Engine<V> {
 mod tests {
     use super::*;
     use crate::request_context::{Admission, Pacing, Policy, RetryPolicy, Scope};
+    #[cfg(feature = "http-plans")]
+    include!("request_context_preflight_call_tests.rs");
+    #[cfg(feature = "http-plans")]
+    include!("request_context_planned_tests.rs");
+    #[cfg(feature = "http-plans")]
+    include!("request_context_plan_expiry_tests.rs");
 
     #[derive(Debug)]
     struct Pending(Context);
+    #[derive(Clone, Copy, Debug)]
+    enum EffectFact {
+        Missing,
+        Accepted,
+        KnownPartial,
+        PartialUnknown,
+        Rejected,
+        Failed,
+        Overflow,
+    }
+
+    // The original control used only live issuance, not recorded-fact authority.
+    fn write_effect_authority<P>(cx: &Cx<'_, P>, context: &Context) -> Result<(), Error> {
+        cx.validate_http_write_effects(context)
+    }
     #[derive(Default)]
     struct Probe {
         count: usize,
@@ -1011,6 +1221,7 @@ mod tests {
         responses: usize,
         items: usize,
         failures: Vec<(Error, Option<crate::Outcome>)>,
+        failure_messages: Vec<String>,
         releases: Vec<HttpRelease>,
         receipts: usize,
         finish_in_item: Option<bool>,
@@ -1026,10 +1237,21 @@ mod tests {
         capture_auth_details: bool,
         auth_observations: std::cell::Cell<usize>,
         hold_write_fact: Option<bool>,
+        native_unproven: bool,
+        effect_fact: Option<EffectFact>,
+        native_effects: usize,
+        housekeeping_checks: usize,
         reconciles: Vec<Option<Vec<String>>>,
+        // The command intent a test mutation is issued under (default Place).
+        mutation_intent: Option<crate::classify::Intent>,
         // Whether a reconcile hook ever saw borrowed delivery/read authority.
         #[cfg(feature = "order-locks")]
         reconcile_custody: bool,
+        // Later reads are legs of the first read's owner (one logical read).
+        legs: bool,
+        // A delivered read reports itself as a complete order read.
+        #[cfg(feature = "order-locks")]
+        reconcile_reads: bool,
     }
     const GROUP: Pacing = Pacing {
         group: 1,
@@ -1060,6 +1282,10 @@ mod tests {
             _: f64,
             _: &Store,
         ) -> Option<AuthOutcome> {
+            if self.native_unproven {
+                self.auth_observations.set(self.auth_observations.get() + 1);
+                return None;
+            }
             if self.capture_auth_details {
                 self.auth_observations.set(self.auth_observations.get() + 1);
                 Some(AuthOutcome::Rejected)
@@ -1093,23 +1319,25 @@ mod tests {
             &[GROUP]
         }
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+            let mut root: Option<Context> = None;
             for _ in 0..self.count {
                 let scope = self.command.map_or(Scope::Background, Scope::Command);
-                let context = cx
-                    .http_context(
-                        scope,
-                        Policy {
-                            operation: Operation::Read,
-                            credential: self.signed.then(|| crate::request_context::Credential {
-                                slot: CredentialSlot::Primary,
-                                reference: crate::signing::KeyRef("fixture".into()),
-                            }),
-                            timeout_ms: 1_000,
-                            pacing: Some(GROUP),
-                            retry: RetryPolicy::Never,
-                        },
-                    )
-                    .unwrap();
+                let policy = Policy {
+                    operation: Operation::Read,
+                    credential: self.signed.then(|| crate::request_context::Credential {
+                        slot: CredentialSlot::Primary,
+                        reference: crate::signing::KeyRef("fixture".into()),
+                    }),
+                    timeout_ms: 1_000,
+                    pacing: Some(GROUP),
+                    retry: RetryPolicy::Never,
+                };
+                let context = match root.as_ref().filter(|_| self.legs) {
+                    Some(root) => cx.http_leg_context(root, policy),
+                    None => cx.http_context(scope, policy),
+                }
+                .unwrap();
+                root.get_or_insert_with(|| context.clone());
                 let request = if self.signed {
                     cx.request_signed_managed(
                         context.clone(),
@@ -1152,6 +1380,7 @@ mod tests {
             error: VenueError,
         ) {
             self.failures.push((reason, error.outcome));
+            self.failure_messages.push(error.message.clone());
             if pending.0.operation() == Operation::Mutation {
                 cx.fail_context(&pending.0, error).unwrap();
             }
@@ -1165,6 +1394,59 @@ mod tests {
         }
         fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: Response<'_>) {
             self.responses += 1;
+            if self.native_unproven {
+                cx.http_write_unproven_result(&pending.0, |evidence| {
+                    evidence.venue_code("10004");
+                    evidence.venue_message("invalid api signature in malformed native proof");
+                    assert!(evidence.order_id("evidence-only"));
+                })
+                .unwrap();
+                assert_eq!(
+                    cx.http_write_unproven_result(&pending.0, |_| panic!("duplicate capture")),
+                    Err(Error::State)
+                );
+                cx.fail_context(&pending.0, "invalid native ACK").unwrap();
+                return;
+            }
+            if let Some(fact) = self.effect_fact {
+                use crate::request_context::WriteResult;
+                let result = match fact {
+                    EffectFact::Missing => None,
+                    EffectFact::Accepted => Some(WriteResult::Accepted {
+                        order_ids: vec!["admitted".into()],
+                    }),
+                    EffectFact::KnownPartial => Some(WriteResult::KnownPartial(VenueError::new(
+                        "known partial without native IDs",
+                    ))),
+                    EffectFact::PartialUnknown => Some(WriteResult::PartialUnknown(
+                        VenueError::new("native subset with unresolved remainder"),
+                    )),
+                    EffectFact::Rejected => {
+                        Some(WriteResult::Rejected(VenueError::new("native refused")))
+                    }
+                    EffectFact::Failed => Some(WriteResult::Failed(VenueError::new("unproven"))),
+                    EffectFact::Overflow => Some(WriteResult::Accepted {
+                        order_ids: vec!["n".repeat(1025)],
+                    }),
+                };
+                if let Some(result) = result {
+                    cx.http_write_result(&pending.0, result).unwrap();
+                }
+                if write_effect_authority(cx, &pending.0).is_ok() {
+                    self.native_effects += 1;
+                    cx.store.set_hedged(true);
+                }
+                if cx.validate_http_write_housekeeping(&pending.0).is_ok() {
+                    self.housekeeping_checks += 1;
+                }
+                if matches!(fact, EffectFact::Accepted) {
+                    cx.done_context(&pending.0, "ok".into()).unwrap();
+                } else {
+                    cx.fail_context(&pending.0, "finish native effect probe")
+                        .unwrap();
+                }
+                return;
+            }
             if self.hostile_response_patch {
                 cx.store
                     .set_order_status("one", crate::model::OrderStatus::Canceled);
@@ -1243,6 +1525,10 @@ mod tests {
                 .unwrap();
                 cx.done_context(&pending.0, "ok".into()).unwrap();
             } else {
+                #[cfg(feature = "order-locks")]
+                if self.reconcile_reads {
+                    cx.orders_reconciled(None);
+                }
                 cx.finish_http_context(&pending.0).unwrap();
             }
         }
@@ -1425,6 +1711,68 @@ mod tests {
         }
         fn freshness_ms(&self) -> f64 {
             3_000.
+        }
+    }
+
+    #[test]
+    fn managed_prepare_carries_the_issued_public_egress_route_through_repreparation() {
+        use crate::request_context::{Egress, RoutingIntent};
+        for (egress, route) in [
+            (Egress::PublicCors, crate::RequestRoute::PublicCors),
+            (Egress::Direct, crate::RequestRoute::Direct),
+        ] {
+            let (mut engine, _) = start(Probe::default());
+            engine.drain_actions().for_each(drop);
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            let context = cx
+                .http_context_with_egress(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 1_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                    egress,
+                )
+                .unwrap();
+            cx.request_managed(
+                context.clone(),
+                Method::Post,
+                "https://venue.test/candles".into(),
+                None,
+                Pending(context),
+            )
+            .unwrap();
+            let prepared = |engine: &mut Engine<Probe>| {
+                engine
+                    .drain_actions()
+                    .find_map(|a| match a {
+                        Action::ManagedHttp(a) => match *a {
+                            HttpAction::Prepare {
+                                preparation,
+                                intent,
+                                request,
+                            } => Some((preparation, intent, request.route)),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .unwrap()
+            };
+            let (first, intent, declared) = prepared(&mut engine);
+            assert_eq!((intent, declared), (RoutingIntent::Public, Some(route)));
+            // A stale route re-prepares the same original packet, route included.
+            bind(&mut engine, first, 0.5);
+            engine.http_preparation_failed(1., first, Error::Stale, VenueError::new("expired"));
+            let (second, intent, declared) = prepared(&mut engine);
+            assert_ne!(second, first);
+            assert_eq!((intent, declared), (RoutingIntent::Public, Some(route)));
         }
     }
 
@@ -1642,6 +1990,375 @@ mod tests {
         }
     }
 
+    // These controls exercise downstream narrower-window custody only. Initial
+    // queue resource/packet capture is verified by owned admission separately.
+    fn narrow_physical_window(engine: &mut Engine<Probe>, token: Preparation, deadline: f64) {
+        let managed = engine
+            .io
+            .managed_http
+            .get_mut(&token.attempt().request)
+            .unwrap();
+        assert!(deadline < managed.lifecycle.deadline());
+        managed.lifecycle = Lifecycle::with_deadline(
+            managed.lifecycle.context().clone(),
+            token.attempt(),
+            0.,
+            deadline,
+        )
+        .unwrap();
+        assert_eq!(managed.lifecycle.preparation(), token);
+    }
+
+    #[test]
+    fn physical_window_unsigned_bind_uses_remaining_cap_and_retains_payload() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            ..Probe::default()
+        });
+        let token = tokens[0];
+        narrow_physical_window(&mut engine, token, 50.);
+        let actions = route(&mut engine, token, 10.);
+        assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { request, .. } if request.timeout_ms == Some(40) && request.url == "https://venue.test/read" && request.body.as_deref() == Some("{}")))));
+    }
+
+    #[test]
+    fn physical_window_default_timeout_keeps_existing_signing_diagnostic() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            ..Probe::default()
+        });
+        let token = tokens[0];
+        let (attempt, input) = work(&route(&mut engine, token, 10.));
+        let actions = signed(&mut engine, 1_000., attempt, input);
+        assert!(!actions.iter().any(
+            |a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. }))
+        ));
+        assert_eq!(
+            engine.venue.failure_messages,
+            ["Signing timed out before dispatch"]
+        );
+        assert_eq!(
+            engine.venue.failures,
+            [(Error::TimedOut, Some(crate::Outcome::NotSent))]
+        );
+    }
+
+    #[test]
+    fn physical_window_refuses_route_preparation_at_exact_expiry() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            ..Probe::default()
+        });
+        let token = tokens[0];
+        narrow_physical_window(&mut engine, token, 50.);
+        let actions = route(&mut engine, token, 50.);
+        assert!(!actions.iter().any(|a| matches!(a, Action::Sign { .. })));
+        assert_eq!(engine.venue.receipts, 0);
+        assert_eq!(
+            engine.venue.failures,
+            [(Error::TimedOut, Some(crate::Outcome::NotSent))]
+        );
+    }
+
+    #[test]
+    fn physical_window_delayed_drain_never_prepares_provider_work_after_cap() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            ..Probe::default()
+        });
+        let token = tokens[0];
+        narrow_physical_window(&mut engine, token, 50.);
+        engine.http_prepared(
+            49.,
+            token,
+            Prepared {
+                id: 7,
+                expires_at: None,
+            },
+        );
+        engine.prepare_dispatch(50.);
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Sign { .. })));
+        assert_eq!(engine.venue.receipts, 0);
+        assert_eq!(
+            engine.venue.failures,
+            [(Error::TimedOut, Some(crate::Outcome::NotSent))]
+        );
+    }
+
+    #[test]
+    fn physical_window_timeout_adjustment_cannot_renew_activated_provider_work() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            ..Probe::default()
+        });
+        let token = tokens[0];
+        narrow_physical_window(&mut engine, token, 50.);
+        engine.http_prepared(
+            49.,
+            token,
+            Prepared {
+                id: 7,
+                expires_at: None,
+            },
+        );
+        Cx {
+            now: 49.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .request_timeout(token.attempt().request, 1_000);
+        engine.prepare_dispatch(50.);
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Sign { .. })));
+        assert_eq!(engine.venue.receipts, 0);
+        assert_eq!(
+            engine.venue.failures,
+            [(Error::TimedOut, Some(crate::Outcome::NotSent))]
+        );
+    }
+
+    #[test]
+    fn physical_window_tighter_timeout_survives_signed_bind() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            ..Probe::default()
+        });
+        let token = tokens[0];
+        narrow_physical_window(&mut engine, token, 50.);
+        Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .request_timeout(token.attempt().request, 20);
+        let actions = route(&mut engine, token, 1.);
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Sign { timeout_ms: 19, .. }))
+        );
+        let (attempt, input) = work(&actions);
+        let actions = signed(&mut engine, 10., attempt, input);
+        bound(&actions);
+        assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { request, .. } if request.timeout_ms == Some(10) && request.url == "https://venue.test/read?stamp=1" && request.body.as_deref() == Some("{}")))));
+    }
+
+    #[test]
+    fn physical_window_caps_sign_and_bind_timeouts_without_changing_signed_payload() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            ..Probe::default()
+        });
+        let token = tokens[0];
+        narrow_physical_window(&mut engine, token, 50.);
+        let actions = route(&mut engine, token, 10.);
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Sign { timeout_ms: 40, .. }))
+        );
+        let (attempt, input) = work(&actions);
+        let actions = signed(&mut engine, 30., attempt, input);
+        bound(&actions);
+        assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { request, .. } if request.timeout_ms == Some(20) && request.url == "https://venue.test/read?stamp=10" && request.body.as_deref() == Some("{}")))));
+    }
+
+    #[test]
+    fn physical_window_retires_parked_provider_at_exact_cap_without_bind() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            ..Probe::default()
+        });
+        let token = tokens[0];
+        narrow_physical_window(&mut engine, token, 50.);
+        let (attempt, input) = work(&route(&mut engine, token, 10.));
+        let actions = signed(&mut engine, 50., attempt, input);
+        assert!(!actions.iter().any(
+            |a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. }))
+        ));
+        assert_eq!(
+            engine.venue.failures,
+            [(Error::TimedOut, Some(crate::Outcome::NotSent))]
+        );
+        assert!(engine.io.managed_http.is_empty());
+    }
+
+    #[test]
+    fn physical_window_expiry_precedes_provider_refusal_and_stale_revision() {
+        for stale in [false, true] {
+            let (mut engine, tokens) = start(Probe {
+                count: 1,
+                signed: true,
+                ..Probe::default()
+            });
+            let token = tokens[0];
+            narrow_physical_window(&mut engine, token, 50.);
+            let (attempt, _) = work(&route(&mut engine, token, 10.));
+            if stale {
+                assert!(engine.io.protocol_clock.observe(20., 520.));
+            }
+            engine.handle(
+                50.,
+                Event::Signed {
+                    attempt,
+                    result: Err(crate::signing::SignError::Refused),
+                },
+            );
+            let actions = engine.drain_actions().collect::<Vec<_>>();
+            assert_eq!(
+                engine.venue.failures,
+                [(Error::TimedOut, Some(crate::Outcome::NotSent))]
+            );
+            assert_eq!(
+                engine.venue.failure_messages,
+                ["Signing timed out before dispatch"]
+            );
+            assert!(!actions.iter().any(|a| matches!(a, Action::Sign { .. }) || matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. }))));
+            assert_eq!(engine.venue.releases.len(), 0);
+        }
+    }
+
+    #[test]
+    fn physical_window_expiry_precedes_reprepare_identity_capacity() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            ..Probe::default()
+        });
+        let token = tokens[0];
+        narrow_physical_window(&mut engine, token, 50.);
+        let (attempt, input) = work(&route(&mut engine, token, 10.));
+        bound(&signed(&mut engine, 11., attempt, input));
+        engine
+            .io
+            .signing
+            .set_test_ids(crate::resource_ids::ResourceIds::starting_at(
+                crate::resource_ids::MAX_RESOURCE_ID + 1,
+            ));
+        assert!(!engine.io.signing.available_id());
+        assert!(!engine.failed());
+        engine.reprepare_http(50., token);
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert_eq!(
+            engine.venue.failures,
+            [(Error::TimedOut, Some(crate::Outcome::NotSent))]
+        );
+        assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. }))));
+        assert!(!engine.failed());
+    }
+
+    #[test]
+    fn physical_window_reprepare_retains_cap_and_early_timer_rearms_to_it() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            signed: true,
+            ..Probe::default()
+        });
+        let old = tokens[0];
+        narrow_physical_window(&mut engine, old, 500.);
+        let timer = engine.io.managed_http[&old.attempt().request].timer;
+        let (attempt, input) = work(&route(&mut engine, old, 10.));
+        let permit = bound(&signed(&mut engine, 11., attempt, input));
+        assert!(engine.io.protocol_clock.observe(12., 512.));
+        assert_eq!(engine.claim_http(12., permit), Err(Error::Stale));
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { request, preparation, .. } if request.timeout_ms == Some(488) && *preparation != old))));
+        engine.handle(20., Event::TimerFired { timer });
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { timer: id, at_ms: 500. } if *id == timer))
+        );
+        assert!(engine.venue.failures.is_empty());
+    }
+
+    #[test]
+    fn physical_window_write_ack_at_cap_is_unknown_before_ordinary_codec() {
+        for split in [false, true] {
+            for at in [49., 50.] {
+                let mut engine = crate::test_support::seeded_engine(Probe::default());
+                let (_, token, timer) = mutation(&mut engine, 610, 0.);
+                narrow_physical_window(&mut engine, token, 50.);
+                let request = token.attempt().request;
+                let permit = bind(&mut engine, token, 1.);
+                assert!(matches!(
+                    engine.claim_http(1., permit),
+                    Ok(Claim::Released(_))
+                ));
+                assert!(engine.io.managed_response_live(request, token, 49.));
+                assert!(!engine.io.managed_response_live(request, token, 50.));
+                engine.drain_actions().for_each(drop);
+                if split {
+                    engine.handle(
+                        10.,
+                        Event::HttpStart {
+                            request,
+                            status: 200,
+                            headers: "",
+                        },
+                    );
+                    engine.handle(
+                        11.,
+                        Event::HttpChunk {
+                            request,
+                            data: b"o",
+                        },
+                    );
+                    assert_eq!(engine.venue.responses, 0);
+                }
+                engine.handle(25., Event::TimerFired { timer });
+                let actions = engine.drain_actions().collect::<Vec<_>>();
+                assert!(actions.iter().any(
+                    |a| matches!(a, Action::SetTimer { timer: id, at_ms: 50. } if *id == timer)
+                ));
+                if split {
+                    engine.handle(
+                        at,
+                        Event::HttpChunk {
+                            request,
+                            data: b"k",
+                        },
+                    );
+                    assert_eq!(engine.venue.responses, 0);
+                    engine.handle(at, Event::HttpEnd { request });
+                } else {
+                    engine.handle(
+                        at,
+                        Event::HttpResponse {
+                            request,
+                            response: Response {
+                                status: 200,
+                                headers: "",
+                                body: "ok",
+                            },
+                        },
+                    );
+                }
+                let actions = engine.drain_actions().collect::<Vec<_>>();
+                if at < 50. {
+                    assert_eq!(engine.venue.responses, 1);
+                    assert!(actions.iter().any(|a| matches!(
+                        a,
+                        Action::Notice(Notice::CommandDone { command: 610, .. })
+                    )));
+                } else {
+                    assert_eq!(engine.venue.responses, 0);
+                    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 610, error }) if error.outcome == Some(crate::Outcome::Unknown))));
+                    assert_eq!(engine.venue.reconciliations.borrow().as_slice(), &["ok"]);
+                }
+            }
+        }
+    }
+
     #[test]
     fn signed_reads_wait_for_routes_and_parked_provider_does_not_block_independent_ready_http() {
         let (mut engine, tokens) = start(Probe {
@@ -1850,8 +2567,12 @@ mod tests {
         } else {
             RetryPolicy::Never
         };
-        // Issued as if dispatched from a placement command.
-        engine.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
+        // Issued as if dispatched from a placement command (or the chosen intent).
+        let intent = engine
+            .venue
+            .mutation_intent
+            .unwrap_or(crate::classify::Intent::Place);
+        engine.io.request_contexts.dispatch = Some((command, intent));
         let mut cx = Cx {
             now: at,
             store: &mut engine.store,
@@ -2423,10 +3144,13 @@ mod tests {
                 true,
             )
             .unwrap();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new(),
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new(),
+            },
+            None
+        ));
         let (_, token, _) = mutation(&mut engine, 7, 0.);
         let permit = bind(&mut engine, token, 1.);
         engine.claim_http(2., permit).unwrap();
@@ -2539,8 +3263,10 @@ mod tests {
             ..Probe::default()
         });
         for (command, status) in [(7, 429), (8, 503)] {
-            let (_, token, _) = mutation(&mut engine, command, 0.);
-            let permit = bind(&mut engine, token, 1.);
+            // A native auth refusal is credential evidence only on a signed write.
+            let (_, token, _) = queue_mutation(&mut engine, command, 0., true);
+            let (attempt, input) = work(&route(&mut engine, token, 1.));
+            let permit = bound(&signed(&mut engine, 1., attempt, input));
             engine.claim_http(2., permit).unwrap();
             engine.io.auth_failure_counted = true;
             #[cfg(feature = "order-locks")]
@@ -2607,10 +3333,13 @@ mod tests {
             .order_locks
             .acquire(&placing, &engine.store, true)
             .unwrap();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new()
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new()
+            },
+            None
+        ));
         let (_, token, _) = mutation(&mut engine, 7, 0.);
         let permit = bind(&mut engine, token, 1.);
         engine.claim_http(2., permit).unwrap();
@@ -2649,10 +3378,13 @@ mod tests {
             )
             .unwrap();
         engine.io.order_locks.note_write();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new()
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new()
+            },
+            None
+        ));
         engine.io.order_locks.finish(7, true);
         let permit = bind(&mut engine, tokens[0], 1.);
         engine.claim_http(2., permit).unwrap();
@@ -2697,10 +3429,13 @@ mod tests {
                 true,
             )
             .unwrap();
-        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
-            command: 8,
-            symbol: String::new()
-        }));
+        assert!(engine.io.order_locks.defer(
+            &Command::CancelSymbolOrders {
+                command: 8,
+                symbol: String::new()
+            },
+            None
+        ));
         let (_, token, _) = mutation(&mut engine, 7, 0.);
         let permit = bind(&mut engine, token, 1.);
         assert_eq!(engine.claim_http(2., permit), Err(Error::Invalid));
@@ -2871,6 +3606,173 @@ mod tests {
         engine.io.queue_reconcile(None, f64::NAN);
         engine.finish_event_scope(7.);
         assert_eq!(engine.venue.reconciles, vec![None]);
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn an_absent_order_cancel_fences_and_reconciles_exactly_once() {
+        use crate::classify::{
+            CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict,
+        };
+        const GONE: CodeTable = CodeTable {
+            rows: &[Row {
+                key: Key::Int(110001),
+                verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+                only: Some(Intent::Cancel),
+            }],
+            success: &[],
+            unlisted: Verdict::Refused(crate::ErrorKind::Rejected),
+            status: &[],
+        };
+        let native = Native {
+            code: NativeCode::Int(110001),
+            message: "order not exists",
+        };
+        for intent in [Intent::Cancel, Intent::Place] {
+            let (mut engine, _) = start(Probe {
+                mutation_intent: Some(intent),
+                ..Probe::default()
+            });
+            let (context, token, _) = mutation(&mut engine, 7, 0.);
+            let permit = bind(&mut engine, token, 1.);
+            engine.claim_http(1., permit).unwrap();
+            let delivery = engine
+                .io
+                .managed_http
+                .get(&token.attempt().request)
+                .unwrap()
+                .delivery();
+            engine.io.http_delivery = Some(delivery);
+            engine.io.http_write_reply = Some((200, String::new()));
+            let (verdict, _) = Cx {
+                now: 2.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            }
+            .http_write_failure(&context, &GONE, Some(&native), "order not exists", None)
+            .unwrap();
+            engine.io.http_write_reply = None;
+            engine.io.http_delivery = None;
+            engine.finish_event_scope(2.);
+            if intent != Intent::Cancel {
+                // Outside a cancel the absent-order row never applies.
+                assert_eq!(verdict, Verdict::Refused(crate::ErrorKind::Rejected));
+                assert!(engine.venue.reconciles.is_empty());
+                assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+                continue;
+            }
+            assert_eq!(verdict, Verdict::Satisfied(SatisfiedIntent::Cancel));
+            assert_eq!(engine.venue.reconciles, vec![None], "exactly one read");
+            assert!(
+                engine.io.order_locks.uncertain("BTCUSDT"),
+                "fenced, not cancelled"
+            );
+            engine.finish_event_scope(3.);
+            assert_eq!(engine.venue.reconciles.len(), 1, "never asked twice");
+            // Only a fresh order read clears the fence.
+            engine.io.order_response_token = Some(engine.io.order_locks.token());
+            Cx {
+                now: 4.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            }
+            .orders_reconciled(None);
+            engine.io.order_response_token = None;
+            assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+        }
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn an_absent_order_under_a_held_placement_reconciles_after_it_finishes() {
+        use crate::classify::{
+            CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict,
+        };
+        const GONE: CodeTable = CodeTable {
+            rows: &[Row {
+                key: Key::Int(110001),
+                verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+                only: Some(Intent::Cancel),
+            }],
+            success: &[],
+            unlisted: Verdict::Refused(crate::ErrorKind::Rejected),
+            status: &[],
+        };
+        // A placement's conflict-cancel leg (classified as Cancel) under its
+        // own held placing lock on BTCUSDT.
+        let (mut engine, _) = start(Probe {
+            mutation_intent: Some(Intent::Cancel),
+            ..Probe::default()
+        });
+        let place = Command::PlaceOrders {
+            command: 7,
+            orders: vec![
+                serde_json::from_str(
+                    r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":1}"#,
+                )
+                .unwrap(),
+            ],
+        };
+        engine
+            .io
+            .order_locks
+            .acquire(&place, &engine.store, false)
+            .unwrap();
+        let (context, token, _) = mutation(&mut engine, 7, 0.);
+        let permit = bind(&mut engine, token, 1.);
+        engine.claim_http(1., permit).unwrap();
+        let delivery = engine
+            .io
+            .managed_http
+            .get(&token.attempt().request)
+            .unwrap()
+            .delivery();
+        engine.io.http_delivery = Some(delivery);
+        engine.io.http_write_reply = Some((200, String::new()));
+        let native = Native {
+            code: NativeCode::Int(110001),
+            message: "order not exists",
+        };
+        Cx {
+            now: 2.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .http_write_failure(&context, &GONE, Some(&native), "order not exists", None)
+        .unwrap();
+        engine.io.http_write_reply = None;
+        engine.io.http_delivery = None;
+        engine.finish_event_scope(2.);
+        assert!(engine.io.order_locks.uncertain("BTCUSDT"), "fenced at once");
+        assert!(
+            engine.venue.reconciles.is_empty(),
+            "a read now could not clear the held placement's fence"
+        );
+        Cx {
+            now: 3.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .fail_context(&context, "placement finished")
+        .unwrap();
+        engine.finish_event_scope(3.);
+        assert_eq!(
+            engine.venue.reconciles,
+            vec![Some(vec!["BTCUSDT".to_owned()])],
+            "exactly one read once the placement finished"
+        );
+        engine.io.order_response_token = Some(engine.io.order_locks.token());
+        Cx {
+            now: 4.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .orders_reconciled(Some("BTCUSDT"));
+        engine.io.order_response_token = None;
+        assert!(
+            !engine.io.order_locks.uncertain("BTCUSDT"),
+            "the read clears it"
+        );
     }
 
     #[cfg(feature = "order-locks")]
@@ -3766,6 +4668,135 @@ mod tests {
         );
     }
 
+    fn assert_managed_effect_fact(fact: EffectFact, may_publish: bool) {
+        let (mut engine, _) = start(Probe {
+            effect_fact: Some(fact),
+            ..Probe::default()
+        });
+        let (_, first, _) = queue_mutation(&mut engine, 7, 0., true);
+        let (attempt, input) = work(&route(&mut engine, first, 1.));
+        let permit = bound(&signed(&mut engine, 2., attempt, input));
+        assert!(matches!(
+            engine.claim_http(3., permit),
+            Ok(Claim::Released(_))
+        ));
+        engine.handle(
+            4.,
+            Event::HttpResponse {
+                request: first.attempt().request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "native fixture",
+                },
+            },
+        );
+        assert_eq!(engine.venue.responses, 1);
+        assert_eq!(
+            engine.venue.native_effects,
+            usize::from(may_publish),
+            "{fact:?}"
+        );
+        assert_eq!(engine.store.hedged(), may_publish, "{fact:?}");
+        assert_eq!(
+            engine.venue.housekeeping_checks,
+            usize::from(!matches!(fact, EffectFact::Missing | EffectFact::Overflow)),
+            "{fact:?}"
+        );
+        let completions = engine
+            .drain_actions()
+            .filter(|a| {
+                matches!(
+                    a,
+                    Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(completions.len(), 1);
+        if matches!(fact, EffectFact::PartialUnknown) {
+            assert!(
+                matches!(&completions[0], Action::Notice(Notice::CommandFailed { error, .. })
+                if error.outcome == Some(crate::Outcome::Unknown))
+            );
+        }
+    }
+    #[test]
+    fn postfact_publication_rejects_absent_refused_and_unproven_native_facts() {
+        for fact in [
+            EffectFact::Missing,
+            EffectFact::Rejected,
+            EffectFact::Failed,
+        ] {
+            assert_managed_effect_fact(fact, false);
+        }
+    }
+    #[test]
+    fn postfact_publication_rejects_native_identity_overflow_before_effects() {
+        assert_managed_effect_fact(EffectFact::Overflow, false);
+    }
+    #[test]
+    fn postfact_publication_accepts_recorded_known_effects_even_without_native_ids() {
+        for fact in [
+            EffectFact::Accepted,
+            EffectFact::KnownPartial,
+            EffectFact::PartialUnknown,
+        ] {
+            assert_managed_effect_fact(fact, true);
+        }
+    }
+
+    #[test]
+    fn native_unproven_fact_uses_real_managed_handoff_and_finishes_once_without_effects() {
+        let (mut engine, _) = start(Probe {
+            native_unproven: true,
+            ..Probe::default()
+        });
+        let (_, first, _) = queue_mutation(&mut engine, 7, 0., true);
+        // This is a financial write, not a tagged private account read. Native
+        // auth-looking evidence must not invent an account-read observation.
+        assert!(engine.io.pending[&first.attempt().request].auth.is_none());
+        let (attempt, input) = work(&route(&mut engine, first, 1.));
+        let permit = bound(&signed(&mut engine, 2., attempt, input));
+        assert!(matches!(
+            engine.claim_http(3., permit),
+            Ok(Claim::Released(_))
+        ));
+        for at in [4., 5.] {
+            engine.handle(
+                at,
+                Event::HttpResponse {
+                    request: first.attempt().request,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: "malformed-native-proof",
+                    },
+                },
+            );
+        }
+        assert_eq!(engine.venue.responses, 1);
+        assert_eq!(engine.venue.receipts, 1);
+        assert_eq!(engine.venue.auth_observations.get(), 0);
+        assert_eq!(engine.health().auth_failures, 0);
+        assert!(engine.store.orders().is_empty());
+        let failures = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+                Action::Notice(Notice::CommandDone { .. }) => {
+                    panic!("unproven native proof cannot succeed")
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(failures.len(), 1);
+        let error = &failures[0];
+        assert_eq!(error.kind, Some(ErrorKind::Internal));
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
+        assert_eq!(error.venue_code.as_deref(), Some("10004"));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["evidence-only"]);
+    }
+
     #[test]
     fn released_native_refusal_then_retry_preparation_failure_is_unknown_not_not_sent() {
         for provider in [false, true] {
@@ -3868,5 +4899,142 @@ mod tests {
             )));
             assert_eq!(engine.venue.receipts, 0);
         }
+    }
+
+    /// Release `token` at `at` (bound and claimed), as the host would.
+    #[cfg(feature = "order-locks")]
+    fn release(engine: &mut Engine<Probe>, token: Preparation, at: f64) {
+        let permit = bind(engine, token, at);
+        engine.claim_http(at, permit).unwrap();
+    }
+
+    #[cfg(feature = "order-locks")]
+    fn fenced(engine: &mut Engine<Probe>) {
+        engine.io.order_locks.fence(Some(&["BTCUSDT".into()]));
+    }
+
+    /// One logical order read spans several physical attempts (pages, coins);
+    /// a fence raised after its first page was released is not cleared by rows
+    /// the venue read before it.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_logical_read_counts_only_from_its_earliest_released_leg() {
+        let (mut engine, tokens) = start(Probe {
+            count: 2,
+            legs: true,
+            reconcile_reads: true,
+            ..Probe::default()
+        });
+        release(&mut engine, tokens[0], 1.);
+        fenced(&mut engine);
+        release(&mut engine, tokens[1], 500.);
+        response(&mut engine, tokens[1], 501.);
+        assert_eq!(engine.venue.responses, 1);
+        assert!(
+            engine.io.order_locks.uncertain("BTCUSDT"),
+            "the first page predates the fence"
+        );
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_commands_read_legs_count_from_its_earliest_leg() {
+        let (mut engine, tokens) = start(Probe {
+            count: 2,
+            command: Some(7),
+            legs: true,
+            reconcile_reads: true,
+            ..Probe::default()
+        });
+        release(&mut engine, tokens[0], 1.);
+        fenced(&mut engine);
+        release(&mut engine, tokens[1], 500.);
+        response(&mut engine, tokens[1], 501.);
+        assert_eq!(engine.venue.responses, 1);
+        assert!(engine.io.order_locks.uncertain("BTCUSDT"));
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_logical_read_released_wholly_after_the_fence_clears_it() {
+        let (mut engine, tokens) = start(Probe {
+            count: 2,
+            legs: true,
+            reconcile_reads: true,
+            ..Probe::default()
+        });
+        fenced(&mut engine);
+        release(&mut engine, tokens[0], 1.);
+        release(&mut engine, tokens[1], 500.);
+        response(&mut engine, tokens[1], 501.);
+        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+    }
+
+    /// Separate owners are separate logical reads: a stale owner, retired or
+    /// not, never lowers another owner's freshness.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn an_earlier_owners_read_mark_never_reaches_another_owner() {
+        let (mut engine, tokens) = start(Probe {
+            count: 2,
+            reconcile_reads: true,
+            ..Probe::default()
+        });
+        release(&mut engine, tokens[0], 1.);
+        response(&mut engine, tokens[0], 2.);
+        fenced(&mut engine);
+        release(&mut engine, tokens[1], 500.);
+        response(&mut engine, tokens[1], 501.);
+        assert_eq!(engine.venue.responses, 2);
+        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+    }
+
+    /// A write released under the reading command takes no read mark.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_mutation_leg_never_marks_its_owners_read() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            command: Some(7),
+            reconcile_reads: true,
+            ..Probe::default()
+        });
+        let (_, write, _) = mutation(&mut engine, 7, 0.);
+        release(&mut engine, write, 1.);
+        fenced(&mut engine);
+        release(&mut engine, tokens[0], 500.);
+        response(&mut engine, tokens[0], 501.);
+        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+    }
+
+    /// Marks live only as long as their owner's contexts; the registry's own
+    /// pruning bounds them.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_read_mark_is_dropped_with_its_owners_last_context() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            ..Probe::default()
+        });
+        release(&mut engine, tokens[0], 1.);
+        response(&mut engine, tokens[0], 2.);
+        assert_eq!(engine.io.request_contexts.read_mark_count(), 1);
+        Cx {
+            now: 5_000.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 1_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        )
+        .unwrap();
+        assert_eq!(engine.io.request_contexts.read_mark_count(), 0);
     }
 }

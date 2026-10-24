@@ -1,10 +1,23 @@
 //! Semantic HTTP ownership and the final controllable transport handoff.
+//! Whole-plan and Preflight APIs require the `http-plans` Cargo feature.
 //!
 //! This module owns no requests, credentials, clocks or network executor. A host
 //! prepares its route first; the engine checks a single-use permit immediately
 //! before that prepared executor hands the request to the transport API.
 use crate::signing::{KeyRef, SignReceipt};
 use crate::{CommandId, CredentialSlot, Outcome, RequestId, VenueError};
+
+#[cfg(feature = "http-plans")]
+#[path = "request_context_plan.rs"]
+pub mod plan;
+
+#[cfg(feature = "http-plans")]
+#[path = "request_context_owner.rs"]
+mod ownership;
+#[cfg(feature = "http-plans")]
+pub use ownership::{
+    HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
+};
 
 #[path = "http_evidence.rs"]
 mod evidence;
@@ -65,7 +78,7 @@ impl<'a> Reconciliation<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Owner {
     Command {
         id: CommandId,
@@ -74,10 +87,56 @@ pub enum Owner {
     Background {
         generation: u64,
     },
+    /// Venue-maintained authentication session (listen key, WS token, login).
+    /// Retiring the session revokes every context and attempt it owns.
+    Session {
+        generation: u64,
+    },
     /// One physical execution serving several command observers.
     Execution {
         generation: u64,
     },
+}
+
+/// Engine-issued session authority. Holds no key, token or credential value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Session {
+    issuer: std::sync::Arc<()>,
+    generation: u64,
+}
+
+impl Session {
+    pub(crate) fn new(issuer: &std::sync::Arc<()>, generation: u64) -> Self {
+        Self {
+            issuer: issuer.clone(),
+            generation,
+        }
+    }
+    pub(crate) fn issued_by(&self, issuer: &std::sync::Arc<()>) -> bool {
+        std::sync::Arc::ptr_eq(&self.issuer, issuer)
+    }
+    pub fn owner(&self) -> Owner {
+        Owner::Session {
+            generation: self.generation,
+        }
+    }
+}
+
+/// A continuation parked behind a session, returned when the venue drains it.
+#[derive(Debug)]
+pub enum Waiter<P> {
+    Ready(Context, P),
+    /// Nothing was sent for this owner; the error's outcome is NotSent.
+    Failed(Context, P, VenueError),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionPolicy {
+    /// Every context issued for the session must use exactly this credential.
+    pub credential: Option<Credential>,
+    /// The venue contract makes a new create/keepalive harmless while an
+    /// earlier one is unresolved (cite it at the declaration site).
+    pub repeat_safe: bool,
 }
 
 /// Independent of HTTP method: private POST snapshots are still reads.
@@ -94,6 +153,17 @@ pub enum RoutingIntent {
     Public,
     Primary,
     Secondary,
+}
+
+/// Egress declared at trusted issuance, independent of HTTP method.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Egress {
+    /// Primary account egress: keyless reads, or confirming a primary credential.
+    Primary,
+    /// Unsigned public reads through the host's public CORS egress.
+    PublicCors,
+    /// Unsigned public reads sent directly, bypassing account proxies.
+    Direct,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -135,6 +205,16 @@ pub struct Credential {
     pub reference: KeyRef,
 }
 
+impl Credential {
+    pub(crate) fn validate(&self) -> Result<(), Error> {
+        if self.reference.0.is_empty() || self.reference.0.len() > 256 {
+            Err(Error::Invalid)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Pacing {
     pub group: u32,
@@ -149,6 +229,8 @@ pub struct Context {
     leg: u64,
     operation: Operation,
     credential: Option<Credential>,
+    /// Egress declared at issuance; it may only confirm a credential's intent.
+    egress: Option<Egress>,
     deadline: f64,
     pacing: Option<Pacing>,
     retry: RetryPolicy,
@@ -189,9 +271,7 @@ impl Context {
             || !deadline.is_finite()
             || deadline <= created_at
             || pacing.is_some_and(|p| !p.minimum_gap_ms.is_finite() || p.minimum_gap_ms < 0.)
-            || credential
-                .as_ref()
-                .is_some_and(|c| c.reference.0.is_empty() || c.reference.0.len() > 256)
+            || credential.as_ref().is_some_and(|c| c.validate().is_err())
         {
             return Err(Error::Invalid);
         }
@@ -201,10 +281,53 @@ impl Context {
             leg,
             operation,
             credential,
+            egress: None,
             deadline,
             pacing,
             retry: RetryPolicy::Never,
         })
+    }
+
+    /// Capture egress before issuer binding: unsigned reads declare it, a
+    /// credentialed context may only confirm a primary slot. Descendants keep it;
+    /// it never grants credential, nonce or identity authority.
+    pub(crate) fn with_egress(mut self, egress: Option<Egress>) -> Result<Self, Error> {
+        let Some(egress) = egress else {
+            return Ok(self);
+        };
+        let valid = match self.credential.as_ref() {
+            Some(credential) => {
+                egress == Egress::Primary && credential.slot == CredentialSlot::Primary
+            }
+            None => self.operation == Operation::Read,
+        };
+        if !valid {
+            return Err(Error::Invalid);
+        }
+        self.egress = Some(egress);
+        Ok(self)
+    }
+
+    pub(crate) fn egress(&self) -> Option<Egress> {
+        self.egress
+    }
+
+    /// Explicit host route for the managed Prepare packet; None keeps the
+    /// host's intent-based routing.
+    pub fn route(&self) -> Option<crate::RequestRoute> {
+        match self.egress? {
+            Egress::Primary => None,
+            Egress::PublicCors => Some(crate::RequestRoute::PublicCors),
+            Egress::Direct => Some(crate::RequestRoute::Direct),
+        }
+    }
+
+    fn credential_intent(&self) -> RoutingIntent {
+        match self.credential.as_ref().map(|credential| credential.slot) {
+            None => RoutingIntent::Public,
+            Some(CredentialSlot::Primary) => RoutingIntent::Primary,
+            Some(CredentialSlot::Secondary) => RoutingIntent::Secondary,
+        }
     }
 
     pub fn owner(&self) -> Owner {
@@ -218,6 +341,12 @@ impl Context {
             .as_ref()
             .is_some_and(|own| std::sync::Arc::ptr_eq(own, issuer))
     }
+    pub(crate) fn same_issuer(&self, other: &Self) -> bool {
+        match (&self.issuer, &other.issuer) {
+            (Some(left), Some(right)) => std::sync::Arc::ptr_eq(left, right),
+            _ => false,
+        }
+    }
     pub fn leg(&self) -> u64 {
         self.leg
     }
@@ -228,10 +357,10 @@ impl Context {
         self.credential.as_ref()
     }
     pub fn routing_intent(&self) -> RoutingIntent {
-        match self.credential.as_ref().map(|credential| credential.slot) {
-            None => RoutingIntent::Public,
-            Some(CredentialSlot::Primary) => RoutingIntent::Primary,
-            Some(CredentialSlot::Secondary) => RoutingIntent::Secondary,
+        match self.egress {
+            Some(Egress::Primary) => RoutingIntent::Primary,
+            Some(Egress::PublicCors | Egress::Direct) => RoutingIntent::Public,
+            None => self.credential_intent(),
         }
     }
     pub fn deadline(&self) -> f64 {
@@ -367,20 +496,9 @@ impl HttpRelease {
         if time.raw_ms >= deadline {
             return Err(Error::TimedOut);
         }
-        signature.validate().map_err(|_| Error::Invalid)?;
-        let signature_valid_until = if let Some(expiry) = signature.expiry_ms {
-            let remaining = expiry - time.protocol_ms;
-            let projected = time.raw_ms + remaining;
-            if !remaining.is_finite() || !projected.is_finite() {
-                return Err(Error::Invalid);
-            }
-            if remaining <= 0. {
-                return Err(Error::Stale);
-            }
-            Some(deadline.min(projected))
-        } else {
-            None
-        };
+        let signature_valid_until = crate::SigningRelease::new(signature, time)?
+            .raw_expiry_ms()
+            .map(|projected| deadline.min(projected));
         if !deadline.is_finite() || deadline <= time.raw_ms {
             return Err(Error::Invalid);
         }
@@ -509,6 +627,7 @@ enum State {
 /// context; command evidence is retained separately until command sealing.
 pub struct Lifecycle {
     context: Context,
+    deadline: f64,
     attempt: Attempt,
     state: State,
     signature: SignReceipt,
@@ -527,6 +646,7 @@ pub enum Claim {
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
+            deadline: context.deadline(),
             context,
             attempt,
             state: State::Preparing,
@@ -536,6 +656,32 @@ impl Lifecycle {
             permits: 0,
             preparation: 0,
         }
+    }
+
+    /// Pure physical-window metadata, never engine issuance or retry authority.
+    /// A plan may narrow the logical bound; route/signature renewal cannot
+    /// extend this attempt's original deadline.
+    pub fn with_deadline(
+        context: Context,
+        attempt: Attempt,
+        created_at: f64,
+        deadline: f64,
+    ) -> Result<Self, Error> {
+        if !created_at.is_finite()
+            || !deadline.is_finite()
+            || deadline <= created_at
+            || deadline > context.deadline()
+        {
+            return Err(Error::Invalid);
+        }
+        let mut lifecycle = Self::new(context, attempt);
+        lifecycle.deadline = deadline;
+        Ok(lifecycle)
+    }
+
+    /// Immutable physical cap; it never grants more time than the Context.
+    pub fn deadline(&self) -> f64 {
+        self.deadline
     }
     pub fn context(&self) -> &Context {
         &self.context
@@ -645,8 +791,7 @@ impl Lifecycle {
         if permit != expected {
             return Err(Error::Revoked);
         }
-        let mut release =
-            HttpRelease::new(self.attempt, time, self.signature, self.context.deadline)?;
+        let mut release = HttpRelease::new(self.attempt, time, self.signature, self.deadline)?;
         if route.expires_at.is_some_and(|at| time.raw_ms >= at)
             || self.signed_revision.is_some_and(|rev| rev != time.revision)
             || time.raw_ms >= self.fresh_until
@@ -654,7 +799,7 @@ impl Lifecycle {
             return Err(Error::Stale);
         }
         if let Some(at) = pacing.check(self.context.pacing, time.raw_ms)? {
-            return if at >= self.context.deadline {
+            return if at >= self.deadline {
                 Err(Error::TimedOut)
             } else {
                 Ok(Claim::WaitUntil(at))
@@ -726,7 +871,7 @@ impl Lifecycle {
         if !now.is_finite() {
             return Err(Error::Invalid);
         }
-        Ok(now >= self.context.deadline && self.settle())
+        Ok(now >= self.deadline && self.settle())
     }
 }
 
@@ -799,6 +944,9 @@ pub enum WriteResult {
     /// Native ACK proves both effects and a definitive refusal, even when it
     /// creates no order IDs (for example, a partially cancelled batch).
     KnownPartial(VenueError),
+    /// Native ACK proves a validated subset of effects, while other effects
+    /// remain unresolved. Publish only that subset; never retry the whole write.
+    PartialUnknown(VenueError),
     Failed(VenueError),
 }
 
@@ -806,7 +954,10 @@ impl WriteResult {
     fn order_ids(&self) -> &[String] {
         match self {
             Self::Accepted { order_ids } => order_ids,
-            Self::Rejected(error) | Self::KnownPartial(error) | Self::Failed(error) => error
+            Self::Rejected(error)
+            | Self::KnownPartial(error)
+            | Self::PartialUnknown(error)
+            | Self::Failed(error) => error
                 .partial
                 .as_ref()
                 .map_or(&[], |partial| partial.order_ids.as_slice()),
@@ -888,7 +1039,42 @@ pub struct CommandWrites {
     report_messages: usize,
     evidence: evidence::EvidenceBudget,
 }
+// Private synchronous terminal preparation. Never exposed as a venue grant.
+#[cfg(feature = "http-plans")]
+pub(crate) struct PreparedWriteSeal {
+    failure: Option<VenueError>,
+    evidence: evidence::EvidenceBudget,
+}
+#[cfg(feature = "http-plans")]
+impl PreparedWriteSeal {
+    pub(crate) fn is_failure(&self) -> bool {
+        self.failure.is_some()
+    }
+}
 impl CommandWrites {
+    /// Prepare the full declared journal before plan admission. Logical legs
+    /// include unselected fallback branches; neither registration nor retry
+    /// may grow this backing after the plan's resources have committed.
+    #[cfg(any(test, feature = "http-plans"))]
+    pub(crate) fn new_reserved(capacity: usize, logical_legs: usize) -> Result<Self, Error> {
+        let mut writes = Self::new(capacity)?;
+        if logical_legs == 0 || logical_legs > capacity {
+            return Err(Error::Capacity);
+        }
+        writes
+            .attempts
+            .try_reserve_exact(capacity)
+            .map_err(|_| Error::Capacity)?;
+        // Existing journal registration/replacement permissions remain intact.
+        // Reserve their full shared upper bound too, so even an underdeclared
+        // logical shape cannot trigger later growth of this backing.
+        writes
+            .legs
+            .try_reserve_exact(capacity)
+            .map_err(|_| Error::Capacity)?;
+        Ok(writes)
+    }
+
     pub fn new(capacity: usize) -> Result<Self, Error> {
         if capacity == 0 || capacity > evidence::MAX_ATTEMPTS {
             return Err(Error::Capacity);
@@ -940,30 +1126,10 @@ impl CommandWrites {
     /// Only a typed definitive refusal may authorize another write attempt.
     /// The request context's policy/deadline must also authorize this retry.
     pub fn retry(&mut self, previous: RequestId, id: RequestId) -> Result<(), Error> {
-        if self.sealed {
-            return Err(Error::State);
-        }
-        if self.attempts.iter().any(|a| a.id == id) {
+        if self.attempts.iter().any(|a| a.id == id) && !self.sealed {
             return Err(Error::Duplicate);
         }
-        if self.occupied() >= self.capacity {
-            return Err(Error::Capacity);
-        }
-        let old = self
-            .attempts
-            .iter()
-            .find(|a| a.id == previous)
-            .ok_or(Error::Invalid)?;
-        if !self.active(old.leg)
-            || old.id_overflow
-            || !old.resend_granted
-            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
-            || self.attempts.iter().rposition(|a| a.leg == old.leg)
-                != self.attempts.iter().position(|a| a.id == previous)
-        {
-            return Err(Error::RetryForbidden);
-        }
-        let leg = old.leg;
+        let leg = self.retry_admissible(previous)?;
         // Each grant authorizes exactly one resend.
         if let Some(old) = self.attempts.iter_mut().find(|a| a.id == previous) {
             old.resend_granted = false;
@@ -1034,6 +1200,50 @@ impl CommandWrites {
         Ok(())
     }
 
+    /// Failure-only continuation for a direct replacement that never sent.
+    /// The active-parent lookup intentionally cannot authorize this old delivery.
+    pub(crate) fn unreleased_replacement_child(
+        &self,
+        previous: RequestId,
+        parent_leg: u64,
+        child: u64,
+    ) -> bool {
+        if self.sealed {
+            return false;
+        }
+        let Some(old) = self.attempts.iter().find(|attempt| attempt.id == previous) else {
+            return false;
+        };
+        if old.leg != parent_leg
+            || !old.released
+            || old.id_overflow
+            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+            || self
+                .attempts
+                .iter()
+                .rfind(|attempt| attempt.leg == old.leg)
+                .is_none_or(|attempt| attempt.id != previous)
+            || self
+                .attempts
+                .iter()
+                .any(|attempt| attempt.leg == child && attempt.released)
+        {
+            return false;
+        }
+        let Some(parent) = self
+            .legs
+            .iter()
+            .position(|leg| leg.id == old.leg && leg.superseded)
+        else {
+            return false;
+        };
+        self.legs.iter().any(|leg| {
+            leg.id == child
+                && !leg.superseded
+                && leg.parent.is_some_and(|(index, _)| index == parent)
+        })
+    }
+
     fn occupied(&self) -> usize {
         self.attempts.len()
             + self
@@ -1100,6 +1310,37 @@ impl CommandWrites {
                 None => return false,
             }
         }
+    }
+
+    /// Journal side of `retry`, without allocating the new attempt.
+    fn retry_admissible(&self, previous: RequestId) -> Result<u64, Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        if self.occupied() >= self.capacity {
+            return Err(Error::Capacity);
+        }
+        let old = self
+            .attempts
+            .iter()
+            .find(|a| a.id == previous)
+            .ok_or(Error::Invalid)?;
+        if !self.active(old.leg)
+            || old.id_overflow
+            || !old.resend_granted
+            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+            || self.attempts.iter().rposition(|a| a.leg == old.leg)
+                != self.attempts.iter().position(|a| a.id == previous)
+        {
+            return Err(Error::RetryForbidden);
+        }
+        Ok(old.leg)
+    }
+
+    /// An owner may park for a re-send only when `retry` would accept it.
+    pub(crate) fn resend_blocked(&self, leg: u64) -> bool {
+        self.latest(leg)
+            .is_some_and(|latest| self.retry_admissible(latest).is_err())
     }
 
     pub(crate) fn leg_attempts(&self, leg: u64) -> usize {
@@ -1179,6 +1420,23 @@ impl CommandWrites {
         status: u16,
         capture: impl FnOnce(&mut UnprovenEvidence),
     ) -> Result<(), Error> {
+        self.capture_unproven_result(id, |budget| UnprovenEvidence::new(budget, status), capture)
+    }
+
+    pub(crate) fn unproven_native_result(
+        &mut self,
+        id: RequestId,
+        capture: impl FnOnce(&mut UnprovenEvidence),
+    ) -> Result<(), Error> {
+        self.capture_unproven_result(id, |budget| Ok(UnprovenEvidence::native(budget)), capture)
+    }
+
+    fn capture_unproven_result(
+        &mut self,
+        id: RequestId,
+        writer: impl FnOnce(evidence::EvidenceBudget) -> Result<UnprovenEvidence, Error>,
+        capture: impl FnOnce(&mut UnprovenEvidence),
+    ) -> Result<(), Error> {
         if self.sealed {
             return Err(Error::State);
         }
@@ -1194,7 +1452,7 @@ impl CommandWrites {
         if !attempt.released || attempt.result.is_some() {
             return Err(Error::State);
         }
-        let mut evidence = UnprovenEvidence::new(self.evidence, status)?;
+        let mut evidence = writer(self.evidence)?;
         capture(&mut evidence);
         let (budget, error, overflow) = evidence.finish();
         self.attempts[index].result = Some(WriteResult::Failed(error));
@@ -1247,10 +1505,76 @@ impl CommandWrites {
         self.report_messages = report_messages;
         Ok(())
     }
+    /// Publication follows this attempt's normalized native facts, not the
+    /// aggregate outcome of its siblings. This check consumes no authority.
+    pub(crate) fn validate_effects(&self, id: RequestId) -> Result<(), Error> {
+        let attempt = self.validate_recorded_attempt(id)?;
+        if !matches!(
+            attempt.result,
+            Some(
+                WriteResult::Accepted { .. }
+                    | WriteResult::KnownPartial(_)
+                    | WriteResult::PartialUnknown(_)
+            )
+        ) {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_housekeeping(&self, id: RequestId) -> Result<(), Error> {
+        self.validate_recorded_attempt(id).map(|_| ())
+    }
+
+    fn validate_recorded_attempt(&self, id: RequestId) -> Result<&WriteAttempt, Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        let attempt = self
+            .attempts
+            .iter()
+            .find(|a| a.id == id)
+            .ok_or(Error::Invalid)?;
+        if self.superseded(attempt.leg) || self.latest(attempt.leg) != Some(id) {
+            return Err(Error::Revoked);
+        }
+        if !attempt.released || attempt.id_overflow || attempt.result.is_none() {
+            return Err(Error::State);
+        }
+        Ok(attempt)
+    }
+
+    /// Failure-only structural progress. This grants no publication or retry
+    /// authority, including for evidence-only IDs on a failed native reply.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn validate_failed_attempt(&self, id: RequestId) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        let attempt = self
+            .attempts
+            .iter()
+            .find(|attempt| attempt.id == id)
+            .ok_or(Error::Invalid)?;
+        if self.superseded(attempt.leg) || self.latest(attempt.leg) != Some(id) {
+            return Err(Error::Revoked);
+        }
+        if attempt.id_overflow || !matches!(attempt.result, Some(WriteResult::Failed(_))) {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
     /// Seal success only when every terminal logical leg is proven accepted.
     /// Refused/failed/unresolved attempts remain available to the failure join;
     /// a venue's optimistic done callback cannot erase their evidence.
     pub fn succeed(&mut self) -> Result<(), Error> {
+        self.validate_success()?;
+        self.sealed = true;
+        Ok(())
+    }
+
+    fn validate_success(&self) -> Result<(), Error> {
         if self.sealed || self.attempts.is_empty() || self.attempts.iter().any(|a| a.id_overflow) {
             return Err(Error::State);
         }
@@ -1264,7 +1588,6 @@ impl CommandWrites {
         if !accepted {
             return Err(Error::State);
         }
-        self.sealed = true;
         Ok(())
     }
 
@@ -1272,17 +1595,36 @@ impl CommandWrites {
     /// sent-leg errors have priority over pre-send siblings. Earlier release
     /// evidence survives a signer/transport failure on a newer physical retry.
     pub fn fail(&mut self, fallback: VenueError) -> Result<VenueError, Error> {
+        let (error, budget) = self.failure_projection(fallback)?;
+        self.evidence = budget;
+        self.sealed = true;
+        Ok(error)
+    }
+
+    /// Project the current physical facts without sealing or charging fallback
+    /// evidence. This grants no completion, retry or observer authority. The
+    /// execution owner supplies presentation-only observer termination errors.
+    pub fn project_failure(&self, fallback: VenueError) -> Result<VenueError, Error> {
+        self.failure_projection(fallback).map(|(error, _)| error)
+    }
+
+    fn failure_projection(
+        &self,
+        fallback: VenueError,
+    ) -> Result<(VenueError, evidence::EvidenceBudget), Error> {
         if self.sealed {
             return Err(Error::State);
         }
-        self.sealed = true;
+        let mut projected_budget = self.evidence;
         let any_released = self.attempts.iter().any(|a| a.released);
         let uncertain = self.attempts.iter().enumerate().any(|(index, a)| {
             a.released
-                && (matches!(a.result, None | Some(WriteResult::Failed(_)))
-                    || self.attempts[index + 1..]
-                        .iter()
-                        .any(|later| later.leg == a.leg && !later.released))
+                && (matches!(
+                    a.result,
+                    None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_))
+                ) || self.attempts[index + 1..]
+                    .iter()
+                    .any(|later| later.leg == a.leg && !later.released))
         }) || self.legs.iter().any(|leg| {
             !leg.superseded
                 && leg.parent.is_some()
@@ -1305,6 +1647,7 @@ impl CommandWrites {
             Some(
                 WriteResult::Rejected(error)
                 | WriteResult::KnownPartial(error)
+                | WriteResult::PartialUnknown(error)
                 | WriteResult::Failed(error),
             ) => Some(error.clone()),
             _ => None,
@@ -1331,8 +1674,8 @@ impl CommandWrites {
                     .flat_map(WriteResult::order_ids)
                     .map(String::as_str)
                     .collect();
-                let (budget, error, fallback_overflow) = self.evidence.error(fallback, &known);
-                self.evidence = budget;
+                let (budget, error, fallback_overflow) = projected_budget.error(fallback, &known);
+                projected_budget = budget;
                 overflow |= fallback_overflow;
                 error
             }
@@ -1375,7 +1718,36 @@ impl CommandWrites {
         if overflow {
             evidence::mark_id_overflow(&mut error);
         }
-        Ok(error)
+        Ok((error, projected_budget))
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn prepare_seal(
+        &self,
+        error: Option<VenueError>,
+    ) -> Result<PreparedWriteSeal, Error> {
+        if error.is_none() && self.validate_success().is_ok() {
+            return Ok(PreparedWriteSeal {
+                failure: None,
+                evidence: self.evidence,
+            });
+        }
+        let (error, evidence) =
+            self.failure_projection(error.unwrap_or_else(|| {
+                VenueError::new("Command writes are not all confirmed accepted")
+            }))?;
+        Ok(PreparedWriteSeal {
+            failure: Some(error),
+            evidence,
+        })
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn commit_seal(&mut self, prepared: PreparedWriteSeal) -> Option<VenueError> {
+        assert!(!self.sealed, "prepared journal seals exactly once");
+        self.sealed = true;
+        self.evidence = prepared.evidence;
+        prepared.failure
     }
 
     /// Retain each terminal logical-leg refusal for the existing reporting path.

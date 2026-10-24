@@ -288,6 +288,10 @@ const isBybitPositionTpslMode = (mode: unknown) => typeof mode === 'string' && B
 // and the request landing. The chaser races this constantly: it cancels at the
 // touch, and the order can complete in the round trip. Treating it as a hard
 // failure made the chaser stop itself and abandon the chase.
+//
+// `HyrotraderExchange` extends this via `isAlreadyGoneCancelMessage` to also
+// accept the simulator's "Order does not exist or is no longer open" phrasing
+// without regressing the bybit/bybitdemo wording.
 const isBybitOrderAlreadyGoneCancelMessage = (message: unknown) => {
   const normalized = `${message || ''}`.toLowerCase();
   return normalized.includes('order not exists') || normalized.includes('too late to cancel');
@@ -402,6 +406,26 @@ export class BybitExchange extends BaseExchange {
 
   get supportsTradeDerivedCandles() {
     return true;
+  }
+
+  // Bulk kline subscribe batch size. Bybit livenet comfortably accepts up to
+  // ~50 topics per `subscribe` frame; Hyro's simulator rejects anything over
+  // 32 and overrides this to 10 (see `HyrotraderExchange`). Keeping the base
+  // default at 50 preserves the pre-Hyro Bybit subscribe cadence.
+  get publicKlineSubscribeChunkSize() {
+    return 50;
+  }
+
+  // The "already gone" classifier for cancel responses. Bybit and bybitdemo
+  // both reply with `"order not exists"` / `"too late to cancel"` when a
+  // cancel loses the race to a fill, so the base classifier matches those.
+  // Hyro's simulator uses different phrasing for the same semantic
+  // (`"Order does not exist or is no longer open"`) and overrides this hook
+  // in `HyrotraderExchange` to accept both. Returning `true` from this hook
+  // causes bulk-cancel paths to retire the row silently instead of raising
+  // a user-facing error.
+  protected isAlreadyGoneCancelMessage(message: unknown): boolean {
+    return isBybitOrderAlreadyGoneCancelMessage(message);
   }
 
   validateCandleInterval(interval: string) {
@@ -3365,7 +3389,7 @@ export class BybitExchange extends BaseExchange {
         request: orders.map((o) => ({ symbol: o.symbol, orderId: o.id })),
       });
       if (data.retMsg !== 'OK') {
-        if (isBybitOrderAlreadyGoneCancelMessage(data.retMsg)) {
+        if (this.isAlreadyGoneCancelMessage(data.retMsg)) {
           // Already gone is still gone — retire the rows.
           this.retireCancelledOrders(orders);
           return;
@@ -3374,7 +3398,7 @@ export class BybitExchange extends BaseExchange {
         throw new Error(data.retMsg);
       }
       const foundErr = data.retExtInfo?.list.find(
-        (l: any) => l.code !== 0 && !isBybitOrderAlreadyGoneCancelMessage(l.msg),
+        (l: any) => l.code !== 0 && !this.isAlreadyGoneCancelMessage(l.msg),
       );
       if (foundErr) {
         this.emitAndLogError(foundErr.msg);
@@ -3412,9 +3436,16 @@ export class BybitExchange extends BaseExchange {
       );
     }
 
-    if (v(data, 'retMsg') !== 'OK') {
-      this.emitAndLogError(v(data, 'retMsg'));
-      return;
+    const cancelAllRetMsg = v(data, 'retMsg');
+    if (cancelAllRetMsg !== 'OK') {
+      // Cancel-all races can land after every open order has already filled,
+      // in which case the venue replies with a gone-phrase instead of OK.
+      // Treat that as a soft success (still retire the rows) rather than a
+      // user-visible error, matching the single-cancel path.
+      if (!this.isAlreadyGoneCancelMessage(cancelAllRetMsg)) {
+        this.emitAndLogError(cancelAllRetMsg);
+        return;
+      }
     }
 
     this.retireCancelledOrders(cancelledRows);

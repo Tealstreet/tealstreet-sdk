@@ -1241,11 +1241,23 @@ fn public_rest_book_refusal_does_not_invalidate_or_refresh_existing_jwt() {
         h.e.store().orders().to_vec(),
     );
     h.actions.clear();
-    h.command(Command::FetchOrderBook {
-        command: 70,
-        symbol: "BTC-USD-PERP".into(),
-        limit: None,
-    });
+    h.e.handle(
+        h.now,
+        Event::Command(Command::FetchOrderBook {
+            command: 70,
+            symbol: "BTC-USD-PERP".into(),
+            limit: None,
+        }),
+    );
+    for action in safe_cex_engine::test_support::prepared_actions(&mut h.e, h.now) {
+        match action {
+            Action::Http(request) => {
+                h.receipt_trace.push(ReceiptTrace::Http(request.id));
+                h.pending.push(request);
+            }
+            action => h.actions.push(action),
+        }
+    }
     assert_eq!(h.pending.len(), 1);
     let request = h.take("/orderbook/");
     assert!(request.headers.is_empty());

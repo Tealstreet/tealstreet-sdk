@@ -313,3 +313,132 @@ Clippy and both ratchets (13 controls) pass. Exact inventory is40 occurrences /
 Independent source/adversarial, caller and full-map reviews are clean, architecture
 No. This checkpoint is on actual #1830 and phase-one landingbc91; actual #1820
 integration and fresh CI remain required before the overseer's merge window.
+
+## Initial plan-list credential refusal
+
+Re-verified after #1786 on landing `e37a80b8c4445e2de45abec7fa3f494ee0561888`,
+with actual #1854 engine `e2b03d5592a`. Initial MODE already terminates startup
+for the existing parsed native credential refusals. The initial Plan snapshot
+still falls through to generic retry after MODE succeeds. This separate fix
+extends that same refusal path only to Plan reads before the first complete
+orders snapshot. Successful and later account refresh behavior stays native.
+
+Use the existing auth_rejection helper and typed StartupFailed publication,
+including its native code/message and primary-invalid-key deactivation policy.
+Keep terminal account state from resuming HTTP through a later poll or private
+login. Do not change markets/tickers startup, transient private failures, bare
+HTTP401/403 responses, ordinary rate limiting or unrelated snapshot scopes.
+There is no signer, RequestContext or error-table migration in this slice.
+
+Before production edits, separately commit original-source RED controls for
+initial Plan AuthInvalid/AuthExpired/AuthPermission refusals, exactly one typed
+startup terminal, no successful orders initialization and no resumed account
+HTTP after sibling callbacks or private login. Keep negative controls for
+transient initial Plan failures and post-startup/scoped refusals. Then run full
+MEXC+Binance native tests, scoped fmt/strict Clippy, both ratchets and independent
+source/adversarial, caller and full-map reviews. Inventory remains unchanged.
+The account implementation, its account tests, narrow lib.rs stream-error
+routing and append-only ledgers are needed; history #1793 stays excluded.
+Complete error envelopes without a data list use the same refusal check through
+on_stream_error; a successful envelope without its expected list remains a
+retryable malformed snapshot. Terminal state discards late snapshot pages and
+blocks both existing and newly requested asset refreshes without rearming polls. Architecture No: reuse existing native refusal facts and
+engine startup authority rather than adding another policy implementation.
+
+### Initial Plan refusal verification
+
+Plan d015560d56a precedes separate original-source RED tests d759c610dda
+(two failures, two negative controls passing). The implemented fix passes all
+44 account tests and full MEXC+Binance native suites:456 tests across40 targets.
+Scoped formatting, strict all-target Clippy and both integrated request-context
+checks pass, including14 scanner controls. Independent source/adversarial, caller
+and full-map reviews are clean, architecture No. Actual #1786 and #1854 are
+integrated, and all incoming Crypto.com #1818 work is preserved. Inventory is
+identical to incoming; only native initial-Plan refusal behavior changes.
+
+## Standalone public book command slice
+
+Base landing367601fdf7a30bed7aa5442546466fd1337fb781, newer than the requested
+cd3dc6a13fe. The overseer authorizes this branch to stack the reviewed green
+#1872 headaa40d4ce87ea70b0cc8ec64e4d7e2127bfc21968 despite its own lib.rs claim;
+porcelain merge6bc38aa2345 includes it. Actual #1872 landing must be integrated
+before final proof. Shared docs retain incoming first and each appendix once.
+HMAC owner claude-4yjlw0 confirms no MEXC/Phemex/WOO source reservation or reviewed
+private recipe; private adoption waits for the shared engine read helper after
+#1817. This unsigned public read needs no signer or credential plumbing.
+
+Current MEXC inventory is37 occurrences /36 entries after actual #1793 history
+landing. This slice removes8 occurrences /7 entries, leaving29 occurrences /
+29 entries. Every other venue/path map stays incoming-exact. Exact removals:
+
+| Path | Fingerprint | Count | Shared destination |
+| --- | --- | --- | --- |
+| venues/mexc/src/depth_query.rs | 0707067c9785c0028c07d0ad94a471aeb9a9315be7d6ed5ceee3f353f822fcf3 | 1 | Issued Context preflight refusal |
+| venues/mexc/src/depth_query.rs | 1c48419d2e8ec54a5b30b712ac91268756fd235c538bcacfdc3227f6383b0de8 | 1 | Issued Context preflight refusal |
+| venues/mexc/src/depth_query.rs | 234fcf69606cefc3d5816bdb500ae93f956e92c1fb5deaeace8f9fd0f4185dce | 1 | Issued Context preflight refusal |
+| venues/mexc/src/depth_query.rs | 7277348e8c2d96d515028483928e715a3e9c014072f494e18fd2e527dc2f360b | 1 | Context success terminal |
+| venues/mexc/src/depth_query.rs | 73bc67e960a617f9b43feeede1fd54e4edf11045a028006651973a5982f241bf | 1 | Issued Context preflight refusal |
+| venues/mexc/src/depth_query.rs | 87fd4d841397b006cb8e07e6de819cc3176d93fcdcc16d2247db02b24db8fa12 | 2 | Context native/decode failure terminal |
+| venues/mexc/src/lib.rs | dd40ba0518f46ed21ce7a11fae5c0e8e1d5877f4466529272ed959bc0aeb843c | 1 | Typed Context HTTP failure terminal |
+
+Genuine admit_http_command issues Read/Public20s/Never before preflight; the
+public adapter accepts no numeric owner argument. Rejected is already terminal,
+Revoked grants nothing, and neither falls back to numeric completion. Store the
+Context with the captured contract size and limit in Pending::BookQuery. Use one
+unsigned request_managed GET to the native encoded contract depth URL. Preserve
+limit1..1000/default100, market/scale validation, sorting, base amounts/totals,
+exact u64 version string, zero quantities and native snapshot error metadata.
+The original status/code510/Retry-After codec is reused, not expanded or replaced
+by another status ladder. Preserve depth+account pause only for live responses;
+no retry, live-book/account commit or credential evidence is introduced.
+
+Typed setup/network/released-deadline errors complete the Context with the native
+public-read NotSent declaration. Initial engine refusal has no write outcome.
+Parked/released expiry, old preparation, duplicate reply and ID reuse must not
+publish stale success or apply a stale429 pause. Native error/decode controls
+remain independent of Context liveness. No signer, shared executor, new timer,
+classification policy, numeric lookup or exemption is added.
+
+Commit original-source REDs before production changes: preparation/release,
+parked and released expiry, typed timeout, stale callbacks/ID reuse, genuine
+initial rejection and late429 non-interference. Preserve native book regression
+payloads/assertions in port_lows/auth_results/candle cross-controls, adapting
+only prepared transport and forward response clocks. The old no-timer assertion
+becomes an explicit single engine20s deadline with no retry timer or socket send.
+Then change depth_query.rs/lib.rs, prune exactly the table above, append CALLERS/
+AUDITS/QUALITY and obtain source/adversarial, caller and full-map reviews.
+Run full MEXC+Binance suites, scoped fmt/strict Clippy and both ratchets; CI and
+an overseer window are required. Architecture No: native codec adopts existing
+shared command custody, managed lifecycle and typed completion. History #1793
+is actual and its remaining paths stay untouched; account #1872 is stack-only.
+
+### Standalone book verification checkpoint
+
+All7 original RED controls pass with the managed adapter. Full MEXC+Binance
+suites pass472 tests across41 targets; scoped fmt/strict all-target Clippy pass.
+Independent reviews preserve native totals-before-truncation and restore the
+original no-timer refusal assertions alongside managed-dispatch exclusions.
+Only the queued request expects the engine deadline. Public/native fixtures
+retain result/auth checks and use forward callback clocks. The exact scanner
+shows29 occurrences /29 entries, an8-occurrence/7-entry reduction. Incoming
+landing integration and both ratchets precede CI/readiness; no merge window is
+claimed. Actual #1872 integration remains required before final merge proof.
+
+Frozen actual landing9aef6bca90b is genuinely integrated atb5d484c45ff. Runtime,
+MEXC/Binance tests and dependency trees are byte-identical to the472-test/strict/
+fmt checkpoint; both integrated ratchets pass (14 controls), and every incoming
+map is preserved except the exact8-occurrence/7-entry book prune. Three
+independent reviews are clean, architecture No. The reviewed #1872 source stays
+exact apart from the explicitly authorized BookQuery integration; its actual
+landing and the overseer's window remain required before merge.
+
+### Managed book integration after startup landing
+
+Actual startup #1872 e233cb05dfb63d7575382bed823c7538a5826b98 and subsequent
+Phemex #1878 7b6b4a2d029052c08fc3801a763a613b6a7ab9d4 are genuinely integrated.
+The startup dependency is resolved: only the eleven managed-book paths differ
+from incoming, with account.rs and its account tests incoming-exact. The native
+book source, fixtures and dependency trees retain the reviewed green behavior.
+Incoming inventory stays intact except the proven eight MEXC occurrences/seven
+entries; source-equivalent integration review and fresh-head CI are recorded in
+the PR. No merge without an overseer window.

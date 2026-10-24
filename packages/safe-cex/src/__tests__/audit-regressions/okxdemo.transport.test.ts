@@ -19,14 +19,22 @@ const options: ExchangeOptions = {
 };
 
 describe('OKX Demo transport and metadata', () => {
-  it('uses the default TLS port for every global and EEA live/demo channel', () => {
+  it('uses default TLS 443 for every global and EEA live/demo channel', () => {
     for (const [region, liveHost, demoHost] of [
       ['okx', 'ws.okx.com', 'wspap.okx.com'],
       ['okxeu', 'wseea.okx.com', 'wseeapap.okx.com'],
     ] as const) {
       for (const channel of ['public', 'private', 'business'] as const) {
-        expect(BASE_WS_URLS[region][channel].livenet).toBe(`wss://${liveHost}/ws/v5/${channel}`);
-        expect(BASE_WS_URLS[region][channel].testnet).toBe(`wss://${demoHost}/ws/v5/${channel}`);
+        for (const [environment, host] of [
+          ['livenet', liveHost],
+          ['testnet', demoHost],
+        ] as const) {
+          const endpoint = BASE_WS_URLS[region][channel][environment];
+          expect(endpoint).toBe(`wss://${host}/ws/v5/${channel}`);
+          const url = new URL(endpoint);
+          expect(url.protocol).toBe('wss:');
+          expect(url.port || '443').toBe('443');
+        }
       }
     }
   });

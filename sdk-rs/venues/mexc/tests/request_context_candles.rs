@@ -395,7 +395,7 @@ fn public_429_preserves_pause_and_late_429_has_no_pause_authority() {
                 limit: None,
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now + 1.);
         assert_eq!(actions.iter().any(|a| matches!(a, Action::Http(_))), late);
         assert_eq!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command:16, error }) if error.kind == Some(ErrorKind::RateLimited))), !late);
         e.handle(

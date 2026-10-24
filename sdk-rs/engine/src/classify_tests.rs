@@ -456,7 +456,8 @@ fn batch_projection_owns_count_ids_and_the_fact_kind() {
         project(&[refused, refused], 2),
         WriteResult::Rejected(_)
     ));
-    let WriteResult::Failed(error) = project(&[refused, BatchItem::Accepted("a"), unknown], 3)
+    let WriteResult::PartialUnknown(error) =
+        project(&[refused, BatchItem::Accepted("a"), unknown], 3)
     else {
         panic!("any unknown item makes the batch unknown");
     };
@@ -555,4 +556,131 @@ fn assert_table_rejects_resend_without_a_native_code() {
         unlisted: Verdict::Unknown(None),
         status: &[(429, Verdict::RefusedResend(ErrorKind::RateLimited))],
     });
+}
+
+#[test]
+fn unknown_fact_with_proven_effects_preserves_partial_unknown_authority() {
+    use crate::request_context::{CommandWrites, Error, WriteResult};
+    let ids = vec!["proven-native".to_owned()];
+    let fact = fact(
+        &TABLE,
+        Intent::Cancel,
+        Released::Response(&response(200)),
+        Some(&int(-9999)),
+        "remainder unresolved",
+    )
+    .for_attempt(crate::RequestId(1))
+    .with_order_ids(&ids);
+    let supplied = WriteFact::Failed {
+        fact,
+        known_effects: true,
+    };
+    assert!(supplied.belongs_to(crate::RequestId(1)));
+    assert!(!supplied.belongs_to(crate::RequestId(2)));
+    assert!(!supplied.resendable());
+    let result = supplied.into_result();
+    assert!(
+        matches!(result, WriteResult::PartialUnknown(_)),
+        "proven effects must remain distinct from evidence-only IDs: {result:?}"
+    );
+    let mut journal = CommandWrites::new(4).unwrap();
+    journal.register(crate::RequestId(1), 1).unwrap();
+    journal.released(crate::RequestId(1)).unwrap();
+    journal.result(crate::RequestId(1), result).unwrap();
+    assert_eq!(journal.validate_effects(crate::RequestId(1)), Ok(()));
+    assert_eq!(
+        journal.retry(crate::RequestId(1), crate::RequestId(2)),
+        Err(Error::RetryForbidden)
+    );
+    assert_eq!(journal.succeed(), Err(Error::State));
+    let terminal = journal.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(terminal.outcome, Some(Outcome::Unknown));
+    assert_eq!(terminal.partial.unwrap().order_ids, ids);
+}
+
+#[test]
+fn batch_proven_subset_plus_unknown_keeps_only_subset_effect_authority() {
+    use crate::request_context::WriteResult;
+    let unknown = BatchItem::Native(int(-9999));
+    let result = project(&[BatchItem::Accepted("proven"), unknown], 2);
+    let WriteResult::PartialUnknown(error) = result else {
+        panic!("proven subset must remain attributable: {result:?}");
+    };
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    let partial = error.partial.unwrap();
+    assert_eq!(partial.order_ids, ["proven"]);
+    assert_eq!((partial.total, partial.failed_index), (Some(2), Some(1)));
+    let gone = BatchItem::Native(int(-2011));
+    let result = batch(
+        &TABLE,
+        Intent::Cancel,
+        &response(200),
+        2,
+        &[gone, unknown],
+        "uncertain",
+    )
+    .unwrap();
+    let WriteResult::PartialUnknown(error) = result else {
+        panic!("Satisfied is a proven cancel effect even without IDs");
+    };
+    assert!(
+        error.partial.is_none(),
+        "the existing error helper omits empty ID metadata"
+    );
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+}
+
+#[test]
+fn wholly_unproven_batch_or_fact_never_borrows_subset_authority() {
+    use crate::request_context::{CommandWrites, Error, WriteResult};
+    let unknown = BatchItem::Native(int(-9999));
+    let fact = fact(
+        &TABLE,
+        Intent::Place,
+        Released::Response(&response(200)),
+        Some(&int(-9999)),
+        "unknown",
+    )
+    .for_attempt(crate::RequestId(1))
+    .with_order_ids(&["evidence".into()]);
+    let mut results = vec![
+        WriteFact::Failed {
+            fact,
+            known_effects: false,
+        }
+        .into_result(),
+        project(&[unknown], 1),
+        project(&[BatchItem::Accepted("evidence")], 2),
+        project(
+            &[BatchItem::Accepted("evidence"), BatchItem::Accepted("")],
+            2,
+        ),
+        batch(
+            &TABLE,
+            Intent::Place,
+            &response(503),
+            2,
+            &[BatchItem::Accepted("evidence"), unknown],
+            "unproven status",
+        )
+        .unwrap(),
+    ];
+    for result in results.drain(..) {
+        assert!(
+            matches!(result, WriteResult::Failed(_)),
+            "unproven reply: {result:?}"
+        );
+        let mut journal = CommandWrites::new(4).unwrap();
+        journal.register(crate::RequestId(1), 1).unwrap();
+        journal.released(crate::RequestId(1)).unwrap();
+        journal.result(crate::RequestId(1), result).unwrap();
+        assert_eq!(
+            journal.validate_effects(crate::RequestId(1)),
+            Err(Error::State)
+        );
+        assert_eq!(
+            journal.fail(VenueError::new("fallback")).unwrap().outcome,
+            Some(Outcome::Unknown)
+        );
+    }
 }

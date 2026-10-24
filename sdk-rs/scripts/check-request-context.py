@@ -369,6 +369,29 @@ HISTORY_BOOTSTRAPS = {'venues/coinbase/src/history.rs': ({'0451c29993291234cad6e
   'de4e8a9f01fa2526af01b897df7e71eb6422d5bda2faabb22527e73503e6a5a6': 1,
   'f9cbb2adfc98c4ca1e0d379b2b1c90b52a3e91fd61f8beaebb998423812ddf8d': 1})}
 
+# Exact same-site snapshot pending-token re-expression, using the existing
+# literal whole-map transition table under the standing rehash authorization.
+HISTORY_BOOTSTRAPS['venues/paradex/src/account.rs'] = ({'0bc0f05583257432e512c356c6a5b41046e2a70d3cfe6eb8190238c9514faba2': 1,
+  '3205be4fd57aee0c1cacd8fdd9fa48f9d000e9bbb2b7f53409ca39c64f0edc4a': 1,
+  '388c9f66c40d488788f2f4a9808088e22a0425615dfd2818c9d63d58675392d1': 1,
+  '395b8568f2efae46398fc76c6b422807900a928734749cdd4f8bd60b42366d19': 1,
+  '5c28b0ebae1f2a54f344d52c2c422801c8e82381c7fd8ad95d13cd549e88ddec': 1,
+  '85a7a04ae14d4df7bd123dd4837791701bbb02dc615d4e9f24060a2161f7ba3e': 1,
+  'a5c107b3d98e73b4c73ebd13c21dcf8cb307a0041bc896cc3e6e808fb63cf446': 1,
+  'ac42e25ca2de115b1eb59cc4913e6fd26670c4dfb47f17ed56fc0d1f34272fd9': 1,
+  'c8154248a24f58ded15a175a8afd344f331635f51e564a526d510748797ff231': 1,
+  'e473c92d9c3a15cbdf8752a673c64963c9ef531ee4a7e47ae60d1abe5e32659e': 1},
+ {'0bc0f05583257432e512c356c6a5b41046e2a70d3cfe6eb8190238c9514faba2': 1,
+  '29a6633fa3f6e05f04f534c0e675690014adde1e8a26e93c3769e8618602c13c': 1,
+  '3205be4fd57aee0c1cacd8fdd9fa48f9d000e9bbb2b7f53409ca39c64f0edc4a': 1,
+  '388c9f66c40d488788f2f4a9808088e22a0425615dfd2818c9d63d58675392d1': 1,
+  '395b8568f2efae46398fc76c6b422807900a928734749cdd4f8bd60b42366d19': 1,
+  '85a7a04ae14d4df7bd123dd4837791701bbb02dc615d4e9f24060a2161f7ba3e': 1,
+  'a5c107b3d98e73b4c73ebd13c21dcf8cb307a0041bc896cc3e6e808fb63cf446': 1,
+  'ac42e25ca2de115b1eb59cc4913e6fd26670c4dfb47f17ed56fc0d1f34272fd9': 1,
+  'c8154248a24f58ded15a175a8afd344f331635f51e564a526d510748797ff231': 1,
+  'e473c92d9c3a15cbdf8752a673c64963c9ef531ee4a7e47ae60d1abe5e32659e': 1})
+
 # Owner-authorized exact two-site recipe-factory rehash. No additional calls.
 SIGNER_POLICY_BOOTSTRAPS = {'venues/binance/src/history.rs': ({'153ef00b195a92e18337317fde397c0707f7778eadc4bfc02b2c0d2ffbf493c5': 1,
                                     '2263b7c3975168a800233a5720729a5293adc8d79ddc822742da439875b1c927': 1,
@@ -409,6 +432,9 @@ SIGNER_POLICY_BOOTSTRAPS = {'venues/binance/src/history.rs': ({'153ef00b195a92e1
 # BingX legacy history and listen-key work, until cxxyqr's history bridge (#1848) and the
 # session Context (#1832/#1842) own them; WEEX account cycle, trading and history, until
 # the shared Plan/execution-group API and the history bridge own them. No other additions.
+# OKX legacy GETs and sign failures (#1773): approved by claude-ddi2il, same exit as WEEX.
+# Bitget private sends, signing and sign failures funnelled through lib.rs: approved by
+# claude-ddi2il, same exit; remove before master.
 STAGING_BOOTSTRAPS = {'venues/bingx/src/lib.rs': ({'1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
  '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 2,
  'b4b475ef7a3c08d3514bf2b7497dc3a85e7a328c33757287a83f82cb602f0a27': 1,
@@ -424,6 +450,32 @@ STAGING_BOOTSTRAPS = {'venues/bingx/src/lib.rs': ({'1620031f97e957d61d90d1f02aee
  'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
  'ca1a695870588abe078efa57b2d1e6f789b219044369ce2f8d1119a9c10664b7': 1,
  'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 1}),
+ 'venues/bitget/src/lib.rs': ({'43cf91072f928d61f9f061f65a83f846ce5b37f7a7328105f8f2c390ba4ccf62': 1,
+ '569abc443c07aca5127ee71c347600be68bb35c14aeae80c3a14b2f5f2642980': 1,
+ '7280fdcd54919b50f6ab0d1bd012fb28e52c546b5b6c457f180576d9c4b2c35f': 1,
+ 'a5c4555a7341b5353adf967e17b11df1c12578e05ceda5525ccf44fddb177b4a': 1},
+    {'43cf91072f928d61f9f061f65a83f846ce5b37f7a7328105f8f2c390ba4ccf62': 1,
+ '569abc443c07aca5127ee71c347600be68bb35c14aeae80c3a14b2f5f2642980': 1,
+ '5b44116449d06833b5f091cb3866ced7f16f181fd1226b31ad977eff6bf26ac9': 1,
+ '6c77d608b079104cc5338cbabb01a7c4a0e24f112ef91ea5483c423808d92bad': 1,
+ '7280fdcd54919b50f6ab0d1bd012fb28e52c546b5b6c457f180576d9c4b2c35f': 1,
+ 'a5c4555a7341b5353adf967e17b11df1c12578e05ceda5525ccf44fddb177b4a': 1,
+ 'a921be85fe127dcd74b1718af170b7309b86f0b4f66469353f73cc86c722be28': 1,
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1}),
+ 'venues/okx/src/lib.rs': ({'1cb580e20171923e6928e9cbc28b73b880ba2dd8c4f11a395557966119b8d038': 1,
+ '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 2,
+ 'a39517b8d72cf193e89578682d47a093f99c8b47724978190a59c88125595faf': 2,
+ 'b8eef2a79ada04918fd91d4c45f3a03a76d566ac79f733acf0c441b0fbbfc934': 1,
+ 'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1},
+    {'1cb580e20171923e6928e9cbc28b73b880ba2dd8c4f11a395557966119b8d038': 1,
+ '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 2,
+ '2e9218906fd923fa6c83c648873ea2527c33dd1068d609c8c1ec343630b36911': 1,
+ 'a39517b8d72cf193e89578682d47a093f99c8b47724978190a59c88125595faf': 2,
+ 'b1761cdefa174ea70037cfceab33b91ad7279e59d22ccecb872e996dd5b0c32c': 1,
+ 'b8eef2a79ada04918fd91d4c45f3a03a76d566ac79f733acf0c441b0fbbfc934': 1,
+ 'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1}),
  'venues/weex/src/lib.rs': ({'067aa233d0ebbb24c837ae5cb4549d6aa68e9f29bf4bdde0ba0630bda9f466c1': 1,
  '0d6bbb8e01da4f9bc9a177c0e8ca9d0d015c922780050cfeda6b33807cac8e78': 1,
  '1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,

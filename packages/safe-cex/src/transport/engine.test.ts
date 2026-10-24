@@ -708,10 +708,15 @@ describe('engine socket routing at the raw transport boundary', () => {
     expect(handler.onClose).toHaveBeenCalledExactlyOnceWith(1001);
     socket.send('after-close');
     expect(relay.send).toHaveBeenCalledTimes(3);
-    routed.connect(url, handlers('private'));
-    routed.connect(url, handlers('private'));
-    routed.connect(url, handlers('private'));
+    const retries = [
+      routed.connect(url, handlers('private')),
+      routed.connect(url, handlers('private')),
+      routed.connect(url, handlers('private')),
+    ];
     expect(raw.connect.mock.lastCall?.[0]).toBe('wss://bybit-proxy-ja.tealstreet.io/v5/private');
+    // One probe may still be awaiting its dynamic relay constructor. Retire it
+    // before Vitest resets the mock; it must not open a socket in the next test.
+    retries.forEach((retry) => retry.close());
   });
 });
 
@@ -1571,6 +1576,9 @@ describe('secondary GET identity egress', () => {
         await routed.request({ ...input, method });
         expect(delivered().url).toBe(primaryUrl);
       }
+      // A declared read-key request uses the read egress whatever its method.
+      await routed.request({ ...input, method: 'POST', route: 'secondary' });
+      expect(delivered().url).toBe(`https://secondary.example/egress/${input.url}`);
       await routed.request({ ...input, headers: {} });
       if (['binance', 'binancepm', 'binanceinverse'].includes(venue))
         expect(delivered().url).not.toContain('secondary.example');

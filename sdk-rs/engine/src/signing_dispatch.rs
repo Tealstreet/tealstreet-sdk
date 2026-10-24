@@ -114,11 +114,24 @@ pub(crate) enum Completion {
     Failed(Pending, SignError),
 }
 impl Dispatch {
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.pending.is_empty() && self.outbound.is_empty()
+    }
+
     pub fn next_id(&mut self) -> RequestId {
         RequestId(self.next.next_or_fatal())
     }
     pub fn available_id(&self) -> bool {
         self.next.available(1)
+    }
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn available_ids(&self, count: u64) -> bool {
+        self.next.available(count)
+    }
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn reserve_ids(&mut self, count: u64) -> Option<std::ops::Range<u64>> {
+        self.next.reserve(count)
     }
     pub fn failed(&self) -> bool {
         self.next.failed()
@@ -209,6 +222,21 @@ impl Dispatch {
             .chain(self.outbound.values())
             .any(|p| p.socket() == Some(socket))
     }
+    /// Read-only target for engine socket epoch/expiry admission. The pending
+    /// recipe and all HTTP lifecycle state remain owned by Dispatch.
+    #[cfg(feature = "managed-sockets")]
+    pub fn outbound_socket(&self, attempt: RequestId) -> Option<(SocketId, bool)> {
+        let pending = self
+            .pending
+            .get(&attempt)
+            .or_else(|| self.outbound.get(&attempt))?;
+        pending.socket().map(|socket| {
+            (
+                socket,
+                matches!(&pending.outbound, Action::WsConnect { .. }),
+            )
+        })
+    }
     pub fn hold(&mut self, outbound: Action) -> Result<(), SignError> {
         let id = self.next_id();
         self.stage(id, outbound, Box::new(Plain), TimerId(0), 0.)?;
@@ -290,11 +318,14 @@ impl Dispatch {
         p.deadline = deadline;
         Ok(())
     }
-    pub fn activate_managed(&mut self, id: RequestId) -> Result<(), SignError> {
+    pub fn activate_managed(&mut self, id: RequestId, deadline: f64) -> Result<(), SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
-        if !p.managed || p.route_ready {
+        if !p.managed || p.route_ready || !deadline.is_finite() || deadline <= p.staged_at {
             return Err(SignError::InvalidRequest);
         }
+        // The route can only tighten the staged physical cap. Delayed provider
+        // preparation and every stale retry retain the same immutable bound.
+        p.deadline = p.deadline.min(deadline);
         p.route_ready = true;
         Ok(())
     }
@@ -321,10 +352,19 @@ impl Dispatch {
             .pending
             .values_mut()
             .find(|p| p.request_id() == Some(request))?;
+        let requested = p.staged_at + f64::from(timeout.max(1));
+        p.deadline = if p.managed {
+            p.deadline.min(requested)
+        } else {
+            requested
+        };
         if let Action::Http(http) = &mut p.outbound {
-            http.timeout_ms = Some(timeout.max(1));
+            http.timeout_ms = Some(if p.managed {
+                (p.deadline - p.staged_at).ceil().max(1.) as u32
+            } else {
+                timeout.max(1)
+            });
         }
-        p.deadline = p.staged_at + f64::from(timeout.max(1));
         Some((p.timer, p.deadline))
     }
     pub fn prepare(

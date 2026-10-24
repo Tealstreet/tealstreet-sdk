@@ -217,6 +217,11 @@ impl crate::request_context::Error {
             .kind(self.kind())
             .outcome(Outcome::NotSent)
     }
+
+    /// Read admission failures carry no financial outcome.
+    pub fn read_venue_error(self) -> VenueError {
+        VenueError::new(self.to_string()).kind(self.kind())
+    }
 }
 
 impl fmt::Display for crate::request_context::Error {
@@ -224,7 +229,7 @@ impl fmt::Display for crate::request_context::Error {
         use crate::request_context::Error;
         f.write_str(match self {
             Error::Invalid => "Invalid request context",
-            Error::Capacity => "Too many requests in flight",
+            Error::Capacity => "Engine request capacity reached",
             Error::Duplicate => "Request is already in flight",
             Error::State => "Request is not in a sendable state",
             Error::TimedOut => "Request context timed out",
@@ -357,6 +362,28 @@ mod tests {
             assert_eq!(error.kind, Some(kind), "{reason:?}");
             assert_eq!(error.outcome, Some(Outcome::NotSent), "{reason:?}");
             assert!(!error.message.is_empty());
+        }
+    }
+
+    #[test]
+    fn read_admission_refusals_keep_kind_and_text_without_financial_outcome() {
+        use crate::request_context::Error;
+        for reason in [
+            Error::TimedOut,
+            Error::Invalid,
+            Error::Revoked,
+            Error::Duplicate,
+            Error::RetryForbidden,
+            Error::Capacity,
+            Error::State,
+            Error::Stale,
+        ] {
+            let read = reason.read_venue_error();
+            let generic = reason.venue_error();
+            assert_eq!(read.message, generic.message);
+            assert_eq!(read.kind, generic.kind);
+            assert_eq!(read.outcome, None);
+            assert_eq!(generic.outcome, Some(Outcome::NotSent));
         }
     }
 

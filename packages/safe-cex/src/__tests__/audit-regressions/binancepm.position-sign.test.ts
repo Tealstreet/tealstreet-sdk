@@ -10,7 +10,7 @@ describe('Binance portfolio-margin WS position signs', () => {
     vi.useRealTimers();
   });
 
-  it('keeps short contracts and notional non-negative like the REST mapper', () => {
+  it('keeps short contracts and notional non-negative like the REST mapper', async () => {
     vi.useFakeTimers();
     const store = new DefaultStore();
     store.update({
@@ -29,6 +29,8 @@ describe('Binance portfolio-margin WS position signs', () => {
       ],
     });
     const exchange = new BinancePMExchange('binancepm', { key: 'key', secret: 'secret' }, store);
+    // ACCOUNT_UPDATE also schedules a REST reconcile, outside this WS mapper test.
+    const refresh = vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([]);
     const websocket = new BinancePMPrivateWebsocket(exchange);
 
     websocket.handleAccountEvents([
@@ -42,5 +44,9 @@ describe('Binance portfolio-margin WS position signs', () => {
 
     expect(store.positions[0]).toMatchObject({ side: PositionSide.Short, contracts: 0.006 });
     expect(store.positions[0].notional).toBeCloseTo(508.81878);
+    expect(refresh).toHaveBeenCalledOnce();
+    websocket.dispose();
+    exchange.dispose();
+    await Promise.resolve();
   });
 });

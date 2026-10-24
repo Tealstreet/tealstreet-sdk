@@ -109,7 +109,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       headers: {
         'X-Referer': BROKER_ID,
         'X-BAPI-RECV-WINDOW': recvWindow,
-        'Content-Type': 'application/json, charset=utf-8',
+        'Content-Type': 'application/json',
         ...bybitSiteHeaders,
       },
     },

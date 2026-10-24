@@ -65,6 +65,10 @@ export type WsStrategy =
     // class offers it ahead of `fallback` when the host app has enabled the relay
     // (`transport/tealstreet/wsRelay`). Never a public stream: the tunnel refuses those.
     relayUpstream?: WsHost;
+    // Also attach the relay to a TUNNELLED resolution (bitget): a venue that checks
+    // the key's bound IP on login needs the egress users bind for REST, which the
+    // proxy host may not be.
+    relayWhenTunnelled?: boolean;
     initialSilentConnects?: number;
     ignoredMessages?: string[];
     directUrls?: string[];
@@ -74,6 +78,8 @@ export interface ExchangeWsRouting {
   public?: WsStrategy;
   private?: WsStrategy;
   business?: WsStrategy;
+  // The private socket of a UTA account, on a different venue path (bitget v3).
+  privateUta?: WsStrategy;
 }
 
 // The full declarative routing spec for one exchange. `ws` channels default to

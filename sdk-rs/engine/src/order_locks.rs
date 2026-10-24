@@ -5,7 +5,8 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub(crate) struct OrderLocks {
     active: Vec<(CommandId, Scope)>,
-    waiting: Vec<(Command, bool)>,
+    /// Deferred commands: failed flag and the caller-wait receipt each carries.
+    waiting: Vec<(Command, bool, Option<u64>)>,
     uncertain: HashMap<String, u64>,
     epoch: u64,
 }
@@ -15,6 +16,9 @@ struct Scope {
     sent: bool,
     managed: bool,
     unknown_symbol: bool,
+    // An absent-order answer arrived while this placement still held its
+    // lock: its reconcile read waits for finish, when a read can clear it.
+    absent: bool,
     ids: Vec<String>,
     symbols: Vec<String>,
     all_symbol: Option<String>,
@@ -37,7 +41,7 @@ fn native(id: &str) -> &str {
 impl OrderLocks {
     pub fn contains(&self, command: CommandId) -> bool {
         self.active.iter().any(|(id, _)| *id == command)
-            || self.waiting.iter().any(|(c, _)| matches!(c, Command::CancelSymbolOrders { command: id, .. } if *id == command))
+            || self.waiting.iter().any(|(c, ..)| matches!(c, Command::CancelSymbolOrders { command: id, .. } if *id == command))
     }
 
     pub fn acquire(
@@ -54,6 +58,7 @@ impl OrderLocks {
             sent: false,
             managed: false,
             unknown_symbol: false,
+            absent: false,
         };
         let input = command;
         let command = match command {
@@ -142,7 +147,7 @@ impl OrderLocks {
         Ok(())
     }
 
-    pub fn defer(&mut self, command: &Command) -> bool {
+    pub fn defer(&mut self, command: &Command, receipt: Option<u64>) -> bool {
         if let Command::CancelSymbolOrders { symbol, .. } = command
             && self.active.iter().any(|(_, held)| {
                 held.placing && (symbol.is_empty() || held.symbols.contains(symbol))
@@ -151,16 +156,21 @@ impl OrderLocks {
             if self.waiting.len() >= 64 {
                 return false;
             }
-            self.waiting.push((command.clone(), false));
+            self.waiting.push((command.clone(), false, receipt));
             return true;
         }
         false
     }
 
-    pub fn ready(&mut self) -> Vec<(Command, bool)> {
+    /// Caller-wait receipts the deferred commands carry.
+    pub fn carries(&self, receipt: u64) -> bool {
+        self.waiting.iter().any(|(.., held)| *held == Some(receipt))
+    }
+
+    pub fn ready(&mut self) -> Vec<(Command, bool, Option<u64>)> {
         let mut ready = Vec::new();
         let uncertain = &self.uncertain;
-        self.waiting.retain(|(command, failed)| {
+        self.waiting.retain(|(command, failed, receipt)| {
             let Command::CancelSymbolOrders { symbol, .. } = command else {
                 return false;
             };
@@ -174,6 +184,7 @@ impl OrderLocks {
                         || uncertain.contains_key("")
                         || uncertain.contains_key(symbol)
                         || symbol.is_empty() && !uncertain.is_empty(),
+                    *receipt,
                 ));
             }
             blocked
@@ -204,7 +215,7 @@ impl OrderLocks {
                 self.uncertain.insert(String::new(), self.epoch);
                 marked.push(String::new());
             }
-            for (waiting, failed) in &mut self.waiting {
+            for (waiting, failed, _) in &mut self.waiting {
                 if matches!(waiting, Command::CancelSymbolOrders { symbol, .. }
                     if symbol.is_empty() || scope.symbols.contains(symbol))
                 {
@@ -215,6 +226,46 @@ impl OrderLocks {
         self.active.retain(|(id, _)| *id != command);
         marked
     }
+    /// Fence symbols (`None`: every symbol) until a fresh order read clears
+    /// them through `reconciled`: an absent-order answer proved the order is not
+    /// open, not that it was cancelled.
+    pub fn fence(&mut self, symbols: Option<&[String]>) {
+        self.epoch = self.epoch.saturating_add(1);
+        match symbols {
+            Some(symbols) => {
+                for symbol in symbols {
+                    self.uncertain.insert(symbol.clone(), self.epoch);
+                }
+            }
+            None => {
+                self.uncertain.insert(String::new(), self.epoch);
+            }
+        }
+    }
+
+    /// Defer the reconcile read of an absent-order answer to this command's
+    /// finish while its placing scope is held (a read now could not clear the
+    /// fence). False when the command holds no placing scope.
+    pub fn defer_absent(&mut self, command: CommandId) -> bool {
+        match self
+            .active
+            .iter_mut()
+            .find(|(id, scope)| *id == command && scope.placing)
+        {
+            Some((_, scope)) => {
+                scope.absent = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn absent_pending(&self, command: CommandId) -> bool {
+        self.active
+            .iter()
+            .any(|(id, scope)| *id == command && scope.absent)
+    }
+
     /// What a reconcile read must cover for this held command: `None` is a
     /// full read (unrouted IDs or an all-symbol cancel), else its symbols.
     pub fn reconcile_scope(&self, command: CommandId) -> Option<Option<Vec<String>>> {
@@ -258,6 +309,15 @@ impl OrderLocks {
                 scope.sent = true;
             }
         }
+    }
+
+    /// New owned preflight cannot erase evidence of an earlier legacy send.
+    #[cfg(feature = "http-plans")]
+    pub fn can_manage_unsent(&self, command: CommandId) -> bool {
+        self.active
+            .iter()
+            .find(|(id, _)| *id == command)
+            .is_none_or(|(_, scope)| !scope.sent)
     }
 
     pub fn manage(&mut self, command: CommandId) {

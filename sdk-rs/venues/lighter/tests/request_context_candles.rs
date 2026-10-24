@@ -13,8 +13,8 @@ const CANDLES: &str = r#"{"code":200,"c":[{"t":2000,"o":"2","h":"3","l":"1","c":
 fn started(options: Options) -> (Engine<Lighter>, TimerId) {
     let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(options));
     engine.start(NOW);
-    let metadata = engine
-        .drain_actions()
+    let metadata = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -307,14 +307,17 @@ fn background_failure_retires_only_its_generation_and_next_poll_can_recover() {
             })
             .unwrap();
         if timeout {
-            let timer = actions
+            let timers: Vec<_> = actions
                 .iter()
-                .find_map(|a| match a {
+                .filter_map(|a| match a {
                     Action::SetTimer { timer, at_ms } if *at_ms == NOW + 140_000. => Some(*timer),
                     _ => None,
                 })
-                .unwrap();
-            engine.handle(NOW + 140_000., Event::TimerFired { timer });
+                .collect();
+            assert!(!timers.is_empty());
+            for timer in timers {
+                engine.handle(NOW + 140_000., Event::TimerFired { timer });
+            }
         } else {
             engine.http_preparation_failed(
                 NOW + 120_001.,
@@ -439,4 +442,101 @@ fn issuance_capacity_refusal_is_visible_without_consuming_a_later_slot() {
     engine.drain_actions().for_each(drop);
     fetch(&mut engine, NOW + 2., 257);
     preparation(&engine.drain_actions().collect::<Vec<_>>());
+}
+
+#[test]
+fn command_entry_capacity_is_typed_before_native_validation_and_preserves_peers() {
+    for robinhood in [false, true] {
+        for testnet in [false, true] {
+            let (mut engine, _) = started(Options {
+                public_data_only: true,
+                robinhood,
+                testnet,
+                ..Options::default()
+            });
+            let mut first = None;
+            for command in 1..=256 {
+                fetch(&mut engine, NOW, command);
+                let (token, _) = preparation(&engine.drain_actions().collect::<Vec<_>>());
+                first.get_or_insert(token);
+            }
+            for (command, symbol) in [(257, "ETH"), (258, "UNKNOWN")] {
+                engine.handle(
+                    NOW,
+                    Event::Command(Command::FetchCandles {
+                        command,
+                        symbol: symbol.into(),
+                        interval: Interval::M1,
+                        limit: Some(2),
+                        from_ms: None,
+                        to_ms: None,
+                    }),
+                );
+                let actions: Vec<_> = engine.drain_actions().collect();
+                let result = terminal(&actions, command);
+                assert_eq!(result.len(), 1, "one correlated entry refusal");
+                let error = result[0].as_ref().unwrap_err();
+                assert_eq!(error.kind, Some(ErrorKind::Internal));
+                assert_eq!(error.outcome, None, "Read refusal has no financial outcome");
+                assert_eq!(error.message, "Engine request capacity reached");
+                assert_eq!(
+                    actions.len(),
+                    1,
+                    "refusal allocates no HTTP, timer or other I/O"
+                );
+            }
+            let request = release(&mut engine, first.unwrap(), NOW + 1.);
+            reply_at(&mut engine, NOW + 2., &request, 200, CANDLES);
+            let actions: Vec<_> = engine.drain_actions().collect();
+            assert!(matches!(terminal(&actions, 1).as_slice(), [Ok(_)]));
+            assert!(terminal(&actions, 258).is_empty());
+            fetch(&mut engine, NOW + 3., 258);
+            preparation(&engine.drain_actions().collect::<Vec<_>>());
+        }
+    }
+}
+
+#[test]
+fn duplicate_live_command_entry_cannot_replace_its_original_candle_owner() {
+    let (mut engine, _) = started(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    fetch(&mut engine, NOW, 700);
+    let (original, _) = preparation(&engine.drain_actions().collect::<Vec<_>>());
+    fetch(&mut engine, NOW + 1., 700);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::Notice(Notice::Event(event))]
+            if event.code == safe_cex_engine::log::code::COMMAND_DUPLICATE
+    ));
+    assert!(terminal(&actions, 700).is_empty());
+    let request = release(&mut engine, original, NOW + 2.);
+    reply_at(&mut engine, NOW + 3., &request, 200, CANDLES);
+    assert!(matches!(
+        terminal(&engine.drain_actions().collect::<Vec<_>>(), 700).as_slice(),
+        [Ok(_)]
+    ));
+}
+
+#[test]
+fn invalid_command_entry_clock_has_one_typed_read_refusal_and_no_owner() {
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let (mut engine, _) = started(Options {
+            public_data_only: true,
+            ..Options::default()
+        });
+        fetch(&mut engine, now, 701);
+        let actions: Vec<_> = engine.drain_actions().collect();
+        let result = terminal(&actions, 701);
+        assert_eq!(result.len(), 1);
+        let error = result[0].as_ref().unwrap_err();
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(error.outcome, None);
+        assert_eq!(error.message, "Invalid request context");
+        assert_eq!(actions.len(), 1, "invalid entry allocates no HTTP or timer");
+        fetch(&mut engine, NOW + 1., 701);
+        preparation(&engine.drain_actions().collect::<Vec<_>>());
+    }
 }

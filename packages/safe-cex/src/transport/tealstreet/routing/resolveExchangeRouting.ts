@@ -30,8 +30,15 @@ const resolveRestPool = (declared: RestPool, proxyRegion?: string): RestPool =>
 const resolveWs = (strategy: WsStrategy | undefined, o: RoutingOptions, egress: 'jp' | 'sg'): ResolvedWs => {
   if (!strategy) return { tunnelled: false };
   const resolved = resolveWsKind(strategy, o);
-  // Declared fallback candidates ride along only on a DIRECT resolution (see WsStrategy).
-  if (resolved.tunnelled) return resolved;
+  // Declared fallback candidates ride along only on a DIRECT resolution (see WsStrategy),
+  // except a relay the strategy explicitly offers to tunnelled sockets too.
+  if (resolved.tunnelled) {
+    // Declared direct URLs bypass this channel's route whichever way it resolves.
+    const tunnelled = strategy.directUrls ? { ...resolved, directUrls: strategy.directUrls } : resolved;
+    return strategy.relayWhenTunnelled && strategy.relayUpstream
+      ? { ...tunnelled, relay: buildRelayUrl(egress, strategy.relayUpstream) }
+      : tunnelled;
+  }
   const out = { ...resolved };
   if (strategy.initialSilentConnects !== undefined) out.initialSilentConnects = strategy.initialSilentConnects;
   if (strategy.ignoredMessages) out.ignoredMessages = strategy.ignoredMessages;
@@ -74,5 +81,6 @@ export const resolveExchangeRouting = (exchange: ExchangeName, o: RoutingOptions
     wsPublic: resolveWs(spec.ws?.public, o, howEgress),
     wsPrivate: resolveWs(spec.ws?.private, o, howEgress),
     wsBusiness: resolveWs(spec.ws?.business, o, howEgress),
+    ...(spec.ws?.privateUta ? { wsPrivateUta: resolveWs(spec.ws.privateUta, o, howEgress) } : {}),
   };
 };

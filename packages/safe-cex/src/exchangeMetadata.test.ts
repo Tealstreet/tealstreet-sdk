@@ -379,6 +379,7 @@ describe('exchangeMetadata', () => {
 
       expect(mobileSupported).toEqual([
         'binance',
+        'binanceinverse',
         'binancepm',
         'binancespot',
         'bitget',
@@ -398,7 +399,6 @@ describe('exchangeMetadata', () => {
       });
 
       [
-        'binanceinverse',
         'bitgetinverse',
         'bitgetusdc',
         'hyrotrader',
@@ -424,7 +424,12 @@ describe('exchangeMetadata', () => {
       });
     });
 
-    it('keeps Binance inverse hidden until COIN-M private and history surfaces are certified', () => {
+    it('keeps Binance inverse production-enabled after the COIN-M rollout', () => {
+      expect(exchangeMetadata.binanceinverse.enabled).toBe(true);
+      expect(exchangeMetadata.binanceinverse.enabledInDev).toBe(true);
+      expect(exchangeMetadata.binanceinverse.enableInPreview).toBe(true);
+      expect(exchangeMetadata.binanceinverse.requiresCors).toBe(true);
+      expect(exchangeMetadata.binanceinverse.privateProxyRegions).toHaveProperty('JA');
       expect(exchangeMetadata.binanceinverse.supportsTestnet).toBe(false);
       expect(exchangeMetadata.binanceinverse.requiresTickersForMarketsLoaded).toBe(true);
       expect(exchangeMetadata.binanceinverse.latencyDomain).toBe('dapi.binance.com');

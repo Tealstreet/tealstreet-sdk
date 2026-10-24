@@ -9,13 +9,17 @@ import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderType } from '../../types';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 const NOW = 1700000000000;
 const KEY = `01${'00'.repeat(39)}`;
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 
-const recorded = (accountLimits: unknown = { code: 200, user_tier_name: 'premium' }) => {
+const recorded = (
+  accountLimits: unknown = { code: 200, user_tier_name: 'premium' },
+  integrator = 158385,
+) => {
   const requests: Array<{ method: string; url: string; body?: string }> = [];
   const sockets: Array<{ subscriptions: string[]; message(text: string): void }> = [];
   let marginMode = 0;
@@ -23,6 +27,7 @@ const recorded = (accountLimits: unknown = { code: 200, user_tier_name: 'premium
   const response = (data: unknown) => ({ status: 200, body: new TextEncoder().encode(JSON.stringify(data)) });
   const transport: Transport = {
     now: () => NOW,
+    prepareHttp: prepareRecordedHttp,
     connect: (_url, handlers) => {
       const subscriptions: string[] = [];
       sockets.push({ subscriptions, message: handlers.onMessage });
@@ -71,6 +76,14 @@ const recorded = (accountLimits: unknown = { code: 200, user_tier_name: 'premium
               collateral: '1000',
               total_asset_value: '1000',
               available_balance: '900',
+              approved_integrators: [
+                {
+                  account_index: integrator,
+                  approval_expiry: NOW + 86400000,
+                  max_perps_maker_fee: 0,
+                  max_perps_taker_fee: 250,
+                },
+              ],
               positions: [
                 {
                   market_id: 1,
@@ -113,7 +126,8 @@ const options = (): ExchangeOptions => ({
   testnet: true,
 });
 const start = async (opts = options(), name: ExchangeName = 'lighter', accountLimits?: unknown) => {
-  const tape = recorded(accountLimits);
+  const integrator = Number(opts.extra?.lighterIntegratorAccountIndex ?? (name === 'lighter-robinhood' ? 47296 : 158385));
+  const tape = recorded(accountLimits, integrator);
   setWasmEngineLoader(loadNodeEngine);
   setRustEngineTransport(() => tape.transport);
   const store = new DefaultStore();
@@ -239,6 +253,11 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('%s real WASM boundary'
       TimeInForce: 0,
       ReduceOnly: 1,
     });
+    if (name === 'lighter-robinhood') {
+      expect(stop.tx.L2TxAttributes).toEqual({ 1: 47296, 2: 250, 3: 0 });
+    } else {
+      expect(stop.tx).not.toHaveProperty('L2TxAttributes');
+    }
     expect(stop.tx.ClientOrderIndex.toString()).toBe(ids[0]);
     expect(atob(stop.tx.Sig)).toHaveLength(80);
     expect(stop.tx.ExpiredAt).toBeGreaterThan(NOW);

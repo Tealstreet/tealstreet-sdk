@@ -29,6 +29,8 @@ const RELAY_UPSTREAM = {
   bybitPrivate: 'wss://stream.bybit.com/v5/private',
   okxPrivate: 'wss://ws.okx.com/ws/v5/private',
   okxBusiness: 'wss://ws.okx.com/ws/v5/business',
+  bitgetPrivate: 'wss://ws.bitget.com/v2/ws/private',
+  bitgetPrivateUta: 'wss://ws.bitget.com/v3/ws/private',
 } as const;
 
 const WS = {
@@ -41,6 +43,7 @@ const WS = {
   coinbase: `${ASIA}/coinbase/private`,
   apex: `${ASIA}/apex/private`,
   bitgetPrivate: `${ASIA}/bitget/v2/private`,
+  bitgetPrivateUta: `${ASIA}/bitget/v3/private`,
   bitgetPublic: 'wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public',
   lighterPublic: `${JP}/lighter/stream?readonly=true`,
   lighterPrivate: `${JP}/lighter/stream`,
@@ -66,6 +69,7 @@ const WS = {
 const REST_JP: ExchangeName[] = [
   'binance',
   'binanceinverse',
+  'binanceoptions',
   'binancepm',
   'binancespot',
   'okx',
@@ -105,15 +109,31 @@ const okxeuWs: WsGroup = {
   private: { kind: 'proxyConditional', host: WS.okxeuPrivate },
   business: { kind: 'proxyConditional', host: WS.okxeuBusiness },
 };
+// Bitget checks the key's bound IP on private login (40018), so a proxied
+// account dials ws-proxy (the IP the add-account form asks Bitget users to bind)
+// and then the relay, which egresses from the same fleet as its REST.
 const bitgetWs: WsGroup = {
   // bitget.ws-secondary-public reuses the same public fallback host as ws-public.
   public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic, initialSilentConnects: 1 },
+  // Master's TS proxy/relay routing. The Rust engine still opens both classic and
+  // UTA private sockets on this channel, so its host hints and UTA direct bypass stay
+  // until the Rust Bitget venue adopts privateUta.
   private: {
-    kind: 'fallbackOnly',
+    kind: 'proxyConditional',
+    host: WS.bitgetPrivate,
     fallback: WS.bitgetPrivate,
+    relayUpstream: RELAY_UPSTREAM.bitgetPrivate,
+    relayWhenTunnelled: true,
     initialSilentConnects: 1,
     ignoredMessages: ['pong'],
     directUrls: [BASE_WS_PRIVATE_UTA_URL],
+  },
+  privateUta: {
+    kind: 'proxyConditional',
+    host: WS.bitgetPrivateUta,
+    fallback: WS.bitgetPrivateUta,
+    relayUpstream: RELAY_UPSTREAM.bitgetPrivateUta,
+    relayWhenTunnelled: true,
   },
 };
 const coinbaseWs: WsGroup = { private: { kind: 'proxyConditional', host: WS.coinbase } };

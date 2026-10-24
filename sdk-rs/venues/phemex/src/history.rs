@@ -1,8 +1,10 @@
 //! Bounded rare reads; documented g-futures history uses textual enums, unlike
 //! the numeric execution endpoint whose side enum remains unverified.
 use crate::{Pending, PhemexPerpetuals};
+use safe_cex_engine::history::{Completion, HistoryRows};
 use safe_cex_engine::model::{OrderStatus, OrderType};
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, json::ArrayAt};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError, json::ArrayAt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -10,8 +12,13 @@ const MAX_ROWS: u32 = 200;
 
 #[derive(Default)]
 pub struct State {
-    active: HashSet<CommandId>,
-    deferred: Vec<(TimerId, Request)>,
+    pub(super) active: HashSet<CommandId>,
+    pub(super) deferred: Vec<(TimerId, Deferred)>,
+}
+
+pub(super) enum Deferred {
+    Signed(Box<Request>),
+    PublicTrades(Box<crate::public_trades::Read>),
 }
 
 pub struct Request {
@@ -36,10 +43,34 @@ impl Request {
 }
 
 enum Rows {
-    Fills(Vec<Execution>),
-    Orders(Vec<HistoricalOrder>),
-    Trades(Vec<Trade>),
+    Fills(Box<HistoryRows<Execution>>),
+    Orders(Box<HistoryRows<HistoricalOrder>>),
+    Trades(Box<HistoryRows<Trade>>),
     Lookup(Vec<safe_cex_engine::model::Order>),
+}
+
+fn encode_rows<T: Serialize>(rows: &[T]) -> Result<String, VenueError> {
+    serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
+}
+
+fn owned_rows<T: Serialize>(command: CommandId) -> Box<HistoryRows<T>> {
+    Box::new(HistoryRows::new(Completion::new(command), encode_rows))
+}
+
+fn finish_rows<T: Serialize, P>(
+    mut owner: HistoryRows<T>,
+    cx: &mut Cx<'_, P>,
+    limit: usize,
+    time: impl Fn(&T) -> f64,
+) {
+    // These endpoints have exactly one response. No rows are admitted before
+    // its complete HTTP/envelope/row verdict, so a failure can never be partial.
+    owner.accept_page();
+    owner.finish_with(cx, Ok(()), |mut rows| {
+        rows.sort_by(|a, b| time(b).total_cmp(&time(a)));
+        rows.truncate(limit);
+        encode_rows(&rows)
+    });
 }
 
 #[derive(Deserialize)]
@@ -137,13 +168,13 @@ struct HistoricalOrder {
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Trade {
+pub(super) struct Trade {
     id: String,
     symbol: String,
     price: f64,
     qty: f64,
     quote_qty: f64,
-    timestamp: f64,
+    pub(super) timestamp: f64,
     side: &'static str,
 }
 
@@ -171,6 +202,25 @@ fn milliseconds(ns: u64) -> f64 {
 }
 
 impl PhemexPerpetuals {
+    pub(crate) fn finish_local_history(cx: &mut Cx<'_, Pending>, result: Result<&str, &str>) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        match result {
+            Ok(data) => {
+                let _ = cx.done_context(&context, data.into());
+            }
+            Err(error) => {
+                let _ = cx.fail_context(&context, error);
+            }
+        }
+    }
     pub(crate) fn history_query(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -181,6 +231,13 @@ impl PhemexPerpetuals {
             self.income_query(cx, command, query);
             return;
         }
+        if self.credentials.is_none()
+            && self.read_credentials.is_none()
+            && let Query::PublicTrades { symbol, limit } = query
+        {
+            self.fetch_public_trades(cx, command, symbol, limit);
+            return;
+        }
         let mut client_id = None;
         let (symbol, from, to, limit, order_id, rows) = match query {
             Query::OrderByClientId {
@@ -188,11 +245,11 @@ impl PhemexPerpetuals {
                 client_order_id,
             } => {
                 if !crate::trading::valid_client(&client_order_id) {
-                    cx.fail(command, "Invalid Phemex client order ID");
+                    Self::finish_local_history(cx, Err("Invalid Phemex client order ID"));
                     return;
                 }
                 if cx.store.market(&symbol).is_none() {
-                    cx.done(command, r#"{"found":false,"definitive":false}"#.into());
+                    Self::finish_local_history(cx, Ok(r#"{"found":false,"definitive":false}"#));
                     return;
                 }
                 client_id = Some(client_order_id);
@@ -217,7 +274,7 @@ impl PhemexPerpetuals {
                 to_ms,
                 limit,
                 order_id,
-                Rows::Fills(Vec::new()),
+                Rows::Fills(owned_rows(command)),
             ),
             Query::OrderHistory {
                 symbol,
@@ -230,7 +287,7 @@ impl PhemexPerpetuals {
                 to_ms,
                 limit,
                 None,
-                Rows::Orders(Vec::new()),
+                Rows::Orders(owned_rows(command)),
             ),
             Query::PublicTrades { symbol, limit } => (
                 Some(symbol),
@@ -238,26 +295,26 @@ impl PhemexPerpetuals {
                 None,
                 limit,
                 None,
-                Rows::Trades(Vec::new()),
+                Rows::Trades(owned_rows(command)),
             ),
             Query::Income { .. } => unreachable!(),
         };
         if (self.options.public_data_only || self.credentials.is_none())
             && !matches!(rows, Rows::Trades(_))
         {
-            cx.fail(command, "Phemex private history requires credentials");
+            Self::finish_local_history(cx, Err("Phemex private history requires credentials"));
             return;
         }
         let Some(symbol) = symbol.filter(|s| cx.store.market(s).is_some()) else {
-            cx.fail(command, "Phemex history requires a known symbol");
+            Self::finish_local_history(cx, Err("Phemex history requires a known symbol"));
             return;
         };
         if !bounds(from, to) {
-            cx.fail(command, "Invalid Phemex history time range");
+            Self::finish_local_history(cx, Err("Invalid Phemex history time range"));
             return;
         }
-        if self.history.active.len() >= 16 || !self.history.active.insert(command) {
-            cx.fail(command, "Too many active Phemex history queries");
+        if self.history.active.len() >= 16 || self.history.active.contains(&command) {
+            Self::finish_local_history(cx, Err("Too many active Phemex history queries"));
             return;
         }
         let native_symbol = self.native_symbol(&symbol).to_owned();
@@ -265,10 +322,10 @@ impl PhemexPerpetuals {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_')
         {
-            cx.fail(command, "Unsupported Phemex native history symbol");
-            self.history.active.remove(&command);
+            Self::finish_local_history(cx, Err("Unsupported Phemex native history symbol"));
             return;
         }
+        self.history.active.insert(command);
         let limit = limit.unwrap_or(100).clamp(1, MAX_ROWS) as usize;
         let request = Request {
             command,
@@ -290,7 +347,9 @@ impl PhemexPerpetuals {
     fn history_send(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         if cx.now < self.paused_until {
             let timer = cx.set_timer(self.paused_until - cx.now);
-            self.history.deferred.push((timer, request));
+            self.history
+                .deferred
+                .push((timer, Deferred::Signed(Box::new(request))));
             return;
         }
         let (path, at) = match request.rows {
@@ -398,13 +457,14 @@ impl PhemexPerpetuals {
         };
         self.history.active.remove(&request.command);
         if !parsed || request.invalid {
-            cx.fail(
-                request.command,
+            self.history_failed(
+                cx,
+                request,
                 "Malformed or oversized Phemex history response",
             );
             return;
         }
-        let result = match &mut request.rows {
+        match request.rows {
             Rows::Lookup(rows) => {
                 #[derive(Serialize)]
                 struct Lookup<'a> {
@@ -414,33 +474,22 @@ impl PhemexPerpetuals {
                     #[serde(skip_serializing_if = "Option::is_none")]
                     definitive: Option<bool>,
                 }
-                serde_json::to_string(&Lookup {
+                let result = serde_json::to_string(&Lookup {
                     found: !rows.is_empty(),
                     order: rows.first(),
                     definitive: rows.is_empty().then_some(true),
-                })
+                });
+                match result.map_err(|error| error.to_string()) {
+                    Ok(data) => cx.done(request.command, data),
+                    Err(error) => cx.fail(request.command, error),
+                };
             }
-            Rows::Fills(rows) => {
-                rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                rows.truncate(request.limit);
-                serde_json::to_string(rows)
-            }
-            Rows::Orders(rows) => {
-                rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
-                rows.truncate(request.limit);
-                serde_json::to_string(rows)
-            }
-            Rows::Trades(rows) => {
-                rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                rows.truncate(request.limit);
-                serde_json::to_string(rows)
-            }
-        };
-        match result.map_err(|error| error.to_string()) {
-            Ok(data) => cx.done(request.command, data),
-            Err(error) => cx.fail(request.command, error),
-        };
+            Rows::Fills(owner) => finish_rows(*owner, cx, request.limit, |row| row.timestamp),
+            Rows::Orders(owner) => finish_rows(*owner, cx, request.limit, |row| row.created_time),
+            Rows::Trades(owner) => finish_rows(*owner, cx, request.limit, |row| row.timestamp),
+        }
     }
+
     pub(crate) fn history_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -448,7 +497,12 @@ impl PhemexPerpetuals {
         error: &str,
     ) {
         self.history.active.remove(&request.command);
-        cx.fail(request.command, error);
+        match request.rows {
+            Rows::Lookup(_) => cx.fail(request.command, error),
+            Rows::Fills(owner) => owner.finish(cx, Err(VenueError::new(error))),
+            Rows::Orders(owner) => owner.finish(cx, Err(VenueError::new(error))),
+            Rows::Trades(owner) => owner.finish(cx, Err(VenueError::new(error))),
+        }
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         let Some(index) = self
@@ -459,8 +513,11 @@ impl PhemexPerpetuals {
         else {
             return false;
         };
-        let (_, request) = self.history.deferred.swap_remove(index);
-        self.history_send(cx, request);
+        let (_, deferred) = self.history.deferred.swap_remove(index);
+        match deferred {
+            Deferred::Signed(request) => self.history_send(cx, *request),
+            Deferred::PublicTrades(read) => self.send_public_trades(cx, read),
+        }
         true
     }
 }
@@ -511,7 +568,7 @@ fn decode(request: &mut Request, text: &str) -> Option<()> {
                 return Some(());
             }
             if let Rows::Fills(rows) = &mut request.rows {
-                rows.push(Execution {
+                rows.stage(Execution {
                     id: row.id.into(),
                     timestamp: (row.transact_time_ns / 1_000_000_000) as f64,
                     symbol: request.symbol.clone(),
@@ -594,7 +651,7 @@ fn decode(request: &mut Request, text: &str) -> Option<()> {
                 return Some(());
             }
             if let Rows::Orders(rows) = &mut request.rows {
-                rows.push(HistoricalOrder {
+                rows.stage(HistoricalOrder {
                     id: row.order_id.into(),
                     symbol: request.symbol.clone(),
                     side,
@@ -610,28 +667,32 @@ fn decode(request: &mut Request, text: &str) -> Option<()> {
             }
         }
         Rows::Trades(_) => {
-            let (time, raw_side, price, qty): (u64, &str, Number<'_>, Number<'_>) =
-                serde_json::from_str(text).ok()?;
-            let side = side(raw_side)?;
-            let price = price.value().filter(|v| *v > 0.0)?;
-            let qty = qty.value().filter(|v| *v > 0.0)?;
-            if time == 0 || !(price * qty).is_finite() {
-                return None;
-            }
-            // The API has no execution ID; equal tuples can be distinct trades.
-            let id = format!("{time}:{}", request.count - 1);
+            let row = decode_public_trade(text, &request.symbol, request.count - 1)?;
             if let Rows::Trades(rows) = &mut request.rows {
-                rows.push(Trade {
-                    id,
-                    symbol: request.symbol.clone(),
-                    price,
-                    qty,
-                    quote_qty: price * qty,
-                    timestamp: milliseconds(time),
-                    side,
-                });
+                rows.stage(row);
             }
         }
     }
     Some(())
+}
+
+pub(super) fn decode_public_trade(text: &str, symbol: &str, index: usize) -> Option<Trade> {
+    let (time, raw_side, price, qty): (u64, &str, Number<'_>, Number<'_>) =
+        serde_json::from_str(text).ok()?;
+    let side = side(raw_side)?;
+    let price = price.value().filter(|v| *v > 0.0)?;
+    let qty = qty.value().filter(|v| *v > 0.0)?;
+    if time == 0 || !(price * qty).is_finite() {
+        return None;
+    }
+    // The API has no execution ID; equal tuples can be distinct trades.
+    Some(Trade {
+        id: format!("{time}:{index}"),
+        symbol: symbol.into(),
+        price,
+        qty,
+        quote_qty: price * qty,
+        timestamp: milliseconds(time),
+        side,
+    })
 }

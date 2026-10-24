@@ -4,6 +4,8 @@ mod account_wire;
 mod history;
 mod identity;
 mod income;
+mod public_candles;
+mod public_trades;
 mod sign;
 mod trading;
 mod wire;
@@ -12,6 +14,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
+use safe_cex_engine::request_context::Context;
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
@@ -50,11 +53,17 @@ pub enum Pending {
         rows: Vec<Candle>,
         invalid: bool,
     },
+    PublicCandles {
+        context: Context,
+        rows: Vec<Candle>,
+        invalid: bool,
+    },
     Account(account::Request),
     Orders(account::OrdersRead),
     Trade(trading::Request),
     History(history::Request),
     Income(income::Request),
+    PublicTrades(Box<public_trades::Read>),
 }
 #[derive(Default)]
 struct Connection {
@@ -353,6 +362,9 @@ impl PhemexPerpetuals {
             Pending::Orders(r) => self.orders_read_failed(cx, r, error),
             Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Unknown),
             Pending::History(r) => self.history_failed(cx, r, error),
+            Pending::PublicTrades(read) => {
+                self.public_trades_failed(cx, *read, safe_cex_engine::VenueError::new(error));
+            }
             Pending::Income(r) => self.income_failed(cx, r, error),
             Pending::Depth { symbol, generation } => {
                 if self
@@ -364,6 +376,9 @@ impl PhemexPerpetuals {
                 }
             }
             Pending::Candles { command, .. } => cx.fail(command, error),
+            Pending::PublicCandles { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::Markets(..) => self.discovery.failed(cx, false),
             Pending::Tickers(..) => self.discovery.failed(cx, true),
         }
@@ -597,7 +612,8 @@ impl Venue for PhemexPerpetuals {
                     safe_cex_engine::startup::skipped_row(cx);
                 }
             }
-            Pending::Candles { rows, invalid, .. } => {
+            Pending::Candles { rows, invalid, .. }
+            | Pending::PublicCandles { rows, invalid, .. } => {
                 if let Ok(r) = serde_json::from_str::<CandleRow>(item) {
                     rows.push(r.candle())
                 } else {
@@ -606,11 +622,17 @@ impl Venue for PhemexPerpetuals {
             }
             Pending::Account(r) => self.account_item(cx, r, item),
             Pending::History(r) => self.history_item(cx, r, item),
+            Pending::PublicTrades(read) => read.item(cx, item),
             Pending::Income(r) => self.income_item(cx, r, item),
             _ => {}
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, r: Response<'_>) {
+        if let Pending::PublicTrades(read) = &p
+            && !read.valid_delivery(cx)
+        {
+            return;
+        }
         if r.status == 429 {
             self.paused_until = self.paused_until.max(
                 cx.now
@@ -639,7 +661,8 @@ impl Venue for PhemexPerpetuals {
             Pending::Identity(command) => self.identity_response(cx, command, r),
             bad @ (Pending::Markets(_, true)
             | Pending::Tickers(_, true)
-            | Pending::Candles { invalid: true, .. }) => {
+            | Pending::Candles { invalid: true, .. }
+            | Pending::PublicCandles { invalid: true, .. }) => {
                 self.fail(cx, bad, "malformed public response row")
             }
             Pending::Markets(rows, false) => {
@@ -697,11 +720,46 @@ impl Venue for PhemexPerpetuals {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 cx.done(command, serde_json::to_string(&rows).unwrap());
             }
+            Pending::PublicCandles {
+                context, mut rows, ..
+            } => {
+                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
+            }
             Pending::Account(p) => self.account_response(cx, p, r),
             Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
             Pending::Trade(p) => self.trade_response(cx, p, r),
             Pending::History(p) => self.history_response(cx, p, r),
+            Pending::PublicTrades(read) => self.public_trades_response(cx, *read, r),
             Pending::Income(p) => self.income_response(cx, p, r),
+        }
+    }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
+            Pending::PublicCandles { context, .. } => {
+                let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
+            Pending::PublicCandles { context, .. } => {
+                let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: &str) {
@@ -860,6 +918,10 @@ impl Venue for PhemexPerpetuals {
                 from_ms,
                 to_ms,
             } => {
+                if self.credentials.is_none() && self.read_credentials.is_none() {
+                    self.fetch_public_candles(cx, &symbol, interval, limit, from_ms, to_ms);
+                    return;
+                }
                 if cx.now < self.paused_until {
                     cx.fail(
                         command,

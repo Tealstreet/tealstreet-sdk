@@ -89,6 +89,13 @@ describe('getBalanceSlice', () => {
       expect(result).toBe(balance);
     });
 
+    it('should return a zero slice for missing coin-margined inverse collateral', () => {
+      const balance = createBalance({ info: { coinMargined: true } });
+      const market = createInverseMarket('NEAR'); // NEAR not in currencies
+      const result = getBalanceSlice(balance, market);
+      expect(result).toEqual({ total: 0, free: 0, used: 0, upnl: 0 });
+    });
+
     it('should handle balance with no currencies', () => {
       const balance = createBalance({ currencies: undefined });
       const market = createLinearMarket();

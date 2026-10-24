@@ -85,6 +85,10 @@ const makeParent = (name: string) =>
     syncSocketHealthToStore: vi.fn(),
     emitWsReconnected: vi.fn(),
     getTickerSymbolsForPublicStream: () => [],
+    // Mirrors `BybitExchange.publicKlineSubscribeChunkSize`; `listenOHLCVs`
+    // reads this to size bulk kline subscribe frames. Must stay 50 for the
+    // Bybit flavours and must not shrink to the Hyro override (10) here.
+    publicKlineSubscribeChunkSize: 50,
   }) as any;
 
 const openSocket = <T extends { ws: WebSocket | undefined }>(websocket: T) => {

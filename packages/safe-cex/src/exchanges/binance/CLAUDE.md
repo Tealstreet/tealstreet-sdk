@@ -103,7 +103,7 @@ Sources: [Spot changelog](https://developers.binance.com/docs/binance-spot-api-d
 [Spot user-data requests](https://developers.binance.com/docs/binance-spot-api-docs/websocket-api/user-data-stream-requests),
 [COIN-M orders](https://developers.binance.com/docs/derivatives/coin-margined-futures/trade/rest-api/New-Order).
 
-This directory contains four Binance exchange variants for Tealstreet: **USD-M Futures**, **COIN-M Inverse Futures**, **Spot**, and **Portfolio Margin**. All variants share the same directory rather than having separate subdirectories.
+This directory contains five Binance exchange variants for Tealstreet: **USD-M Futures**, **COIN-M Inverse Futures**, **Spot**, **Portfolio Margin** and **Options** (`binanceoptions`, REST only, see [Options](#options-binanceoptions)). All variants share the same directory rather than having separate subdirectories.
 
 ## Exchange Information
 
@@ -111,8 +111,8 @@ This directory contains four Binance exchange variants for Tealstreet: **USD-M F
 | ------------------ | ------------------- | ----------------------------------- | ------------------------------ | ------------------------- |
 | Exchange class     | `BinanceExchange`   | `BinanceInverseExchange`            | `BinancePMExchange`            | `BinanceSpotExchange`     |
 | Pretty name        | Binance             | Binance Inverse                     | Binance Portfolio Margin       | Binance Spot              |
-| Production enabled | Yes                 | No (`enabledInDev: true`, preview off) | Yes                            | No (`enabledInDev: true`) |
-| Testnet support    | Yes                 | Yes                                 | Yes                            | Yes                       |
+| Production enabled | Yes                 | Yes                                 | Yes                            | No (`enabledInDev: true`) |
+| Testnet support    | Yes                 | No                                  | Yes                            | Yes                       |
 
 ## API Documentation
 
@@ -120,6 +120,7 @@ This directory contains four Binance exchange variants for Tealstreet: **USD-M F
 - **COIN-M Futures**: https://developers.binance.com/docs/derivatives/coin-margined-futures/general-info
 - **Portfolio Margin**: https://developers.binance.com/docs/derivatives/portfolio-margin/general-info
 - **Spot API**: https://developers.binance.com/docs/binance-spot-api-docs/rest-api
+- **Options**: https://developers.binance.com/docs/derivatives/options-trading/general-info
 - **CCXT REST**: https://github.com/ccxt/ccxt/blob/master/ts/src/binance.ts
 - **CCXT WebSocket**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/binance.ts
 
@@ -164,6 +165,15 @@ This directory contains four Binance exchange variants for Tealstreet: **USD-M F
 | `binancepm.types.ts`      | PM-specific endpoints (papi/v1 paths) and base URLs                                        |
 | `binancepm.ws-private.ts` | PM private WebSocket: `CONDITIONAL_ORDER_TRADE_UPDATE` events, throttled position fetching |
 | `binancepm.ws-public.ts`  | PM public WebSocket: same as futures (uses fstream for market data)                        |
+
+### Options (`exchangeName: 'binanceoptions'`)
+
+| File                          | Description                                                             |
+| ----------------------------- | ----------------------------------------------------------------------- |
+| `binanceoptions.api.ts`       | REST client for `eapi.binance.com`, signed by `signBinanceRequest`      |
+| `binanceoptions.exchange.ts`  | `BinanceOptionsExchange`: REST polling, no websockets                   |
+| `binanceoptions.mappers.ts`   | Pure mappers for markets, quotes, positions, orders, fills and greeks   |
+| `binanceoptions.types.ts`     | Hosts, endpoints and time-in-force mapping                              |
 
 ### Other Files
 
@@ -310,6 +320,12 @@ errors to users.
 `binanceinverse` uses Binance's COIN-M `/dapi` family, not the USD-M `/fapi`
 family. Keep it as a separate variant because symbols, collateral, native order
 quantity, and position sizing are inverse-contract specific.
+
+Direct browser REST writes to `/dapi` are not CORS-safe: live testing saw
+`POST /dapi/v1/order` fail at the preflight with `OPTIONS 404` and no
+`Access-Control-Allow-Origin`. Keep `requiresCors: true` and the Tealstreet
+HOW/tradetunnel path forced unless Binance changes the `/dapi` CORS contract
+and order placement has been revalidated in a browser.
 
 | Endpoint                     | Method      | Description                                                        |
 | ---------------------------- | ----------- | ------------------------------------------------------------------ |
@@ -871,6 +887,8 @@ is authoritative only for balances and preserves the current position array.
 - Logs balance aggregation details once on first fetch (`hasLoggedBalanceAggregation` flag).
 - Falls back to top-level `totalWalletBalance`/`availableBalance` if aggregation throws.
 
+**COIN-M inverse**: Aggregates `/dapi/v1/account` assets into USD top-level totals for portfolio display, but also preserves each asset under `balance.currencies[asset]` with native `total`/`free`/`used`/`upnl` and marks `balance.info.coinMargined = true`. The order form and margin module depend on those per-coin slices so `NEARUSD_PERP` validates against NEAR collateral rather than aggregate BTC/XRP/USD value; when a coin is absent, `getBalanceSlice` uses the marker to return a zero slice. Keep `balance.coins[asset]` for holdings display.
+
 **PM**: Fetches from `/papi/v1/balance`, aggregates only USDT, USDC, and FDUSD assets. Uses `totalWalletBalance`, `crossMarginFree`, and `umUnrealizedPNL`.
 
 ## Exchange Metadata
@@ -1225,3 +1243,37 @@ GTX maker order stays post-only when repriced instead of silently becoming GTC.
 The security live-smoke runner checks both writes on its scripted transport; its
 TS/Rust replay keeps time-in-force in strict write identity. This paired TS fix
 changes no order size, identity, cancellation or retry contract.
+
+## Options (`binanceoptions`)
+
+Binance's European options on `eapi.binance.com`. They sit in their own options account, so they are a separate connection like `binancespot`. Same API key, same query-string HMAC (`signBinanceRequest`), so `payloadSigner` works. Every market is an option, and the metadata sets `optionsOnly` so exchange-mcp lists the option tools without `EXCHANGE_OPTIONS`.
+
+Metadata keeps it out of every app: `enabled`, `enabledInDev`, `enableInPreview` and `supportedOnMobile` are all false. Only exchange-mcp runs it.
+
+### What the adapter does
+
+- **Markets** come from `/eapi/v1/exchangeInfo`. `option.underlying` and `Market.base` are the base asset from `optionContracts` (`BTC`), and account greeks are renamed from `BTCUSDT` the same way. Rows not `TRADING` are dropped.
+- **Prices and quantities are per contract**, and a contract is `info.unit` of the underlying: 1 for most, 100 for XRP, 1000 for DOGE (2026-10-20). `contractSize` stays 1 so price × amount is the premium. `Position.contracts` is the venue quantity.
+- **Quotes** join `/eapi/v1/mark` (mark price, IVs, greeks) with `/eapi/v1/ticker` (bid, ask, last, and `exercisePrice` as the underlying price). Binance sends `-1` for an IV it cannot quote; the mapper reads it as 0, which `OptionQuote` defines as unavailable.
+- **`/eapi/v1/ticker` `priceChangePercent` is a fraction** (705 on an open of 3815 reads `0.185`), so `Ticker.percentage` multiplies it by 100.
+- **Greeks** on quotes are per 1 unit of the underlying, in USDT, vega per vol point, theta per calendar day. Measured 2026-10-20 against Black-Scholes, including a DOGE contract of 1000 DOGE whose vega and gamma are per DOGE.
+- **Position greeks are derived.** `/eapi/v1/position` has none, so `fetchPositions` also reads `/eapi/v1/mark` and multiplies by the signed quantity and `unit`. The `units` string says so.
+- **Account greeks** are `/eapi/v1/marginAccount` `greek` as Binance reports them. Their scale has not been measured; the `units` string says that too.
+- **Balance** is `marginAccount.asset`: `equity` as total, `available` as free, `initialMargin` as used.
+- **Orders**: limit only, priced by `price`. Binance's new-order endpoint has no implied-volatility parameter, so `impliedVolatility` is refused before any request, as are market orders, triggers, TP/SL and an amount above `maxQty`. Post-only sends `postOnly: true`. `placeOrders` checks the whole batch, then posts each order to `/eapi/v1/order` in turn.
+- **Cancels** use `DELETE /eapi/v1/order` by `orderId` (`-2011` counts as cancelled) and `DELETE /eapi/v1/allOpenOrders` for a symbol. `updateOrder` is cancel then place, since Binance has no option amend.
+- **History**: `/eapi/v1/historyOrders` and `/eapi/v1/userTrades` both require a symbol, so the adapter refuses without one. A fill's `fee` is negative when charged (the documented TAKER example), so `commission` is its negation. `realizedProfit` is not mapped: nothing says whether it is gross or net.
+- **Testnet**: Binance's options docs name `demo-fapi.binance.com`, which answers 403 on every `/eapi` path. `testnet.binancefuture.com` serves `/eapi` publicly, so `testnet` points there. No private call has run on it.
+
+### Client order ID
+
+Sends `clientOrderId`, rule `^[A-Za-z0-9_-]{1,36}$`. Binance documents no charset or length for options; this is the range every other Binance product accepts. Generated IDs carry no broker prefix. `Order.id` is Binance's `orderId`; the client ID is `Order.clientOrderId`.
+
+### Known gaps
+
+- **No websockets.** The tick polls balance, positions and tickers every 10 s (`/eapi/v1/ticker` alone weighs 40 of the 400-a-minute budget), so it works with polling off, the way exchange-mcp runs it, and with polling on. No order book and no live candles.
+- **No private call has run against a live key.** Balance, positions, orders, history, fills and account greeks are checked against Binance's documented responses only.
+- **`POST /eapi/v1/batchOrders` and `DELETE /eapi/v1/batchOrders` are not used.** The docs name the place parameter `orders`, CCXT sends `batchOrders`, and neither says how an array goes into the signed query string. One request per order until someone can try it with a key.
+- **No fee rates, closed PnL, income or funding flow** (`/eapi/v1/bill` exists and is not mapped).
+- **No `sdk-rs` port.** The Rust registry and `ExchangeName` in `sdk-rs` do not list `binanceoptions`.
+

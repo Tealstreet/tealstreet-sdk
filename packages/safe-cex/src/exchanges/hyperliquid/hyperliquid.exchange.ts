@@ -1458,12 +1458,16 @@ export class HyperliquidExchange extends BaseExchange {
   };
 
   private fetchFee = async (): Promise<{ takerFee: number; makerFee: number } | null> => {
+    const user = this.options.vault || this.options.applicationId;
+    if (this.isPublicDataOnly || !user) {
+      return { takerFee: 0.00045, makerFee: 0.00015 };
+    }
     try {
       const { data } = await this.infoXhr.post(
         ENDPOINTS.INFO,
         {
           type: 'userFees',
-          user: this.options.key,
+          user,
         },
         {
           headers: {

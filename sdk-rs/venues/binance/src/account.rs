@@ -6,6 +6,7 @@ use crate::{BinanceFutures, Channel, Pending};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotCoverage;
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, CoinBalance, CurrencyBalance, MarginType, Market, Order, OrderExtra, OrderSide,
@@ -124,6 +125,7 @@ pub struct AccountState {
     started: bool,
     listen_key_failures: u32,
     listen_key_timer: Option<TimerId>,
+    listen_key_session: Option<safe_cex_engine::request_context::Session>,
     keepalive_timer: Option<TimerId>,
     keepalive_failing: bool,
     has_opened: bool,
@@ -374,40 +376,14 @@ impl BinanceFutures {
         self.listen_key_request(cx, Method::Post, Request::ListenKey);
     }
 
-    /// Livenet listenKey requests carry only the API key; testnet signs them.
+    /// Create opens a new session generation; keepalive uses the current one.
     fn listen_key_request(&mut self, cx: &mut Cx<'_, Pending>, method: Method, request: Request) {
         if !cx.private_feed_policy().streaming() {
             return;
         }
-        let Some(credentials) = &self.credentials else {
-            return;
-        };
-        if self.options.testnet {
-            self.signed(
-                cx,
-                method,
-                self.paths.listen_key,
-                Query::new(),
-                Pending::Account(request),
-            );
-        } else {
-            let request = cx.request(
-                method,
-                format!("{}{}", self.urls.account_rest, self.paths.listen_key),
-                vec![],
-                None,
-                Pending::Account(request),
-            );
-            cx.sign_http(
-                request,
-                Box::new(crate::sign::Http::new(
-                    credentials.clone(),
-                    Query::new(),
-                    self.options.recv_window,
-                    false,
-                )),
-            );
-        }
+        let mut session = self.account.listen_key_session.take();
+        self.listen_key_session_request(cx, &mut session, method, request);
+        self.account.listen_key_session = session;
     }
 
     fn fetch_positions(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -632,7 +608,7 @@ impl BinanceFutures {
         self.account_request_failed(cx, request, format!("network error: {error}"));
     }
 
-    fn account_request_failed(
+    pub(crate) fn account_request_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
@@ -2541,7 +2517,7 @@ impl BinanceFutures {
             return;
         };
         let id = self.next_spot_request_id("tealstreet-user-data");
-        let Some(credentials) = &self.credentials else {
+        let Ok((_, credentials)) = self.credentials.select(CredentialRole::SessionAuth) else {
             return;
         };
         self.account.spot_subscription = None;

@@ -1,9 +1,12 @@
 //! Rare reads return JSON; no history rows enter the live store.
 use crate::{Hyperliquid, Pending, account::side, wire::*};
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::history::{Completion, HistoryRows, ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
-use safe_cex_engine::{CommandId, Cx, Query, Response, VenueError};
+use safe_cex_engine::request_context::{
+    CommandEntryError, Context, Operation, Policy, RetryPolicy,
+};
+use safe_cex_engine::{CommandId, Cx, ErrorKind, Outcome, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -25,7 +28,8 @@ enum HistoryRow {
     Trade(Trade),
 }
 pub struct Request {
-    history: Box<CursorHistory<HistoryRow>>,
+    history: Box<ReadCursorHistory<HistoryRow>>,
+    pub(crate) leg: Option<Context>,
     kind: Kind,
     query: Query,
     from: f64,
@@ -38,6 +42,14 @@ pub struct Request {
     valid: bool,
 }
 impl Request {
+    pub(crate) fn root(&self) -> &Context {
+        self.history.root()
+    }
+    pub(crate) fn valid_delivery(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.leg
+            .as_ref()
+            .is_some_and(|leg| self.history.validate_delivery(cx, leg).is_ok())
+    }
     pub(crate) fn streamed(&self) -> bool {
         self.kind != Kind::Lookup
     }
@@ -156,43 +168,75 @@ impl Hyperliquid {
             client_order_id,
         } = &query
         {
-            if let Some(order) = cx.store.orders().iter().find(|o| {
+            let cached = cx.store.orders().iter().position(|o| {
                 o.symbol == *symbol && o.client_order_id.as_deref() == Some(client_order_id)
-            }) {
-                #[derive(Serialize)]
-                struct Found<'a> {
-                    found: bool,
-                    order: &'a safe_cex_engine::model::Order,
-                }
-                cx.done(
-                    command,
-                    serde_json::to_string(&Found { found: true, order }).unwrap(),
-                );
-                return;
-            }
-            if !crate::account::valid_cloid(client_order_id) || self.user().is_none() {
-                cx.done(command, "{\"found\":false,\"definitive\":false}".into());
+            });
+            if cached.is_some()
+                || !crate::account::valid_cloid(client_order_id)
+                || self.user().is_none()
+            {
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
+                let result = if let Some(index) = cached {
+                    #[derive(Serialize)]
+                    struct Found<'a> {
+                        found: bool,
+                        order: &'a safe_cex_engine::model::Order,
+                    }
+                    serde_json::to_string(&Found {
+                        found: true,
+                        order: &cx.store.orders()[index],
+                    })
+                    .unwrap()
+                } else {
+                    "{\"found\":false,\"definitive\":false}".into()
+                };
+                let _ = cx.done_context(&context, result);
                 return;
             }
         }
         if self.spot {
-            {
-                let result: Result<String, String> = match query {
-                    Query::OrderByClientId { .. } => {
-                        Ok("{\"found\":false,\"definitive\":false}".into())
-                    }
-                    Query::PublicTrades { .. } => {
-                        Err("Hyperliquid spot public trades query is not supported".into())
-                    }
-                    _ => Ok("[]".into()),
-                };
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+            let mut completion = Completion::new(command);
+            match query {
+                Query::OrderByClientId { .. } => {
+                    completion.finish(cx, Ok("{\"found\":false,\"definitive\":false}".into()));
                 }
-            };
+                Query::PublicTrades { .. } => {
+                    completion.finish(
+                        cx,
+                        Err(VenueError::new(
+                            "Hyperliquid spot public trades query is not supported",
+                        )
+                        .kind(ErrorKind::Unsupported)
+                        .outcome(Outcome::NotSent)),
+                    );
+                }
+                Query::Fills { .. } | Query::OrderHistory { .. } | Query::Income { .. } => {
+                    completion.incomplete("history is INCOMPLETE: Hyperliquid spot adapter has no native history read");
+                    HistoryRows::<()>::new(completion, |rows| {
+                        serde_json::to_string(rows)
+                            .map_err(|error| VenueError::new(error.to_string()))
+                    })
+                    .finish(cx, Ok(()));
+                }
+            }
             return;
         }
+        let root = match cx.admit_caller_read_root(None, None) {
+            Ok(root) => root,
+            Err(CommandEntryError::Rejected(_)) => return,
+            Err(CommandEntryError::Revoked) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+        };
         let (kind, from, to) = match &query {
             Query::OrderByClientId { .. } => (Kind::Lookup, None, None),
             Query::Fills { from_ms, to_ms, .. } => (Kind::Fills, *from_ms, *to_ms),
@@ -214,7 +258,7 @@ impl Hyperliquid {
             Query::PublicTrades { .. } => (Kind::Trades, None, None),
         };
         if kind != Kind::Trades && (self.options.public_data_only || self.user().is_none()) {
-            cx.fail(command, "Hyperliquid account identity is missing");
+            let _ = cx.fail_context(&root, "Hyperliquid account identity is missing");
             return;
         }
         let to = to.unwrap_or(cx.now).floor();
@@ -231,16 +275,24 @@ impl Hyperliquid {
             || to > 9_007_199_254_740_991.0
             || from > to
         {
-            cx.fail(command, "Invalid history time range");
+            let _ = cx.fail_context(&root, "Invalid history time range");
             return;
         }
-        let request = Request {
-            history: Box::new(CursorHistory::new(
-                Completion::new(command),
+        let completion = match ReadCompletion::from_context(cx, command, root.clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(&root, error.read_venue_error());
+                return;
+            }
+        };
+        let read = Request {
+            history: Box::new(ReadCursorHistory::new(
+                completion,
                 CursorWalk::new(200),
                 stall_message,
                 encode_rows,
             )),
+            leg: None,
             kind,
             query,
             from,
@@ -252,9 +304,9 @@ impl Hyperliquid {
             seen: HashSet::new(),
             valid: true,
         };
-        self.history_page(cx, request);
+        self.history_page(cx, read);
     }
-    fn history_page(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+    fn history_page(&mut self, cx: &mut Cx<'_, Pending>, read: Request) {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Read<'a> {
@@ -272,39 +324,37 @@ impl Hyperliquid {
             #[serde(skip_serializing_if = "Option::is_none")]
             oid: Option<&'a str>,
         }
-        let kind = match request.kind {
+        let kind = match read.kind {
             Kind::Fills | Kind::IncomeFills => "userFillsByTime",
             Kind::Orders => "historicalOrders",
             Kind::IncomeFunding => "userFunding",
             Kind::Trades => "recentTrades",
             Kind::Lookup => "orderStatus",
         };
-        let coin = if let Query::PublicTrades { symbol, .. } = &request.query {
+        let coin = if let Query::PublicTrades { symbol, .. } = &read.query {
             cx.store.market(symbol).map(|m| m.id.as_str())
         } else {
             None
         };
-        if request.kind == Kind::Trades && coin.is_none() {
-            cx.fail(request.history.command(), "Market not found");
+        if read.kind == Kind::Trades && coin.is_none() {
+            let _ = cx.fail_context(read.root(), "Market not found");
             return;
         }
         let ranged = matches!(
-            request.kind,
+            read.kind,
             Kind::Fills | Kind::IncomeFills | Kind::IncomeFunding
         );
         let body = serde_json::to_string(&Read {
             r#type: kind,
-            user: (request.kind != Kind::Trades)
-                .then(|| self.user())
-                .flatten(),
+            user: (read.kind != Kind::Trades).then(|| self.user()).flatten(),
             coin,
-            start_time: ranged.then_some(request.cursor as u64),
-            end_time: ranged.then_some(request.to as u64),
-            aggregate_by_time: matches!(request.kind, Kind::Fills | Kind::IncomeFills)
+            start_time: ranged.then_some(read.cursor as u64),
+            end_time: ranged.then_some(read.to as u64),
+            aggregate_by_time: matches!(read.kind, Kind::Fills | Kind::IncomeFills)
                 .then_some(false),
             oid: if let Query::OrderByClientId {
                 client_order_id, ..
-            } = &request.query
+            } = &read.query
             {
                 Some(client_order_id)
             } else {
@@ -312,37 +362,43 @@ impl Hyperliquid {
             },
         })
         .unwrap();
-        self.history_read(cx, body, request);
+        self.history_read(cx, body, read);
     }
-    pub(crate) fn history_item(&self, request: &mut Request, item: &str) {
-        request.raw_count += 1;
-        match request.kind {
+    pub(crate) fn history_item(&self, cx: &Cx<'_, Pending>, read: &mut Request, item: &str) {
+        let Some(leg) = read.leg.as_ref() else {
+            return;
+        };
+        let Ok(mut page) = read.history.admit(cx, leg) else {
+            return;
+        };
+        read.raw_count += 1;
+        match read.kind {
             Kind::Lookup => {}
             Kind::Fills | Kind::IncomeFills => {
                 let Ok(fill) = serde_json::from_str::<FillRow>(item) else {
-                    request.valid = false;
+                    read.valid = false;
                     return;
                 };
                 // Historical queries keep their established zero defaults and
                 // gross realized-PnL convention, independent of live metadata.
                 let fee = fill.fee.unwrap_or(0.);
                 let closed_pnl = fill.closed_pnl.unwrap_or(0.);
-                if fill.time < request.from || fill.time > request.to {
+                if fill.time < read.from || fill.time > read.to {
                     return;
                 }
-                if !request.seen.insert(fill.tid.to_string()) {
+                if !read.seen.insert(fill.tid.to_string()) {
                     return;
                 }
-                request.added += 1;
-                request.newest = request.newest.max(fill.time);
+                read.added += 1;
+                read.newest = read.newest.max(fill.time);
                 let symbol = self.symbol(&fill.coin).unwrap_or(&fill.coin).to_owned();
-                if !symbol_matches(&request.query, &symbol) {
+                if !symbol_matches(&read.query, &symbol) {
                     return;
                 }
-                if request.kind == Kind::Fills {
+                if read.kind == Kind::Fills {
                     if let Query::Fills {
                         order_id: Some(id), ..
-                    } = &request.query
+                    } = &read.query
                         && *id != fill.oid.to_string()
                     {
                         return;
@@ -356,7 +412,7 @@ impl Hyperliquid {
                     } else {
                         &fill.fee_token
                     };
-                    request.history.stage(HistoryRow::Execution(Execution {
+                    page.stage(HistoryRow::Execution(Execution {
                         time_ms: fill.time,
                         tid: fill.tid,
                         id: fill.tid.to_string(),
@@ -388,10 +444,10 @@ impl Hyperliquid {
                             "fee",
                         ),
                     ] {
-                        if value == 0.0 || !income_matches(&request.query, kind) {
+                        if value == 0.0 || !income_matches(&read.query, kind) {
                             continue;
                         }
-                        request.history.stage(HistoryRow::Income(Income {
+                        page.stage(HistoryRow::Income(Income {
                             symbol: symbol.clone(),
                             income_type: kind,
                             income: value,
@@ -406,21 +462,21 @@ impl Hyperliquid {
             }
             Kind::IncomeFunding => {
                 let Ok(row) = serde_json::from_str::<Funding>(item) else {
-                    request.valid = false;
+                    read.valid = false;
                     return;
                 };
-                if row.time < request.from || row.time > request.to {
+                if row.time < read.from || row.time > read.to {
                     return;
                 }
                 let id = format!("{}:{}:{}", row.hash, row.delta.coin, row.time);
-                if !request.seen.insert(id) {
+                if !read.seen.insert(id) {
                     return;
                 }
-                request.added += 1;
-                request.newest = request.newest.max(row.time);
+                read.added += 1;
+                read.newest = read.newest.max(row.time);
                 let symbol = self.symbol(row.delta.coin).unwrap_or(row.delta.coin);
-                if row.delta.usdc != 0.0 && symbol_matches(&request.query, symbol) {
-                    request.history.stage(HistoryRow::Income(Income {
+                if row.delta.usdc != 0.0 && symbol_matches(&read.query, symbol) {
+                    page.stage(HistoryRow::Income(Income {
                         symbol: symbol.into(),
                         income_type: "FUNDING_FEE",
                         income: row.delta.usdc,
@@ -442,7 +498,7 @@ impl Hyperliquid {
             }
             Kind::Orders => {
                 let Ok(row) = serde_json::from_str::<OrderUpdate>(item) else {
-                    request.valid = false;
+                    read.valid = false;
                     return;
                 };
                 let wire = &row.order;
@@ -471,7 +527,7 @@ impl Hyperliquid {
                     "take profit limit" | "take profit market" => OrderType::TakeProfit,
                     _ => OrderType::Limit,
                 };
-                request.history.stage(HistoryRow::Order(OrderState {
+                page.stage(HistoryRow::Order(OrderState {
                     time: row.status_timestamp,
                     rank,
                     order: HistoricalOrder {
@@ -491,20 +547,20 @@ impl Hyperliquid {
             }
             Kind::Trades => {
                 let Ok(row) = serde_json::from_str::<PublicTrade>(item) else {
-                    request.valid = false;
+                    read.valid = false;
                     return;
                 };
                 let symbol = self.symbol(row.coin).unwrap_or(row.coin).to_owned();
-                if let Query::PublicTrades { symbol: target, .. } = &request.query
+                if let Query::PublicTrades { symbol: target, .. } = &read.query
                     && *target != symbol
                 {
                     return;
                 }
                 let key = format!("{}:{}:{}", row.coin, row.time, row.tid);
-                if !request.seen.insert(key) {
+                if !read.seen.insert(key) {
                     return;
                 }
-                request.history.stage(HistoryRow::Trade(Trade {
+                page.stage(HistoryRow::Trade(Trade {
                     id: row.tid.to_string(),
                     symbol,
                     price: row.px,
@@ -519,22 +575,25 @@ impl Hyperliquid {
     pub(crate) fn history_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        mut request: Request,
+        mut read: Request,
         response: Response<'_>,
     ) {
-        if !(200..300).contains(&response.status) || !request.valid {
+        if !read.valid_delivery(cx) {
+            return;
+        }
+        if !(200..300).contains(&response.status) || !read.valid {
             self.history_failed(
                 cx,
-                request,
-                &format!(
+                read,
+                format!(
                     "Invalid Hyperliquid history response (HTTP {})",
                     response.status
                 ),
             );
             return;
         }
-        self.history_weight(cx, request.raw_count, request.streamed());
-        if request.kind == Kind::Lookup {
+        self.history_weight(cx, read.raw_count, read.streamed());
+        if read.kind == Kind::Lookup {
             #[derive(Deserialize)]
             struct Lookup<'a> {
                 #[serde(borrow)]
@@ -553,7 +612,7 @@ impl Hyperliquid {
                     }
                     let row = row.order.ok_or("Missing lookup order")?;
                     if let Some(mut order) = self.map_order(cx, &row.order)
-                        && symbol_matches(&request.query, &order.symbol)
+                        && symbol_matches(&read.query, &order.symbol)
                     {
                         order.status = if row.status == "open" || row.status == "triggered" {
                             OrderStatus::Open
@@ -573,73 +632,82 @@ impl Hyperliquid {
                     }
                 });
             match result {
-                Ok(data) => cx.done(request.history.command(), data),
-                Err(error) => cx.fail(request.history.command(), error),
+                Ok(data) => {
+                    let _ = cx.done_context(read.root(), data);
+                }
+                Err(error) => {
+                    let _ = cx.fail_context(read.root(), error);
+                }
             };
             return;
         }
         let ranged = matches!(
-            request.kind,
+            read.kind,
             Kind::Fills | Kind::IncomeFills | Kind::IncomeFunding
         );
-        let cap = if request.kind == Kind::IncomeFunding {
+        let cap = if read.kind == Kind::IncomeFunding {
             500
         } else {
             2000
         };
-        let inclusive_gap = ranged && request.added == 0 && request.raw_count >= cap;
+        let inclusive_gap = ranged && read.added == 0 && read.raw_count >= cap;
         let gap = if inclusive_gap {
             Some("Hyperliquid history stalled on a full inclusive page; requested range may be incomplete".to_owned())
-        } else if request.kind == Kind::Orders && request.raw_count >= 2000 {
+        } else if read.kind == Kind::Orders && read.raw_count >= 2000 {
             Some("Hyperliquid order history reached its rolling retention limit".to_owned())
         } else {
             None
         };
         // Inclusive physical bounds may repeat while new native IDs still advance.
         // Output filtering must not determine progress or manufacture completeness.
-        let more = ranged && request.added > 0;
-        let next = more.then(|| format!("{}:{}", request.newest, request.seen.len()));
-        let step = request.history.advance_with_coverage(
+        let more = ranged && read.added > 0;
+        let next = more.then(|| format!("{}:{}", read.newest, read.seen.len()));
+        let leg = read.leg.as_ref().expect("validated history delivery");
+        let Ok(mut page) = read.history.admit(cx, leg) else {
+            return;
+        };
+        let step = page.advance_with_coverage(
             CursorPage {
                 next,
-                rows: request.raw_count as usize,
-                fresh: request.added,
+                rows: read.raw_count as usize,
+                fresh: read.added,
                 want_more: more,
             },
             gap,
         );
         if let CursorStep::More(_) = step {
-            request.cursor = request.newest;
-            request.added = 0;
-            request.raw_count = 0;
-            self.history_page(cx, request);
+            read.cursor = read.newest;
+            read.added = 0;
+            read.raw_count = 0;
+            read.leg = None;
+            self.history_page(cx, read);
             return;
         }
-        if request.kind == Kind::IncomeFills
-            && matches!(&request.query, Query::Income { kind: None, .. })
+        if read.kind == Kind::IncomeFills && matches!(&read.query, Query::Income { kind: None, .. })
         {
-            if !request.history.restart_stage() {
-                request.history.reject(
+            if !read.history.restart_stage() {
+                let _ = read.history.reject(
                     cx,
                     VenueError::new("Hyperliquid income stage restarted before completion"),
                 );
                 return;
             }
-            request.kind = Kind::IncomeFunding;
-            request.cursor = request.from;
-            request.newest = request.from;
-            request.added = 0;
-            request.seen.clear();
-            request.raw_count = 0;
-            self.history_page(cx, request);
+            read.kind = Kind::IncomeFunding;
+            read.cursor = read.from;
+            read.newest = read.from;
+            read.added = 0;
+            read.seen.clear();
+            read.raw_count = 0;
+            read.leg = None;
+            self.history_page(cx, read);
             return;
         }
-        self.history_finish(cx, request, Ok(()));
+        self.history_finish(cx, read, Ok(()));
     }
     fn history_finish(
         &self,
         cx: &mut Cx<'_, Pending>,
-        request: Request,
+        read: Request,
         result: Result<(), VenueError>,
     ) {
         let Request {
@@ -649,16 +717,29 @@ impl Hyperliquid {
             from,
             to,
             ..
-        } = request;
-        history.finish_with(cx, result, |rows| {
+        } = read;
+        let _ = history.finish_with(cx, result, |rows| {
             encode_query(kind, &query, from, to, rows)
         });
     }
-    pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        if request.kind == Kind::Lookup {
-            cx.fail(request.history.command(), error);
+    pub(crate) fn reject_history(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        read: Request,
+        error: VenueError,
+    ) {
+        let _ = read.history.reject(cx, error);
+    }
+    pub(crate) fn history_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        read: Request,
+        error: impl Into<VenueError>,
+    ) {
+        if read.kind == Kind::Lookup {
+            let _ = cx.fail_context(read.root(), error);
         } else {
-            self.history_finish(cx, request, Err(VenueError::new(error)));
+            self.history_finish(cx, read, Err(error.into()));
         }
     }
 }

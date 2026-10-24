@@ -13,16 +13,15 @@ export interface ModelConcern {
 export interface ScreenResult {
   allowed: boolean;
   /**
-   * Which sandbox this module earned. `strict` is the only tier that syncs.
-   * `local-only` runs with relaxed network rules on this device and is never
-   * stored server-side, which is what keeps it out of an attacker's reach.
+   * Which sandbox this module earned. `strict` and `standard` both sync;
+   * `standard` mounts in the frame that allows the network.
    */
   tier: ScreenTier;
   /** Deterministic, from the syntax tree. */
   findings: CircumventionFinding[];
   /** The model's, which may only ever ADD to the above. */
   concerns: ModelConcern[];
-  /** Shown to the author when refused, or when explaining why it cannot sync. */
+  /** Shown to the author when refused. */
   reason: string | null;
   /** True when a static block short-circuited the provider call. */
   modelSkipped: boolean;
@@ -58,8 +57,7 @@ const parseConcerns = (raw: unknown): ModelConcern[] => {
     // An unrecognised severity normalizes DOWN to `flag`, not up. The model
     // inventing a severity is a malformed answer, and a typo must not become a
     // refusal — the static rules are what carry the hard decisions.
-    const normalized: ScreenSeverity =
-      severity === 'block' ? 'block' : severity === 'local-only' ? 'local-only' : 'flag';
+    const normalized: ScreenSeverity = severity === 'block' ? 'block' : severity === 'standard' ? 'standard' : 'flag';
     concerns.push({ severity: normalized, detail });
   }
   return concerns;
@@ -144,24 +142,19 @@ export const screenModule = async (input: ScreenModuleInput, options: ScreenModu
   }
 
   /**
-   * The model can RAISE the tier but never lower it. A `local-only` static
+   * The model can RAISE the tier but never lower it. A `standard` static
    * finding stands whatever the model thinks, so nothing written in the source
-   * can argue a module back into the syncing tier — the same ordering
-   * invariant that governs blocks, applied to the network.
+   * can argue a networked module into the frame with `connect-src 'none'` —
+   * the same ordering invariant that governs blocks, applied to the network.
    */
-  const tier: ScreenTier = concerns.some((c) => c.severity === 'local-only') ? 'local-only' : staticTier;
+  const tier: ScreenTier = concerns.some((c) => c.severity === 'standard') ? 'standard' : staticTier;
 
   return {
     allowed: true,
     tier,
     findings,
     concerns,
-    // A local-only module is allowed, but the author still needs to be told
-    // why it will not sync — silence here reads as a bug on their other device.
-    reason:
-      tier === 'local-only'
-        ? 'This module reaches the network or loads external code, so it runs only on this device and is not backed up or synced.'
-        : null,
+    reason: null,
     modelSkipped: false,
   };
 };

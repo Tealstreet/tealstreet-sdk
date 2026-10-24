@@ -694,6 +694,54 @@ describe('MEXC futures audit regressions', () => {
     );
   });
 
+  it('hydrates symbol margin and leverage before placing a cold regular order', async () => {
+    const exchange = createExchange();
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        success: true,
+        code: 0,
+        data: [
+          {
+            symbol: 'BTC_USDT',
+            positionType: 1,
+            openType: 1,
+            leverage: 50,
+          },
+          {
+            symbol: 'BTC_USDT',
+            positionType: 2,
+            openType: 1,
+            leverage: 32,
+          },
+        ],
+      },
+    });
+    const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0, data: 'order-1' } });
+    exchange.store.update({ markets: [market], positions: [] });
+    exchange.xhr = { get, post } as any;
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 10,
+        price: 50000,
+      }),
+    ).resolves.toEqual(['order-1']);
+
+    expect(get).toHaveBeenCalledWith(ENDPOINTS.POSITION_LEVERAGE, {
+      params: { symbol: 'BTC_USDT' },
+    });
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.ORDER_SUBMIT,
+      expect.objectContaining({
+        openType: 1,
+        leverage: 50,
+      }),
+    );
+  });
+
   it('paces concurrent regular order placement to avoid venue spam throttles', async () => {
     vi.useFakeTimers();
     try {

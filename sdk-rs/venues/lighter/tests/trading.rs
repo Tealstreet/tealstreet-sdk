@@ -1207,3 +1207,42 @@ fn bare_rate_code_fences_dependent_settings_until_reconciliation() {
     );
     assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:9,error}) if error.message.contains("awaiting reconciliation"))));
 }
+
+#[test]
+fn robinhood_attribution_uses_47296_or_the_explicit_override_on_both_networks() {
+    for testnet in [false, true] {
+        for override_index in [None, Some(999)] {
+            let expected = override_index.unwrap_or(47_296);
+            let mut options = options();
+            options.robinhood = true;
+            options.testnet = testnet;
+            options.integrator_account_index = override_index;
+            let (mut engine, _) = ready_with(options);
+            place(&mut engine, vec![limit()]);
+            let tier = http(&mut engine, "accountLimits");
+            reply(
+                &mut engine,
+                &tier,
+                200,
+                r#"{"code":200,"user_tier_name":"plus"}"#,
+            );
+            let approval = http(&mut engine, "/account?");
+            reply(
+                &mut engine,
+                &approval,
+                200,
+                &format!(
+                    r#"{{"code":200,"accounts":[{{"approved_integrators":[{{"account_index":{expected},"approval_expiry":{},"max_perps_taker_fee":300,"max_perps_maker_fee":0}}]}}]}}"#,
+                    NOW as u64 + 100_000
+                ),
+            );
+            let nonce = http(&mut engine, "nextNonce");
+            reply(&mut engine, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+            let submission = http(&mut engine, "sendTx");
+            assert_eq!(
+                wire(&submission)["L2TxAttributes"],
+                json!({"1":expected,"2":250,"3":0})
+            );
+        }
+    }
+}

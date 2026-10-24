@@ -66,11 +66,9 @@ endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
   documented `tpslMode: "full"` shape.
 - Private WS uses `wss://ws.bitget.com/v3/ws/private` and subscribes with
   `{ instType: "UTA", topic: "account" | "position" | "order" }`.
-  The existing Tealstreet Bitget private WS fallback route only targets Classic
-  v2 (`/bitget/v2/private`). Before routing UTA private WS through the proxy
-  fleet, add infra support for a v3 upstream path (for example
-  `/bitget/v3/private` -> `wss://ws.bitget.com/v3/ws/private`) and then wire
-  the client routing table/fallback logic to that route.
+  Its proxied routes are the v3 equivalents of Classic's: ws-proxy
+  `/bitget/v3/private` and the relay upstream `ws.bitget.com/v3/ws/private`
+  (routing `privateUta`, resolved as `wsPrivateUta`). See "Private WS egress".
 
 Account-type detection is eager during validation/startup and lazy on private
 methods that choose between Classic v2 and UTA v3. The lazy path shares one
@@ -197,8 +195,8 @@ web topbar can show a degraded private stream even though REST writes still
 succeed and the socket may appear connected. Any authenticated private payload
 clears the degraded reason. This mirrors Coinbase's post-write user-stream
 watchdog and is intentionally lighter than Lighter's full route-recovery system.
-For Classic private WS, the watchdog also promotes the connection to the
-Tealstreet fallback route and reconnects. Literal `pong` heartbeat frames must
+The watchdog only reconnects the current route; route changes follow evidence
+about the route (see "Private WS egress"). Literal `pong` heartbeat frames must
 not count as private-stream payloads for this decision: a browser can keep the
 direct socket alive with pongs while receiving zero authenticated order,
 position, or account data. While degraded, Bitget runs its own periodic REST
@@ -206,6 +204,22 @@ private snapshot (`fetchPositions`, full `fetchOrders`, fast `fetchBalance`)
 until a real private frame arrives. Do not rely on private WS reconnect-open
 handlers for this: `ENABLE_RECONNECTING_WEBSOCKET` is false in this repo, and
 the ordinary tick loop does not poll standalone Classic algo TP/SL orders.
+
+**Only the instance that started its private stream arms this watchdog**
+(`privateStreamStarted`, set in `start()`). The web's main-thread mirror places
+every UI order but is never started (see `apps/web/src/controllers/CLAUDE.md` →
+dual-instance model), so it never sees a private frame; before the guard, every
+UI order fired the toast 8s later, started this REST loop writing the UI's
+store, and `recoverMissingPrivateStream` opened a second private socket from
+the mirror.
+
+**Bitget answers a failed login with `event: "error"`, not `event: "login"`**
+(30005 login failed, 30011 key, 30012 passphrase, 30013 timestamp, 30015 sign;
+IP and region refusals arrive the same way). `onMessage` reports it once per
+failure streak and reconnects when it arrives before a successful login; after
+login it is a refused subscription and is reported without reconnecting. Left
+unhandled, a rejected socket kept answering pings with zero subscriptions and
+passed every liveness check while delivering nothing.
 
 ## REST API Endpoints
 
@@ -307,8 +321,42 @@ The implementation uses **four WebSocket connections** simultaneously:
 
 ### 4. Private WebSocket (`bitget.ws-private.ts`)
 
-- **Classic URL**: `wss://ws.bitget.com/v2/ws/private` (or fallback: `wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private`)
-- **UTA URL**: `wss://ws.bitget.com/v3/ws/private`
+- **Classic URL**: `wss://ws.bitget.com/v2/ws/private` direct; a proxied account dials ws-proxy `wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private`, then the relay
+- **UTA URL**: `wss://ws.bitget.com/v3/ws/private` direct; proxied: ws-proxy `.../bitget/v3/private`, then the relay
+
+#### Private WS egress (Bitget checks the key's bound IP)
+
+Since 2026-10, Bitget rejects a private login whose source IP the API key is not
+bound to: `{event: "error", code: 40018, msg: "Current IP does not match the bound
+IP"}`. REST was unaffected (it egresses through our proxies), so users saw a dead
+private stream while orders still placed — the browser's and the hosted
+container's IPs are never on a key's whitelist.
+
+Routing (`routingTable.ts`) is OKX's pattern: `private`/`privateUta` are
+`proxyConditional` to ws-proxy (`python/ws-proxy`, egress `54.255.57.166`, which
+the add-account form asks Bitget users to bind via `exchangesRequireWsIp`) with a
+`relayUpstream` and `relayWhenTunnelled`, so the tradetunnel relay — egressing
+from the private proxy fleet, i.e. the account's REST IPs — is offered even to a
+proxied account. Bitget does NOT gate the relay on `WS_RELAY_PRIVATE`.
+
+`bitget.ws-private.ts` walks the chain with `WsDirectFallback`:
+- **40018 (or 40024, restricted location) before login** → `rejectCurrent()` and switch to the next route at once;
+  reported (once) only when every route is refused, and then it stops
+  switching routes (the socket may still reconnect to the last one).
+- **A tunnel socket** (ReconnectingWebSocket — it reconnects internally and never
+  re-runs the route choice) advances after 2 opens that closed before login, or
+  6 connects that failed before opening (an outage does that too, hence the
+  higher bar). Both counters reset on every switch; a login clears the
+  closes-before-login count, an open clears the failed-connects count.
+- **A native direct socket** (non-proxied account: direct → relay → ws-proxy)
+  advances through its own close path (`processClose` → `connectAndSubscribe`
+  → `resolveUrl`), and after 2 silent connects as before.
+
+Infra this depends on: ws-proxy's `bitget/v2/private` + `bitget/v3/private`
+routes; tradetunnel `RELAY_ALLOWED_UPSTREAMS` including `ws.bitget.com/v2/ws/private`
+and `/v3/ws/private` (live `kubectl` env + `terraform/{tokyo,singapore}`); the
+private fleet's `stream_bitget_backend` (already present). Bitget's HOW egress is
+Tokyo, so the relay dials `fsjnpy143pbz.jp`.
 - **Authentication**: Required before subscribing (login op)
 - **Channels subscribed**:
   - `account` with `coin: 'default'` - Balance/account updates
@@ -326,15 +374,13 @@ Normal-order fill handling recognizes the documented `partially_filled` status. 
 
 ### Reconnection & Fallback URL Logic
 
-All WebSocket connections implement a **fallback URL mechanism** (`bitget.ws-public.ts:26-29`, `bitget.ws-private.ts:16-19`, `bitget.ws-secondary-public.ts:23-27`):
+The two PUBLIC WebSocket classes implement this **fallback URL mechanism** (`bitget.ws-public.ts`, `bitget.ws-secondary-public.ts`); the private socket uses `WsDirectFallback` instead (see "Private WS egress"):
 
 - Each connection tracks `messageCount` and `lastMessageCount`
 - On each `connectAndSubscribe()` call, if both `lastMessageCount` and `messageCount` are 0 (no messages received since last connection), `connectionAttempts` increments
 - After `MAX_ATTEMPTS` (2) consecutive connections with zero messages, `useFallbackUrl` is set to `true`
 - On switch to fallback, a `grafana-info` event is emitted for monitoring
 - `messageCount` is reset to 0 on every new connection
-- Private WS counts non-heartbeat frames only. Pongs prove socket liveness, not
-  authenticated channel delivery.
 
 ### Ping/Pong Heartbeat
 
@@ -669,10 +715,9 @@ The private WS triggers throttled REST fetches (500ms debounce) after receiving 
   autoDownSizeReduceOrders: true,
   supportsChaser: true,
   supportsTunnel: true,
-  // No supportsWsRoute: bitget's routing entry is `fallbackOnly`, which the
-  // resolver evaluates without consulting `tealstreetWsRoute`, and all three ws
-  // classes hardcode `useFallbackUrl = false` and flip it themselves after
-  // failed connects. Advertising it rendered a checkbox nothing read.
+  // No supportsWsRoute: bitget never reads `tealstreetWsRoute` — public is
+  // `fallbackOnly`, private follows `tealstreetProxy`. Advertising it rendered
+  // a checkbox nothing read.
   tvMaxGetBarFetches: 5,
   alwaysCalculateUnrealizedPnlFromLastPrice: true,
   supportedTPSLTriggerTypes: [MarkPrice],      // Only mark price trigger type
@@ -939,3 +984,39 @@ revision/terminal/opened fence as retained order rows, preserving cancel routes.
 Read-only recovery uses the existing coalesced timers and busy/pause handling;
 malformed-only or foreign-only traffic does not claim useful financial liveness.
 The financial fill channel, auth, signing and write-retry policy are unchanged.
+
+
+## Rust dispatch signer checkpoint
+
+The draft native migration stages private HTTP and Classic/UTA login with shared
+engine SignStep work. Venue state carries opaque identities; trusted setup owns
+all material. Private primary passphrase is mandatory; an absent secondary
+passphrase inherits its primary provider ref, while explicit empty rejects.
+Ordinary GET uses secondary, degraded balance recovery remains primary, and POST
+and WS stay primary. Public broker headers remain unchanged.
+
+Owned identity/history/trade read provider refusal bypasses network read retries.
+Background account failures retain existing recovery/backoff, and provider refusal
+cannot promote an unconfirmed Classic account. Earlier accepted writes, native40009 resend evidence
+and original rollback diagnostics retain existing outcome semantics. Hosted
+admission is described below. No secret restoration or venue-local signing
+fallback is permitted.
+
+
+## Rust hosted and remote signing
+
+Hosted `signHttpRequest`/`signWsAuth` and keyless `remoteSigner` are admitted
+for all three aliases through the shared owned provider; no TS venue is built.
+`bitget.signing.ts` is the standalone HTTP codec shared with the `bitget.api.ts`
+interceptor: same `$` symbol strip (except candles), `encode: false` query,
+underscore-stripped signed body and ms timestamp. Hosted capture uses primary
+custody only and sets `ACCESS-KEY`/`ACCESS-SIGN`/`ACCESS-TIMESTAMP`/
+`ACCESS-PASSPHRASE`; the passphrase comes from the provider's Present result.
+
+Remote WS login keeps the legacy wire (`exchangeName: 'bitget'`, Base64,
+`extraData.timestamp` in seconds over `timestamp + "GET" + "/user/verify"`).
+The decode is declared in `construction-rules.json` as `secondsTimestamp` with
+`secondsSuffix`, shared with OKX; native login work is three typed parts.
+Private `PayloadSigner` is typed unsupported (the TS interceptor never calls
+it), RemoteSigner wins without fallback, and primary-only remote wire refuses
+secondary-identity work before any callback. Actual-WASM proofs are CI-run.

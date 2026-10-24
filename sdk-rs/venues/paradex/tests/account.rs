@@ -1428,6 +1428,160 @@ fn duplicated_out_of_scope_order_rows_do_not_invalidate_the_snapshot() {
     assert!(h.e.store().order("126").is_none());
 }
 
+fn snapshot_token_order() -> String {
+    ORDER.replace(
+        "\"instruction\":\"GTC\"",
+        "\"instruction\":\"GTC\",\"flags\":[]",
+    )
+}
+
+#[test]
+fn native_amend_ack_rejects_inflight_read_without_poisoning_later_signing_evidence() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    let complete = snapshot_token_order();
+    order_update(&mut h, socket, &complete);
+    h.command(Command::AmendOrder {
+        command: 701,
+        id: "123".into(),
+        price: Some(101.),
+        amount: None,
+    });
+    let amend = h.take("/orders/123");
+    h.timer(h.now + 1_000.);
+    let read = h.take("/orders");
+    h.respond(amend, 200, r#"{"id":"123"}"#);
+    assert!(h.result(701).is_ok());
+
+    // This replica row would otherwise qualify as a newer external edit.
+    let poison = complete
+        .replace("\"price\":\"99\"", "\"price\":\"109\"")
+        .replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"1\"")
+        .replace("1700000000000,\"client_id\"", "1700000009000,\"client_id\"");
+    h.respond(read, 200, &format!(r#"{{"results":[{poison}]}}"#));
+    let current = h.e.store().order("123").unwrap();
+    assert_eq!((current.price, current.filled), (99., 0.));
+    h.command(Command::AmendOrder {
+        command: 702,
+        id: "123".into(),
+        price: None,
+        amount: Some(3.),
+    });
+    assert!(
+        h.result(702).is_err(),
+        "id-only ACK proves no mutable attributes"
+    );
+    assert!(!h.pending.iter().any(|r| r.url.ends_with("/orders/123")));
+
+    // A lower timestamp than the rejected row still advances native state and
+    // restores signing evidence for the exact acknowledged target.
+    let fresh = complete
+        .replace("\"price\":\"99\"", "\"price\":\"101\"")
+        .replace("1700000000000,\"client_id\"", "1700000002000,\"client_id\"");
+    order_update(&mut h, socket, &fresh);
+    assert_eq!(h.e.store().order("123").unwrap().price, 101.);
+    h.command(Command::AmendOrder {
+        command: 703,
+        id: "123".into(),
+        price: None,
+        amount: Some(3.),
+    });
+    let request = h.take("/orders/123");
+    let body: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["price"], "101");
+    assert_eq!(body["size"], "3");
+}
+
+#[test]
+fn token_adoption_explicit_invalidation_rejects_terminal_cache_and_store_effects() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    let complete = snapshot_token_order();
+    order_update(&mut h, socket, &complete);
+    h.timer(h.now + 1_000.);
+    let read = h.take("/orders");
+    h.e.store_mut().invalidate_order_snapshots();
+    let poison = complete
+        .replace("\"status\":\"OPEN\"", "\"status\":\"CANCELED\"")
+        .replace("1700000000000,\"client_id\"", "1700000009000,\"client_id\"");
+    h.respond(read, 200, &format!(r#"{{"results":[{poison}]}}"#));
+    assert_eq!(
+        h.e.store().orders().len(),
+        1,
+        "explicit Store invalidation rejects the entire native read application"
+    );
+    assert_eq!(
+        h.e.store().order("123").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+    let fresh = complete
+        .replace("\"price\":\"99\"", "\"price\":\"101\"")
+        .replace("1700000000000,\"client_id\"", "1700000002000,\"client_id\"");
+    order_update(&mut h, socket, &fresh);
+    assert_eq!(
+        h.e.store().order("123").unwrap().price,
+        101.,
+        "the rejected read consumed neither a native watermark nor terminal identity"
+    );
+    h.command(Command::AmendOrder {
+        command: 704,
+        id: "123".into(),
+        price: None,
+        amount: Some(3.),
+    });
+    let request = h.take("/orders/123");
+    let body: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["price"], "101");
+}
+
+#[test]
+fn token_adoption_exhaustion_keeps_cycle_continuation_and_native_ws_progress() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    safe_cex_engine::test_support::exhaust_order_snapshots(h.e.store_mut());
+    for attempt in 1..=2 {
+        h.timer(h.now + POLL_MS);
+        h.reply("/positions", &format!(r#"{{"results":[{POSITION}]}}"#));
+        h.reply(
+            "/account",
+            r#"{"total_collateral":"1000","free_collateral":"800"}"#,
+        );
+        assert!(
+            !h.pending.iter().any(|r| r.url.ends_with("/orders")),
+            "exhausted capture must never issue an unfenced GET"
+        );
+        h.reply(
+            "/account/margin",
+            r#"{"configs":[{"market":"BTC-USD-PERP","leverage":20}]}"#,
+        );
+        let discarded = h
+            .actions
+            .iter()
+            .filter(|a| {
+                matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.level == safe_cex_engine::Level::Error
+                    && event.code == safe_cex_engine::log::code::SNAPSHOT_DISCARDED)
+            })
+            .count();
+        assert_eq!(discarded, attempt, "each live cycle reaches capture once");
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { at_ms, .. }
+            if *at_ms == h.now + POLL_MS)),
+            "cycle reaches its next ordinary poll"
+        );
+    }
+    let fresh = snapshot_token_order()
+        .replace("\"id\":\"123\"", "\"id\":\"456\"")
+        .replace("\"price\":\"99\"", "\"price\":\"101\"");
+    order_update(&mut h, socket, &fresh);
+    assert_eq!(h.e.store().order("456").unwrap().price, 101.);
+    h.timer(h.now + 1_000.);
+    assert!(!h.pending.iter().any(|r| r.url.ends_with("/orders")));
+    assert!(h.e.store().order("456").is_some());
+}
+
 #[test]
 fn one_malformed_margin_row_keeps_its_stored_leverage_while_valid_peers_commit() {
     let (mut h, _) = loaded();

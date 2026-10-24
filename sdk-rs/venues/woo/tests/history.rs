@@ -350,7 +350,7 @@ fn ledger_retains_account_aggregates_signed_money_and_same_id_different_types() 
     assert_eq!(json.matches("tranId").count(), 3);
 }
 #[test]
-fn ledger_pages_obey_ten_requests_per_minute_and_failure_is_not_empty() {
+fn ledger_pages_obey_ten_requests_per_minute_and_later_failure_keeps_coverage() {
     let mut e = ready();
     let r = query(
         &mut e,
@@ -395,7 +395,8 @@ fn ledger_pages_obey_ten_requests_per_minute_and_failure_is_not_empty() {
             },
         },
     );
-    assert!(result(&mut e).is_err());
+    // The first validated ledger row survives; page-two failure carries coverage.
+    owned_history::partial(&e.drain_actions().collect::<Vec<_>>(), 1);
 }
 #[test]
 fn malformed_history_row_is_skipped_with_a_warning_and_valid_rows_return() {
@@ -1120,4 +1121,640 @@ fn full_walk_page_with_malformed_rows_is_not_mistaken_for_the_last_page() {
         ),
     );
     assert_eq!(result(&mut e).unwrap().matches("timestamp").count(), 3);
+}
+
+mod owned_history {
+    use super::*;
+    use safe_cex_engine::{ErrorKind, HttpRequest, Level, Value, log::code};
+
+    fn orders() -> Query {
+        Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(2000),
+        }
+    }
+    fn income(kind: Option<&str>) -> Query {
+        Query::Income {
+            symbol: None,
+            kind: kind.map(str::to_owned),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(5),
+        }
+    }
+    fn ledger(id: u32) -> String {
+        format!(
+            r#"{{"id":{id},"type":"FUNDING_FEE","token":"USDT","amount":0.1,"timestamp":{NOW}}}"#
+        )
+    }
+    fn order(id: u32) -> String {
+        ORDER.replace("9007199254740993", &id.to_string())
+    }
+    fn rows(axis: u8, rows: &str, page: u32, total: u32, size: u32) -> String {
+        let data = format!(
+            r#""rows":[{rows}],"meta":{{"total":{total},"records_per_page":{size},"current_page":{page}}}"#
+        );
+        if axis == 0 || axis == 2 {
+            format!(r#"{{"success":true,"data":{{{data}}}}}"#)
+        } else {
+            format!(r#"{{"success":true,{data}}}"#)
+        }
+    }
+    fn send(e: &mut TestEngine, r: &HttpRequest, text: &str, streamed: bool) {
+        if streamed {
+            e.handle(
+                NOW + 1.,
+                Event::HttpStart {
+                    request: r.id,
+                    status: 200,
+                    headers: "",
+                },
+            );
+            for chunk in text.as_bytes().chunks(19) {
+                e.handle(
+                    NOW + 1.,
+                    Event::HttpChunk {
+                        request: r.id,
+                        data: chunk,
+                    },
+                );
+            }
+            e.handle(NOW + 1., Event::HttpEnd { request: r.id });
+        } else {
+            response(e, r, NOW + 1., text);
+        }
+    }
+    fn next(e: &mut TestEngine) -> HttpRequest {
+        let actions: Vec<_> = e.drain_actions().collect();
+        if let Some(r) = actions.iter().find_map(|a| match a {
+            Action::Http(r) => Some(r.clone()),
+            _ => None,
+        }) {
+            return r;
+        }
+        let (timer, at) = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .expect("paced continuation");
+        e.handle(at, Event::TimerFired { timer });
+        requests(e).remove(0)
+    }
+    fn markers(output: &[Action]) -> Vec<&safe_cex_engine::LogEvent> {
+        output
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(event)) if event.code == code::HISTORY_INCOMPLETE => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+    fn typed_reject(output: &[Action]) {
+        assert!(
+            markers(output).is_empty(),
+            "strict rejection has no result coverage: {output:?}"
+        );
+        assert!(
+            !output
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+        );
+        let errors: Vec<_> = output
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 99, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "one failure: {output:?}");
+        assert_eq!(errors[0].kind, Some(ErrorKind::Internal));
+        assert_eq!(errors[0].outcome, None);
+    }
+    pub(super) fn partial(output: &[Action], count: usize) {
+        let gaps = markers(output);
+        assert_eq!(gaps.len(), 1, "one shared coverage marker: {output:?}");
+        assert_eq!(gaps[0].level, Level::Warn);
+        assert!(
+            matches!(gaps[0].fields.as_slice(), [("command", Value::Num(owner))] if *owner == 99.)
+        );
+        let (terminal, result) = output
+            .iter()
+            .enumerate()
+            .find_map(|(i, a)| match a {
+                Action::Notice(Notice::CommandDone {
+                    command: 99,
+                    result,
+                }) => Some((i, result)),
+                _ => None,
+            })
+            .expect("accepted-only result");
+        assert!(output.iter().position(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code==code::HISTORY_INCOMPLETE)).unwrap() < terminal);
+        let result: Vec<serde_json::Value> = serde_json::from_str(result).unwrap();
+        assert_eq!(result.len(), count);
+        assert!(
+            !result
+                .iter()
+                .any(|r| r["id"] == "999999" || r["tranId"] == "999999"),
+            "failed-page prefix cannot escape"
+        );
+        assert!(
+            !output
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
+    }
+    fn failed(e: &mut TestEngine, r: &HttpRequest, failure: u8, axis: u8, streamed: bool) {
+        match failure {
+            0 => e.handle(
+                NOW + 10000.,
+                Event::HttpFailed {
+                    request: r.id,
+                    error: "connection lost",
+                },
+            ),
+            1 => e.handle(
+                NOW + 10000.,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: Response {
+                        status: 503,
+                        headers: "",
+                        body: r#"{"success":false}"#,
+                    },
+                },
+            ),
+            2 => send(e, r, &rows(axis, "{}", 2, 2, 1), streamed),
+            3 => {
+                let prefix = if axis == 1 {
+                    order(999999)
+                } else {
+                    ledger(999999)
+                };
+                let text = if axis == 2 {
+                    format!(r#"{{"success":true,"data":{{"rows":[{prefix},"#)
+                } else {
+                    format!(r#"{{"success":true,"rows":[{prefix},"#)
+                };
+                send(e, r, &text, streamed);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn first_page_failures_reject_typed_without_a_marker() {
+        for axis in 0..4 {
+            for failure in 0..4 {
+                for streamed in [false, true] {
+                    let mut e = ready();
+                    let q = match axis {
+                        0 => fills(Some(5)),
+                        1 => orders(),
+                        2 => income(None),
+                        _ => Query::PublicTrades {
+                            symbol: "BTCUSDT".into(),
+                            limit: Some(5),
+                        },
+                    };
+                    let mut r = query(&mut e, q);
+                    // A wholly unmappable page is a terminal failure. Other
+                    // first-fill failures keep the existing native alternatives.
+                    let attempts = if axis == 0 && failure != 2 { 10 } else { 1 };
+                    for attempt in 0..attempts {
+                        failed(&mut e, &r, failure, axis, streamed);
+                        if attempt + 1 < attempts {
+                            r = next(&mut e);
+                        }
+                    }
+                    typed_reject(&e.drain_actions().collect::<Vec<_>>());
+                    assert!(e.store().orders().is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn later_order_and_income_failure_keep_only_validated_prior_rows() {
+        for axis in [1, 2] {
+            for failure in 0..4 {
+                for streamed in [false, true] {
+                    let mut e = ready();
+                    e.set_log_level(Level::Error);
+                    let first = query(&mut e, if axis == 1 { orders() } else { income(None) });
+                    send(
+                        &mut e,
+                        &first,
+                        &rows(axis, &if axis == 1 { order(1) } else { ledger(1) }, 1, 2, 1),
+                        streamed,
+                    );
+                    let second = next(&mut e);
+                    failed(&mut e, &second, failure, axis, streamed);
+                    partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+                    assert!(e.store().orders().is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ranged_fills_keep_admitted_rows_when_later_alternatives_all_fail() {
+        for streamed in [false, true] {
+            let mut e = ready();
+            let first = query(
+                &mut e,
+                Query::Fills {
+                    symbol: Some("BTCUSDT".into()),
+                    order_id: None,
+                    from_ms: Some(NOW - 4000.),
+                    to_ms: Some(NOW),
+                    limit: Some(5),
+                },
+            );
+            send(
+                &mut e,
+                &first,
+                &rows(0, &fill(1, NOW - 1000., "BUY"), 1, 1, 1),
+                streamed,
+            );
+            let mut second = next(&mut e);
+            for attempt in 0..10 {
+                failed(&mut e, &second, 0, 0, streamed);
+                if attempt < 9 {
+                    second = next(&mut e);
+                }
+            }
+            partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+        }
+    }
+
+    #[test]
+    fn legacy_fill_second_page_failure_retains_the_first_legacy_page() {
+        for streamed in [false, true] {
+            let mut e = ready();
+            let mut r = query(&mut e, fills(Some(5)));
+            for _ in 0..5 {
+                send(&mut e, &r, &rows(0, "", 1, 0, 1), streamed);
+                r = next(&mut e);
+            }
+            assert!(r.url.contains("/v1/client/trades"));
+            send(
+                &mut e,
+                &r,
+                &rows(1, &fill(1, NOW, "BUY"), 1, 2, 1),
+                streamed,
+            );
+            let second = next(&mut e);
+            assert!(second.url.contains("page=2"));
+            failed(&mut e, &second, 0, 0, streamed);
+            partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+        }
+    }
+
+    #[test]
+    fn mixed_pages_keep_row_warning_and_gain_owned_missing_coverage() {
+        for axis in 0..4 {
+            for streamed in [false, true] {
+                let mut e = ready();
+                let q = match axis {
+                    0 => fills(Some(5)),
+                    1 => orders(),
+                    2 => income(None),
+                    _ => Query::PublicTrades {
+                        symbol: "BTCUSDT".into(),
+                        limit: Some(5),
+                    },
+                };
+                let first = query(&mut e, q);
+                let valid = match axis {
+                    0 => fill(1, NOW, "BUY"),
+                    1 => order(1),
+                    2 => ledger(1),
+                    _ => format!(
+                        r#"{{"symbol":"PERP_BTC_USDT","side":"BUY","executed_price":60000,"executed_quantity":0.001,"executed_timestamp":{}}}"#,
+                        NOW / 1000.
+                    ),
+                };
+                send(
+                    &mut e,
+                    &first,
+                    &rows(axis, &format!("{valid},{{}}"), 1, 2, 100),
+                    streamed,
+                );
+                let output = e.drain_actions().collect::<Vec<_>>();
+                assert!(output.iter().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==code::ROW_SKIPPED)));
+                partial(&output, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn filtered_only_pages_never_authorize_empty_recovery() {
+        for axis in [1, 2] {
+            let mut e = ready();
+            let r = query(
+                &mut e,
+                if axis == 1 {
+                    orders()
+                } else {
+                    income(Some("REALIZED_PNL"))
+                },
+            );
+            let excluded = if axis == 1 {
+                order(1).replace("PERP_BTC_USDT", "PERP_ETH_USDT")
+            } else {
+                ledger(1)
+            };
+            send(&mut e, &r, &rows(axis, &excluded, 1, 2, 1), true);
+            let second = next(&mut e);
+            failed(&mut e, &second, 0, axis, true);
+            typed_reject(&e.drain_actions().collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    fn native_metadata_and_no_progress_refusals_remain_strict_after_acceptance() {
+        for metadata in [false, true] {
+            let mut e = ready();
+            let r = query(&mut e, orders());
+            send(&mut e, &r, &rows(1, &order(1), 1, 3, 1), true);
+            let second = next(&mut e);
+            send(
+                &mut e,
+                &second,
+                &rows(
+                    1,
+                    &order(if metadata { 2 } else { 1 }),
+                    if metadata { 999 } else { 2 },
+                    3,
+                    1,
+                ),
+                true,
+            );
+            let output = e.drain_actions().collect::<Vec<_>>();
+            typed_reject(&output);
+        }
+    }
+
+    #[test]
+    fn native_range_truncation_is_strict_even_with_accepted_rows() {
+        let mut e = ready();
+        let mut r = query(
+            &mut e,
+            Query::Fills {
+                symbol: Some("BTCUSDT".into()),
+                order_id: None,
+                from_ms: Some(NOW - 4000.),
+                to_ms: Some(NOW),
+                limit: Some(100000),
+            },
+        );
+        for page in 1..=50 {
+            send(
+                &mut e,
+                &r,
+                &rows(0, &fill(page, NOW - 1000., "BUY"), 1, 1, 1),
+                false,
+            );
+            if page < 50 {
+                r = next(&mut e);
+            }
+        }
+        let output = e.drain_actions().collect::<Vec<_>>();
+        typed_reject(&output);
+        assert!(
+            !output.iter().any(|a| matches!(a, Action::Http(_))),
+            "no extra native range request"
+        );
+    }
+
+    #[test]
+    fn terminal_attempt_1000_succeeds_and_a_needed_1001_is_never_sent() {
+        for terminal in [false, true] {
+            let mut e = ready();
+            let mut r = query(&mut e, orders());
+            for page in 1..=1000 {
+                send(
+                    &mut e,
+                    &r,
+                    &rows(1, &order(page), page, if terminal { 1000 } else { 1001 }, 1),
+                    false,
+                );
+                if page < 1000 {
+                    r = next(&mut e);
+                }
+            }
+            let output = e.drain_actions().collect::<Vec<_>>();
+            assert!(
+                !output.iter().any(|a| matches!(a, Action::Http(_))),
+                "never request1001"
+            );
+            if terminal {
+                assert!(markers(&output).is_empty());
+                let json = output
+                    .iter()
+                    .find_map(|a| match a {
+                        Action::Notice(Notice::CommandDone {
+                            command: 99,
+                            result,
+                        }) => Some(result),
+                        _ => None,
+                    })
+                    .expect("terminal page1000 completes");
+                assert_eq!(
+                    serde_json::from_str::<Vec<serde_json::Value>>(json)
+                        .unwrap()
+                        .len(),
+                    1000
+                );
+            } else {
+                assert!(markers(&output).is_empty());
+                assert!(output.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{command:99,error}) if error.message=="WOO history pagination limit exceeded")));
+            }
+        }
+    }
+
+    #[test]
+    fn simultaneous_owners_keep_failure_and_accepted_coverage_separate() {
+        let mut e = ready();
+        e.set_log_level(Level::Error);
+        let before = e.store().balance().clone();
+        let first = query(&mut e, orders());
+        e.handle(
+            NOW,
+            Event::Command(Command::Query {
+                command: 42,
+                query: orders(),
+            }),
+        );
+        let peer = requests(&mut e).remove(0);
+        send(&mut e, &first, &rows(1, &order(1), 1, 2, 1), true);
+        let second = next(&mut e);
+        failed(&mut e, &peer, 0, 1, true);
+        let peer_output: Vec<_> = e.drain_actions().collect();
+        assert!(markers(&peer_output).is_empty());
+        assert!(peer_output.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command: 42, error }) if error.kind == Some(ErrorKind::Internal)
+        )));
+        failed(&mut e, &second, 0, 1, true);
+        partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+        assert!(e.store().orders().is_empty());
+        assert!(e.store().positions().is_empty());
+        assert_eq!(e.store().balance(), &before);
+    }
+
+    #[test]
+    fn mixed_pages_keep_the_first_gap_and_emit_one_terminal_marker() {
+        let mut e = ready();
+        let first = query(&mut e, orders());
+        send(
+            &mut e,
+            &first,
+            &rows(1, &format!("{},{{}}", order(1)), 1, 5, 3),
+            true,
+        );
+        let mut output: Vec<_> = e.drain_actions().collect();
+        let second = output
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            markers(&output).is_empty(),
+            "only immediate row warning before terminal delivery"
+        );
+        send(
+            &mut e,
+            &second,
+            &rows(1, &format!("{},{{}},{{}}", order(2)), 2, 5, 3),
+            true,
+        );
+        output.extend(e.drain_actions());
+        partial(&output, 2);
+        let gap = markers(&output)[0];
+        assert!(gap.message.contains("skipped 1"));
+        assert_eq!(output.iter().filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == code::ROW_SKIPPED)).count(), 2);
+    }
+
+    #[test]
+    fn empty_public_snapshot_completes_once_without_a_private_request() {
+        for streamed in [false, true] {
+            let mut e = ready();
+            let r = query(
+                &mut e,
+                Query::PublicTrades {
+                    symbol: "BTCUSDT".into(),
+                    limit: Some(5),
+                },
+            );
+            assert!(r.headers.is_empty());
+            send(&mut e, &r, &rows(3, "", 1, 0, 100), streamed);
+            let output: Vec<_> = e.drain_actions().collect();
+            assert!(markers(&output).is_empty());
+            assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
+            assert_eq!(output.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 99, result }) if result == "[]")).count(), 1);
+        }
+    }
+
+    #[test]
+    fn consuming_signed_setup_refusal_keeps_legacy_strict_error() {
+        let (mut e, _) = started();
+        e.drain_actions().for_each(drop);
+        e.handle(
+            NOW,
+            Event::Command(Command::Query {
+                command: 99,
+                query: fills(Some(5)),
+            }),
+        );
+        let output: Vec<_> = e.drain_actions().collect();
+        assert!(markers(&output).is_empty());
+        assert!(!output.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::Notice(Notice::CommandDone { .. })
+        )));
+        assert!(output.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command: 99, error })
+                if error.kind.is_none() && error.outcome.is_none() && error.message == "WOO private requests require credentials"
+        )));
+    }
+
+    #[test]
+    fn empty_v3_alias_attempts_count_against_the_shared_legacy_page_budget() {
+        let mut e = ready();
+        let mut r = query(&mut e, fills(Some(2000)));
+        for _ in 0..5 {
+            send(&mut e, &r, &rows(0, "", 1, 0, 1), false);
+            r = next(&mut e);
+        }
+        for page in 1..=995 {
+            send(
+                &mut e,
+                &r,
+                &rows(1, &fill(page as u64, NOW, "BUY"), page, 996, 1),
+                false,
+            );
+            if page < 995 {
+                r = next(&mut e);
+            }
+        }
+        let output = e.drain_actions().collect::<Vec<_>>();
+        assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(output.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{command:99,error}) if error.message=="WOO history pagination limit exceeded")));
+    }
+}
+
+#[test]
+fn failed_streamed_fill_prefix_cannot_poison_the_same_identity_on_an_alternative() {
+    let mut e = ready();
+    let first = query(&mut e, fills(Some(5)));
+    e.handle(
+        NOW + 1.,
+        Event::HttpStart {
+            request: first.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    let prefix = format!(
+        r#"{{"success":true,"data":{{"rows":[{},"#,
+        fill(1, NOW, "BUY")
+    );
+    e.handle(
+        NOW + 1.,
+        Event::HttpChunk {
+            request: first.id,
+            data: prefix.as_bytes(),
+        },
+    );
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+    );
+    e.handle(
+        NOW + 2.,
+        Event::HttpFailed {
+            request: first.id,
+            error: "prefix lost",
+        },
+    );
+    let second = requests(&mut e).remove(0);
+    assert!(second.url.contains("BTC_USDT_PERP"));
+    response(
+        &mut e,
+        &second,
+        NOW + 3.,
+        &format!(
+            r#"{{"success":true,"data":{{"rows":[{}]}}}}"#,
+            fill(1, NOW, "BUY")
+        ),
+    );
+    assert_eq!(result(&mut e).unwrap().matches("timestamp").count(), 1);
 }

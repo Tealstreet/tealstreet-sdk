@@ -181,6 +181,8 @@ export class BitgetExchange extends BaseExchange {
   private isPrivateStreamDegraded = false;
   private lastPrivateStreamMessageAt = 0;
   private hasWarnedPrivateStreamDegraded = false;
+  /** Only the instance running the private stream (never the web's main-thread mirror) can judge it. */
+  private privateStreamStarted = false;
 
   get suppressBitgetValidationErrorEmission(): boolean {
     return this._suppressBitgetValidationErrorEmission;
@@ -442,6 +444,10 @@ export class BitgetExchange extends BaseExchange {
   };
 
   private schedulePrivateStreamWriteCheck = () => {
+    // The web's main-thread mirror places UI orders but never connects the private
+    // stream, so a watchdog there always fired: a false toast, a REST loop writing
+    // the UI store, and a second private socket opened from the mirror.
+    if (!this.privateStreamStarted) return;
     const lastPrivateFrameAtSchedule = this.lastPrivateStreamMessageAt;
     if (this.privateStreamWriteCheckTimeout) {
       clearTimeout(this.privateStreamWriteCheckTimeout);
@@ -503,6 +509,7 @@ export class BitgetExchange extends BaseExchange {
     await this.ensureAccountTypeDetected();
     if (this.isDisposed) return;
 
+    this.privateStreamStarted = true;
     this.privateWebsocket.connectAndSubscribe();
 
     await this.tick();

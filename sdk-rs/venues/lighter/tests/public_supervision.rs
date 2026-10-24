@@ -8,6 +8,7 @@ struct Rig {
     timers: Timers,
     socket: SocketId,
     now: f64,
+    fired: usize,
 }
 
 fn connected(actions: &[Action]) -> Option<SocketId> {
@@ -49,7 +50,16 @@ impl Rig {
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(NOW);
         let mut timers = Timers::new();
-        let meta = requests(&mut engine).pop().unwrap();
+        let meta = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+            .into_iter()
+            .find_map(|a| {
+                if let Action::Http(r) = a {
+                    Some(r)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
         reply(&mut engine, &meta, 200, META);
         let actions = drain(&mut engine, &mut timers);
         let socket = connected(&actions).unwrap_or(SocketId(0));
@@ -58,12 +68,39 @@ impl Rig {
             timers,
             socket,
             now: NOW,
+            fired: 0,
         };
         (rig, actions)
     }
     fn handle(&mut self, event: Event<'_>) -> Vec<Action> {
         self.engine.handle(self.now, event);
-        drain(&mut self.engine, &mut self.timers)
+        self.drain()
+    }
+    fn drain(&mut self) -> Vec<Action> {
+        let mut output = Vec::new();
+        for _ in 0..50 {
+            let actions =
+                safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now);
+            if actions.is_empty() {
+                return output;
+            }
+            for action in &actions {
+                track(&mut self.timers, action);
+                if let Action::Http(request) = action
+                    && request.url.ends_with("exchangeStats")
+                {
+                    reply_at(
+                        &mut self.engine,
+                        self.now,
+                        request,
+                        200,
+                        r#"{"code":200,"order_book_stats":[]}"#,
+                    );
+                }
+            }
+            output.extend(actions);
+        }
+        panic!("public fixture failed to settle");
     }
     fn open(&mut self) -> Vec<Action> {
         let socket = self.socket;
@@ -73,7 +110,20 @@ impl Rig {
         self.handle(Event::WsMessage { socket, text })
     }
     fn advance(&mut self, until: f64) -> Vec<Action> {
-        let actions = advance(&mut self.engine, &mut self.timers, until);
+        let mut actions = self.drain();
+        while let Some((timer, at)) = self
+            .timers
+            .iter()
+            .copied()
+            .filter(|(_, at)| *at <= until)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        {
+            self.timers.retain(|(id, _)| *id != timer);
+            self.now = at;
+            self.fired += 1;
+            self.engine.handle(at, Event::TimerFired { timer });
+            actions.extend(self.drain());
+        }
         self.now = until;
         actions
     }
@@ -217,11 +267,9 @@ fn suppressed_public_feed_is_not_supervised() {
         }));
         let polls = rig.timers.len();
         assert_eq!(polls, 1, "only the public poll is scheduled");
+        let previous = rig.fired;
         let actions = rig.advance(NOW + 600_000.0);
-        let fired = actions
-            .iter()
-            .filter(|a| matches!(a, Action::SetTimer { .. }))
-            .count();
+        let fired = rig.fired - previous;
         assert_eq!(fired, 300, "{policy:?}: only the 2s poll fires");
         assert!(connected(&actions).is_none());
         assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));

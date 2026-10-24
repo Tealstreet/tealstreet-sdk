@@ -45,7 +45,7 @@ fn every_deployment_uses_its_rest_websocket_and_quote_profile() {
         let mut sockets = 0;
         let mut request_paths = Vec::new();
         for _ in 0..30 {
-            let actions = engine.drain_actions().collect::<Vec<_>>();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
             if actions.is_empty() {
                 break;
             }
@@ -94,7 +94,7 @@ fn every_deployment_uses_its_rest_websocket_and_quote_profile() {
 }
 
 #[test]
-fn robinhood_placements_skip_the_other_deployments_default_builder() {
+fn robinhood_placements_require_their_own_default_builder_approval() {
     for testnet in [false, true] {
         let mut opts = options();
         opts.robinhood = true;
@@ -114,17 +114,11 @@ fn robinhood_placements_skip_the_other_deployments_default_builder() {
         );
         let requests = requests(&mut engine);
         assert_eq!(requests.len(), 1);
-        assert!(requests[0].url.contains("/nextNonce?"));
-        reply(&mut engine, &requests[0], 200, r#"{"code":200,"nonce":10}"#);
-        let submissions = support::requests(&mut engine);
-        assert_eq!(submissions.len(), 1);
-        assert!(submissions[0].url.ends_with("/api/v1/sendTx"));
+        assert!(requests[0].url.contains("/accountLimits?"));
         assert!(
-            !submissions[0]
-                .body
-                .as_deref()
-                .unwrap()
-                .contains("L2TxAttributes")
+            !requests
+                .iter()
+                .any(|request| request.url.contains("nextNonce") || request.url.contains("sendTx"))
         );
     }
 }

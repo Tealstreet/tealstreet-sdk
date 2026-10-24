@@ -209,6 +209,7 @@ export function toBinance(symbol: string, from: ExchangeName): string {
     }
 
     // -- Polymarket: non-standard, best effort ------------------------------
+    case 'binanceoptions':
     case 'polymarket':
       return symbol;
   }
@@ -372,6 +373,7 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
     }
 
     // -- Polymarket: non-standard, passthrough ------------------------------
+    case 'binanceoptions':
     case 'polymarket':
       return symbol;
   }

@@ -37,6 +37,12 @@ const INTERVAL_INVERSE = inverseObj(INTERVAL) as Record<string, Timeframe>;
 const KLINE_TOPIC_PREFIX_LEN = 6;
 const OHLCV_NO_DATA_TIMEOUT_MS = 25_000;
 const OHLCV_RECOVERY_COOLDOWN_MS = 10_000;
+// Bybit livenet closes the socket if too many topics arrive in a single
+// subscribe frame, so initial ticker subscribes and reconnect resubscribes
+// stay at 10. Bulk kline subscribes are tolerated at a higher ceiling on
+// Bybit (we use `publicKlineSubscribeChunkSize` on the parent exchange so
+// Hyro can shrink its own cap without affecting ordinary Bybit).
+const PUBLIC_TICKER_SUBSCRIBE_CHUNK_SIZE = 10;
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -215,7 +221,7 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
     const newTopics = filtered.map((m) => `tickers.${m.symbol}`);
     this.topics.tickers = [...(this.topics.tickers || []), ...newTopics];
 
-    for (const chunkTopics of chunk(newTopics, 10)) {
+    for (const chunkTopics of chunk(newTopics, PUBLIC_TICKER_SUBSCRIBE_CHUNK_SIZE)) {
       this.send(JSON.stringify({ op: 'subscribe', args: chunkTopics }));
       await sleep(5);
     }
@@ -231,8 +237,11 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
   subscribe = async () => {
     const topics = flatten(Object.values(this.topics));
 
-    // need to back off here or bybit closes
-    for (const chunkTopics of chunk(topics, 10)) {
+    // Need to back off here or Bybit closes. Hyro's simulator also rejects
+    // oversized kline batches ("at most 32 topics per connection"); the base
+    // 10-topic ticker chunk is already comfortably below that limit, so this
+    // path is safe for both venues.
+    for (const chunkTopics of chunk(topics, PUBLIC_TICKER_SUBSCRIBE_CHUNK_SIZE)) {
       const payload = { op: 'subscribe', args: chunkTopics };
       this.send(JSON.stringify(payload));
       await sleep(10);
@@ -389,10 +398,14 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
       },
     ];
 
+    // Fall back to the Bybit-livenet default if the parent predates the
+    // Hyro-vs-Bybit chunk split (keeps the ws class usable from test doubles
+    // that mock the parent exchange).
+    const chunkSize = this.parent.publicKlineSubscribeChunkSize ?? 50;
     const waitForConnectedAndSubscribe = () => {
       if (this.isConnected) {
         if (!this.isDisposed) {
-          for (const chunkTopics of chunk(topics, 50)) {
+          for (const chunkTopics of chunk(topics, chunkSize)) {
             const payload = { op: 'subscribe', args: chunkTopics };
             this.send(JSON.stringify(payload));
           }

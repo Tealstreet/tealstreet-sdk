@@ -5,32 +5,27 @@
  *   intent: constructs with no legitimate use, no observed corpus usage, and
  *   which mostly would not work anyway under an opaque origin.
  *
- * `local-only` — legitimate for someone who knows what they are doing, but the
- *   module may never travel. It runs on the device where it was written, in a
- *   frame with relaxed network rules, and is NEVER synced to the server.
- *   Everything that reaches the network or loads foreign code lands here.
+ * `standard` — legitimate, but needs the network. The module runs in the
+ *   `standard` frame (`connect-src https:`) and syncs, commits and publishes
+ *   like any other. Everything that reaches the network or loads foreign code
+ *   lands here.
  *
  * `flag` — evidence, never a gate. Recorded and handed to the model, but on its
  *   own it changes nothing. Either it works fine inside the frame, or it is
  *   already dead by virtue of the opaque origin.
  */
-export type ScreenSeverity = 'block' | 'local-only' | 'flag';
+export type ScreenSeverity = 'block' | 'standard' | 'flag';
 
 /**
- * Which sandbox a module has earned.
+ * Which sandbox a module has earned. Both `strict` and `standard` sync.
  *
- * `strict` is the only tier that syncs — and syncing is exactly what makes a
- * module reachable by someone else's stolen session, which is the whole threat.
- * A `local-only` module cannot be delivered by an attacker because it is never
- * stored anywhere an attacker can write.
- *
- * Note that `local-only` relaxes `connect-src` and `script-src` ONLY. The
- * opaque origin is kept in both tiers, so the exchange API keys in the host's
- * localStorage stay unreachable even from code the user has explicitly
- * trusted. Advanced mode is still strictly safer than today's same-origin
- * `eval`.
+ * `standard` relaxes `connect-src` and `script-src` ONLY. The opaque origin is
+ * kept in both tiers, so the exchange API keys never enter the frame — the one
+ * asset the threat model protects. A standard module sending position or order
+ * data over the network, or loading a third-party script that changes after it
+ * was screened, is an ACCEPTED risk (owner decision, 2026-10-22).
  */
-export type ScreenTier = 'strict' | 'local-only' | 'blocked';
+export type ScreenTier = 'strict' | 'standard' | 'blocked';
 
 export interface CircumventionFinding {
   /** Stable id, safe to grep for in logs and to alert on. */

@@ -1,4 +1,3 @@
-import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import type { Market, PlaceOrderOpts } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -15,19 +14,20 @@ import { BlofinExchange } from '../../exchanges/blofin/blofin.exchange';
 import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
 import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
-import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
 import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
 import { KucoinExchange } from '../../exchanges/kucoin/kucoin.exchange';
 import { KucoinSpotExchange } from '../../exchanges/kucoin/kucoinspot.exchange';
 import { OKXExchange } from '../../exchanges/okx/okx.exchange';
-import { RustEngineExchange as OrderlyExchange } from '../../exchanges/rust/rust.exchange';
 import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
 import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
+import { RustEngineExchange as OrderlyExchange } from '../../exchanges/rust/rust.exchange';
 import { WeexExchange } from '../../exchanges/weex/weex.exchange';
 import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
+import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 
 const MARKET: Market = {
   id: 'BTCUSDT',
@@ -208,7 +208,12 @@ const CASES: Case[] = [
     async (id) => {
       const exchange = create(PhemexExchange, 'phemex');
       vi.spyOn(exchange, 'getOrFetchPositionsForSymbol').mockResolvedValue([]);
-      return (await exchange.formatCreateOrder(limit({ clientOrderId: id })))[0];
+      vi.spyOn(exchange, 'fetchRawPositionModeForSymbol').mockResolvedValue(PositionMode.OneWay);
+      const get = recorder({ data: { positions: [] } });
+      exchange.xhr = { get };
+      const payload = (await exchange.formatCreateOrder(limit({ clientOrderId: id })))[0];
+      expect(get).not.toHaveBeenCalled();
+      return payload;
     },
   ],
   [

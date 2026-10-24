@@ -292,3 +292,395 @@ command authority from background engine/native admission. Full-map review
 verified every original candle-review assertion/clock/payload is retained.
 Architecture gate: No. CI replay/size/complete-package proof and the overseer's
 merge window remain separate gates; this checkpoint is not a merge approval.
+
+## Phase 1b: engine command-entry admission (2026-10-23)
+
+Base `6741c1c6609` contains actual candle #1807 and engine command-entry #1830
+(`0001c78eeb2`). This follow-up replaces only the remaining candle issuance
+refusal, not the deferred inventory families in the appendix. Current Lighter
+inventory is 47 occurrences (`lib.rs`: 6); removing the one exact
+`cx.fail(c, error)` fingerprint makes those totals 46 and 5 respectively. Every
+other venue fingerprint and every other Lighter path remains incoming verbatim.
+
+The complete callback audit finds two `fetch_candles` callers: genuine
+`on_command(FetchCandles)` passes `Some(command)`, and the poll timer passes
+`None`. Before admission the helper only reads subscription generation/revision;
+it queues no work, publishes nothing and consumes no resource. Command reads
+will call the landed `Cx::admit_http_command(Policy)` once, without an ID argument.
+On either `Rejected` (already emitted one typed denial) or `Revoked` (no current
+entry authority), return without a local terminal, request or fallback. The
+background caller continues using `http_context(Scope::Background, policy)`;
+capacity refusal still clears only its matching generation's in-flight flag.
+Both branches retain the same public Read policy, 20-second timeout, no
+credential and `RetryPolicy::Never`. Native input validation, query bytes,
+streaming, Context terminals, revision fences and WebSocket behavior are intact.
+No wrapper, numeric completion, local capacity policy or retry is introduced.
+
+Files: `src/lib.rs`, `tests/request_context_candles.rs`, this plan, the exact
+Lighter-only manifest prune and caller/audit/quality appendices. Fresh all-open
+PR inspection (`--limit 200`) finds #1866 holds only Lighter `src/trading.rs`;
+leave it untouched. No other open PR holds this slice's source or test file.
+
+Commit this plan and obtain independent source/adversarial, caller and full-map
+reviews before production edits. Commit original-RED controls separately: full
+256-owner admission returns the engine's exact typed Read capacity error (no
+financial outcome), before invalid native parameters, with exactly one terminal
+and no I/O/timer allocation. Existing owners must still release and complete;
+a live duplicate command must produce no new request or terminal and must not
+revoke the original. Exercise both aliases and networks, preserve all original
+seven candle controls, and prove a freed slot accepts the refused command.
+Then adopt shared command entry, prune just that one fingerprint and retain all
+incoming entries/prunes. Run focused candles, all Lighter+Binance native tests,
+strict touched-crate clippy/fmt, bans and both request-context checks; obtain
+three clean implementation reviews and open a separate draft PR with CI watch.
+
+Caller-visible refusal changes from the adapter's generic lifecycle-unavailable
+message to the engine's typed `Engine request capacity reached` / Internal Read
+denial, with no financial outcome. Successful and native validation replies keep
+their existing wire/result shape. Duplicate live command IDs are refused by the
+shared entry owner without affecting the original command. Private trading,
+auth/nonce, history and multi-request paths remain dependent on their owning
+shared seams. Architecture gate: this is a consumer of the shared admission
+choke point, not a per-venue admission implementation.
+
+Plan-review correction: initial admission can also reject a nonfinite raw clock
+or invalid computed deadline. The shared denial is `Invalid request context`,
+`InvalidInput`, outcome `None`, replacing the same generic adapter error. Add a
+one-terminal/no-I/O control for NaN and both infinities on a genuine command
+callback, plus a later finite-clock admission to prove no retained owner.
+This is shared policy validation; native candle parameter validation is unchanged.
+
+Implementation receipt: original production source at `6741c1c6609` with corrected
+controls in `d1e6ab36d6c` produces two assertion failures (capacity message and
+invalid-clock kind), with all eight compatibility controls passing. The first
+RED commit `3c99a9d2957` also rejected the engine's existing duplicate diagnostic;
+`d1e6ab36d6c` explicitly preserves that diagnostic rather than treating it as an
+admission bug. No production source was committed before these controls.
+
+## Cached Read completion slice on actual 732cf8 (2026-10-23)
+
+Base `732cf8b0a6e5f5dbe783c62af9f14e7c32ee8fe0`; branch
+`feat/rust-lighter-cached-read-context`. The current full venue inventory is
+46 occurrences: account5/history10/identity3/lib5/limits6/trading17. The original
+full inventory appendix remains historical; incoming prunes are retained.
+
+Selection: migrate the two synchronous cached reads together. `FetchLeverage`
+(lib.rs) reads only Store settings and serializes equal buy/sell leverage;
+missing settings fail with `Lighter leverage is not loaded`. The extension
+`FetchAccountTier` (limits.rs) returns only its existing tier cache, including
+`null` before a successful limits refresh. Neither command fetches metadata,
+refreshes limits, authenticates, signs, allocates transport or joins another read.
+Native cache cadence, tier labels/normalization and all writes remain unchanged.
+
+This is the largest currently unblocked coherent slice found in the fresh
+open-PR file map. Hyperliquid spot candles could prune6 but #1877 holds the
+existing test that explicitly requires merged spot to remain legacy. Paradex
+candles could prune6 but retain klines-to-TradingView fallback and polling, which
+require a separate shared multi-attempt authority audit (the existing Read retry
+API is not absent); identity/private paths also wait on shared
+session/signing cores. Lighter identity/catalog have native multi-attempt fallback;
+its independent ticker/depth public pair prunes2, GRVT catalog prunes1, and the
+already planned unsigned Paradex public trades consumer prunes1. GRVT session
+regions belong to claude-55ao7t. Paradex signing is untouched while Sam decides
+whether to use remote Stark payloadSigner option C. Lighter trading.rs is held by
+#1866, and Hyperliquid sign/trading by #1852/#1866; no held source/test is edited.
+
+### Implementation and exact prune
+
+Before reading or serializing either cache, admit the genuine current callback
+using existing `Cx::admit_http_command(Policy)` with Read/no credential,
+20,000ms/Never/no pacing. This existing engine API explicitly supports a no-HTTP
+initial Read root. Rejected already emitted its one typed failure; Revoked
+returns without touching another owner. Never use a numeric fallback or invent a
+request, delivery, timer, mutation fact, completion wrapper or venue capacity rule.
+Consume the root immediately with `done_context`/`fail_context`; handle returned
+revocation without unwrap or a second result. Put admission directly in each
+existing command branch; preserve the native result/error codec verbatim.
+
+Only lib.rs, limits.rs, new tests/request_context_cached_reads.rs, this plan,
+CALLERS/AUDITS/QUALITY appendices and the shared inventory are intended paths.
+The exact three removed occurrences are lib.rs `cx.done(command, data)` and
+`cx.fail(command, error)`, plus limits.rs `cx.done(command, tier)`. Expected
+inventory46→43, lib5→3 and limits6→5; every other Lighter and foreign mapping
+remains byte-equivalent. Do not prune the identical `fail(command,error)` in
+limits.rs's SetAccountTier branch. Generate counts from the actual scanner.
+
+### Original REDs and verification
+
+Commit assertion-failing tests before source. Test both command entry points via
+the real Engine, both aliases and networks. With256 managed candle owners parked,
+valid cached leverage/missing settings/tier must each refuse once with the shared
+Internal capacity error and no financial outcome; a refused ID can be used after
+freeing a peer slot. Invalid NaN/±Infinity clocks must give the shared InvalidInput
+entry error, then succeed at finite time. These assertions must fail on original
+source, which currently bypasses admission and returns cache data/native missing
+setting error instead. No tests merely inspect source spelling or mirror the move.
+
+Compatibility controls preserve finite-time leverage JSON, missing-setting text,
+unknown tier null and repeated immediate completions without leaking the256-owner
+bound; prove no HTTP/managed HTTP/signing/socket/timer or Store publication from
+cached reads. Preserve duplicate-live-command diagnostic/original candle ownership,
+including cross-entrypoint duplicate IDs. Retain existing account_limits cached
+standard-tier and SetAccountTier tests unchanged. Use existing shared test_support
+and native support fixtures, with no generic transport fork.
+
+Obtain independent source/adversarial, caller and full-map plan reviews before
+source and repeat after implementation. Run focused new tests, full Lighter and
+Binance native tests with CARGO_BUILD_JOBS=2, strict touched-crate Clippy/scoped fmt,
+bans and both request-context checks. CI runs WASM/replays/size/timing. Push a draft
+PR, keep a background CI watch, then request a train slot when green and reviews
+are CLEAN; separate fresh full-map guard before a head-matched merge.
+
+Caller-visible: finite valid caches retain method signatures and native output.
+Cached calls now share bounded command admission: capacity/invalid clock failures
+carry shared typed Read metadata and cannot consume another owner; no financial
+outcome or transport support is required for these synchronous reads. No caller
+outside the SDK needs a signature change. Architecture gate: No; this consumes
+existing engine entry and completion authority, adding no cross-cutting mechanism.
+
+### Cached Read original RED and implementation receipt
+
+Plan2a093966518, original RED ffef6eaf580. Eight focused tests run against the
+unchanged actual732cf8 production: five intended assertion failures and three
+compatibility passes. Present leverage/tier incorrectly succeed at full capacity;
+missing leverage exposes its native unclassified error instead of the capacity
+refusal; both cached success branches ignore invalid clocks. After consuming
+shared admission and Context terminals directly, all eight controls pass unchanged.
+The test uses real Engine callbacks and genuine parked candle peers, never mocks
+Context authority. Unknown tier remains null; existing loaded-tier/write controls
+remain intact in account_limits.rs. Scanner-generated delta is exactly lib c5a…1
+and c873…1 plus limits417fc047…1; no other fingerprints are changed. Production
+uses only existing shared APIs, no new helper, transport, retry or signing path.
+
+Cached slice verification: 504 Lighter+Binance native tests across48 result groups,
+all8 focused controls, strict Lighter all-target/all-feature Clippy, scoped fmt,
+bans and both request-context checks (14 controls) pass. Genuine integration of
+actual #1871/#1872 at e233cb05dfb preserves their source and prunes; three shared
+doc conflicts keep complete incoming first plus exact611/868/777-byte own tails.
+No Rust runtime dependency of the tested Lighter/Binance closure changed during
+integration. Only the same8 own paths differ from the new landing. Fresh CI and
+independent implementation reviews are separate final gates; no WASM/replay or
+whole-venue closure is claimed by native evidence.
+
+## Public ticker/depth seed Context slice on actual db32 (2026-10-23)
+
+Fresh branch `feat/rust-lighter-public-seed-context` starts at actual #1900
+`db32da5314cce685e3ff2e17d51e26bfb94c8093`. Full current inventory43:
+account5/history10/identity3/lib3/limits5/trading17. The public ticker and order-book
+seed pair removes the next two independent physical send sites; catalog fallback
+retains the one remaining lib site. Public identity/catalog retain native multiple
+attempts; private reads have signer/join prerequisites. Hyperliquid spot's six
+sites remain blocked by the #1877 legacy-spot fixture. GRVT login belongs to #1905.
+
+Before source, recheck every open PR file list. #1866 holds Lighter trading.rs;
+#1877 now also holds tests/request_context_candles.rs. Neither may be edited.
+If either held fixture necessarily needs adaptation, stop this slice and report
+that collision rather than weakening it or cloning its assertions elsewhere.
+Intended own files: lib.rs, new tests/request_context_public_seeds.rs, existing
+public.rs/public-review.rs/support only where prepared drains are needed, this
+plan and CALLERS/AUDITS/QUALITY appendices, exact shared inventory prune. Other
+native fixtures may be listed by the independent driver audit before source;
+no assertion changes or unrelated production edits are authorized by this list.
+
+### Native facts and managed design
+
+`exchangeStats` is unsigned GET with empty headers/body and the exact six native
+ArrayAt envelope alternatives. It snapshots ticker_revision, stages native Stats
+rows (retaining skipped-row diagnostics/partial valid peers), then updates only
+markets whose WebSocket source revision is no newer. Preserve ticker_in_flight,
+existing startup Backoff, stream subscriptions and native field mapping.
+
+`orderBookOrders?market_id={id}&limit=100` is unsigned GET with empty headers/body,
+a complete response (no array selector). Existing depth generation/revision,
+in_flight, rest_retry_at and per-book silence/gap rules remain native. Preserve
+strict RestDepth/Depth validation and last_received/nonce/book_changed behavior;
+failed or stale reads cannot reset another subscription's latch or publish a book.
+
+Add mandatory Context ownership to the two existing Pending variants. Before
+setting a new in-flight latch, issue a separate shared Background Read Context:
+no credential,20s,Never,no pacing. Use request_managed, then attach the original
+stream selector only for tickers. This is a single logical read per seed; no
+command completion owner, fake mutation fact, joined execution, local Plan or
+copied retry policy is introduced. Admission/queue failure uses existing native
+failure cleanup; never emit a command terminal or touch another Context.
+
+On ticker item admission use the existing shared live-Context validation before
+native staging; engine managed delivery already fences physical release. Before
+publication validate the current Context, retire through finish_http_context,
+then preserve native ticker source or depth generation/revision checks. Every
+terminal path retires its Context, including malformed envelopes/prefixes,
+preparation/queue/transport/expiry failures and stale-generation early returns.
+Depth cleanup mutates only its matching generation. Ticker cleanup releases its
+single in-flight latch and existing startup Backoff; Context refusal must not
+strand either seed. Expired handles may retire without acquiring send rights.
+No new retry timer, budget, outcome classifier or metadata policy is added.
+
+### Original REDs, exact map and gates
+
+Commit assertion-failing tests first: both aliases/networks emit public Prepare
+with exact native GET/header/body bytes; neither early response nor streamed rows
+before final claim publish. Successful release preserves native ticker partial
+rows/source dominance and depth mapping. Preparation denial, original deadline
+while parked/claimed, and failed prefixes publish nothing, allocate no command
+terminal and release only the matching seed latch for native retry. Prove late
+old depth response/failure cannot release a resubscribed replacement; stale
+revision cannot replace fresh WS depth/ticker data. Test Context capacity refusal
+against unrelated parked command owners, then free a slot and recover through
+native timer/backoff. Keep existing native assertions through prepared_actions.
+
+Expected exact removals: lib fingerprint
+2bbebb7465e83aac90aeda0b54e32b996272c805baa3f70ed2fafc69a8e73268 once
+(ticker request_streamed), and
+18cd2d97de7df286e747348057b54c6924eb3e65bc7df288229e919c4a447f11 once
+(depth request). Inventory43→41, lib3→1; all other Lighter/foreign maps unchanged.
+Never prune the remaining catalog sender or rehash unrelated legacy sites.
+
+Run full Lighter+Binance native tests CARGO_BUILD_JOBS=2, strict touched-crate
+Clippy/scoped fmt, bans and both current request checks. Obtain three independent
+plan reviews before source and source/adversarial/caller/full-map reviews after
+implementation. CI supplies WASM/replay/timing/size evidence with a background
+watch. Request a train slot only when green; fresh separate full-map guard before
+head-matched merge. No whole-venue zero, private/signing or transport-package proof
+is claimed by this public pair.
+
+Caller-visible: custom worker/hosted transports must support prepare/bind/claim
+for these background GETs. Preparation shares the original20s bound with response
+processing. Successful data/cadence and SDK call signatures stay native; parked
+or expired work cannot mutate Store. Failure remains background recovery, never
+a correlated user's command result. Architecture gate No: existing Context and
+HTTP lifecycle APIs carry policy; the venue retains only protocol/cache facts.
+
+### Public-seed slice narrowed to depth only before source
+
+The deeper independent fixture audit found a concrete #1877 hold collision for
+ticker adoption: request_context_candles.rs's background-generation recovery test
+selects the first SetTimer at NOW+140000. Its poll issues ticker before candle;
+a managed ticker adds the same20s deadline first and the held test would expire
+ticker rather than the intended candle owner. No deadline change, operation
+reorder or duplicate test can honestly remove that collision. Ticker adoption
+waits until the held fixture can be disambiguated by its owner or after landing.
+No ticker source/test is changed by this PR.
+
+Proceed with **depth only**, the next unblocked physical read. All design,
+original-RED and validation requirements above apply to depth; ticker requirements
+remain a deferred plan rather than this implementation claim. Exact prune is
+only18cd2d97de7df286e747348057b54c6924eb3e65bc7df288229e919c4a447f11
+once:43→42/lib3→2; ticker2bbebb and catalog1edfac remain exact. The held candle
+fixture does not subscribe to order books, so depth adds no timer to its poll.
+Confirm this with all three plan reviews before source. Shared unheld test drivers
+may receive prepared drains with actual event clocks, retaining all assertions.
+
+Depth driver audit also adds unheld tests/public_supervision.rs. Its suppressed-
+feed test currently counts exactly one tracked timer and300 total SetTimer
+operations after subscribing a depth read. Managed read deadlines/recovery now
+add legitimate timers. Retain every timer and action; explicitly distinguish and
+assert the20s Context deadlines/recovery from the original2s poll count, keeping
+all original no-WS-connect/no-ping/no-reconnect-supervision guarantees. Never drop
+unknown timers, manufacture completion or alter runtime order/deadlines to keep
+an old total. Public/public-review direct depth drains use prepared_actions at
+the actual event clock; shared support only where required. Ticker-only drivers,
+held candle/trading tests and production ticker logic remain unchanged.
+
+### Depth original RED and native implementation receipt
+
+Plan8b700d2ffc8 narrowed at caf6e4cf1b3, driver correction c7a1d352046; all three
+independent plan reviews CLEAN/architectureNo. Original RED362e8edb77f runs seven
+compiled assertion failures on actualdb32 legacy dispatch. Test correction
+6311e52cfe0 pins the existing native testnet REST host (testnet-api.lighter.xyz);
+the original managed-preparation/capacity RED assertions are unchanged. This is
+a fixture correction, not a new endpoint change. All seven controls now pass.
+
+Production changes only Pending::Depth, its single sender and its terminal
+cleanup. Issuance before the in-flight latch uses Background Read20s/Never/noauth;
+queue failure retires the exact returned handle. Success captures liveness and
+retires before native generation/revision early returns or unchanged RestDepth
+mapping; global failures retire before existing matching-generation cooldown.
+No command result, retry loop, row framework, signing or native ticker change.
+Scanner removes only18cd… once:43→42/lib3→2; catalog/ticker sites stay exact.
+
+Only public.rs and public-review.rs need driver adaptation: shared prepared_actions
+at each existing event clock exposes released depth HTTP while preserving every
+native assertion, including the old-failure no-new-request check. The actual
+six supervision tests pass unchanged for depth-only, so no timer assertion edit,
+shared support change or held fixture edit is needed. All33 focused tests across
+public/public-review/public_supervision/new depth controls pass. Dedicated tests
+cover exact four-deployment wire, preclaim fencing, parked/released original
+expiry and recovery, route/transport/malformed cleanup, resubscribed generation,
+WS revision precedence, capacity peer isolation and300 successful retirements.
+Full native/strict/ratchet/CI and independent source reviews remain final gates.
+
+Depth verification on source81ac295d25a:511 Lighter+Binance native tests across49
+result groups PASS, including all7 new controls, all8 cached-read controls and
+unchanged held candle tests. Strict all-target/all-feature Lighter Clippy, scoped
+fmt, bans and both current request checks/15 controls PASS. Ticker/catalog,
+private/account/signing/trading and shared engine source stay unchanged; only9
+own paths differ from actualdb32. Independent implementation reviews and broad
+CI remain separate gates. No local WASM release/replay/timing sweep was run.
+
+### 2026-10-24: ticker hold released after depth landing
+
+Base actual1912 `5ce4b13fb7edadcf188a49f435663091e9596807`, including actual1877.
+The public-seed plan above already maps and specifies ticker ownership; resume
+only its ticker half. Fresh open-PR file lists show no Lighter lib/test collision
+except the unrelated trading.rs nonce lane. Current inventory42/lib2 becomes41/1
+by pruning only ticker fingerprint
+`2bbebb7465e83aac90aeda0b54e32b996272c805baa3f70ed2fafc69a8e73268`:1.
+Catalog `1edfac` remains counted; its primary/fallback relationship is separate.
+
+Add mandatory Context to Pending::Tickers. Before setting ticker_in_flight,
+issue Background Read/no credential/20s/Never/no pacing. Refusal goes through
+existing startup Backoff without a stranded latch or command terminal. Replace
+only its request_streamed with request_managed followed by the exact same
+stream_response Envelope aliases and empty headers/body. Validate live ownership
+before item staging. Before native response publication, capture liveness and
+retire the Context once; failures retire then clear the latch and use existing
+startup.failed(false). Preserve native usable partial rows (failed && rows.empty
+is the existing rejection predicate), per-symbol ticker_sources/revision dominance,
+all field conversions and the original poll/backoff cadence. Malformed streamed
+envelopes discard staged prefixes through the existing stream-error cleanup.
+No new row framework, retry budget, native fallback or local authority seam.
+
+Original REDs before production: all four deployments Prepare exact GET bytes;
+unclaimed complete/streamed responses publish nothing; parked/released20s deadline
+and typed route/transport failure retire the seed and permit native recovery;
+malformed envelopes/prefixes do not escape; usable partial rows retain native
+semantics; newer WS rows dominate only their symbol; Context capacity admission
+cannot strand the latch or retire unrelated candle owners; repeat300 successful
+cycles leave no Background owner leak. No user command terminal/financial outcome.
+
+The previously held candle fixture is now editable. Its timeout branch currently
+fires only the first NOW+140000 SetTimer, which becomes ticker's timer when both
+seeds are managed. Change only host driving to deliver every captured timer due
+at that same deadline, as a real host does; preserve its exact time and every
+candle generation/recovery assertion. Run this driver-only correction against
+legacy ticker source first (GREEN). Preparation selection is already URL-scoped
+to candles. Add no production ordering/deadline workaround or duplicate test.
+Existing ticker-native fixture drivers may use shared prepared_actions at their
+original event clocks, retaining every wire, value, failure and revision assertion.
+Only drivers that actually encounter ticker Prepare may change; no trade/signing
+source, engine or held files. Document each required driver correction.
+
+Files: lib.rs, new tests/request_context_tickers.rs, affected existing public/
+startup fixture drivers and shared test support, request_context_candles.rs host
+clock driver, exact manifest key and append-only plan/CALLERS/AUDITS/QUALITY.
+Original tests must compile and fail on actual legacy dispatch assertions. Run
+Lighter+Binance native (CARGO_BUILD_JOBS=2), strict touched-crate Clippy, scopedfmt,
+bans and both inventory checks/15controls; three independent plan then implementation
+reviews, architecture No (existing shared Context/managed HTTP), draft/background
+CI at120s and serialized train slot only when green. No catalog/private/signing
+or whole-family-zero claim.
+
+Ticker execution receipt: original six compiled admission assertions are RED at
+85eec6c0675; all six pass on managed source. Driver-only24a7c15952e first passes
+all10 candle Context controls with legacy ticker source. Full native verification
+identified five fixture targets still relying on immediate ticker transport:
+public-review and public_feed now use shared prepared drains at their original
+clocks; shared support restores the startup ticker before trading protection
+assertions. Two depth-capacity controls first settle the genuine public ticker
+before filling all256 command-owner slots, preserving the original depth/free-slot
+and WS-revision assertions. The supervision driver completes empty ticker reads
+and counts actual TimerFired deliveries (exact300 polls), rather than counting
+created-but-cancelled Context deadline timers as fires. All original supervision
+assertions and timestamps remain. The five affected targets now pass; production
+trading/account, catalog and engine code are unchanged. Full final native/strict,
+legacy-driver compatibility, ratchet and independent review gates follow.

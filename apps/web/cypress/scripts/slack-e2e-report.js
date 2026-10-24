@@ -139,10 +139,11 @@ function bucketExchange(ex) {
   const failed = ex.totalFailed || 0;
   const passed = ex.totalPassed || 0;
   const blocked = ex.totalBlocked || 0;
+  const totalRan = passed + failed;
+  // A spec that crashed before any test ran has failed === 0 too; it is not clean.
+  if (totalRan === 0) return ex.transportFailureReason ? 'transport-flap' : 'blocked-at-load';
   if (failed === 0) return 'clean';
   if (ex.transportFailureReason) return 'transport-flap';
-  const totalRan = passed + failed;
-  if (totalRan === 0) return 'blocked-at-load';
   if (ex.loadFailureDiagnostics && blocked >= failed - 1) return 'blocked-at-load';
   if (passed > 0 && failed > 0) return 'partial';
   return 'clean-failure';
@@ -317,7 +318,7 @@ function buildDetailedReport(exchanges, totalPassed, totalTests, runUrl, trigger
   lines.push('');
 
   for (const ex of exchanges) {
-    const status = ex.totalFailed === 0 ? 'PASSED' : 'FAILED';
+    const status = ex.totalFailed === 0 && ex.totalPassed > 0 ? 'PASSED' : 'FAILED';
     lines.push('-'.repeat(80));
     lines.push(`${ex.exchange.toUpperCase()} — ${status} (${ex.totalPassed}/${ex.totalPassed + ex.totalFailed})`);
     if (ex.runUrl) lines.push(`Cypress Cloud: ${ex.runUrl}`);
@@ -488,7 +489,8 @@ async function main() {
     totalFailed += ex.totalFailed;
   }
 
-  const allPassed = totalFailed === 0;
+  const crashedSpecs = exchanges.filter((ex) => ex.totalPassed + ex.totalFailed === 0).length;
+  const allPassed = totalFailed === 0 && crashedSpecs === 0;
 
   // Build URLs
   const runUrl = `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;

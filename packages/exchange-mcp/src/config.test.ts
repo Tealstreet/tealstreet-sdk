@@ -45,6 +45,11 @@ describe('readConfig', () => {
     expect(readConfig(signerEnv).options.enableOptionMarkets).toBe(false);
   });
 
+  it('turns options on for an exchange that trades only options, with or without EXCHANGE_OPTIONS', () => {
+    expect(readConfig({ EXCHANGE: 'binanceoptions' }).options.enableOptionMarkets).toBe(true);
+    expect(readConfig({ EXCHANGE: 'binanceoptions', EXCHANGE_OPTIONS: 'true' }).options.enableOptionMarkets).toBe(true);
+  });
+
   it('turns inverse on only when asked', () => {
     expect(readConfig({ ...signerEnv, EXCHANGE_INVERSE: 'true' }).options.enableInverseMarkets).toBe(true);
     expect(readConfig(signerEnv).options.enableInverseMarkets).toBe(false);

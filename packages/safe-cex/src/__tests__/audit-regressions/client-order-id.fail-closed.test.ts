@@ -8,6 +8,7 @@ import { BackpackExchange } from '../../exchanges/backpack/backpack.exchange';
 import { BaseExchange } from '../../exchanges/base';
 import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
 import { BinancePMExchange } from '../../exchanges/binance/binancepm.exchange';
+import { BinanceOptionsExchange } from '../../exchanges/binance/binanceoptions.exchange';
 import { BinanceSpotExchange } from '../../exchanges/binance/binancespot.exchange';
 import { BingxExchange } from '../../exchanges/bingx/bingx.exchange';
 import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
@@ -65,6 +66,7 @@ const HONORING: Array<[string, ExchangeCtor]> = [
   ['apexomni', ApexOmniExchange],
   ['backpack', BackpackExchange],
   ['binance', BinanceExchange],
+  ['binanceoptions', BinanceOptionsExchange],
   ['binancepm', BinancePMExchange],
   ['binancespot', BinanceSpotExchange],
   ['bingx', BingxExchange],

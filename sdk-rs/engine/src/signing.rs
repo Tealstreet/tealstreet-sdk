@@ -21,6 +21,65 @@ pub struct CredentialSetupPolicy {
 pub struct IdentitySetupPolicy {
     pub trim_credential: Option<bool>,
     pub passphrase: Option<SetupFieldPolicy>,
+    /// Declared secret decoding is authoritative over caller metadata.
+    pub secret_encoding: Option<KeyEncoding>,
+    /// The only extra signing ref trusted setup may install for this slot.
+    pub extra: Option<ExtraKeyPolicy>,
+    /// Declares the signing ref an asymmetric key of this algorithm; only a
+    /// declared ref answers public operations, so no secret is fingerprinted.
+    pub signing_algorithm: Option<Algorithm>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExtraKeyPolicy {
+    pub key: ExtraKey,
+    #[serde(default)]
+    pub field: ExtraFieldPolicy,
+    /// Declared decoding of the extra material; authoritative over caller metadata.
+    #[serde(default)]
+    pub encoding: Option<KeyEncoding>,
+}
+
+/// Extra refs never fall back across slots, so there is no fallback variant.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExtraFieldPolicy {
+    #[default]
+    Optional,
+    RequiredForPrivate,
+}
+
+/// Trusted setup decoding of supplied key material. Nothing here is inferred.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum KeyEncoding {
+    #[default]
+    Utf8,
+    Base64,
+    Hex,
+    /// PKCS8/SEC1 envelope decoding; algorithm validation occurs when signing.
+    Pem,
+    /// Key bytes are the ASCII of standard padded base64 of the input bytes.
+    Base64Text,
+}
+
+/// Closed vocabulary of additional per-identity signing material. These refs
+/// are signing inputs only: never a nonce domain, account subject or id source.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum ExtraKey {
+    /// ApeX Omni zkLink seed: the exact 65-byte packed Ethereum signature.
+    ZklinkSeed,
+}
+impl ExtraKey {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::ZklinkSeed => "zklinkSeed",
+        }
+    }
 }
 
 /// Required material is validated by trusted setup; external refs prove presence only.
@@ -44,6 +103,36 @@ impl CredentialSetupPolicy {
         let complete = |identity: &Identity| {
             !identity.credential.0.is_empty() && !identity.signing.0.is_empty()
         };
+        // Extra refs exist only where declared. They never fall back across slots.
+        for (identity, policy, primary) in [
+            (identities.primary.as_ref(), self.primary, true),
+            (identities.secondary.as_ref(), self.secondary, false),
+        ] {
+            let declared = policy.and_then(|policy| policy.extra);
+            let Some(identity) = identity else { continue };
+            if identity
+                .extra
+                .keys()
+                .any(|key| declared.is_none_or(|declared| declared.key != *key))
+            {
+                return Err(SignError::InvalidRequest);
+            }
+            if let Some(declared) = declared {
+                let required = match declared.field {
+                    ExtraFieldPolicy::Optional => false,
+                    ExtraFieldPolicy::RequiredForPrivate => !(primary && public_data_only),
+                };
+                if required
+                    && complete(identity)
+                    && identity
+                        .extra
+                        .get(&declared.key)
+                        .is_none_or(|key| !valid_key_ref(key))
+                {
+                    return Err(SignError::InvalidRequest);
+                }
+            }
+        }
         let required = |policy: Option<IdentitySetupPolicy>, primary: bool| match policy
             .and_then(|policy| policy.passphrase)
             .unwrap_or_default()
@@ -110,6 +199,9 @@ pub struct Identity {
     /// Caller-assigned, non-secret identity/nonce namespace. Never a key hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stable_id: Option<String>,
+    /// Additional signing refs owned by this slot; see `ExtraKey`.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub extra: std::collections::BTreeMap<ExtraKey, KeyRef>,
 }
 impl Identity {
     pub fn require_stable_id(&self) -> Result<&str, SignError> {
@@ -130,6 +222,7 @@ impl Identity {
                 .stable_id
                 .as_deref()
                 .is_some_and(|id| !valid_stable_id(id))
+            || self.extra.values().any(|key| !valid_key_ref(key))
         {
             Err("Secondary read credentials require a nonempty key and secret")
         } else {
@@ -162,7 +255,8 @@ pub enum Algorithm {
     HmacSha512,
     /// SHA256(message || key), raw 32-byte digest. No implicit hex or prehash.
     Sha256SecretSuffix,
-    /// Ed25519 exact message, without a prehash; raw 64-byte signature.
+    /// Ed25519 exact message, without a prehash; raw 64-byte signature. The key is
+    /// a 32-byte seed or the `seed || public` keypair whose public half must match.
     Ed25519,
     /// ECDSA P-256 with one SHA256 of message; fixed-width r || s, 64 bytes.
     Es256,
@@ -172,6 +266,9 @@ pub enum Algorithm {
     StarkDigest,
     /// Reserved: Schnorr curve/hash contract requires definition before provider support.
     SchnorrDigest,
+    /// zkLink Rescue/MuSig over an exact 36-byte contract; 65-byte seed key;
+    /// raw 64-byte packed signature. Deterministic: no entropy or nonce state.
+    ZkLinkContract,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -213,6 +310,11 @@ pub enum Operation {
     },
     /// Credential value for an outbound header/body/upgrade field, not storage.
     Present { key: KeyRef },
+    /// Non-secret 20-byte Ethereum address of a ref declared `Secp256k1Digest`.
+    PublicAddress { key: KeyRef },
+    /// Non-secret public key of a ref declared for exactly `algorithm`:
+    /// `Ed25519` 32 bytes, `StarkDigest` the 32-byte big-endian felt.
+    PublicKey { algorithm: Algorithm, key: KeyRef },
 }
 
 /// Context is advisory; providers may optionally refuse it. No enforcement core.
@@ -286,6 +388,17 @@ pub fn hmac_sha256_work(
     }
 }
 
+/// Login preimage `seconds + method + path` as three typed byte parts. The shape
+/// keeps it distinct from an HTTP capture of identical bytes; the remote wire
+/// decodes it only against the family's declared `secondsSuffix`.
+pub fn seconds_suffix_payload(seconds: &str, method: &str, path: &str) -> Vec<PayloadPart> {
+    [seconds, method, path]
+        .map(|part| PayloadPart::Bytes {
+            bytes: part.as_bytes().to_vec(),
+        })
+        .into()
+}
+
 impl SignRequest {
     /// Validate provider output against this exact atomic request. Dispatch and
     /// signing-only capture share receipt, result-count and byte-shape policy.
@@ -310,13 +423,19 @@ impl SignRequest {
             .map(|operation| match operation {
                 Operation::Present { .. } => None,
                 Operation::Sha256 { .. } => Some(32),
+                Operation::PublicAddress { .. } => Some(20),
+                // `validate` refuses an algorithm without a public form first.
+                Operation::PublicKey { algorithm, .. } => {
+                    Some(public_key_len(*algorithm).unwrap_or(usize::MAX))
+                }
                 Operation::Sign { algorithm, .. } => Some(match algorithm {
                     Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => 32,
                     Algorithm::HmacSha512
                     | Algorithm::Ed25519
                     | Algorithm::Es256
                     | Algorithm::StarkDigest
-                    | Algorithm::SchnorrDigest => 64,
+                    | Algorithm::SchnorrDigest
+                    | Algorithm::ZkLinkContract => 64,
                     Algorithm::Secp256k1Digest => 65,
                 }),
             })
@@ -349,6 +468,14 @@ impl SignRequest {
                 Operation::Sign { key, .. } if !valid_key_ref(key) => {
                     return Err(SignError::InvalidRequest);
                 }
+                Operation::PublicAddress { key } if !valid_key_ref(key) => {
+                    return Err(SignError::InvalidRequest);
+                }
+                Operation::PublicKey { algorithm, key }
+                    if !valid_key_ref(key) || public_key_len(*algorithm).is_none() =>
+                {
+                    return Err(SignError::InvalidRequest);
+                }
                 Operation::Sign { payload, .. } | Operation::Sha256 { payload } => {
                     if payload.len() > 256 {
                         return Err(SignError::InvalidRequest);
@@ -375,6 +502,14 @@ impl SignRequest {
             }
         }
         Ok(())
+    }
+}
+
+/// Algorithms with a public form; consumers exist only for these two.
+fn public_key_len(algorithm: Algorithm) -> Option<usize> {
+    match algorithm {
+        Algorithm::Ed25519 | Algorithm::StarkDigest => Some(32),
+        _ => None,
     }
 }
 
@@ -494,8 +629,36 @@ pub trait Signer: ProviderBounds {
     fn sign_ready(&self, _request: &SignRequest) -> Option<Result<SignResult, SignError>> {
         None
     }
+    /// Advisory admission answer from installed state only; never signs to probe.
+    /// Release-time signing remains the choke point.
+    fn can_sign(&self, _key: &KeyRef, _algorithm: Algorithm) -> Capability {
+        Capability::Unknown
+    }
 }
 pub type Provider = Arc<dyn Signer>;
+
+/// What a provider declares it can sign for one ref; anything but
+/// `Supported` fails command admission closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Capability {
+    Supported,
+    Unsupported,
+    Unknown,
+}
+
+/// Which ref of the selected identity a command will sign with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyUse {
+    Signing,
+    Extra(ExtraKey),
+}
+
+/// One signature a multi-release command will need before its first release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Need {
+    pub key: KeyUse,
+    pub algorithm: Algorithm,
+}
 
 // Authenticated payloads and values are deliberately absent from Debug output.
 macro_rules! redacted_debug {
@@ -531,6 +694,7 @@ mod setup_field_policy_tests {
             signing: KeyRef(format!("{slot}.signing")),
             passphrase: passphrase.map(|p| KeyRef(p.into())),
             stable_id: None,
+            extra: Default::default(),
         }
     }
 
@@ -581,6 +745,7 @@ mod setup_field_policy_tests {
                 signing: KeyRef(String::new()),
                 passphrase: Some(KeyRef("primary.passphrase".into())),
                 stable_id: None,
+                extra: Default::default(),
             }),
             secondary: Some(identity("secondary", None)),
         };
@@ -597,6 +762,7 @@ mod setup_field_policy_tests {
                 signing: KeyRef(String::new()),
                 passphrase: None,
                 stable_id: None,
+                extra: Default::default(),
             }),
         };
         let original = ids.clone();
@@ -613,5 +779,144 @@ mod setup_field_policy_tests {
         assert!(
             serde_json::from_str::<IdentitySetupPolicy>(r#"{"passphrase":"invented"}"#).is_err()
         );
+    }
+
+    #[test]
+    fn extra_refs_are_declared_signing_material_with_unchanged_legacy_json() {
+        let legacy = identity("primary", None);
+        let json = serde_json::to_string(&legacy).unwrap();
+        assert!(
+            !json.contains("extra"),
+            "empty extras keep the earlier wire shape"
+        );
+        assert_eq!(serde_json::from_str::<Identity>(&json).unwrap(), legacy);
+        let mut seeded = legacy.clone();
+        seeded.extra.insert(
+            ExtraKey::ZklinkSeed,
+            KeyRef("primary.extra.zklinkSeed".into()),
+        );
+        let json = serde_json::to_string(&seeded).unwrap();
+        assert!(json.contains(r#""extra":{"zklinkSeed":"primary.extra.zklinkSeed"}"#));
+        assert_eq!(serde_json::from_str::<Identity>(&json).unwrap(), seeded);
+        assert!(
+            serde_json::from_str::<Identity>(&json.replace("zklinkSeed\"", "l1Wallet\"")).is_err()
+        );
+        let mut invalid = seeded.clone();
+        invalid
+            .extra
+            .insert(ExtraKey::ZklinkSeed, KeyRef(String::new()));
+        assert!(invalid.validate().is_err());
+
+        let declared = |field| CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                extra: Some(ExtraKeyPolicy {
+                    key: ExtraKey::ZklinkSeed,
+                    field,
+                    encoding: None,
+                }),
+                ..Default::default()
+            }),
+            secondary: None,
+        };
+        let ids = |primary: Identity| Identities {
+            primary: Some(primary),
+            secondary: None,
+        };
+        // Undeclared extras refuse, in either slot, even in public mode.
+        for public in [false, true] {
+            assert_eq!(
+                CredentialSetupPolicy::default()
+                    .apply_to_identities(&mut ids(seeded.clone()), public),
+                Err(SignError::InvalidRequest)
+            );
+            let mut secondary = Identities {
+                primary: None,
+                secondary: Some(seeded.clone()),
+            };
+            assert_eq!(
+                declared(ExtraFieldPolicy::Optional).apply_to_identities(&mut secondary, public),
+                Err(SignError::InvalidRequest)
+            );
+        }
+        let required = declared(ExtraFieldPolicy::RequiredForPrivate);
+        required
+            .apply_to_identities(&mut ids(seeded.clone()), false)
+            .unwrap();
+        assert_eq!(
+            required.apply_to_identities(&mut ids(legacy.clone()), false),
+            Err(SignError::InvalidRequest)
+        );
+        required
+            .apply_to_identities(&mut ids(legacy.clone()), true)
+            .unwrap();
+        declared(ExtraFieldPolicy::Optional)
+            .apply_to_identities(&mut ids(legacy.clone()), false)
+            .unwrap();
+        assert!(
+            serde_json::from_str::<ExtraKeyPolicy>(
+                r#"{"key":"zklinkSeed","field":"requiredWithPrimaryFallback"}"#
+            )
+            .is_err(),
+            "extra refs never fall back across slots"
+        );
+        let mut applied = ids(seeded.clone());
+        required.apply_to_identities(&mut applied, false).unwrap();
+        assert_eq!(
+            applied.primary.unwrap().stable_id,
+            None,
+            "never an identity source"
+        );
+    }
+
+    #[test]
+    fn zklink_contract_result_shape_and_setup_vocabulary_are_exact() {
+        let request = SignRequest {
+            receipt: SignReceipt::default(),
+            context: Context::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::ZkLinkContract,
+                key: KeyRef("primary.extra.zklinkSeed".into()),
+                payload: vec![PayloadPart::Bytes { bytes: vec![0; 36] }],
+            }],
+        };
+        assert_eq!(request.expected_result_lengths(), vec![Some(64)]);
+        for length in [63, 65] {
+            assert_eq!(
+                request.validate_result(&SignResult::new(
+                    vec![vec![0; length]],
+                    SignReceipt::default()
+                )),
+                Err(SignError::InvalidResult)
+            );
+        }
+        assert_eq!(
+            serde_json::to_string(&Algorithm::ZkLinkContract).unwrap(),
+            r#""zkLinkContract""#
+        );
+        assert_eq!(
+            serde_json::from_str::<IdentitySetupPolicy>(r#"{"secretEncoding":"base64Text"}"#)
+                .unwrap()
+                .secret_encoding,
+            Some(KeyEncoding::Base64Text)
+        );
+        assert!(
+            serde_json::from_str::<IdentitySetupPolicy>(r#"{"secretEncoding":"base58"}"#).is_err()
+        );
+    }
+
+    #[test]
+    fn seconds_suffix_payload_keeps_three_exact_parts_for_each_family() {
+        for (method, path) in [("GET", "/users/self/verify"), ("GET", "/user/verify")] {
+            let parts = seconds_suffix_payload("1700000000", method, path);
+            assert!(
+                parts
+                    == [
+                        b"1700000000".to_vec(),
+                        method.as_bytes().to_vec(),
+                        path.as_bytes().to_vec()
+                    ]
+                    .map(|bytes| PayloadPart::Bytes { bytes })
+            );
+        }
     }
 }

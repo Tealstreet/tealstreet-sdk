@@ -79,6 +79,8 @@ export type ExchangeMetadata = {
    * (`ExchangeAccountConfig.enableOptionMarkets`).
    */
   supportsOptionsToggle?: boolean;
+  /** Whether every market on this exchange is an option, so options are on without a toggle (`binanceoptions`). */
+  optionsOnly?: boolean;
   /**
    * Whether this exchange trades inverse contracts in the same account as its linear derivatives, and therefore
    * offers a per-account "also trade inverse" toggle (`ExchangeAccountConfig.enableInverseMarkets`).
@@ -397,6 +399,8 @@ const HyrotraderMetadata: ExchangeMetadata = {
   supportsKlineSeconds: false,
   positionModes: [PositionMode.OneWay],
   hidePositionModeSelector: true,
+  marginTypes: [MarginType.Cross],
+  hideMarginTypeSelector: true,
   supportsFeeRates: false,
   supportsPositionMargin: false,
   exchangeName: 'hyrotrader' as ExchangeName,
@@ -512,13 +516,15 @@ const BinanceInverseMetadata: ExchangeMetadata = {
   exchangeName: 'binanceinverse' as ExchangeName,
   prettyName: 'Binance Inverse',
   defaultQuote: 'USD',
-  // Keep COIN-M hidden until credentialed livenet/testnet validation covers
-  // private state, order placement, and inverse sizing end-to-end.
-  enabled: false,
+  enabled: true,
   enabledInDev: true,
-  enableInPreview: false,
-  supportedOnMobile: false,
+  enableInPreview: true,
+  supportedOnMobile: true,
   latencyDomain: 'dapi.binance.com',
+  requiresCors: true,
+  privateProxyRegions: {
+    JA: privateProxyIpsTokyo,
+  },
   supportsTestnet: false,
   requiresTickersForMarketsLoaded: true,
 };
@@ -559,6 +565,48 @@ const BinancePMMetadata: ExchangeMetadata = {
   features: {
     kline: true,
     orderbook: true,
+    orders: true,
+    positions: true,
+    balance: true,
+  },
+};
+
+// REST only and not offered to any app: no websockets, and no private call has run against a live key.
+const BinanceOptionsMetadata: ExchangeMetadata = {
+  ...BinanceMetadata,
+  supportsPublicOnly: false,
+  exchangeName: 'binanceoptions' as ExchangeName,
+  prettyName: 'Binance Options',
+  enabled: false,
+  enabledInDev: false,
+  enableInPreview: false,
+  supportedOnMobile: false,
+  supportsTestnet: true,
+  optionsOnly: true,
+  supportsOptionsToggle: false,
+  latencyDomain: 'eapi.binance.com',
+  // Polls everything: /eapi/v1/ticker alone weighs 40 of the 400-a-minute budget.
+  tickInterval: 10_000,
+  positionModes: [PositionMode.OneWay],
+  marginTypes: [MarginType.Cross],
+  leverageMagnets: [1],
+  leverageSliderDisabled: true,
+  hidePositionModeSelector: true,
+  hideMarginTypeSelector: true,
+  supportsTrailingStopLoss: false,
+  supportedTPSLTriggerTypes: [],
+  defaultTPTriggerType: undefined,
+  defaultSLTriggerType: undefined,
+  supportsChaser: false,
+  supportsPositionMargin: false,
+  supportsPartialStops: false,
+  supportsInfinityStops: false,
+  supportsTunnel: false,
+  supportsTPSLCloseAttribute: false,
+  alwaysCalculateUnrealizedPnlFromLastPrice: false,
+  features: {
+    kline: true,
+    orderbook: false,
     orders: true,
     positions: true,
     balance: true,
@@ -698,6 +746,7 @@ const MexcMetadata: ExchangeMetadata = {
   marginTypeIsGlobal: false,
   leverageIsGlobal: false,
   supportsFeeRates: true,
+  fetchLeverageOnMarginSymbolChange: true,
   alwaysCalculateUnrealizedPnlFromLastPrice: true,
   doesNotSupportOpenInterest: false,
   latencyDomain: 'api.mexc.com',
@@ -840,11 +889,11 @@ const BitgetMetadata: ExchangeMetadata = {
   supportsChaser: true,
   supportsPositionMargin: true,
   supportsTunnel: true,
-  // No `supportsWsRoute`: bitget never reads `tealstreetWsRoute`. Its routing
-  // entry is `fallbackOnly`, which the resolver evaluates without consulting
-  // the flag, and all three ws classes hardcode `useFallbackUrl = false` and
-  // flip it themselves after failed connection attempts. Advertising it
-  // rendered a checkbox that saved a value nothing consumed. Contrast bitunix,
+  // No `supportsWsRoute`: bitget never reads `tealstreetWsRoute`. Its public
+  // routing is `fallbackOnly` (the two public ws classes flip `useFallbackUrl`
+  // themselves) and its private routing follows `tealstreetProxy`
+  // (`proxyConditional` + relay). Advertising it rendered a checkbox that saved
+  // a value nothing consumed. Contrast bitunix,
   // which initialises `useFallbackUrl` from the flag, and lighter, whose
   // routing is `wsRouteCandidates` — the flag is real for both.
   supportedTPSLTriggerTypes: [OrderStopTriggerType.MarkPrice],
@@ -2283,6 +2332,7 @@ export const exchangeMetadata: {
   bybitinverse: BybitInverseMetadata,
   binance: BinanceMetadata,
   binanceinverse: BinanceInverseMetadata,
+  binanceoptions: BinanceOptionsMetadata,
   binancepm: BinancePMMetadata,
   binancespot: BinanceSpotMetadata,
   bitget: BitgetMetadata,

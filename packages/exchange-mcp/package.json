@@ -40,7 +40,8 @@
     "test": "vitest run",
     "test-ci": "vitest run",
     "test-wasm": "SAFE_CEX_WASM_TESTS=1 vitest run .wasm.test.ts --maxWorkers=2",
-    "typecheck": "node ../../scripts/tsc-ts6.mjs --noEmit"
+    "typecheck": "node ../../scripts/tsc-ts6.mjs --noEmit",
+    "typecheck:ts7": "node ../../scripts/tsc-ts7.mjs --noEmit"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
@@ -50,7 +51,7 @@
     "@tealstreet/safe-cex-wasm": "*",
     "@tealstreet/script-api-core": "*",
     "@types/node": "^22.15.3",
-    "tsup": "^8.5.1",
+    "tsup": "^9.0.0",
     "typescript": "^6.0.3",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^5.0.2",

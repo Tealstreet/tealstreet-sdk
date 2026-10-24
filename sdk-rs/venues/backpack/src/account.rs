@@ -10,7 +10,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::Tick;
-use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, Method, OrderSnapshotToken, Response, SocketId, TimerId};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
@@ -43,9 +43,11 @@ pub enum Request {
     Orders {
         rows: SnapshotBuilder<String, Order>,
         repairs: Vec<crate::trading::Repair>,
+        /// Native mapping-time decisions, applied only after whole-read admission.
+        unpriced: Vec<(String, bool)>,
         /// A working order on a catalogue-malformed market keeps the last snapshot.
         hold: bool,
-        revision: u64,
+        token: OrderSnapshotToken,
         next: Next,
     },
 }
@@ -55,7 +57,6 @@ pub struct Account {
     pub socket: Connection,
     pub leverage: f64,
     pub leverage_revision: u64,
-    pub orders_revision: u64,
     pub positions_revision: u64,
     pub balance_revision: u64,
     balance_guard: StaleGuard,
@@ -81,7 +82,6 @@ impl Default for Account {
             socket: Connection::default(),
             leverage: 1.0,
             leverage_revision: 0,
-            orders_revision: 0,
             positions_revision: 0,
             balance_revision: 0,
             balance_guard: StaleGuard::default(),
@@ -427,7 +427,17 @@ impl Backpack {
         );
     }
     fn orders_read(&mut self, cx: &mut Cx<'_, Pending>, next: Next) {
-        self.account.orders_revision += 1;
+        // Starting a newer native read supersedes every older read.
+        cx.store.invalidate_order_snapshots();
+        let Some(token) = cx.store.begin_orders_snapshot() else {
+            cx.notice(
+                Level::Error,
+                code::SNAPSHOT_DISCARDED,
+                "Backpack order snapshot authority exhausted",
+            );
+            self.next_account(cx, next);
+            return;
+        };
         let _ = self.signed(
             cx,
             Method::Get,
@@ -437,8 +447,9 @@ impl Backpack {
             Pending::Account(Request::Orders {
                 rows: SnapshotBuilder::default(),
                 repairs: vec![],
+                unpriced: vec![],
                 hold: false,
-                revision: self.account.orders_revision,
+                token,
                 next,
             }),
             true,
@@ -513,6 +524,7 @@ impl Backpack {
             Request::Orders {
                 rows,
                 repairs,
+                unpriced: pending_unpriced,
                 hold,
                 ..
             } => {
@@ -544,7 +556,10 @@ impl Backpack {
                     if let Some(repair) = repair {
                         repairs.push(repair);
                     }
-                    self.note_unpriced_trigger(cx.store, &mapped);
+                    let pending =
+                        matches!(mapped.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                            && unpriced(cx.store, &mapped.symbol);
+                    pending_unpriced.push((mapped.id.clone(), pending));
                     rows.push(mapped);
                 }
             }
@@ -710,19 +725,29 @@ impl Backpack {
                 Request::Orders {
                     rows,
                     repairs,
+                    unpriced,
                     hold,
-                    revision,
+                    token,
                     next,
                 } => {
                     if hold {
                         return Err("Backpack invalid orders".into());
                     }
-                    if revision == self.account.orders_revision {
+                    let account = &mut self.account;
+                    let accepted = cx.store.commit_orders_snapshot([token], |current| {
                         if rows.rejected() == 0 {
-                            self.account.order_skips.clear();
+                            account.order_skips.clear();
                         }
-                        let rows = rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
-                        cx.store.set_orders(rows);
+                        for (id, pending) in unpriced {
+                            if pending {
+                                account.unpriced_triggers.insert(id);
+                            } else {
+                                account.unpriced_triggers.remove(&id);
+                            }
+                        }
+                        rows.commit(current.iter().cloned(), |o| o.id.clone())
+                    });
+                    if accepted {
                         for repair in repairs {
                             self.start_repair(cx, repair);
                         }
@@ -821,7 +846,7 @@ impl Backpack {
                 .or(d.p.as_ref().map(|n| n.0))
                 .or(d.execution_price.as_ref().map(|n| n.0))
                 .unwrap_or(0.0);
-            self.account.orders_revision += 1;
+            cx.store.invalidate_order_snapshots();
             if self
                 .account
                 .order_times
@@ -1019,16 +1044,6 @@ fn instruction(method: Method, path: &str) -> &'static str {
 }
 
 impl crate::Backpack {
-    fn note_unpriced_trigger(&mut self, store: &safe_cex_engine::Store, order: &Order) {
-        if matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
-            && unpriced(store, &order.symbol)
-        {
-            self.account.unpriced_triggers.insert(order.id.clone());
-        } else {
-            self.account.unpriced_triggers.remove(&order.id);
-        }
-    }
-
     /// A trigger read before any price defaults to StopLoss; relabel it from
     /// the seeded price once that exists.
     pub(crate) fn relabel_unpriced_triggers(&mut self, cx: &mut Cx<'_, Pending>) {

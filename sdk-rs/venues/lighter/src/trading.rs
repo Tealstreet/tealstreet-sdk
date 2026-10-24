@@ -20,7 +20,10 @@ pub struct Trading {
     active: Option<Job>,
     inflight: bool,
     waiting_limits: bool,
-    next_nonce: Option<u64>,
+    /// Bounded by the signer's safe-integer nonce range.
+    next_nonce: safe_cex_engine::nonce::VenueCounter<{ (1 << 53) - 1 }>,
+    /// Captured with the in-flight nextNonce request.
+    nonce_ticket: safe_cex_engine::nonce::SeedTicket,
     next_id: u64,
     timer: Option<TimerId>,
     position_wait: Option<PositionWait>,
@@ -348,7 +351,9 @@ impl Lighter {
     fn builder(&self) -> Option<sign::Builder> {
         self.options
             .integrator_account_index
-            .or(if self.options.testnet || self.options.robinhood {
+            .or(if self.options.robinhood {
+                Some(47_296)
+            } else if self.options.testnet {
                 None
             } else {
                 Some(158_385)
@@ -475,10 +480,11 @@ impl Lighter {
             );
             return;
         }
-        if self.trading.next_nonce.is_none() {
+        if !self.trading.next_nonce.seeded() {
             let account = self.account.account_index.unwrap();
             let key = self.account.api_key_index.unwrap();
             self.trading.inflight = true;
+            self.trading.nonce_ticket = self.trading.next_nonce.ticket();
             cx.request(
                 Method::Get,
                 format!(
@@ -502,8 +508,10 @@ impl Lighter {
         let count = txs.len();
         let mut signed = Vec::with_capacity(count);
         for tx in txs {
-            let nonce = self.trading.next_nonce.unwrap();
-            self.trading.next_nonce = nonce.checked_add(1);
+            let Some(nonce) = self.trading.next_nonce.take() else {
+                self.trade_finish(cx, not_sent("Lighter transaction nonce exhausted"));
+                return;
+            };
             match self
                 .account
                 .signer
@@ -514,7 +522,7 @@ impl Lighter {
                 }) {
                 Ok(tx) => signed.push(tx),
                 Err(error) => {
-                    self.trading.next_nonce = None;
+                    self.trading.next_nonce.invalidate();
                     self.trade_finish(cx, not_sent(error));
                     return;
                 }
@@ -715,18 +723,19 @@ impl Lighter {
                 self.trade_kick(cx);
             }
             Request::Nonce => {
+                let ticket = self.trading.nonce_ticket;
                 let reply = serde_json::from_str::<Reply>(response.body);
                 match reply {
                     Ok(reply)
                         if response.status < 300
                             && reply.code.as_ref().and_then(Number::integer) == Some(200) =>
                     {
-                        self.trading.next_nonce = reply
+                        let seeded = reply
                             .nonce
                             .as_ref()
                             .and_then(Number::integer)
-                            .filter(|n| *n < i64::MAX as u64);
-                        if self.trading.next_nonce.is_none() {
+                            .is_some_and(|n| self.trading.next_nonce.seed(ticket, n));
+                        if !seeded {
                             self.trade_finish(
                                 cx,
                                 not_sent("Lighter returned an invalid transaction nonce"),
@@ -763,7 +772,7 @@ impl Lighter {
                     && !self.trading.active.as_ref().unwrap().retried_nonce
                 {
                     self.trading.active.as_mut().unwrap().retried_nonce = true;
-                    self.trading.next_nonce = None;
+                    self.trading.next_nonce.invalidate();
                     self.trading.timer = Some(cx.set_timer(150.0));
                     return;
                 }
@@ -774,7 +783,7 @@ impl Lighter {
                     _ => 0,
                 };
                 if response.status >= 300 || code != Some(200) || hash_count != submission.count {
-                    self.trading.next_nonce = None;
+                    self.trading.next_nonce.invalidate();
                     // The sequencer may still accept individual transactions of a refused batch.
                     let unknown = response.status >= 500
                         || code.is_none()
@@ -945,7 +954,7 @@ impl Lighter {
     }
 
     fn submission_uncertain(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
-        self.trading.next_nonce = None;
+        self.trading.next_nonce.invalidate();
         if let Effect::Setting { symbol, .. } = effect {
             self.account_setting_write(symbol);
             self.trading
@@ -1067,14 +1076,17 @@ impl Lighter {
     }
 
     fn mint_id(&mut self, cx: &Cx<'_, Pending>) -> Result<u64, String> {
-        if self.trading.next_id == 0 {
-            let mut random = [0; 2];
-            cx.fill_entropy(&mut random)?;
-            self.trading.next_id = ((cx.now as u64).saturating_mul(100)
-                + u64::from(u16::from_le_bytes(random)) % 100)
-                % MAX_CLIENT_INDEX;
+        if self.trading.next_id >= MAX_CLIENT_INDEX {
+            return Err("Lighter client order index namespace exhausted.".into());
         }
-        self.trading.next_id = self.trading.next_id % MAX_CLIENT_INDEX + 1;
+        let mut random = [0; 2];
+        cx.fill_entropy(&mut random)?;
+        let candidate = ((u128::from(cx.now as u64) * 100
+            + u128::from(u16::from_le_bytes(random) % 100))
+            % u128::from(MAX_CLIENT_INDEX)) as u64;
+        // Every lot, bracket leg and batch shares this instance reservation.
+        // Failed or uncertain sends never release an already prepared index.
+        self.trading.next_id = candidate.max(self.trading.next_id + 1);
         Ok(self.trading.next_id)
     }
 
@@ -1406,4 +1418,68 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 /// The submission may have executed; callers must reconcile before resending.
 fn uncertain(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
+}
+
+#[cfg(test)]
+mod client_index_parity_tests {
+    use super::*;
+    use safe_cex_engine::test_support::{ProbeVenue, seeded_engine};
+
+    #[test]
+    fn client_index_maximum_is_reserved_once_then_exhaustion_never_wraps() {
+        let mut venue = Lighter::new(crate::Options::default());
+        venue.trading.next_id = MAX_CLIENT_INDEX - 1;
+        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
+            assert_eq!(venue.mint_id(cx), Ok(MAX_CLIENT_INDEX));
+            assert_eq!(
+                venue.mint_id(cx).unwrap_err(),
+                "Lighter client order index namespace exhausted."
+            );
+            assert_eq!(venue.trading.next_id, MAX_CLIENT_INDEX);
+            assert!(venue.mint_id(cx).is_err());
+            assert_eq!(venue.trading.next_id, MAX_CLIENT_INDEX);
+        }));
+        engine.start(1000.);
+        assert!(!engine.drain_actions().any(|action| matches!(
+            action,
+            safe_cex_engine::Action::Http(_) | safe_cex_engine::Action::Sign { .. }
+        )));
+    }
+
+    #[test]
+    fn a_zero_timestamp_and_entropy_candidate_still_reserves_positive_indices() {
+        let entropy = safe_cex_engine::entropy::Entropy::new(
+            Box::new(|bytes| {
+                bytes.fill(0);
+                Ok(())
+            }),
+            Box::new(|bytes| {
+                bytes.fill(0);
+                Ok(())
+            }),
+        );
+        let venue = Lighter::new(crate::Options::default());
+        let mut engine = safe_cex_engine::Engine::new(
+            ProbeVenue::new(venue, |venue, cx| {
+                assert_eq!(venue.mint_id(cx), Ok(1));
+                assert_eq!(venue.mint_id(cx), Ok(2));
+            }),
+            Some(entropy),
+        )
+        .unwrap();
+        engine.start(0.);
+    }
+
+    #[test]
+    fn each_reservation_reconsiders_the_current_timestamp_candidate() {
+        let mut venue = Lighter::new(crate::Options::default());
+        venue.trading.next_id = 7;
+        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
+            let first = venue.mint_id(cx).unwrap();
+            assert!((170_000_000_000_000..=170_000_000_000_099).contains(&first));
+            let next = venue.mint_id(cx).unwrap();
+            assert!(next > first && next <= MAX_CLIENT_INDEX);
+        }));
+        engine.start(1_700_000_000_000.);
+    }
 }

@@ -18,7 +18,7 @@ fn place(e: &mut Engine<Kraken>, orders: Vec<PlaceOrderOpts>) {
     command(e, Command::PlaceOrders { command: 7, orders });
 }
 fn http(e: &mut Engine<Kraken>, path: &str) -> HttpRequest {
-    let all = e.drain_plain().collect::<Vec<_>>();
+    let all = safe_cex_engine::test_support::prepared_actions(e, NOW);
     let debug = format!("{all:?}");
     all.into_iter()
         .find_map(|a| match a {

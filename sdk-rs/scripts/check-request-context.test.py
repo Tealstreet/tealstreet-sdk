@@ -81,6 +81,43 @@ class RequestContextBan(unittest.TestCase):
         # Bootstrap only establishes the reviewed initial inventory.
         self.assertFalse(ban.check(one, one, []))
 
+    def test_snapshot_pending_rebind_is_exact_and_cannot_allow_regrowth(self):
+        path = 'venues/paradex/src/account.rs'
+        before, after = ban.HISTORY_BOOTSTRAPS[path]
+        old, current = {path: dict(before)}, {path: dict(after)}
+        self.assertEqual(sum(before.values()), 10)
+        self.assertEqual(sum(after.values()), 10)
+        self.assertEqual(hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest(),
+                         '2533bbc9d874e500f4a9a6c47b47f0c36770957f564cc9d8523629f0e4b1af2c')
+        self.assertEqual(hashlib.sha256(json.dumps(after, sort_keys=True).encode()).hexdigest(),
+                         '6318d427aca63f36566df341d8ed3facc9b9f49b68a0d08f4d774567b83df9a9')
+        original = ban.git('show', '848924471635eee7a0c61c64407a861c3aea37f3:sdk-rs/' + path)
+        current_source = (ban.ROOT / path).read_text()
+        self.assertEqual(dict(ban.fingerprints(original)), before)
+        self.assertEqual(dict(ban.fingerprints(current_source)), after)
+        self.assertEqual(set(before) - set(after), {
+            '5c28b0ebae1f2a54f344d52c2c422801c8e82381c7fd8ad95d13cd549e88ddec'})
+        self.assertEqual(set(after) - set(before), {
+            '29a6633fa3f6e05f04f534c0e675690014adde1e8a26e93c3769e8618602c13c'})
+        self.assertFalse(ban.check(current, current, [('old', old)]))
+        self.assertFalse(ban.check(current, current, [('landed', current)]))
+        extra = {path: {**after, 'f' * 64: 1}}
+        self.assertTrue(ban.check(extra, extra, [('old', old)]))
+        increased = {path: {**after}}
+        increased[path][next(iter(after))] += 1
+        self.assertTrue(ban.check(increased, increased, [('old', old)]))
+        pruned = {path: {**after}}
+        del pruned[path][next(iter(after))]
+        self.assertTrue(ban.check(current, current, [('old', old), ('parent', pruned)]))
+        altered_old = {path: {**before}}
+        del altered_old[path][next(iter(before))]
+        self.assertTrue(ban.check(current, current, [('altered', altered_old)]))
+        unrelated = {**current, 'venues/other/src/account.rs': dict(after)}
+        self.assertTrue(ban.check(unrelated, unrelated, [('old', old)]))
+        mismatch = {path: {**after}}
+        del mismatch[path][next(iter(after))]
+        self.assertTrue(ban.check(mismatch, current, [('old', old)]))
+
     def test_exact_landed_bootstrap_transition_never_allows_regrowth(self):
         path = ban.BOOTSTRAP_PATH
         old = {path: dict(ban.BOOTSTRAP_OLD)}
@@ -191,7 +228,8 @@ class RequestContextBan(unittest.TestCase):
             'venues/grvt/src/history.rs': (13, 11, 'f97e2d042aad67c83cb7b67fd2e18fe2ea1911d39bee4928b4bfcd29a53a9173', '10b79560bfa80b935be2f78f7f6a3fb2e7b44436372c89a588a15d558c07fa3e'),
             'venues/kucoin/src/spot/mod.rs': (22, 20, 'cff9fea5f76ae51654a83c7953df010ef41e3941614a6fdd67b9f1001bd212ff', 'fca911a5d114175c7374dfef35111bf3498f871eead93ef398d926ccf6929da8'),
         }
-        self.assertEqual(set(expected) | {'venues/hyperliquid/src/history.rs'}, set(ban.HISTORY_BOOTSTRAPS))
+        self.assertEqual(set(expected) | {'venues/hyperliquid/src/history.rs',
+                                          'venues/paradex/src/account.rs'}, set(ban.HISTORY_BOOTSTRAPS))
         for path, (before, after, old_hash, landed_hash) in expected.items():
             with self.subTest(path=path):
                 old, landed = ban.HISTORY_BOOTSTRAPS[path]
@@ -219,22 +257,40 @@ class RequestContextBan(unittest.TestCase):
                                 and token.removeprefix('r#') in ban.METHODS}
                     self.assertLessEqual(kinds(source), kinds(original))
 
-    def test_staging_bootstraps_add_only_the_approved_site_and_shrink(self):
-        self.assertEqual(set(ban.STAGING_BOOTSTRAPS), {'venues/bingx/src/lib.rs', 'venues/weex/src/lib.rs'})
+    def test_staging_bootstraps_add_only_the_approved_sites(self):
+        # Owner approvals: exact added fingerprints and exact entry sizes.
+        sign_http = '6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219'
+        approved = {
+            'venues/bingx/src/lib.rs': ({sign_http}, 10, 9),
+            'venues/weex/src/lib.rs': ({sign_http}, 19, 17),
+            'venues/okx/src/lib.rs': ({
+                '2e9218906fd923fa6c83c648873ea2527c33dd1068d609c8c1ec343630b36911',
+                'b1761cdefa174ea70037cfceab33b91ad7279e59d22ccecb872e996dd5b0c32c'}, 8, 10),
+            'venues/bitget/src/lib.rs': ({
+                '5b44116449d06833b5f091cb3866ced7f16f181fd1226b31ad977eff6bf26ac9',
+                '6c77d608b079104cc5338cbabb01a7c4a0e24f112ef91ea5483c423808d92bad',
+                'a921be85fe127dcd74b1718af170b7309b86f0b4f66469353f73cc86c722be28',
+                'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa'}, 4, 8),
+        }
+        self.assertEqual(set(ban.STAGING_BOOTSTRAPS), set(approved))
         for path, (old_map, new_map) in ban.STAGING_BOOTSTRAPS.items():
             with self.subTest(path=path):
                 added = {d for d, n in new_map.items() if n > old_map.get(d, 0)}
-                self.assertEqual(added, {'6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219'})
-                self.assertLess(sum(new_map.values()), sum(old_map.values()))
+                approved_added, old_size, new_size = approved[path]
+                self.assertEqual(added, approved_added)
+                self.assertEqual((sum(old_map.values()), sum(new_map.values())), (old_size, new_size))
                 old, new = {path: old_map}, {path: new_map}
                 self.assertFalse(ban.check(new, new, [('landed', old)]))
-                for grown in [dict(new_map, **{'f' * 64: 1}), {**new_map, next(iter(added)): 2}]:
-                    self.assertTrue(ban.check({path: grown}, {path: grown}, [('landed', old)]))
-                pruned_map = dict(new_map)
-                del pruned_map[next(iter(added))]
-                pruned = {path: pruned_map}
-                # Once the staging site is pruned, nothing can restore it.
-                self.assertTrue(ban.check(new, new, [('landed', old), ('pruned', pruned)]))
+                grown = [dict(new_map, **{'f' * 64: 1})]
+                grown += [{**new_map, d: new_map[d] + 1} for d in sorted(added)]
+                for map_ in grown:
+                    self.assertTrue(ban.check({path: map_}, {path: map_}, [('landed', old)]))
+                for digest in sorted(added):
+                    pruned_map = dict(new_map)
+                    del pruned_map[digest]
+                    pruned = {path: pruned_map}
+                    # Once a staging site is pruned, nothing can restore it.
+                    self.assertTrue(ban.check(new, new, [('landed', old), ('pruned', pruned)]))
 
     def test_history_bootstraps_cannot_expand_or_override_any_newer_pruned_constraint(self):
         for path, (old_map, new_map) in ban.HISTORY_BOOTSTRAPS.items():

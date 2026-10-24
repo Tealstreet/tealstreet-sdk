@@ -2,7 +2,7 @@
 """Freeze legacy credential/signing sites while families migrate to dispatch.
 
 The hash is of one stripped source line (not its line number), so ordinary
-refactors cannot silently introduce another secret holder. Legacy sign modules are reviewed during their migration. Migrated Binance, Bybit and BingX
+refactors cannot silently introduce another secret holder. Legacy sign modules are reviewed during their migration. Migrated Binance, Bybit, BingX, AsterDEX, OKX and Bitget
 include their sign modules in this ban: only frozen test-oracle sites remain;
 production primitive work uses the provider. Test-only sites are frozen too.
 """
@@ -20,7 +20,7 @@ def sites():
     found = collections.defaultdict(collections.Counter)
     for path in sorted((ROOT / 'venues').glob('*/src/**/*.rs')):
         relative = path.relative_to(ROOT / 'venues')
-        if relative.parts[0] not in {'binance', 'bybit', 'bingx'} and (path.name == 'sign.rs' or 'sign' in relative.parts[2:-1]):
+        if relative.parts[0] not in {'asterdex', 'binance', 'bingx', 'bybit', 'okx', 'bitget'} and (path.name == 'sign.rs' or 'sign' in relative.parts[2:-1]):
             continue
         for line in path.read_text().splitlines():
             if not line.strip().startswith('//') and PATTERN.search(line):

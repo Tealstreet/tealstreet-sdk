@@ -1,5 +1,11 @@
 # Rust live gate: shadow, smoke and canary
 
+Sam's current rollout mechanism is the [per-user hard-cut bundle switch](RUST_BUNDLE_ROLLOUT.md):
+frozen TS app/server versus new Rust app/server for every held venue. Its cohort,
+shared-state and rollback rules supersede older per-account/default-switch
+recommendations below; the evidence and reconciliation requirements still apply.
+This is preparation only, with no deployment or flag change.
+
 How a Rust venue proves it matches TS against the live venue before any
 account defaults to it. Replay gates (`rust:gate`, `RUST_GATE_HONESTY.md`)
 prove parity on recorded input; [cutover readiness](RUST_CUTOVER_READINESS.md)

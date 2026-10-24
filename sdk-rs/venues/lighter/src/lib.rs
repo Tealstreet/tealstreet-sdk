@@ -78,17 +78,20 @@ pub enum Pending {
     Identity(identity::Request),
     Trade(trading::Request),
     Markets {
+        context: Context,
         fallback: bool,
         rows: Vec<Market>,
         metadata: HashMap<String, MarketMeta>,
         failed: bool,
     },
     Tickers {
+        context: Context,
         rows: Vec<(String, Ticker)>,
         failed: bool,
         revision: u64,
     },
     Depth {
+        context: Context,
         symbol: String,
         revision: u64,
         generation: u64,
@@ -238,24 +241,46 @@ impl Lighter {
     fn symbol_for_id(&self, id: &str) -> Option<&str> {
         self.symbols.get(id).map(String::as_str)
     }
-    fn markets(&self, cx: &mut Cx<'_, Pending>, fallback: bool) {
+    fn markets(&mut self, cx: &mut Cx<'_, Pending>, fallback: bool) {
+        let Ok(context) = cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) else {
+            self.startup.failed(cx, true);
+            return;
+        };
         let path = if fallback {
             "orderBooks"
         } else {
             "orderBookDetails"
         };
-        cx.request_streamed(
+        match cx.request_managed(
+            context.clone(),
             Method::Get,
             format!("{}/api/v1/{path}", self.host()),
-            vec![],
-            ArrayAt::Envelope(&[&["order_book_details"], &["order_books"]]),
+            None,
             Pending::Markets {
+                context,
                 fallback,
                 rows: vec![],
                 metadata: HashMap::new(),
                 failed: false,
             },
-        );
+        ) {
+            Ok(request) => cx.stream_response(
+                request,
+                ArrayAt::Envelope(&[&["order_book_details"], &["order_books"]]),
+            ),
+            Err((pending, _)) => {
+                self.public_failed(cx, pending, "Lighter catalog preparation failed")
+            }
+        }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
         // Suppressed public feeds never open; supervising them would only churn retries.
@@ -288,30 +313,54 @@ impl Lighter {
         if self.ticker_in_flight || self.startup.waiting(&false) {
             return;
         }
+        let Ok(context) = cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) else {
+            self.startup.failed(cx, false);
+            return;
+        };
         self.ticker_in_flight = true;
-        cx.request_streamed(
+        let pending = Pending::Tickers {
+            context: context.clone(),
+            rows: vec![],
+            failed: false,
+            revision: self.ticker_revision,
+        };
+        match cx.request_managed(
+            context,
             Method::Get,
             format!("{}/api/v1/exchangeStats", self.host()),
-            vec![],
-            ArrayAt::Envelope(&[
-                &["order_book_stats"],
-                &["data", "order_book_stats"],
-                &["result", "order_book_stats"],
-                &["tickers"],
-                &["data", "tickers"],
-                &["result", "tickers"],
-            ]),
-            Pending::Tickers {
-                rows: vec![],
-                failed: false,
-                revision: self.ticker_revision,
-            },
-        );
+            None,
+            pending,
+        ) {
+            Ok(request) => cx.stream_response(
+                request,
+                ArrayAt::Envelope(&[
+                    &["order_book_stats"],
+                    &["data", "order_book_stats"],
+                    &["result", "order_book_stats"],
+                    &["tickers"],
+                    &["data", "tickers"],
+                    &["result", "tickers"],
+                ]),
+            ),
+            Err((pending, error)) => {
+                self.public_failed(cx, pending, &error.venue_error().message);
+            }
+        }
     }
     fn depth_seed(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         let Some(market) = cx.store.market(symbol) else {
             return;
         };
+        let id = market.id.clone();
         let host = self.host();
         let Some(state) = self.books.get_mut(symbol) else {
             return;
@@ -319,21 +368,35 @@ impl Lighter {
         if state.in_flight || cx.now < state.rest_retry_at {
             return;
         }
-        state.in_flight = true;
-        cx.request(
-            Method::Get,
-            format!(
-                "{}/api/v1/orderBookOrders?market_id={}&limit=100",
-                host, market.id
-            ),
-            vec![],
-            None,
-            Pending::Depth {
-                symbol: symbol.into(),
-                revision: state.revision,
-                generation: state.generation,
+        let Ok(context) = cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
             },
-        );
+        ) else {
+            state.rest_retry_at = cx.now + 2_000.0;
+            return;
+        };
+        state.in_flight = true;
+        let pending = Pending::Depth {
+            context: context.clone(),
+            symbol: symbol.into(),
+            revision: state.revision,
+            generation: state.generation,
+        };
+        if let Err((pending, error)) = cx.request_managed(
+            context,
+            Method::Get,
+            format!("{}/api/v1/orderBookOrders?market_id={}&limit=100", host, id),
+            None,
+            pending,
+        ) {
+            self.public_failed(cx, pending, &error.venue_error().message);
+        }
     }
     #[allow(clippy::too_many_arguments)]
     fn fetch_candles(
@@ -354,31 +417,31 @@ impl Lighter {
             .candles
             .get(&(symbol.clone(), interval))
             .map_or(0, |state| state.revision);
-        let context = match cx.http_context(
-            command.map_or(Scope::Background, Scope::Command),
-            Policy {
-                operation: Operation::Read,
-                credential: None,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            },
-        ) {
-            Ok(context) => context,
-            Err(_) => {
-                // Issuance refusal has no Context; this is the remaining legacy site.
-                let error = VenueError::new("Lighter candle lifecycle is unavailable")
-                    .kind(ErrorKind::Internal);
-                if let Some(c) = command {
-                    cx.fail(c, error)
-                } else if let Some(state) = self
-                    .candles
-                    .get_mut(&(symbol, interval))
-                    .filter(|state| Some(state.generation) == generation)
-                {
-                    state.in_flight = false;
-                }
+        let policy = Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        };
+        let context = if command.is_some() {
+            let Ok(context) = cx.admit_http_command(policy) else {
                 return;
+            };
+            context
+        } else {
+            match cx.http_context(Scope::Background, policy) {
+                Ok(context) => context,
+                Err(_) => {
+                    if let Some(state) = self
+                        .candles
+                        .get_mut(&(symbol, interval))
+                        .filter(|state| Some(state.generation) == generation)
+                    {
+                        state.in_flight = false;
+                    }
+                    return;
+                }
             }
         };
         let result = (|| {
@@ -645,16 +708,27 @@ impl Lighter {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets {
-                fallback: false, ..
-            } => self.markets(cx, true),
-            Pending::Markets { fallback: true, .. } => self.startup.failed(cx, true),
-            Pending::Tickers { .. } => {
+                context, fallback, ..
+            } => {
+                let _ = cx.finish_http_context(&context);
+                if fallback {
+                    self.startup.failed(cx, true);
+                } else {
+                    self.markets(cx, true);
+                }
+            }
+            Pending::Tickers { context, .. } => {
+                let _ = cx.finish_http_context(&context);
                 self.ticker_in_flight = false;
                 self.startup.failed(cx, false);
             }
             Pending::Depth {
-                symbol, generation, ..
+                context,
+                symbol,
+                generation,
+                ..
             } => {
+                let _ = cx.finish_http_context(&context);
                 if let Some(s) = self
                     .books
                     .get_mut(&symbol)
@@ -892,7 +966,15 @@ impl Venue for Lighter {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) | Pending::Identity(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
-            Pending::Markets { rows, metadata, .. } => {
+            Pending::Markets {
+                context,
+                rows,
+                metadata,
+                ..
+            } => {
+                if cx.validate_background_read_http_delivery(context).is_err() {
+                    return;
+                }
                 match serde_json::from_str::<Instrument<'_>>(item) {
                     Ok(m) => {
                         if m.market_type.eq_ignore_ascii_case("spot") {
@@ -993,7 +1075,15 @@ impl Venue for Lighter {
                     Err(_) => safe_cex_engine::startup::skipped_row(cx),
                 }
             }
-            Pending::Tickers { rows, failed, .. } => {
+            Pending::Tickers {
+                context,
+                rows,
+                failed,
+                ..
+            } => {
+                if cx.validate_http_context(context).is_err() {
+                    return;
+                }
                 match serde_json::from_str::<Stats<'_>>(item) {
                     Ok(stats) => {
                         let id = stats.market_id.map(|v| format!("{v:.0}"));
@@ -1068,6 +1158,11 @@ impl Venue for Lighter {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Markets { context, .. } = &pending
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         let pending = match pending {
             Pending::Identity(request) => {
                 self.identity_response(cx, request, response);
@@ -1102,6 +1197,7 @@ impl Venue for Lighter {
             | Pending::History(_)
             | Pending::Identity(_) => unreachable!(),
             Pending::Markets {
+                context,
                 fallback,
                 rows,
                 metadata,
@@ -1111,6 +1207,7 @@ impl Venue for Lighter {
                     self.public_failed(
                         cx,
                         Pending::Markets {
+                            context,
                             fallback,
                             rows,
                             metadata,
@@ -1136,17 +1233,21 @@ impl Venue for Lighter {
                         .collect(),
                 );
                 cx.store.set_markets(rows);
+                let _ = cx.finish_http_context(&context);
                 self.account_start(cx);
                 self.connect(cx);
                 self.poll = Some(cx.set_timer(2_000.0));
             }
             Pending::Tickers {
+                context,
                 rows,
                 failed,
                 revision,
             } => {
+                let live = cx.validate_http_context(&context).is_ok();
+                let _ = cx.finish_http_context(&context);
                 self.ticker_in_flight = false;
-                if failed && rows.is_empty() {
+                if !live || failed && rows.is_empty() {
                     self.startup.failed(cx, false);
                     return;
                 }
@@ -1158,10 +1259,13 @@ impl Venue for Lighter {
                 }
             }
             Pending::Depth {
+                context,
                 symbol,
                 revision,
                 generation,
             } => {
+                let live = cx.validate_http_context(&context).is_ok();
+                let _ = cx.finish_http_context(&context);
                 let Some(s) = self
                     .books
                     .get_mut(&symbol)
@@ -1171,7 +1275,7 @@ impl Venue for Lighter {
                 };
                 s.in_flight = false;
                 s.rest_retry_at = cx.now + 2_000.0;
-                if s.revision != revision {
+                if !live || s.revision != revision {
                     return;
                 }
                 #[derive(serde::Deserialize)]
@@ -1274,6 +1378,11 @@ impl Venue for Lighter {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Pending::Markets { context, .. } = &pending
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         if let Pending::Account(request) = pending {
             self.account_stream_error(cx, request, response);
             return;
@@ -1491,7 +1600,16 @@ impl Venue for Lighter {
                 from_ms,
                 to_ms,
             } => self.fetch_candles(cx, Some(command), symbol, interval, limit, from_ms, to_ms),
-            Command::FetchLeverage { command, symbol } => {
+            Command::FetchLeverage { symbol, .. } => {
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
                 #[derive(serde::Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Leverage {
@@ -1510,8 +1628,12 @@ impl Venue for Lighter {
                         .map_err(|e| e.to_string())
                     });
                 match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                    Ok(data) => {
+                        let _ = cx.done_context(&context, data);
+                    }
+                    Err(error) => {
+                        let _ = cx.fail_context(&context, error);
+                    }
                 };
             }
             Command::Query { command, query } => self.history_query(cx, command, query),

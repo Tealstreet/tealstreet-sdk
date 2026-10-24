@@ -1,9 +1,10 @@
 #![allow(dead_code)]
 mod support;
 
+use crate::support::FixtureOptions as Options;
+use crate::support::*;
 use safe_cex_engine::{Action, Command, Engine, Event, Method, Notice, Response, SocketId};
-use safe_cex_venue_okx::{Okx, Options};
-use support::*;
+use safe_cex_venue_okx::Okx;
 
 // OKX v5 Get instruments / positions / orders schemas. EEA advertises X-Perps
 // as FUTURES with ruleType=xperp; other dated futures remain out of scope.
@@ -36,9 +37,9 @@ fn ticker(id: &str) -> String {
 fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
     let eea = options.eea;
     let private = options.key.is_some();
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(options));
+    let mut e = crate::support::engine(options);
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 0.0).remove(0);
     assert!(is_get(&a, "instruments?instType=SWAP"));
     if eea {
         assert!(
@@ -48,7 +49,7 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
     reply(&mut e, &a, &rows(&[MARKET, &inverse()]), 1.0);
     if eea {
         assert!(!e.store().loaded().markets);
-        let a = actions(&mut e).remove(0);
+        let a = prepared(&mut e, 1.0).remove(0);
         assert!(is_get(&a, "instruments?instType=FUTURES"));
         let unsupported = future()
             .replace("\"xperp\"", "\"normal\"")
@@ -61,13 +62,13 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
         );
     }
     assert!(e.store().loaded().markets);
-    let mut out = actions(&mut e);
+    let mut out = prepared(&mut e, if eea { 2.0 } else { 1.0 });
     let a = out.remove(0);
     assert!(is_get(&a, "tickers?instType=SWAP"));
     reply(&mut e, &a, &rows(&[TICKER, &ticker("BTC-USD-SWAP")]), 3.0);
     if eea {
         assert!(!e.store().loaded().tickers);
-        let a = actions(&mut e).remove(0);
+        let a = prepared(&mut e, 3.0).remove(0);
         assert!(is_get(&a, "tickers?instType=FUTURES"));
         reply(
             &mut e,
@@ -76,7 +77,7 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
             4.0,
         );
     }
-    out.extend(actions(&mut e));
+    out.extend(prepared(&mut e, if eea { 4.0 } else { 3.0 }));
     (e, out)
 }
 fn private_catalog() -> (Engine<Okx>, SocketId, Vec<Action>) {
@@ -94,7 +95,7 @@ fn private_catalog() -> (Engine<Okx>, SocketId, Vec<Action>) {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         5.0,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let private = out
         .iter()
         .find_map(|a| match a {
@@ -323,10 +324,10 @@ fn inverse_and_xperp_writes_keep_native_lots_and_exact_instrument_identity() {
 }
 #[test]
 fn malformed_xperp_row_is_skipped_without_withholding_the_catalog() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -357,10 +358,10 @@ fn malformed_xperp_row_is_skipped_without_withholding_the_catalog() {
 
 #[test]
 fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -391,10 +392,10 @@ fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
 
 #[test]
 fn malformed_xperp_catalogue_row_does_not_discard_valid_swaps() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -486,7 +487,7 @@ fn read_keys_override_http_passphrase_but_never_private_socket_login_or_writes()
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         5.0,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let private = out
         .iter()
         .find_map(|a| match a {
@@ -496,7 +497,7 @@ fn read_keys_override_http_passphrase_but_never_private_socket_login_or_writes()
         .unwrap();
     complete(out, &mut e);
     e.handle(7.0, Event::WsOpened { socket: private });
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 7.0);
     assert!(out.iter().any(|a|matches!(a,Action::WsSend{text,..}if text.contains(r#""apiKey":"primary""#)&&text.contains(r#""passphrase":"primary-pass""#))));
     e.handle(
         8.0,
@@ -507,7 +508,7 @@ fn read_keys_override_http_passphrase_but_never_private_socket_login_or_writes()
             side: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 7.0);
     assert!(out.iter().any(|a|matches!(a,Action::Http(r) if r.headers.iter().any(|(k,v)|*k=="OK-ACCESS-KEY"&&v=="primary"))));
 }
 #[test]
@@ -548,10 +549,10 @@ fn collateral_uses_exact_swap_mark_not_xperp_basis() {
 }
 #[test]
 fn blank_untraded_xperp_ticker_fields_do_not_abort_other_seeded_markets() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -587,10 +588,10 @@ fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers()
         (r#""last":"40000""#, r#""last":"bad""#),
         (r#""bidPx":"39999.9""#, r#""bidPx":"bad""#),
     ] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             eea: true,
             ..Options::default()
-        }));
+        });
         e.start(0.0);
         let a = actions(&mut e).remove(0);
         reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -622,10 +623,10 @@ fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers()
 
 #[test]
 fn unparseable_xperp_ticker_row_keeps_valid_swap_peers_and_logs_the_row() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -935,9 +936,10 @@ fn missing_order_currency_reserves_proven_settlement_on_rest_and_websocket() {
 }
 
 mod product_semantics {
-    use super::support::*;
+    use crate::support::FixtureOptions as Options;
+    use crate::support::*;
     use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, SocketId};
-    use safe_cex_venue_okx::{Okx, Options};
+    use safe_cex_venue_okx::Okx;
 
     // OKX instruments API: inverse ctVal is quote currency; xperp rows use FUTURES.
     // https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments
@@ -947,15 +949,15 @@ mod product_semantics {
         TICKER.replace("BTC-USDT-SWAP", id)
     }
     fn startup(eea: bool, private: bool) -> (Engine<Okx>, Vec<Action>) {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             eea,
             key: private.then(|| "test-key".into()),
             secret: private.then(|| "test-secret".into()),
             passphrase: private.then(|| "test-passphrase".into()),
             ..Options::default()
-        }));
+        });
         e.start(0.0);
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 0.0).remove(0);
         assert!(
             matches!(&request, Action::Http(r) if r.url.contains(if eea && private { "/account/instruments?" } else { "/public/instruments?" }))
         );
@@ -967,7 +969,7 @@ mod product_semantics {
         );
         if eea {
             assert!(!e.store().loaded().markets);
-            let request = actions(&mut e).remove(0);
+            let request = prepared(&mut e, 1.0).remove(0);
             assert!(matches!(&request, Action::Http(r) if r.url.ends_with("instType=FUTURES")));
             let dated = XPERP
                 .replace("xperp", "normal")
@@ -982,7 +984,7 @@ mod product_semantics {
                 1.5,
             );
         }
-        let mut initial = actions(&mut e);
+        let mut initial = prepared(&mut e, if eea { 1.5 } else { 1.0 });
         let request = initial.remove(0);
         reply(
             &mut e,
@@ -992,10 +994,10 @@ mod product_semantics {
         );
         if eea {
             assert!(!e.store().loaded().tickers);
-            let request = actions(&mut e).remove(0);
+            let request = prepared(&mut e, 2.0).remove(0);
             reply(&mut e, &request, &envelope(&ticker("BTC-USD-UM")), 2.5);
         }
-        initial.extend(actions(&mut e));
+        initial.extend(prepared(&mut e, if eea { 2.5 } else { 2.0 }));
         (e, initial)
     }
     fn socket(initial: &[Action], suffix: &str) -> SocketId {
@@ -1091,10 +1093,10 @@ mod product_semantics {
 
     #[test]
     fn failed_second_eea_catalog_page_never_publishes_a_partial_set() {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             eea: true,
             ..Options::default()
-        }));
+        });
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(INVERSE), 1.0);
@@ -1122,7 +1124,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1147,7 +1152,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 6.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1175,13 +1183,19 @@ mod product_semantics {
                     },
                 }),
             );
-            let request = actions(&mut e).remove(0);
+            let request = prepared(&mut e, 4.)
+                .into_iter()
+                .find(|a| matches!(a, Action::Http(_)))
+                .expect("prepared native history HTTP");
             assert!(
                 matches!(&request, Action::Http(r) if r.url.contains(if symbol.is_some() { "instType=FUTURES" } else { "instType=SWAP" }))
             );
             reply(&mut e, &request, &envelope(""), 5.0);
             if symbol.is_none() {
-                let request = actions(&mut e).remove(0);
+                let request = prepared(&mut e, 5.)
+                    .into_iter()
+                    .find(|a| matches!(a, Action::Http(_)))
+                    .expect("prepared native history HTTP");
                 assert!(matches!(&request, Action::Http(r) if r.url.contains("instType=FUTURES")));
                 reply(&mut e, &request, &envelope(""), 6.0);
             }
@@ -1197,7 +1211,7 @@ mod product_semantics {
             .find(|a| is_get(a, "/api/v5/account/config"))
             .unwrap();
         reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 3.0);
-        let initial = actions(&mut e);
+        let initial = prepared(&mut e, 3.0);
         let private = socket(&initial, "/private");
         let positions = initial
             .iter()
@@ -1227,7 +1241,7 @@ mod product_semantics {
             5.0,
         );
         assert!(!e.store().loaded().positions);
-        let future = actions(&mut e)
+        let future = prepared(&mut e, 5.0)
             .into_iter()
             .find(|a| is_get(a, "/api/v5/account/positions?instType=FUTURES"))
             .unwrap();
@@ -1237,11 +1251,11 @@ mod product_semantics {
         assert_eq!(p.notional, 500.0);
         assert_eq!(p.unrealized_pnl, 40.0);
         assert_eq!(e.store().balance().used, 400.0);
-        actions(&mut e);
+        prepared(&mut e, 5.5);
         e.handle(6.0, Event::WsOpened { socket: private });
-        actions(&mut e);
+        prepared(&mut e, 6.0);
         ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 4.0);
         assert!(out.iter().any(
         |a| matches!(a, Action::WsSend { text, .. } if text.contains("\"instType\":\"FUTURES\""))
     ));
@@ -1295,7 +1309,7 @@ mod product_semantics {
         reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 3.0);
         // Placement admission requires the complete account snapshot, including
         // both EEA products; config alone does not prove account readiness.
-        let mut pending = actions(&mut e);
+        let mut pending = prepared(&mut e, 3.0);
         while let Some(request) = pending.pop() {
             let Action::Http(http) = &request else {
                 continue;
@@ -1306,7 +1320,7 @@ mod product_semantics {
                 envelope("")
             };
             reply(&mut e, &request, &body, 3.5);
-            pending.extend(actions(&mut e));
+            pending.extend(prepared(&mut e, 3.5));
         }
         assert!(e.store().loaded().balance);
         assert!(e.store().loaded().positions);
@@ -1316,7 +1330,7 @@ mod product_semantics {
             4.0,
             Event::Command(Command::PlaceOrders { command: 1, orders }),
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 3.5);
         let request = out
             .iter()
             .find_map(|a| match a {
@@ -1349,7 +1363,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1375,7 +1392,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 6.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1405,10 +1425,16 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         let old: Vec<_> = (1..=100).map(|i| format!(r#"{{"instId":"BTC-USD-SWAP","billId":"{i}","type":"8","pnl":"0","fee":"0","balChg":"0.0001","ccy":"BTC","ts":"1700000000000"}}"#)).collect();
         reply(&mut e, &request, &envelope(&old.join(",")), 5.0);
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 5.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         assert!(matches!(&request, Action::Http(r) if r.url.contains("instType=FUTURES")));
         reply(
             &mut e,
@@ -1443,7 +1469,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         let row = r#"{"instId":"BTC-USD-SWAP","ordId":"100","side":"buy","ordType":"limit","state":"filled","px":"50000","sz":"1","accFillSz":"1","cTime":"1700000000000"}"#;
         let page = envelope(&vec![row; 100].join(","));
         reply(&mut e, &request, &page, 5.0);
@@ -1455,7 +1484,10 @@ mod product_semantics {
             })
             .unwrap();
         e.handle(105.0, Event::TimerFired { timer });
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 105.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(&mut e, &request, &page, 106.0);
         let out = actions(&mut e);
         assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error: s, .. }) if s.legacy_text().contains("incomplete source"))));
@@ -1470,7 +1502,7 @@ mod product_semantics {
         let (mut e, initial) = startup(false, true);
         let public = socket(&initial, "/public");
         e.handle(3.0, Event::WsOpened { socket: public });
-        actions(&mut e);
+        prepared(&mut e, 3.0);
         ws(
             &mut e,
             public,
@@ -1481,7 +1513,7 @@ mod product_semantics {
             .find(|a| is_get(a, "/api/v5/account/config"))
             .unwrap();
         reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 4.0);
-        let pending = actions(&mut e);
+        let pending = prepared(&mut e, 4.0);
         let positions = pending
             .iter()
             .find(|a| matches!(a, Action::Http(r) if r.url.contains("/positions?")))
@@ -1516,7 +1548,7 @@ mod product_semantics {
         // Recorded public instruments payload, 2026-10-20. The venue omits caps
         // for unavailable iceberg/trigger/TWAP orders while publishing real limits.
         let row = include_str!("fixtures/crml-preopen.json");
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+        let mut e = crate::support::engine(Options::default());
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         reply(
@@ -1544,7 +1576,7 @@ mod product_semantics {
         for value in ["malformed", "-1", "NaN", "inf", "0"] {
             let mut row = native.clone();
             row["maxTriggerSz"] = value.into();
-            let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+            let mut e = crate::support::engine(Options::default());
             e.start(0.0);
             let request = actions(&mut e).remove(0);
             reply(
@@ -1569,7 +1601,7 @@ mod product_semantics {
         ] {
             row[key] = "".into();
         }
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+        let mut e = crate::support::engine(Options::default());
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(&row.to_string()), 1.0);
@@ -1580,10 +1612,10 @@ mod product_semantics {
     #[test]
     fn untraded_xperp_blank_last_is_unavailable_and_partial_stream_keeps_known_trade() {
         // Actual EEA ticker TEST002-USD_UM_XPERP-310822 publishes last/open24h="".
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             eea: true,
             ..Options::default()
-        }));
+        });
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(MARKET), 1.0);
@@ -1638,7 +1670,7 @@ mod product_semantics {
     #[test]
     fn nonempty_malformed_native_last_seeds_zero_and_keeps_the_ticker_row() {
         for last in ["garbage", "NaN", "inf"] {
-            let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+            let mut e = crate::support::engine(Options::default());
             e.start(0.0);
             let request = actions(&mut e).remove(0);
             reply(&mut e, &request, &envelope(MARKET), 1.0);
@@ -1664,7 +1696,7 @@ mod product_semantics {
             .find(|a| is_get(a, "/api/v5/account/config"))
             .unwrap();
         reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 3.0);
-        let pending = actions(&mut e);
+        let pending = prepared(&mut e, 3.0);
         let private = socket(&pending, "/private");
         let positions = pending
             .iter()
@@ -1707,11 +1739,11 @@ mod product_semantics {
             ),
             6.0,
         );
-        let mut reads = actions(&mut e);
+        let mut reads = prepared(&mut e, 6.0);
         while let Some(request) = reads.pop() {
             if matches!(&request, Action::Http(_)) {
                 reply(&mut e, &request, &envelope(""), 6.5);
-                reads.extend(actions(&mut e));
+                reads.extend(prepared(&mut e, 6.5));
             }
         }
         assert_eq!(
@@ -1720,9 +1752,9 @@ mod product_semantics {
             "unproven REST leverage reserves the full440USD instead of zero"
         );
         e.handle(7.0, Event::WsOpened { socket: private });
-        actions(&mut e);
+        prepared(&mut e, 7.0);
         ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-        actions(&mut e);
+        prepared(&mut e, 4.0);
         ws(
             &mut e,
             private,
@@ -1806,7 +1838,7 @@ mod product_semantics {
             .find(|a| is_get(a, "/api/v5/account/config"))
             .unwrap();
         reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 3.0);
-        let pending = actions(&mut e);
+        let pending = prepared(&mut e, 3.0);
         let private = socket(&pending, "/private");
         let positions = pending
             .iter()
@@ -1835,9 +1867,9 @@ mod product_semantics {
         assert_eq!(e.store().balance().upnl, 40.0);
         assert_eq!(e.store().balance().free, 600.0);
         e.handle(6.0, Event::WsOpened { socket: private });
-        actions(&mut e);
+        prepared(&mut e, 6.0);
         ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-        actions(&mut e);
+        prepared(&mut e, 4.0);
         let before = e.store().balance().clone();
         ws(
             &mut e,
@@ -1869,12 +1901,12 @@ mod product_semantics {
             .find(|a| is_get(a, "/api/v5/account/config"))
             .unwrap();
         reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 3.0);
-        let pending = actions(&mut e);
+        let pending = prepared(&mut e, 3.0);
         let private = socket(&pending, "/private");
         e.handle(3.5, Event::WsOpened { socket: private });
-        actions(&mut e);
+        prepared(&mut e, 3.5);
         ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-        actions(&mut e);
+        prepared(&mut e, 4.0);
         (
             e,
             private,
@@ -2246,8 +2278,26 @@ mod product_semantics {
         let socket = socket(&actions(&mut e), "/private");
         e.handle(2001.0, Event::WsOpened { socket });
         actions(&mut e);
-        ws(&mut e, socket, r#"{"event":"login","code":"0"}"#);
-        let mut fresh: Vec<_> = actions(&mut e)
+        e.handle(
+            2002.0,
+            Event::WsMessage {
+                socket,
+                text: r#"{"event":"login","code":"0"}"#,
+            },
+        );
+        let mut handed_off = actions(&mut e);
+        let wakeups: Vec<_> = handed_off
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == 2002.0 => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        for timer in wakeups {
+            e.handle(2002.0, Event::TimerFired { timer });
+            handed_off.extend(actions(&mut e));
+        }
+        let mut fresh: Vec<_> = handed_off
             .into_iter()
             .filter(|a| matches!(a, Action::Http(_)))
             .collect();
@@ -2291,18 +2341,18 @@ mod product_semantics {
 
 #[test]
 fn open_position_on_a_skipped_instrument_is_reported_not_silently_hidden() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         key: Some("k".into()),
         secret: Some("s".into()),
         passphrase: Some("p".into()),
         ..Options::default()
-    }));
+    });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 0.0).remove(0);
     let broken = r#"{"instType":"SWAP","instId":"ETH-USDT-SWAP","ctType":"linear","ctVal":"bad"}"#;
     reply(&mut e, &a, &envelope(&format!("{MARKET},{broken}")), 1.0);
     // Private startup begins with the catalogue, alongside the ticker seed.
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 1.0);
     let tickers = out
         .iter()
         .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
@@ -2318,7 +2368,7 @@ fn open_position_on_a_skipped_instrument_is_reported_not_silently_hidden() {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.0,
     );
-    let mut pending: Vec<_> = actions(&mut e)
+    let mut pending: Vec<_> = prepared(&mut e, 3.0)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
@@ -2334,7 +2384,7 @@ fn open_position_on_a_skipped_instrument_is_reported_not_silently_hidden() {
             envelope("")
         };
         reply(&mut e, &a, &body, 4.0);
-        for out in actions(&mut e) {
+        for out in prepared(&mut e, 4.0) {
             match out {
                 Action::Http(_) => pending.push(out),
                 Action::Notice(safe_cex_engine::Notice::Event(event)) => logs.push(event.message),

@@ -3,6 +3,7 @@ use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response};
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
 use serde::Deserialize;
 
+const NOW: f64 = 1_710_000_000_000.;
 const FILL: &str = r#"{"transactTimeNs":1669407633999999999,"symbol":"BTCUSDT","currency":"USDT","side":"Sell","tradeType":"Trade","execQtyRq":"0.001","execPriceRp":"16600","execFeeRv":"0.00166","execID":"5c3d96e1-8874-53b6-b6e5-9dcc4d28b4ab","orderID":"fcdfeafa-ed68-45d4-b2bd-7bc27f2b2b0b"}"#;
 const ORDER: &str = r#"{"actionTimeNs":1667562110213260743,"transactTimeNs":1667562110221077395,"orderId":"743fc923-cb01-4261-88d1-b35dba2cdac0","symbol":"BTCUSDT","side":"Buy","ordType":"Market","ordStatus":"Filled","priceRp":"21206.7","orderQtyRq":"0.001","cumQtyRq":"0.001","reduceOnly":false}"#;
 fn engine(private: bool) -> Engine<PhemexPerpetuals> {
@@ -48,11 +49,8 @@ fn actions(e: &mut Engine<PhemexPerpetuals>) -> Vec<Action> {
     e.drain_actions().collect()
 }
 fn query(e: &mut Engine<PhemexPerpetuals>, query: Query) -> Action {
-    e.handle(
-        1_710_000_000_000.0,
-        Event::Command(Command::Query { command: 10, query }),
-    );
-    actions(e)
+    e.handle(NOW, Event::Command(Command::Query { command: 10, query }));
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .expect("HTTP request")
@@ -87,7 +85,7 @@ fn respond(e: &mut Engine<PhemexPerpetuals>, request: &Action, body: &str, strea
     };
     if streamed {
         e.handle(
-            2.0,
+            NOW + 1.,
             Event::HttpStart {
                 request: r.id,
                 status: 200,
@@ -96,17 +94,17 @@ fn respond(e: &mut Engine<PhemexPerpetuals>, request: &Action, body: &str, strea
         );
         for data in body.as_bytes().chunks(7) {
             e.handle(
-                2.0,
+                NOW + 1.,
                 Event::HttpChunk {
                     request: r.id,
                     data,
                 },
             );
         }
-        e.handle(2.0, Event::HttpEnd { request: r.id });
+        e.handle(NOW + 1., Event::HttpEnd { request: r.id });
     } else {
         e.handle(
-            2.0,
+            NOW + 1.,
             Event::HttpResponse {
                 request: r.id,
                 response: Response {
@@ -205,7 +203,7 @@ fn malformed_unknown_enum_and_failed_reads_are_errors_not_empty_success() {
     let a = query(&mut e, fills());
     let Action::Http(r) = a else { unreachable!() };
     e.handle(
-        2.0,
+        NOW + 1.,
         Event::HttpFailed {
             request: r.id,
             error: "network failure",
@@ -1101,5 +1099,311 @@ mod owned_income {
             respond(&mut e, &next, "[]", streamed);
             assert_partial(&actions(&mut e), 10, 0);
         }
+    }
+}
+
+mod owned_bounded {
+    use super::*;
+    use safe_cex_engine::{ErrorKind, log::code};
+
+    const TRADE: &str = r#"[1666860389799499999,"Buy","20702.1","0.949"]"#;
+
+    fn axis_query(axis: u8, limit: Option<u32>) -> Query {
+        match axis {
+            0 => Query::Fills {
+                symbol: Some("BTCUSDT".into()),
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit,
+            },
+            1 => Query::OrderHistory {
+                symbol: Some("BTCUSDT".into()),
+                from_ms: None,
+                to_ms: None,
+                limit,
+            },
+            2 => Query::PublicTrades {
+                symbol: "BTCUSDT".into(),
+                limit,
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    fn body(axis: u8, rows: &str) -> String {
+        if axis == 2 {
+            format!(r#"{{"error":null,"result":{{"symbol":"BTCUSDT","trades_p":[{rows}]}}}}"#)
+        } else {
+            format!("[{rows}]")
+        }
+    }
+
+    fn row(axis: u8) -> &'static str {
+        match axis {
+            0 => FILL,
+            1 => ORDER,
+            2 => TRADE,
+            _ => unreachable!(),
+        }
+    }
+
+    fn no_result_or_gap(output: &[Action]) {
+        assert!(
+            !output
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. }))),
+            "an unvalidated bounded response cannot complete: {output:?}"
+        );
+        assert!(
+            !output.iter().any(|a| matches!(a,
+                Action::Notice(Notice::Event(event)) if event.code == code::HISTORY_INCOMPLETE
+            )),
+            "there is no earlier accepted page: {output:?}"
+        );
+    }
+
+    fn failure_matrix(axis: u8) {
+        for streamed in [false, true] {
+            for failure in 0..4 {
+                let mut e = engine(axis != 2);
+                let page = query(&mut e, axis_query(axis, None));
+                let Action::Http(request) = &page else {
+                    unreachable!()
+                };
+                match failure {
+                    0 => e.handle(
+                        NOW + 1.,
+                        Event::HttpFailed {
+                            request: request.id,
+                            error: "connection lost",
+                        },
+                    ),
+                    1 => e.handle(
+                        NOW + 1.,
+                        Event::HttpResponse {
+                            request: request.id,
+                            response: Response {
+                                status: 503,
+                                headers: "",
+                                body: "unavailable",
+                            },
+                        },
+                    ),
+                    2 => respond(
+                        &mut e,
+                        &page,
+                        &body(axis, &format!("{},{{}}", row(axis))),
+                        streamed,
+                    ),
+                    3 => {
+                        let cap = if axis == 2 { 1000 } else { 200 };
+                        let rows = vec![row(axis); cap + 1].join(",");
+                        respond(&mut e, &page, &body(axis, &rows), streamed);
+                    }
+                    _ => unreachable!(),
+                }
+                let output = actions(&mut e);
+                no_result_or_gap(&output);
+                let errors: Vec<_> = output
+                    .iter()
+                    .filter_map(|a| match a {
+                        Action::Notice(Notice::CommandFailed { command: 10, error }) => Some(error),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(errors.len(), 1, "exactly one failure: {output:?}");
+                assert_eq!(
+                    errors[0].kind,
+                    Some(if axis == 2 && failure == 0 {
+                        ErrorKind::Network
+                    } else {
+                        ErrorKind::Internal
+                    }),
+                    "axis {axis}, failure {failure}, streamed {streamed}"
+                );
+                assert_eq!(errors[0].outcome, None, "reads gain no write outcome");
+                assert_eq!(
+                    errors[0].message,
+                    match failure {
+                        0 => "connection lost",
+                        1 => "HTTP 503: unavailable",
+                        _ => "Malformed or oversized Phemex history response",
+                    }
+                );
+                // The same logical ID must be admitted again after cleanup.
+                let next = query(&mut e, axis_query(axis, None));
+                respond(&mut e, &next, &body(axis, ""), streamed);
+                assert_eq!(result(&mut e).unwrap(), "[]");
+            }
+        }
+    }
+
+    #[test]
+    fn fills_failures_are_typed_and_release_the_active_slot() {
+        failure_matrix(0);
+    }
+    #[test]
+    fn orders_failures_are_typed_and_release_the_active_slot() {
+        failure_matrix(1);
+    }
+    #[test]
+    fn public_trade_failures_are_typed_and_release_the_active_slot() {
+        failure_matrix(2);
+    }
+
+    #[test]
+    fn streamed_prefix_waits_for_full_validation_and_transport_failure_discards_it() {
+        for axis in 0..3 {
+            let mut e = engine(axis != 2);
+            let page = query(&mut e, axis_query(axis, None));
+            let Action::Http(request) = page else {
+                unreachable!()
+            };
+            e.handle(
+                NOW + 1.,
+                Event::HttpStart {
+                    request: request.id,
+                    status: 200,
+                    headers: "",
+                },
+            );
+            let prefix = if axis == 2 {
+                format!(
+                    r#"{{"error":null,"result":{{"symbol":"BTCUSDT","trades_p":[{},"#,
+                    row(axis)
+                )
+            } else {
+                format!("[{},", row(axis))
+            };
+            e.handle(
+                NOW + 1.,
+                Event::HttpChunk {
+                    request: request.id,
+                    data: prefix.as_bytes(),
+                },
+            );
+            assert!(
+                actions(&mut e).is_empty(),
+                "no terminal or marker before the envelope closes"
+            );
+            e.handle(
+                NOW + 1.,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "truncated transport",
+                },
+            );
+            let output = actions(&mut e);
+            no_result_or_gap(&output);
+            let kind = if axis == 2 {
+                ErrorKind::Network
+            } else {
+                ErrorKind::Internal
+            };
+            assert!(output.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command: 10, error })
+                    if error.kind == Some(kind) && error.message == "truncated transport"
+            )));
+        }
+    }
+
+    #[test]
+    fn valid_empty_and_full_bounded_pages_finish_once_without_continuation() {
+        for axis in 0..3 {
+            for streamed in [false, true] {
+                let mut e = engine(axis != 2);
+                for count in [0, if axis == 2 { 1000 } else { 200 }] {
+                    let page = query(&mut e, axis_query(axis, Some(1)));
+                    let rows = vec![row(axis); count].join(",");
+                    respond(&mut e, &page, &body(axis, &rows), streamed);
+                    let output = actions(&mut e);
+                    assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
+                    assert!(!output.iter().any(|a| matches!(a,
+                        Action::Notice(Notice::Event(event)) if event.code == code::HISTORY_INCOMPLETE
+                    )));
+                    let completions: Vec<_> = output
+                        .iter()
+                        .filter_map(|a| match a {
+                            Action::Notice(Notice::CommandDone {
+                                command: 10,
+                                result,
+                            }) => Some(result),
+                            _ => None,
+                        })
+                        .collect();
+                    assert_eq!(completions.len(), 1, "one terminal: {output:?}");
+                    let rows: Vec<serde_json::Value> =
+                        serde_json::from_str(completions[0]).unwrap();
+                    assert_eq!(rows.len(), usize::from(count != 0));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn equal_time_sort_is_stable_and_concurrent_owners_do_not_share_terminals() {
+        for streamed in [false, true] {
+            let mut e = engine(true);
+            let first = query(&mut e, fills());
+            e.handle(
+                NOW + 1.,
+                Event::Command(Command::Query {
+                    command: 42,
+                    query: axis_query(1, None),
+                }),
+            );
+            let second = next_http(&mut e);
+            let distinct = FILL.replace("5c3d96e1-8874-53b6-b6e5-9dcc4d28b4ab", "second");
+            respond(&mut e, &first, &format!("[{FILL},{distinct}]"), streamed);
+            let output = actions(&mut e);
+            let [
+                Action::Notice(Notice::CommandDone {
+                    command: 10,
+                    result,
+                }),
+            ] = output.as_slice()
+            else {
+                panic!("one successful owner: {output:?}");
+            };
+            let rows: Vec<serde_json::Value> = serde_json::from_str(result).unwrap();
+            assert_eq!(rows[0]["id"], "5c3d96e1-8874-53b6-b6e5-9dcc4d28b4ab");
+            assert_eq!(rows[1]["id"], "second");
+            let Action::Http(request) = second else {
+                unreachable!()
+            };
+            e.handle(
+                3.,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "peer failed",
+                },
+            );
+            let output = actions(&mut e);
+            no_result_or_gap(&output);
+            let [Action::Notice(Notice::CommandFailed { command: 42, error })] = output.as_slice()
+            else {
+                panic!("one failed peer: {output:?}");
+            };
+            assert_eq!(error.message, "peer failed");
+        }
+    }
+
+    #[test]
+    fn lookup_failure_keeps_legacy_unclassified_rejection() {
+        let mut e = engine(true);
+        let page = query(&mut e, lookup("fixture-lookup"));
+        respond(&mut e, &page, "[{}]", true);
+        let output = actions(&mut e);
+        no_result_or_gap(&output);
+        let [Action::Notice(Notice::CommandFailed { command: 10, error })] = output.as_slice()
+        else {
+            panic!("legacy lookup rejection: {output:?}");
+        };
+        assert_eq!(error.kind, None);
+        assert_eq!(
+            error.message,
+            "Malformed or oversized Phemex history response"
+        );
     }
 }

@@ -772,7 +772,7 @@ impl Trading {
                 }
                 self.amend_locks.insert(id.clone());
             }
-            account.bump_orders();
+            account.bump_orders(cx);
             account.bump_positions();
             account.request(
                 cx,
@@ -996,7 +996,7 @@ impl Trading {
         rejected: bool,
     ) {
         if !matches!(request.kind, Kind::Quotes(_) | Kind::Rails(_)) {
-            account.bump_orders();
+            account.bump_orders(cx);
             account.bump_positions();
         }
         if let Kind::Amend { id, .. } = &request.kind {

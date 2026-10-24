@@ -184,15 +184,15 @@ impl MexcFutures {
     }
     pub fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, command: u32, symbol: String) {
         if cx.now < self.account.paused_until {
-            cx.fail(command, "MEXC account reads are rate limited");
+            Self::fail_local_read(cx, "MEXC account reads are rate limited");
             return;
         }
         let Some(m) = cx.store.market(&symbol) else {
-            cx.fail(command, "Market not found");
+            Self::fail_local_read(cx, "Market not found");
             return;
         };
         if self.credentials.is_none() {
-            cx.fail(command, "MEXC leverage requires credentials");
+            Self::fail_local_read(cx, "MEXC leverage requires credentials");
             return;
         }
         let query = sign::query([("symbol", m.id.clone())]);
@@ -247,7 +247,10 @@ impl MexcFutures {
         full: bool,
         symbol: Option<String>,
     ) {
-        if self.account.in_flight.contains(&scope) || cx.now < self.account.paused_until {
+        if self.account.auth_rejected
+            || self.account.in_flight.contains(&scope)
+            || cx.now < self.account.paused_until
+        {
             return;
         }
         self.account.in_flight.insert(scope);
@@ -388,6 +391,9 @@ impl MexcFutures {
             return;
         }
         if m.channel == "push.personal.asset" {
+            if self.account.auth_rejected {
+                return;
+            }
             if let Some(t) = self.account.asset_refresh.take() {
                 cx.clear_timer(t);
             }
@@ -1059,20 +1065,35 @@ impl MexcFutures {
             .skip_logged
             .rearm_namespace(prefix, clean, ids.iter().map(String::as_str));
     }
-    pub fn account_response(
+    pub fn account_startup_refusal(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        request: Request,
-        response: Response<'_>,
-    ) {
-        // A refused key can never pass the mode read, so startup fails instead of polling.
-        let read_key = self.options.read_credentials.is_some();
-        if matches!(request, Request::Mode)
-            && !self.account.mode_ready
-            && let Some(error) = auth_rejection(response.body, read_key)
+        request: &Request,
+        response: &Response<'_>,
+    ) -> bool {
+        if let (true, Request::Mode | Request::Snapshot(_)) = (self.account.auth_rejected, request)
         {
+            return true;
+        }
+        // Initial mode and plan-list credential refusals cannot recover by polling.
+        let read_key = self.options.read_credentials.is_some();
+        let initial_plan = if let Request::Snapshot(snapshot) = request {
+            snapshot.scope == Scope::Plan && !cx.store.loaded().orders
+        } else {
+            false
+        };
+        let startup_read =
+            (matches!(request, Request::Mode) && !self.account.mode_ready) || initial_plan;
+        if startup_read && let Some(error) = auth_rejection(response.body, read_key) {
             self.account.auth_rejected = true;
+            self.account.in_flight.clear();
+            self.account.staged.clear();
+            self.account.stage_mask = 0;
+            self.account.full_failed = true;
             if let Some(timer) = self.account.poll.take() {
+                cx.clear_timer(timer);
+            }
+            if let Some(timer) = self.account.asset_refresh.take() {
                 cx.clear_timer(timer);
             }
             cx.notice(Level::Error, code::AUTH_REJECTED, &error.message);
@@ -1082,6 +1103,17 @@ impl MexcFutures {
             if refused && !read_key {
                 cx.deactivate();
             }
+            return true;
+        }
+        false
+    }
+    pub fn account_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        if self.account_startup_refusal(cx, &request, &response) {
             return;
         }
         let result = if response.status == 200 {
@@ -1461,6 +1493,9 @@ impl MexcFutures {
         }
     }
     pub fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>, full: bool) {
+        if self.account.auth_rejected {
+            return;
+        }
         self.account.needs_full |= full || !cx.store.loaded().orders;
         self.snapshot_account(cx, Scope::Assets, false);
         self.snapshot_account(cx, Scope::Positions, false);
@@ -1485,6 +1520,10 @@ impl MexcFutures {
         }
     }
     pub fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        if let (true, Request::Mode | Request::Snapshot(_)) = (self.account.auth_rejected, &request)
+        {
+            return;
+        }
         if let Request::Leverage { command, .. } = &request {
             cx.command_error(*command, error);
             cx.fail(*command, error);
@@ -1500,7 +1539,7 @@ impl MexcFutures {
                 self.account.staged.clear();
             }
         }
-        if self.account.poll.is_none() {
+        if !self.account.auth_rejected && self.account.poll.is_none() {
             self.account.poll = Some(cx.set_poll_timer(2000.0));
         }
     }

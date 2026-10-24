@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HyrotraderExchange } from '../../exchanges/bybit/hyrotrader.exchange';
 import { DefaultStore } from '../../store/store.base';
-import { Order, OrderSide, OrderType, Position, PositionMode } from '../../types';
+import { Order, OrderSide, OrderType, Position, PositionMode, PositionSide } from '../../types';
 
 class TestHyroExchange extends HyrotraderExchange {
   getBybitRestBaseUrl() {
@@ -181,6 +181,86 @@ const attach = (exchange: TestHyroExchange) => {
 };
 
 describe('HyroTrader private stream recovery ordering', () => {
+  it('accepts zero-size flat position updates without leverage after a close', () => {
+    const { exchange, store } = setup();
+    store.update({
+      positions: [
+        {
+          id: 'BTCUSDT',
+          symbol: 'BTCUSDT',
+          side: PositionSide.Short,
+          entryPrice: 83000,
+          notional: 165.75,
+          leverage: 3,
+          unrealizedPnl: 0,
+          realizedPnl: 0,
+          contracts: 0.002,
+          liquidationPrice: 0,
+          positionMode: PositionMode.OneWay,
+        } as Position,
+      ],
+    });
+    const { socket } = attach(exchange);
+    socket.ready = true;
+    socket.onMessage(
+      message({
+        creationTime: 1792636946033,
+        topic: 'position',
+        data: [
+          {
+            positionIdx: 0,
+            positionValue: '0',
+            side: '',
+            size: '0',
+            symbol: 'BTCUSDT',
+            updatedTime: '1792636946033',
+          },
+        ],
+      }),
+    );
+    expect(exchange.emitAndLogError).not.toHaveBeenCalled();
+    expect(store.positions[0]).toMatchObject({ id: 'BTCUSDT', contracts: 0, notional: 0, leverage: 3 });
+  });
+
+  it('accepts entryPrice as the position entry-price field', () => {
+    const { exchange, store } = setup();
+    const { socket } = attach(exchange);
+    socket.ready = true;
+    socket.onMessage(
+      message({
+        topic: 'position',
+        data: [
+          {
+            symbol: 'BTCUSDT',
+            size: '0.002',
+            side: 'Buy',
+            entryPrice: '82829.30',
+            markPrice: '82830.07',
+            unrealisedPnl: '0.00154',
+            positionValue: '165.66014',
+            leverage: '3',
+            positionIdx: 0,
+          },
+        ],
+      }),
+    );
+    expect(exchange.emitAndLogError).not.toHaveBeenCalled();
+    expect(store.positions[0]).toMatchObject({ symbol: 'BTCUSDT', entryPrice: 82829.3, leverage: 3 });
+  });
+
+  it('treats an already-filled chase cancel as an already-gone order', async () => {
+    const { exchange } = setup();
+    exchange.xhr = {
+      post: vi.fn().mockResolvedValue({
+        data: { retCode: 110001, retMsg: 'Order does not exist or is no longer open', result: {} },
+      }),
+    } as any;
+    await expect(exchange.cancelOrdersHelper([{ id: 'order-1', symbol: 'BTCUSDT' } as Order], 'linear')).resolves.toBe(
+      undefined,
+    );
+    expect(exchange.emitAndLogError).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, '0', 0])('keeps one-way mode for a position-topic index %s', (positionIdx) => {
     const { exchange, store } = setup();
     const { socket } = attach(exchange);

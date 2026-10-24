@@ -59,6 +59,22 @@ fn plan_reduce_only_comes_from_the_native_flag_or_closing_side() {
     assert!(e.store().order("302").unwrap().reduce_only);
 }
 
+fn book_response(e: &mut TestEngine, r: &safe_cex_engine::HttpRequest, body: &str) {
+    book_response_at(e, r, body, 300.0);
+}
+fn book_response_at(e: &mut TestEngine, r: &safe_cex_engine::HttpRequest, body: &str, now: f64) {
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
 fn book_query(
     e: &mut TestEngine,
     command: u32,
@@ -72,10 +88,19 @@ fn book_query(
             limit,
         }),
     );
-    let out = e.drain_actions().collect::<Vec<_>>();
-    assert!(
-        !out.iter()
-            .any(|a| matches!(a, Action::WsSend { .. } | Action::SetTimer { .. }))
+    let out = safe_cex_engine::test_support::prepared_actions(e, 300.0);
+    assert!(!out.iter().any(|a| matches!(a, Action::WsSend { .. })));
+    let deadlines: Vec<_> = out
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(*at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        deadlines,
+        [20_300.0],
+        "one engine deadline and no retry timer"
     );
     out.iter()
         .find_map(|a| match a {
@@ -111,7 +136,7 @@ fn independent_book_query_sorts_base_totals_and_preserves_large_version() {
             .url
             .ends_with("/api/v1/contract/depth/BTC_USDT?limit=2")
     );
-    response(
+    book_response(
         &mut e,
         &request,
         r#"{"success":true,"code":0,"data":{"version":9007199254740993,"bids":[[59999,"20"],[60000,10,1],[59998,40]],"asks":[[60002,30],[60001,0]]}}"#,
@@ -171,7 +196,10 @@ fn book_queries_validate_input_and_capture_their_own_scale_and_limit() {
         let out = e.drain_actions().collect::<Vec<_>>();
         assert!(!out.iter().any(|a| matches!(
             a,
-            Action::Http(_) | Action::WsSend { .. } | Action::SetTimer { .. }
+            Action::Http(_)
+                | Action::WsSend { .. }
+                | Action::SetTimer { .. }
+                | Action::ManagedHttp(_)
         )));
         assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command:81, error }) if error.kind == Some(safe_cex_engine::ErrorKind::InvalidInput))));
     }
@@ -183,11 +211,11 @@ fn book_queries_validate_input_and_capture_their_own_scale_and_limit() {
     assert!(second.url.ends_with("limit=1000"));
     e.store_mut().set_markets(vec![]);
     let body = r#"{"success":true,"code":0,"data":{"version":"9007199254740993","bids":[[60000,10]],"asks":[]}}"#;
-    response(&mut e, &second, body);
+    book_response(&mut e, &second, body);
     let result = completed(&mut e, 83);
     assert_eq!(result["bids"][0]["amount"].as_f64(), Some(0.1));
     assert_eq!(result["asks"], serde_json::json!([]));
-    response(&mut e, &first, body);
+    book_response(&mut e, &first, body);
     assert_eq!(
         completed(&mut e, 82)["bids"][0]["amount"].as_f64(),
         Some(0.001)
@@ -205,20 +233,19 @@ fn query_response_cannot_replace_a_newer_subscribed_book() {
         }),
     );
     let subscription = requests(&mut e).pop().unwrap();
-    response(
+    book_response(
         &mut e,
         &subscription,
         r#"{"success":true,"code":0,"data":{"version":10,"bids":[[60000,10]],"asks":[[60001,40]]}}"#,
     );
     e.drain_actions().for_each(drop);
     let query = book_query(&mut e, 84, Some(1));
-    ws(
-        &mut e,
+    e.handle(301.0, Event::WsMessage {
         socket,
-        r#"{"channel":"push.depth","symbol":"BTC_USDT","data":{"version":11,"bids":[[60000,30]],"asks":[]}}"#,
-    );
+        text: r#"{"channel":"push.depth","symbol":"BTC_USDT","data":{"version":11,"bids":[[60000,30]],"asks":[]}}"#,
+    });
     e.drain_actions().for_each(drop);
-    response(&mut e, &query, EMPTY);
+    book_response_at(&mut e, &query, EMPTY, 302.0);
     assert_eq!(completed(&mut e, 84)["bids"], serde_json::json!([]));
     assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(60000.0, 0.003)]);
     assert_eq!(e.book("BTCUSDT").unwrap().asks(), [(60001.0, 0.004)]);
@@ -241,7 +268,7 @@ fn malformed_books_and_overflow_reject_the_whole_query() {
         r#"{"version":1,"bids":[[1,null]],"asks":[]}"#,
     ] {
         let query = book_query(&mut e, 85, Some(1));
-        response(
+        book_response(
             &mut e,
             &query,
             &format!(r#"{{"success":true,"code":0,"data":{data}}}"#),
@@ -273,7 +300,7 @@ fn malformed_books_and_overflow_reject_the_whole_query() {
         e.store_mut()
             .update_markets(|m| m.contract_size = Some(size));
         let query = book_query(&mut e, 87, Some(1));
-        response(
+        book_response(
             &mut e,
             &query,
             &format!(
@@ -333,7 +360,10 @@ fn query_failures_are_classified_and_rate_limits_pause_without_retrying() {
             let out = e.drain_actions().collect::<Vec<_>>();
             assert!(!out.iter().any(|a| matches!(
                 a,
-                Action::Http(_) | Action::SetTimer { .. } | Action::WsSend { .. }
+                Action::Http(_)
+                    | Action::ManagedHttp(_)
+                    | Action::SetTimer { .. }
+                    | Action::WsSend { .. }
             )));
             assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command:89, error }) if error.kind == Some(ErrorKind::RateLimited))));
         }
@@ -420,8 +450,14 @@ fn depth_query_resumes_after_the_reported_cooldown() {
             limit: None,
         }),
     );
-    let resumed = requests(&mut e).pop().expect("new query after cooldown");
-    response(&mut e, &resumed, EMPTY);
+    let resumed = safe_cex_engine::test_support::prepared_actions(&mut e, 2400.0)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .expect("new query after cooldown");
+    book_response_at(&mut e, &resumed, EMPTY, 2400.0);
     assert_eq!(completed(&mut e, 93)["asks"], serde_json::json!([]));
 }
 
@@ -434,7 +470,13 @@ fn standalone_json_book_query_reaches_unsigned_rest_and_preserves_native_result(
     )
     .expect("standalone MEXC advertises JSON REST-book queries");
     e.handle(100.0, Event::Command(command));
-    let reads = requests(&mut e);
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, 100.0)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
     assert_eq!(reads.len(), 1);
     let request = &reads[0];
     assert_eq!(request.method, safe_cex_engine::Method::Get);
@@ -445,7 +487,7 @@ fn standalone_json_book_query_reaches_unsigned_rest_and_preserves_native_result(
     );
     assert!(request.headers.is_empty());
     assert_eq!(request.body, None);
-    response(
+    book_response(
         &mut e,
         request,
         r#"{"success":true,"code":0,"data":{"version":"9007199254740993","bids":[[60000,20,1]],"asks":[[60002,40,1]]}}"#,
