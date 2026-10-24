@@ -5,7 +5,7 @@ use safe_cex_engine::signing::{
     Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef,
     Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
-use sha2::{Digest, Sha256, Sha512};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use zeroize::Zeroizing;
 mod key_material;
@@ -203,7 +203,8 @@ impl LocalSigner {
     }
     /// Consumes bytes; neither this provider nor its keys implement Debug/export.
     /// Replaced material is undeclared: a declaration describes the bytes setup
-    /// installed, never later ones.
+    /// installed, never later ones. A role ref keeps its role, which is its
+    /// declaration; trusted callers replace role material only with that kind.
     pub fn insert(&mut self, reference: KeyRef, bytes: Vec<u8>) {
         self.algorithms.remove(&reference);
         self.keys.insert(reference, Zeroizing::new(bytes));
@@ -381,24 +382,32 @@ impl LocalSigner {
         self.algorithms.remove(reference);
     }
     /// Ordinary material declared for exactly this asymmetric algorithm.
+    /// A role is its own declaration; ordinary refs need trusted policy's.
     fn declared_key(&self, reference: &KeyRef, algorithm: Algorithm) -> Result<&[u8], SignError> {
+        if self.roles.contains_key(reference) {
+            return self.algorithm_key(reference, algorithm);
+        }
         if self.algorithms.get(reference) != Some(&algorithm) {
             return Err(SignError::InvalidRequest);
         }
         self.key(reference)
     }
-    /// Ordinary material only; extra refs require `role_key`.
+    /// Ordinary material only; extra refs require `algorithm_key`.
     fn key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
         if self.roles.contains_key(reference) {
             return Err(SignError::InvalidRequest);
         }
         self.raw_key(reference)
     }
-    fn role_key(&self, reference: &KeyRef, role: ExtraKey) -> Result<&[u8], SignError> {
-        if self.roles.get(reference) != Some(&role) {
-            return Err(SignError::InvalidRequest);
+    /// Signing material: a role ref serves only its role's one algorithm, and a
+    /// role-only algorithm never reads ordinary material.
+    fn algorithm_key(&self, reference: &KeyRef, algorithm: Algorithm) -> Result<&[u8], SignError> {
+        match self.roles.get(reference) {
+            Some(role) if role.algorithm() == algorithm => self.raw_key(reference),
+            Some(_) => Err(SignError::InvalidRequest),
+            None if algorithm == Algorithm::ZkLinkContract => Err(SignError::InvalidRequest),
+            None => self.key(reference),
         }
-        self.raw_key(reference)
     }
     fn raw_key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
         self.keys
@@ -516,10 +525,7 @@ impl LocalSigner {
                     payload,
                 } => {
                     let message = self.expand(payload, &result)?;
-                    let key = match algorithm {
-                        Algorithm::ZkLinkContract => self.role_key(key, ExtraKey::ZklinkSeed)?,
-                        _ => self.key(key)?,
-                    };
+                    let key = self.algorithm_key(key, *algorithm)?;
                     match algorithm {
                         Algorithm::HmacSha256 => {
                             let mut mac = Hmac::<Sha256>::new_from_slice(key)
@@ -527,12 +533,15 @@ impl LocalSigner {
                             mac.update(&message);
                             mac.finalize().into_bytes().to_vec()
                         }
+                        #[cfg(any(test, feature = "hmac-sha512"))]
                         Algorithm::HmacSha512 => {
-                            let mut mac = Hmac::<Sha512>::new_from_slice(key)
+                            let mut mac = Hmac::<sha2::Sha512>::new_from_slice(key)
                                 .map_err(|_| SignError::InvalidRequest)?;
                             mac.update(&message);
                             mac.finalize().into_bytes().to_vec()
                         }
+                        #[cfg(not(any(test, feature = "hmac-sha512")))]
+                        Algorithm::HmacSha512 => return Err(SignError::Unsupported),
                         Algorithm::Sha256SecretSuffix => {
                             let mut hash = Sha256::new();
                             hash.update(&message);
@@ -555,8 +564,7 @@ impl LocalSigner {
                         Algorithm::Es256 => primitives::es256(key, &message)?,
                         Algorithm::Secp256k1Digest => primitives::secp256k1_digest(key, &message)?,
                         Algorithm::StarkDigest => primitives::stark_digest(key, &message)?,
-                        // Reserved: no Schnorr contract is defined yet.
-                        Algorithm::SchnorrDigest => return Err(SignError::Unsupported),
+                        Algorithm::SchnorrDigest => primitives::schnorr_digest(key, &message)?,
                     }
                 }
             };
@@ -606,7 +614,8 @@ fn asymmetric(algorithm: Algorithm) -> bool {
 /// Mirrors the `sign_now` arms; keep the two in step.
 fn implemented(algorithm: Algorithm) -> bool {
     match algorithm {
-        Algorithm::HmacSha256 | Algorithm::HmacSha512 | Algorithm::Sha256SecretSuffix => true,
+        Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => true,
+        Algorithm::HmacSha512 => cfg!(any(test, feature = "hmac-sha512")),
         Algorithm::ZkLinkContract => cfg!(feature = "zklink"),
         Algorithm::Ed25519
         | Algorithm::Es256
@@ -621,10 +630,7 @@ impl Signer for LocalSigner {
         true
     }
     fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
-        let usable = match algorithm {
-            Algorithm::ZkLinkContract => self.role_key(key, ExtraKey::ZklinkSeed).is_ok(),
-            _ => self.key(key).is_ok(),
-        };
+        let usable = self.algorithm_key(key, algorithm).is_ok();
         if usable && implemented(algorithm) {
             Capability::Supported
         } else {
@@ -878,6 +884,201 @@ mod tests {
         );
     }
 
+    /// R1: the provider arm signs exactly what the legacy Lighter signer signs,
+    /// with the payload split as entropy (first 32 bytes) then input.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_digest_matches_the_legacy_hedged_lighter_signature() {
+        let key =
+            "01000000000000000000000000000000000000000000000000000000000000000000000000000000";
+        let (signer, ids) = LocalSigner::from_json(
+            serde_json::json!({"primary":{"key":"lighter-api-key","secret":format!("0x{key}"),"secretEncoding":"hex"}})
+                .to_string(),
+        )
+        .unwrap();
+        let signing = ids.primary.unwrap().signing;
+        let sign = |entropy: [u8; 32], input: &[u8]| {
+            let mut payload = entropy.to_vec();
+            payload.extend_from_slice(input);
+            signer.sign_now(&SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![Operation::Sign {
+                    algorithm: Algorithm::SchnorrDigest,
+                    key: signing.clone(),
+                    payload: vec![PayloadPart::Bytes { bytes: payload }],
+                }],
+            })
+        };
+        let key_bytes: Vec<u8> = (0..40)
+            .map(|i| u8::from_str_radix(&key[i * 2..i * 2 + 2], 16).unwrap())
+            .collect();
+        // A canonical word, then words at and above p, which legacy and Go reduce.
+        for input in [
+            vec![1, 0, 0, 0, 0, 0, 0, 0],
+            vec![1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff],
+            vec![0xff; 16],
+        ] {
+            for entropy in [[0u8; 32], [0x5a; 32]] {
+                let legacy = crate::lighter::schnorr_sign(
+                    &input,
+                    &key_bytes,
+                    crate::lighter::hedged_nonce(&input, &key_bytes, &entropy).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(legacy.len(), 80);
+                assert_eq!(sign(entropy, &input).unwrap().values, vec![legacy]);
+            }
+        }
+        // Entropy alone, or input that is not whole words, is refused.
+        assert_eq!(sign([0; 32], &[]), Err(SignError::InvalidRequest));
+        assert_eq!(sign([0; 32], &[1, 2, 3]), Err(SignError::InvalidRequest));
+    }
+
+    fn schnorr_request(key: KeyRef, payload: Vec<u8>) -> SignRequest {
+        SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::SchnorrDigest,
+                key,
+                payload: vec![PayloadPart::Bytes { bytes: payload }],
+            }],
+        }
+    }
+
+    fn schnorr_signer(key: &[u8]) -> (LocalSigner, KeyRef) {
+        let hex: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
+        let (signer, ids) = LocalSigner::from_json(
+            serde_json::json!({"primary":{"key":"k","secret":hex,"secretEncoding":"hex"}})
+                .to_string(),
+        )
+        .unwrap();
+        (signer, ids.primary.unwrap().signing)
+    }
+
+    /// R1: payloads without full entropy, or without whole input words, are refused.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_digest_refuses_truncated_entropy_and_partial_words() {
+        let mut key = [0u8; 40];
+        key[0] = 1;
+        let (signer, signing) = schnorr_signer(&key);
+        for payload in [vec![], vec![7; 31], vec![7; 32], vec![7; 33], vec![7; 47]] {
+            assert_eq!(
+                signer.sign_now(&schnorr_request(signing.clone(), payload)),
+                Err(SignError::InvalidRequest)
+            );
+        }
+    }
+
+    /// R1: an independent oracle. Signatures from the arm verify against the
+    /// public keys the Go signer derived for the go-wasm.json scalars.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_digest_verifies_against_go_derived_public_keys() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/lighter/go-wasm.json")).unwrap();
+        let bytes = |case: &serde_json::Value, field: &str| -> Vec<u8> {
+            let text = case[field].as_str().unwrap();
+            (0..text.len() / 2)
+                .map(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).unwrap())
+                .collect()
+        };
+        let mut checked = 0;
+        for case in fixture["signatures"].as_array().unwrap() {
+            let key = bytes(case, "key");
+            let input = bytes(case, "payload");
+            if input.is_empty() || !crate::lighter::canonical_scalar(&key).unwrap() {
+                continue;
+            }
+            let (signer, signing) = schnorr_signer(&key);
+            for entropy in [[0u8; 32], [0xa5; 32]] {
+                let mut payload = entropy.to_vec();
+                payload.extend_from_slice(&input);
+                let result = signer
+                    .sign_now(&schnorr_request(signing.clone(), payload))
+                    .unwrap();
+                let signature = &result.values[0];
+                assert!(
+                    crate::lighter::schnorr_verify(&input, &bytes(case, "publicKey"), signature)
+                        .unwrap()
+                );
+                assert!(
+                    !crate::lighter::schnorr_verify(
+                        &bytes(case, "changedPayload"),
+                        &bytes(case, "publicKey"),
+                        signature
+                    )
+                    .unwrap()
+                );
+            }
+            checked += 1;
+        }
+        assert!(
+            checked > 0,
+            "go-wasm.json must hold canonical signing vectors"
+        );
+    }
+
+    /// R1: keys are refused, never reduced: zero, the group order and above,
+    /// and 39/41-byte keys are refused; order - 1 signs. Legacy reduces a key at or above the
+    /// order and signs; the arm's refusal is the recorded behaviour change.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_digest_refuses_noncanonical_and_zero_keys() {
+        use goldilocks_crypto::ScalarField;
+        let mut input = [0u8; 40];
+        input[0] = 1;
+        let mut payload = vec![0x11; 32];
+        payload.extend_from_slice(&input);
+        let order = ScalarField::N.to_bytes_le();
+        let mut short = vec![0u8; 39];
+        short[0] = 1;
+        let mut long = vec![0u8; 41];
+        long[0] = 1;
+        for key in [
+            [0u8; 40].to_vec(),
+            order.to_vec(),
+            [0xff; 40].to_vec(),
+            short,
+            long,
+        ] {
+            let (signer, signing) = schnorr_signer(&key);
+            assert_eq!(
+                signer.sign_now(&schnorr_request(signing, payload.clone())),
+                Err(SignError::InvalidRequest),
+                "{}-byte key",
+                key.len()
+            );
+        }
+        for key in [order, [0xff; 40]] {
+            let legacy = crate::lighter::hedged_nonce(&input, &key, &[0x11; 32])
+                .and_then(|nonce| crate::lighter::schnorr_sign(&input, &key, nonce));
+            assert_eq!(legacy.map(|signature| signature.len()), Ok(80));
+        }
+        let below_order = ScalarField::NEG_ONE.to_bytes_le();
+        let (signer, signing) = schnorr_signer(&below_order);
+        let result = signer.sign_now(&schnorr_request(signing, payload)).unwrap();
+        let public = crate::lighter::public_key(&below_order).unwrap();
+        assert!(crate::lighter::schnorr_verify(&input, &public, &result.values[0]).unwrap());
+    }
+
+    /// Without the schnorr feature the arm refuses as Unsupported.
+    #[cfg(not(feature = "schnorr"))]
+    #[test]
+    fn schnorr_digest_is_unsupported_without_the_feature() {
+        let mut key = [0u8; 40];
+        key[0] = 1;
+        let (signer, signing) = schnorr_signer(&key);
+        let mut payload = vec![0; 32];
+        payload.extend_from_slice(&[1, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            signer.sign_now(&schnorr_request(signing, payload)),
+            Err(SignError::Unsupported)
+        );
+    }
+
     #[test]
     fn secondary_signing_alias_names_the_primary_ref_without_a_second_copy() {
         let hex_policy = |encoding| CredentialSetupPolicy {
@@ -990,6 +1191,7 @@ mod tests {
                 format!("0X{}", crate::hex(secret.as_bytes()).to_uppercase()),
             ),
             ("pem", pem("PRIVATE KEY", &base64)),
+            ("base58", bs58::encode(secret.as_bytes()).into_string()),
         ] {
             let (signer, identities) = LocalSigner::from_json(
                 serde_json::json!({
@@ -1119,6 +1321,13 @@ mod tests {
             ("hex", "0x123".to_owned()),
             ("hex", "0x0x00".to_owned()),
             ("hex", "x00".to_owned()),
+            // Base58 excludes 0, O, I and l; an empty decode is no key.
+            ("base58", "0OIl".to_owned()),
+            ("base58", "".to_owned()),
+            (
+                "base58",
+                "ed25519:11111111111111111111111111111111".to_owned(),
+            ),
             (
                 "pem",
                 pem("PRIVATE KEY", "AQ==").replace("END PRIVATE KEY", "END EC PRIVATE KEY"),
@@ -1377,7 +1586,7 @@ mod tests {
             &format!(r#""encoding":"hex"}},"zklinkSeed":{{"value":"{seed}"}}}}"#),
         );
         assert!(LocalSigner::from_json_with_policy(duplicate, zklink_policy()).is_err());
-        let unknown = zklink_setup(&seed).replace("zklinkSeed", "l1Wallet");
+        let unknown = zklink_setup(&seed).replace("zklinkSeed", "unknownRole");
         assert!(LocalSigner::from_json_with_policy(unknown, zklink_policy()).is_err());
         let missing = r#"{"primary":{"key":"apex-key","secret":"apex-secret"}}"#.to_owned();
         assert_eq!(
@@ -1770,5 +1979,212 @@ mod tests {
                 );
             }
         }
+    }
+
+    // P6b REDs: the l1Wallet role reaches the provider through the existing
+    // policy and setup decode; its one algorithm is Secp256k1Digest.
+    fn l1_wallet_setup(wallet: &str) -> (LocalSigner, serde_json::Value) {
+        let policy: CredentialSetupPolicy = serde_json::from_value(serde_json::json!({
+            "primary": {"extra": {"key": "l1Wallet", "field": "requiredForPrivate", "encoding": "hex"}}
+        }))
+        .unwrap();
+        let setup = serde_json::json!({"primary": {
+            "key": "account", "secret": "l2", "extra": {"l1Wallet": {"value": wallet, "encoding": "hex"}}
+        }});
+        let (signer, ids) = LocalSigner::from_json_with_policy(setup.to_string(), policy).unwrap();
+        let role = serde_json::to_value(ids.primary.unwrap()).unwrap()["extra"]["l1Wallet"].clone();
+        assert!(role.is_string());
+        (signer, role)
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn l1_wallet_role_answers_its_ethers_address() {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/ethereum/primitives.json"))
+                .unwrap();
+        for case in corpus["cases"].as_array().unwrap() {
+            let wallet = case["privateKey"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("0x");
+            let (signer, role) = l1_wallet_setup(wallet);
+            let request =
+                public_request(serde_json::json!([{"kind": "publicAddress", "key": role}]));
+            let result = signer.sign_now(&request).unwrap();
+            let expected = case["recovered"].as_str().unwrap().to_ascii_lowercase();
+            assert_eq!(format!("0x{}", crate::hex(&result.values[0])), expected);
+        }
+    }
+
+    #[test]
+    fn l1_wallet_role_is_refused_outside_its_algorithm() {
+        let (signer, role) = l1_wallet_setup(SCALAR);
+        for operation in [
+            serde_json::json!({"kind": "present", "key": role}),
+            serde_json::json!({"kind": "sign", "algorithm": "hmacSha256", "key": "primary.signing",
+                "payload": [{"kind": "credential", "key": role}]}),
+            serde_json::json!({"kind": "sign", "algorithm": "hmacSha256", "key": role, "payload": []}),
+            serde_json::json!({"kind": "sign", "algorithm": "zkLinkContract", "key": role,
+                "payload": [{"kind": "bytes", "bytes": vec![0u8; 36]}]}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "ed25519", "key": role}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "starkDigest", "key": role}),
+        ] {
+            let request = public_request(serde_json::json!([operation]));
+            assert_eq!(
+                signer.sign_now(&request),
+                Err(SignError::InvalidRequest),
+                "{operation}"
+            );
+        }
+        // The zkLink role answers no public operation and signs nothing else.
+        let (seed, _, _) = zklink_case();
+        let (zklink, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let seed_ref = ids.primary.unwrap().extra[&ExtraKey::ZklinkSeed].clone();
+        for operation in [
+            serde_json::json!({"kind": "publicAddress", "key": seed_ref}),
+            serde_json::json!({"kind": "sign", "algorithm": "secp256k1Digest", "key": seed_ref,
+                "payload": [{"kind": "bytes", "bytes": vec![7u8; 32]}]}),
+        ] {
+            let request = public_request(serde_json::json!([operation]));
+            assert_eq!(
+                zklink.sign_now(&request),
+                Err(SignError::InvalidRequest),
+                "{operation}"
+            );
+        }
+        // The L1 wallet belongs to the primary identity only.
+        let policy: CredentialSetupPolicy = serde_json::from_value(serde_json::json!({
+            "secondary": {"extra": {"key": "l1Wallet", "encoding": "hex"}}
+        }))
+        .unwrap();
+        let setup = serde_json::json!({"secondary": {
+            "key": "read", "secret": "l2", "extra": {"l1Wallet": {"value": SCALAR, "encoding": "hex"}}
+        }});
+        assert!(matches!(
+            LocalSigner::from_json_with_policy(setup.to_string(), policy),
+            Err(SignError::InvalidRequest)
+        ));
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn l1_wallet_signs_digests_that_recover_to_its_own_address() {
+        let (signer, role) = l1_wallet_setup(SCALAR);
+        let digest = vec![9u8; 32];
+        let request = public_request(serde_json::json!([
+            {"kind": "publicAddress", "key": role},
+            {"kind": "sign", "algorithm": "secp256k1Digest", "key": role,
+             "payload": [{"kind": "bytes", "bytes": digest}]},
+        ]));
+        let result = signer.sign_now(&request).unwrap();
+        let address = format!("0x{}", crate::hex(&result.values[0]));
+        assert!(crate::ethereum::signed_by(
+            &digest,
+            &result.values[1],
+            &address
+        ));
+        assert_eq!(
+            address,
+            crate::ethereum::private_key_address(SCALAR)
+                .unwrap()
+                .to_ascii_lowercase()
+        );
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn l1_wallet_material_is_refused_at_use_and_required_where_declared() {
+        // Zero, the curve order and a short scalar answer nothing.
+        for wallet in [
+            "0".repeat(64),
+            "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141".into(),
+            "11".repeat(31),
+        ] {
+            let (signer, role) = l1_wallet_setup(&wallet);
+            for operation in [
+                serde_json::json!({"kind": "publicAddress", "key": role}),
+                serde_json::json!({"kind": "sign", "algorithm": "secp256k1Digest", "key": role,
+                    "payload": [{"kind": "bytes", "bytes": vec![9u8; 32]}]}),
+            ] {
+                let request = public_request(serde_json::json!([operation]));
+                assert_eq!(
+                    signer.sign_now(&request),
+                    Err(SignError::InvalidRequest),
+                    "{wallet}"
+                );
+            }
+        }
+        let policy = || -> CredentialSetupPolicy {
+            serde_json::from_value(serde_json::json!({
+                "primary": {"extra": {"key": "l1Wallet", "field": "requiredForPrivate", "encoding": "hex"}}
+            }))
+            .unwrap()
+        };
+        // A complete private identity requires the wallet; empty is absent.
+        for setup in [
+            serde_json::json!({"primary": {"key": "account", "secret": "l2"}}),
+            serde_json::json!({"primary": {"key": "account", "secret": "l2",
+                "extra": {"l1Wallet": {"value": "", "encoding": "hex"}}}}),
+        ] {
+            assert!(matches!(
+                LocalSigner::from_json_with_policy(setup.to_string(), policy()),
+                Err(SignError::InvalidRequest)
+            ));
+        }
+        // Pre-import, the wallet alone is the whole account: no L2 fields.
+        let wallet_only = serde_json::json!({"primary": {
+            "extra": {"l1Wallet": {"value": SCALAR, "encoding": "hex"}}
+        }});
+        let (signer, ids) =
+            LocalSigner::from_json_with_policy(wallet_only.to_string(), policy()).unwrap();
+        let ids = ids.primary.unwrap();
+        assert!(ids.credential.0.is_empty() && ids.signing.0.is_empty());
+        let role = ids.extra[&ExtraKey::L1Wallet].clone();
+        let request = public_request(serde_json::json!([{"kind": "publicAddress", "key": role}]));
+        assert_eq!(signer.sign_now(&request).unwrap().values[0].len(), 20);
+    }
+
+    #[cfg(not(feature = "secp256k1"))]
+    #[test]
+    fn l1_wallet_address_without_its_arm_is_unsupported() {
+        let (signer, role) = l1_wallet_setup(SCALAR);
+        let request = public_request(serde_json::json!([{"kind": "publicAddress", "key": role}]));
+        assert_eq!(signer.sign_now(&request), Err(SignError::Unsupported));
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn insert_keeps_a_role_and_remove_ends_it() {
+        let (mut signer, role) = l1_wallet_setup(SCALAR);
+        let role: KeyRef = serde_json::from_value(role).unwrap();
+        let address = |signer: &LocalSigner| {
+            signer.sign_now(&public_request(
+                serde_json::json!([{"kind": "publicAddress", "key": role}]),
+            ))
+        };
+        let present = |signer: &LocalSigner| {
+            signer.sign_now(&public_request(
+                serde_json::json!([{"kind": "present", "key": role}]),
+            ))
+        };
+        // Replacing role material keeps the role: still never presented.
+        let other = "22".repeat(32);
+        signer.insert(role.clone(), (0..32).map(|_| 0x22).collect());
+        let expected = crate::ethereum::private_key_address(&other)
+            .unwrap()
+            .to_ascii_lowercase();
+        assert_eq!(
+            format!("0x{}", crate::hex(&address(&signer).unwrap().values[0])),
+            expected
+        );
+        assert_eq!(present(&signer), Err(SignError::InvalidRequest));
+        // Removal ends the role; reinsertion is ordinary, undeclared material.
+        signer.remove(&role);
+        assert_eq!(address(&signer), Err(SignError::InvalidRequest));
+        signer.insert(role.clone(), (0..32).map(|_| 0x22).collect());
+        assert_eq!(address(&signer), Err(SignError::InvalidRequest));
+        assert!(present(&signer).is_ok());
     }
 }

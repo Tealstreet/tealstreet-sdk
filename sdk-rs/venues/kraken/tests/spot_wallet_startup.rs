@@ -23,7 +23,7 @@ impl Wallet {
         engine.start(NOW);
         let metadata = requests(&mut engine).pop().unwrap();
         reply(&mut engine, &metadata, meta);
-        let actions: Vec<_> = engine.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
         let public = actions
             .iter()
             .find_map(|a| match a {
@@ -76,12 +76,16 @@ impl Wallet {
     fn recover_metadata(&mut self, body: &str) -> Vec<Action> {
         let (timer, at_ms) = self.metadata_retry.take().expect("metadata retry");
         self.engine.handle(at_ms, Event::TimerFired { timer });
-        let metadata = requests(&mut self.engine)
+        let metadata = safe_cex_engine::test_support::prepared_actions(&mut self.engine, at_ms)
             .into_iter()
+            .filter_map(|action| match action {
+                Action::Http(request) => Some(request),
+                _ => None,
+            })
             .find(|request| request.url.ends_with("AssetPairs"))
             .unwrap();
         reply_at(&mut self.engine, at_ms, &metadata, body);
-        self.engine.drain_actions().collect()
+        safe_cex_engine::test_support::prepared_actions(&mut self.engine, at_ms)
     }
     fn collect(&mut self) {
         for action in self.engine.drain_actions() {

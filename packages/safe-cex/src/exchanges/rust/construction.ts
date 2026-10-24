@@ -5,8 +5,8 @@ import rules from './construction-rules.json';
 import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex/asterdex.types';
 
 export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'requiredWithPrimaryFallback';
-export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
-export type ExtraKeyPolicy = { key: 'zklinkSeed'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
+export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text' | 'base58';
+export type ExtraKeyPolicy = { key: 'zklinkSeed' | 'l1Wallet'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
 /** Asymmetric only: a declared signing ref may answer public operations (P4). */
 export type SigningAlgorithm = 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest';
 export type IdentitySetupPolicy = {
@@ -22,7 +22,11 @@ export type RemoteSigningPolicy = Readonly<{
   protectedHeaders?: readonly string[];
   signatureEncoding?: 'hex' | 'base64';
   passphraseHeader?: string;
-  wire?: Readonly<{ exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot' | 'okxTimestamp'; requestId?: string }>;
+  wire?: Readonly<{
+    exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot' | 'secondsTimestamp'; requestId?: string;
+    /** Signed literal after a seconds login stamp; required by `secondsTimestamp`. */
+    secondsSuffix?: Readonly<{ method: string; path: string }>;
+  }>;
 }>;
 
 type Rule = {

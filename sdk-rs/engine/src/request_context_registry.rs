@@ -16,6 +16,9 @@ use std::collections::VecDeque;
 
 const CAPACITY: usize = 256;
 
+#[path = "local_setting.rs"]
+mod local_setting;
+
 #[path = "session_context.rs"]
 pub(super) mod session;
 
@@ -70,6 +73,7 @@ struct CommandOwner {
 }
 
 enum CommandPhase {
+    LocalSetting,
     Context {
         root: Context,
         entry_owned: bool,
@@ -133,6 +137,7 @@ impl CommandOwner {
     fn context_root(&self) -> Option<&Context> {
         match &self.phase {
             CommandPhase::Context { root, .. } => Some(root),
+            CommandPhase::LocalSetting => None,
             #[cfg(feature = "http-plans")]
             _ => None,
         }
@@ -141,6 +146,7 @@ impl CommandOwner {
     fn retained(&self) -> bool {
         match &self.phase {
             CommandPhase::Context { entry_owned, .. } => *entry_owned,
+            CommandPhase::LocalSetting => true,
             #[cfg(feature = "http-plans")]
             CommandPhase::Preflight(_) | CommandPhase::Planned(_) | CommandPhase::Retiring(_) => {
                 true
@@ -221,7 +227,7 @@ pub(super) struct ContextRegistry {
     /// Order-read epoch at each live owner's first released Read: one logical
     /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
     #[cfg(feature = "order-locks")]
-    read_marks: HashMap<Owner, u64>,
+    read_marks: Vec<(Owner, u64)>,
 }
 
 impl ContextRegistry {
@@ -229,7 +235,11 @@ impl ContextRegistry {
     /// its earliest released Read. A mark only ever keeps a fence longer.
     #[cfg(feature = "order-locks")]
     pub(super) fn read_mark(&mut self, owner: Owner, epoch: u64) -> u64 {
-        *self.read_marks.entry(owner).or_insert(epoch)
+        if let Some((_, mark)) = self.read_marks.iter().find(|(held, _)| *held == owner) {
+            return *mark;
+        }
+        self.read_marks.push((owner, epoch));
+        epoch
     }
     #[cfg(all(test, feature = "order-locks"))]
     pub(super) fn read_mark_count(&self) -> usize {
@@ -242,17 +252,16 @@ impl ContextRegistry {
         if self.read_marks.is_empty() {
             return;
         }
-        let mut live: std::collections::HashSet<Owner> =
-            self.contexts.values().map(Context::owner).collect();
-        live.extend(self.commands.iter().map(|(id, owner)| Owner::Command {
-            id: *id,
-            generation: owner.generation,
-        }));
-        self.read_marks.retain(|owner, _| live.contains(owner));
+        let (contexts, commands) = (&self.contexts, &self.commands);
+        self.read_marks.retain(|(owner, _)| {
+            matches!(owner, Owner::Command { id, generation }
+                if commands.get(id).is_some_and(|live| live.generation == *generation))
+                || contexts.values().any(|context| context.owner() == *owner)
+        });
     }
     fn forget_read_mark(&mut self, _owner: Owner) {
         #[cfg(feature = "order-locks")]
-        self.read_marks.remove(&_owner);
+        self.read_marks.retain(|(held, _)| *held != _owner);
     }
     pub(super) fn prune(&mut self, now: f64) {
         self.contexts.retain(|_, old| old.deadline() > now);
@@ -321,10 +330,10 @@ impl ContextRegistry {
             CommandPhase::Context {
                 root, entry_owned, ..
             } => (root, entry_owned),
-            #[cfg(feature = "http-plans")]
             _ => panic!("command entry must retain a Context root"),
         };
-        assert_eq!(root, context);
+        // Plain comparisons: release WASM carries no Debug for Context or Owner.
+        assert!(root == context, "command entry retains its own root");
         assert!(!*entry_owned, "command entry already retained");
         *entry_owned = true;
     }
@@ -377,7 +386,7 @@ impl ContextRegistry {
         until: Option<f64>,
     ) -> Result<Context, Error> {
         if let Some(parent) = parent {
-            self.validate(parent, now)?;
+            self.validate_send(parent, now)?;
             if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
                 return Err(Error::Invalid);
             }
@@ -386,6 +395,11 @@ impl ContextRegistry {
             (Some(own), Some(inherited)) if own != inherited => return Err(Error::Invalid),
             (own, inherited) => own.or(inherited),
         };
+        if let Some(Egress::Session(session)) = egress
+            && !self.sessions.live(session.generation())
+        {
+            return Err(Error::Revoked);
+        }
         if scope == Scope::Background && policy.operation == Operation::Mutation {
             return Err(Error::Invalid);
         }
@@ -450,8 +464,12 @@ impl ContextRegistry {
         parent: Option<&Context>,
     ) -> Result<Context, Error> {
         if let Some(parent) = parent {
-            self.validate(parent, now)?;
+            self.validate_send(parent, now)?;
             if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
+                return Err(Error::Invalid);
+            }
+            // A leg never moves to another session, nor takes its egress.
+            if parent.owner() != (Owner::Session { generation }) {
                 return Err(Error::Invalid);
             }
         }
@@ -461,8 +479,7 @@ impl ContextRegistry {
         self.sessions.admit(generation, &policy)?;
         self.contexts.retain(|_, old| old.deadline() > now);
         self.sessions.prune(&self.contexts);
-        // Session legs inherit their parent's egress like every other leg.
-        let egress = parent.and_then(Context::egress);
+        let egress = self.sessions.egress(generation);
         self.commit(
             Owner::Session { generation },
             identity,
@@ -577,7 +594,7 @@ impl ContextRegistry {
         policies: &[Policy],
         now: f64,
     ) -> Result<Vec<Context>, Error> {
-        self.validate(parent, now)?;
+        self.validate_send(parent, now)?;
         if parent.operation() != Operation::Mutation || delivery.context != *parent {
             return Err(Error::Revoked);
         }
@@ -688,6 +705,24 @@ impl ContextRegistry {
         }
         self.validate_handle(context)?;
         if self.superseded(context) {
+            return Err(Error::Revoked);
+        }
+        Ok(())
+    }
+
+    /// `validate` plus the session-egress retirement fence, for issuance and
+    /// physical send only. Delivery, streaming and write facts of an attempt
+    /// sent earlier use plain `validate`, so its outcome stays recordable.
+    pub(super) fn validate_send(&self, context: &Context, now: f64) -> Result<(), Error> {
+        self.validate(context, now)?;
+        self.egress_live(context)
+    }
+
+    /// The session-egress retirement fence alone.
+    pub(super) fn egress_live(&self, context: &Context) -> Result<(), Error> {
+        if let Some(Egress::Session(session)) = context.egress()
+            && !self.sessions.live(session.generation())
+        {
             return Err(Error::Revoked);
         }
         Ok(())
@@ -1391,7 +1426,7 @@ impl ContextRegistry {
                 }
                 #[cfg(feature = "http-plans")]
                 CommandPhase::Retiring(_) => return false,
-                CommandPhase::Context { .. } => {}
+                CommandPhase::Context { .. } | CommandPhase::LocalSetting => {}
             }
         }
         self.forget_observer(command);
@@ -1473,6 +1508,10 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         egress: Egress,
     ) -> Result<Context, Error> {
+        // Session egress is minted only from a live session.
+        if matches!(egress, Egress::Session(_)) {
+            return Err(Error::Invalid);
+        }
         self.make_http_context(scope, policy, None, Some(egress))
     }
 
@@ -1480,7 +1519,7 @@ impl<P> Cx<'_, P> {
     /// raw deadline; integer timeout recomputation cannot round the bound up.
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
         self.io.request_contexts.validate_legacy(parent)?;
-        self.io.request_contexts.validate(parent, self.now)?;
+        self.io.request_contexts.validate_send(parent, self.now)?;
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
@@ -1546,7 +1585,7 @@ impl<P> Cx<'_, P> {
         if evidence == RetryEvidence::DefinitiveRefusal {
             return Err(Error::RetryForbidden);
         }
-        self.io.request_contexts.validate(context, self.now)?;
+        self.io.request_contexts.validate_send(context, self.now)?;
         context.retry(evidence, self.now)
     }
 
@@ -1678,7 +1717,7 @@ impl<P> Cx<'_, P> {
         };
         self.io.request_contexts.validate_completion(
             id,
-            self.io.http_delivery.as_ref(),
+            super::completion_delivery(&self.io.http_delivery),
             Some(context),
         )
     }
@@ -1913,7 +1952,7 @@ impl<P> Cx<'_, P> {
             self.fence_absent_orders(context);
         }
         // Session writes get one attempt per operation: no resend grant.
-        if !resendable || !matches!(context.owner(), Owner::Command { .. }) {
+        if !resendable || matches!(context.owner(), Owner::Session { .. }) {
             return Ok(None);
         }
         match self.io.request_contexts.grant_resend(&delivery) {
@@ -2092,7 +2131,7 @@ impl<P> Cx<'_, P> {
         context: &Context,
         grant: ResendGrant,
     ) -> Result<Context, Error> {
-        self.io.request_contexts.validate(context, self.now)?;
+        self.io.request_contexts.validate_send(context, self.now)?;
         if self.io.request_contexts.latest_write(context)? != Some(grant.attempt) {
             return Err(Error::Revoked);
         }
@@ -2567,6 +2606,56 @@ mod tests {
             assert!(cx.io.timers.is_empty());
             assert!(cx.io.request_contexts.commands.contains_key(&7));
         }
+    }
+
+    /// A re-mark keeps the owner's earliest epoch; other owners are separate.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_read_mark_keeps_its_owners_earliest_epoch() {
+        let mut registry = ContextRegistry::default();
+        let first = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+        let other = registry.issue(2, Scope::Background, policy(), 0.).unwrap();
+        assert_eq!(registry.read_mark(first.owner(), 5), 5);
+        assert_eq!(registry.read_mark(first.owner(), 9), 5);
+        assert_eq!(registry.read_mark(other.owner(), 9), 9);
+        assert_eq!(registry.read_mark_count(), 2);
+    }
+
+    /// A sweep keeps live owners in any phase and drops dead or regenerated
+    /// ones; forgetting one owner leaves the others.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn read_marks_live_exactly_as_long_as_their_owners() {
+        let mut registry = ContextRegistry::default();
+        let command = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+        let background = registry.issue(2, Scope::Background, policy(), 0.).unwrap();
+        let Owner::Command { id, generation } = command.owner() else {
+            panic!("a command scope has a command owner");
+        };
+        registry.read_mark(command.owner(), 1);
+        registry.read_mark(background.owner(), 1);
+        registry.read_mark(
+            Owner::Command {
+                id,
+                generation: generation + 1,
+            },
+            1,
+        );
+        registry.read_mark(
+            Owner::Background {
+                generation: u64::MAX,
+            },
+            1,
+        );
+        registry.forget_dead_read_marks();
+        assert_eq!(registry.read_mark_count(), 2, "dead and regenerated swept");
+        registry.forget_read_mark(background.owner());
+        assert_eq!(registry.read_mark_count(), 1);
+        assert_eq!(
+            registry.read_mark(command.owner(), 9),
+            1,
+            "the live mark stays"
+        );
     }
 
     fn policy() -> Policy {
