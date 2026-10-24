@@ -89,3 +89,23 @@ managed-sockets/http-plans combination; keep Plan/fatal/expiry cleanup rails.
 Run scoped tests/strict Clippy/fmt, both bans and targeted negative controls.
 Full feature/size/CPU gates run in fresh CI; one watcher at120s or more.
 Independent uuf source/custody/runtime review and PR/train GO remain required.
+
+## Original core checkpoint
+
+New integration target multi_constraint_pacing uses only the existing public
+API and actual managed route -> provider -> Bind -> Claim path. Original result:
+2 named assertion RED / 1 working GREEN / 0 ignored. After a successful Claim0,
+route preparation10 wrongly starts signing before eligibility100; a provider
+parked until300 and delayed second route310 wrongly starts signing before400.
+Eligible route/provider/Bind/Claim with one release remains GREEN. Initial fixture
+compile needed Venue's required callback methods and Debug on Pending; corrected
+before the recorded assertion-only receipt. No production source changed in this
+checkpoint. Shared-Mac build jobs2. Command:
+`cargo test -p safe-cex-engine --features test-support --test multi_constraint_pacing`.
+
+G2b owner hcmq3f confirms #1956 local ee6e790fef0, source28e1bb36f3e, remote
+older/notREADY: validate_mutation_group currently checks scalar zero before IDs
+via request_context_group_plan::normalize. Their narrow helper must call our
+canonical expanded-floor zero resolver with the same Result signature; normalize
+stays unchanged. They own that future composition and alias no-ID controls;
+this PR owns resolver/storage/check/released and prepared-signing wait custody.
