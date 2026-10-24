@@ -1,6 +1,6 @@
 # BingX history paging on the original caller Read root
 
-Status: plan first; original compiling assertions next, no production conversion.
+Status: plan and original compiling assertions; no production conversion.
 Source pin: actual `b3688e4c04d`. Owner: codex-cxxyqr, transferred from
 codex-uufub4 by the overseer. Native reviewer: claude-4yjlw0; bridge/API reviewer:
 codex-uufub4. This is a Context-root consumer, independent of #2011 Read Plans.
@@ -33,12 +33,15 @@ X-SOURCE-KEY/content-type headers and the existing dispatch::Http recipe.
 
 | Family | Native path and geometry |
 | --- | --- |
-| Fills | `/openApi/swap/v2/trade/fillHistory`; required symbol; default seven-day range; `startTs`, `endTs`, `pageSize`, pageIndex starts at 1; limit default 100, clamp 1..1000. Inclusive windows at most seven days, next begins at previous end+1 ms. A full mapped page increments pageIndex, max 1000 per window; no new identity or an out-of-window row rejects. Short pages advance the window or finish. |
+| Fills | `/openApi/swap/v2/trade/fillHistory`; missing symbol returns local `[]`; optional orderId query filter; default seven-day range; `startTs`, `endTs`, `pageSize`, pageIndex starts at 1; limit default 100, clamp 1..1000. Inclusive windows at most seven days, next begins at previous end+1 ms. A full mapped page increments pageIndex, max 1000 per window; no new identity or an out-of-window row rejects. Short pages advance the window or finish. |
 | Orders | `/openApi/swap/v2/trade/allOrders`; optional symbol; `startTime`, `endTime`, `limit`, default 500, clamp 1..1000. Paired unequal bounds use the existing RangeWalk with seven-day chunks and a 50-page-per-chunk cap. No bounds use one response; equal bounds reject a saturated page. |
 | Income | `/openApi/swap/v2/user/income`; optional symbol/incomeType; default 100, clamp 1..1000. Same RangeWalk and equal-bound saturation rules as orders. Income identity remains tranId/type/value/time. |
 | Public trades | `/openApi/swap/v2/quote/trades`; one unsigned response, default 500, clamp 1..1000, native symbol and original response order. |
 
-Retain RangeWalk's exact split/progress rules, its native ChunkDone loop, and
+One-sided private bounds are filled natively: missing end becomes now, missing
+start becomes end minus seven days. Unequal resulting order/income bounds use
+RangeWalk. Truncation walks remaining chunks and rejects only at Finished;
+it must not stop early. Retain its split/progress rules and ChunkDone loop, and
 the 200 ms timer after every fill/range page. Do not invent a new total page cap,
 whole-query geometry bound, pause or transport retry. Preserve native row
 conversion, fill seconds versus order/income milliseconds, fill IDs/dedup,
@@ -58,6 +61,10 @@ discard only its unaccepted staging, retire its leg, then derive a new Never
 child from the SAME selected root and same page parameters. Do not remint the
 root, reselect credentials or add transport retry. Both physical attempts keep
 the native 20 s default, capped by the original root. A second rejection fails.
+Native resend retains Request rows/error (only candles clear them today).
+Normal signature rejection has no rows; the conversion's explicit discard
+prevents rejected-attempt staging crossing into a new admitted attempt. State
+this custody change in CALLERS, without claiming native already discarded it.
 
 ## Custody and direct cutover
 
@@ -145,3 +152,27 @@ integration test. Production waits native/bridge review and explicit conversion.
 Later gates: scoped history/local-query suites, strict all-target Clippy/fmt,
 current-tip bans/ratchets, preservation/source review, fresh exact-head CI and
 BingX replay CPU/WASM size. No merge or readiness is claimed by this plan.
+
+## Original checkpoint and review receipt
+
+Plan `67782b4cbcb` precedes the integration target. Native review by
+claude-4yjlw0 and bridge/API direction review by codex-uufub4 are CLEAR; native
+Low notes on local missing-symbol results, orderId, one-sided bounds, late
+truncation and retained rejected-attempt staging are incorporated above.
+
+Executed on unchanged production with:
+`cargo test -p safe-cex-venue-bingx --test history_context`.
+Result: 7 assertion REDs, 3 GREEN, 0 ignored, no compile or fixture failures.
+The four release cases pass their URL/query/key/header positives, then observe
+`(legacy, Prepare, Claim) == (1,0,0)` instead of `(0,1,1)`.
+Parked expiry emits no terminal; signed and public exact-deadline DATA each
+return successful `[]` instead of strict Timeout. These are separate tests.
+The three independent GREEN controls preserve native strict later-page failure,
+one-time same-page/read-key re-sign followed by strict second rejection, and
+an in-bound public result under a raised caller wait. The latter is not proof
+of a walk continuing beyond 120 seconds. All remaining production/readiness
+controls above remain gates, not executed adoption evidence.
+The unchanged native history target passes 20/20 and local-history custody
+passes 5/5. The new target passes strict all-feature Clippy and workspace fmt.
+Only this plan/index and the new integration target differ from the source pin;
+all production, shared engine, checker and inventory blobs remain byte-identical.
