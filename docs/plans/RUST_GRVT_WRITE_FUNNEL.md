@@ -131,9 +131,9 @@ this five-site plan does not claim its account inventory removal.
 | Gap / dependency | Owner proposal | Exact status / required proof |
 | --- | --- | --- |
 | Serial Plan and condition wait actual composition | claude-fe7lgm | Source pins above CLEAR but unlanded. Actual #2012/#2037 plus refrozen pins required; one owner, one reserved Context, no positive pacing floor. |
-| Same-call serial Session resend and immediate failed-Read continuation | claude-fe7lgm | RUST_SERIAL_SESSION_RESEND.md at 606488cba17 (initial 239c705f2b6) is a PLAN, OPEN before source. Same call attempt 2 after parsed code 1000, Mutation ResendGrant or validated Read DATA, Session park with no third send; immediate Read failure continuation carries no fabricated DATA or 1 ms delay. |
-| Revision-gated new call and same-call auth resend | claude-fe7lgm with claude-m26ps4 for the revision signal | OPEN amendment to 606488cba17: native first calls and resends both wait during refresh even if the engine Session is still Ready. Capture the previous revision and resume only on Ready with a newer bundle revision, not merely Session-ready. |
-| Refresh after Prepare/Bind, before Claim | claude-m26ps4 (#2069 engine-wide Bind path), fe7lgm offers serial fallback | OPEN shared unreleased-call park/reissue. Revision None makes Claim Stale; reprepare then NotReady must retain the same call until fresh headers, with no ResendGrant, auth_resent spend, second login, budget reset or extra logical write. Require Mutation and Read ingress REDs. |
+| Same-call serial Session resend and immediate failed-Read continuation | claude-fe7lgm | RUST_SERIAL_SESSION_RESEND.md at 30703266220 (earlier 606488cba17 / 239c705f2b6) is a PLAN, OPEN before source. Same call attempt 2 after parsed code 1000, Mutation ResendGrant or validated Read DATA, Session park with no third send; immediate Read failure continuation carries no fabricated DATA or 1 ms delay. |
+| Revision-gated new call and same-call auth resend | claude-fe7lgm with claude-m26ps4 for the revision signal | OPEN source under amended plan 30703266220: native first calls and resends both wait during refresh even if the engine Session is still Ready. Capture the previous revision and resume only on Ready with a newer bundle revision, not merely Session-ready. |
+| Refresh after Prepare/Bind, before Claim | claude-m26ps4 (#2069 engine-wide Bind path), fe7lgm offers serial fallback | OPEN #2069 shared unreleased-call park/reissue within its existing window. Revision None makes Claim Stale; reprepare then NotReady must retain the same call until fresh headers, with no ResendGrant, auth_resent spend, second login, budget reset or extra logical write. Require Mutation and Read ingress REDs. |
 | Cached Session header bundle | claude-m26ps4 | #2069 generalized source dd7fd51d03a is consumer-reviewed CLEAR locally, unlanded. Needs actual #2037/G2b and final pin. Bundle generation/revision, aggregate packet budgets, collision refusal and cleanup must compose with serial waits. |
 | GRVT EIP712 provider-payload HTTP recipe | codex-zs5e83, reviewed by m26ps4 and core/custody owner | OPEN consumer recipe/constructor work. Existing provider Secp256k1Digest/PublicAddress primitives suffice; no new crypto algorithm or legacy SignPayload bypass. Exact recipe API and construction witness reviewed before source. |
 | Login completion / credential and header lifetime | codex-zs5e83 with claude-55ao7t login ownership and m26ps4 core review | OPEN consumer composition: native login_session is a login-operation engine Session, distinct from cached cookie/account state. Connect honest Session-ready/failed transitions and provider installation; never mint a substitute Session or treat a native counter as engine provenance. |
@@ -147,7 +147,7 @@ Session failure/retire delivers on_plan_session_wait_ended in failure custody:
 fail with native error/outcome, with no re-park and never a second resend. A
 hook that declines to finish seals once. The venue retains auth_resent across the
 six immediate network Read attempts; there is no extra login after the flag is
-spent. The 606488cba17 proposal and its OPEN amendments own these gaps; today's
+spent. The 30703266220 amended proposal owns these gaps; today's
 serial implementation does not.
 
 ## Session header audit and hosted material
@@ -167,11 +167,12 @@ has a newer revision; the still-Ready engine Session alone is insufficient.
 A stale packet must reprepare; it cannot release its old bundle. If refresh
 starts after Prepare/Bind, the shared same-call unreleased park must retain the
 Pending instead of converting NotReady into a native terminal or spending an
-auth resend. NotReady/retired/header-invalid need distinct typed preparation
-causes, not error text. AuthInvalid/AuthExpired are not accepted merely for local
-cache state: credentialed terminals count those as auth-health evidence. Core
-must preserve the existing health-unchanged contract or obtain a separate ruling.
-Failed login replacement is a
+auth resend. Under m26ps4's #2069 park plan, NotReady never reaches venue
+failure code: the engine waits within the current window until a newer Ready
+revision and re-prepares the same call. Expiry is Timeout/NotSent with health
+unchanged. Retired/header-invalid remain terminal NotSent with existing non-auth
+InvalidInput kinds. No new cause accessor, VenueError field, error-text inference
+or auth-health evidence is needed. Failed login replacement is a
 new engine generation. Any cookie OR account-ID change moves one shared revision;
 session_bearer and session_bearer_revision read that exact same counter. Increment
 is checked and overflow fails closed; the native unchecked generation counter
@@ -254,3 +255,44 @@ scope instruction, exact shared API/source review and actual dependency landings
 Local Cargo is scoped to GRVT/new target with CARGO_BUILD_JOBS=4 and no concurrent
 own build. No local workspace/all-feature/performance sweep, WIP push or new CI
 run is part of this plan-and-originals-only assignment.
+
+## Original checkpoint
+
+Plan-first 89c9448b92b and corrected plan/index 10fa03e4bf3 precede the new
+request_context_write_funnel target. The target includes the existing trading.rs
+unchanged, retaining all 42 native financial assertions. A thin delegator boots
+native GRVT in the same Engine and admits 256 genuine Command Read peers for the
+two capacity probes; no engine Session or selected identity is transplanted.
+
+Scoped execution: 66 controls, 13 intended assertion REDs / 53 GREENs / 0 ignored.
+The 24 new controls split into 13 REDs / 11 GREENs; all 42 existing trading
+controls pass. No compile/setup failure is included in those numbers. The first
+compile found a struct-pattern typo and a missing command limit field; both were
+fixed before execution. A native no-seventh-Read fixture initially rejected the
+normal account refresh after terminal; it now uses Inspect's /order endpoint and
+pins no seventh Inspect while allowing native post-terminal account refresh.
+
+First failures are ten genuine Prepare-before-transport assertions (five entry
+families, bracket continuation, FIFO wake, new 20 s policy, held Prepare and
+unsigned Bind/Claim), two capacity assertions (raw send for valid planning;
+native InvalidInput rather than shared Internal for invalid planning), and an
+unclaimed raw DATA completion assertion. The 20 s/expiry/Bind/Claim suffixes,
+capacity recovery and 255-peer validation are gated, not executed evidence.
+
+The 11 new GREENs pin the 401/408/503 x 1000/non-1000 matrix (with identical body,
+rotated headers, second-1000 terminal and no third send), Content-Type-first,
+six immediate Read network attempts and no seventh Inspect, auth spend retained
+across a Read network retry, unanswered Mutation Unknown with no resend, and
+native partial-progress stripping to None. The future shared journal terminal
+is deliberately not claimed to equal that last native assertion.
+
+Exact provider construction/recipe-header, account-ID-only revision, immutable
+payload on Stale reprepare and Mutation/Read refresh-between-Prepare-and-Claim
+controls are still source gates: the reviewed shared API and typed provider
+constructor do not exist in this native base. #2069 owns the actual unreleased
+wait REDs, not a message-based GRVT workaround. This original checkpoint neither
+implements nor certifies those gates. No production instruction or push is
+inferred from plan/original review.
+
+Scoped strict Clippy for the new target passes with -D warnings; rustfmt and
+diff-check pass. No workspace/all-feature build, WIP push or CI dispatch was run.
