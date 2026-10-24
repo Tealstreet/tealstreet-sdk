@@ -41,8 +41,8 @@ impl Venue for Probe {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
         if let Command::CancelSymbolOrders { command, .. } = command {
-            assert!(cx.io.http_delivery.is_none());
-            assert!(cx.io.order_response_token.is_none());
+            assert!(cx.io.core.http_delivery.is_none());
+            assert!(cx.io.core.order_response_token.is_none());
             self.deferred += 1;
             cx.done(command, "deferred cancel".into());
             return;
@@ -93,9 +93,9 @@ impl Venue for Probe {
     }
     fn on_http_plan_ready(&mut self, cx: &mut Cx<'_, ()>, plan: &Plan) {
         self.ready += 1;
-        assert!(cx.io.command_entry.is_none());
-        assert!(cx.io.http_delivery.is_none());
-        self.ready_token = cx.io.order_response_token;
+        assert!(cx.io.core.command_entry.is_none());
+        assert!(cx.io.core.http_delivery.is_none());
+        self.ready_token = cx.io.core.order_response_token;
         if self.order_read {
             cx.orders_reconciled(Some("BTCUSD"));
         }
@@ -122,7 +122,7 @@ impl Venue for Probe {
         assert_eq!(response.status, 200);
         assert_eq!(response.body, "[]");
         self.responses += 1;
-        self.read_token = cx.io.order_response_token;
+        self.read_token = cx.io.core.order_response_token;
         assert!(self.read_token.is_some());
         if self.reconcile_in_read {
             cx.orders_reconciled(Some("BTCUSD"));
@@ -171,12 +171,13 @@ fn read_run(reconcile: bool) -> Engine<Probe> {
     });
     // Seed an already-existing uncertain placement fence using the existing
     // lock state machine; the tested order read is real Engine request/response.
-    e.io.order_locks
+    e.io.core
+        .order_locks
         .acquire(&place(101), &e.store, true)
         .unwrap();
-    e.io.order_locks.note_write();
-    e.io.order_locks.finish(101, true);
-    assert!(e.io.order_locks.uncertain("BTCUSD"));
+    e.io.core.order_locks.note_write();
+    e.io.core.order_locks.finish(101, true);
+    assert!(e.io.core.order_locks.uncertain("BTCUSD"));
     e.start(0.);
     e.handle(0., Event::Command(read()));
     let request = e.venue.request.unwrap();
@@ -198,7 +199,7 @@ fn read_run(reconcile: bool) -> Engine<Probe> {
     assert_eq!(e.venue.responses, 1);
     assert_eq!(e.venue.ready, 1);
     assert_eq!(
-        e.io.order_response_token, e.venue.read_token,
+        e.io.core.order_response_token, e.venue.read_token,
         "outer token must be restored exactly"
     );
     e
@@ -207,7 +208,7 @@ fn read_run(reconcile: bool) -> Engine<Probe> {
 fn plan_readiness_cannot_borrow_a_real_order_response_token() {
     let e = read_run(false);
     assert!(
-        e.io.order_locks.uncertain("BTCUSD"),
+        e.io.core.order_locks.uncertain("BTCUSD"),
         "readiness borrowed unrelated order-read authority"
     );
     assert_eq!(e.venue.ready_token, None);
@@ -215,7 +216,7 @@ fn plan_readiness_cannot_borrow_a_real_order_response_token() {
 #[test]
 fn legitimate_order_read_keeps_its_reconciliation_authority() {
     let e = read_run(true);
-    assert!(!e.io.order_locks.uncertain("BTCUSD"));
+    assert!(!e.io.core.order_locks.uncertain("BTCUSD"));
 }
 fn deferred(refuse_ready: bool) {
     let mut e = crate::test_support::seeded_engine(Probe {

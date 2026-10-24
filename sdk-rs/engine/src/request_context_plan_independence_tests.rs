@@ -116,9 +116,9 @@ mod independent_plan_calls {
                     calls: &call,
                 },
             ];
-            let ids = cx.io.next_id;
-            let storage = cx.io.request_contexts.plan_context_storage();
-            let action_count = cx.io.actions.len();
+            let ids = cx.io.core.next_id;
+            let storage = cx.io.core.request_contexts.plan_context_storage();
+            let action_count = cx.io.core.actions.len();
             let policy = PlanPolicy {
                 independent_calls: self.independent,
                 operation: if self.read {
@@ -149,9 +149,9 @@ mod independent_plan_calls {
             };
             if self.read && self.independent {
                 assert_eq!(admitted.unwrap_err(), Error::Invalid);
-                assert_eq!(cx.io.next_id, ids);
-                assert_eq!(cx.io.request_contexts.plan_context_storage(), storage);
-                assert_eq!(cx.io.actions.len(), action_count);
+                assert_eq!(cx.io.core.next_id, ids);
+                assert_eq!(cx.io.core.request_contexts.plan_context_storage(), storage);
+                assert_eq!(cx.io.core.actions.len(), action_count);
                 cx.fail_preflight(&preflight, "read refused atomically")
                     .unwrap();
                 return;
@@ -268,12 +268,12 @@ mod independent_plan_calls {
             }
         }
         fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Context>, _: Option<&[String]>) {
-            assert!(cx.io.http_delivery.is_none());
-            assert!(cx.io.command_entry.is_none());
+            assert!(cx.io.core.http_delivery.is_none());
+            assert!(cx.io.core.command_entry.is_none());
             #[cfg(feature = "order-locks")]
-            assert!(cx.io.order_response_token.is_none());
-            assert!(cx.io.http_write_reply.is_none());
-            assert!(cx.io.http_plan_ready.is_none());
+            assert!(cx.io.core.order_response_token.is_none());
+            assert!(cx.io.core.http_write_reply.is_none());
+            assert!(cx.io.core.http_plan_ready.is_none());
             self.reconciles += 1;
         }
         fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, _: &str) {
@@ -441,7 +441,7 @@ mod independent_plan_calls {
                     .iter()
                     .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
             );
-            assert!(e.io.managed_http.is_empty());
+            assert!(e.io.core.managed_http.is_empty());
             assert!(e.io.pending.is_empty());
             for (request, now) in [(first, 4.), (second, 5.)] {
                 let late = response(&mut e, request, 503, now);
@@ -501,7 +501,7 @@ mod independent_plan_calls {
         assert_eq!(failures(&actions).len(), 1);
         assert_eq!(failures(&actions)[0].outcome, Some(crate::Outcome::Unknown));
         assert_eq!(e.venue.retired, 1);
-        assert!(e.io.managed_http.is_empty());
+        assert!(e.io.core.managed_http.is_empty());
         assert!(!actions.iter().any(
             |a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(),HttpAction::Prepare{..}))
         ));
@@ -582,7 +582,7 @@ mod independent_plan_calls {
         let (mut e, actions) = setup(true, true);
         release(&mut e, &actions, 0.);
         let plan = e.venue.plan.clone().unwrap();
-        assert!(e.io.http_delivery.is_none());
+        assert!(e.io.core.http_delivery.is_none());
         let mut called = false;
         Cx {
             now: 1.,
@@ -602,7 +602,7 @@ mod independent_plan_calls {
         assert_eq!(failures(&actions).len(), 1);
         assert_eq!(failures(&actions)[0].outcome, Some(crate::Outcome::Unknown));
         assert_eq!(e.venue.retired, 1);
-        assert!(e.io.managed_http.is_empty());
+        assert!(e.io.core.managed_http.is_empty());
     }
     #[test]
     fn evidence_overflow_still_runs_cleanup_but_cannot_continue_siblings() {
@@ -619,7 +619,7 @@ mod independent_plan_calls {
         assert_eq!(failures(&actions)[0].outcome, Some(crate::Outcome::Unknown));
         assert!(failures(&actions)[0].message.contains("truncated IDs"));
         assert_eq!(e.venue.retired, 1);
-        assert!(e.io.managed_http.is_empty());
+        assert!(e.io.core.managed_http.is_empty());
         assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. }))));
     }
     #[test]

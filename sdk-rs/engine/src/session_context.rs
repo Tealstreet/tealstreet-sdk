@@ -448,7 +448,7 @@ impl<P> Cx<'_, P> {
     /// or drain them.
     pub(super) fn session_scope(&self) -> Result<(), Error> {
         #[cfg(feature = "http-plans")]
-        if self.io.http_preflight_ready.is_some() || self.io.http_plan_ready.is_some() {
+        if self.io.core.http_preflight_ready.is_some() || self.io.core.http_plan_ready.is_some() {
             return Err(Error::State);
         }
         Ok(())
@@ -459,8 +459,15 @@ impl<P> Cx<'_, P> {
     pub fn open_session(&mut self, policy: SessionPolicy) -> Result<Session, Error> {
         self.session_scope()?;
         let generation = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        self.io.request_contexts.sessions.open(generation, policy)?;
-        Ok(Session::new(&self.io.request_contexts.issuer, generation))
+        self.io
+            .core
+            .request_contexts
+            .sessions
+            .open(generation, policy)?;
+        Ok(Session::new(
+            &self.io.core.request_contexts.issuer,
+            generation,
+        ))
     }
 
     /// A logical session operation with its own original raw bound. Mutations
@@ -470,9 +477,10 @@ impl<P> Cx<'_, P> {
     /// first discards the attempt, and its outcome stays unknown.
     pub fn session_context(&mut self, session: &Session, policy: Policy) -> Result<Context, Error> {
         self.session_scope()?;
-        let generation = self.io.request_contexts.validate_session(session)?;
+        let generation = self.io.core.request_contexts.validate_session(session)?;
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         self.io
+            .core
             .request_contexts
             .issue_session(identity, generation, policy, self.now, None)
     }
@@ -484,16 +492,23 @@ impl<P> Cx<'_, P> {
         parent: &Context,
         policy: Policy,
     ) -> Result<Context, Error> {
-        self.io.request_contexts.validate_legacy(parent)?;
-        self.io.request_contexts.validate_send(parent, self.now)?;
+        self.io.core.request_contexts.validate_legacy(parent)?;
+        self.io
+            .core
+            .request_contexts
+            .validate_send(parent, self.now)?;
         let Owner::Session { generation } = parent.owner() else {
             return Err(Error::Invalid);
         };
         self.session_scope()?;
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        self.io
-            .request_contexts
-            .issue_session(identity, generation, policy, self.now, Some(parent))
+        self.io.core.request_contexts.issue_session(
+            identity,
+            generation,
+            policy,
+            self.now,
+            Some(parent),
+        )
     }
 
     /// Work owned by a command or the background that carries this session's
@@ -506,9 +521,10 @@ impl<P> Cx<'_, P> {
         policy: Policy,
     ) -> Result<Context, Error> {
         self.session_scope()?;
-        let generation = self.io.request_contexts.validate_session(session)?;
+        let generation = self.io.core.request_contexts.validate_session(session)?;
         let egress = self
             .io
+            .core
             .request_contexts
             .sessions
             .egress(generation)
@@ -526,10 +542,10 @@ impl<P> Cx<'_, P> {
         session: &Session,
     ) -> Result<Vec<(Context, P, VenueError)>, Error> {
         self.session_scope()?;
-        let generation = self.io.request_contexts.validate_session(session)?;
+        let generation = self.io.core.request_contexts.validate_session(session)?;
         let waiters = self.drain_waits(generation, VenueError::new("Session retired"));
         self.io.retire_http_owner(session.owner());
-        let registry = &mut self.io.request_contexts;
+        let registry = &mut self.io.core.request_contexts;
         registry.sessions.retire(generation);
         registry
             .contexts
@@ -547,23 +563,28 @@ impl<P> Cx<'_, P> {
     ) -> Result<(), (P, Error)> {
         let checked = (|| {
             self.session_scope()?;
-            let generation = self.io.request_contexts.validate_session(session)?;
-            self.io.request_contexts.validate(owner, self.now)?;
+            let generation = self.io.core.request_contexts.validate_session(session)?;
+            self.io.core.request_contexts.validate(owner, self.now)?;
             // An owner waiting on its own session could never become ready.
             if matches!(owner.owner(), Owner::Session { .. }) {
                 return Err(Error::Invalid);
             }
             // An execution observer re-dispatches only through its execution.
             if matches!(owner.owner(), Owner::Command { id, .. }
-                if self.io.request_contexts.is_observer(id))
+                if self.io.core.request_contexts.is_observer(id))
             {
                 return Err(Error::Revoked);
             }
-            if self.io.request_contexts.resend_blocked(owner, self.now) {
+            if self
+                .io
+                .core
+                .request_contexts
+                .resend_blocked(owner, self.now)
+            {
                 return Err(Error::State);
             }
             // Planned and preflight commands sequence their own legs.
-            if !self.io.request_contexts.context_phase(owner) {
+            if !self.io.core.request_contexts.context_phase(owner) {
                 return Err(Error::State);
             }
             if self.io.session_waits.entries.iter().any(
@@ -584,12 +605,12 @@ impl<P> Cx<'_, P> {
             return Err((pending, Error::Capacity));
         };
         let timer = TimerId(ids.start);
-        self.io.timers.insert(timer, ());
-        self.io.actions.push(Action::SetTimer {
+        self.io.core.timers.insert(timer, ());
+        self.io.core.actions.push(Action::SetTimer {
             timer,
             at_ms: owner.deadline(),
         });
-        self.io.request_contexts.hold_wait(owner);
+        self.io.core.request_contexts.hold_wait(owner);
         self.io.session_waits.entries.push(Wait {
             session: generation,
             unit: Unit::Owner(owner.clone()),
@@ -607,7 +628,7 @@ impl<P> Cx<'_, P> {
         if self.session_scope().is_err() {
             return vec![];
         }
-        let Ok(generation) = self.io.request_contexts.validate_session(session) else {
+        let Ok(generation) = self.io.core.request_contexts.validate_session(session) else {
             return vec![];
         };
         // A Ready owner is live by its own deadline; a Failed one keeps its
@@ -617,15 +638,17 @@ impl<P> Cx<'_, P> {
         let mut waiters = Vec::new();
         for wait in self.take_waits(generation) {
             match wait.unit {
-                Unit::Owner(owner) => match self.io.request_contexts.validate(&owner, self.now) {
-                    Ok(()) => {
-                        self.io.request_contexts.release_wait(&owner);
-                        waiters.push(Waiter::Ready(owner, wait.pending));
+                Unit::Owner(owner) => {
+                    match self.io.core.request_contexts.validate(&owner, self.now) {
+                        Ok(()) => {
+                            self.io.core.request_contexts.release_wait(&owner);
+                            waiters.push(Waiter::Ready(owner, wait.pending));
+                        }
+                        Err(reason) => {
+                            waiters.push(Waiter::Failed(owner, wait.pending, owner_error(reason)));
+                        }
                     }
-                    Err(reason) => {
-                        waiters.push(Waiter::Failed(owner, wait.pending, owner_error(reason)));
-                    }
-                },
+                }
                 #[cfg(feature = "http-plans")]
                 Unit::Slot { plan, slot, intent } => {
                     match self.resume_plan_slot(&plan, &slot, intent) {
@@ -692,7 +715,7 @@ impl<P> Cx<'_, P> {
         if self.session_scope().is_err() {
             return vec![];
         }
-        match self.io.request_contexts.validate_session(session) {
+        match self.io.core.request_contexts.validate_session(session) {
             Ok(generation) => self.drain_waits(generation, error),
             Err(_) => vec![],
         }
@@ -734,14 +757,18 @@ impl<P> Cx<'_, P> {
             .partition::<Vec<_>, _>(|wait| wait.session == generation);
         self.io.session_waits.entries = kept;
         for timer in taken.iter().filter_map(|wait| wait.timer) {
-            self.io.timers.remove(&timer);
-            self.io.actions.push(Action::ClearTimer { timer });
+            self.io.core.timers.remove(&timer);
+            self.io.core.actions.push(Action::ClearTimer { timer });
         }
         taken
     }
 
     pub fn session_live(&self, session: &Session) -> bool {
-        self.io.request_contexts.validate_session(session).is_ok()
+        self.io
+            .core
+            .request_contexts
+            .validate_session(session)
+            .is_ok()
     }
 }
 
@@ -755,11 +782,11 @@ impl<V: Venue> Engine<V> {
         };
         if now.is_finite() && now < entries[index].unit.deadline() {
             let at_ms = entries[index].unit.deadline();
-            self.io.actions.push(Action::SetTimer { timer, at_ms });
+            self.io.core.actions.push(Action::SetTimer { timer, at_ms });
             return true;
         }
         let wait = entries.remove(index);
-        self.io.timers.remove(&timer);
+        self.io.core.timers.remove(&timer);
         self.begin_event_scope();
         // A parked Preflight read reached its caller's receipt cap: the
         // Preflight's terminal comes first, then the pending returns once.
@@ -797,15 +824,15 @@ impl<V: Venue> Engine<V> {
         loop {
             if !self.io.session_waits.has_slot_work()
                 || !now.is_finite()
-                || self.io.http_delivery.is_some()
-                || self.io.http_plan_ready.is_some()
-                || self.io.http_plan_expiring.is_some()
-                || self.io.http_preflight_ready.is_some()
-                || !self.io.request_contexts.plan_scope_clear()
+                || self.io.core.http_delivery.is_some()
+                || self.io.core.http_plan_ready.is_some()
+                || self.io.core.http_plan_expiring.is_some()
+                || self.io.core.http_preflight_ready.is_some()
+                || !self.io.core.request_contexts.plan_scope_clear()
             {
                 return;
             }
-            let registry = &self.io.request_contexts;
+            let registry = &self.io.core.request_contexts;
             let sealed = self.io.session_waits.entries.iter().position(|wait| {
                 wait.unit
                     .plan()
@@ -818,8 +845,8 @@ impl<V: Venue> Engine<V> {
             if let Some(index) = sealed {
                 let wait = self.io.session_waits.entries.remove(index);
                 if let Some(timer) = wait.timer {
-                    self.io.timers.remove(&timer);
-                    self.io.actions.push(Action::ClearTimer { timer });
+                    self.io.core.timers.remove(&timer);
+                    self.io.core.actions.push(Action::ClearTimer { timer });
                 }
                 let reason = if now >= wait.unit.deadline() {
                     Error::TimedOut
@@ -844,8 +871,8 @@ impl<V: Venue> Engine<V> {
                 let (plan, slot, pending, error) = self.io.session_waits.ended.remove(0);
                 // The Slot was held until now; it is released only for this
                 // disposition, where the venue re-parks it or fails the Plan.
-                self.io.request_contexts.unpark_plan_slot(&plan, &slot);
-                if !self.io.request_contexts.plan_registered(&plan) || now >= plan.deadline() {
+                self.io.core.request_contexts.unpark_plan_slot(&plan, &slot);
+                if !self.io.core.request_contexts.plan_registered(&plan) || now >= plan.deadline() {
                     self.venue.on_session_wait_expired(
                         &mut Cx {
                             now,
@@ -856,10 +883,10 @@ impl<V: Venue> Engine<V> {
                         error,
                     );
                 } else {
-                    self.io.http_plan_ready = Some(plan.clone());
-                    self.io.http_plan_poison = true;
+                    self.io.core.http_plan_ready = Some(plan.clone());
+                    self.io.core.http_plan_poison = true;
                     #[cfg(feature = "order-locks")]
-                    let order_response = self.io.order_response_token.take();
+                    let order_response = self.io.core.order_response_token.take();
                     self.venue.on_plan_session_wait_ended(
                         &mut Cx {
                             now,
@@ -872,10 +899,10 @@ impl<V: Venue> Engine<V> {
                     );
                     #[cfg(feature = "order-locks")]
                     {
-                        self.io.order_response_token = order_response;
+                        self.io.core.order_response_token = order_response;
                     }
-                    self.io.http_plan_ready = None;
-                    self.io.http_plan_poison = false;
+                    self.io.core.http_plan_ready = None;
+                    self.io.core.http_plan_poison = false;
                     ContextRegistry::rearm_live_plan(&mut self.io, &plan);
                 }
             }

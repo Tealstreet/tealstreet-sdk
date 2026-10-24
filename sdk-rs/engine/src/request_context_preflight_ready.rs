@@ -82,9 +82,20 @@ impl<P> Cx<'_, P> {
         owner: Owner,
     ) -> Result<(), Error> {
         // A ready founder's own physical Plan (#1919) is its same admission.
-        if self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
-            ready.owner() != owner && !self.io.request_contexts.founded_by(owner, ready.owner())
-        }) {
+        if self
+            .io
+            .core
+            .http_preflight_ready
+            .as_ref()
+            .is_some_and(|ready| {
+                ready.owner() != owner
+                    && !self
+                        .io
+                        .core
+                        .request_contexts
+                        .founded_by(owner, ready.owner())
+            })
+        {
             Err(Error::Revoked)
         } else {
             Ok(())
@@ -98,18 +109,23 @@ impl<P> Cx<'_, P> {
         if !self.now.is_finite() {
             return Err(Error::Invalid);
         }
-        let state = self.io.request_contexts.preflight_state(handle)?;
+        let state = self.io.core.request_contexts.preflight_state(handle)?;
         if state.session_parked
-            || self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
-                !ready.issued_by(&self.io.request_contexts.issuer)
-                    || ready.owner() != handle.owner()
-            })
-            || self.io.http_plan_ready.is_some()
-            || self.io.http_plan_expiring.is_some()
+            || self
+                .io
+                .core
+                .http_preflight_ready
+                .as_ref()
+                .is_some_and(|ready| {
+                    !ready.issued_by(&self.io.core.request_contexts.issuer)
+                        || ready.owner() != handle.owner()
+                })
+            || self.io.core.http_plan_ready.is_some()
+            || self.io.core.http_plan_expiring.is_some()
         {
             return Err(Error::Revoked);
         }
-        let allowed = if let Some(delivery) = self.io.http_delivery.as_ref() {
+        let allowed = if let Some(delivery) = self.io.core.http_delivery.as_ref() {
             state.handoff.as_ref() == Some(delivery)
                 || state.call.first().is_some_and(|call| {
                     call.matches(delivery) || call.admission.predecessor.as_ref() == Some(delivery)
@@ -117,10 +133,15 @@ impl<P> Cx<'_, P> {
         } else {
             state.activation == Activation::Initial
                 || (state.activation == Activation::Activating
-                    && self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
-                        ready.owner() == handle.owner()
-                            && ready.issued_by(&self.io.request_contexts.issuer)
-                    }))
+                    && self
+                        .io
+                        .core
+                        .http_preflight_ready
+                        .as_ref()
+                        .is_some_and(|ready| {
+                            ready.owner() == handle.owner()
+                                && ready.issued_by(&self.io.core.request_contexts.issuer)
+                        }))
         };
         allowed.then_some(()).ok_or(Error::Revoked)
     }
@@ -135,13 +156,13 @@ impl<P> Cx<'_, P> {
         if !self.now.is_finite() {
             return Err(Error::Invalid);
         }
-        self.io.request_contexts.preflight_state(handle)?;
+        self.io.core.request_contexts.preflight_state(handle)?;
         // Failure-only cleanup outside all active loans never grants progress.
-        if self.io.http_delivery.is_none()
-            && self.io.http_plan_ready.is_none()
-            && self.io.http_plan_expiring.is_none()
-            && self.io.http_preflight_ready.is_none()
-            && self.io.command_entry.is_none()
+        if self.io.core.http_delivery.is_none()
+            && self.io.core.http_plan_ready.is_none()
+            && self.io.core.http_plan_expiring.is_none()
+            && self.io.core.http_preflight_ready.is_none()
+            && self.io.core.command_entry.is_none()
         {
             Ok(())
         } else {
@@ -155,7 +176,7 @@ impl<P> Cx<'_, P> {
         let Owner::Command { id, .. } = handle.owner() else {
             return Err(Error::Invalid);
         };
-        let state = self.io.request_contexts.preflight_state(handle)?;
+        let state = self.io.core.request_contexts.preflight_state(handle)?;
         if !self.io.entry_bound(id)
             || state.activation != Activation::Initial
             || !state.call.is_empty()
@@ -164,6 +185,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         self.io
+            .core
             .request_contexts
             .preflight_state_mut(handle)?
             .activation = Activation::Parked;
@@ -175,7 +197,7 @@ impl<P> Cx<'_, P> {
         if !self.now.is_finite() {
             return Err(Error::Invalid);
         }
-        self.io.request_contexts.queue_preflight_ready(handle)
+        self.io.core.request_contexts.queue_preflight_ready(handle)
     }
 
     pub(in crate::engine) fn owned_http_admission(
@@ -185,6 +207,7 @@ impl<P> Cx<'_, P> {
         self.validate_preflight_ready_owner(context.owner())?;
         if self
             .io
+            .core
             .http_plan_ready
             .as_ref()
             .is_some_and(|ready| ready.owner() != context.owner())
@@ -193,14 +216,16 @@ impl<P> Cx<'_, P> {
         }
         let admission = self
             .io
+            .core
             .request_contexts
-            .owned_admission(context, self.io.http_delivery.as_ref())?;
+            .owned_admission(context, self.io.core.http_delivery.as_ref())?;
         if admission.as_ref().is_some_and(|a| {
-            a.predecessor.is_none() && !self.io.session_resumed.contains(&a.attempt.request)
-        }) && let Some(plan) = self.io.request_contexts.plan_from_context(context)
-            && !self.io.request_contexts.initial_plan_custody(&plan)?
+            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
+        }) && let Some(plan) = self.io.core.request_contexts.plan_from_context(context)
+            && !self.io.core.request_contexts.initial_plan_custody(&plan)?
             && !self
                 .io
+                .core
                 .http_plan_ready
                 .as_ref()
                 .is_some_and(|ready| ready.same_plan(&plan))
@@ -208,8 +233,8 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         if admission.as_ref().is_some_and(|a| {
-            a.predecessor.is_none() && !self.io.session_resumed.contains(&a.attempt.request)
-        }) && let Ok(handle) = self.io.request_contexts.owner_from_context(context)
+            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
+        }) && let Ok(handle) = self.io.core.request_contexts.owner_from_context(context)
         {
             self.validate_preflight_activation(&handle)?;
         }
@@ -220,7 +245,7 @@ impl<P> Cx<'_, P> {
 impl<V: Venue> Engine<V> {
     #[inline]
     pub(in crate::engine) fn flush_preflight_readiness(&mut self, now: f64) {
-        if self.io.request_contexts.preflight_ready.is_empty() {
+        if self.io.core.request_contexts.preflight_ready.is_empty() {
             return;
         }
         self.flush_live_preflight_readiness(now);
@@ -229,26 +254,26 @@ impl<V: Venue> Engine<V> {
     #[inline(never)]
     fn flush_live_preflight_readiness(&mut self, now: f64) {
         if !now.is_finite()
-            || self.io.command_entry.is_some()
-            || self.io.http_delivery.is_some()
-            || self.io.http_plan_ready.is_some()
-            || self.io.http_plan_expiring.is_some()
-            || self.io.http_preflight_ready.is_some()
-            || !self.io.request_contexts.plan_scope_clear()
+            || self.io.core.command_entry.is_some()
+            || self.io.core.http_delivery.is_some()
+            || self.io.core.http_plan_ready.is_some()
+            || self.io.core.http_plan_expiring.is_some()
+            || self.io.core.http_preflight_ready.is_some()
+            || !self.io.core.request_contexts.plan_scope_clear()
         {
             return;
         }
-        self.io.request_contexts.end_preflight_admission();
+        self.io.core.request_contexts.end_preflight_admission();
         self.sweep_executions(now);
         self.flush_http_owner_retirements();
         loop {
-            while let Some(handle) = self.io.request_contexts.next_preflight_ready() {
+            while let Some(handle) = self.io.core.request_contexts.next_preflight_ready() {
                 self.assert_live();
-                self.io.http_preflight_ready = Some(handle.clone());
-                self.io.http_plan_poison = true;
+                self.io.core.http_preflight_ready = Some(handle.clone());
+                self.io.core.http_plan_poison = true;
                 #[cfg(feature = "order-locks")]
-                let response = self.io.order_response_token.take();
-                self.io.http_history_failure = None;
+                let response = self.io.core.order_response_token.take();
+                self.io.core.http_history_failure = None;
                 self.venue.on_http_preflight_ready(
                     &mut Cx {
                         now,
@@ -259,6 +284,7 @@ impl<V: Venue> Engine<V> {
                 );
                 if !self
                     .io
+                    .core
                     .request_contexts
                     .consume_preflight_activation(&handle)
                 {
@@ -276,12 +302,12 @@ impl<V: Venue> Engine<V> {
                 }
                 #[cfg(feature = "order-locks")]
                 {
-                    self.io.order_response_token = response;
+                    self.io.core.order_response_token = response;
                 }
-                self.io.http_preflight_ready = None;
-                self.io.http_plan_poison = false;
+                self.io.core.http_preflight_ready = None;
+                self.io.core.http_plan_poison = false;
                 self.assert_live();
-                self.io.request_contexts.end_plan_admission();
+                self.io.core.request_contexts.end_plan_admission();
                 self.sweep_executions(now);
                 self.flush_http_owner_retirements();
             }
@@ -296,7 +322,7 @@ impl<V: Venue> Engine<V> {
                 self.dispatch_actions(now);
                 self.fence_socket_actions(now);
             }
-            if self.io.request_contexts.preflight_ready.is_empty() {
+            if self.io.core.request_contexts.preflight_ready.is_empty() {
                 break;
             }
         }

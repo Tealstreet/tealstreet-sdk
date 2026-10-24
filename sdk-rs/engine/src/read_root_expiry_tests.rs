@@ -327,8 +327,12 @@ fn second_page_in_flight(release: bool) -> (Engine<Probe>, Option<HttpRequest>) 
 
 /// The in-flight page's own leg timer, bound to its exact managed request.
 fn leg_timer(e: &Engine<Probe>) -> TimerId {
-    assert_eq!(e.io.managed_http.len(), 1, "exactly one page in flight");
-    e.io.managed_http.values().next().unwrap().timer
+    assert_eq!(
+        e.io.core.managed_http.len(),
+        1,
+        "exactly one page in flight"
+    );
+    e.io.core.managed_http.values().next().unwrap().timer
 }
 
 fn released_page_expiry(leg_first: bool) -> Engine<Probe> {
@@ -488,7 +492,7 @@ fn missing_receipt(duplicate: bool) {
         e.venue.legacy_from = None;
         50
     } else {
-        e.io.command_waits.exhaust_receipts();
+        e.io.core.command_waits.exhaust_receipts();
         7
     };
     e.drain_actions().for_each(drop);
@@ -659,15 +663,15 @@ fn a_full_registry_refuses_admission_atomically_and_recovers() {
     assert!(matches!(terminals.as_slice(), [Err(error)]
         if error.kind == Some(ErrorKind::Internal) && error.outcome.is_none()));
     assert!(!e.venue.roots.contains_key(&300));
-    assert!(!e.io.read_roots.iter().any(|(_, id, ..)| *id == 300));
-    assert_eq!(e.io.read_roots.len(), 256);
+    assert!(!e.io.core.read_roots.iter().any(|(_, id, ..)| *id == 300));
+    assert_eq!(e.io.core.read_roots.len(), 256);
     tick(&mut e, 1_000.);
     receive(&mut e, 1_000., 301, 300_000);
     assert!(
         e.venue.roots.contains_key(&301),
         "a freed slot admits again"
     );
-    assert_eq!(e.io.read_roots.len(), 256);
+    assert_eq!(e.io.core.read_roots.len(), 256);
 }
 
 #[test]
@@ -754,7 +758,7 @@ fn an_unstamped_mutation_is_refused_not_sent() {
         Some(Err(crate::request_context::CommandEntryError::Revoked)),
         "a stamped receipt is not refused"
     );
-    e.io.command_waits.exhaust_receipts();
+    e.io.core.command_waits.exhaust_receipts();
     e.drain_actions().for_each(drop);
     e.handle_command(1., query(6), Some(1_000)).unwrap();
     assert_eq!(e.venue.0, Some(Ok(())));
@@ -771,7 +775,7 @@ fn drain_actions_expires_at_the_last_observed_engine_time() {
     });
     receive(&mut e, 0., 7, 1_000);
     e.drain_actions().for_each(drop);
-    e.io.dispatch_now = 1_000.;
+    e.io.core.dispatch_now = 1_000.;
     let actions: Vec<_> = e.drain_actions().collect();
     assert_strict_timeout(&actions, 7, 0, "drain at dispatch_now");
 }
@@ -781,7 +785,7 @@ fn drain_actions_expires_at_the_last_observed_engine_time() {
 /// The next engine resource identity, without spending one for the caller.
 fn next_id(e: &mut Engine<Probe>) -> u64 {
     let id = e.io.reserve_ids(1).expect("an identity").start;
-    e.io.next_id = crate::resource_ids::ResourceIds::starting_at(id);
+    e.io.core.next_id = crate::resource_ids::ResourceIds::starting_at(id);
     id
 }
 
@@ -792,12 +796,12 @@ fn admission_without_root_and_timer_identities_is_refused_typed() {
         park: true,
         ..Default::default()
     });
-    e.io.next_id =
+    e.io.core.next_id =
         crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID);
     let ran = catch_unwind(AssertUnwindSafe(|| receive(&mut e, 0., 7, 1_000)));
     assert!(ran.is_ok() && !e.failed(), "no panic, no poisoned engine");
     assert!(!e.venue.roots.contains_key(&7));
-    assert!(e.io.read_roots.is_empty(), "no ghost tracked root");
+    assert!(e.io.core.read_roots.is_empty(), "no ghost tracked root");
     let (terminals, _) = outcome(&e.drain_actions().collect::<Vec<_>>(), 7);
     assert!(matches!(terminals.as_slice(), [Err(error)] if error.outcome.is_none()));
 }
@@ -812,13 +816,13 @@ fn a_terminal_with_no_identities_left_still_expires_and_keeps_later_roots() {
     receive(&mut e, 0., 7, 1_000);
     receive(&mut e, 0., 8, 2_000);
     e.drain_actions().for_each(drop);
-    e.io.next_id =
+    e.io.core.next_id =
         crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID + 1);
     let ran = catch_unwind(AssertUnwindSafe(|| tick(&mut e, 1_000.)));
     assert!(ran.is_ok() && !e.failed(), "expiry needs no fresh identity");
     let actions: Vec<_> = e.drain_actions().collect();
     assert_strict_timeout(&actions, 7, 0, "root 7");
-    assert!(e.io.read_roots.iter().any(|(_, id, ..)| *id == 8));
+    assert!(e.io.core.read_roots.iter().any(|(_, id, ..)| *id == 8));
 }
 
 #[test]
@@ -905,7 +909,7 @@ fn a_poisoned_engine_runs_no_expiry_cleanup() {
         ..Default::default()
     });
     receive(&mut e, 0., 7, 1_000);
-    e.io.http_owner_poison = true;
+    e.io.core.http_owner_poison = true;
     let ran = catch_unwind(AssertUnwindSafe(|| tick(&mut e, 1_000.)));
     assert!(ran.is_err(), "a poisoned engine traps");
     assert!(e.venue.retired.is_empty(), "no hook before the trap");
@@ -919,8 +923,12 @@ fn the_sweep_reserves_all_cleanup_actions_before_marking() {
         receive(&mut e, 0., command, 30_000);
     }
     released(&mut e, 0.);
-    e.io.actions.shrink_to_fit();
+    e.io.core.actions.shrink_to_fit();
     tick(&mut e, 30_000.);
-    let reserved = e.io.read_root_sweep_capacity.expect("a sweep ran");
-    assert_eq!(e.io.actions.capacity(), reserved, "no growth after marking");
+    let reserved = e.io.core.read_root_sweep_capacity.expect("a sweep ran");
+    assert_eq!(
+        e.io.core.actions.capacity(),
+        reserved,
+        "no growth after marking"
+    );
 }

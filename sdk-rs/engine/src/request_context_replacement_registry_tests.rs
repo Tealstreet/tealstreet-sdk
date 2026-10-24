@@ -282,12 +282,13 @@ fn public_replacement_children_cross_u32_without_narrowing_or_identity_reuse() {
     let mut io = super::super::Io::<()>::default();
     let mut store = Store::default();
     let parent = io
+        .core
         .request_contexts
         .issue(1, Scope::Command(7), policy(), 0.)
         .unwrap();
-    io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
+    io.core.http_delivery = Some(refusal(&mut io.core.request_contexts, &parent, 11));
     let first = u64::from(u32::MAX);
-    io.next_id = ResourceIds::starting_at(first);
+    io.core.next_id = ResourceIds::starting_at(first);
     let mut cx = Cx {
         now: 1.,
         store: &mut store,
@@ -300,18 +301,18 @@ fn public_replacement_children_cross_u32_without_narrowing_or_identity_reuse() {
         children.iter().map(Context::leg).collect::<Vec<_>>(),
         [first, first + 1]
     );
-    assert_eq!(cx.io.next_id, ResourceIds::starting_at(first + 2));
+    assert_eq!(cx.io.core.next_id, ResourceIds::starting_at(first + 2));
     assert!(children.iter().all(|child| child.owner() == parent.owner()
         && child.deadline() == parent.deadline()
-        && cx.io.request_contexts.validate(child, 1.).is_ok()));
+        && cx.io.core.request_contexts.validate(child, 1.).is_ok()));
     assert_eq!(
-        cx.io.request_contexts.validate(&parent, 1.),
+        cx.io.core.request_contexts.validate(&parent, 1.),
         Err(Error::Revoked)
     );
-    assert!(!cx.io.next_id.failed());
+    assert!(!cx.io.core.next_id.failed());
     assert!(cx.io.pending.is_empty());
-    assert!(cx.io.actions.is_empty());
-    assert!(cx.io.timers.is_empty());
+    assert!(cx.io.core.actions.is_empty());
+    assert!(cx.io.core.timers.is_empty());
 }
 
 #[test]
@@ -319,11 +320,12 @@ fn last_safe_replacement_range_refuses_atomically_then_admits_its_final_child() 
     let mut io = super::super::Io::<()>::default();
     let mut store = Store::default();
     let parent = io
+        .core
         .request_contexts
         .issue(1, Scope::Command(7), policy(), 0.)
         .unwrap();
-    io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
-    io.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
+    io.core.http_delivery = Some(refusal(&mut io.core.request_contexts, &parent, 11));
+    io.core.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
     let mut cx = Cx {
         now: 1.,
         store: &mut store,
@@ -333,23 +335,29 @@ fn last_safe_replacement_range_refuses_atomically_then_admits_its_final_child() 
         cx.http_replacement_contexts(&parent, &[policy(), policy()]),
         Err(Error::Capacity)
     );
-    assert_eq!(cx.io.next_id, ResourceIds::starting_at(MAX_RESOURCE_ID));
-    unchanged(&cx.io.request_contexts, &parent, 11, 1);
-    assert!(!cx.io.next_id.failed());
+    assert_eq!(
+        cx.io.core.next_id,
+        ResourceIds::starting_at(MAX_RESOURCE_ID)
+    );
+    unchanged(&cx.io.core.request_contexts, &parent, 11, 1);
+    assert!(!cx.io.core.next_id.failed());
     assert!(cx.io.pending.is_empty());
-    assert!(cx.io.actions.is_empty());
-    assert!(cx.io.timers.is_empty());
+    assert!(cx.io.core.actions.is_empty());
+    assert!(cx.io.core.timers.is_empty());
     let children = cx.http_replacement_contexts(&parent, &[policy()]).unwrap();
     assert_eq!(children.len(), 1);
     assert_eq!(children[0].leg(), MAX_RESOURCE_ID);
     assert_eq!(children[0].owner(), parent.owner());
     assert_eq!(children[0].deadline(), parent.deadline());
-    assert_eq!(cx.io.next_id, ResourceIds::starting_at(MAX_RESOURCE_ID + 1));
+    assert_eq!(
+        cx.io.core.next_id,
+        ResourceIds::starting_at(MAX_RESOURCE_ID + 1)
+    );
     assert_eq!(cx.io.reserve_ids(1), None); // Exclusive-end sentinel is not issued.
-    assert!(!cx.io.next_id.failed());
+    assert!(!cx.io.core.next_id.failed());
     assert!(cx.io.pending.is_empty());
-    assert!(cx.io.actions.is_empty());
-    assert!(cx.io.timers.is_empty());
+    assert!(cx.io.core.actions.is_empty());
+    assert!(cx.io.core.timers.is_empty());
 }
 
 #[test]
@@ -357,11 +365,12 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
     let mut io = super::super::Io::<()>::default();
     let mut store = Store::default();
     let parent = io
+        .core
         .request_contexts
         .issue(1, Scope::Command(7), policy(), 0.)
         .unwrap();
-    io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
-    io.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
+    io.core.http_delivery = Some(refusal(&mut io.core.request_contexts, &parent, 11));
+    io.core.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
     let mut cx = Cx {
         now: 1.,
         store: &mut store,
@@ -371,8 +380,11 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
         cx.http_replacement_contexts(&parent, &[policy(), policy()]),
         Err(Error::Capacity)
     );
-    assert_eq!(cx.io.next_id, ResourceIds::starting_at(MAX_RESOURCE_ID));
-    unchanged(&cx.io.request_contexts, &parent, 11, 1);
+    assert_eq!(
+        cx.io.core.next_id,
+        ResourceIds::starting_at(MAX_RESOURCE_ID)
+    );
+    unchanged(&cx.io.core.request_contexts, &parent, 11, 1);
     let mut invalid = policy();
     invalid.timeout_ms = 0;
     assert_eq!(
@@ -380,7 +392,7 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
         Err(Error::Invalid)
     );
     assert_eq!(
-        cx.io.next_id,
+        cx.io.core.next_id,
         ResourceIds::starting_at(MAX_RESOURCE_ID + 1),
         "failed policy burns checked identities"
     );
@@ -388,9 +400,9 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
         cx.http_replacement_contexts(&parent, &[policy()]),
         Err(Error::Capacity)
     );
-    unchanged(&cx.io.request_contexts, &parent, 11, 1);
+    unchanged(&cx.io.core.request_contexts, &parent, 11, 1);
     assert!(cx.io.pending.is_empty());
-    assert!(cx.io.actions.is_empty());
+    assert!(cx.io.core.actions.is_empty());
 }
 
 #[test]
@@ -407,11 +419,12 @@ fn public_replacement_requires_current_delivery_and_retry_permission() {
             ..policy()
         };
         let parent = io
+            .core
             .request_contexts
             .issue(1, Scope::Command(7), parent_policy.clone(), 0.)
             .unwrap();
-        let correct = refusal(&mut io.request_contexts, &parent, 11);
-        io.http_delivery = match case {
+        let correct = refusal(&mut io.core.request_contexts, &parent, 11);
+        io.core.http_delivery = match case {
             0 => None,
             1 => Some(Delivery {
                 attempt: Attempt {
@@ -422,7 +435,7 @@ fn public_replacement_requires_current_delivery_and_retry_permission() {
             }),
             _ => Some(correct.clone()),
         };
-        io.next_id = ResourceIds::starting_at(20);
+        io.core.next_id = ResourceIds::starting_at(20);
         let mut cx = Cx {
             now: 1.,
             store: &mut store,
@@ -437,26 +450,26 @@ fn public_replacement_requires_current_delivery_and_retry_permission() {
             cx.http_replacement_contexts(&parent, std::slice::from_ref(&parent_policy)),
             Err(expected)
         );
-        unchanged(&cx.io.request_contexts, &parent, 11, 1);
+        unchanged(&cx.io.core.request_contexts, &parent, 11, 1);
         assert_eq!(
-            cx.io.request_contexts.contexts.get(&parent.leg()),
+            cx.io.core.request_contexts.contexts.get(&parent.leg()),
             Some(&parent)
         );
         assert_eq!(
-            cx.io.next_id,
+            cx.io.core.next_id,
             ResourceIds::starting_at(if case == 0 { 20 } else { 21 })
         );
         assert!(cx.io.pending.is_empty());
-        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.core.actions.is_empty());
         if case != 2 {
-            cx.io.http_delivery = Some(correct);
+            cx.io.core.http_delivery = Some(correct);
             let children = cx
                 .http_replacement_contexts(&parent, std::slice::from_ref(&parent_policy))
                 .unwrap();
             assert_eq!(children.len(), 1);
             assert_eq!(children[0].leg(), if case == 0 { 20 } else { 21 });
             assert_eq!(
-                cx.io.request_contexts.validate(&parent, 1.),
+                cx.io.core.request_contexts.validate(&parent, 1.),
                 Err(Error::Revoked)
             );
         }
@@ -502,11 +515,13 @@ fn replacement_second_child_collision_defers_cleanup_and_commits_no_authority() 
     let mut io = super::super::Io::<()>::default();
     let mut store = Store::default();
     let parent = io
+        .core
         .request_contexts
         .issue(1, Scope::Command(7), policy(), 0.)
         .unwrap();
     for (identity, timeout_ms) in [(99, 1), (21, 100)] {
-        io.request_contexts
+        io.core
+            .request_contexts
             .issue(
                 identity,
                 Scope::Background,
@@ -520,9 +535,9 @@ fn replacement_second_child_collision_defers_cleanup_and_commits_no_authority() 
             )
             .unwrap();
     }
-    io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
-    io.next_id = ResourceIds::starting_at(20);
-    let before = registry_state(&io.request_contexts, &parent);
+    io.core.http_delivery = Some(refusal(&mut io.core.request_contexts, &parent, 11));
+    io.core.next_id = ResourceIds::starting_at(20);
+    let before = registry_state(&io.core.request_contexts, &parent);
     let mut cx = Cx {
         now: 2.,
         store: &mut store,
@@ -532,19 +547,22 @@ fn replacement_second_child_collision_defers_cleanup_and_commits_no_authority() 
         cx.http_replacement_contexts(&parent, &[policy(), policy()]),
         Err(Error::Duplicate)
     );
-    assert_eq!(registry_state(&cx.io.request_contexts, &parent), before);
     assert_eq!(
-        cx.io.next_id,
+        registry_state(&cx.io.core.request_contexts, &parent),
+        before
+    );
+    assert_eq!(
+        cx.io.core.next_id,
         ResourceIds::starting_at(22),
         "the denied checked range is never reused"
     );
-    assert!(!cx.io.request_contexts.contexts.contains_key(&20));
+    assert!(!cx.io.core.request_contexts.contexts.contains_key(&20));
     assert!(
-        cx.io.request_contexts.contexts.contains_key(&99),
+        cx.io.core.request_contexts.contexts.contains_key(&99),
         "denial cannot perform expiry cleanup"
     );
     assert!(cx.io.pending.is_empty());
-    assert!(cx.io.actions.is_empty());
+    assert!(cx.io.core.actions.is_empty());
     let children = cx
         .http_replacement_contexts(&parent, &[policy(), policy()])
         .unwrap();
@@ -557,15 +575,15 @@ fn replacement_second_child_collision_defers_cleanup_and_commits_no_authority() 
             .iter()
             .all(|child| child.deadline() == 100. && child.owner() == parent.owner())
     );
-    assert_eq!(cx.io.next_id, ResourceIds::starting_at(24));
-    assert!(!cx.io.request_contexts.contexts.contains_key(&99));
-    assert!(cx.io.request_contexts.contexts.contains_key(&21));
+    assert_eq!(cx.io.core.next_id, ResourceIds::starting_at(24));
+    assert!(!cx.io.core.request_contexts.contexts.contains_key(&99));
+    assert!(cx.io.core.request_contexts.contexts.contains_key(&21));
     assert_eq!(
-        cx.io.request_contexts.validate(&parent, 2.),
+        cx.io.core.request_contexts.validate(&parent, 2.),
         Err(Error::Revoked)
     );
     assert!(cx.io.pending.is_empty());
-    assert!(cx.io.actions.is_empty());
+    assert!(cx.io.core.actions.is_empty());
 }
 
 #[test]
@@ -1006,16 +1024,22 @@ fn replacement_real_handoff_revokes_parent_but_retains_exact_expired_root_comple
         },
     )
     .unwrap();
-    assert!(!cx.io.request_contexts.contexts.contains_key(&root.leg()));
+    assert!(
+        !cx.io
+            .core
+            .request_contexts
+            .contexts
+            .contains_key(&root.leg())
+    );
     assert_eq!(
-        cx.io.request_contexts.validate(&root, cx.now),
+        cx.io.core.request_contexts.validate(&root, cx.now),
         Err(Error::TimedOut)
     );
     let altered = root.clone().with_retry(RetryPolicy::Never).unwrap();
     assert_eq!(cx.done_context(&altered, "[]".into()), Err(Error::Revoked));
     cx.fail_context(&root, "logical deadline").unwrap();
     assert!(
-        matches!(cx.io.actions.last(), Some(Action::Notice(Notice::CommandFailed { command: 7, error, .. })) if error.outcome == Some(Outcome::Unknown))
+        matches!(cx.io.core.actions.last(), Some(Action::Notice(Notice::CommandFailed { command: 7, error, .. })) if error.outcome == Some(Outcome::Unknown))
     );
     assert_eq!(cx.fail_context(&root, "duplicate"), Err(Error::Revoked));
     let next = cx
@@ -1083,26 +1107,28 @@ fn replacement_child_capacity_abort_finishes_immediately_without_parent_authorit
         "a refused replacement child must retire immediately in its parent's callback"
     );
     assert_eq!(engine.venue().callbacks, 1);
-    assert!(!engine.io.request_contexts.commands.contains_key(&7));
+    assert!(!engine.io.core.request_contexts.commands.contains_key(&7));
     for child in &engine.venue().children {
         assert!(
             !engine
                 .io
+                .core
                 .request_contexts
                 .contexts
                 .contains_key(&child.leg())
         );
     }
     assert_eq!(
-        engine.io.managed_http.len(),
+        engine.io.core.managed_http.len(),
         255,
         "unrelated routes survive"
     );
     assert_eq!(engine.io.pending.len(), 255);
-    assert_eq!(engine.io.timers.len(), 255);
+    assert_eq!(engine.io.core.timers.len(), 255);
     assert!(
         engine
             .io
+            .core
             .managed_http
             .values()
             .all(|m| matches!(m.delivery().context.owner(), Owner::Background { .. }))
@@ -1316,7 +1342,7 @@ mod signed_replacement_handoff {
             assert_eq!(engine.venue().settled_children, 2);
             assert_eq!(engine.venue().callbacks, released);
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
             assert!(!engine.signing_pending(parent_attempt));
             assert!(!engine.signing_pending(first.0));
             assert!(!engine.signing_pending(second.0));
@@ -1412,7 +1438,7 @@ mod signed_replacement_handoff {
             let old_permit = permit(&ready);
             assert_eq!(old_work.receipt.stamp_ms, Some(4.));
             if calibrated {
-                assert!(engine.io.protocol_clock.observe(10., 510.));
+                assert!(engine.io.core.protocol_clock.observe(10., 510.));
                 assert_eq!(engine.claim_http(10., old_permit), Err(Error::Stale));
             } else {
                 engine.http_preparation_failed(
@@ -1436,7 +1462,7 @@ mod signed_replacement_handoff {
             assert_ne!(next, old);
             assert_eq!(next.attempt(), old.attempt());
             assert_eq!(
-                engine.io.managed_http[&next.attempt().request]
+                engine.io.core.managed_http[&next.attempt().request]
                     .delivery()
                     .context,
                 child_context
@@ -1544,7 +1570,7 @@ mod signed_replacement_handoff {
                 1
             );
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
             for id in [parent, old_signer, fresh_signer, second] {
                 assert!(!engine.signing_pending(id));
             }

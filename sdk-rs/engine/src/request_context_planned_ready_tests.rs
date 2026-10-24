@@ -70,7 +70,7 @@ impl Venue for Probe {
             cx.begin_preflight(preflight_policy()).unwrap()
         };
         if self.capped {
-            let ids = cx.io.next_id;
+            let ids = cx.io.core.next_id;
             let result = cx.begin_planned_execution(
                 &preflight,
                 &steps(),
@@ -78,7 +78,7 @@ impl Venue for Probe {
                 Window::UntilTerminal,
                 "capped",
             );
-            self.cap_ids_unchanged = cx.io.next_id == ids;
+            self.cap_ids_unchanged = cx.io.core.next_id == ids;
             self.record("capped execution", result.map(|_| ()));
             return;
         }
@@ -208,7 +208,7 @@ fn only_the_exact_founder_generation_owns_a_physical_plan() {
     let Owner::Command { id, generation } = founder else {
         panic!("command founder")
     };
-    let registry = &e.io.request_contexts;
+    let registry = &e.io.core.request_contexts;
     assert!(registry.founded_by(plan.owner(), founder));
     assert!(!registry.founded_by(
         plan.owner(),

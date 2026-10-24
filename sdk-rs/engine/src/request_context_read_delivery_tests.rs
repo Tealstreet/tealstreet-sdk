@@ -316,7 +316,7 @@ fn read_publication_pair_authority_is_exact_and_read_only() {
         let sibling = cx.http_leg_context(&root, read_policy(50)).unwrap();
         let mut root_argument = root.clone();
         let mut leg_argument = leg.clone();
-        cx.io.http_delivery = Some(Delivery {
+        cx.io.core.http_delivery = Some(Delivery {
             context: leg.clone(),
             attempt: crate::request_context::Attempt {
                 request: RequestId(99),
@@ -363,11 +363,12 @@ fn read_publication_pair_authority_is_exact_and_read_only() {
                 Err(Error::TimedOut)
             }
             7 => {
-                cx.io.http_delivery = None;
+                cx.io.core.http_delivery = None;
                 Err(Error::Revoked)
             }
             8 => {
                 cx.io
+                    .core
                     .request_contexts
                     .commands
                     .get_mut(&7)
@@ -383,7 +384,7 @@ fn read_publication_pair_authority_is_exact_and_read_only() {
             }
             10 => {
                 leg_argument = root.clone();
-                cx.io.http_delivery.as_mut().unwrap().context = root.clone();
+                cx.io.core.http_delivery.as_mut().unwrap().context = root.clone();
                 Ok(())
             }
             11 => {
@@ -394,7 +395,7 @@ fn read_publication_pair_authority_is_exact_and_read_only() {
                 leg_argument = cx
                     .http_context(Scope::Command(7), read_policy(200))
                     .unwrap();
-                cx.io.http_delivery.as_mut().unwrap().context = leg_argument.clone();
+                cx.io.core.http_delivery.as_mut().unwrap().context = leg_argument.clone();
                 Err(Error::Revoked)
             }
             13 => {
@@ -415,10 +416,11 @@ fn read_publication_pair_authority_is_exact_and_read_only() {
             }
             _ => unreachable!(),
         };
-        let contexts = cx.io.request_contexts.contexts.len();
-        let commands = cx.io.request_contexts.commands.len();
+        let contexts = cx.io.core.request_contexts.contexts.len();
+        let commands = cx.io.core.request_contexts.commands.len();
         let delivery = cx
             .io
+            .core
             .http_delivery
             .as_ref()
             .map(|d| (d.context.clone(), d.attempt));
@@ -432,18 +434,19 @@ fn read_publication_pair_authority_is_exact_and_read_only() {
             expected,
             "repeat {case}"
         );
-        assert_eq!(cx.io.request_contexts.contexts.len(), contexts);
-        assert_eq!(cx.io.request_contexts.commands.len(), commands);
+        assert_eq!(cx.io.core.request_contexts.contexts.len(), contexts);
+        assert_eq!(cx.io.core.request_contexts.commands.len(), commands);
         assert_eq!(
             cx.io
+                .core
                 .http_delivery
                 .as_ref()
                 .map(|d| (d.context.clone(), d.attempt)),
             delivery
         );
-        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.core.actions.is_empty());
         assert!(cx.io.pending.is_empty());
-        assert!(cx.io.timers.is_empty());
+        assert!(cx.io.core.timers.is_empty());
         assert!(!cx.store.hedged());
     }
 }

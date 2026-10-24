@@ -95,14 +95,14 @@ impl Venue for Probe {
                 pending + 1,
             )?;
         }
-        assert!(cx.io.http_delivery.is_none());
-        assert!(cx.io.command_entry.is_none());
+        assert!(cx.io.core.http_delivery.is_none());
+        assert!(cx.io.core.command_entry.is_none());
         #[cfg(feature = "order-locks")]
-        assert!(cx.io.order_response_token.is_none());
+        assert!(cx.io.core.order_response_token.is_none());
         #[cfg(feature = "http-plans")]
-        assert!(cx.io.http_plan_ready.is_none());
+        assert!(cx.io.core.http_plan_ready.is_none());
         #[cfg(feature = "http-plans")]
-        assert!(cx.io.http_plan_expiring.is_none());
+        assert!(cx.io.core.http_plan_expiring.is_none());
         if self.retire {
             cx.stop_socket_feed(epoch.feed());
         }
@@ -111,7 +111,7 @@ impl Venue for Probe {
         }
         if self.fatal {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                cx.io.next_id.invalidate();
+                cx.io.core.next_id.invalidate();
             }));
         }
         if self.managed {
@@ -161,6 +161,7 @@ fn started(probe: Probe) -> (Engine<Probe>, Epoch) {
     engine.drain_actions().for_each(drop);
     let epoch = engine
         .io
+        .core
         .socket_driver
         .state
         .epoch(engine.venue.feed.unwrap())
@@ -176,7 +177,7 @@ fn started(probe: Probe) -> (Engine<Probe>, Epoch) {
 }
 fn cx(engine: &mut Engine<Probe>) -> Cx<'_, usize> {
     Cx {
-        now: engine.io.dispatch_now,
+        now: engine.io.core.dispatch_now,
         store: &mut engine.store,
         io: &mut engine.io,
     }
@@ -269,7 +270,7 @@ fn managed_read_waits_for_returned_subscription_batch_then_prepares_binds_and_cl
     e.handle(3., Event::TimerFired { timer });
     assert_eq!(e.venue.calls, [7]);
     assert!(e.io.socket_continuations.is_empty());
-    assert_eq!(e.io.socket_continuation_bytes, 0);
+    assert_eq!(e.io.core.socket_continuation_bytes, 0);
 }
 
 #[test]
@@ -285,7 +286,7 @@ fn retirement_before_final_drain_discards_seed_and_fences_its_frames() {
     assert!(!out.iter().any(|a| matches!(a, Action::WsSend { .. })));
     assert!(no_http(&out));
     assert!(e.io.socket_continuations.is_empty());
-    assert_eq!(e.io.socket_continuation_bytes, 0);
+    assert_eq!(e.io.core.socket_continuation_bytes, 0);
 }
 
 #[test]
@@ -399,7 +400,7 @@ fn paced_batches_wait_for_the_last_subscription_frame() {
 #[test]
 fn admission_refuses_duplicates_missing_requirements_and_capacity_atomically() {
     let (mut e, _) = started(Probe::default());
-    let ids = e.io.next_id;
+    let ids = e.io.core.next_id;
     assert_eq!(
         queue(&mut e, &["book"], &["missing"], 1),
         Err(SocketError::InvalidInterest)
@@ -408,8 +409,8 @@ fn admission_refuses_duplicates_missing_requirements_and_capacity_atomically() {
         queue(&mut e, &["book"], &["book", "book"], 1),
         Err(SocketError::InvalidInterest)
     );
-    assert_eq!(e.io.next_id, ids);
-    e.io.next_id =
+    assert_eq!(e.io.core.next_id, ids);
+    e.io.core.next_id =
         crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID + 1);
     assert_eq!(
         queue(&mut e, &["book"], &["book"], 1),
@@ -417,7 +418,7 @@ fn admission_refuses_duplicates_missing_requirements_and_capacity_atomically() {
     );
     assert!(e.io.socket_proposals.is_empty());
     assert!(e.io.socket_continuations.is_empty());
-    assert_eq!(e.io.socket_proposal_bytes, 0);
+    assert_eq!(e.io.core.socket_proposal_bytes, 0);
 }
 
 #[test]
@@ -519,7 +520,7 @@ fn changed_canonical_interest_cancels_work_even_when_its_key_survives() {
     e.drain_actions().for_each(drop);
     e.handle(1., Event::TimerFired { timer });
     assert!(e.venue.calls.is_empty());
-    assert_eq!(e.io.socket_continuation_bytes, 0);
+    assert_eq!(e.io.core.socket_continuation_bytes, 0);
 }
 
 #[test]
@@ -528,16 +529,16 @@ fn pending_credit_cap_and_last_safe_timer_refuse_without_aliasing() {
     for id in 0..MAX_PROPOSALS {
         queue(&mut e, &["book"], &["book"], id).unwrap();
     }
-    let ids = e.io.next_id;
+    let ids = e.io.core.next_id;
     assert_eq!(
         queue(&mut e, &["book"], &["book"], 9),
         Err(SocketError::Capacity)
     );
-    assert_eq!(e.io.next_id, ids);
+    assert_eq!(e.io.core.next_id, ids);
     assert_eq!(e.io.socket_proposals.len(), MAX_PROPOSALS);
 
     let (mut e, _) = started(Probe::default());
-    e.io.next_id =
+    e.io.core.next_id =
         crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID);
     queue(&mut e, &["book"], &["book"], 1).unwrap();
     let first: Vec<_> = e.drain_actions().collect();
@@ -552,7 +553,7 @@ fn pending_credit_cap_and_last_safe_timer_refuse_without_aliasing() {
     e.handle(1., Event::TimerFired { timer: old });
     assert!(e.venue.calls.is_empty());
     assert!(e.io.socket_continuations.is_empty());
-    assert!(!e.io.next_id.failed());
+    assert!(!e.io.core.next_id.failed());
 }
 
 #[test]
@@ -575,7 +576,7 @@ fn continuation_clears_and_restores_ambient_delivery() {
         None,
     )
     .unwrap();
-    e.io.http_delivery = Some(request_context_registry::Delivery {
+    e.io.core.http_delivery = Some(request_context_registry::Delivery {
         context,
         attempt: Attempt {
             request: RequestId(42),
@@ -585,10 +586,10 @@ fn continuation_clears_and_restores_ambient_delivery() {
     assert!(e.handle_socket_continuation(1., timer));
     assert_eq!(e.venue.calls, [1]);
     assert_eq!(
-        e.io.http_delivery.as_ref().unwrap().attempt.request,
+        e.io.core.http_delivery.as_ref().unwrap().attempt.request,
         RequestId(42)
     );
-    assert!(e.io.command_entry.is_none());
+    assert!(e.io.core.command_entry.is_none());
 }
 
 #[test]
@@ -718,7 +719,7 @@ fn early_one_shot_wakeup_rearms_without_early_callback_or_retained_credit() {
     queue(&mut e, &["book"], &["book"], 7).unwrap();
     let out: Vec<_> = e.drain_actions().collect();
     let timer = wake(&out, 1.);
-    assert!(e.io.socket_continuation_bytes > 0);
+    assert!(e.io.core.socket_continuation_bytes > 0);
     e.handle(0.5, Event::TimerFired { timer });
     let rearmed: Vec<_> = e.drain_actions().collect();
     assert!(e.venue.calls.is_empty());
@@ -728,8 +729,8 @@ fn early_one_shot_wakeup_rearms_without_early_callback_or_retained_credit() {
     e.drain_actions().for_each(drop);
     assert_eq!(e.venue.calls, [7]);
     assert!(e.io.socket_continuations.is_empty());
-    assert_eq!(e.io.socket_continuation_bytes, 0);
-    assert!(!e.io.timers.contains_key(&timer));
+    assert_eq!(e.io.core.socket_continuation_bytes, 0);
+    assert!(!e.io.core.timers.contains_key(&timer));
     e.handle(1., Event::TimerFired { timer });
     e.drain_actions().for_each(drop);
     assert_eq!(e.venue.calls, [7]);
@@ -744,7 +745,7 @@ fn expiry_cleanup_barrier_is_never_borrowed_by_a_socket_continuation() {
         queue(&mut e, &["book"], &["book"], 7).unwrap();
         let previous = already_armed.then(|| wake(&e.drain_actions().collect::<Vec<_>>(), 1.));
         let barrier = Plan::new(&Preflight::new(&std::sync::Arc::new(()), 99, 1), 100.);
-        e.io.http_plan_expiring = Some(barrier.clone());
+        e.io.core.http_plan_expiring = Some(barrier.clone());
         if let Some(timer) = previous {
             e.handle(1., Event::TimerFired { timer });
         }
@@ -757,14 +758,15 @@ fn expiry_cleanup_barrier_is_never_borrowed_by_a_socket_continuation() {
             "expiry cleanup cannot arm a native continuation"
         );
         assert!(
-            e.io.http_plan_expiring
+            e.io.core
+                .http_plan_expiring
                 .as_ref()
                 .unwrap()
                 .same_plan(&barrier)
         );
         assert_eq!(e.io.socket_continuations.len(), 1);
-        assert!(e.io.socket_continuation_bytes > 0);
-        e.io.http_plan_expiring = None;
+        assert!(e.io.core.socket_continuation_bytes > 0);
+        e.io.core.http_plan_expiring = None;
         let after: Vec<_> = e.drain_actions().collect();
         let timer = wake(&after, 1.);
         if let Some(previous) = previous {
@@ -775,7 +777,7 @@ fn expiry_cleanup_barrier_is_never_borrowed_by_a_socket_continuation() {
         e.handle(1., Event::TimerFired { timer });
         e.drain_actions().for_each(drop);
         assert_eq!(e.venue.calls, [7]);
-        assert_eq!(e.io.socket_continuation_bytes, 0);
+        assert_eq!(e.io.core.socket_continuation_bytes, 0);
         assert!(e.io.socket_continuations.is_empty());
     }
 }
