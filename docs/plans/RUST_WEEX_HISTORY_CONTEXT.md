@@ -136,3 +136,29 @@ all-target WEEX Clippy and fmt, scanner/unit checks and bans on the exact source
 head. CI supplies repository fast-lane checks plus isolated WEEX WASM size and
 replay CPU gates; report a miss. Draft stays non-ready while #1983 or original
 REDs/readiness controls remain unmet. No merge without overseer GO.
+
+## Original-source receipt
+
+The new `sdk-rs/venues/weex/tests/history_context.rs` runs against byte-unchanged
+`ba3d7da1d3a` production with the trusted native signer and real handle_command
+receipt. Its drain drives real Prepare/Bind/Claim when emitted and separately
+counts legacy Http releases; there is no production adapter or policy copy.
+
+Executed command: `cargo test -p safe-cex-venue-weex --test history_context`
+from `sdk-rs`. Result: **6 assertion RED / 2 GREEN / 0 ignored**. No compile,
+fixture, missing-request, selection, wire-body or parsing failure counts as RED.
+
+- Signed list, signed income and public release each pass their native request
+  assertions, then fail `(legacy, prepared, claimed)`: `(1,0,0)` vs `(0,1,1)`.
+- Public root equality emits no terminal instead of one typed Timeout.
+- Accepted normal orders plus algo HttpFailed exactly at the caller deadline
+  returns those rows through native recovery instead of strict root Timeout.
+- Ranged income's genuine 100-row page parks on the 100 ms timer; firing it
+  after caller expiry produces no root terminal instead of strict Timeout.
+- GREEN: a live-root algo failure preserves the one accepted normal-order row
+  and one command-owned marker; an empty public response finishes once within
+  the declared caller bound.
+
+These pin the pre-cutover behavior only. The draft must not merge this RED
+checkpoint. Signed production and new root/leg controls wait for actual #1983;
+all six assertions must turn GREEN through the real shared path before READY.
