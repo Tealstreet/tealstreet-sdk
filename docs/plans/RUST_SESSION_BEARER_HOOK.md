@@ -422,6 +422,13 @@ retires a second Session in the same flush. Composition with combo-5b
   moves to another outer trigger, such as a retire in `start`.
 - Still waiting on dependencies: R10b/R10b' (#2037), R11 and the group gate
   (G2b), R14's refusal half and the `Egress::Session` control (#1896/#1897).
+- Composition pin (claude-fe7lgm, CLEAR at `0644cd619e8`): whichever of #2037
+  and this lands second makes the tail of `flush_http_plans` read, in order:
+  1. `flush_bearer_fences(now)`;
+  2. `flush_plan_session_waits(now)`, whose loop also drains Bearer fences at
+     the top of each pass;
+  3. `io.session_resumed.clear()`.
+  Bound failures, which may seal, always come before parked dispositions.
 
 **Engine facts the source must follow:**
 - **The real prepare point.** `queue_managed` emits `HttpAction::Prepare` at
