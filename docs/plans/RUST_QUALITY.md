@@ -1595,3 +1595,12 @@ malformed-result controls execute through genuine Engine callbacks. The scanner
 changes 29/17 to21/14, distinguishing three genuine bracket completion removals
 from five conservative obsolete request-field matches. No bootstrap growth.
 Legacy execution/group/session/history ownership remains a separate blocker.
+
+Verification checkpoint: source/caller/full-map independent reviews are CLEAR at
+2024ec88acc after all fixes; no remaining High/Medium. The map reviewer explicitly
+confirmed typed-role reuse is semantic deduplication, with no hidden/renamed sites,
+21/14 exact source/manifest, original25assertions unchanged and5653unowned entries
+preserved. Executed220Bitrue native controls plus1compile-fail doc, registry3,
+TS construction4, and earlier305Binance controls on identical engine source PASS.
+Focused strict/checker/fmt gates pass; full fresh CI and HMAC-owner source review
+are still pending. No WASM/replay/size result is inferred from native tests.

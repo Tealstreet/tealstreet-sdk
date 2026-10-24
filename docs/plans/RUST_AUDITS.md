@@ -2956,3 +2956,12 @@ bytes and independent retry budgets, and withholds uncertain 500/408 signature
 replay through the shared classifier. Physical bracket legs keep one caller root.
 No managed write journal, accepted-ID Partial or zero-legacy claim; staged native
 owner lifetimes remain explicit. Independent source/caller/full-map review follows.
+
+Verification checkpoint: source/caller/full-map independent reviews are CLEAR at
+2024ec88acc after all fixes; no remaining High/Medium. The map reviewer explicitly
+confirmed typed-role reuse is semantic deduplication, with no hidden/renamed sites,
+21/14 exact source/manifest, original25assertions unchanged and5653unowned entries
+preserved. Executed220Bitrue native controls plus1compile-fail doc, registry3,
+TS construction4, and earlier305Binance controls on identical engine source PASS.
+Focused strict/checker/fmt gates pass; full fresh CI and HMAC-owner source review
+are still pending. No WASM/replay/size result is inferred from native tests.
