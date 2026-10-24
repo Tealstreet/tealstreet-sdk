@@ -316,6 +316,14 @@ impl<P> Cx<'_, P> {
             callback(self);
             return;
         }
+        self.with_recorded_owned_failure(error, callback);
+    }
+
+    fn with_recorded_owned_failure(
+        &mut self,
+        error: impl FnOnce() -> VenueError,
+        callback: impl FnOnce(&mut Self),
+    ) {
         let delivery = self
             .io
             .http_delivery
@@ -331,6 +339,26 @@ impl<P> Cx<'_, P> {
         {
             self.finish_owned_read_failure(&delivery, error());
         }
+    }
+
+    pub(in super::super::super) fn with_independent_plan_failure(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+        callback: impl FnOnce(&mut Self, VenueError),
+    ) -> Result<(), Error> {
+        let owned = self.io.http_delivery.as_ref().is_some_and(|delivery| {
+            self.io
+                .request_contexts
+                .plan_from_context(&delivery.context)
+                .is_some_and(|current| current.same_plan(plan))
+                && self.io.request_contexts.record_owned_read_failure(delivery)
+        });
+        if !owned {
+            return self.fail_plan(plan, error);
+        }
+        self.with_recorded_owned_failure(|| error.clone(), |cx| callback(cx, error.clone()));
+        Ok(())
     }
 
     #[inline(never)]

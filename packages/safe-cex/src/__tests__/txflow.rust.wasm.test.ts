@@ -18,6 +18,7 @@ const OPTIONS = { key: '', secret: '0x' + 'ab'.repeat(32), applicationId: WALLET
 
 /** Documented native envelopes, also used by harness/private-tape-txflow.mjs. */
 const recordedTxFlowTransport = () => {
+  const startedAt = performance.now();
   const requests: Array<Parameters<Transport['request']>[0]> = [];
   const sockets: Array<{ url: string; channel?: string; sent: unknown[] }> = [];
   const context = {
@@ -75,7 +76,7 @@ const recordedTxFlowTransport = () => {
     activeAssetData: { user: WALLET, coin: '1', leverage: { type: 'cross', mode: 'oneWay', value: 7 } },
   };
   const transport: Transport = {
-    now: () => 1_700_000_000_000,
+    now: () => 1_700_000_000_000 + performance.now() - startedAt,
     connect: (url, { channel, onOpen }) => {
       const socket = { url, channel, sent: [] as unknown[] };
       sockets.push(socket);
