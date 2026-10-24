@@ -703,3 +703,24 @@ reviewed dependency composition is #2020 `be661facc08`, which contains #2016
 `6e29a1414ae` and its owner-resolved physical/Command journal propagation.
 Execution against that genuine dependency remains separate from the current
 capability checks; neither dependency is described as an actual landing.
+
+## Ordinary Plan-expiry guard correction
+
+Capability head `4adac95464c` passed its dedicated barrier CI check, but its
+Bybit feature-mode check exposed an ordinary Plan regression: a host failure
+at the root deadline cleaned only the first of three pending peers. The
+conditional patch had incorrectly gated `expire_plan_before_http_failure`
+behind the barrier feature. That hook belongs to every HTTP Plan. Exact
+correction `7688542e46e54546` restores only its `http-plans` guard, preserving
+the exact preparation check before the common expiry sweep.
+
+The unchanged seven cleanup controls reproduce six PASS / one FAIL without
+the correction in the Bybit closure, and seven PASS with it; the barrier-on
+working control also passes seven. Corrected scoped strict Clippy passes.
+Core source review clears the one-line restoration. No assertion is changed.
+
+The intermediate same-head comparison on `4ad` measured web and Node equally:
+off 1,323,702 bytes, on 1,343,943 bytes, versus the fixed 1,343,488-byte budget.
+The off build has 19,786 bytes of headroom; enabled is diagnostic and is not
+a shipping adopter's budget approval. These measurements do not certify the
+corrected source: fresh CI and a same-head comparison remain required.

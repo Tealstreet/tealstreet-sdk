@@ -793,7 +793,7 @@ impl<V: Venue> Engine<V> {
         self.io.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
-        #[cfg(feature = "http-mutation-barriers")]
+        #[cfg(feature = "http-plans")]
         if self
             .io
             .managed_http
