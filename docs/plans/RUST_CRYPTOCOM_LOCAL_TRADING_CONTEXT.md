@@ -162,3 +162,15 @@ edit, the same committed 26 controls execute on unchanged tip Crypto.com source:
 18 assertion RED / 8 GREEN / zero ignored. The source delta against the actual
 tip is empty. Production is now authorized for exactly the eight listed sites;
 credential-selection sites and combo-5b source files must remain byte-exact.
+
+
+## Managed implementation checkpoint
+
+The implementation is limited to trading.rs, the exact eight removal-only
+request inventory entries, the already committed dedicated test and docs.
+Seven direct entry calls use the policy-data helper; the helper contains no
+issuer or lifecycle wrapper. Fixed mode calls done_local_setting with an empty
+Store projection and emits the original warning only on success. All 26 dedicated
+controls pass without assertion changes. Existing private jobs, signature bytes,
+queues, timers and asynchronous terminals are unchanged. Scoped crate/strict and
+inventory checks plus independent runtime reviews are in progress before push.

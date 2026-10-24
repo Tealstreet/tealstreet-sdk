@@ -6853,3 +6853,23 @@ version fences, contract-size scaling and buffer limits remain. Public reads
 carry no credential and publish neither command terminals nor account-auth
 evidence. Existing safe-cex startup/subscribed-order-book consumers require no
 new input; host dispatch uses the existing managed prepare/bind/claim protocol.
+
+
+## Crypto.com immediate trading command custody
+
+Seven immediate trading refusals now require genuine credential-free Mutation
+admission before publishing the native NotSent error. Invalid clocks, missing
+receipts or full owner capacity instead receive the shared typed refusal once;
+duplicate live ownership publishes no replacement native terminal. No native
+warning or command_error is emitted for denied admission. Finite business
+messages, error kinds, validation/key precedence and unchanged Store are retained.
+Local missing-key refusal carries no remote credential-health evidence.
+
+The fixed SetPositionMode acknowledgement uses shared LocalSetting admission
+without a Store projection: both initial hedged values remain unchanged. Its
+warning is emitted after successful completion, rather than before completion;
+failed/revoked admission emits no warning. Callers receive the same [] payload
+for admitted success. No arguments, signed wire bytes or remote write flow change.
+Empty order/cancel jobs and the asynchronous legacy trade terminals remain for
+the later managed-write conversion. Exactly eight request inventory occurrences
+are removed (Crypto.com 21 to 13); credential-selection inventory is unchanged.

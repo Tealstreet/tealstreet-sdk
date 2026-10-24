@@ -1655,3 +1655,16 @@ reference tests across26 targets pass (target counts include empty doc tests).
 Strict Clippy/fmt, bans and both inventory checks pass after the fix. Independent
 source/adversarial, caller and full-map delta reviews are CLEAR atbec93dd562a;
 architecture gate No. CI family size/CPU and other CI gates remain pending.
+
+
+## Crypto.com immediate trading managed controls
+
+Plan and original controls were committed before production. Re-executed on
+actual db6fa45bbb7 with unchanged source, the dedicated target produced 18
+assertion REDs and 8 working GREEN controls. After adoption all 26 pass, including
+all three non-finite clocks, full genuine-owner capacity and recovery, duplicate
+live owners, native validation/key precedence, missing-key auth-health isolation,
+fixed-mode Store preservation from either initial value, warning order, repeated
+slot reuse, private placement bytes/progress and legacy empty jobs. No ignored
+tests, removed financial assertion or fabricated custody; broad replay and
+WASM/CPU/memory checks belong to CI.

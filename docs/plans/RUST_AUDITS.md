@@ -3010,3 +3010,14 @@ current cleanup without DATA or newer-owner authority. The exact removal-only
 manifest delta is two MEXC lib fingerprints/occurrences,18 to16 in the venue.
 No private signer, account/history/trading reducer, scheduler or engine code
 changes in this slice. Family performance/size evidence remains a CI gate.
+
+
+## Crypto.com local trading admission
+
+Immediate cancel/amend validation, leverage validation, unsupported margin,
+missing primary key and placement-plan errors now consume actual Mutation entry
+authority before their existing NotSent projection. Fixed position mode uses
+shared LocalSetting with no financial Store change. Rejected admission supplies
+the only failure; revoked custody adds no fallback. Credential-free local errors
+do not count as remote auth evidence. Remote jobs/signing/classification and all
+other venue files remain unchanged; no engine or key-selection algorithm added.
