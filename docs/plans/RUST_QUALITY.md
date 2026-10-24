@@ -1833,3 +1833,39 @@ controls plus1compile-fail doc, registry3, TS construction4, and earlier305Binan
 controls on identical engine source PASS.
 Focused strict/checker/fmt gates pass; full fresh CI and HMAC-owner source review
 are still pending. No WASM/replay/size result is inferred from native tests.
+
+
+## GRVT unsigned candle Read Plan controls
+
+The original 23 candle controls now pass, including all formerly Prepare-gated
+suffixes: unclaimed DATA, typed preparation cleanup, six immediate transport
+attempts, physical timeout, original caller cap, stale delivery and full-pool
+recovery with all 255 retained peer Contexts validated. Six library controls
+include the login-independent preparation callback delegation guard. Native
+product/public fixtures use real managed release without changing assertions.
+Scoped cargo checks use four jobs serially; workspace, feature and WASM/size/
+replay checks belong to CI. No execution or budget claim is made for those gates.
+
+
+## GRVT public book command controls
+
+All24 original controls pass, including exact released deadlines, 256-owner
+capacity/local-empty refusal and255-survivor recovery, unclaimed/stale DATA,
+strict preparation+integrity, six released transport attempts/no seventh and
+physical-Timeout versus HTTP408/504 DATA. Rate-limit controls retain native
+NotSent, clamped hint/code/message, no outbound or deferral timer. All260 GRVT
+tests and scoped strict Clippy/fmt pass with four jobs and sequential cargo.
+Native depth/public/trading fixture changes only drive real managed release;
+all previous assertions remain. Full workspace/features/WASM/replay belong to CI.
+
+## OKX selected history identity controls
+
+Nine new native controls and the existing lookup eight pass before and after
+adoption. They pin selected signing key separately from declared route intent,
+keyless/filtered-primary precedence, secondary-only cache refusal, primary
+lookup, unsigned demo public trades, and later-page identity/cursor retention.
+The original real credential inventory RED is now green. Focused history/closed/
+lookup/signer/root suites pass89 tests across7 targets; strict all-target Clippy,
+formatting and request/credential ratchets cover the scoped change. Existing
+financial assertions and fixtures are unchanged. Independent source/caller/map
+reviews and fresh exact-head CI remain required before READY.

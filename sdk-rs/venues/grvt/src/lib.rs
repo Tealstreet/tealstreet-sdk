@@ -1,8 +1,11 @@
 //! GRVT perpetuals: deterministic market, account and order state machines.
 mod account;
+mod candles;
 mod depth_query;
 mod history;
 mod identity;
+#[cfg(test)]
+mod preparation_delegation_tests;
 mod sign;
 mod trading;
 mod wire;
@@ -10,7 +13,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
-use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
@@ -53,9 +56,7 @@ pub struct Pending {
     pub(crate) context: Option<safe_cex_engine::request_context::Context>,
 }
 pub(crate) enum Job {
-    BookQuery {
-        command: safe_cex_engine::CommandId,
-    },
+    BookQuery(Box<depth_query::Request>),
     Account(account::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
@@ -69,18 +70,14 @@ pub(crate) enum Job {
         malformed: Vec<String>,
         failed: bool,
     },
-    Candles {
-        command: u32,
-        rows: Vec<Candle>,
-        failed: bool,
-    },
+    Candles(Box<candles::Request>),
 }
 impl Job {
     fn is_private(&self) -> bool {
         match self {
-            Self::BookQuery { .. }
+            Self::BookQuery(_)
             | Self::Markets { .. }
-            | Self::Candles { .. }
+            | Self::Candles(_)
             | Self::Account(account::Request::Login) => false,
             Self::History(request) => !request.is_public(),
             _ => true,
@@ -229,6 +226,14 @@ impl Grvt {
         );
     }
     fn send_request(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending) {
+        if let Job::BookQuery(request) = pending.job {
+            self.book_query_send(cx, *request);
+            return;
+        }
+        if let Job::Candles(request) = pending.job {
+            self.candle_send(cx, *request);
+            return;
+        }
         if let Job::Trade(request) = &pending.job
             && let Err(error) = self.trade_pending_guard(cx, request)
         {
@@ -241,12 +246,9 @@ impl Grvt {
         }
         pending.auth_generation = self.account.generation;
         let (base, headers, at) = match &pending.job {
-            Job::BookQuery { .. } => (
-                self.mdg(),
-                vec![("Content-Type", "application/json".into())],
-                None,
-            ),
-            Job::Markets { .. } | Job::Candles { .. } => (
+            Job::BookQuery(_) => unreachable!(),
+            Job::Candles(_) => unreachable!(),
+            Job::Markets { .. } => (
                 self.mdg(),
                 vec![("Content-Type", "application/json".into())],
                 Some(ArrayAt::Envelope(&[&["r"], &["result"]])),
@@ -309,10 +311,12 @@ impl Grvt {
     }
     fn fail_pending(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending.job {
-            Job::BookQuery { command } => cx.fail(
-                command,
-                depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
-            ),
+            Job::BookQuery(request) => {
+                let _ = cx.fail_plan(
+                    &request.plan,
+                    depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
+                );
+            }
             Job::Identity { command } => self.identity_failed(cx, command, error),
             Job::Account(request) => self.account_failed(cx, request, error),
             Job::Trade(request) => {
@@ -327,7 +331,9 @@ impl Grvt {
                 );
                 self.startup_retry.failed(cx, ());
             }
-            Job::Candles { command, .. } => cx.fail(command, "GRVT candle read failed"),
+            Job::Candles(request) => {
+                let _ = cx.fail_plan(&request.plan, "GRVT candle read failed");
+            }
         }
     }
     fn fetch_markets(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -824,7 +830,7 @@ impl Venue for Grvt {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match &mut pending.job {
-            Job::Identity { .. } | Job::BookQuery { .. } => {}
+            Job::Identity { .. } | Job::BookQuery(_) => {}
             Job::Account(request) => self.account_item(cx, request, item),
             Job::Trade(request) => self.trade_item(cx, request, item),
             Job::History(request) => self.history_item(cx, request, item),
@@ -888,16 +894,7 @@ impl Venue for Grvt {
                     maker_fee: None,
                 });
             }
-            Job::Candles { rows, failed, .. } => {
-                let c = serde_json::from_str::<wire::Feed<'_>>(item)
-                    .ok()
-                    .and_then(|f| f.candle());
-                if let Some(c) = c {
-                    rows.push(c);
-                } else {
-                    *failed = true;
-                }
-            }
+            Job::Candles(request) => request.item(cx, item),
         }
     }
     fn on_response(
@@ -906,19 +903,23 @@ impl Venue for Grvt {
         mut pending: Pending,
         response: Response<'_>,
     ) {
+        if let Job::Candles(request) = pending.job {
+            self.candle_response(cx, *request, response);
+            return;
+        }
+        if let Job::BookQuery(request) = pending.job {
+            self.book_query_response(cx, *request, response);
+            return;
+        }
         if let Some(context) = pending.context.take() {
             self.login_answered(cx, context, &response);
-        }
-        if let Job::BookQuery { command } = pending.job {
-            self.book_query_response(cx, command, response);
-            return;
         }
         if let Err(error) = wire::check(&response) {
             let code = wire::code(&response);
             if code == "1000"
                 && !pending.auth_resent
                 && !matches!(pending.job, Job::Account(account::Request::Login))
-                && !matches!(pending.job, Job::Markets { .. } | Job::Candles { .. })
+                && !matches!(pending.job, Job::Markets { .. } | Job::Candles(_))
                 && !matches!(&pending.job,Job::History(request) if request.is_public())
             {
                 if let Job::History(request) = &mut pending.job
@@ -956,7 +957,7 @@ impl Venue for Grvt {
             return;
         }
         match pending.job {
-            Job::BookQuery { .. } => unreachable!(),
+            Job::BookQuery(_) => unreachable!(),
             Job::Identity { command } => self.identity_response(cx, command, response),
             Job::Account(request) => self.account_response(cx, request, response),
             Job::Trade(request) => self.trade_response(cx, request, response),
@@ -1047,22 +1048,7 @@ impl Venue for Grvt {
                     self.refresh = Some(cx.set_timer(300_000.));
                 }
             }
-            Job::Candles {
-                command,
-                mut rows,
-                failed,
-                ..
-            } => {
-                if failed {
-                    cx.fail(command, "Invalid GRVT candles");
-                } else {
-                    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
-                        Ok(data) => cx.done(command, data),
-                        Err(error) => cx.fail(command, error),
-                    };
-                }
-            }
+            Job::Candles(_) => unreachable!(),
         }
     }
     fn on_stream_error(
@@ -1071,6 +1057,15 @@ impl Venue for Grvt {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Job::Candles(request) = pending.job {
+            if cx
+                .validate_plan_delivery(&request.plan, &request.leg)
+                .is_ok()
+            {
+                let _ = cx.fail_plan(&request.plan, "GRVT candle read failed");
+            }
+            return;
+        }
         if wire::check(&response).is_err() {
             self.on_response(cx, pending, response);
         } else if let Job::History(request) = pending.job {
@@ -1079,7 +1074,33 @@ impl Venue for Grvt {
             self.fail_pending(cx, pending, "Missing GRVT response array");
         }
     }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Job::BookQuery(request) = pending.job {
+            let _ = cx.fail_plan(&request.plan, error);
+        } else if let Job::Candles(request) = pending.job {
+            let _ = cx.fail_plan(&request.plan, error);
+        } else {
+            self.on_sign_error(cx, pending, error);
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
+        if let Job::BookQuery(request) = pending.job {
+            let _ = cx.fail_plan(
+                &request.plan,
+                depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
+            );
+            return;
+        }
+        if let Job::Candles(request) = pending.job {
+            let _ = cx.fail_plan(&request.plan, "GRVT candle read failed");
+            return;
+        }
         if pending.context.take().is_some() {
             self.login_failed(cx, pending);
             return;
@@ -1103,11 +1124,8 @@ impl Venue for Grvt {
                     malformed.clear();
                     *failed = false;
                 }
-                Job::Candles { rows, failed, .. } => {
-                    rows.clear();
-                    *failed = false;
-                }
-                Job::Identity { .. } | Job::BookQuery { .. } => {}
+                Job::Candles(_) => unreachable!(),
+                Job::Identity { .. } | Job::BookQuery(_) => {}
                 Job::Account(request) => request.reset(),
                 Job::Trade(request) => request.reset(),
                 Job::History(request) => {
@@ -1126,6 +1144,34 @@ impl Venue for Grvt {
             }
             Job::History(request) => self.history_failed(cx, *request, error),
             _ => self.fail_pending(cx, pending, error),
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Job::BookQuery(request) = pending.job {
+            if matches!(
+                error.kind,
+                Some(safe_cex_engine::ErrorKind::Network | safe_cex_engine::ErrorKind::Timeout)
+            ) {
+                self.book_query_failed(cx, *request, error);
+            } else {
+                let _ = cx.fail_plan(&request.plan, error);
+            }
+        } else if let Job::Candles(request) = pending.job {
+            if matches!(
+                error.kind,
+                Some(safe_cex_engine::ErrorKind::Network | safe_cex_engine::ErrorKind::Timeout)
+            ) {
+                self.candle_failed(cx, *request);
+            } else {
+                let _ = cx.fail_plan(&request.plan, error);
+            }
+        } else {
+            self.on_request_failed(cx, pending, &error.message);
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1184,27 +1230,8 @@ impl Venue for Grvt {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if let Command::FetchOrderBook {
-            command,
-            ref symbol,
-            ..
-        } = command
-        {
-            if let Some(market) = cx.store.market(symbol) {
-                #[derive(Serialize)]
-                struct Request<'a> {
-                    i: &'a str,
-                    d: u32,
-                }
-                let body = serde_json::to_string(&Request {
-                    i: &market.id,
-                    d: 50,
-                })
-                .expect("book request serializes");
-                self.request(cx, "/lite/v1/book", body, Job::BookQuery { command });
-            } else {
-                cx.done(command, r#"{"bids":[],"asks":[]}"#.into());
-            }
+        if let Command::FetchOrderBook { ref symbol, .. } = command {
+            self.fetch_book_query(cx, symbol);
             return;
         }
 
@@ -1314,60 +1341,14 @@ impl Venue for Grvt {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval: timeframe,
                 limit,
                 from_ms,
                 to_ms,
             } => {
-                let Some(i) = interval(timeframe) else {
-                    cx.fail(command, timeframe.unsupported("GRVT"));
-                    return;
-                };
-                let Some(m) = cx.store.market(&symbol) else {
-                    cx.fail(command, "Unknown GRVT market");
-                    return;
-                };
-                #[derive(Serialize)]
-                struct Body<'a> {
-                    i: &'a str,
-                    t: &'static str,
-                    #[serde(rename = "i1")]
-                    interval: &'a str,
-                    #[serde(skip_serializing_if = "Option::is_none")]
-                    st: Option<String>,
-                    #[serde(skip_serializing_if = "Option::is_none")]
-                    et: Option<String>,
-                    l: u32,
-                }
-                if from_ms
-                    .into_iter()
-                    .chain(to_ms)
-                    .any(|v| !v.is_finite() || v < 0.)
-                {
-                    cx.fail(command, "Invalid GRVT candle bounds");
-                    return;
-                }
-                let body = serde_json::to_string(&Body {
-                    i: &m.id,
-                    t: "TRADE",
-                    interval: i,
-                    st: from_ms.map(|v| format!("{:.0}", v * 1e6)),
-                    et: to_ms.map(|v| format!("{:.0}", v * 1e6)),
-                    l: limit.unwrap_or(500).clamp(1, 1000),
-                })
-                .expect("candle request");
-                self.request(
-                    cx,
-                    "/lite/v1/kline",
-                    body,
-                    Job::Candles {
-                        command,
-                        rows: vec![],
-                        failed: false,
-                    },
-                );
+                self.fetch_candles(cx, symbol, timeframe, limit, from_ms, to_ms);
             }
             Command::PlaceOrders { command, .. }
             | Command::CancelOrders { command, .. }

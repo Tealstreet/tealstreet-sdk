@@ -7518,6 +7518,112 @@ native validation precedence. Supported history requests use their existing
 selection, signing, paging and completion paths.
 
 
+## GRVT unsigned FetchCandles caller bounds
+
+FetchCandles retains the original caller receipt through one unsigned Read Plan,
+with initial plus five immediate transport attempts. The explicit 20 s attempt
+bound (including route, Prepare, Bind and physical transport) and derived 120 s
+logical ceiling are NEW caller contracts: native Candles set timeout_ms=None.
+The original caller deadline always wins; retries never renew it, and a late
+selected attempt has a shortened window or refuses below 1 ms remaining.
+Unclaimed DATA, expired callers and stale attempts cannot publish candle rows.
+
+Status, malformed data and preparation refusals stay strict. Only released
+transport failures or physical timeouts can select a declared Read retry. The
+sixth failure terminates with no seventh request; rows staged by a failed attempt
+are discarded. Preparation errors retain shared typed fields and NotSent. Local
+interval/market/bounds precedence, wire, sorting and native errors are unchanged.
+The public request selects no credentials and waits on no Session or signer.
+All non-Candles preparation failures retain the inherited engine callback chain.
+The second integrator of this slice and #1905 runs its login-specific control.
+
+
+## GRVT unsigned FetchOrderBook Read Plan
+
+Independent public BookQuery now admits the genuine caller Read before market
+lookup. At capacity, an unknown symbol refuses through shared admission where
+the native path previously returned an empty book without I/O. Otherwise unknown
+market keeps its exact empty result through done_preflight. No fake HTTP leg.
+Known-symbol work retains one caller receipt under a single six-attempt Read
+Plan; the new 20 s admission/route/Prepare/Bind/physical bound and derived 120 s
+ceiling replace native timeout_ms=None. Original caller deadline wins, and a
+late retry is shortened or refused below 1 ms without renewal.
+
+Only released Network or physical Timeout can select the next immediate attempt.
+HTTP 408/504 Timeout DATA, rate-limit DATA, malformed snapshots and integrity
+failures stay strict with no transport retry. Native status/codec refusals retain
+Read NotSent and all venue metadata; rate-limit hints stay clamped with no new
+deferral timer. Shared entry refusal is Read outcome none; preparation refusal
+retains typed NotSent. This command neither publishes nor repairs Store books or
+private account/session state. Limit remains ignored, d=50 and native wire remain.
+
+### TxFlow immediate local command custody
+
+Fifteen local occurrences now consume genuine command entry through shared Read
+ownership or keyless Mutation refusal: initial history/candle validation,
+filtered empty income, cached leverage, unsupported book/STP and pre-I/O write
+refusals. FetchStpMode is Read and SetStpMode is Mutation; both keep native
+Unsupported/NotSent metadata. None/Expired caller waits use cause-aware rejection
+without a numeric fallback. Native JSON, validation order, finite-clock messages
+and no-I/O behavior are preserved. FetchAccount remains the shared pre-venue
+capability refusal; its unreachable native arm stays held. Physical HTTP,
+pagination, signed writes, queues, account/socket state and financial reducers
+are outside this slice. Inventory decreases from25 to10; #2031's ticker CPU
+change lands first and must be preserved on actual integration before freeze.
+
+## BreakoutProp options refusal is engine-owned
+
+FetchOptionChain, FetchOptionExpiries and FetchAccountGreeks are refused by the
+engine before command entry, because BreakoutProp declares
+`capabilities.options = false`. The venue's own options arm was unreachable and
+is deleted. Callers see the same result as before: "Options are not enabled on
+this account", no kind, no outcome and no I/O, at any entry clock. Nothing
+changes for SDK or TS callers. See
+[RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md).
+
+## OKX history selected identity retention
+
+History captures the engine-selected opaque identity on its original caller
+Read root. Every signed page queues through ReadLeg with that retained selection;
+it no longer maps a Context slot back into current venue credential options.
+Closed positions consume the existing read_slots declaration with their native
+primary-required policy. Ordinary private history remains Secondary else Primary,
+primary client-order lookup remains Primary, and public trades remain unsigned.
+
+Local empty/refusal/cached results are decided without effects before genuine
+entry admission, preserving keyless precedence and the secondary-presence cache
+guard. They cannot be preempted by a missing-selection auto-refusal. Page100,
+native100ms dequeue, immutable caller deadline,20s children, exact delivery,
+strict root/provider failures, native physical-failure shaping and demo headers
+remain unchanged. No new runtime policy or key-selection path is introduced.
+The credential inventory removes closed1 and reduces history2 to1; the remaining
+history mention is the protected snapshot-presence gate. lib/account/discovery,
+signer/host/engine code and existing fixtures are unchanged.
+Local early answers use a credential-free root: malformed opaque credential
+references no longer override a bad-range, unknown-symbol, empty-fills or cached
+lookup result. Remote reads still require shared selection and credential admission.
+
+## Polymarket unsigned midpoint seed batches
+
+Each unsigned POST /midpoints batch now admits an existing Background Read and
+passes through host Prepare/Bind/Claim. The exact JSON body, Content-Type,
+hundred-token partition, subset/bookless success and native quote overlay are
+retained. Private startup still proceeds independently of midpoint completion.
+
+NEW policy: each batch has a 20-second admission-to-expiry bound, including
+stalled route preparation. Expired DATA cannot decode or publish. Exact typed
+failure cleanup can cancel that operation, advance the next native batch and
+back off the failed offset independently. A fresh retry has its own bound.
+Unissued admission/queue refusal instead backs off that offset without walking
+all later offsets synchronously while capacity is unavailable. A new catalogue
+retires any replaced batch Contexts, fencing their late replies and resources.
+
+Exact Context ownership prevents old replies or host preparation failures from
+clearing a newer retry. Native warning text, retry timing, incremental ticker
+publication and out-of-batch filtering remain. No credentials, signing, command
+terminal, mutation fact or key-selection path is added.
+
+
 ## Backpack subscribed-book REST seeds
 
 Subscribed Backpack book snapshots use a keyless Background Read Context with
