@@ -386,7 +386,7 @@ impl ContextRegistry {
         until: Option<f64>,
     ) -> Result<Context, Error> {
         if let Some(parent) = parent {
-            self.validate(parent, now)?;
+            self.validate_send(parent, now)?;
             if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
                 return Err(Error::Invalid);
             }
@@ -395,6 +395,11 @@ impl ContextRegistry {
             (Some(own), Some(inherited)) if own != inherited => return Err(Error::Invalid),
             (own, inherited) => own.or(inherited),
         };
+        if let Some(Egress::Session(session)) = egress
+            && !self.sessions.live(session.generation())
+        {
+            return Err(Error::Revoked);
+        }
         if scope == Scope::Background && policy.operation == Operation::Mutation {
             return Err(Error::Invalid);
         }
@@ -459,8 +464,12 @@ impl ContextRegistry {
         parent: Option<&Context>,
     ) -> Result<Context, Error> {
         if let Some(parent) = parent {
-            self.validate(parent, now)?;
+            self.validate_send(parent, now)?;
             if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
+                return Err(Error::Invalid);
+            }
+            // A leg never moves to another session, nor takes its egress.
+            if parent.owner() != (Owner::Session { generation }) {
                 return Err(Error::Invalid);
             }
         }
@@ -470,8 +479,7 @@ impl ContextRegistry {
         self.sessions.admit(generation, &policy)?;
         self.contexts.retain(|_, old| old.deadline() > now);
         self.sessions.prune(&self.contexts);
-        // Session legs inherit their parent's egress like every other leg.
-        let egress = parent.and_then(Context::egress);
+        let egress = self.sessions.egress(generation);
         self.commit(
             Owner::Session { generation },
             identity,
@@ -586,7 +594,7 @@ impl ContextRegistry {
         policies: &[Policy],
         now: f64,
     ) -> Result<Vec<Context>, Error> {
-        self.validate(parent, now)?;
+        self.validate_send(parent, now)?;
         if parent.operation() != Operation::Mutation || delivery.context != *parent {
             return Err(Error::Revoked);
         }
@@ -697,6 +705,24 @@ impl ContextRegistry {
         }
         self.validate_handle(context)?;
         if self.superseded(context) {
+            return Err(Error::Revoked);
+        }
+        Ok(())
+    }
+
+    /// `validate` plus the session-egress retirement fence, for issuance and
+    /// physical send only. Delivery, streaming and write facts of an attempt
+    /// sent earlier use plain `validate`, so its outcome stays recordable.
+    pub(super) fn validate_send(&self, context: &Context, now: f64) -> Result<(), Error> {
+        self.validate(context, now)?;
+        self.egress_live(context)
+    }
+
+    /// The session-egress retirement fence alone.
+    pub(super) fn egress_live(&self, context: &Context) -> Result<(), Error> {
+        if let Some(Egress::Session(session)) = context.egress()
+            && !self.sessions.live(session.generation())
+        {
             return Err(Error::Revoked);
         }
         Ok(())
@@ -1482,6 +1508,10 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         egress: Egress,
     ) -> Result<Context, Error> {
+        // Session egress is minted only from a live session.
+        if matches!(egress, Egress::Session(_)) {
+            return Err(Error::Invalid);
+        }
         self.make_http_context(scope, policy, None, Some(egress))
     }
 
@@ -1489,7 +1519,7 @@ impl<P> Cx<'_, P> {
     /// raw deadline; integer timeout recomputation cannot round the bound up.
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
         self.io.request_contexts.validate_legacy(parent)?;
-        self.io.request_contexts.validate(parent, self.now)?;
+        self.io.request_contexts.validate_send(parent, self.now)?;
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
@@ -1555,7 +1585,7 @@ impl<P> Cx<'_, P> {
         if evidence == RetryEvidence::DefinitiveRefusal {
             return Err(Error::RetryForbidden);
         }
-        self.io.request_contexts.validate(context, self.now)?;
+        self.io.request_contexts.validate_send(context, self.now)?;
         context.retry(evidence, self.now)
     }
 
@@ -1687,7 +1717,7 @@ impl<P> Cx<'_, P> {
         };
         self.io.request_contexts.validate_completion(
             id,
-            self.io.http_delivery.as_ref(),
+            super::completion_delivery(&self.io.http_delivery),
             Some(context),
         )
     }
@@ -1922,7 +1952,7 @@ impl<P> Cx<'_, P> {
             self.fence_absent_orders(context);
         }
         // Session writes get one attempt per operation: no resend grant.
-        if !resendable || !matches!(context.owner(), Owner::Command { .. }) {
+        if !resendable || matches!(context.owner(), Owner::Session { .. }) {
             return Ok(None);
         }
         match self.io.request_contexts.grant_resend(&delivery) {
@@ -2101,7 +2131,7 @@ impl<P> Cx<'_, P> {
         context: &Context,
         grant: ResendGrant,
     ) -> Result<Context, Error> {
-        self.io.request_contexts.validate(context, self.now)?;
+        self.io.request_contexts.validate_send(context, self.now)?;
         if self.io.request_contexts.latest_write(context)? != Some(grant.attempt) {
             return Err(Error::Revoked);
         }
