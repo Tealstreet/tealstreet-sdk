@@ -22,6 +22,8 @@ def modes():
     closures = {}
     grouped = {(): ['engine baseline'], ('order-locks', 'test-support'): ['explicit CI control'],
                # No family enables serial Plans before adoption; keep them compiled and tested.
+               # The family closures WITHOUT serial-plans are the off-build control; after
+               # an adopter, workspace tests unify it on, so never fold those modes away.
                ('http-plans', 'order-locks', 'serial-plans', 'test-support'): ['serial Plan control']}
     for family in families:
         tree = subprocess.check_output([
