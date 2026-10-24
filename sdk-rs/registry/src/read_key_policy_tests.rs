@@ -381,7 +381,7 @@ fn backpack_history_declares_public_read_in_registry_and_bridge() {
         construction::read_credentials_policy("backpack"),
         PublicRead
     );
-    let bridge = construction::bridge("backpack", &EngineOptions::default());
+    let bridge = construction::bridge("backpack", &options("{}"));
     assert_eq!(bridge.read_credentials, PublicRead);
     assert_eq!(
         serde_json::to_value(bridge).unwrap()["readCredentials"],

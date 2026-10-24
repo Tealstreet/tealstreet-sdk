@@ -216,3 +216,12 @@ hidden or removed, and no inventory allowance is added.
 The actual provider seam is now landed as8efb4548c39755a6a180b5a381de7c58fafb06c3.
 Integrate that immutable commit, rerun originals against its native source, and
 carry compatibility/source reviews before qualifying the composed candidate.
+
+The actual8efb native originals reproduce13GREEN/18assertRED. Candidate
+qualification uses a separate local Cargo target from the pristine baseline
+archive; a shared-target run was rejected after it reused the baseline test
+binary. Fresh candidate Backpack tests pass274 with the same pre-existing
+ignored account test. The new registry bridge pin uses the existing JSON
+options helper (EngineOptions has no Default); that compile correction is not
+RED evidence. The real WASM integration gate is now wired into only Backpack's
+existing family CI job after the family build, with no new job or CPU change.
