@@ -27,12 +27,15 @@ impl Http {
 
     /// The unsigned transport intent used when staging this exact recipe.
     pub fn unsigned(&self) -> RequestParts {
-        self.params.clone().render(
-            self.method,
-            self.path,
-            vec![("X-SOURCE-KEY", "Tealstreet".into())],
-        )
+        unsigned(self.method, self.path, &self.params)
     }
+}
+
+/// The unsigned transport intent for a request, before any identity signs it.
+pub fn unsigned(method: Method, path: &'static str, params: &Params) -> RequestParts {
+    params
+        .clone()
+        .render(method, path, vec![("X-SOURCE-KEY", "Tealstreet".into())])
 }
 
 impl SignStep for Http {

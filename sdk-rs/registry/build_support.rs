@@ -68,13 +68,30 @@ struct RemoteSigningWire {
     exchange_name: String,
     extra_data: Option<RemoteExtraData>,
     request_id: Option<String>,
+    seconds_suffix: Option<SecondsSuffix>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum RemoteExtraData {
     BybitExpiry,
     BinanceSpot,
-    OkxTimestamp,
+    SecondsTimestamp,
+}
+/// The signed literal after a seconds login stamp, e.g. `GET` + `/user/verify`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SecondsSuffix {
+    method: String,
+    path: String,
+}
+impl SecondsSuffix {
+    fn valid(&self) -> bool {
+        (1..=16).contains(&self.method.len())
+            && self.method.bytes().all(|byte| byte.is_ascii_uppercase())
+            && (2..=256).contains(&self.path.len())
+            && self.path.starts_with('/')
+            && self.path.bytes().all(|byte| byte.is_ascii_graphic())
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -328,7 +345,13 @@ pub fn generate(json: &str) -> Result<String, String> {
                         || id.bytes().any(|byte| byte.is_ascii_control())
                 })
                 || (wire.request_id.is_some()
-                    && !matches!(wire.extra_data, Some(RemoteExtraData::BinanceSpot))))
+                    && !matches!(wire.extra_data, Some(RemoteExtraData::BinanceSpot)))
+                || matches!(wire.extra_data, Some(RemoteExtraData::SecondsTimestamp))
+                    != wire.seconds_suffix.is_some()
+                || wire
+                    .seconds_suffix
+                    .as_ref()
+                    .is_some_and(|suffix| !suffix.valid()))
         {
             return Err("invalid delegated wire declaration".into());
         }
