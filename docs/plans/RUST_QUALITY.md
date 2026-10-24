@@ -1665,3 +1665,15 @@ original deadline, preparation failure, clock/capacity recovery and duplicate
 owner/delivery. All pass with zero ignored. Existing candle and spot fixtures
 retain native assertions while driving managed preparation. The new probe opens
 no socket, so it makes no standalone socket-composition claim.
+
+
+## Hyperliquid local settings and schedule controls
+
+Original25 controls execute12 assertion REDs/13 GREEN on unchanged9d344 source.
+The exact target, strengthened before production to validate all255 retained
+peers after capacity recovery, now passes25/25 without ignored controls. Ten
+capacity cases cover nine lexical sites, including both commands sharing the
+merged-spot success line. Native result/error/Store, duplicate-owner, invalid
+clock, zero-wait and schedule4999/5000/None boundary assertions are retained.
+The existing trading, spot and schedule targets pass unchanged. No broad local
+workspace/all-feature or WASM/performance build substitutes for exact-head CI.

@@ -138,3 +138,25 @@ of all255 remaining peer Contexts after exact first-peer retirement and recovery
 then checks the observed count. The original25 controls still execute12 intended
 REDs/13 GREEN/0ignored on unchanged9d344 source; the new suffix remains gated
 until cutover. No direct next_id introspection claim is made by integration tests.
+
+
+## Production adoption
+
+Production follows original peer-strengthening checkpoint8079968c66f. All25
+unchanged controls are now GREEN, including full-capacity refusal before the
+one-way projection, exact first-peer retirement/recovery and validation of every
+other255 Contexts. No original assertion was weakened. The9 exact terminals now
+use the existing shared APIs: four LocalSetting success sites, five genuine
+Mutation admissions followed by fail_context with native errors. No per-venue
+admission helper or new shared API is introduced. Existing credential checks,
+valid writes, job queues, nonce/signature work, ACKs and reconciliation remain
+byte-exact. The two changed production functions only touch the named local exits.
+
+The25 new controls and the existing trading, spot and schedule-cancel targets
+pass with four cargo jobs, run sequentially. Scoped strict Clippy/fmt and final
+integrated ratchets are separate receipts; broader workspace/feature/WASM/replay
+validation runs in CI. Native/source reviews follow an immutable committed pin.
+
+Scoped strict library/new-target Clippy with -D warnings and formatting pass.
+Native targeted receipt: trading32 + spot43 + schedule11 plus new25 =111 PASS,
+zero ignored. Existing financial/wire assertions and fixture files are unchanged.

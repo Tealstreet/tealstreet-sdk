@@ -3021,3 +3021,15 @@ two working controls plus nine compiling assertion REDs on unchanged production.
 All eleven now pass alongside ten existing candle and43 spot controls. Two gated
 new-test metadata expectations were corrected to the existing perps NotSent
 contract; primary RED boundaries and native wire/result assertions are retained.
+
+
+## Hyperliquid local setting terminal authority
+
+Nine local numeric terminals use shared LocalSetting success or genuine Mutation
+admission plus fail_context. The Store one-way projection is inside the sealed
+local-setting closure; all validation and key-check precedence remain native.
+Only trading22->15 and trading/schedule3->1 inventory occurrences change, family
+31->22, with every retained hash count and foreign manifest byte preserved.
+Valid writes, queues, signatures, nonces, account, History, Builder and sockets
+remain exact. Original checks precede source and expose custody gaps, not new
+financial outcome defects or an altered signing model.
