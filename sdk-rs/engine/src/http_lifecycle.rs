@@ -771,7 +771,10 @@ impl<V: Venue> Engine<V> {
         // Session writes change no orders: no reconciliation record and no
         // write-revision fence over unrelated command reconciliation.
         let journal = managed.lifecycle.context().operation() == Operation::Mutation
-            && matches!(managed.lifecycle.context().owner(), Owner::Command { .. });
+            && matches!(
+                managed.lifecycle.context().owner(),
+                Owner::Command { .. } | Owner::Execution { .. }
+            );
         if journal {
             let capture = if self.io.streams.contains_key(&request) {
                 Err(Error::Invalid)

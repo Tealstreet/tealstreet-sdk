@@ -142,3 +142,22 @@ With the owner-generic lookup, the same test settles that call, releases the
 sibling, and projects the same final Unknown with both evidence and accepted IDs
 to each observer exactly once. The physical owner retires once; late replies
 change neither terminals nor callbacks. Ten focused controls pass with order-locks.
+
+## Frozen planned-execution restack
+
+The branch plain-merges frozen #1919 `2f4a08b449c` at `712d2e5bbda`.
+Readiness and Session fixtures, plus incoming venue Plan constructors, explicitly
+retain `independent_calls: false`. The caller documentation keeps the incoming
+file followed by this change's unchanged suffix.
+
+The existing physical founder/follower control exposed a semantic conflict:
+the Session integration restricted reconciliation capture to Command owners,
+so an Execution-owned Mutation's 408 reached the DATA codec. The merged source
+produced nine passing controls and that assertion failure. The correction
+includes both Command and Execution Mutation owners in reconciliation capture;
+Session writes remain excluded. Release metadata, admission and write-mark
+ordering remain on the existing shared path.
+
+The unchanged independent controls now pass: ten with all features, nine with
+only `http-plans`; none are ignored. The #1919 owner cleared this restoration
+of pre-Session coverage, including non-physical Execution legs.
