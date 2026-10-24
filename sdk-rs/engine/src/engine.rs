@@ -1535,6 +1535,8 @@ struct Io<P> {
     #[cfg(feature = "managed-sockets")]
     socket_driver: crate::socket_driver::Driver,
     #[cfg(feature = "managed-sockets")]
+    socket_message: Option<(crate::socket_lifecycle::Epoch, f64)>,
+    #[cfg(feature = "managed-sockets")]
     managed_sockets: bool,
     #[cfg(feature = "managed-sockets")]
     socket_failed: bool,
@@ -1627,6 +1629,8 @@ impl<P> Default for Io<P> {
             #[cfg(feature = "managed-sockets")]
             socket_driver: Default::default(),
             #[cfg(feature = "managed-sockets")]
+            socket_message: None,
+            #[cfg(feature = "managed-sockets")]
             managed_sockets: false,
             #[cfg(feature = "managed-sockets")]
             socket_failed: false,
@@ -1646,6 +1650,20 @@ impl<P> Default for Io<P> {
             socket_continuation_bytes: 0,
         }
     }
+}
+
+/// The delivery that may authorize or forbid a command's completion. A
+/// session delivery is no command's, so its callbacks settle like a
+/// delivery-less (socket or timer) callback; it does not bind waiters.
+fn completion_delivery(
+    delivery: &Option<request_context_registry::Delivery>,
+) -> Option<&request_context_registry::Delivery> {
+    delivery.as_ref().filter(|delivery| {
+        !matches!(
+            delivery.context.owner(),
+            crate::request_context::Owner::Session { .. }
+        )
+    })
 }
 
 impl<P> Io<P> {
@@ -2402,7 +2420,7 @@ impl<P> Cx<'_, P> {
         let delivery = if observer {
             None
         } else {
-            self.io.http_delivery.as_ref()
+            completion_delivery(&self.io.http_delivery)
         };
         let seal = self
             .io
@@ -3610,12 +3628,18 @@ impl<V: Venue> Engine<V> {
             self.io.request_contexts.enter_delivery(delivery);
         }
         let previous = std::mem::replace(&mut self.io.http_delivery, delivery.clone());
+        #[cfg(feature = "managed-sockets")]
+        let socket_message = self.io.socket_message.take();
         self.handle_event_scoped(now, event, physical_timeout);
         #[cfg(feature = "http-plans")]
         {
             self.io.http_history_failure = None;
         }
         self.io.http_delivery = previous;
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.io.socket_message = socket_message;
+        }
         if let Some(delivery) = delivery.as_ref() {
             self.io.request_contexts.exit_delivery(delivery);
         }

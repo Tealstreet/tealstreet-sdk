@@ -326,3 +326,17 @@ incoming-first resolution with the branch sections retained once. Every non-doc
 path equals the automatic merge, and the integrated provenance/bans check passes.
 The 29 controls per mode, compatibility targets, strict Clippy and fmt also pass
 on the integrated engine. Fresh exact-head CI remains a gate.
+
+## Post-5b composition checkpoint
+
+The plain merge of `9486269b636` with the actual COMBO-5b landing
+`219d4bc6725` composes the history-failure proof clear with the incoming
+socket-message scope at the common event callback and both socket callback
+boundaries. The physical-timeout argument stays on the shared handler. The
+Plan terminal, binding validators and all history assertions remain unchanged.
+
+Scoped validation at jobs4: history21, binding4, private history4 and native
+socket snapshot16 pass, with no ignored controls. The no-default engine check,
+scoped strict Clippy, credential-selection checker and full bans pass. This is
+the first COMBO-6b pin; its single CI is deferred to the chain end per the
+auditor, and the later actual COMBO-6a landing must still be integrated.
