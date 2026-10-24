@@ -11,8 +11,11 @@ fn engine() -> Engine<WeexFutures> {
     })
 }
 fn response(e: &mut Engine<WeexFutures>, id: RequestId, body: &str) {
+    response_at(e, id, 1_773_295_700_000.0, body);
+}
+fn response_at(e: &mut Engine<WeexFutures>, id: RequestId, now: f64, body: &str) {
     e.handle(
-        1_773_295_700_000.0,
+        now,
         Event::HttpResponse {
             request: id,
             response: Response {
@@ -527,16 +530,18 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
 #[test]
 fn rest_book_queries_leave_live_depth_generation_and_ticker_account_state_unchanged() {
     let (mut e, socket) = started();
+    let at = 1_773_295_700_000.0;
     e.handle(
-        1.0,
+        at + 1.0,
         Event::Command(Command::SubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
     );
     let id = request(e.drain_actions().collect(), "/depth");
-    response(
+    response_at(
         &mut e,
         id,
+        at + 1.5,
         r#"{"lastUpdateId":160,"bids":[["100","2"]],"asks":[]}"#,
     );
     e.drain_actions().for_each(drop);
@@ -554,21 +559,26 @@ fn rest_book_queries_leave_live_depth_generation_and_ticker_account_state_unchan
         ),
         (8, 200, r#"{"code":40006,"msg":"invalid api key"}"#),
     ] {
+        let now = at + 2.0 + f64::from(command - 7) * 2.0;
         e.handle(
-            2.0,
+            now,
             Event::Command(Command::FetchOrderBook {
                 command,
                 symbol: "BTCUSDT".into(),
                 limit: Some(1),
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
-        assert_eq!(actions.len(), 1);
-        let Action::Http(request) = &actions[0] else {
-            panic!("independent REST query")
-        };
+        let requests: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, now)
+            .into_iter()
+            .filter_map(|action| match action {
+                Action::Http(request) => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(requests.len(), 1);
+        let request = &requests[0];
         e.handle(
-            3.0,
+            now + 1.0,
             Event::HttpResponse {
                 request: request.id,
                 response: Response {
@@ -617,7 +627,7 @@ fn rest_book_queries_leave_live_depth_generation_and_ticker_account_state_unchan
         );
     }
     e.handle(
-        4.0,
+        at + 6.0,
         Event::WsMessage {
             socket,
             text: r#"{"e":"depth","s":"BTCUSDT","U":161,"u":161,"b":[["100","4"]],"a":[]}"#,
@@ -626,31 +636,35 @@ fn rest_book_queries_leave_live_depth_generation_and_ticker_account_state_unchan
     e.drain_actions().for_each(drop);
     assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(100.0, 4.0)]);
     e.handle(
-        5.0,
+        at + 7.0,
         Event::Command(Command::FetchOrderBook {
             command: 9,
             symbol: "BTCUSDT".into(),
             limit: None,
         }),
     );
-    let query = request(e.drain_actions().collect(), "/depth");
+    let query = request(
+        safe_cex_engine::test_support::prepared_actions(&mut e, at + 7.0),
+        "/depth",
+    );
     e.handle(
-        6.0,
+        at + 8.0,
         Event::Command(Command::UnsubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
     );
     e.drain_actions().for_each(drop);
     e.handle(
-        7.0,
+        at + 9.0,
         Event::Command(Command::SubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
     );
     let seed = request(e.drain_actions().collect(), "/depth");
-    response(
+    response_at(
         &mut e,
         query,
+        at + 10.0,
         r#"{"lastUpdateId":9999,"bids":[["1","3"]],"asks":[]}"#,
     );
     assert!(e.drain_actions().any(|a| matches!(
@@ -658,9 +672,10 @@ fn rest_book_queries_leave_live_depth_generation_and_ticker_account_state_unchan
         Action::Notice(safe_cex_engine::Notice::CommandDone { command: 9, .. })
     )));
     assert!(e.book("BTCUSDT").is_none());
-    response(
+    response_at(
         &mut e,
         seed,
+        at + 11.0,
         r#"{"lastUpdateId":200,"bids":[["99","2"]],"asks":[]}"#,
     );
     e.drain_actions().for_each(drop);

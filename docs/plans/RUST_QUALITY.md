@@ -1641,3 +1641,56 @@ registry3 and SDK constructor5 pass; strict Phemex Clippy passes. The exact
 combined staging map is17F/18O ->16F/16O, with one temporary sign_http; trading
 stays4F/4O via its approved release-metadata re-expression. No checker predicate
 or negative assertion is weakened. Actual #1970/#1974 and final CI remain gates.
+
+## MEXC unsigned Background Read verification
+
+Plan3690a27236f precedes original controlsc58c123d68c:18 executed controls,
+11 assertion RED/7 working GREEN/zero ignored against unchanged production.
+The same18 assertions pass after managed adoption. They cover parked dispatch,
+preparation refusal, deadline equality, expired stream end, native startup retry,
+exact500ms depth recovery, old-response isolation, a concurrent live symbol,
+malformed-envelope429 precedence, wire values and buffered version replay.
+All221 MEXC native tests pass across18 targets including the empty doc target;
+strict all-target/all-feature Clippy, scoped fmt, full bans and both request
+ratchets (15 checker tests) pass. Existing native test expectations stay intact;
+public fixture collectors now drive the shared prepared-action executor at their
+explicit event times. Signed secondary probes use an inert Identity continuation
+instead of a public Markets continuation.
+
+Two independent runtime findings received their own assertion-RED commit221bfbfc2ff
+and fixbec93dd562a: expired cleanup metadata must not suppress native failure
+recovery; accepted catalogue custody must retire before successor admission. All
+20 controls now pass; refreshed223 MEXC tests across19 targets and305 Binance
+reference tests across26 targets pass (target counts include empty doc tests).
+Strict Clippy/fmt, bans and both inventory checks pass after the fix. Independent
+source/adversarial, caller and full-map delta reviews are CLEAR atbec93dd562a;
+architecture gate No. CI family size/CPU and other CI gates remain pending.
+
+
+### Hyperliquid spot candle custody controls
+
+Eleven dedicated controls cover standalone/merged spot on both networks, exact
+native wire and rows, validation order, real Prepare/Bind/Claim, early delivery,
+original deadline, preparation failure, clock/capacity recovery and duplicate
+owner/delivery. All pass with zero ignored. Existing candle and spot fixtures
+retain native assertions while driving managed preparation. The new probe opens
+no socket, so it makes no standalone socket-composition claim.
+
+
+## Crypto.com immediate trading managed controls
+
+Plan and original controls were committed before production. Re-executed on
+actual db6fa45bbb7 with unchanged source, the dedicated target produced 18
+assertion REDs and 8 working GREEN controls. After adoption all 26 pass, including
+all three non-finite clocks, full genuine-owner capacity and recovery, duplicate
+live owners, native validation/key precedence, missing-key auth-health isolation,
+fixed-mode Store preservation from either initial value, warning order, repeated
+slot reuse, private placement bytes/progress and legacy empty jobs. No ignored
+tests, removed financial assertion or fabricated custody; broad replay and
+WASM/CPU/memory checks belong to CI.
+
+The scoped Crypto.com suite passes 174 tests across 16 targets; strict all-target
+Clippy, formatting, bans and the 15 request inventory tests pass. Read-only
+credential scanning confirms no key-selection term change, and all production
+outside Crypto.com trading.rs stays base-exact. Original controls remain
+byte-identical to their RED checkpoint. CI is still required before readiness.
