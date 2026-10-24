@@ -530,16 +530,21 @@ Proposed implementation is one thin native refusal helper called by those two
 arms. It admits the genuine command through existing admit_http_command with
 Operation::Mutation, no credential, timeout 20,000ms, no pacing and Never retry;
 then calls fail_context with the original not_sent(message).kind(Unsupported).
+Before admission, use the complete shared receipt gate: command_wait None calls
+reject_unstamped_command(Mutation), Expired calls reject_expired_command(Mutation),
+and only Remaining reaches admission. No missing/expired receipt mints a fresh
+20-second root. Rejected already emitted its refusal; Revoked grants no terminal
+or numeric fallback. This corrects the initial helper proposal per owner review.
 This is the existing shared local-refusal pattern, with no venue issuer, numeric
 completion fallback, owner table, scheduler or local classification policy.
-Admission failure is already terminal and must never be finalized again.
+Only CommandEntryError::Rejected is already terminal; no admission error permits a second finalizer.
 Production waits for independent plan/exact-hook review.
 
 Commit this plan first, then separate assertion RED controls on unchanged native
 source. Working controls pin both messages/fields for public and private keyless
 setup, both setting values, one terminal, unchanged financial/settings Store and
 no physical work; immediate command reuse must remain possible. Hostile controls
-pin InvalidInput/NotSent for invalid command clocks and Capacity/NotSent at the
+pin InvalidInput/NotSent for invalid command clocks and the shared Internal/NotSent capacity error at the
 shared 256-owner bound. Duplicate IDs must preserve the parked prior owner and
 its later successful delivery; this may already be a working engine guard and
 must not be labeled an original failure unless reproduced. No missing-API or
@@ -550,3 +555,9 @@ Backpack tests/strict Clippy with CARGO_BUILD_JOBS=4, one build at a time; fmt,
 bans and both inventory checks follow. Update CALLERS with resulting behavior,
 not proof status. Obtain source/caller/map review, push a draft and run fresh
 Rust CI with one watcher at least 120 seconds apart. No merge without its window.
+
+
+Test compile correction before any original RED claim: the initial control used
+nonexistent ErrorKind::Capacity. Capacity is a Context admission cause projected
+as existing ErrorKind::Internal; the test now pins that actual shared contract.
+The failed compile is not assertion-RED evidence and no production changed.

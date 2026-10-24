@@ -183,7 +183,7 @@ fn capacity(setting: Setting) {
     }
     let actions = invoke(&mut e, setting, 257, true, 11.);
     let error = failure(&actions, 257);
-    assert_eq!(error.kind, Some(ErrorKind::Capacity));
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
     unchanged(&e);
     complete_parked(&mut e, first, 1);
