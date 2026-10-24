@@ -205,6 +205,69 @@ fn primary_client_lookup_never_uses_secondary_signing() {
     signed(&physical(&a, "/trade/order?"), false);
 }
 #[test]
+fn secondary_only_disables_cached_primary_lookup_before_credential_refusal() {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+    for secondary in [false, true] {
+        let mut e = ready(options(false, secondary, false));
+        e.store_mut().set_orders(vec![Order {
+            id: "cached".into(),
+            parent_id: None,
+            status: OrderStatus::Closed,
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 100.,
+            amount: 2.,
+            filled: 2.,
+            remaining: 0.,
+            reduce_only: false,
+            close: None,
+            client_order_id: Some("cached1".into()),
+            time_in_force: None,
+            last_update: 123.,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }]);
+        let before = e.account_snapshot_frame(NOW).to_vec();
+        let a = send(
+            &mut e,
+            query(Query::OrderByClientId {
+                symbol: "BTCUSDT".into(),
+                client_order_id: "cached1".into(),
+            }),
+            NOW,
+        );
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+        );
+        if secondary {
+            assert_eq!(a.iter().filter(|a| matches!(a,Action::Notice(Notice::CommandFailed { command: OWNER, error }) if error.message=="OKX client order lookup requires credentials")).count(),1);
+            assert!(
+                !a.iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+            );
+        } else {
+            let result = a
+                .iter()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::CommandDone {
+                        command: OWNER,
+                        result,
+                    }) => Some(result),
+                    _ => None,
+                })
+                .unwrap();
+            let result: serde_json::Value = serde_json::from_str(result).unwrap();
+            assert_eq!(result["found"], true);
+            assert_eq!(result["order"]["id"], "cached");
+        }
+        assert_eq!(e.account_snapshot_frame(NOW), before);
+    }
+}
+#[test]
 fn public_trades_stay_unsigned_with_demo_headers_even_with_secondary() {
     let mut opts = options(false, true, false);
     opts.testnet = true;

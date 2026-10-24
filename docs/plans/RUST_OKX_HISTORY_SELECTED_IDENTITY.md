@@ -144,3 +144,8 @@ fixture assertion incorrectly equated physical HttpRequest.route with managed
 routing intent; the immediate preparer leaves that transport field None. That
 assumption was corrected before counting originals: raw Prepare intent and
 provider-produced key headers are pinned separately, with no claimed routing RED.
+
+Review closure adds the missing cached-order edge: with neither key/no secondary
+the same cache returns FOUND; adding only a secondary disables it and yields the
+native missing-primary failure, no HTTP and no financial Store mutation. The
+new target now passes9 controls; existing lookup8 remain GREEN. Strict passes.
