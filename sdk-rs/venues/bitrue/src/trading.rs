@@ -7,6 +7,17 @@ use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Outcome, Respon
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+fn local_mutation_policy() -> safe_cex_engine::request_context::Policy {
+    use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+    Policy {
+        operation: Operation::Mutation,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Trading {
     acknowledged: HashMap<String, Target>,
@@ -824,41 +835,45 @@ impl Bitrue {
                 .iter()
                 .any(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
         });
-        let id = match &command {
-            Command::PlaceOrders { command, .. }
-            | Command::CancelOrders { command, .. }
-            | Command::CancelSymbolOrders { command, .. }
-            | Command::AmendOrder { command, .. }
-            | Command::SetLeverage { command, .. } => *command,
-            Command::SetMarginType { command, .. } => {
-                cx.fail(
-                    *command,
+        match &command {
+            Command::PlaceOrders { .. }
+            | Command::CancelOrders { .. }
+            | Command::CancelSymbolOrders { .. }
+            | Command::AmendOrder { .. }
+            | Command::SetLeverage { .. } => {}
+            Command::SetMarginType { .. } => {
+                let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                    return true;
+                };
+                let _ = cx.fail_context(
+                    &context,
                     not_sent("Bitrue margin mode cannot be changed through the API")
                         .kind(ErrorKind::Unsupported),
                 );
                 return true;
             }
-            Command::SetPositionMode {
-                command,
-                hedged,
-                symbol: _,
-            } => {
+            Command::SetPositionMode { hedged, .. } => {
                 if *hedged {
-                    cx.fail(
-                        *command,
+                    let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                        return true;
+                    };
+                    let _ = cx.fail_context(
+                        &context,
                         not_sent("Bitrue supports one-way positions only")
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.store.set_hedged(false);
-                    cx.done(*command, "[]".into());
+                    let _ = cx.done_local_setting("[]".into(), |store| store.set_hedged(false));
                 }
                 return true;
             }
             _ => return false,
         };
         if let Err(error) = self.trade_plan(cx, command.clone()) {
-            cx.fail(id, not_sent(error));
+            let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                return true;
+            };
+            let _ = cx.fail_context(&context, not_sent(error));
             return true;
         }
         self.trading.queue.push_back(command);
