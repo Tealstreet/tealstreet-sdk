@@ -6,6 +6,7 @@ use crate::account_wire::*;
 use crate::sign::{Credentials, Params};
 pub use metadata::{Leg as MetadataLeg, fail as fail_metadata_plan};
 use safe_cex_engine::Level;
+use safe_cex_engine::credential_selection::Slots;
 use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
@@ -15,6 +16,7 @@ use safe_cex_engine::model::{
     PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::request_context::{Session, SessionPolicy};
+use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json::ArrayAt};
@@ -75,6 +77,8 @@ type OrderMeta = (Order, String, String, bool, String);
 
 #[derive(Default)]
 pub struct Account {
+    /// Configured keys, built once; reads choose among them by role.
+    pub(crate) slots: Slots<Identity>,
     started: bool,
     mode_known: bool,
     mode_in_flight: bool,
@@ -283,6 +287,12 @@ fn response_error(response: Response<'_>, allow_missing_code: bool) -> Option<St
 }
 
 impl Account {
+    pub(crate) fn with_slots(slots: Slots<Identity>) -> Self {
+        Self {
+            slots,
+            ..Self::default()
+        }
+    }
     pub fn handles_socket(&self, socket: SocketId) -> bool {
         self.socket == Some(socket)
     }
@@ -378,6 +388,8 @@ impl Account {
             match cx.open_session(SessionPolicy {
                 credential: Some(crate::managed::session_credential(credentials, method)),
                 repeat_safe: true,
+                // Signed: routed by its credential, never a session egress.
+                private_egress: None,
             }) {
                 Ok(session) => self.session = Some(session),
                 Err(_) => {
@@ -399,7 +411,7 @@ impl Account {
         if let Err((pending, error)) = queued {
             let pending = match *pending {
                 Pending::Signed(signed) => {
-                    crate::managed::finish(cx, signed.context);
+                    crate::managed::finish(cx, signed.context().cloned());
                     signed.inner
                 }
                 pending => pending,
@@ -436,7 +448,7 @@ impl Account {
         });
         match crate::managed::read(
             cx,
-            credentials,
+            &self.slots,
             crate::managed::Read {
                 method: Method::Get,
                 path,
@@ -445,15 +457,15 @@ impl Account {
             },
             Pending::Account(request),
             safe_cex_engine::request_context::Scope::Background,
+            scope,
         ) {
-            Ok(id) => {
-                if let Some(scope) = scope {
-                    tag_read(cx, id, Method::Get, credentials, scope);
-                }
-            }
+            Ok(_) => {}
             Err((pending, error)) => {
                 let (pending, context) = match *pending {
-                    Pending::Signed(signed) => (signed.inner, signed.context),
+                    Pending::Signed(signed) => {
+                        let context = signed.context().cloned();
+                        (signed.inner, context)
+                    }
                     pending => (pending, None),
                 };
                 if let Pending::Account(request) = pending {

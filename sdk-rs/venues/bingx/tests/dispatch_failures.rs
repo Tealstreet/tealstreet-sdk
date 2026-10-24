@@ -29,7 +29,8 @@ struct Harness {
     http: Vec<HttpRequest>,
     errors: Vec<VenueError>,
     done: Vec<String>,
-    timers: Vec<safe_cex_engine::TimerId>,
+    timers: Vec<(safe_cex_engine::TimerId, f64)>,
+    now: f64,
     progress: Vec<safe_cex_engine::model::OrderIdentityReceipt>,
 }
 impl Harness {
@@ -61,11 +62,12 @@ impl Harness {
             errors: vec![],
             done: vec![],
             timers: vec![],
+            now: 1_000.,
             progress: vec![],
         }
     }
     fn event(&mut self, event: Event<'_>) {
-        self.engine.handle(1_000., event);
+        self.engine.handle(self.now, event);
         let mut queue = VecDeque::from(self.engine.drain_actions().collect::<Vec<_>>());
         while let Some(action) = queue.pop_front() {
             match action {
@@ -77,7 +79,7 @@ impl Harness {
                     } => {
                         assert!(self.routes.insert(request.id, preparation).is_none());
                         self.engine.http_prepared(
-                            1_000.,
+                            self.now,
                             preparation,
                             Prepared {
                                 id: request.id.0,
@@ -92,7 +94,7 @@ impl Harness {
                     } => {
                         assert_eq!(self.routes.remove(&request.id), Some(preparation));
                         if matches!(
-                            self.engine.claim_http(1_000., permit),
+                            self.engine.claim_http(self.now, permit),
                             Ok(Claim::Released(_))
                         ) {
                             self.http.push(request);
@@ -109,8 +111,8 @@ impl Harness {
                 Action::Http(r) => self.http.push(r),
                 Action::Notice(Notice::CommandFailed { error, .. }) => self.errors.push(error),
                 Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(result),
-                Action::SetTimer { timer, .. } => self.timers.push(timer),
-                Action::ClearTimer { timer } => self.timers.retain(|id| *id != timer),
+                Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => self.timers.retain(|(id, _)| *id != timer),
                 Action::Notice(Notice::CommandProgress { receipts, .. }) => {
                     self.progress.extend(receipts)
                 }
@@ -395,8 +397,10 @@ fn later_history_page_signer_refusal_discards_buffered_rows_and_releases_owner()
     h.release();
     h.reply(r#"{"code":0,"data":{"fill_orders":[{"tradeId":"fill-one","orderId":"order-one","symbol":"BTC-USDT","time":500,"price":"95","qty":"1","side":"BUY","commission":"0"}]}}"#);
     assert!(h.done.is_empty() && h.errors.is_empty());
-    assert_eq!(h.timers.len(), 1);
-    let timer = h.timers.remove(0);
+    assert_eq!(h.timers.iter().filter(|(_, at)| *at == 1_200.).count(), 1);
+    let index = h.timers.iter().position(|(_, at)| *at == 1_200.).unwrap();
+    let (timer, at) = h.timers.remove(index);
+    h.now = at;
     h.event(Event::TimerFired { timer });
     h.refuse(SignError::Refused);
     assert_eq!(h.error(), &SignError::Refused.venue_error());
