@@ -8,8 +8,9 @@ pub(in super::super) struct State {
     pub(super) policy: PreflightPolicy,
     pub(super) receipt_cap: Option<(u64, f64)>,
     // At most one entry; storage is reserved fallibly before ID admission.
-    call: Vec<Call>,
-    handoff: Option<Delivery>,
+    pub(super) call: Vec<Call>,
+    pub(super) handoff: Option<Delivery>,
+    pub(super) activation: super::ready::Activation,
 }
 
 impl State {
@@ -19,6 +20,7 @@ impl State {
             receipt_cap: None,
             call: Vec::new(),
             handoff: None,
+            activation: super::ready::Activation::Initial,
         }
     }
 
@@ -80,7 +82,7 @@ impl ContextRegistry {
         Ok(())
     }
 
-    fn owner_from_context(&self, context: &Context) -> Result<Preflight, Error> {
+    pub(super) fn owner_from_context(&self, context: &Context) -> Result<Preflight, Error> {
         let Owner::Command { id, generation } = context.owner() else {
             return Err(Error::Invalid);
         };
@@ -184,7 +186,7 @@ impl ContextRegistry {
         }
     }
 
-    fn preflight_state(&self, handle: &Preflight) -> Result<&State, Error> {
+    pub(super) fn preflight_state(&self, handle: &Preflight) -> Result<&State, Error> {
         let owner = self.preflight_owner(handle)?;
         let CommandPhase::Preflight(state) = &owner.phase else {
             unreachable!()
@@ -192,7 +194,7 @@ impl ContextRegistry {
         Ok(state)
     }
 
-    fn preflight_state_mut(&mut self, handle: &Preflight) -> Result<&mut State, Error> {
+    pub(super) fn preflight_state_mut(&mut self, handle: &Preflight) -> Result<&mut State, Error> {
         self.preflight_owner(handle)?;
         let Owner::Command { id, .. } = handle.owner() else {
             unreachable!()
@@ -275,6 +277,7 @@ impl<P> Cx<'_, P> {
         &self,
         handle: &Preflight,
     ) -> Result<(PreflightPolicy, Option<Context>), Error> {
+        self.validate_preflight_activation(handle)?;
         let state = self.io.request_contexts.preflight_state(handle)?;
         if let Some(call) = state.call.first() {
             self.validate_preflight_delivery(handle, &call.context)?;
@@ -322,11 +325,7 @@ impl<P> Cx<'_, P> {
         admission: &Admission,
         reason: Error,
     ) {
-        let Ok(Some(current)) = self
-            .io
-            .request_contexts
-            .owned_admission(&admission.context, self.io.http_delivery.as_ref())
-        else {
+        let Ok(Some(current)) = self.owned_http_admission(&admission.context) else {
             return;
         };
         if current.attempt != admission.attempt {
@@ -509,6 +508,7 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         terms: CallTerms,
     ) -> Result<Context, Error> {
+        self.validate_preflight_activation(handle)?;
         let state = self.io.request_contexts.preflight_state(handle)?;
         if !state.call.is_empty() || !state.admits_handoff(self.io.http_delivery.as_ref()) {
             return Err(Error::Revoked);
