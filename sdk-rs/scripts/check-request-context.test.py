@@ -370,5 +370,111 @@ class RequestContextBan(unittest.TestCase):
         self.assertEqual(dict(ban.fingerprints(original)), old)
         self.assertEqual(dict(ban.fingerprints(reviewed)), new)
 
+
+def in_cx_fn(body, name='cx'):
+    return 'fn handle(&mut self, ' + name + ": &mut Cx<'_, Pending>) { " + body + ' }'
+
+
+class PrecisionRed(unittest.TestCase):
+    """RUST_REQUEST_CONTEXT_PRECISION.md: only resolved Cx calls are legacy."""
+
+    def prod(self, source):
+        prod, test = ban.context_fingerprints(source)
+        self.assertFalse(test)
+        return prod
+
+    def test_conservative_matches_record_nothing(self):
+        for body in [
+            'if matches!(request, Request::Get) { return; }',
+            'let label = format!("{} {}", request.path, done);',
+            'self.request(cx, command);', 'self.fail(cx, command, error);',
+            'pending.request.retry();', 'h.done(row);', 'list.done();',
+            'sign::request(&secret, payload);', 'assert!(row.done());',
+        ]:
+            with self.subTest(body=body):
+                self.assertTrue(ban.fingerprints(in_cx_fn(body)))
+                self.assertFalse(self.prod(in_cx_fn(body)))
+
+    def test_receiver_is_resolved_by_type_not_name(self):
+        call = 'c.done(command, "null".into());'
+        lexical = ban.fingerprints('c.done(command, "null".into());')
+        self.assertEqual(self.prod(in_cx_fn(call, 'c')), lexical)
+        self.assertEqual(self.prod("fn f(c: &mut safe_cex_engine::Cx<'_, P>) { " + call + ' }'), lexical)
+        self.assertEqual(self.prod('fn f() { each(|c, row| { ' + call + ' }); }'), lexical)
+        self.assertFalse(self.prod('fn f(c: &mut Other) { ' + call + ' }'))
+        # The innermost binding wins: a typed non-Cx closure parameter shadows.
+        self.assertFalse(self.prod(in_cx_fn('each(|c: &mut Row| { ' + call + ' });', 'c')))
+        # Real sites keep their exact fingerprint, so the rebaseline is a subset.
+        real = 'cx.request(Method::Get, "https://venue/read", pending);'
+        self.assertEqual(self.prod(in_cx_fn(real)), ban.fingerprints(real))
+
+    def test_qualified_cx_forms_stay_counted(self):
+        for body in ['Cx::request(cx, 1);', '<Cx as Trait>::fail(cx, 1);',
+                     'Alias::done(cx, 1);', 'let send = Cx::fail;',
+                     'safe_cex_engine::Cx::request(cx, 1);']:
+            with self.subTest(body=body):
+                self.assertEqual(sum(self.prod(in_cx_fn(body)).values()), 1)
+        self.assertFalse(self.prod(in_cx_fn('sign::request(secret, 1);')))
+
+    def test_cx_alias_and_rebinding_fail_closed(self):
+        for source in [
+            in_cx_fn('let c = cx; c.done(1, row);'),
+            in_cx_fn('let c = &mut *cx; c.done(1, row);'),
+            in_cx_fn('(cx).request(1);'),
+            in_cx_fn('let s = S { cx }; s.cx.done(1, row);'),
+            in_cx_fn('let s = S { inner: cx };'),
+            in_cx_fn('let pair = (cx, 1);'),
+            in_cx_fn('let all = [cx];'),
+            in_cx_fn('match cx { c => c.done(1, row) }'),
+            in_cx_fn('if let c = cx { c.done(1, row); }'),
+            'fn f() { each(|c, row| { let d = c; d.done(1, row); }); }',
+            "use safe_cex_engine::Cx as Ctx;",
+            "type Alias<'a> = Cx<'a, Pending>;",
+            "struct Holder<'a> { cx: &'a mut Cx<'a, Pending> }",
+            "fn f(cx: Option<&mut Cx<'_, Pending>>) {}",
+            "fn f<'a>(cx: &'a mut Cx<'_, Pending>) -> &'a mut Cx<'_, Pending> { cx }",
+            "impl Legacy for Cx<'_, Pending> {}",
+        ]:
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                ban.context_fingerprints(source)
+        # Allowed value positions: member access, call argument, declaration.
+        ban.context_fingerprints(in_cx_fn('let t = cx.now; helper(cx, 1); other(&mut *cx); each(cx, |cx, row| cx.done(1, row));'))
+        ban.context_fingerprints("fn f(apply: impl FnMut(&mut Cx<'_, Pending>, Row)) {}")
+
+    def test_test_regions_are_listed_separately(self):
+        call = 'cx.done(command, "null".into());'
+        expected = ban.fingerprints(call)
+        for source in [
+            '#[cfg(test)] mod tests { use super::*; ' + in_cx_fn(call) + ' }',
+            '#[cfg(test)] ' + in_cx_fn(call),
+            '#[cfg(test)] #[allow(dead_code)] ' + in_cx_fn(call),
+        ]:
+            with self.subTest(source=source):
+                self.assertEqual(ban.context_fingerprints(source), ({}, expected))
+        self.assertEqual(ban.context_fingerprints('#[cfg(feature = "x")] ' + in_cx_fn(call)), (expected, {}))
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            src = root / 'venues/reference/src'
+            (src / 'history').mkdir(parents=True)
+            (src / 'lib.rs').write_text('mod history; #[cfg(test)] mod secondary_tests; ' + in_cx_fn(call))
+            (src / 'history.rs').write_text('#[cfg(test)] mod family_tests; mod shape;')
+            (src / 'history/family_tests.rs').write_text(in_cx_fn(call))
+            (src / 'history/shape.rs').write_text(in_cx_fn(call))
+            (src / 'secondary_tests.rs').write_text('mod nested; ' + in_cx_fn(call))
+            (src / 'secondary_tests').mkdir()
+            (src / 'secondary_tests/nested.rs').write_text(in_cx_fn(call))
+            (src / 'undeclared_tests.rs').write_text(in_cx_fn(call))
+            with mock.patch.object(ban, 'ROOT', root):
+                prod, test = ban.request_sites()
+            digest = dict(expected)
+            self.assertEqual(prod, {p: digest for p in [
+                'venues/reference/src/history/shape.rs', 'venues/reference/src/lib.rs',
+                'venues/reference/src/undeclared_tests.rs']})
+            self.assertEqual(test, {p: digest for p in [
+                'venues/reference/src/history/family_tests.rs',
+                'venues/reference/src/secondary_tests.rs',
+                'venues/reference/src/secondary_tests/nested.rs']})
+
+
 if __name__ == '__main__':
     unittest.main()
