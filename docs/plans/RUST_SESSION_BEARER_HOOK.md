@@ -519,8 +519,10 @@ before landing rather than adding a second, parallel one.
 - `SessionBearer::Ready { headers: SessionHeaders, revision }`.
 - `SessionHeaders` holds 1 to `MAX_SESSION_HEADERS` (4) distinct
   (case-insensitive) venue-declared names with `SecretHeaderValue` values.
-  Transport-owned names (Host, Content-Length, Transfer-Encoding, Connection,
-  Content-Type) and invalid names are refused. `SessionHeaders::authorization`
+  Transport-owned and hop-by-hop names (Host, Content-Length,
+  Transfer-Encoding, Connection, Content-Type, Keep-Alive,
+  Proxy-Authorization, Proxy-Authenticate, TE, Trailer, Upgrade, Expect) and
+  invalid names are refused. `SessionHeaders::authorization`
   is the single-header case, so Paradex and BreakoutProp DXAPI are unchanged.
 - One revision covers the whole set. All existing fences apply to it:
   - a just-in-time read at prepare;
@@ -542,14 +544,20 @@ before landing rather than adding a second, parallel one.
     Ready, rather than issuing into NotReady.
   - The venue's revision is strictly monotonic and overflow fails closed.
 
-Controls (`session_bearer.rs`), mutation-checked: removing the collision check
-fails the collision test.
+Controls (`session_bearer.rs`). Mutation checks:
+- dropping the recipe-header clause of `attach_session_headers`'s collision
+  check fails `a_recipe_header_colliding_with_the_bundle_is_refused`;
+- dropping its `signer_headers` clause fails
+  `a_signed_header_colliding_with_the_bundle_is_refused` (the Signer site).
 - A GRVT-style bundle attaches together and refreshes together on a revision
   move, unsigned and signed.
-- A recipe `Cookie` colliding with the bundle is refused before Bind, with
-  health unchanged.
+- A recipe `Cookie` colliding with the bundle is refused NotSent before Bind,
+  with health unchanged.
+- A signing step writing `Cookie` on the packet or among the signer headers
+  is refused NotSent before the signed Bind.
+- A two-header bundle overflowing a crowded recipe is refused NotSent.
 - `SessionHeaders::new` refuses an empty set, 5 entries, duplicate names,
-  transport names and an invalid name, and redacts its `Debug` output.
+  every transport and hop-by-hop name and an invalid name, and redacts its `Debug` output.
 
-Results: 29 default and 35 with barriers; engine lib 868; clippy
+Results: 31 default and 37 with barriers; engine lib 868; clippy
 `-D warnings` in both modes.

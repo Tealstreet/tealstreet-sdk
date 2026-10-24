@@ -1921,6 +1921,13 @@ fn session_header_sets_are_bounded_and_redacted() {
         "Transfer-Encoding",
         "Connection",
         "Content-Type",
+        "keep-alive",
+        "Proxy-Authorization",
+        "Proxy-Authenticate",
+        "te",
+        "Trailer",
+        "Upgrade",
+        "Expect",
         "bad name",
     ] {
         assert_eq!(
