@@ -1,11 +1,13 @@
 //! Unsigned public-trades custody and unchanged signed-read compatibility.
+mod support;
 use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Error, HttpAction, Prepared, RoutingIntent};
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Notice, Query, RequestRoute, Response,
     VenueError,
 };
-use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+use safe_cex_venue_phemex::PhemexPerpetuals;
+use support::Options;
 
 type TestEngine = Engine<PhemexPerpetuals>;
 const NOW: f64 = 1_710_000_000_000.;
@@ -18,7 +20,7 @@ fn engine(primary: bool, secondary: bool) -> TestEngine {
     engine_with_mode(primary, secondary, false)
 }
 fn engine_with_mode(primary: bool, secondary: bool, public_data_only: bool) -> TestEngine {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         public_data_only,
         key: primary.then(|| "fixture-primary".into()),
         secret: primary.then(|| "fixture-material".into()),
@@ -28,7 +30,7 @@ fn engine_with_mode(primary: bool, secondary: bool, public_data_only: bool) -> T
             passphrase: None,
         }),
         ..Options::default()
-    }));
+    });
     e.store_mut().set_markets(vec![Market {
         id: "BTC/USDT:USDT".into(),
         symbol: SYMBOL.into(),
