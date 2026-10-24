@@ -295,3 +295,17 @@ is outside this single-family invocation; full combined-host coverage remains
 the PR CI gate. Logs: `/tmp/codex-phemex-read-owner-host-original.log` and
 `/tmp/codex-phemex-read-owner-host-green.log`. Current landing integration and
 fresh one-head PR CI remain separate from this focused same-artifact receipt.
+
+Fixture correction `777d8d8b400` is integrated with actual
+`35a62a8b72e6598ebb290dc0ad173c7e42ff855b` at `3bb1e71df24`. README and CALLERS
+are the only manual resolutions; no source or manifest union was needed.
+The entire Phemex source/test subtree remains exact `906bd894561`.
+On this integrated source the dedicated read-owner target passes 27/27, zero
+ignored; normal bans and all ratchets pass. A fresh Phemex-only WASM rebuild
+also passes the same three selected compiled-host controls with no assertion
+changes. Its artifact hash is
+`bccae8380bc753271305fa9fee03a97a29a6dea85740cbaf73ca67f6d3d8c88c`.
+Scoped JS syntax checks and ESLint pass. Independent zs5e83 source/fixture
+preservation review is CLEAR at exact `3bb1e71df24`; it did not rerun WASM or CI.
+The prior core custody review is CLEAR at `906bd894561`; current integration
+carry and fresh qualifying PR CI remain separately attributed gates.
