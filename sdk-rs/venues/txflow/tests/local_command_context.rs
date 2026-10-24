@@ -189,7 +189,6 @@ entry_control!(candle_interval_requires_valid_entry, CandleInterval);
 entry_control!(candle_range_requires_valid_entry, CandleRange);
 entry_control!(cached_leverage_requires_valid_entry, CachedLeverage);
 entry_control!(missing_leverage_requires_valid_entry, MissingLeverage);
-entry_control!(account_query_requires_valid_entry, Account);
 entry_control!(book_query_requires_valid_entry, Book);
 entry_control!(read_stp_requires_valid_entry, ReadStp);
 entry_control!(write_stp_requires_valid_entry, WriteStp);
@@ -242,10 +241,7 @@ fn finite_native_branches_keep_exact_results_errors_and_no_io() {
             (_, Notice::CommandFailed { command, error }) => {
                 assert_eq!(*command, 91);
                 assert_eq!(error.message, native_message(case), "{case:?}");
-                let unsupported = matches!(
-                    case,
-                    Case::Account | Case::Book | Case::ReadStp | Case::WriteStp
-                );
+                let unsupported = matches!(case, Case::Book | Case::ReadStp | Case::WriteStp);
                 assert_eq!(
                     error.kind,
                     if unsupported {
@@ -277,4 +273,18 @@ fn settled_local_command_id_can_be_reused_without_physical_work() {
             Notice::CommandFailed { command: 91, .. }
         ));
     }
+}
+
+#[test]
+fn unsupported_account_capability_keeps_the_shared_prevenue_refusal() {
+    let mut engine = fresh();
+    engine.handle(f64::NAN, Event::Command(command(Case::Account)));
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let Notice::CommandFailed { command, error } = terminal(&actions) else {
+        panic!("unsupported account capability succeeded");
+    };
+    assert_eq!(*command, 91);
+    assert_eq!(error.message, "This action is not supported on this venue");
+    assert_eq!(error.kind, None);
+    assert_eq!(error.outcome, None);
 }

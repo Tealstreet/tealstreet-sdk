@@ -8,14 +8,16 @@ its index row and original-source tests. No production or inventory change.
 ## Inventory and scope
 
 The canonical checker inventory contains 25 TxFlow occurrences at this base.
-Select 16 immediate completion occurrences; eventual adoption leaves 9. This
+Source re-verification selects 15 immediate completion occurrences; eventual
+adoption leaves 10. The initial 16-site candidate included one branch already
+preempted by the engine account-capability guard. This
 slice needs no unlanded engine API, G1, G2, G2b, G2c or signer admission.
 
 | Source at the base | Selected occurrences | Native branches |
 | --- | ---: | --- |
 | history.rs:255-316 | 6 | Unsupported public trades / client-ID lookup, missing testnet account, invalid history bounds, unknown/ambiguous symbol, filtered empty income history. |
 | lib.rs:517-535 | 3 | Candle market, interval and range validation. |
-| trading.rs:289-332 | 7 | Cached leverage success/failure, unsupported account/book/STP, unauthenticated write, invalid built write. |
+| trading.rs:289-332 | 6 | Cached leverage success/failure, unsupported book/STP, unauthenticated write, invalid built write. |
 
 The shared FetchStpMode/SetStpMode lexical occurrence represents two operations:
 Fetch is Read, Set is Mutation. The declaration follows the genuine command,
@@ -24,7 +26,8 @@ remain Read even when native errors already contain Unsupported/NotSent fields;
 retain that metadata. Writes use keyless Mutation admission and exact failure,
 not Read casting. No successful Mutation is selected.
 
-Nine held occurrences cover raw physical issuance (account, public info/exchange
+Ten held occurrences include the unreachable native FetchAccount refusal and
+raw physical issuance (account, public info/exchange
 and trading) and physical candle/write completion. Valid history retains native
 CursorHistory/Completion, payloads, pagination and failure handling. This plan
 does not grant retained callbacks a fresh command entry, change accepted IDs,
@@ -66,7 +69,7 @@ assertions. Preserve existing native history/trading/candle/account tests.
 
 After the original receipt, source remains held until the requested count and
 scope are reported. Eventual production keeps all original assertions and prunes
-exactly 16 occurrences; all nine held and foreign inventory entries remain.
+exactly 15 occurrences; all ten held and foreign inventory entries remain.
 Scoped native tests, strict Clippy, formatting, request-context checks and full
 bans precede draft review. CI must report TxFlow family size/headroom; no profile,
 budget or assertion adjustment substitutes for the gate. No READY or merge claim
@@ -82,3 +85,15 @@ public ticker application byte-for-byte. No wire.rs edit is needed here.
 Managed socket and account production are outside this slice. Signal any source
 composition to its owner before freezing; do not resolve a semantic overlap by
 changing either contract. Current plan/tests run on 9330 as requested.
+
+## Original fixture correction before receipt
+
+The first scoped run exposed a fixture provenance mistake: Engine::handle
+intercepts FetchAccount before venue entry because TxFlow declares account
+lookup Unsupported (engine.rs:3805). Its native trading.rs arm cannot be reached
+through genuine entry, so it is held rather than inventing a wrapper/capability
+or treating its NaN assertion as an adoption RED. Keep the shared pre-venue
+unsupported reply as a GREEN. The finite-clock control now expects that exact
+public behavior. The other 16 cases still target genuine entry (two STP
+operations share one lexical occurrence). Do not claim the first run as
+17 genuine REDs or an all-GREEN native control receipt.
