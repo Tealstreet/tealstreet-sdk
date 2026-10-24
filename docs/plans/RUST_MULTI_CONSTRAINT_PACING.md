@@ -109,3 +109,21 @@ via request_context_group_plan::normalize. Their narrow helper must call our
 canonical expanded-floor zero resolver with the same Result signature; normalize
 stays unchanged. They own that future composition and alias no-ID controls;
 this PR owns resolver/storage/check/released and prepared-signing wait custody.
+
+## Source checkpoint
+
+Original RED commit5b348d03356 is retained. Implementation adds flat resolved set
+storage and validate_zero on SendPacing, the default-empty venue declaration,
+construction wiring, pre-allocation invalid-group rejection and prepared signer
+waiting on the existing managed timer. No Context/Policy/Plan or host-wire format
+change. Final Claim's admission/deadline/signature sequence is unchanged except
+that its existing check/released calls now resolve all primitive constraints.
+
+The new dedicated target passes15/15 on default-off engine features with
+ test-support. Added cases cover alias/primitive shared state, denial/second-bound
+atomicity, WOO+PUT, maximum member/outer floors, canonical expanded zero checks,
+configuration rejection, raw-bound expiry, early/duplicate wake, route-expiry
+reprepare and a later competing primitive release before delayed final Claim.
+Recipe preparation counter proves no invocation before the expanded algo floor.
+Combined feature and existing lifecycle regression checks remain in progress;
+independent review, strict checks and fresh CI precede readiness.
