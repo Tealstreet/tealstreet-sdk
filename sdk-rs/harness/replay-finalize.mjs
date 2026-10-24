@@ -1,3 +1,7 @@
+export function captureReplayState(snapshot, audit, { final = false } = {}) {
+  return { ...snapshot, protocolErrors: final ? audit?.errors() ?? [] : [] };
+}
+
 /**
  * Capture the logical end of a replay before memory collection yields to live
  * timers. Both implementations include reconstruction in the CPU window and

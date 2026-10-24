@@ -5,7 +5,7 @@ use safe_cex_engine::signing::{
     Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef,
     Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
-use sha2::{Digest, Sha256, Sha512};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use zeroize::Zeroizing;
 mod key_material;
@@ -533,12 +533,15 @@ impl LocalSigner {
                             mac.update(&message);
                             mac.finalize().into_bytes().to_vec()
                         }
+                        #[cfg(any(test, feature = "hmac-sha512"))]
                         Algorithm::HmacSha512 => {
-                            let mut mac = Hmac::<Sha512>::new_from_slice(key)
+                            let mut mac = Hmac::<sha2::Sha512>::new_from_slice(key)
                                 .map_err(|_| SignError::InvalidRequest)?;
                             mac.update(&message);
                             mac.finalize().into_bytes().to_vec()
                         }
+                        #[cfg(not(any(test, feature = "hmac-sha512")))]
+                        Algorithm::HmacSha512 => return Err(SignError::Unsupported),
                         Algorithm::Sha256SecretSuffix => {
                             let mut hash = Sha256::new();
                             hash.update(&message);
@@ -561,8 +564,7 @@ impl LocalSigner {
                         Algorithm::Es256 => primitives::es256(key, &message)?,
                         Algorithm::Secp256k1Digest => primitives::secp256k1_digest(key, &message)?,
                         Algorithm::StarkDigest => primitives::stark_digest(key, &message)?,
-                        // Reserved: no Schnorr contract is defined yet.
-                        Algorithm::SchnorrDigest => return Err(SignError::Unsupported),
+                        Algorithm::SchnorrDigest => primitives::schnorr_digest(key, &message)?,
                     }
                 }
             };
@@ -612,7 +614,8 @@ fn asymmetric(algorithm: Algorithm) -> bool {
 /// Mirrors the `sign_now` arms; keep the two in step.
 fn implemented(algorithm: Algorithm) -> bool {
     match algorithm {
-        Algorithm::HmacSha256 | Algorithm::HmacSha512 | Algorithm::Sha256SecretSuffix => true,
+        Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => true,
+        Algorithm::HmacSha512 => cfg!(any(test, feature = "hmac-sha512")),
         Algorithm::ZkLinkContract => cfg!(feature = "zklink"),
         Algorithm::Ed25519
         | Algorithm::Es256
@@ -878,6 +881,201 @@ mod tests {
         assert_eq!(
             signer.key(secondary.passphrase.as_ref().unwrap()).unwrap(),
             b"own"
+        );
+    }
+
+    /// R1: the provider arm signs exactly what the legacy Lighter signer signs,
+    /// with the payload split as entropy (first 32 bytes) then input.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_digest_matches_the_legacy_hedged_lighter_signature() {
+        let key =
+            "01000000000000000000000000000000000000000000000000000000000000000000000000000000";
+        let (signer, ids) = LocalSigner::from_json(
+            serde_json::json!({"primary":{"key":"lighter-api-key","secret":format!("0x{key}"),"secretEncoding":"hex"}})
+                .to_string(),
+        )
+        .unwrap();
+        let signing = ids.primary.unwrap().signing;
+        let sign = |entropy: [u8; 32], input: &[u8]| {
+            let mut payload = entropy.to_vec();
+            payload.extend_from_slice(input);
+            signer.sign_now(&SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![Operation::Sign {
+                    algorithm: Algorithm::SchnorrDigest,
+                    key: signing.clone(),
+                    payload: vec![PayloadPart::Bytes { bytes: payload }],
+                }],
+            })
+        };
+        let key_bytes: Vec<u8> = (0..40)
+            .map(|i| u8::from_str_radix(&key[i * 2..i * 2 + 2], 16).unwrap())
+            .collect();
+        // A canonical word, then words at and above p, which legacy and Go reduce.
+        for input in [
+            vec![1, 0, 0, 0, 0, 0, 0, 0],
+            vec![1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff],
+            vec![0xff; 16],
+        ] {
+            for entropy in [[0u8; 32], [0x5a; 32]] {
+                let legacy = crate::lighter::schnorr_sign(
+                    &input,
+                    &key_bytes,
+                    crate::lighter::hedged_nonce(&input, &key_bytes, &entropy).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(legacy.len(), 80);
+                assert_eq!(sign(entropy, &input).unwrap().values, vec![legacy]);
+            }
+        }
+        // Entropy alone, or input that is not whole words, is refused.
+        assert_eq!(sign([0; 32], &[]), Err(SignError::InvalidRequest));
+        assert_eq!(sign([0; 32], &[1, 2, 3]), Err(SignError::InvalidRequest));
+    }
+
+    fn schnorr_request(key: KeyRef, payload: Vec<u8>) -> SignRequest {
+        SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::SchnorrDigest,
+                key,
+                payload: vec![PayloadPart::Bytes { bytes: payload }],
+            }],
+        }
+    }
+
+    fn schnorr_signer(key: &[u8]) -> (LocalSigner, KeyRef) {
+        let hex: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
+        let (signer, ids) = LocalSigner::from_json(
+            serde_json::json!({"primary":{"key":"k","secret":hex,"secretEncoding":"hex"}})
+                .to_string(),
+        )
+        .unwrap();
+        (signer, ids.primary.unwrap().signing)
+    }
+
+    /// R1: payloads without full entropy, or without whole input words, are refused.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_digest_refuses_truncated_entropy_and_partial_words() {
+        let mut key = [0u8; 40];
+        key[0] = 1;
+        let (signer, signing) = schnorr_signer(&key);
+        for payload in [vec![], vec![7; 31], vec![7; 32], vec![7; 33], vec![7; 47]] {
+            assert_eq!(
+                signer.sign_now(&schnorr_request(signing.clone(), payload)),
+                Err(SignError::InvalidRequest)
+            );
+        }
+    }
+
+    /// R1: an independent oracle. Signatures from the arm verify against the
+    /// public keys the Go signer derived for the go-wasm.json scalars.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_digest_verifies_against_go_derived_public_keys() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/lighter/go-wasm.json")).unwrap();
+        let bytes = |case: &serde_json::Value, field: &str| -> Vec<u8> {
+            let text = case[field].as_str().unwrap();
+            (0..text.len() / 2)
+                .map(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).unwrap())
+                .collect()
+        };
+        let mut checked = 0;
+        for case in fixture["signatures"].as_array().unwrap() {
+            let key = bytes(case, "key");
+            let input = bytes(case, "payload");
+            if input.is_empty() || !crate::lighter::canonical_scalar(&key).unwrap() {
+                continue;
+            }
+            let (signer, signing) = schnorr_signer(&key);
+            for entropy in [[0u8; 32], [0xa5; 32]] {
+                let mut payload = entropy.to_vec();
+                payload.extend_from_slice(&input);
+                let result = signer
+                    .sign_now(&schnorr_request(signing.clone(), payload))
+                    .unwrap();
+                let signature = &result.values[0];
+                assert!(
+                    crate::lighter::schnorr_verify(&input, &bytes(case, "publicKey"), signature)
+                        .unwrap()
+                );
+                assert!(
+                    !crate::lighter::schnorr_verify(
+                        &bytes(case, "changedPayload"),
+                        &bytes(case, "publicKey"),
+                        signature
+                    )
+                    .unwrap()
+                );
+            }
+            checked += 1;
+        }
+        assert!(
+            checked > 0,
+            "go-wasm.json must hold canonical signing vectors"
+        );
+    }
+
+    /// R1: keys are refused, never reduced: zero, the group order and above,
+    /// and 39/41-byte keys are refused; order - 1 signs. Legacy reduces a key at or above the
+    /// order and signs; the arm's refusal is the recorded behaviour change.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_digest_refuses_noncanonical_and_zero_keys() {
+        use goldilocks_crypto::ScalarField;
+        let mut input = [0u8; 40];
+        input[0] = 1;
+        let mut payload = vec![0x11; 32];
+        payload.extend_from_slice(&input);
+        let order = ScalarField::N.to_bytes_le();
+        let mut short = vec![0u8; 39];
+        short[0] = 1;
+        let mut long = vec![0u8; 41];
+        long[0] = 1;
+        for key in [
+            [0u8; 40].to_vec(),
+            order.to_vec(),
+            [0xff; 40].to_vec(),
+            short,
+            long,
+        ] {
+            let (signer, signing) = schnorr_signer(&key);
+            assert_eq!(
+                signer.sign_now(&schnorr_request(signing, payload.clone())),
+                Err(SignError::InvalidRequest),
+                "{}-byte key",
+                key.len()
+            );
+        }
+        for key in [order, [0xff; 40]] {
+            let legacy = crate::lighter::hedged_nonce(&input, &key, &[0x11; 32])
+                .and_then(|nonce| crate::lighter::schnorr_sign(&input, &key, nonce));
+            assert_eq!(legacy.map(|signature| signature.len()), Ok(80));
+        }
+        let below_order = ScalarField::NEG_ONE.to_bytes_le();
+        let (signer, signing) = schnorr_signer(&below_order);
+        let result = signer.sign_now(&schnorr_request(signing, payload)).unwrap();
+        let public = crate::lighter::public_key(&below_order).unwrap();
+        assert!(crate::lighter::schnorr_verify(&input, &public, &result.values[0]).unwrap());
+    }
+
+    /// Without the schnorr feature the arm refuses as Unsupported.
+    #[cfg(not(feature = "schnorr"))]
+    #[test]
+    fn schnorr_digest_is_unsupported_without_the_feature() {
+        let mut key = [0u8; 40];
+        key[0] = 1;
+        let (signer, signing) = schnorr_signer(&key);
+        let mut payload = vec![0; 32];
+        payload.extend_from_slice(&[1, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            signer.sign_now(&schnorr_request(signing, payload)),
+            Err(SignError::Unsupported)
         );
     }
 

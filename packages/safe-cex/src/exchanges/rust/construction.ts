@@ -22,7 +22,11 @@ export type RemoteSigningPolicy = Readonly<{
   protectedHeaders?: readonly string[];
   signatureEncoding?: 'hex' | 'base64';
   passphraseHeader?: string;
-  wire?: Readonly<{ exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot' | 'okxTimestamp'; requestId?: string }>;
+  wire?: Readonly<{
+    exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot' | 'secondsTimestamp'; requestId?: string;
+    /** Signed literal after a seconds login stamp; required by `secondsTimestamp`. */
+    secondsSuffix?: Readonly<{ method: string; path: string }>;
+  }>;
 }>;
 
 type Rule = {

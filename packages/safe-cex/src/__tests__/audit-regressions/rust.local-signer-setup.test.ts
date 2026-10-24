@@ -99,7 +99,7 @@ describe('trusted local signer setup', () => {
     expect(received).toMatchObject({ primary: { secretEncoding: encoding } });
   });
   it('refuses provider metadata on unmigrated Rust families before construction', () => {
-    expect(() => new RustEngineExchange('bitget', { ...options(), localSigner: {} }, new DefaultStore()))
+    expect(() => new RustEngineExchange('kraken', { ...options(), localSigner: {} }, new DefaultStore()))
       .toThrow(/not supported/);
   });
   it('rejects malformed or unknown setup metadata before constructing an engine', () => {
@@ -244,16 +244,16 @@ const setupPayload = (setup: LocalSignerSetup, venue = 'okx'): unknown => {
 };
 
 describe('shared required passphrase field policy', () => {
-  it.each(passphraseFamilies)('%s declares both slot rules; only migrated OKX and WEEX adopt dispatch signing', (venue) => {
+  it.each(passphraseFamilies)('%s declares both slot rules; only migrated OKX, Bitget and WEEX adopt dispatch signing', (venue) => {
     expect(deriveSignerSetupPolicy(venue)).toEqual({
       primary: { passphrase: 'requiredForPrivate' },
       secondary: { passphrase: 'requiredWithPrimaryFallback' },
     });
-    const okx = venue.startsWith('okx');
-    const migrated = okx || venue === 'weex';
+    const stripped = venue.startsWith('okx') || venue.startsWith('bitget');
+    const migrated = stripped || venue === 'weex';
     expect(deriveBridgeConstruction(venue, {} as ExchangeOptions).dispatchSigning).toBe(migrated);
     const construct = () => new RustEngineExchange(venue, { key: 'key', secret: 'secret', passphrase: 'pass', localSigner: {} } as ExchangeOptions, new DefaultStore());
-    if (okx) {
+    if (stripped) {
       const exchange = construct();
       expect(exchange.options.key).toBeUndefined();
       expect(exchange.options.secret).toBeUndefined();
