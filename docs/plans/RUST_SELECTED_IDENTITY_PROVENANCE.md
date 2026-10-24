@@ -120,9 +120,11 @@ WASM EngineHost.dispose already marks disposed before cleanup, aborts requests,
 disposes managed HTTP, cancels primitive/hosted signings and timers, and frees an
 owned engine. RustEngineExchange.dispose also releases its setup/provider and
 host. G2c integrates snapshot lifetime into those existing teardown paths; it
-does not claim they currently implement snapshot retirement. EVERY host disposal must invalidate the snapshot before freeing an owned
-engine or retaining a borrowed one, including borrowed WASM EngineHost (the
-current default), not merely native borrowed-engine hosts. Disposed guards fence
+does not claim they currently implement snapshot retirement. Healthy disposal
+must invalidate the snapshot before freeing an owned engine or retaining a
+borrowed one, including borrowed WASM EngineHost (the current default). After a
+trap, public ingress is permanently fenced and all Rust calls, getters and free
+are forbidden; inert bounded records remain until the instance is discarded. Disposed guards fence
 host callbacks but alone do not retire a retained Rust engine's snapshot.
 EngineHost.invoke refuses after disposed=true, so use an explicit private
 teardown call path after public access is fenced; do not reopen normal invoke.
@@ -393,15 +395,20 @@ before agreement. Released writes retain Unknown/partial-ID/budget evidence.
 ```rust
 pub struct IdentityRetirement { /* private, engine-minted, failure-only */ }
 impl<V: Venue> Engine<V> {
-    pub fn retire_identity_snapshot(&mut self) -> IdentityRetirement;
+    pub fn retire_identity_snapshot(
+        &mut self,
+    ) -> Result<IdentityRetirement, IdentityRetirementError>;
 }
+pub enum IdentityRetirementError { HandoffInProgress }
 // Private engine/registry hook; never a Cx or public Context capability.
 fn finish_identity_teardown(&mut self, retirement: &IdentityRetirement);
 // WASM administrative export, called by the host's private teardown path:
-// WasmEngine.retireIdentitySnapshot() -> void
+// WasmEngine.retireIdentitySnapshot() -> void or typed pre-effect refusal
 ```
 
-Retirement is idempotent and starts by irreversibly rejecting new normal engine
+Healthy retirement is idempotent. Before any effect it must refuse during the
+full G2b final-resource-check/claim/last-handoff region. On success it starts by
+irreversibly rejecting new normal engine
 entries, snapshot bindings, owner admission and outgoing I/O. The private
 retirement witness permits only existing failure/cancellation cleanup, even
 when normal Context checks now reject the snapshot. It grants no signing,
@@ -412,71 +419,50 @@ All retained snapshot/binding handles then fail validation permanently. A new
 engine, even with the same refs/subjects and matching numeric handles, has a
 new issuer and cannot revive any old witness or consumed grant.
 
-WASM order: both `EngineHost.dispose()` and `failEngine()` fence public ingress
-(`disposed=true`) before entering the common `cleanup()`. Retirement belongs at
-the top of `cleanup()`, after its local once-only guard and before even command
-settlement/deadline release, socketFailures, HTTP, provider jobs, socket/timer
-cleanup, signer clearing or owned-engine free. Direct cleanup must also establish
-the public fence; `disposed` alone is not the once-only cleanup guard because
-both entry paths set it first. The private retirement call must not use `invoke`, which
-correctly rejects disposed hosts, or dispatch actions/callbacks from teardown.
-It ignores any return value and never drains actions or normal engine callbacks.
-Cleanup attempts all remaining releases if retirement, command settlement or a
-resource release throws. It runs once for BOTH
-borrowed and owned hosts; `ownsEngine=false` only controls `free`, not retirement.
-A missing hook on a test double does not permit a snapshot-aware production host
-to silently skip retirement; exact construction capability detection is a source
-review gate. Current older fake engines without snapshots retain cleanup tests.
+WASM order: normal `EngineHost.dispose()` first respects the existing group
+handoff guard, before fencing or cleanup effects. Retirement may refuse before
+the tombstone, or the host may defer the WHOLE teardown until the last handoff;
+it must not flip liveness between committed sibling dispatches. The exact owner
+hook remains review-gated. A preclaim tombstone denies every group leg with zero
+HTTP. A retirement attempt from the first dispatch must preserve all committed
+sibling handoffs and conservative Unknown/accepted-ID evidence; no sibling can
+be changed to NotSent or prepared again by per-member liveness validation.
 
-Native `Host::run` already returns its engine after stopping. Fence inbox/command
-admission before invoking the same engine retirement hook, then abort existing
-managed/provider/socket/timer resources before returning that retained engine.
-Drop/unwind paths need the same retirement guarantee; do not perform normal
-venue callbacks from Drop. Name an explicit cancellation control: poll a native
-`Host::run` future with live HTTP/provider/socket/timer ownership, then drop that
-future without reaching its normal return. A retained snapshot witness must be
-retired and resources aborted without a new venue callback or success terminal.
-Pair that with normal owned-drop and retained-engine-return controls; cancellation
-is not covered by either of them. The safe owned-engine return/Drop source shape
-(for example an `Option<Engine>` taken only after stop) needs exact source review.
-Proposed private cleanup does not rely on a disposed
-JS wrapper to prove Rust liveness. Native owned and retained-engine controls,
-plus WASM borrowed/owned controls, are required before runtime readiness.
+When healthy (`deadError === undefined`), the common cleanup establishes the
+public fence and a local once-only guard, then calls the plain administrative
+`retireIdentitySnapshot()` before pending-command settlement/deadline release,
+socketFailures, HTTP, signing jobs, socket/timer cleanup or owned-engine free.
+The call does not go through `invoke`, which correctly refuses disposed hosts.
+It ignores returned actions and never drains actions or venue callbacks. Healthy
+private registry cleanup may bypass only dead-snapshot normal validation using
+its exact engine/owner failure-only witness. Released journals, accepted IDs,
+consumed budgets and one common group seal remain intact.
 
-### New-contract control ledger and review gates
+When poisoned (`deadError !== undefined`), cleanup must not read ANY engine
+property, getter or export, including retirement, current_group/claim validation
+and free. It settles/cancels host-owned commands, transports, signing jobs,
+sockets and timers only; interrupted writes stay Unknown. This is the ONE
+permitted retirement-hook skip, based on deadError rather than ownsEngine or
+missing-hook detection. The engine cannot run again; its inert bounded records
+remain until the instance is discarded. Owned cleanup accepts the bounded leak
+of one trapped engine rather than re-entering a possibly torn WASM heap.
 
-Existing three native tests remain GREEN compatibility evidence, not REDs.
-The next controls are explicitly NEW-CONTRACT. First executable REDs can test
-actual `EngineHost.dispose` with a declared `retireIdentitySnapshot` spy: borrowed
-and owned hosts must call it once after the public fence and before any command
-settlement, socket-failure/signing cleanup or other resource release/free. A
-`failEngine` RED must cover that second entry into the same cleanup. Return an
-action from the spy and assert no action dispatch/drain. A working control proves public ingress already refuses during
-cleanup; another proves owned versus borrowed `free` behavior is preserved.
-These are boundary-call contract tests, not proof of the unimplemented Rust
-snapshot or an assertion of an existing wrong-account exploit.
+Healthy borrowed and owned hosts both retire; ownsEngine controls free only.
+A required production retirement hook cannot be silently skipped in the healthy
+case. Cleanup must attempt every remaining host resource release if retirement,
+command settlement or another resource release throws. Direct healthy cleanup
+must also establish the public fence and respect the group guard; disposed alone
+is not its once-only guard. No captured Rust callback after poison is retained.
 
-After exact signatures are approved, native install/freeze/codec tests require a
-compiled API scaffold that fails closed; they must reach assertions rather than
-count missing methods as an original regression. No test-only epoch/state shim
-may be claimed as an installed runtime witness. Cover failed atomic install and
-subsequent legal setters, each of eight setter refusals before/after start,
-foreign issuer and refs, absent/conflicting domains, genuine Secondary relation,
-Primary-only mutation, same binding through G1 activations and teardown of old
-Prepare/Bind/DATA/timers while released-write evidence remains conservative.
-Exact host/registry/G2b hooks remain reviewer source gates before implementation.
+Native healthy return, owned Drop and cancelled-run-future paths likewise retire
+before resource release without normal venue callbacks. A distinct caught-panic
+path must never call into the engine from cleanup or Drop; fence ingress and
+release host-owned resources conservatively instead. Required controls separately
+cover normal owned Drop, retained-engine return, cancellation after polling a
+run future with live resources, and caught panic. The exact native ownership
+shape and panic marker require owner review before edits. No public snapshot
+witness can resume a poisoned engine or be reconstructed from an external token.
 
-## First new-contract boundary evidence
-
-Core review of `09fec34606b` clears the first host-boundary controls only. Both
-borrowed and owned `EngineHost.dispose` paths now have executable NEW-CONTRACT
-assertions in `hosts/wasm/js/host-identity-provenance.test.mjs`. Each reaches its
-final assertion and fails solely because `retireIdentitySnapshot` is never
-called: the observed cleanup/free sequence otherwise matches. Four working
-controls pass: public ingress is fenced during cleanup, borrowed engines remain
-unfreed, owned engines are freed once, and a throwing resource does not strand
-later cleanup. This is two assertion REDs and four GREENs on unchanged runtime,
-not missing-method/import failures or evidence of an existing native snapshot.
 No runtime source, subject codec, shared claim/group hook or host teardown path
 has been edited. Exact Rust/registry/host source and native codec reviews remain
 required before implementation. The hook-throw and poisoned-engine cases from
@@ -500,17 +486,18 @@ freezing all eight setters. No installed snapshot is mutable. A constructor
 control must preserve both distinct entropy inputs and external capability data,
 then require sealing before start; no missing API compile failure counts as RED.
 
-The shared cleanup top is the retirement boundary for both normal dispose and
-`failEngine`, before even pending-command settlement. Expanded ordered controls
+The historical expanded controls treated both normal dispose and `failEngine`
+as retirement entries. The reconciled source-stage contract below supersedes
+that poisoned-entry expectation: only healthy cleanup retires; poisoned cleanup
+never enters the engine. Expanded ordered controls
 include pending write rejection/deadline cleanup, socket-failure timers and all
 signing maps. The retirement spy returns an action and the test requires no
 `run`/transport dispatch. Existing assertions remain. The borrowed/owned
 `failEngine` variants are host-boundary controls only, not proof that calling
-Rust after a WASM trap is safe. Exact safe retirement after poison, a throwing
-retirement hook and all later cleanup attempts remain mandatory source-stage
-controls; the implementation cannot simply re-enter a borrowed poisoned engine.
-Native cancelled-run-future, owned-drop and retained-engine-return cases are
-three separately required controls. Subject errors and Secondary-requires-
+Rust after a WASM trap is safe. Zero engine access after poison, a throwing
+healthy retirement hook and all later cleanup attempts remain mandatory controls.
+Native cancelled-run-future, owned-drop, retained-engine-return and caught-panic
+cases are four separately required controls. Subject errors and Secondary-requires-
 Primary are explicit and atomic; environment is closed, never a free string.
 
 Revised API and construction/teardown hooks require both reviewers again before
@@ -518,8 +505,8 @@ runtime edits. Candidate native codec accepted forms still need their owners.
 
 ## Expanded boundary evidence after API review
 
-The expanded host controls execute on unchanged runtime with five NEW-CONTRACT
-assertion REDs and five working GREENs, zero skipped. Four REDs cover normal
+The historical `f39d62ed099` host controls executed on unchanged runtime with
+five NEW-CONTRACT assertion REDs and five working GREENs, zero skipped. Four REDs cover normal
 `dispose` and `failEngine`, each borrowed and owned. Their ordered logs now put
 retirement ahead of pending write deadline/settlement, socket-failure cleanup,
 HTTP, all three signing maps, sockets/timers, transport and optional free.
@@ -541,64 +528,46 @@ checks. Exact hooks must be reviewed before making these tests pass.
 
 Current integration is `04f5bdd1cb7`, including actual flat-PnL landing
 `b43525cb103` after the outage. Five-path preservation is checked; the original
-engine and host control blobs remain exact `f39d62ed099`. This section proposes
+engine and host control blobs at that integration are exact `f39d62ed099`.
+This section proposes
 runtime hook placement for review; it authorizes no runtime edit or adoption.
 
-### Borrow-free WASM retirement candidate
+### Reconciled healthy and poisoned teardown
 
-`host.mjs` explicitly forbids inspecting Rust state after a WASM trap. A normal
-wasm-bindgen `&mut WasmEngine` retirement method may itself need the already
-poisoned borrow, so merely bypassing `EngineHost.invoke` is insufficient. The
-candidate is an engine-minted, failure-only retirement callback obtained AFTER
-successful seal and BEFORE start, then retained in a private host slot.
+fe7lgm's host ruling and hcmq3f's G2b fit review replace the captured-callback
+candidate. Healthy cleanup uses the plain mutable administrative retirement
+method only after the whole-group handoff guard permits it. Poisoned cleanup
+makes no WASM call, getter or free, and does not capture or invoke a retirement
+callback. Snapshot bindings have no serde/public constructor or caller-supplied
+subject/liveness surrogate. The dead host cannot consume the inert engine state.
 
-The WASM administrative surface can preserve the proposed JavaScript spelling
-`retireIdentitySnapshot()` while exporting a getter that returns a previously
-created no-argument function. Host construction captures that function once
-while the engine is healthy; cleanup calls the captured value without reading
-any engine property or obtaining an inner engine borrow after poison. A normal
-engine method masquerading as this callback is not the production implementation.
-Existing test-double methods still test the host boundary, not this Rust safety.
-
-The callback captures only an engine-issued shared liveness cell from the exact
-installed snapshot. It irreversibly tombstones that cell, with no Context,
-provider, registry mutation, I/O, callback dispatch or mutable WasmEngine borrow.
-Every installed-binding admission/Prepare/Bind/handoff/DATA check must honor this
-cell under the existing actor/final-handoff sequencing. The witness cannot be
-minted from a caller counter/epoch, and a public snapshot clone grants no retire
-method. Only the administrative host owns retirement authority.
-
-A healthy private registry cleanup path then retires owner records and resources
-under its issued failure-only witness after normal validation is fenced. A
-poisoned engine must never be re-entered merely to compact those records: all
-such authority is already revoked by the shared tombstone; host-owned jobs,
-transports, timers and commands are canceled/settled conservatively. Whether
-bounded inert records may remain until destruction, and how owned free behaves
-after a trap, require the registry/host owners' explicit source ruling. This
-proposal does not declare that unresolved part safe or clear it by a spy test.
-No retired record may ever resume, gain credits or publish a successful fact.
+No liveness or pointer-identity check at admission, Prepare, Bind, handoff or
+DATA may allocate after Plan seal. New maps keyed by CommandId or Owner use
+RandomState, not IdMap. In-flight Session leg cleanup uses Session retirement
+and session_leg_context; it does not issue a separate retirement authority.
 
 Exact runtime map for review:
 
 | Source | Proposed hook and required invariant |
 | --- | --- |
-| New `engine/src/identity_snapshot.rs` | Opaque installed allocation, canonical subject data, lifecycle cell and host-only failure authority; no new network/discovery path |
-| `engine/src/engine.rs` | Final install and common eight-setter predicate; capture actual configured tuple; refuse required-unsealed start before callbacks/IDs |
-| `engine/src/selected_read.rs` | Consume exact selection into bound read; retain full witness and crate-private borrowed selection, never unwrap/reselect |
-| `engine/src/request_context_registry*` and G2b ownership/release paths | Existing issuer/owner checks plus exact installed/liveness checks; healthy failure cleanup preserves released-write facts; owner review before touching these hunks |
-| `registry/src/lib.rs` final trusted constructors/finish | Stage native-reviewed subjects and policy with the final refs; defer actual seal until host injections finish; no second identity registry |
-| `hosts/wasm/src/lib.rs` AnyEngine/WasmEngine | Seal export; obtain borrow-free retirement callback while healthy; do not use a mutable engine entry after trap |
-| `hosts/wasm/js/host.mjs` constructor/common cleanup | Inject existing entropy/provider/capabilities, seal, privately capture callback; retirement first before command settlement for dispose/failEngine, no action drain |
-| `hosts/native/src/lib.rs` builders/run/stop/Drop | Seal after builders and before start; fence then retire before resources; owned/returned/cancelled-future controls and no venue callbacks from Drop |
+| New `engine/src/identity_snapshot.rs` | Opaque installed allocation, canonical subject data, lifecycle cell and private exact-owner failure authority; no network/discovery or post-seal allocation |
+| `engine/src/engine.rs` | Final install and eight-setter predicate; actual configured tuple; required-unsealed refusal before callbacks/IDs; retirement refuses HandoffInProgress before effects |
+| `engine/src/selected_read.rs` | Retain full bound witness and crate-private borrowed selection, never unwrap/reselect |
+| `engine/src/request_context_registry*` and G2b ownership/release | Group guard covers final resource check/claim/last handoff; preclaim all-leg denial; no liveness flip between siblings; exact hunks require owner review |
+| `registry/src/lib.rs` constructors/finish | Stage reviewed subjects/policy with final refs; seal only after host injection; no second identity registry |
+| `hosts/wasm/src/lib.rs` AnyEngine/WasmEngine | Seal and plain healthy retirement exports; no retirement closure/getter after poison |
+| `hosts/wasm/js/host.mjs` constructor/cleanup/free | Inject then seal; healthy guarded once-only retirement before host releases; deadError path reads no engine property and skips free; host cleanup continues on throws |
+| `hosts/native/src/lib.rs` run/stop/Drop | Healthy guarded retirement for owned/retained/cancelled run future; caught panic causes no engine calls; resources released conservatively |
 
-Required source-stage controls include a callback captured while healthy that
-still retires when every ordinary engine method/getter is poisoned; retirement
-throw does not strand command/resource cleanup; required production hooks cannot
-be silently skipped; failed seal leaves setup mutable and no witness; and native
-run-future cancellation revokes retained witnesses and resources without falsely
-reporting an interrupted write as unsent. Existing five RED/five GREEN host
-controls remain intact. These are additions to the source review gates, not
-substitutes for real Rust snapshot/registry/host controls.
+Required source-stage controls are healthy borrowed/owned ordered retirement,
+retirement throw followed by every later host cleanup, trap mid-call followed by
+dispose with zero engine-export/getter/free access, and untouched interrupted-write
+Unknown/IDs. The native panic variant is distinct from owned, retained and
+cancelled-future cases. A preclaim tombstone denies all legs with zero HTTP; a
+first-dispatch retirement attempt must refuse before tombstone or defer the whole
+retirement until every committed handoff is complete. Failed seal still leaves
+setup mutable with no witness. Candidate native codec forms and exact shared
+registry/G2b/native/host hunks remain owner-reviewed before implementation.
 
 ### Hosted setup and legacy scope
 
