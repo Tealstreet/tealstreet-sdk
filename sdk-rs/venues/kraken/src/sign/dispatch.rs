@@ -371,3 +371,7 @@ pub fn challenge_work(ids: &Identities, challenge: &str) -> Result<SignRequest, 
         SignReceipt::default(),
     ))
 }
+
+#[cfg(test)]
+#[path = "dispatch_tests.rs"]
+mod tests;
