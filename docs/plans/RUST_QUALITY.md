@@ -1618,6 +1618,19 @@ financial state preservation, duplicate original-owner release, and 300 sequenti
 failures with 255 Background peers and one free Context slot. Capacity recovery
 releases exact Background roots. No fabricated Context, numeric fallback or
 missing-method compile failure is regression evidence.
+
+## OKX closed-position managed controls
+
+Ten original compiling assertion REDs and six native working controls now pass
+through the managed adapter. Five additional managed controls pin dequeue-time
+child bounds, release-aware typed timeout fields, provider/preparation metadata
+and accepted-prefix recovery, reversed equal-deadline ingress order, and an
+explicit180s caller receipt completing after the default120s boundary. All21
+controls and all9 existing closed-position tests pass without ignored tests or
+removed financial assertions. Existing fixtures only drive managed preparation
+and advance each native100ms page clock. Capacity uses genuine retained peers;
+reuse controls now reach and pass their stale-timer/DATA assertions. Family
+WASM/replay/CPU/memory certification remains CI's responsibility.
 ## WOO managed socket controls
 
 Plan cd7acf34bbb preceded test-only checkpoint bc5415d7c09. Four real-engine
