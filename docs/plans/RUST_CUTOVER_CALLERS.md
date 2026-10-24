@@ -7190,3 +7190,83 @@ Capacity refusal produces one shared failure, with no numeric fallback or
 physical action. The local helper must never be called from a delayed funding
 callback, accepted page delivery or queued trading work. Inventory: Orderly
 28F/29O to 25F/26O, solely the three documented initial failure fingerprints.
+
+### BreakoutProp login transport (session core): OPEN obligations
+
+The DXtrade password login now runs as an engine session write on the primary
+private egress. Login 401/403 now reaches waiting commands as
+`AuthInvalid`/`AuthPermission` (NotSent) with `AUTH_REJECTED`. It no longer
+arrives as untyped text.
+
+**OPEN, required before any BreakoutProp signer-migrated or remote-ready
+claim:**
+- **Provider presentation:** the password is still serialized into the body
+  at dispatch by the venue (claude-19pt8s).
+- **Remote readiness.**
+
+This slice claims transport and session ownership only.
+[Plan](RUST_BACKGROUND_SESSION.md).
+
+### Kraken Futures managed candle pages
+
+FetchCandles keeps one genuine caller-wait Read root across its native ten-page
+walk. Every eligible page uses a fresh unsigned Read/Never physical child, capped
+at that exact original receipt deadline. Subscription pages use independent
+Background Reads; generation checks still guard both publication and in-flight
+cleanup, with native five-second polling and no logical20s poll-walk cap.
+
+The explicit20s admission-to-expiry page bound is NEW: the old chart packet had
+no request_timeout declaration. It includes route preparation and unclaimed Bind
+waiting, as well as transport. Root expiry is strict engine-owned Timeout with
+no prefix, rows or continuation. Local preparation refusal/timeout preserves
+shared typed fields including localNotSent; released Read failure retains the
+shared projection. No financial effect or new retry is inferred. Existing
+unsigned wire, codec, sorting/duplicate winner, paging budget and validation
+messages remain native. SDK host/outer wait contracts are unchanged.
+
+A walk needs two registry Context slots: root and current physical page. Initial
+root admission reserves only its own slot; if the first child cannot fit, one
+strict typed Capacity/localNotSent terminal retires the root without HTTP.
+
+
+## Backpack unsupported command candle intervals
+
+Unsupported FetchCandles intervals keep the exact native refusal message and
+absent error kind on a valid keyless Read entry. The shared receipt, clock and
+capacity checks run first; invalid clocks and unavailable capacity report their
+existing typed engine errors without a write outcome. Missing or expired
+receipts refuse without renewing the caller's bound. Duplicate IDs retain the
+prior owner's authority and eventual reply. Refusal creates no HTTP, managed
+preparation, signing, socket, timer or Store update. Supported candle intervals,
+query/stream behavior and unsupported WS subscription diagnostics are unchanged.
+
+
+## Crypto.com unsigned PublicTrades caller-root ownership
+
+PublicTrades is an unsigned one-response Read with one immutable caller receipt
+root across native 10ms queue eligibility, route preparation and retries. Each
+eligible dequeue mints a fresh child capped at 20s and at that original root;
+late or reused-owner DATA cannot parse/stage/complete. Root expiry is strict
+Timeout with no prefix, INCOMPLETE marker or renewed work. Preparation/local
+submission refusal is strict; a released physical-child Timeout under a live
+root keeps the native retry path. Shared Context pacing additionally preserves
+the native 10ms physical send gap when independent preparations are delayed.
+
+Production/testnet URL, escaping, empty headers/body, default count25, wire
+count clamp150, caller truncation, duplicate row order and native financial
+fields remain unchanged. A failed streamed page is reset before retry; no
+unaccepted prefix is published. Missing-array streams keep native transport
+retry, whereas malformed rows in a valid array reject the whole page.
+
+Native retry counts remain exact: three released transport retries with 1000ms
+waits; the legacy 40101 hint caps at one retry, including code40001/message40101
+and transport-message40101 collisions. Native code/message fields are carried
+through the shared classifier. The minimum 40101 compatibility predicate uses
+the original error projection: decoded error fields for a valid envelope, raw
+body text for a missing-list envelope, and the transport message for a host
+failure. It is a known follow-up requiring a separate caller-policy ruling
+before removal. Strict route preparation keeps the shared pre-release NotSent
+attempt fact; released read failures and root expiry have no financial outcome.
+It grants no account-auth evidence or mutation rights. Public 40101 errors
+retain typed/native metadata without changing auth health. Private history,
+signing, account/trading reducers and credential selection are unchanged.
