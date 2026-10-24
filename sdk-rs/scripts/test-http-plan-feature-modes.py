@@ -21,9 +21,10 @@ def modes():
         raise RuntimeError('expected at least one venue family')
     closures = {}
     grouped = {(): ['engine baseline'], ('order-locks', 'test-support'): ['explicit CI control'],
+               # Seeded serial-plans OFF control: never add serial-plans here. Once a family
+               # adopts, workspace tests unify it on, so this row alone proves the off build.
+               ('http-plans', 'order-locks', 'test-support'): ['serial plans OFF control'],
                # No family enables serial Plans before adoption; keep them compiled and tested.
-               # The family closures WITHOUT serial-plans are the off-build control; after
-               # an adopter, workspace tests unify it on, so never fold those modes away.
                ('http-plans', 'order-locks', 'serial-plans', 'test-support'): ['serial Plan control']}
     for family in families:
         tree = subprocess.check_output([
