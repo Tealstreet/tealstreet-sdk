@@ -12,7 +12,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, PublicFeedPolicy, Response, SocketId,
@@ -52,14 +52,17 @@ pub enum Pending {
     Trade(trading::Request),
     Account(account::Request),
     Markets {
+        context: Context,
         rows: Vec<Market>,
         malformed: HashSet<String>,
     },
     Tickers {
+        context: Context,
         rows: Vec<Ticker>,
         failed: bool,
     },
     Depth {
+        context: Context,
         symbol: String,
         generation: u32,
     },
@@ -72,6 +75,17 @@ pub enum Pending {
         context: Context,
         limit: usize,
     },
+}
+
+impl Pending {
+    fn public_context(&self) -> Option<&Context> {
+        match self {
+            Self::Markets { context, .. }
+            | Self::Tickers { context, .. }
+            | Self::Depth { context, .. } => Some(context),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -161,17 +175,73 @@ impl MexcFutures {
             depth_paused_until: 0.0,
         }
     }
-    fn get(&self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
-        cx.request(Method::Get, format!("{REST}{path}"), vec![], None, pending);
+    fn get(&mut self, cx: &mut Cx<'_, Pending>, path: &str, symbol: String, generation: u32) {
+        let context = match cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(context) => context,
+            Err(_) => {
+                self.resync(cx, &symbol);
+                return;
+            }
+        };
+        let pending = Pending::Depth {
+            context: context.clone(),
+            symbol,
+            generation,
+        };
+        if let Err((pending, error)) =
+            cx.request_managed(context, Method::Get, format!("{REST}{path}"), None, pending)
+        {
+            self.failure(cx, pending, &error.venue_error().message);
+        }
     }
-    fn stream(&self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
-        cx.request_streamed(
-            Method::Get,
-            format!("{REST}{path}"),
-            vec![],
-            ArrayAt::EnvelopeField("data"),
-            pending,
-        );
+    fn stream(&mut self, cx: &mut Cx<'_, Pending>, path: &str, tickers: bool) {
+        let context = match cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    error.venue_error().message,
+                );
+                self.discovery.failed(cx, tickers);
+                return;
+            }
+        };
+        let pending = if tickers {
+            Pending::Tickers {
+                context: context.clone(),
+                rows: vec![],
+                failed: false,
+            }
+        } else {
+            Pending::Markets {
+                context: context.clone(),
+                rows: vec![],
+                malformed: HashSet::new(),
+            }
+        };
+        match cx.request_managed(context, Method::Get, format!("{REST}{path}"), None, pending) {
+            Ok(request) => cx.stream_response(request, ArrayAt::EnvelopeField("data")),
+            Err((pending, error)) => self.failure(cx, pending, &error.venue_error().message),
+        }
     }
     fn send(
         &self,
@@ -340,14 +410,7 @@ impl MexcFutures {
         state.version = None;
         state.buffering = Some(vec![]);
         let generation = state.generation;
-        self.get(
-            cx,
-            &path,
-            Pending::Depth {
-                symbol: symbol.into(),
-                generation,
-            },
-        );
+        self.get(cx, &path, symbol.into(), generation);
     }
     fn resync(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         let Some(state) = self.books.get_mut(symbol) else {
@@ -532,7 +595,7 @@ impl MexcFutures {
             cx.store.set_balance(Default::default());
         }
     }
-    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+    fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
         self.stream(
             cx,
             if tickers {
@@ -540,23 +603,20 @@ impl MexcFutures {
             } else {
                 "/api/v1/contract/detail"
             },
-            if tickers {
-                Pending::Tickers {
-                    rows: vec![],
-                    failed: false,
-                }
-            } else {
-                Pending::Markets {
-                    rows: vec![],
-                    malformed: HashSet::new(),
-                }
-            },
+            tickers,
         );
     }
     fn failure(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Some(context) = pending.public_context() {
+            // Engine-admitted failure still owns native cleanup after expiry
+            // pruning has removed the Context's retirement metadata.
+            let _ = cx.finish_http_context(context);
+        }
         match pending {
             Pending::Identity(command) => self.identity_failed(cx, command, error),
-            Pending::Depth { symbol, generation } => {
+            Pending::Depth {
+                symbol, generation, ..
+            } => {
                 if self
                     .books
                     .get(&symbol)
@@ -745,6 +805,11 @@ impl Venue for MexcFutures {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Some(context) = pending.public_context()
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         match pending {
             Pending::History(request) => self.query_item(cx, request, item),
             Pending::Account(account::Request::Leverage { rows, bad, .. }) => {
@@ -756,34 +821,34 @@ impl Venue for MexcFutures {
             Pending::Account(account::Request::Snapshot(snapshot)) => {
                 self.account_item(cx, snapshot, item)
             }
-            Pending::Markets { rows, malformed } => {
-                match serde_json::from_str::<Contract<'_>>(item) {
-                    Ok(raw) => {
-                        let unit = raw.vol_unit;
-                        let symbol = compact(&raw.symbol);
-                        match Self::market(raw) {
-                            Ok(Some(m)) => {
-                                self.volume_units.insert(m.symbol.clone(), unit);
-                                rows.push(m);
-                            }
-                            Ok(None) => {}
-                            Err(()) => {
-                                safe_cex_engine::startup::skipped_row(cx);
-                                malformed.insert(symbol);
-                            }
+            Pending::Markets {
+                rows, malformed, ..
+            } => match serde_json::from_str::<Contract<'_>>(item) {
+                Ok(raw) => {
+                    let unit = raw.vol_unit;
+                    let symbol = compact(&raw.symbol);
+                    match Self::market(raw) {
+                        Ok(Some(m)) => {
+                            self.volume_units.insert(m.symbol.clone(), unit);
+                            rows.push(m);
                         }
-                    }
-                    Err(_) => {
-                        safe_cex_engine::startup::skipped_row(cx);
-                        if let Ok(row) = serde_json::from_str::<ContractIdentity<'_>>(item)
-                            && !row.symbol.is_empty()
-                        {
-                            malformed.insert(compact(&row.symbol));
+                        Ok(None) => {}
+                        Err(()) => {
+                            safe_cex_engine::startup::skipped_row(cx);
+                            malformed.insert(symbol);
                         }
                     }
                 }
-            }
-            Pending::Tickers { rows, failed: _ } => match serde_json::from_str::<Tick<'_>>(item) {
+                Err(_) => {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    if let Ok(row) = serde_json::from_str::<ContractIdentity<'_>>(item)
+                        && !row.symbol.is_empty()
+                    {
+                        malformed.insert(compact(&row.symbol));
+                    }
+                }
+            },
+            Pending::Tickers { rows, .. } => match serde_json::from_str::<Tick<'_>>(item) {
                 Ok(raw) => {
                     if let Some(m) = cx.store.market_by_id(&raw.symbol) {
                         rows.push(Self::ticker(raw, m));
@@ -824,12 +889,20 @@ impl Venue for MexcFutures {
         if response.status == 429 {
             self.account.paused_until = self.depth_paused_until;
         }
+        if let Some(context) = pending.public_context()
+            && let Err(error) = cx.validate_background_read_http_delivery(context)
+        {
+            self.failure(cx, pending, &error.venue_error().message);
+            return;
+        }
         // Account reads classify their own HTTP failures (a refused key ends startup).
         if response.status != 200 && !matches!(pending, Pending::Account(_)) {
             self.failure(cx, pending, &format!("MEXC HTTP {}", response.status));
             return;
         }
-        match pending {
+        let background = pending.public_context().cloned();
+        let mut start_account_and_tickers = false;
+        (|| match pending {
             Pending::Identity(command) => self.identity_response(cx, command, response),
             Pending::Account(request) => {
                 let ok = response.status == 200;
@@ -840,7 +913,9 @@ impl Venue for MexcFutures {
             }
             Pending::Trade(_) => unreachable!(),
             Pending::History(request) => self.query_response(cx, request, response),
-            Pending::Markets { rows, malformed } => {
+            Pending::Markets {
+                rows, malformed, ..
+            } => {
                 if rows.is_empty() {
                     cx.notice(
                         Level::Warn,
@@ -871,17 +946,11 @@ impl Venue for MexcFutures {
                 if refresh {
                     return;
                 }
-                self.account_start(cx);
-                self.stream(
-                    cx,
-                    "/api/v1/contract/ticker",
-                    Pending::Tickers {
-                        rows: vec![],
-                        failed: false,
-                    },
-                );
+                start_account_and_tickers = true;
             }
-            Pending::Tickers { mut rows, failed } => {
+            Pending::Tickers {
+                mut rows, failed, ..
+            } => {
                 if failed || rows.is_empty() {
                     cx.notice(
                         Level::Warn,
@@ -896,7 +965,9 @@ impl Venue for MexcFutures {
                 cx.store.set_tickers(rows);
                 self.public_ready(cx);
             }
-            Pending::Depth { symbol, generation } => {
+            Pending::Depth {
+                symbol, generation, ..
+            } => {
                 let depth = Envelope::checked(response.body).and_then(|e| {
                     let snapshot: DepthSnapshot =
                         serde_json::from_str(e.payload()?).map_err(|e| e.to_string())?;
@@ -979,6 +1050,13 @@ impl Venue for MexcFutures {
                     }
                 };
             }
+        })();
+        if let Some(context) = background {
+            let _ = cx.finish_http_context(&context);
+        }
+        if start_account_and_tickers {
+            self.account_start(cx);
+            self.discovery_read(cx, true);
         }
     }
     fn on_stream_error(

@@ -7,7 +7,7 @@ use safe_cex_venue_mexc::{MexcFutures, Options};
 const MARKETS: &str = r#"{"success":true,"code":0,"data":[{"symbol":"BTC_USDT","baseCoin":"BTC","quoteCoin":"USDT","settleCoin":"USDT","state":0,"apiAllowed":true,"contractSize":0.0001,"volUnit":1,"priceUnit":0.1,"minVol":1,"maxVol":400000,"minLeverage":1,"maxLeverage":500,"makerFeeRate":0,"takerFeeRate":0.0002}]}"#;
 const TICKERS: &str = r#"{"success":true,"code":0,"data":[{"symbol":"BTC_USDT","lastPrice":60000,"fairPrice":60001,"indexPrice":59999,"bid1":59999.9,"ask1":60000,"riseFallRate":0.01,"holdVol":10000,"fundingRate":0.0001,"volume24":50000,"amount24":300000}]}"#;
 fn drain(e: &mut Engine<MexcFutures>) -> Vec<Action> {
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, 1000.)
 }
 fn http(actions: &[Action], path: &str) -> HttpRequest {
     actions
