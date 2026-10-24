@@ -953,7 +953,7 @@ struct Polls {
 /// The engine timer state a poll change writes to.
 struct TimerSink<'a> {
     next_id: &'a mut crate::resource_ids::ResourceIds,
-    timers: &'a mut HashMap<TimerId, ()>,
+    timers: &'a mut crate::IdMap<TimerId, ()>,
     actions: &'a mut Vec<Action>,
 }
 
@@ -1140,7 +1140,7 @@ mod resource_identity_regressions {
         use std::panic::{AssertUnwindSafe, catch_unwind};
         let mut polls = Polls::default();
         let mut ids = ResourceIds::starting_at(MAX_RESOURCE_ID);
-        let mut timers = HashMap::new();
+        let mut timers = crate::IdMap::default();
         let mut actions = Vec::new();
         let mut sink = TimerSink {
             next_id: &mut ids,
@@ -1169,7 +1169,7 @@ mod resource_identity_regressions {
             ..Polls::default()
         };
         let mut ids = ResourceIds::starting_at(MAX_RESOURCE_ID);
-        let mut timers = HashMap::new();
+        let mut timers = crate::IdMap::default();
         let mut actions = Vec::new();
         let mut sink = TimerSink {
             next_id: &mut ids,
@@ -1471,7 +1471,7 @@ struct Io<P> {
     http_owner_poison: bool,
     #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
-    managed_http: HashMap<RequestId, http_lifecycle::Managed>,
+    managed_http: crate::IdMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
     http_responses: crate::request_context::ReconciliationResponses,
     http_write_revision: u64,
@@ -1479,9 +1479,9 @@ struct Io<P> {
     #[cfg(feature = "order-locks")]
     order_locks: crate::order_locks::OrderLocks,
     #[cfg(feature = "order-locks")]
-    active_commands: std::collections::HashSet<CommandId>,
+    active_commands: crate::id_map::IdSet<CommandId>,
     #[cfg(feature = "order-locks")]
-    order_read_tokens: HashMap<RequestId, u64>,
+    order_read_tokens: crate::IdMap<RequestId, u64>,
     #[cfg(feature = "order-locks")]
     order_response_token: Option<u64>,
     actions: Vec<Action>,
@@ -1497,7 +1497,7 @@ struct Io<P> {
     read_root_sweep_capacity: Option<usize>,
     public_feed_policy: PublicFeedPolicy,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
-    pending: HashMap<RequestId, PendingHttp<P>>,
+    pending: crate::IdMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
     session_waits: request_context_registry::session::Waits<P>,
     signing: crate::signing_dispatch::Dispatch,
@@ -1509,9 +1509,9 @@ struct Io<P> {
     host_algorithms: Option<Vec<crate::signing::Algorithm>>,
     dispatch_now: f64,
     signing_admission: Vec<(Action, crate::signing::SignError)>,
-    streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
-    incoming: HashMap<RequestId, Incoming>,
-    timers: HashMap<TimerId, ()>,
+    streams: crate::IdMap<RequestId, (ArrayAt, ItemCheck)>,
+    incoming: crate::IdMap<RequestId, Incoming>,
+    timers: crate::IdMap<TimerId, ()>,
     polls: Polls,
     next_id: crate::resource_ids::ResourceIds,
     /// Retained symbol buffers; only the active prefix belongs to the next frame.
@@ -1570,15 +1570,15 @@ impl<P> Default for Io<P> {
             http_plan_poison: false,
             http_responses: Default::default(),
             http_write_revision: 0,
-            managed_http: HashMap::new(),
+            managed_http: Default::default(),
             http_pacing: Default::default(),
             entropy: None,
             #[cfg(feature = "order-locks")]
             order_locks: crate::order_locks::OrderLocks::default(),
             #[cfg(feature = "order-locks")]
-            active_commands: std::collections::HashSet::new(),
+            active_commands: Default::default(),
             #[cfg(feature = "order-locks")]
-            order_read_tokens: HashMap::new(),
+            order_read_tokens: Default::default(),
             #[cfg(feature = "order-locks")]
             order_response_token: None,
             actions: Vec::new(),
@@ -1590,7 +1590,7 @@ impl<P> Default for Io<P> {
             read_root_sweep_capacity: None,
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
-            pending: HashMap::new(),
+            pending: Default::default(),
             signatures: Vec::new(),
             session_waits: Default::default(),
             signing: Default::default(),
@@ -1600,9 +1600,9 @@ impl<P> Default for Io<P> {
             host_algorithms: None,
             dispatch_now: 0.,
             signing_admission: Vec::new(),
-            streams: HashMap::new(),
-            incoming: HashMap::new(),
-            timers: HashMap::new(),
+            streams: Default::default(),
+            incoming: Default::default(),
+            timers: Default::default(),
             polls: Polls::default(),
             next_id: Default::default(),
             changed_books: Vec::new(),

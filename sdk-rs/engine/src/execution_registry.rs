@@ -7,10 +7,10 @@ use crate::execution_group::{Execution, Groups, Joined, Member, Observer, Root, 
 pub(super) struct Executions {
     groups: Groups,
     /// Execution root identity (its `Owner::Execution` generation) to group.
-    roots: HashMap<u64, Execution>,
-    observers: HashMap<CommandId, Observer>,
+    roots: crate::IdMap<u64, Execution>,
+    observers: crate::IdMap<CommandId, Observer>,
     /// Background read Context rooting each background execution.
-    backgrounds: HashMap<u64, Context>,
+    backgrounds: crate::IdMap<u64, Context>,
 }
 
 fn root_identity(context: &Context) -> Option<u64> {

@@ -7,7 +7,6 @@ use crate::request_context::{
     Context, Error, Operation, Owner, Policy, Session, SessionPolicy, Waiter, WriteResult,
 };
 use crate::{ErrorKind, Outcome, VenueError};
-use std::collections::HashMap;
 
 const SESSIONS: usize = 64;
 
@@ -23,14 +22,14 @@ enum Write {
 struct State {
     policy: SessionPolicy,
     /// Mutation legs by logical identity: one physical attempt per operation.
-    writes: HashMap<u64, Write>,
+    writes: crate::IdMap<u64, Write>,
     /// A released write had no proven outcome. Only retirement clears it.
     unresolved: bool,
 }
 
 #[derive(Default)]
 pub(super) struct Sessions {
-    live: HashMap<u64, State>,
+    live: crate::IdMap<u64, State>,
 }
 
 impl Sessions {
@@ -52,7 +51,7 @@ impl Sessions {
             generation,
             State {
                 policy,
-                writes: HashMap::new(),
+                writes: Default::default(),
                 unresolved: false,
             },
         );
@@ -158,7 +157,7 @@ impl Sessions {
 
     /// Bound per-operation records by live logical handles. In-flight attempts
     /// keep theirs until the physical attempt settles.
-    pub(super) fn prune(&mut self, contexts: &HashMap<u64, Context>) {
+    pub(super) fn prune(&mut self, contexts: &crate::IdMap<u64, Context>) {
         for state in self.live.values_mut() {
             state.writes.retain(|leg, write| {
                 contexts.contains_key(leg)

@@ -3,7 +3,6 @@
 //! (docs/plans/RUST_EXECUTION_GROUPS.md, "Settled API choices for review").
 use crate::request_context::{Error, Operation};
 use crate::{CommandId, ErrorKind, OrderIdentityReceipt, Outcome, VenueError};
-use std::collections::HashMap;
 
 pub(crate) const MAX_OBSERVERS: usize = 64;
 const MAX_MEMBERS: usize = 256;
@@ -96,8 +95,8 @@ struct Group {
 #[derive(Default)]
 pub(crate) struct Groups {
     next: u64,
-    groups: HashMap<u64, Group>,
-    members: HashMap<CommandId, (u64, u64)>,
+    groups: crate::IdMap<u64, Group>,
+    members: crate::IdMap<CommandId, (u64, u64)>,
 }
 
 impl Entry {

@@ -321,7 +321,6 @@ mod tests {
     use super::*;
     use crate::book::Book;
     use crate::{Action, Command, Engine, Event, Response, SocketId, Venue};
-    use std::collections::HashMap;
 
     struct Probe {
         supervisor: Supervisor,
@@ -407,7 +406,7 @@ mod tests {
     struct Harness {
         engine: Engine<Probe>,
         now: f64,
-        timers: HashMap<TimerId, f64>,
+        timers: crate::IdMap<TimerId, f64>,
         closed: Vec<SocketId>,
         pings: Vec<SocketId>,
     }
@@ -428,7 +427,7 @@ mod tests {
                 )
                 .unwrap(),
                 now,
-                timers: HashMap::new(),
+                timers: Default::default(),
                 closed: Vec::new(),
                 pings: Vec::new(),
             };

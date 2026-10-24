@@ -10,7 +10,6 @@ use crate::request_context::{
 use crate::request_context::{
     HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
 };
-use std::collections::HashMap;
 #[cfg(feature = "http-plans")]
 use std::collections::VecDeque;
 
@@ -196,8 +195,8 @@ pub(super) enum Seal {
 #[derive(Default)]
 pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
-    contexts: HashMap<u64, Context>,
-    commands: HashMap<CommandId, CommandOwner>,
+    contexts: crate::IdMap<u64, Context>,
+    commands: crate::IdMap<CommandId, CommandOwner>,
     sessions: session::Sessions,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
@@ -219,7 +218,7 @@ pub(super) struct ContextRegistry {
     /// Order-read epoch at each live owner's first released Read: one logical
     /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
     #[cfg(feature = "order-locks")]
-    read_marks: HashMap<Owner, u64>,
+    read_marks: crate::IdMap<Owner, u64>,
 }
 
 impl ContextRegistry {
@@ -240,7 +239,7 @@ impl ContextRegistry {
         if self.read_marks.is_empty() {
             return;
         }
-        let mut live: std::collections::HashSet<Owner> =
+        let mut live: crate::id_map::IdSet<Owner> =
             self.contexts.values().map(Context::owner).collect();
         live.extend(self.commands.iter().map(|(id, owner)| Owner::Command {
             id: *id,

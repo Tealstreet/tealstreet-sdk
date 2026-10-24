@@ -2,7 +2,6 @@
 use crate::signing::{SignError, SignReceipt, SignRequest, SignResult, validate_result_shape};
 use crate::signing_headers::ResultHeaderPolicy;
 use crate::{Action, HttpRequest, RequestId, SocketId, TimerId};
-use std::collections::HashMap;
 
 /// Narrow send-time view: protocol clock and injected signing entropy only.
 /// Identity replay seeding never supplies nonce bytes to this context.
@@ -103,9 +102,9 @@ impl Pending {
 }
 #[derive(Default)]
 pub(crate) struct Dispatch {
-    pending: HashMap<RequestId, Pending>,
+    pending: crate::IdMap<RequestId, Pending>,
     /// Metadata only: materialised values live exclusively in the outbound action.
-    outbound: HashMap<RequestId, Pending>,
+    outbound: crate::IdMap<RequestId, Pending>,
     next: crate::resource_ids::ResourceIds,
 }
 pub(crate) enum Completion {
