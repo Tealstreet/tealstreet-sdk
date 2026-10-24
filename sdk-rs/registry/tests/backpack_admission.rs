@@ -215,3 +215,54 @@ fn malformed_secondary_does_not_change_existing_primary_setup() {
         assert_eq!(values[1], hex(RFC_SIGNATURE));
     }
 }
+
+#[test]
+fn empty_secondary_key_retains_the_existing_configuration_refusal() {
+    let error = construct(json!({
+        "key": "primary-api-key",
+        "secret": base64(&hex(RFC_SEED)),
+        "readCredentials": {"key": "", "secret": base64(&[8; 32])},
+    }))
+    .err()
+    .expect("empty secondary key refused");
+    assert_eq!(
+        error,
+        "Secondary read credentials require a nonempty key and secret"
+    );
+}
+
+#[test]
+fn dual_read_setup_keeps_mutation_on_the_primary_provider() {
+    use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+    let (identities, signer) = construct(json!({
+        "key": "primary-api-key",
+        "secret": base64(&hex(RFC_SEED)),
+        "readCredentials": {"key": "read-api-key", "secret": base64(&[8; 32])},
+    }))
+    .unwrap();
+    let slots = Slots::new(
+        identities.primary,
+        identities.secondary,
+        SlotPolicy::default(),
+    );
+    let (selection, identity) = slots.select(CredentialRole::Mutation).unwrap();
+    assert_eq!(selection.slot(), safe_cex_engine::CredentialSlot::Primary);
+    let request = SignRequest {
+        receipt: Default::default(),
+        context: Default::default(),
+        operations: vec![
+            Operation::Present {
+                key: identity.credential.clone(),
+            },
+            Operation::Sign {
+                algorithm: Algorithm::Ed25519,
+                key: identity.signing.clone(),
+                payload: vec![PayloadPart::Bytes { bytes: vec![] }],
+            },
+        ],
+    };
+    let signer = signer.expect("primary provider retained");
+    let values = signer.sign_ready(&request).unwrap().unwrap().values.clone();
+    assert_eq!(values[0], b"primary-api-key");
+    assert_eq!(values[1], hex(RFC_SIGNATURE));
+}
