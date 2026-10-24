@@ -8018,3 +8018,31 @@ HTTP or recovery timers. Complete-seed publication, live overlays, financial
 projection/CPU row hints and private-startup eligibility are preserved. This
 removes only the count-one ticker sender; the shared account/history/metadata
 info sender remains outside this slice.
+
+
+## GRVT remaining local Unsupported command custody
+
+The reachable CancelOrdersWithSymbols, FetchMaxLeverage, FetchStpMode and
+SetStpMode generic refusals now take genuine keyless command admission before
+fail_context. Read and Mutation policies use20s, no pacing and Never; there is
+no HTTP, signer, key selection or queued work. Native Unsupported GRVT command
+text and absent kind/code/retry hint remain. Shared capacity, invalid clocks,
+caller receipt and duplicate ownership precede that native diagnostic. A shared
+rejection owns its one terminal, with no numeric fallback or second failure.
+
+Explicit approved outcome change: native CancelOrdersWithSymbols and SetStpMode
+refusals had no outcome. They now carry NotSent because nothing was released.
+This follows the established shared pre-release Read None / Mutation NotSent
+contract and the [Breakout immediate local command precedent](#breakout-immediate-local-command-custody),
+whose local unsupported SetStpMode also adds NotSent while preserving native
+text and absent kind. Read refusals retain outcome None. Original native-None
+evidence remains at216142; only that Mutation assertion was superseded at7e39
+after the overseer's ruling, before source. No shared projection override exists.
+
+DELETION, not adoption: the private-phase-pending match arm was unreachable;
+all nine variants return through earlier real dispatch. Its deletion retains
+exhaustiveness in the generic match without changing those earlier paths.
+Symbol-aware amendment remains an engine pre-entry refusal; identity, BookQuery,
+query/history and valid trading remain on their own paths. Two singleton lib
+removals comprise one reachable refusal adoption and one dead-arm deletion.
+The independent catalog slice and its two inventory removals are separate.
