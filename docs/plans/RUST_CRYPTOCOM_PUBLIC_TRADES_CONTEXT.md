@@ -191,8 +191,10 @@ preserving that legacy projection. Neither may silently change. Private history
 continues unchanged. This also qualifies the earlier broad statement that other
 HTTP/native errors never retry: it excludes this legacy text collision.
 
-Full-map review verified exact one-site shrink and untouched production; its
-README blank-line finding is fixed by appending the row directly to the table.
+Full-map review verified untouched production and identified the incomplete
+singleton projection; the corrected map names the genuine 3F/4O public
+extraction. Its README blank-line finding is fixed by appending the row directly
+to the table.
 
 
 ## Review closure and overseer ruling
