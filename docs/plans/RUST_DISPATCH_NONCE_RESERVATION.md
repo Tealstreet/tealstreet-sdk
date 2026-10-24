@@ -612,3 +612,15 @@ attribute preserves the reviewed sharing; selection may leave one indirect
 call per Claim. The static default removes the capability branch, but this
 work makes no CPU improvement claim. Existing CPU certification remains a CI
 gate after the local size and correctness gates pass.
+
+
+The split-entry experiment (`6cb609d3f6e`) measures 14,166,597 bytes, worse
+than the first capability candidate by 8,269. Reject that measured regression
+with a forward commit, retaining the smaller per-V ordinary path plus the
+captured-permission conjunction and all added hardening controls. Re-measure
+this corrected candidate; do not carry the rejected function-pointer sharing.
+The landing branch is now independently over budget. Under the overseer's
+temporary rule, readiness requires a same-toolchain current-tip pair with own
+combined delta at most zero; fitting the earlier absolute ceiling is no longer
+enough. Keep the PR held with no push or dispatch pending that gate or a new
+overseer ruling.
