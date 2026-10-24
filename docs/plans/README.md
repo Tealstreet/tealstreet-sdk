@@ -362,4 +362,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Bitrue dispatch signing | Production candidate; original REDs green, review and CI pending | Before replacing inline Bitrue HMAC, selection or native signature resend. | [RUST_BITRUE_DISPATCH_SIGNER.md](RUST_BITRUE_DISPATCH_SIGNER.md) |
 
+| GRVT unsigned candle Read Plan | Managed adoption under review | Before changing candle caller limits, streaming or the six-attempt transport budget. | [RUST_GRVT_CANDLE_CONTEXT.md](RUST_GRVT_CANDLE_CONTEXT.md) |
+
 | TxFlow unsigned ticker seed custody | Local plan and original-control checkpoint | Before managing the activeAssetCtx seed sender; preserve native seed cadence, keyed retry and CPU cache. | [RUST_TXFLOW_TICKER_SEED_CONTEXT.md](RUST_TXFLOW_TICKER_SEED_CONTEXT.md) |

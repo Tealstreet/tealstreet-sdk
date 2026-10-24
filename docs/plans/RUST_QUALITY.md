@@ -1833,3 +1833,15 @@ controls plus1compile-fail doc, registry3, TS construction4, and earlier305Binan
 controls on identical engine source PASS.
 Focused strict/checker/fmt gates pass; full fresh CI and HMAC-owner source review
 are still pending. No WASM/replay/size result is inferred from native tests.
+
+
+## GRVT unsigned candle Read Plan controls
+
+The original 23 candle controls now pass, including all formerly Prepare-gated
+suffixes: unclaimed DATA, typed preparation cleanup, six immediate transport
+attempts, physical timeout, original caller cap, stale delivery and full-pool
+recovery with all 255 retained peer Contexts validated. Six library controls
+include the login-independent preparation callback delegation guard. Native
+product/public fixtures use real managed release without changing assertions.
+Scoped cargo checks use four jobs serially; workspace, feature and WASM/size/
+replay checks belong to CI. No execution or budget claim is made for those gates.

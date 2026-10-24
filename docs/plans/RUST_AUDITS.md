@@ -3150,3 +3150,22 @@ controls plus1compile-fail doc, registry3, TS construction4, and earlier305Binan
 controls on identical engine source PASS.
 Focused strict/checker/fmt gates pass; full fresh CI and HMAC-owner source review
 are still pending. No WASM/replay/size result is inferred from native tests.
+
+
+## GRVT candle managed ownership checkpoint
+
+Plan 3b69de0eda3 precedes original controls 1299b94c26d: 15 compiling assertion
+REDs and 8 GREEN controls on unchanged source, zero ignored. Native timeout
+wording corrected at 1b4f901b4cd and independently closed by 9cz; 20 s attempts
+and the derived 120 s ceiling are new caller contracts, disclosed in CALLERS.
+The login-independent default-delegation control f01df259941 passes and detects
+a direct fail_pending disposition. The second integrator owns the #1905 login
+composition control; this unsigned slice has no login dependency.
+
+Production moves only Candles entry/Job/callback custody to one Read Plan plus
+a dedicated module and crate http-plans opt-in. Exact scanner removal is seven
+numeric terminals AND their eliminated raw candle request call: lib 19 to 11,
+family 49 to 41. This corrects the initial terminal-only estimate of seven; no
+rename-only prune or removal of another Job's shared request funnel is claimed.
+Original controls stay unchanged. Existing product/public fixtures only drive
+real Prepare/Bind/Claim; all wire, row, validation and financial assertions stay.
