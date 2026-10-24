@@ -31,6 +31,16 @@ per physical read.
   read uses `request_signed_managed` with the OKX dispatch recipe. Both then call
   `stream_response(id, EnvelopeField("data"))`.
 - `Pending::Markets` and `Pending::Tickers` carry their Context.
+  - **Delivery gate (cxxyqr API fit).** `validate_background_read_http_delivery(context)`
+    runs in both `on_item` and `on_response`. It runs before codecs, skipped-row
+    or cache side effects, envelope handling, the reducer, continuation and
+    publication.
+  - Stale or refused authority only retires the Context: no failure, no
+    `public_failed`, nothing done to a replacement read.
+  - The native 429 discovery pause is kept separately.
+  - The signed EEA read uses `SelectedRead::background` with `ReadRole::Read`
+    and no auth scope. The legacy list path had no account-auth tag, and none
+    is added.
   - A response runs the native body checks and the 429 discovery pause, then
     the product-chain reducer and publication, then retires the Context.
   - A next product in the chain retires the old Context before admitting the
@@ -57,8 +67,11 @@ the OKX row are #1950, closed positions and writes (#1919).
 
 The new file is `sdk-rs/venues/okx/tests/discovery_context.rs`.
 
-1. The public instruments and tickers reads are released through managed
-   preparation. Today they go through legacy `request_streamed`.
+1. The public instruments read is released through managed preparation.
+   Today it goes through legacy `request_streamed`.
+1b. The public tickers read, after instruments, is released through managed
+   preparation. This is a separate RED, so the receipt doesn't overclaim the
+   path.
 2. An unanswered instruments read ends at the shared 20 s deadline, and startup
    discovery reads instruments again after its native backoff. Today nothing
    ends it.
@@ -73,10 +86,12 @@ Controls, which pass both before and after:
 
 ## Original RED receipt
 
-On unchanged production at `ba3d7da1d3a`: 3 assertion REDs, 2 passing
-controls, nothing ignored.
+On unchanged production at `ba3d7da1d3a`: 4 assertion REDs, 2 passing
+controls, nothing ignored. The tickers custody RED is now its own test.
 
 - Public instruments are released outside managed custody.
+- Public tickers, reached after an answered instruments read, are released
+  outside managed custody.
 - The unanswered instruments read stays latched; no read follows in 50 s.
 - The EEA `account/instruments` read is signed with the primary key but is
   released outside managed custody.

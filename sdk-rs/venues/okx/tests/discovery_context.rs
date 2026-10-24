@@ -168,26 +168,23 @@ fn credentialed(eea: bool) -> Options {
 // ---- Original REDs ----
 
 #[test]
-fn public_discovery_reads_release_through_background_context() {
-    let mut cycle = Cycle::started(Options::default());
-    let markets = cycle.take(PUBLIC_MARKETS).expect("public instruments read");
+fn public_instruments_read_releases_through_background_context() {
+    let cycle = Cycle::started(Options::default());
+    let markets = cycle
+        .requests
+        .iter()
+        .find(|r| r.url.ends_with(PUBLIC_MARKETS))
+        .expect("public instruments read");
     assert!(
         cycle.managed.contains(&markets.id),
         "instruments released outside managed Context custody"
     );
-    cycle.engine.handle(
-        1.0,
-        Event::HttpResponse {
-            request: markets.id,
-            response: safe_cex_engine::Response {
-                status: 200,
-                headers: "",
-                body: &envelope(MARKET),
-            },
-        },
-    );
-    cycle.now = 1.0;
-    cycle.collect();
+}
+
+#[test]
+fn public_tickers_read_releases_through_background_context() {
+    let mut cycle = Cycle::started(Options::default());
+    cycle.answer("/api/v5/public/instruments", &envelope(MARKET), 1.0);
     let tickers = cycle
         .requests
         .iter()
