@@ -195,3 +195,40 @@ Required controls before runtime readiness:
 
 The first checkpoint records actual first failing assertions and working
 controls separately; downstream suffixes behind a RED are not executed evidence.
+
+## Executed original checkpoint
+
+The dedicated `dispatch_nonce_reservation` target compiles against actual5b,
+with unchanged engine/host/provider/venue runtime. Initial execution gives five
+assertion REDs and nine working GREEN controls, zero ignored:
+
+- Queue-time real Cx reservations release `1001` then `1000` when routes resume
+  B/A. Both real managed claims succeed before the ordering assertion fails.
+- With the prepare-only legacy allocator probe, B claims while A's provider
+  parks; A's later provider result reaches apply (`[1,0]` instead of `[1]`).
+- A and B both bind; B claims first and A's old permit still returns Released
+  instead of Stale. This tests the distinct final Claim fence.
+- Separate engines with one probe subject show the same late-apply failure.
+- NEW-CONTRACT decimal-string receipt parsing refuses the unknown `nonce`
+  field at runtime. This is schema evidence, not a missing-method compile RED.
+
+Working controls exercise both in-order binds/releases, abandoned higher
+reservation, provider refusal without Bind, duplicate Claim/late provider
+inertness, original queue-store continuity across engines/recreation, distinct
+subjects, 2002 regressing-clock integer reservations and u64 exhaustion, old
+safe-integer timestamp receipts, and closed original-schema nonce rejection.
+The last control rejects malformed nonce input as an unknown field today; it
+does not certify the future strict decimal parser.
+
+The prepare probe has protocol time equal to raw time in these fixtures. It
+cannot certify private raw-clock selection, trusted Slots minting, key alias
+setup, mutable route/selection mismatch, nonce-bearing receipt matching, wipe
+implementation, repair success/exhaustion, command terminal aggregation, group
+commit or #2024 composition. Those stay source-stage controls, not silently
+passing mocks. Original RED suffixes after their first failed assertion remain
+unexecuted. No actual network send or provider cryptography is claimed: host
+handoff is represented by the genuine successful final claim and signed packet.
+
+Scoped target strict Clippy, rustfmt, credential-selection checker and full bans
+pass on this checkpoint at jobs4. Only this target is executed locally; no
+workspace/all-feature sweep, runtime certification or CI readiness is claimed.
