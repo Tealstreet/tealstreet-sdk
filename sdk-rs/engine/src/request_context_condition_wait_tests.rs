@@ -1188,10 +1188,10 @@ mod condition_waits {
         let actions = e.drain_actions().collect::<Vec<_>>();
         let result = terminals(&actions, 65);
         assert!(
-            // The existing order-lock entry refusal: no outcome, nothing sent.
-            matches!(&result[..], [Err(error)] if error.message
-                == "Order amendment or cancellation is already in flight"
-                && error.outcome.is_none()),
+            // The order-lock capacity refusal (#2095): Internal, NotSent, nothing sent.
+            matches!(&result[..], [Err(error)] if error.message == crate::order_locks::CAPACITY_REACHED
+                && error.kind == Some(ErrorKind::Internal)
+                && error.outcome == Some(crate::Outcome::NotSent)),
             "{result:?}"
         );
         assert!(prepared(&actions).is_none());

@@ -198,8 +198,8 @@ the limit.
 
 For Bitget placements the binding limit is lower: 64 active order-lock scopes
 (`order_locks.rs`, `acquire`). The 65th queued placement is refused at entry,
-before any send, with the existing refusal "Order amendment or cancellation
-is already in flight" and no outcome (RED23). Bitget already sets
+before any send, with the order-lock capacity refusal from #2095
+(Internal, NotSent) (RED23). Bitget already sets
 `guard_order_mutations` at `49f7d1857b6`, so this is existing entry
 behaviour, not new with the migration. It is still disclosed in Bitget's
 CALLERS against native's unbounded queue. The 256 owner limit binds
