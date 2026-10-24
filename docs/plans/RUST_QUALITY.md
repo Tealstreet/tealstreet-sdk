@@ -1803,3 +1803,13 @@ accepted-only later transport/503/codec/physical-timeout recovery. The external
 NaN fixture adaptation and narrow first PublicTrades Network expectation are
 disclosed in the plan; private failure assertions remain unchanged. Full Rust,
 WASM and workspace checks belong to the one PR-triggered CI run.
+
+## StampFloor clock-boundary controls
+
+Original four new-API compile controls are retained from m26's handoff. Four
+additional frozen controls pin unsafe/non-finite current clocks, the maximum
+safe current stamp, and unchanged stamp_ms behavior; two fail at runtime on the
+inherited draft before correction. The opaque type has both a nameable positive
+doctest and a constructor-privacy compile-fail control. Shared release tests
+retain genuine prepare/bind/claim and no-release-on-denial behavior separately.
+No venue inventory prune or native migration receipt is claimed by this core PR.
