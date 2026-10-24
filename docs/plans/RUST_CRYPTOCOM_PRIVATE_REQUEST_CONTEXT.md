@@ -166,8 +166,8 @@ No Plan solely for paging, no local root timer or renewed receipt.
 
 Trading: opt into actual http-plans for preflight/whole-plan admission and
 physical windows; use genuine entry custody before progress/queue/I/O. Preserve
-native validation and order identity receipts, 20ms inter-step eligibility and
-required physical pacing through shared Context policy. Account-leverage Read
+native validation and order identity receipts and20ms inter-step eligibility.
+Do not introduce a physical20ms fence on immediate native resends. Account-leverage Read
 preflight remains Read before the final setting Mutation, with no write right
 until Plan admission. Use shared classify::CodeTable and journal facts, exact
 leg intents, terminal aggregation and accepted IDs. No local outcome demotion.
@@ -175,12 +175,12 @@ Known mandated audit corrections belong in CALLERS and REDs: all-failed
 best-effort batches cannot report done; code40101 on408/5xx cannot trigger a
 write resend; malformed ACK/unproven status is unknown; accepted partial IDs
 survive a later failure. Keep native read retries separate from write resend.
-Exact Plan source/physical-attempt/window geometry must be reviewed by uufub4
-before implementation; do not guess around unsupported constructors.
-This is a pre-source gate: declare two physical attempts for a write with the
+The concrete constructor/custody table below has bounded core CLEAR at613b39e022a;
+production source and its executed controls still require review.
+Declare two physical attempts for a write with the
 native single40101 resend; retain serial20ms step eligibility, the checked
 whole-batch credit ceiling, and genuine leverage Read-preflight -> Mutation-Plan
-custody. The exact constructor/credit/window table remains pending core review.
+custody. Use the reviewed constructor/credit/window table below.
 Never admit a normal Read root and attempt fresh command-entry Mutation later.
 Empty keyed PlaceOrders/CancelOrders use done_empty_plan on genuine Preflight
 authority, with no synthetic physical call or accepted fact. Keyless empty
@@ -237,10 +237,121 @@ and both checker test targets (15/8) plus banned-pattern checks pass. The origin
 26 controls retain13RED/13GREEN on that engine. Two added account same-stage
 mixed-error controls pass, bringing the current target to13RED/15GREEN/0ignored;
 at16a376f668c the26 earlier bodies remained unchanged. Shared setup/checker hold is lifted;
-the explicit core Plan-constructor review remains required before source.
+the explicit core Plan-constructor review was still pending at that checkpoint.
 
 The subsequent review closure ports only the two vector/stamp oracle factories
 to real recipe dispatch while preserving their literal/output assertions, and
 strengthens the capacity control to check all256 exact pending preparations
 before/after identity entry. There is no Credentials import in the new target.
 Both recipe controls remain GREEN; the full target remains13RED/15GREEN.
+
+## Reviewed Plan constructors and terminal timing
+
+codex-uufub4 reviewed the actual219d engine at613b39e022a: bounded constructor
+and custody CLEAR, read-only, with no independent execution. This table replaces
+the earlier pending API question; it is not production-source or CI clearance.
+
+| Native operation | Shared authority and declaration | Settlement |
+| --- | --- | --- |
+| Entry and FIFO wait | begin_preflight(WriteAfterReads), selected Primary for both read_credential and write_credential; park_preflight in genuine initial custody | Retain handle with queued job; request_preflight_ready grants nothing until on_http_preflight_ready |
+| Direct keyed write | admit_plan from initial or ready Preflight custody | Serial final-write schedule below |
+| Leverage account-id prerequisite | preflight_read_context, Primary Read, timeout20000, CallTerms wait0/attempts2/FreshAttempt | validate_preflight_delivery before decoding account_id; admit_plan in that same successful callback atomically retires the prerequisite |
+| Native leverage40101 retry | preflight_retry_context with the exact ReadFailure, once | Fresh prerequisite attempt; no account-poll transport retry policy; all other prerequisite failures fail_preflight |
+| Empty keyed batch | done_empty_plan after native credential precedence | No dummy physical call, accepted fact or replayed command |
+| Final writes | PlanPolicy Mutation, same trusted Primary, DefinitiveRefusal; one CallBound per serial StepBound, timeout20000/attempts2/FreshAttempt/no fallback | validate_plan_delivery, classify_write and http_write_fact; exact refused-resend grant before settlement, otherwise finish_plan_call |
+| Failed physical call | Exact returned failed Pending and finish_plan_failed_call when native best-effort continuation applies | Later calls issue only in Plan-ready custody; failure cleanup is not DATA validation; strict preparation/queue refusal may seal through shared failure |
+
+For N final writes, declare2*N physical credits, peak1 and span40000*N plus
+the sum of step waits, all checked before admission. N<=128 follows the256-credit
+ceiling; all other shared reservations may also refuse atomically. CALLERS and
+controls must identify this whole-batch admission limit rather than silently
+truncate or split a batch into renewed roots. The prerequisite consumes its own
+time and credits; the final Plan root starts only at final admission. This API
+has no WriteAfterReads caller-wait binding, so do not claim a receipt-capped
+Mutation root or include prerequisite time in the declared final Plan span.
+
+The first step waits0 for ordinary jobs or20ms after the leverage prerequisite;
+later steps wait20ms after prior settlement. Step.wait does not delay
+plan_resend_context: native eligible40101 write resend remains immediate. No
+physical20ms pacing fence is added. Network,408,5xx and malformed/unproven replies
+never grant a write resend. A source-stage table must distinguish these write
+rules from native Read retries and pin fresh attempt windows independently.
+
+After the last finish_plan_call, retain the genuine Plan and result through the
+existing final20ms native timer. done_plan is permitted there only while the same
+Plan is live, structurally complete and isolated from another ready owner;
+validate_plan_seal_origin accepts delivery=None with owner.deliveries==0. The
+timer is eligibility only: it issues no leg and never replays trade_command.
+Then request_preflight_ready for the next native parked owner, which still waits
+for the engine callback before doing work. Do not add a dummy StepBound, a new
+terminal-custody hook or a renewed root to represent the tail wait.
+
+PlanBound has no tail-wait field. The immutable root remains40000*N plus step
+waits; if the last response leaves less than20ms, strict root expiry wins before
+the final timer. Exact-owner cleanup makes that old timer inert. This new
+whole-plan-bound consequence must be disclosed in CALLERS and pinned at equality
+in both event orders, alongside a live-root timer that completes once and wakes
+the next FIFO owner once. An unconditional extra20ms beyond that root would need
+a separately approved shared bound extension; this cutover does not request it.
+
+done_plan delegates all-failed, partial and unknown aggregation and accepted IDs
+to the journal. Native ids/first_error/effective state cannot override it. The
+actual PlanPolicy has no independent_calls field: no copied flag or readiness
+claim for forthcoming independent-call behavior is part of this plan.
+
+## Production sequence and review boundaries
+
+Ship one complete cutover; these are local implementation checkpoints, not
+separately shipped staging paths. Plain-merge the reviewed #2061 head or its
+actual landing first, preserving its exclusive managed public-history authority.
+
+1. Trusted setup and custody: update the Crypto registry arm/provider setup and
+   TS construction together with Options. Keep only opaque Primary identity,
+   public settings and the once-computed secondary validation result. Erase raw
+   secondary inputs and use that metadata alone at start and identity. Private
+   POST selection stays Primary with Read scope=None, no route/tag evidence.
+   Hosted setup sends only the required Primary signing material. Coordinate
+   shared-file regions before editing: registry/lib.rs is also touched by #2033,
+   #2029, #1990 and #1891; construction-rules/localSignerSetup by #2033/#1868,
+   with #2029 also touching construction rules. No foreign hunk resolution is
+   implied by this plan.
+2. Canonical recipe: move Envelope to sign/dispatch.rs and harden prepare/apply
+   attestation. Before deleting Credentials, port dispatch_recipe.rs comparisons
+   and sign.rs literal unit vectors to independent literal-only recipe controls,
+   including the replay-key WS vector57a5207e795bd876080625ee876fa750cd0134c3916bcdc346d4efe1b6f0218f.
+   Keep same-ms/no-counter and u64 decimal controls. Delete eager/raw helpers in
+   the same atomic cutover; retain no fallback or alternate dispatch flag.
+3. Read consumers: account.rs keeps independent Background owners and unchanged
+   native stage/counter/reducer behavior; identity.rs uses a selected caller root
+   with20s children; history.rs retains one selected caller root across eligible
+   dequeue/retry and exact history-bridge admission. Preparation/provider and
+   root expiry remain strict for command Reads; native live-root released
+   transport failures keep their documented recovery. WS auth signs only at the
+   existing one-second handoff, with late-close/reconnect result fences, without
+   changing private REST startup or reducer authentication policy.
+4. Trading: implement the reviewed Preflight/Plan table in trading.rs and exact
+   Pending callback arms. Add one const CodeTable and record accepted IDs/effects
+   through journal facts. Preserve validation, native FIFO, setting effects and
+   reconciliation identities; expose no numeric terminal fallback. Declare all
+   physical credits before any final-write progress or I/O.
+5. Cutover audit: remove account.rs::signed and all remaining raw Credentials
+   callers only after every private consumer and WS auth has moved. Regenerate
+   the exact eight-entry request prune, signing shrink and credential inventory
+   shrink; leave foreign rows/checker behavior unchanged. Crypto remains outside
+   the migrated-family signing set under the explicit interim choice above.
+   Review the whole dispatch/provider path, not only scanner output.
+
+Preserve all28 original assertion bodies except the explicit opaque-fixture
+construction change. Source-stage additions cover the constructor table and
+N128/N129 atomic admission, parked provider and delayed route/final Claim, fresh
+resend windows, leverage retry count, wrong receipt/provider fields/body binding,
+failure-only continuation, final20ms root-expiry priority, exact-owner cleanup
+and unrelated live peers. The existing financial tests remain the reducer oracle.
+
+Run scoped Crypto tests and strict all-target Clippy sequentially with jobs4,
+format checks, both inventory ratchets and banned patterns. Full family size,
+CPU, replay and shared coverage stay in CI. Obtain bounded source/caller/map,
+HMAC, selection and core Plan-source reviews; do not inherit executed evidence
+from the constructor review. Push only an intended freeze candidate after the
+requested reviews return, with one PR Rust run per head. READY follows green CI
+and clear source reviews; landing still requires the overseer's window.
