@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| BingX local candle refusal custody | Draft conversion; source review/CI pending | Before replacing the three synchronous candle refusals; remote/key-selection paths excluded. | [RUST_BINGX_LOCAL_CANDLE_CONTEXT.md](RUST_BINGX_LOCAL_CANDLE_CONTEXT.md) |
 | BingX history paging custody | Implementation under native/source review | Before moving native fill/range pages and signature resends onto one caller-wait Read root. | [RUST_BINGX_HISTORY_CONTEXT.md](RUST_BINGX_HISTORY_CONTEXT.md) |
 | WEEX public depth-query custody | Original assertions reviewed; production conversion | Before managing command-owned unsigned order-book snapshots and their four numeric terminals. | [RUST_WEEX_DEPTH_QUERY_CONTEXT.md](RUST_WEEX_DEPTH_QUERY_CONTEXT.md) |
 | Polymarket public read custody | Draft adoption; local checks pass | Before adopting public books/candles and local completion or pruning their inventory. | [RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md](RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md) |
@@ -323,5 +324,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Hyperliquid spot candle custody | Managed adoption; focused controls pass, review and CI pending | Before changing standalone or merged spot candles; reuses the existing perps Context and wire path. | [RUST_HYPERLIQUID_SPOT_CANDLES_CONTEXT.md](RUST_HYPERLIQUID_SPOT_CANDLES_CONTEXT.md) |
 | Aster frozen startup clock boundary | Test-only plan and deterministic control | Before assuming startup readiness occurs at a fixed post-sync timestamp. | [RUST_ASTERDEX_REPLAY_CLOCK_BOUNDARY.md](RUST_ASTERDEX_REPLAY_CLOCK_BOUNDARY.md) |
 | Crypto.com immediate trading custody | Implemented; native/strict/reviews pass, CI pending | Before converting the eight local refusal/fixed-setting sites. | [RUST_CRYPTOCOM_LOCAL_TRADING_CONTEXT.md](RUST_CRYPTOCOM_LOCAL_TRADING_CONTEXT.md) |
+| Crypto.com public discovery ownership | Managed implementation under review | Before managing the last unsigned discovery sender and its Markets/Tickers continuations. | [RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md](RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md) |
 
 | Kraken Futures public candle custody | Managed adoption; focused controls pass, source review/CI pending | Before changing caller-root pages or subscription candle polling. | [RUST_KRAKEN_FUTURES_CANDLE_CONTEXT.md](RUST_KRAKEN_FUTURES_CANDLE_CONTEXT.md) |
