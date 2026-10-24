@@ -1912,3 +1912,48 @@ Depth-query startup also required the same genuine prepared_actions collector;
 only that bootstrap changes, with every assertion retained. The source-stage
 Shared-feed control now checks no socket actions at startup, timeout and retry.
 Production source remains byte-exact to0e0393051d5.
+
+## AsterDEX synchronous Read controls
+
+The committed original actual-Engine target executes20 behavioral assertion
+REDs plus six native working controls on unchanged production, with zero ignored.
+Each of ten terminals is tested at invalid clocks and full genuine-root capacity.
+Mainnet/testnet, V1/V3 precedence, exact native errors/JSON, finite positive cached
+leverage, missing/nonfinite cache, duplicate-owner isolation,300 synchronous ID
+reuses and keyless PublicTrades remote exemption remain covered. The managed
+target passes all26 without changing the original assertions. Existing financial
+and signature controls are retained. CI certifies WASM/replay/CPU/size/memory;
+local success makes no performance or merge-readiness claim.
+
+## AsterDEX local trading refusal controls
+
+The committed original target executes24 behavioral assertion REDs and9 native
+positives on unchanged production. The same33 controls now pass unchanged after
+adoption. Eight path shapes cover explicit Read/Mutation/auth fields and symbol
+cancellation at invalid/full entry, with genuine256 retained peer roots and
+actual retirement/recovery. Separate controls pin all three STP Read outcomes,
+credential-free auth-health, both pre-admission acknowledged-state boundaries,
+duplicate owner protection and300 synchronous reuses.
+
+Native positives retain exact V1 POST/V3 Secondary STP GET at full managed
+capacity, a9,999-place job with only its live acknowledgement consuming capacity,
+Store-first cancellation followed by exactly DELETE/order/Call::Cancel(live),
+and finite admitted missing-key cancellation cleanup. Private state is seeded
+before Engine construction in an explicit cfg(test) child, not presented as a
+provider or physical-release receipt. Existing financial tests are unchanged.
+Family size and replay certification are left to fresh CI; the downloaded
+1,321,596-byte baseline excludes lean #1987/#2006 and is not an adoption result.
+
+
+## GRVT local command tail controls
+
+The revised18 compiling original controls pass after production, including
+all previously gated capacity recovery suffixes: retire the exact first of256
+genuine Command Read peers, repeat the native refusal and validate255 survivors.
+Read None / approved Mutation NotSent, raw text and absent kind/code/hint,
+configured/public-only precedence, external NaN, zero caller wait and duplicate
+ownership are pinned. Actual engine symbol-amend rejection counts zero forwarded
+entries, followed by a reachable positive. Nine safe real commands prove earlier
+dispatch before the deleted private-phase diagnostic. Library7 and trading42
+also pass, for67 scoped tests with no ignored controls. Strict GRVT all-target
+Clippy/fmt and full ratchets PASS; broad workspace/WASM/performance stay in CI.
