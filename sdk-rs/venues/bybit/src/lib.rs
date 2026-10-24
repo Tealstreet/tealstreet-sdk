@@ -146,7 +146,7 @@ pub enum Then {
     /// An ordinary write or mode read on the engine's Preflight/Plan core.
     Ordinary(trading::ordinary::Request),
     History(history::Request),
-    Closed(closed::Request),
+    Closed(Box<closed::Request>),
 }
 
 pub struct Pending {
@@ -342,6 +342,41 @@ fn candle_start(interval: Interval, time: f64) -> f64 {
 /// resend, IP not allowed, expired key. 10005 (permission) is left out: a key
 /// lacking only this read's scope may still trade.
 const CREDENTIAL_REJECTIONS: [i64; 4] = [10003, 10004, 10010, 33004];
+
+/// A command read's native refusal, classified so it keeps its kind.
+pub(crate) fn read_refusal(response: &Response<'_>, prefix: &str) -> Option<VenueError> {
+    use safe_cex_engine::classify::{self, Native, NativeCode, Released};
+    let (code, message) = venue_error(response)?;
+    // Only a parsed retCode is native evidence; a bare HTTP error is not.
+    let parsed = serde_json::from_str::<Status>(response.body)
+        .ok()
+        .and_then(|status| status.ret_code)
+        .is_some();
+    let native = parsed.then_some(Native {
+        code: NativeCode::Int(code),
+        message: &message,
+    });
+    Some(
+        classify::read(
+            &trading::codes::BYBIT,
+            Released::Response(response),
+            native.as_ref(),
+            format!("{prefix}{message}"),
+        )
+        .error,
+    )
+}
+
+/// A page failure that reached the public dispatch as text.
+fn page_failure(response: Result<Response<'_>, &str>) -> VenueError {
+    match response {
+        Err(error) => VenueError::new(error).kind(ErrorKind::Network),
+        Ok(_) => VenueError::new("Bybit page answer lost its read leg").kind(ErrorKind::Internal),
+    }
+}
+
+/// Each page of a command read has its own window inside the caller's.
+pub(crate) const PAGE_WINDOW_MS: u32 = 20_000;
 
 /// Bybit's message for a rejected request, from any envelope or body.
 pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
@@ -731,6 +766,42 @@ impl BybitLinear {
         })
     }
 
+    /// A command read's caller root: the receipt deadline bounds every page.
+    /// `None` when admission already answered the command.
+    pub(crate) fn caller_read_root(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        signed: bool,
+    ) -> Option<safe_cex_engine::request_context::Context> {
+        use safe_cex_engine::request_context::CommandEntryError;
+        let credential = self
+            .read_policy(signed, 1)
+            .and_then(|policy| policy.credential);
+        match cx.admit_caller_read_root(credential, None) {
+            Ok(root) => Some(root),
+            Err(CommandEntryError::Rejected(_)) => None,
+            Err(CommandEntryError::Revoked) => {
+                let _ =
+                    cx.reject_expired_command(safe_cex_engine::request_context::Operation::Read);
+                None
+            }
+        }
+    }
+
+    /// One page of a command read: a 20 s managed leg of its caller root.
+    pub(crate) fn page_leg(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        root: &safe_cex_engine::request_context::Context,
+        signed: bool,
+    ) -> Result<safe_cex_engine::request_context::Context, VenueError> {
+        let policy = self.read_policy(signed, PAGE_WINDOW_MS).ok_or_else(|| {
+            VenueError::new("Bybit signed read has no credential").kind(ErrorKind::AuthInvalid)
+        })?;
+        cx.http_leg_context(root, policy)
+            .map_err(|error| error.venue_error())
+    }
+
     pub(crate) fn queue_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -787,6 +858,19 @@ impl BybitLinear {
                         .venue_error()
                         .outcome(safe_cex_engine::Outcome::NotSent);
                     self.identity_response(cx, context, Err(error));
+                }
+                // A page refused before any send keeps the engine's typed error.
+                Then::History(request) => {
+                    let error = error
+                        .venue_error()
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    self.on_history_failed(cx, request, error);
+                }
+                Then::Closed(request) => {
+                    let error = error
+                        .venue_error()
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    self.on_closed_failed(cx, *request, error);
                 }
                 then => self.on_public_response(cx, then, Err(&error.venue_error().message)),
             },
@@ -1987,8 +2071,9 @@ impl BybitLinear {
             Then::Trade(request) => self.on_trade_response(cx, request, response),
             // Ordinary responses and failures never reach the public path.
             Then::Ordinary(_) => {}
-            Then::History(request) => self.on_history_response(cx, request, response),
-            Then::Closed(request) => self.on_closed_response(cx, request, response),
+            // Answers arrive with their page leg in on_response; only failures here.
+            Then::History(request) => self.on_history_failed(cx, request, page_failure(response)),
+            Then::Closed(request) => self.on_closed_failed(cx, *request, page_failure(response)),
         }
     }
 }
@@ -2307,6 +2392,15 @@ impl Venue for BybitLinear {
         self.ordinary_reconciliation(pending)
     }
 
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        // Closed-position owners travel in their pending and drop with it.
+        self.retire_history(owner);
+    }
+
     fn reconcile_http(
         &self,
         _cx: &mut safe_cex_engine::request_context::Reconciliation<'_>,
@@ -2322,6 +2416,8 @@ impl Venue for BybitLinear {
             Then::Candles(read) => Self::candles_failed(cx, read, error),
             Then::Identity(context) => self.identity_response(cx, context, Err(error)),
             Then::Options(request) => self.on_options_response(cx, request, Err(error)),
+            Then::History(request) => self.on_history_failed(cx, request, error),
+            Then::Closed(request) => self.on_closed_failed(cx, *request, error),
             then => self.on_request_failed(
                 cx,
                 Pending {
@@ -2523,6 +2619,29 @@ impl Venue for BybitLinear {
             self.on_options_response(cx, request, Ok(response));
             return;
         }
+        if matches!(pending.then, Then::History(_) | Then::Closed(_)) {
+            // A page answers on its own leg; the owner validates that delivery.
+            let Some(read) = pending.read.clone() else {
+                return;
+            };
+            let mut pending = Some(pending);
+            // A native re-read continues on this leg's retry attempt.
+            if self.reread(cx, &mut pending, &response) {
+                return;
+            }
+            match pending.map(|pending| pending.then) {
+                Some(Then::History(request)) => {
+                    self.on_history_response(cx, request, &read, response);
+                }
+                Some(Then::Closed(request)) => {
+                    self.on_closed_response(cx, *request, &read, response);
+                }
+                _ => {}
+            }
+            // The page is handled; its leg retires so a long walk never fills capacity.
+            let _ = cx.finish_http_context(&read);
+            return;
+        }
         if let Some(read) = pending.read.clone() {
             // Only a live Background read may publish; the engine never
             // delivers an answer for a retired attempt.
@@ -2661,6 +2780,15 @@ impl Venue for BybitLinear {
             self.identity_response(cx, context, Err(error));
             return;
         }
+        // A page or its re-read keeps the signer's typed error.
+        if let Then::History(request) = pending.then {
+            self.on_history_failed(cx, request, error);
+            return;
+        }
+        if let Then::Closed(request) = pending.then {
+            self.on_closed_failed(cx, *request, error);
+            return;
+        }
         if pending.rest.resent {
             // This refusal concerns only the retry. The earlier dispatched
             // attempt keeps the existing conservative failure/recovery path.
@@ -2671,8 +2799,6 @@ impl Venue for BybitLinear {
         match pending.then {
             Then::Trade(request) => self.on_trade_sign_failed(cx, request, error),
             Then::Identity(context) => self.identity_response(cx, context, Err(error)),
-            Then::History(request) => self.on_history_sign_failed(cx, request, error),
-            Then::Closed(request) => self.on_closed_sign_failed(cx, request, error),
             Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
             Then::Options(request) => self.on_options_response(cx, request, Err(error)),
             then => self.on_public_response(cx, then, Err(&error.message)),

@@ -7364,3 +7364,14 @@ them as fixtures.
 | --- | --- | --- |
 | A create answered `10014` or `110072` (duplicate `orderLinkId`), every Bybit variant | `Unknown`: the order may already exist, so the engine reconciles it (was `Rejected`) | Treat as uncertain; reconcile before resubmitting the same link. |
 | The same codes on cancel or amend | Unchanged: `Rejected` | None. |
+
+### Bybit history and closed positions on caller Read roots (slice 5)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| Fills, order history, income, public trades and closed positions are bounded by the caller's wait | At the deadline: strict `timeout`, no rows and no incomplete marker (was unbounded; a long multi-window walk eventually returned) | Pass a wait that covers the range, or narrow it. |
+| Each page has its own window inside the caller's (20 s, or less when the caller's wait ends first) | An unanswered page fails typed `timeout`; transport loss is typed `network` (was never, or text) | None. |
+| A page failure after accepted rows | Unchanged: accepted rows plus the incomplete marker; typed failure when none | None. |
+| A native refusal | Classified: keeps its `kind` and the native `venueCode` (was `internal` and no code) | Branch on `kind`. |
+| A signature/timestamp refusal (`10002`/`10004`) | Re-read once as a managed retry with Bybit's clock; host text never re-sends | None. |
+| Credentials | Unchanged: the read key when configured, else the primary; keyless account history is `[]` with no request | None. |
