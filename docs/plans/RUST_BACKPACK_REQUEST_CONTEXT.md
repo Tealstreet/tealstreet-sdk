@@ -562,3 +562,17 @@ kind assertion and is a mandatory post-cutover check, not claimed as executed
 in that RED; the separate duplicate working control does execute real delivery.
 Only this plan and the new test file differ from the base. Production, manifest,
 key-selection sites/maps and all combo-5b source remain byte-identical.
+
+
+The overseer approved the slice and authorized production after hcmq3f's bounded
+plan/control CLEAR at `d746618aaaa`. The applied source is the prepared d704
+artifact (SHA-256
+`d704e147c4776c2450192e8630dc931a1350f0eb8c1dc8f193764cd5e8c892a9`):
+only the unsupported FetchCandles branch plus its CommandWait import change.
+All six unchanged controls now PASS, zero failures/ignored. The previously
+unexecuted capacity postcondition now also reaches real successful prior-owner
+delivery. Native messages/no-outcome fields, public/private keyless modes, no
+I/O/Store changes, duplicate-owner delivery, reuse and WS diagnostics remain
+GREEN. Exactly the planned one-count lib.rs fingerprint is removed; all other
+inventory and key-selection sites/maps remain unchanged. Fresh CI and exact
+committed source preservation review follow in parallel; no READY is claimed.

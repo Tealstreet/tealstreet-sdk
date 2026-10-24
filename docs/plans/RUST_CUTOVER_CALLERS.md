@@ -6853,3 +6853,15 @@ version fences, contract-size scaling and buffer limits remain. Public reads
 carry no credential and publish neither command terminals nor account-auth
 evidence. Existing safe-cex startup/subscribed-order-book consumers require no
 new input; host dispatch uses the existing managed prepare/bind/claim protocol.
+
+
+## Backpack unsupported command candle intervals
+
+Unsupported FetchCandles intervals keep the exact native refusal message and
+absent error kind on a valid keyless Read entry. The shared receipt, clock and
+capacity checks run first; invalid clocks and unavailable capacity report their
+existing typed engine errors without a write outcome. Missing or expired
+receipts refuse without renewing the caller's bound. Duplicate IDs retain the
+prior owner's authority and eventual reply. Refusal creates no HTTP, managed
+preparation, signing, socket, timer or Store update. Supported candle intervals,
+query/stream behavior and unsupported WS subscription diagnostics are unchanged.
