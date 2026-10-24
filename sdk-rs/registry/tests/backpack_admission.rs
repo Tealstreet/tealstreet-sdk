@@ -266,3 +266,81 @@ fn dual_read_setup_keeps_mutation_on_the_primary_provider() {
     assert_eq!(values[0], b"primary-api-key");
     assert_eq!(values[1], hex(RFC_SIGNATURE));
 }
+
+struct CaptureStartup;
+impl Visit for CaptureStartup {
+    type Output = (Identities, bool, Vec<safe_cex_engine::Action>);
+    fn visit<V: safe_cex_engine::Venue + 'static>(
+        self,
+        mut engine: safe_cex_engine::Engine<V>,
+    ) -> Self::Output {
+        let identities = engine.identities().clone();
+        let has_signer = engine.signer().is_some();
+        engine.start(10.);
+        (identities, has_signer, engine.drain_actions().collect())
+    }
+}
+
+#[test]
+fn public_only_malformed_read_seed_keeps_native_config_error_and_no_start() {
+    use safe_cex_engine::{Action, Notice, log::code};
+    for (secret, expected) in [
+        ("not base64!".to_string(), "Invalid Backpack base64 seed"),
+        (base64(&[8; 31]), "Ed25519 seed must be 32 bytes"),
+    ] {
+        let options = serde_json::from_value(json!({
+            "publicDataOnly": true,
+            "readCredentials": {"key": "read-api-key", "secret": secret},
+        }))
+        .unwrap();
+        let (identities, has_signer, actions) = build(
+            "backpack",
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(5)),
+            CaptureStartup,
+        )
+        .unwrap();
+        assert!(identities.primary.is_none());
+        assert!(identities.secondary.is_none());
+        assert!(!has_signer);
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(&actions[0], Action::Notice(Notice::Event(event))
+            if event.code == code::CONFIG_INVALID && event.message == expected));
+    }
+}
+
+#[test]
+fn native_valid_base64_read_seeds_always_construct_and_sign_in_the_provider() {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::signing::KeyEncoding;
+    for byte in [0, 1, 7, 8, 127, 128, 255] {
+        let secret = base64(&[byte; 32]);
+        assert!(safe_cex_venue_backpack::sign::Credentials::new("read".into(), &secret).is_ok());
+        let (signer, identities) = LocalSigner::from_setup(LocalSetup {
+            primary: Some(LocalIdentity {
+                key: Secret::new("primary".into()),
+                secret: Secret::new(base64(&[7; 32])),
+                secret_encoding: KeyEncoding::Base64,
+                ..Default::default()
+            }),
+            secondary: Some(LocalIdentity {
+                key: Secret::new("read".into()),
+                secret: Secret::new(secret),
+                secret_encoding: KeyEncoding::Base64,
+                ..Default::default()
+            }),
+        })
+        .expect("native-valid read seed must not refuse the primary setup");
+        let read = identities.secondary.unwrap();
+        let request = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::Ed25519,
+                key: read.signing,
+                payload: vec![PayloadPart::Bytes { bytes: vec![] }],
+            }],
+        };
+        assert_eq!(signer.sign_now(&request).unwrap().values[0].len(), 64);
+    }
+}
