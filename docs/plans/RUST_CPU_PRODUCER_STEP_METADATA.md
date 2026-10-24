@@ -49,8 +49,8 @@ remains nonterminal. This also avoids binding a partially populated post-step
 list that would later differ at `evidenceEndCheck`.
 
 Use the existing uncached complete run/jobs/artifacts API reader to refresh
-`context.inventory`: at most6 refresh cycles per command/context, with5s
-spacing (at most30s scheduled delay, in addition to existing transport time).
+`context.inventory`: at most20 refresh cycles per command/context, with30s
+spacing (at most10min scheduled delay, in addition to existing transport time).
 The budget is shared across suites/artifact bindings, not multiplied by32.
 Do not poll the active planner itself. Do not retry HTTP refusals, malformed
 responses, failed provenance checks, or measurement jobs.
@@ -72,7 +72,7 @@ After convergence, use the terminal record consistently for upload/checkout
 authentication, returned bundle, measurement-window checks and bindings.
 Keep exact artifact id/size/digest/producer/ZIP checks, logged checkout and
 step windows unchanged. On exhaustion, fail explicitly with run/job/name,
-pending step names/statuses/conclusions and the6-refresh cap; do not cache an
+pending step names/statuses/conclusions and the20-refresh cap; do not cache an
 accepted bundle or mint plan/certificate/matrix output.
 
 ## Originals and controls
@@ -121,13 +121,13 @@ keeps its original record; a later binding of the same producer may not
 substitute a different whole job record.
 
 GREEN-stage controls cover refresh-only attempt2 aliases, same-name duplicate
-producers, changed job/runner IDs, two producers sharing six refreshes total, concurrent bindings unable to overspend,
+producers, changed job/runner IDs, two producers sharing twenty refreshes total, concurrent bindings unable to overspend,
 late descriptive fields, active planner/certifier exclusion, immutable earlier
 bindings with final drift rejection, completed/null convergence, skipped
 unrelated steps, and preservation of both raw API observations. Exhaustion
 assertions include run1000, job100 and the pending step name/status/conclusion.
 
-Scoped execution:66/66 PASS,0 skipped across the producer originals/hostile
+Initial execution at ca364:66/66 PASS,0 skipped across the producer originals/hostile
 controls and existing cpu-ci/cohort/artifact/request-budget tests. This is not
 fresh CI, a real CPU replay run, or merge clearance. CI's existing
 `rust:test-harness` glob includes the new control file without workflow edits.
@@ -144,12 +144,12 @@ A later observation populates those lists with the same pinned identities,
 but still contains nonterminal steps; it is diagnostic, not certification.
 
 Treat only a valid empty array as an unmaterialized, nonterminal inventory
-under the existing shared six-refresh/five-second budget. Never bind it or
+under the overseer-approved shared twenty-refresh/thirty-second budget. Never bind it or
 infer success from an empty list. Missing/non-array inventories and malformed
 step records still fail immediately. Once nonempty, requested upload-step
 uniqueness and all existing success/identity/provenance checks still apply.
 An empty list that never materializes fails at the same cap with run/job and
-an explicit empty-inventory diagnostic. Do not increase the cap or retry HTTP.
+an explicit empty-inventory diagnostic. Do not exceed the ruled cap or retry HTTP.
 
 Before production, add assertion REDs for empty-to-terminal convergence and
 empty-list exhaustion. Keep malformed inventory, missing/duplicate upload,
@@ -157,3 +157,15 @@ attempt/identity and HTTP working controls, and pin empty-to-pending-to-terminal
 convergence without accepting the intermediate snapshot. Send the exact delta
 to dazzy3; fresh CI is required after any production change. No workflow retry
 has been started for the failed run.
+
+## Revised wait-budget ruling
+
+After the empty snapshot before17:44:29Z, an observation at17:50:06Z still
+contained nonterminal metadata under the same32 pinned producer identities.
+This does not establish the exact convergence time, but demonstrates why a
+30s schedule cannot cover the observed lag. The overseer explicitly ruled
+20 complete-inventory refreshes at30s spacing, shared per command/context
+for both empty inventories and nonterminal steps (10min scheduled delay).
+All other identity/attempt/strict provenance checks remain unchanged. Pin
+the spacing and20-refresh cap for both shapes before applying production.
+No alternative artifact-API authority is included in this change.

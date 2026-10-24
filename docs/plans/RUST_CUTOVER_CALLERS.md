@@ -7675,8 +7675,9 @@ on its existing path until the Rust implementation is selected.
 
 CPU artifact authentication now waits for every step in its exact completed,
 successful attempt1 producer to become terminal. The command shares at most
-six complete metadata inventory refreshes, five seconds apart, across all
-artifact bindings. Exhaustion reports the run, physical job and pending steps;
+twenty complete metadata inventory refreshes, thirty seconds apart, across all
+artifact bindings, including valid empty step lists. Exhaustion reports the
+run, physical job and pending steps or the explicit empty-inventory cap;
 HTTP refusals, changed identity and retry aliases fail closed. This is an API
 metadata wait, not a replay/measurement retry or a new timing sample. Exact
 upload/checkout windows, ZIP/digest checks, raw observations and final
