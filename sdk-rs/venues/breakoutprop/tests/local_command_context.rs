@@ -131,7 +131,8 @@ fn invalid(case: Case) {
     assert_eq!(error.outcome, mutation(case).then_some(Outcome::NotSent));
     assert!(engine.store().orders().is_empty());
     assert!(engine.store().positions().is_empty());
-    assert!(engine.store().settings().is_empty());
+    assert!(engine.store().setting("ETHUSD").is_none());
+    assert!(engine.store().markets().is_empty());
 }
 macro_rules! entry_control {
     ($name:ident, $case:ident) => {
@@ -194,7 +195,8 @@ fn finite_local_cases_keep_native_results_messages_kind_and_no_io() {
         }
         assert!(engine.store().orders().is_empty());
         assert!(engine.store().positions().is_empty());
-        assert!(engine.store().settings().is_empty());
+        assert!(engine.store().setting("ETHUSD").is_none());
+        assert!(engine.store().markets().is_empty());
     }
 }
 #[test]
