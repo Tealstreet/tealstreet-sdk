@@ -7389,6 +7389,19 @@ journal. Remote signing/JWT/trading/history behavior is untouched. Exact legacy
 inventory: config 1 plus initial terminals 6 removed; Paradex 48 -> 41.
 
 
+## Lighter unsigned FetchAccount identity
+
+FetchAccount now admits one caller-bound unsigned Read before selector validation.
+Its native index/address candidates retain their order and each has its own20s
+physical window capped by the original caller receipt. Shared capacity, clock,
+duplicate and expiry refusals precede native diagnostics. Released transport
+failure or physical timeout can advance to a different native candidate only
+while that exact original root remains live; preparation refusal cannot. Existing
+native status/row/error/referrer semantics remain unchanged. The single checked
+companion diagnostic and command terminal use that root. No new caller parameter,
+credential, Session, signer or private lifecycle activity is needed.
+
+
 ## WEEX local leverage refusals use command Read authority
 
 FetchLeverage preserves unknown-market, active shared-pause, then missing-read-

@@ -351,3 +351,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Orderly unsupported order controls | Implemented; source reviews and CI pending | Before converting the one initial Bybit BBO/TickSize refusal; no deferred-job or signer changes. | [RUST_ORDERLY_UNSUPPORTED_ORDER_CONTEXT.md](RUST_ORDERLY_UNSUPPORTED_ORDER_CONTEXT.md) |
 
 - [Paradex config/local entry](RUST_PARADEX_LOCAL_ENTRY.md) and [remaining engine seams](RUST_PARADEX_ENGINE_GAPS.md): seven-site managed/local slice after the hosted signing decision.
+
+| Lighter unsigned identity Read | Managed implementation under review | Before changing FetchAccount candidate custody, original caller expiry or the exact three-site identity prune. | [RUST_LIGHTER_IDENTITY_CONTEXT.md](RUST_LIGHTER_IDENTITY_CONTEXT.md) |

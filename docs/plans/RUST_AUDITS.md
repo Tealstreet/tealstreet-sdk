@@ -3086,3 +3086,15 @@ All26 original assertions pass with the seven-site implementation. This receipt
 covers real retained-peer capacity, native metadata, duplicate custody, receipt
 expiry and config Prepare/Bind/Claim/expiry/retry; CI and independent source
 review are separate gates.
+
+
+## Lighter identity caller and physical custody
+
+The complete unsigned identity candidate chain uses a tracked caller Read root
+and unsigned20s/Never children. Exact live DATA validation precedes decoding;
+failure-only continuation uses the engine's typed released callback, validates
+the original root and retires the expired current child before the next candidate.
+Preparation refusals are strict. Candidate construction, parsing and private
+account/signing paths remain unchanged. Exact inventory identity3->0/family33->30
+removes one physical request and two numeric terminals, with no rename prune or
+new engine helper. Original plan/API receipts do not substitute for source review.
