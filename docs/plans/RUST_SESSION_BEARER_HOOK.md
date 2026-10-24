@@ -982,3 +982,28 @@ enable `session-bearer` when they adopt, with their own budget review.
   - ON: session_bearer 55 / 61, lib 1092, barrier 14.
   - Clippy `-D warnings` clean in five modes: none, http-plans,
     barriers + test-support, session-bearer, and the full ON row.
+
+Size follow-ups:
+- `874506c83c8`: the action-queue wipe (`Wiping`), the Bind-packet wipe arm,
+  the bound-call Authorization/route refusal and the Public->Primary intent
+  switch.
+- `cd75dd2a4e3`: the per-engine `bearer_bound` and `bearer_parked` lists and
+  their helpers, with an off-mode `park_bearer` stub for the unreachable
+  branches.
+- `0cfb990d444`: the Bind-wipe unit test is gated.
+
+Wasm evidence (dazzy3 F1). Each family was built with its own build.sh
+profile, run through `wasm-bindgen 0.2.129`, then `wasm-opt version_132 -Oz`
+with build.sh's flags (the CI artifact), comparing tip `10f3348569e` with the
+gated head. Shipped bytes:
+
+| Family | Tip | Gated head | Delta | Budget |
+| --- | --- | --- | --- | --- |
+| asterdex | 1,338,586 | 1,338,588 | +2 | 1,343,488 |
+| bitget | 1,362,767 | 1,361,861 | -906 | 1,363,968 |
+| bybit | 1,336,606 | 1,336,691 | +85 | 1,343,488 |
+
+The off-mode refusal itself costs about 66 bytes on bybit. The PR run's wasm
+families job is the full every-family evidence. Results: OFF lib 876 and
+session_bearer_off 1/2; ON lib 1092, session_bearer 61, barrier 14; clippy
+clean in four modes; `cargo check --workspace --all-targets` clean.
