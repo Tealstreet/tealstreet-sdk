@@ -88,7 +88,7 @@ fn account_equity(
         };
         reply(engine, &request, &body, 5.0);
         pending.extend(
-            actions(engine)
+            prepared(engine, 5.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );

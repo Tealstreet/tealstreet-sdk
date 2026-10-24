@@ -16,9 +16,11 @@ mod wire;
 use safe_cex_engine::ErrorKind;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
+use safe_cex_engine::selected_read::{ReadRole, SelectedRead};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
@@ -47,7 +49,7 @@ pub struct Pending {
     seed_generation: u32,
 }
 enum Task {
-    BookQuery(CommandId),
+    BookQuery(depth_query::Request),
     Markets(Vec<Market>),
     Account(account::Request),
     Trade(trading::Request),
@@ -159,6 +161,8 @@ pub struct WeexFutures {
     trading: trading::State,
     history: history::State,
     credentials: sign::Credentials,
+    /// Configured keys, built once. GET reads use the read key, even without a primary.
+    slots: Slots<safe_cex_engine::signing::Identity>,
     /// Trusted caller-assigned primary stableId; never derived from key material.
     identity: Option<String>,
     /// A supplied primary identity lacks a valid key/signing/passphrase ref.
@@ -190,6 +194,11 @@ impl WeexFutures {
             primary: primary.filter(complete),
             read: options.read_credentials.filter(complete),
         };
+        let slots = Slots::new(
+            credentials.primary.clone(),
+            credentials.read.clone(),
+            SlotPolicy::default(),
+        );
         Self {
             public: Connection::default(),
             active_symbols: HashSet::new(),
@@ -200,6 +209,7 @@ impl WeexFutures {
             trading: trading::State::default(),
             history: history::State::default(),
             credentials,
+            slots,
             identity,
             incomplete_credentials,
             invalid_read_credentials,
@@ -264,14 +274,15 @@ impl WeexFutures {
             cx.fail(command, String::from("WEEX account reads are rate limited"));
             return;
         }
-        let Some(signer) = self.credentials.select(Method::Get) else {
+        let selected = SelectedRead::select(&self.slots, ReadRole::Read { scope: None });
+        if selected.is_err() {
             cx.fail(command, String::from("WEEX leverage requires credentials"));
             return;
-        };
+        }
         let revision = self.account.settings_revision();
         if let Err(error) = managed::read(
             cx,
-            signer,
+            selected,
             command,
             format!("/capi/v3/account/symbolConfig?symbol={market_id}"),
             self.seed_generation,
@@ -374,9 +385,17 @@ impl WeexFutures {
         task: Task,
         stream: Option<ArrayAt>,
     ) -> bool {
-        let Some((identity, slot)) = self.credentials.select(method) else {
+        // This legacy staging site still keys its role on the method: GETs read,
+        // everything else is a primary-key Mutation.
+        let role = if method == Method::Get {
+            CredentialRole::Read { scope: None }
+        } else {
+            CredentialRole::Mutation
+        };
+        let Ok((selection, identity)) = self.slots.select(role) else {
             return false;
         };
+        let slot = selection.slot();
         let mut pairs: Vec<_> = query.split('&').filter(|p| !p.is_empty()).collect();
         pairs.sort_unstable_by_key(|p| p.split('=').next().unwrap_or(""));
         let path_query = if pairs.is_empty() {
@@ -595,10 +614,6 @@ impl WeexFutures {
         cx.book_changed(&symbol);
     }
     fn fail(&mut self, cx: &mut Cx<'_, Pending>, task: Task, error: &str) {
-        if let Task::BookQuery(command) = task {
-            cx.fail(command, depth_query::failure(error, ErrorKind::Network));
-            return;
-        }
         if let Task::Identity { context, .. } = &task {
             Self::identity_failed(cx, context, error);
             return;
@@ -828,6 +843,9 @@ impl Venue for WeexFutures {
         {
             return;
         }
+        if matches!(p.task, Task::Account(_)) && p.seed_generation != self.seed_generation {
+            return;
+        }
         let ok = match &mut p.task {
             Task::Account(r) => self.account_item(cx, r, item),
             Task::History(r) => self.history_item(cx, r, item),
@@ -903,6 +921,42 @@ impl Venue for WeexFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, response: Response<'_>) {
+        if let Task::Account(request) = p.task {
+            let context = request.context.clone();
+            // A native rate-limit signal still pauses this immutable identity's
+            // other reads even when this snapshot's seed/cycle is stale.
+            if response.status == 429 {
+                self.paused_until = self
+                    .paused_until
+                    .max(cx.now + rate::delay(response, cx.now));
+            }
+            if p.seed_generation == self.seed_generation
+                && self.account_delivery_current(cx, &request)
+            {
+                if response.status >= 400 {
+                    if let Some(context) = &context {
+                        let _ = cx.finish_http_context(context);
+                    }
+                    self.account_failed(
+                        cx,
+                        request,
+                        &format!("HTTP {}: {}", response.status, response.body),
+                    );
+                } else if p.invalid {
+                    if let Some(context) = &context {
+                        let _ = cx.finish_http_context(context);
+                    }
+                    self.account_failed(cx, request, "malformed REST row");
+                } else {
+                    self.account_response(cx, request, response);
+                }
+            }
+            if let Some(context) = context {
+                let _ = cx.finish_http_context(&context);
+            }
+            return;
+        }
+
         if matches!(p.task, Task::Daily | Task::BookTickers)
             && p.seed_generation != self.seed_generation
         {
@@ -912,14 +966,14 @@ impl Venue for WeexFutures {
             self.trade_response(cx, request, response);
             return;
         }
+        if let Task::BookQuery(request) = p.task {
+            self.book_query_response(cx, request, response);
+            return;
+        }
         if response.status == 429 {
             self.paused_until = self
                 .paused_until
                 .max(cx.now + rate::delay(response, cx.now));
-        }
-        if let Task::BookQuery(command) = p.task {
-            self.book_query_response(cx, command, response);
-            return;
         }
         if response.status >= 400 {
             self.fail(
@@ -958,7 +1012,7 @@ impl Venue for WeexFutures {
                 ..
             } => self.leverage_response(cx, &context, &symbol, revision, response),
             Task::Identity { context, .. } => self.identity_response(cx, &context, response),
-            Task::Account(r) => self.account_response(cx, r, response),
+            Task::Account(_) => unreachable!("account response handled before reducer"),
             Task::Trade(r) => self.trade_response(cx, r, response),
             Task::History(r) => self.history_response(cx, r, response),
             Task::Markets(markets) => {
@@ -1062,6 +1116,10 @@ impl Venue for WeexFutures {
         error: safe_cex_engine::VenueError,
     ) {
         match p.task {
+            Task::BookQuery(request) => request.failed(cx, error),
+            Task::Account(r) => {
+                self.account_request_failed(cx, r, p.seed_generation, &error.message)
+            }
             Task::Identity { context, .. } => Self::identity_failed(cx, &context, error),
             Task::Leverage { context, .. } => managed::reject(cx, &context, error),
             Task::Trade(r) => self.trade_failed(cx, r, error),
@@ -1075,11 +1133,21 @@ impl Venue for WeexFutures {
         p: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        if let Task::Trade(request) = p.task {
-            self.trade_failed(cx, request, error);
-        } else {
-            self.on_request_failed(cx, p, &error.message);
+        match p.task {
+            Task::BookQuery(request) => request.failed(cx, error),
+            Task::Trade(request) => self.trade_failed(cx, request, error),
+            task => self.on_request_failed(cx, Pending { task, ..p }, &error.message),
         }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.deferred_gets.retain(|deferred| match &deferred.task {
+            Task::BookQuery(query) => query.owner() != owner,
+            _ => true,
+        });
     }
     fn on_http_owner_retired(
         &mut self,
@@ -1110,6 +1178,11 @@ impl Venue for WeexFutures {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: &str) {
+        if let Task::Account(request) = p.task {
+            self.account_request_failed(cx, request, p.seed_generation, error);
+            return;
+        }
+
         if matches!(p.task, Task::Daily | Task::BookTickers)
             && p.seed_generation != self.seed_generation
         {
@@ -1125,7 +1198,11 @@ impl Venue for WeexFutures {
             {
                 return;
             }
-            self.get(cx, &r.path, &r.query, r.task, r.stream);
+            if let Task::BookQuery(request) = r.task {
+                self.send_book_query(cx, request, r.query);
+            } else {
+                self.get(cx, &r.path, &r.query, r.task, r.stream);
+            }
             return;
         }
         if self.account_timer(cx, timer) || self.history_timer(cx, timer) {
@@ -1178,17 +1255,7 @@ impl Venue for WeexFutures {
             limit,
         } = command
         {
-            self.get(
-                cx,
-                paths::DEPTH,
-                &format!(
-                    "symbol={}&limit={}",
-                    safe_cex_engine::url::encode(symbol),
-                    limit.unwrap_or(200)
-                ),
-                Task::BookQuery(command),
-                None,
-            );
+            self.fetch_book_query(cx, command, symbol, limit);
             return;
         }
 

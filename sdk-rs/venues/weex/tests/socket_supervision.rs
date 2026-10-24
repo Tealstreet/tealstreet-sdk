@@ -5,6 +5,7 @@ use safe_cex_engine::{
 };
 mod support;
 use safe_cex_venue_weex::WeexFutures;
+use support::PreparedActions;
 use support::setup::Options;
 
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":0.000001,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"#;
@@ -71,7 +72,7 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in self.engine.prepared_actions(self.now) {
             match action {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),

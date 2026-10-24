@@ -134,7 +134,7 @@ fn complete(mut pending: Vec<Action>, e: &mut Engine<Okx>) -> Vec<String> {
             envelope("")
         };
         reply(e, &a, &body, 6.0);
-        pending.extend(actions(e));
+        pending.extend(prepared(e, 6.0));
     }
     urls
 }
@@ -171,7 +171,7 @@ fn index_underlying_updates_every_matching_swap_and_xperp() {
         })
         .unwrap();
     e.handle(5.0, Event::WsOpened { socket: public });
-    let sent = actions(&mut e);
+    let sent = prepared(&mut e, 5.0);
     assert!(sent.iter().any(|a|matches!(a,Action::WsSend{text,..} if text.contains(r#""channel":"index-tickers","instId":"BTC-USD""#))));
     ws(
         &mut e,
@@ -239,9 +239,9 @@ fn product_subscriptions_and_execution_fill_use_actual_inverse_price() {
     let (mut e, private, out) = private_catalog();
     complete(out, &mut e);
     e.handle(7.0, Event::WsOpened { socket: private });
-    actions(&mut e);
+    prepared(&mut e, 7.0);
     ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 4.0);
     assert!(out.iter().any(|a|matches!(a,Action::WsSend{text,..} if text.contains(r#""channel":"positions","instType":"FUTURES""#) && text.contains(r#""channel":"orders","instType":"SWAP""#))));
     ws(
         &mut e,
@@ -276,13 +276,13 @@ fn delayed_futures_read_gates_startup_and_failure_preserves_old_union() {
         .find(|a| is_get(a, "positions?instType=SWAP"))
         .unwrap();
     reply(&mut e, swap, &envelope(""), 6.0);
-    let futures = actions(&mut e)
+    let futures = prepared(&mut e, 6.0)
         .into_iter()
         .find(|a| is_get(a, "positions?instType=FUTURES"))
         .unwrap();
     assert!(!e.store().loaded().positions);
     e.handle(7.0,Event::Command(Command::PlaceOrders {command:99,orders:vec![serde_json::from_str(r#"{"symbol":"BTCUSD261225","type":"limit","side":"buy","amount":2,"price":40000}"#).unwrap()]}));
-    assert!(actions(&mut e).iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed { command: 99, error }) if error.legacy_text().contains("not ready"))));
+    assert!(prepared(&mut e, 7.0).iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed { command: 99, error }) if error.legacy_text().contains("not ready"))));
     let Action::Http(request) = futures else {
         panic!()
     };
@@ -305,7 +305,7 @@ fn inverse_and_xperp_writes_keep_native_lots_and_exact_instrument_identity() {
     let (mut e, _, out) = private_catalog();
     complete(out, &mut e);
     e.handle(8.0,Event::Command(Command::PlaceOrders {command:5,orders:vec![serde_json::from_str(r#"{"symbol":"BTCUSD261225","type":"limit","side":"buy","amount":2,"price":40000,"clientOrderId":"CallerX"}"#).unwrap()]}));
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 8.0);
     let request = out
         .iter()
         .find_map(|a| {
@@ -331,7 +331,7 @@ fn malformed_xperp_row_is_skipped_without_withholding_the_catalog() {
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 1.0).remove(0);
     reply(
         &mut e,
         &a,
@@ -350,7 +350,7 @@ fn malformed_xperp_row_is_skipped_without_withholding_the_catalog() {
         .collect();
     assert_eq!(symbols.len(), 2, "{symbols:?}");
     assert!(
-        actions(&mut e)
+        prepared(&mut e, 1.0)
             .iter()
             .any(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
     );
@@ -365,7 +365,7 @@ fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 1.0).remove(0);
     reply(
         &mut e,
         &a,
@@ -374,17 +374,17 @@ fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
     );
     assert!(!e.store().loaded().markets);
     assert!(e.store().markets().is_empty());
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 1.0);
     assert!(
         !out.iter()
             .any(|a| matches!(a, Action::WsConnect { .. } | Action::Http(_)))
     );
     let timer = retry_timer(&out, 2.0, 1_000.0).expect("startup retry timer");
     e.handle(1002.0, Event::TimerFired { timer });
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 1002.0).remove(0);
     assert!(is_get(&a, "/api/v5/public/instruments?instType=SWAP"));
     reply(&mut e, &a, &envelope(MARKET), 1003.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 1003.0).remove(0);
     reply(&mut e, &a, &envelope(&future()), 1004.0);
     assert!(e.store().loaded().markets);
     assert_eq!(e.store().markets().len(), 2);
@@ -399,7 +399,7 @@ fn malformed_xperp_catalogue_row_does_not_discard_valid_swaps() {
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 1.0).remove(0);
     reply(
         &mut e,
         &a,
@@ -411,7 +411,7 @@ fn malformed_xperp_catalogue_row_does_not_discard_valid_swaps() {
     assert!(e.store().loaded().markets);
     assert_eq!(e.store().markets().len(), 1);
     assert!(e.store().market("BTCUSDT").is_some());
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
+    assert!(prepared(&mut e, 1.0).iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
 }
 
 #[test]
@@ -428,7 +428,7 @@ fn failed_later_product_position_refresh_keeps_both_previous_products() {
             side: None,
         }),
     );
-    let a = actions(&mut e)
+    let a = prepared(&mut e, 7.0)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap();
@@ -436,13 +436,13 @@ fn failed_later_product_position_refresh_keeps_both_previous_products() {
         matches!(&a,Action::Http(r) if r.body.as_deref().unwrap().contains(r#""instId":"BTC-USD-261225""#))
     );
     reply(&mut e, &a, &envelope(""), 8.0);
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 8.0);
     let swap = out
         .iter()
         .find(|a| is_get(a, "positions?instType=SWAP"))
         .unwrap();
     reply(&mut e, swap, &envelope(""), 9.0);
-    let future = actions(&mut e)
+    let future = prepared(&mut e, 9.0)
         .into_iter()
         .find(|a| is_get(a, "positions?instType=FUTURES"))
         .unwrap();
@@ -530,7 +530,7 @@ fn collateral_uses_exact_swap_mark_not_xperp_basis() {
                 envelope("")
             };
             reply(&mut e, &a, &body, 6.0);
-            pending.extend(actions(&mut e));
+            pending.extend(prepared(&mut e, 6.0));
         }
     }
     let mut tickers = e.store().tickers().to_vec();
@@ -556,11 +556,11 @@ fn blank_untraded_xperp_ticker_fields_do_not_abort_other_seeded_markets() {
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 1.0).remove(0);
     reply(&mut e, &a, &envelope(&future()), 2.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 2.0).remove(0);
     reply(&mut e, &a, &envelope(TICKER), 3.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 3.0).remove(0);
     let ticker = ticker("BTC-USD-261225")
         .replace(r#""last":"40000""#, r#""last":"""#)
         .replace(r#""open24h":"40000""#, r#""open24h":"""#);
@@ -573,7 +573,7 @@ fn blank_untraded_xperp_ticker_fields_do_not_abort_other_seeded_markets() {
     assert_eq!(t.mark, 0.0);
     assert_eq!(t.percentage, 0.0);
     assert_eq!(
-        actions(&mut e)
+        prepared(&mut e, 4.0)
             .iter()
             .filter(|a| matches!(a, Action::WsConnect { .. }))
             .count(),
@@ -595,11 +595,11 @@ fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers()
         e.start(0.0);
         let a = actions(&mut e).remove(0);
         reply(&mut e, &a, &envelope(MARKET), 1.0);
-        let a = actions(&mut e).remove(0);
+        let a = prepared(&mut e, 1.0).remove(0);
         reply(&mut e, &a, &envelope(&future()), 2.0);
-        let a = actions(&mut e).remove(0);
+        let a = prepared(&mut e, 2.0).remove(0);
         reply(&mut e, &a, &envelope(TICKER), 3.0);
-        let a = actions(&mut e).remove(0);
+        let a = prepared(&mut e, 3.0).remove(0);
         let row = ticker("BTC-USD-261225").replace(good, bad);
         reply(&mut e, &a, &envelope(&row), 4.0);
         assert!(e.store().loaded().tickers, "{bad}");
@@ -615,7 +615,7 @@ fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers()
             0.0,
             "{bad}"
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 4.0);
         assert!(out.iter().any(|a| matches!(a, Action::WsConnect { .. })));
         assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.message == "OKX seeded 1 malformed ticker rows as zero")), "{bad}");
     }
@@ -630,11 +630,11 @@ fn unparseable_xperp_ticker_row_keeps_valid_swap_peers_and_logs_the_row() {
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 1.0).remove(0);
     reply(&mut e, &a, &envelope(&future()), 2.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 2.0).remove(0);
     reply(&mut e, &a, &envelope(TICKER), 3.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 3.0).remove(0);
     reply(
         &mut e,
         &a,
@@ -645,7 +645,7 @@ fn unparseable_xperp_ticker_row_keeps_valid_swap_peers_and_logs_the_row() {
     assert!(e.store().loaded().tickers);
     assert_eq!(e.store().tickers().len(), 1);
     assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 40000.0);
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
+    assert!(prepared(&mut e, 3.0).iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
 }
 
 #[test]
@@ -660,9 +660,9 @@ fn account_push_retains_real_usd_and_coin_details_and_live_order_margin() {
         .unwrap();
     complete(out, &mut e);
     e.handle(7.0, Event::WsOpened { socket: private });
-    actions(&mut e);
+    prepared(&mut e, 7.0);
     ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-    actions(&mut e);
+    prepared(&mut e, 4.0);
     ws(
         &mut e,
         private,
@@ -708,9 +708,9 @@ fn malformed_account_details_are_atomic_and_scalar_only_push_keeps_currency_deta
     let (mut e, private, out) = private_catalog();
     complete(out, &mut e);
     e.handle(7.0, Event::WsOpened { socket: private });
-    actions(&mut e);
+    prepared(&mut e, 7.0);
     ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-    actions(&mut e);
+    prepared(&mut e, 4.0);
     let before = e.store().balance().clone();
     let coins = e.store().currency_balances().unwrap().to_vec();
     for details in [
@@ -744,9 +744,9 @@ fn native_usd_margin_uses_decimal_addition_and_subtraction_for_every_row() {
     let (mut e, private, out) = private_catalog();
     complete(out, &mut e);
     e.handle(7.0, Event::WsOpened { socket: private });
-    actions(&mut e);
+    prepared(&mut e, 7.0);
     ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-    actions(&mut e);
+    prepared(&mut e, 4.0);
     // Two independent positions accumulate exactly four USD of native IMR.
     ws(
         &mut e,
@@ -807,9 +807,9 @@ fn native_coin_margin_keeps_subcent_precision_and_negative_pnl() {
     let (mut e, private, out) = private_catalog();
     complete(out, &mut e);
     e.handle(7.0, Event::WsOpened { socket: private });
-    actions(&mut e);
+    prepared(&mut e, 7.0);
     ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-    actions(&mut e);
+    prepared(&mut e, 4.0);
     // Distinct products and live orders share BTC collateral; no USD-cent trim.
     ws(
         &mut e,
@@ -889,7 +889,7 @@ fn missing_order_currency_reserves_proven_settlement_on_rest_and_websocket() {
                     envelope("")
                 };
                 reply(&mut e, &request, &body, 6.0);
-                pending.extend(actions(&mut e));
+                pending.extend(prepared(&mut e, 6.0));
             }
             assert!(e.store().loaded().orders && e.store().loaded().balance);
             assert_eq!(e.store().balance().free, 40600.0);
@@ -905,9 +905,9 @@ fn missing_order_currency_reserves_proven_settlement_on_rest_and_websocket() {
             assert_eq!(ledger.balance.free, equity - native_reserve);
 
             e.handle(7.0, Event::WsOpened { socket: private });
-            actions(&mut e);
+            prepared(&mut e, 7.0);
             ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-            actions(&mut e);
+            prepared(&mut e, 4.0);
             ws(
                 &mut e,
                 private,
@@ -1043,7 +1043,7 @@ mod product_semantics {
         let (mut e, initial) = startup(true, false);
         let public = socket(&initial, "/public");
         e.handle(3.0, Event::WsOpened { socket: public });
-        let subscriptions: Vec<serde_json::Value> = actions(&mut e)
+        let subscriptions: Vec<serde_json::Value> = prepared(&mut e, 3.0)
             .into_iter()
             .filter_map(|a| match a {
                 Action::WsSend { text, .. } if text != "ping" => {
@@ -1081,7 +1081,7 @@ mod product_semantics {
         let (mut e, initial) = startup(false, false);
         let public = socket(&initial, "/public");
         e.handle(3.0, Event::WsOpened { socket: public });
-        actions(&mut e);
+        prepared(&mut e, 3.0);
         ws(
             &mut e,
             public,
@@ -1100,7 +1100,7 @@ mod product_semantics {
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(INVERSE), 1.0);
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 1.0).remove(0);
         reply(
             &mut e,
             &request,
@@ -1124,7 +1124,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1149,7 +1152,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 6.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1177,13 +1183,19 @@ mod product_semantics {
                     },
                 }),
             );
-            let request = actions(&mut e).remove(0);
+            let request = prepared(&mut e, 4.)
+                .into_iter()
+                .find(|a| matches!(a, Action::Http(_)))
+                .expect("prepared native history HTTP");
             assert!(
                 matches!(&request, Action::Http(r) if r.url.contains(if symbol.is_some() { "instType=FUTURES" } else { "instType=SWAP" }))
             );
             reply(&mut e, &request, &envelope(""), 5.0);
             if symbol.is_none() {
-                let request = actions(&mut e).remove(0);
+                let request = prepared(&mut e, 5.)
+                    .into_iter()
+                    .find(|a| matches!(a, Action::Http(_)))
+                    .expect("prepared native history HTTP");
                 assert!(matches!(&request, Action::Http(r) if r.url.contains("instType=FUTURES")));
                 reply(&mut e, &request, &envelope(""), 6.0);
             }
@@ -1351,7 +1363,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1377,7 +1392,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 6.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1407,10 +1425,16 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         let old: Vec<_> = (1..=100).map(|i| format!(r#"{{"instId":"BTC-USD-SWAP","billId":"{i}","type":"8","pnl":"0","fee":"0","balChg":"0.0001","ccy":"BTC","ts":"1700000000000"}}"#)).collect();
         reply(&mut e, &request, &envelope(&old.join(",")), 5.0);
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 5.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         assert!(matches!(&request, Action::Http(r) if r.url.contains("instType=FUTURES")));
         reply(
             &mut e,
@@ -1445,11 +1469,14 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         let row = r#"{"instId":"BTC-USD-SWAP","ordId":"100","side":"buy","ordType":"limit","state":"filled","px":"50000","sz":"1","accFillSz":"1","cTime":"1700000000000"}"#;
         let page = envelope(&vec![row; 100].join(","));
         reply(&mut e, &request, &page, 5.0);
-        let timer = actions(&mut e)
+        let timer = prepared(&mut e, 5.0)
             .into_iter()
             .find_map(|a| match a {
                 Action::SetTimer { timer, .. } => Some(timer),
@@ -1457,9 +1484,12 @@ mod product_semantics {
             })
             .unwrap();
         e.handle(105.0, Event::TimerFired { timer });
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 105.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(&mut e, &request, &page, 106.0);
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 106.0);
         assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error: s, .. }) if s.legacy_text().contains("incomplete source"))));
         assert!(
             !out.iter()
@@ -1533,7 +1563,7 @@ mod product_semantics {
         assert!(!preopen.active);
         assert_eq!(preopen.limits.amount.max, 20000.0);
         assert!(
-            actions(&mut e)
+            prepared(&mut e, 1.0)
                 .iter()
                 .any(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
         );
@@ -1573,10 +1603,10 @@ mod product_semantics {
         }
         let mut e = crate::support::engine(Options::default());
         e.start(0.0);
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 1.0).remove(0);
         reply(&mut e, &request, &envelope(&row.to_string()), 1.0);
         assert!(!e.store().loaded().markets);
-        assert!(retry_timer(&actions(&mut e), 1.0, 1_000.0).is_some());
+        assert!(retry_timer(&prepared(&mut e, 1.0), 1.0, 1_000.0).is_some());
     }
 
     #[test]
@@ -1589,16 +1619,16 @@ mod product_semantics {
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(MARKET), 1.0);
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 1.0).remove(0);
         reply(
             &mut e,
             &request,
             &envelope(&XPERP.replace("BTC-USD-UM", "TEST002-USD_UM_XPERP-310822")),
             1.5,
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 1.0).remove(0);
         reply(&mut e, &request, &envelope(TICKER), 2.0);
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 2.0).remove(0);
         reply(
             &mut e,
             &request,
@@ -1614,10 +1644,10 @@ mod product_semantics {
             (t.last, t.mark, t.index, t.percentage),
             (0.0, 0.0, 0.0, 0.0)
         );
-        let initial = actions(&mut e);
+        let initial = prepared(&mut e, 2.0);
         let public = socket(&initial, "/public");
         e.handle(3.0, Event::WsOpened { socket: public });
-        actions(&mut e);
+        prepared(&mut e, 3.0);
         ws(
             &mut e,
             public,
@@ -1644,7 +1674,7 @@ mod product_semantics {
             e.start(0.0);
             let request = actions(&mut e).remove(0);
             reply(&mut e, &request, &envelope(MARKET), 1.0);
-            let request = actions(&mut e).remove(0);
+            let request = prepared(&mut e, 1.0).remove(0);
             reply(
                 &mut e,
                 &request,
@@ -1906,7 +1936,7 @@ mod product_semantics {
             .unwrap();
         reply(&mut e, positions, &envelope(JOIN_SWAP_POSITION), 4.1);
         assert!(!e.store().loaded().positions && !e.store().loaded().balance);
-        let future = actions(&mut e)
+        let future = prepared(&mut e, 4.1)
             .into_iter()
             .find(|a| is_get(a, "/api/v5/account/positions?instType=FUTURES"))
             .unwrap();
@@ -1942,7 +1972,7 @@ mod product_semantics {
             );
             reply(&mut e, &request, &envelope(row), 5.0);
             next.extend(
-                actions(&mut e)
+                prepared(&mut e, 5.0)
                     .into_iter()
                     .filter(|a| matches!(a, Action::Http(_))),
             );
@@ -2009,7 +2039,7 @@ mod product_semantics {
             };
             reply(&mut e, &request, &body, 5.0);
             next.extend(
-                actions(&mut e)
+                prepared(&mut e, 5.0)
                     .into_iter()
                     .filter(|a| matches!(a, Action::Http(_))),
             );
@@ -2037,7 +2067,7 @@ mod product_semantics {
             .find(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
             .unwrap();
         reply(&mut e, positions, &envelope(JOIN_SWAP_POSITION), 4.1);
-        let future = actions(&mut e)
+        let future = prepared(&mut e, 4.1)
             .into_iter()
             .find(|a| is_get(a, "/api/v5/account/positions?instType=FUTURES"))
             .unwrap();
@@ -2088,7 +2118,7 @@ mod product_semantics {
                 .find(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
                 .unwrap();
             reply(&mut e, positions, &envelope(JOIN_SWAP_POSITION), 4.1);
-            let future = actions(&mut e)
+            let future = prepared(&mut e, 4.1)
                 .into_iter()
                 .find(|a| is_get(a, "/api/v5/account/positions?instType=FUTURES"))
                 .unwrap();
@@ -2118,7 +2148,7 @@ mod product_semantics {
                 };
                 reply(&mut e, &request, &envelope(data), 5.0);
                 next.extend(
-                    actions(&mut e)
+                    prepared(&mut e, 5.0)
                         .into_iter()
                         .filter(|a| matches!(a, Action::Http(_))),
                 );
@@ -2173,7 +2203,7 @@ mod product_semantics {
             };
             reply(&mut e, &request, &envelope(row), 6.0);
             next.extend(
-                actions(&mut e)
+                prepared(&mut e, 6.0)
                     .into_iter()
                     .filter(|a| matches!(a, Action::Http(_))),
             );
@@ -2223,7 +2253,7 @@ mod product_semantics {
             };
             reply(&mut e, &request, &envelope(row), 5.0);
             next.extend(
-                actions(&mut e)
+                prepared(&mut e, 5.0)
                     .into_iter()
                     .filter(|a| matches!(a, Action::Http(_))),
             );
@@ -2237,7 +2267,7 @@ mod product_semantics {
                 code: 1006,
             },
         );
-        let timer = actions(&mut e)
+        let timer = prepared(&mut e, 5.0)
             .into_iter()
             .find_map(|a| match a {
                 Action::SetTimer { timer, .. } => Some(timer),
@@ -2245,9 +2275,9 @@ mod product_semantics {
             })
             .unwrap();
         e.handle(2000.0, Event::TimerFired { timer });
-        let socket = socket(&actions(&mut e), "/private");
+        let socket = socket(&prepared(&mut e, 2000.0), "/private");
         e.handle(2001.0, Event::WsOpened { socket });
-        actions(&mut e);
+        prepared(&mut e, 2001.0);
         e.handle(
             2002.0,
             Event::WsMessage {
@@ -2255,7 +2285,7 @@ mod product_semantics {
                 text: r#"{"event":"login","code":"0"}"#,
             },
         );
-        let mut handed_off = actions(&mut e);
+        let mut handed_off = prepared(&mut e, 2002.0);
         let wakeups: Vec<_> = handed_off
             .iter()
             .filter_map(|a| match a {
@@ -2265,7 +2295,7 @@ mod product_semantics {
             .collect();
         for timer in wakeups {
             e.handle(2002.0, Event::TimerFired { timer });
-            handed_off.extend(actions(&mut e));
+            handed_off.extend(prepared(&mut e, 2002.0));
         }
         let mut fresh: Vec<_> = handed_off
             .into_iter()
@@ -2282,7 +2312,7 @@ mod product_semantics {
             };
             reply(&mut e, &request, &envelope(row), 2002.0);
             fresh.extend(
-                actions(&mut e)
+                prepared(&mut e, 2002.0)
                     .into_iter()
                     .filter(|a| matches!(a, Action::Http(_))),
             );
@@ -2303,7 +2333,9 @@ mod product_semantics {
         assert!(e.store().positions().is_empty() && e.store().orders().is_empty());
         assert_eq!(e.store().balance().total, 6000.0);
         assert!(
-            !actions(&mut e).iter().any(|a| matches!(a, Action::Http(_))),
+            !prepared(&mut e, 2003.0)
+                .iter()
+                .any(|a| matches!(a, Action::Http(_))),
             "retired FUTURES completion must not advance old order kinds"
         );
     }

@@ -460,3 +460,81 @@ Branch `feat/rust-execution-background-roots` on landing after #1854/#1864.
 Bitrue FetchLeverage adoption (codex-9czdjh, #1819) waits on Bitrue's signer
 migration. Mutation executions (Hyro) remain open.
 
+
+## Plan-backed executions (claude-fe7lgm, 2026-10-24)
+
+Branch `feat/rust-planned-execution`, stacked on the reviewed #1873 pin
+`2fe13f4d892`, behind `http-plans`. This implements the composition contract
+uufub4 cleared for API fit (`82c23a39e66` on `feat/rust-hyro-execution`) and
+the revised ownership design uufub4 cleared on 2026-10-24. A first cut kept
+the Plan under the founder command and was rejected as a narrower lifetime
+policy; its controls were kept and extended.
+
+- **Admission:** `Cx::begin_planned_execution(&preflight, steps, policy,
+  Window::UntilTerminal, key) -> (Plan, ExecutionHandle, founder_root)`, one
+  transaction. It checks group membership, root and physical-owner storage
+  and one more retirement, then runs the shared `admit_plan_owned` (also
+  behind `admit_plan`). That reserves two more Contexts (execution root,
+  founder root) and two more ids (execution identity, founder root leg)
+  inside the same capacity checks. A refusal leaves no Plan, group, root,
+  identity or action. `BeforeRelease` is refused.
+- **Physical owner:** the Plan, its slots and journal move from the founder's
+  exact retained Preflight to a physical owner keyed by `Owner::Execution`
+  (`ContextRegistry::physical`). `owner_entry`/`command_mut` resolve a
+  command generation or a physical owner; every Plan/journal path uses them.
+  The founder keeps its own pending/delivery accounting and becomes an
+  entry-owned Context root bounded by the Plan root, holding no journal.
+- **Observers:** the founder is the group's first ordinary member; followers
+  join with their own genuine entry root. A member's only physical work is
+  the Plan's: `register_attempt` refuses any member's own root (also #1910 on
+  the landing). Each observer expires or detaches on its own bound.
+- **Terminal:** #1894's `prepare_plan_terminal`/`commit_plan_terminal` is
+  the one funnel (`done_plan`, `done_read_plan_after_data`, `fail_plan`,
+  expiry, failed delivery and declared conditional terminals). For a
+  physical Plan, `prepare_plan_terminal` first sweeps observers past their
+  bound against the live journal; `commit_plan_terminal` then retires the
+  physical owner with no notice and seals the group once: every surviving
+  observer gets the journal's projection verbatim through `seal_projected`,
+  with its rejection reports. `PreparedPlanSeal` carries the Plan's `Owner`.
+  Before the seal, preparation also clones one terminal and report set per
+  surviving observer, reserves the `Sealed` storage, the notice actions and
+  the physical owner's request list with its cleanup actions; after the seal
+  the observer fan-out only moves (`Groups::complete_into`). The claim is
+  narrow: shared cleanup (`take_managed`'s boxed Cancel, late-ACK custody)
+  still allocates as on the command path, and a deep clone during
+  preparation follows #1894's OOM-abort model.
+- **Orphans:** when the last observer leaves, unsent slots are revoked
+  (`revoke_unsent_execution_legs`), `validate_plan_delivery` refuses before
+  any codec, and the event-boundary sweep fails the Plan (journal facts kept:
+  a released write projects Unknown). A later reply reaches no venue codec.
+- **Refusals:** `abort_execution`, `complete_execution` and `seal_execution`
+  are refused on a planned handle; `http_leg_context` under it is refused.
+- **Order locks:** a released physical write marks the placement scope of
+  every observer present at release as sent. A later joiner is not marked;
+  an observer present at release flags the symbol when it fails.
+- **Early observer seals:** an observer that expires or detaches before the
+  Plan seal (including observers already past their bound when a host
+  callback seals the Plan: `seal_plan` sweeps them first) keeps its own
+  reason and takes the outcome and IDs from the physical journal's
+  non-consuming projection
+  (`project_failure`, computed while the owner and binding are live; nothing
+  is sealed, charged or copied): Unknown for a released write, with the
+  accepted ID prefix. While a peer remains the outcome is always Unknown:
+  neither "nothing sent yet" nor "every released write refused" rules out a
+  later declared write going out. The Plan seal's own
+  projection still reaches the remaining observers verbatim.
+- **Group ids:** `Groups::next` cannot overflow: every begin first reserves
+  one engine id (ceiling 2^53-1), so `next` stays below that.
+
+Controls (`execution_planned_tests.rs`; original REDs `cac95ea3531`, then
+`fe181da6fec` for the ownership contract): one write serves founder and
+followers with one projection; an unresolved write projects Unknown to all;
+an early follower expiry leaves the write running; the root bounds every
+observer and is never renewed; no direct completion or extra leg; atomic
+refusal; the Plan is execution-owned; a detached founder leaves the write
+to live peers; the last observer leaving withholds a sent reply and never
+binds an unsent write; a follower cannot send on its own root; Read
+followers receive the Plan result.
+
+The reconciliation REDs (`request_context_reconciliation_tests.rs`,
+`33f92d40391`) stay committed and ignored until their runtime clears API fit.
