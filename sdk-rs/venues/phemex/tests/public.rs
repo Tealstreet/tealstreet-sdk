@@ -1,8 +1,10 @@
 //! Oracles: https://phemex-docs.github.io/ USDⓈ-M public response examples.
+mod support;
 use safe_cex_engine::{
     Action, Command, Engine, Event, Notice, RequestId, Response, SocketId, Venue,
 };
-use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+use safe_cex_venue_phemex::PhemexPerpetuals;
+use support::Options;
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"500","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"error":null,"result":[{"symbol":"BTCUSDT","bidRp":"20690.1","askRp":"20690.2","lastRp":"20690.2","markRp":"20690.3","indexRp":"20690","openRp":"20000","openInterestRv":"250","fundingRateRr":"0.0001","volumeRq":"10"}]}"#;
 fn respond(e: &mut Engine<PhemexPerpetuals>, id: RequestId, body: &str) {
@@ -34,10 +36,10 @@ fn request_at(e: &mut Engine<PhemexPerpetuals>, path: &str, now: f64) -> Request
         .unwrap()
 }
 fn started() -> (Engine<PhemexPerpetuals>, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(0.);
     let id = request(&mut e, "products");
     respond(&mut e, id, PRODUCTS);
@@ -354,10 +356,10 @@ fn incomplete_book_snapshot_is_not_committed() {
 }
 #[test]
 fn invalid_supported_product_rejects_the_entire_seed() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(0.);
     let id = request(&mut e, "products");
     respond(
@@ -418,10 +420,10 @@ fn malformed_full_ws_snapshot_heals_without_publishing_an_empty_book() {
 
 #[test]
 fn startup_retry_waits_for_the_complete_rate_limit_pause() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(0.);
     let id = request(&mut e, "products");
     e.handle(
@@ -470,10 +472,10 @@ fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
 
 #[test]
 fn suppressed_public_feed_is_not_supervised() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.set_public_feed_policy(safe_cex_engine::PublicFeedPolicy::Shared)
         .unwrap();
     e.start(0.);
