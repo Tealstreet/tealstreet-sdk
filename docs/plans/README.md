@@ -379,6 +379,8 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 - [Polymarket midpoint seed custody](RUST_POLYMARKET_MIDPOINT_READ_CONTEXT.md): one unsigned Background Read site; plan and original controls before production.
 
+| GRVT fixed local settings | Shared local terminal adoption under review | Before changing the three synchronous pre-credential settings terminals or their exact inventory prune. | [RUST_GRVT_LOCAL_SETTINGS_CONTEXT.md](RUST_GRVT_LOCAL_SETTINGS_CONTEXT.md) |
+
 | Command-owned Read-Plan history authority | Implemented; source reviews and focused checks clear, CI pending | Before accepting Plan pages, settling Slots with accepted rows or recovering a released transport failure through the same Plan terminal. | [RUST_READ_PLAN_HISTORY_AUTHORITY.md](RUST_READ_PLAN_HISTORY_AUTHORITY.md) |
 
 | Independent Mutation Plan calls | Plan-first engine follow-up after #1932 | Before continuing independent native batch siblings after a delivered unproven 408/5xx. | [RUST_PLAN_INDEPENDENT_FAILURES.md](RUST_PLAN_INDEPENDENT_FAILURES.md) |
