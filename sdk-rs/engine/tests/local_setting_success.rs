@@ -22,11 +22,7 @@ fn mutation() -> Policy {
 // Only this adapter changes at cutover. The current truthful Mutation path
 // projects the local setting but cannot seal its empty journal as success.
 fn local_success<P>(cx: &mut Cx<'_, P>, project: impl FnOnce(&mut Store)) -> Result<(), String> {
-    let context = cx
-        .admit_http_command(mutation())
-        .map_err(|e| format!("{e:?}"))?;
-    project(cx.store);
-    cx.done_context(&context, "[]".into())
+    cx.done_local_setting("[]".into(), project)
         .map_err(|e| format!("{e:?}"))
 }
 
@@ -75,6 +71,14 @@ impl Venue for Probe {
                         .unwrap();
                     }
                 }
+                Some("twice") => {
+                    self.local(cx);
+                    self.local(cx);
+                }
+                Some("bound") => {
+                    self.roots.push(cx.admit_http_command(mutation()).unwrap());
+                    self.local(cx);
+                }
                 Some("timer") => {
                     cx.set_timer(10.);
                 }
@@ -94,7 +98,7 @@ impl Venue for Probe {
                 _ => self.local(cx),
             },
             Command::FetchStpMode { .. } => self.local(cx),
-            _ => panic!("unexpected probe command"),
+            _ => self.local(cx),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, ()>, _: TimerId) {
@@ -302,4 +306,95 @@ fn a_panicking_local_projection_poison_fences_partial_store_publication() {
         "failed={failed}, frame_denied={frame_denied}, drain_denied={drain_denied}"
     );
     assert_eq!(observed.lock().unwrap().projections, 1);
+}
+
+fn assert_setting_success(command: Command) {
+    let (mut e, observed) = engine(false);
+    e.handle(1., Event::Command(command));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_no_io(&actions);
+    assert_eq!(successes(&actions, 7), 1);
+    assert_eq!(observed.lock().unwrap().projections, 1);
+}
+
+#[test]
+fn leverage_dispatch_has_local_setting_authority() {
+    assert_setting_success(Command::SetLeverage {
+        command: 7,
+        symbol: "X".into(),
+        leverage: 2.,
+        side: None,
+    });
+}
+#[test]
+fn margin_dispatch_has_local_setting_authority() {
+    assert_setting_success(Command::SetMarginType {
+        command: 7,
+        symbol: "X".into(),
+        isolated: false,
+    });
+}
+#[test]
+fn stp_dispatch_has_local_setting_authority() {
+    assert_setting_success(Command::SetStpMode {
+        command: 7,
+        mode: safe_cex_engine::model::StpMode::ExpireBoth,
+    });
+}
+fn assert_wrong_dispatch(command: Command) {
+    let (mut e, observed) = engine(false);
+    e.handle(1., Event::Command(command));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_no_io(&actions);
+    assert!(actions.is_empty());
+    assert!(e.store().hedged());
+    assert_eq!(observed.lock().unwrap().projections, 0);
+}
+#[test]
+fn place_dispatch_cannot_borrow_local_setting_authority() {
+    assert_wrong_dispatch(Command::PlaceOrders {
+        command: 7,
+        orders: vec![],
+    });
+}
+#[test]
+fn cancel_dispatch_cannot_borrow_local_setting_authority() {
+    assert_wrong_dispatch(Command::CancelOrders {
+        command: 7,
+        ids: vec![],
+    });
+}
+#[test]
+fn amend_dispatch_cannot_borrow_local_setting_authority() {
+    assert_wrong_dispatch(Command::AmendOrder {
+        command: 7,
+        id: "old".into(),
+        price: None,
+        amount: None,
+    });
+}
+#[test]
+fn completion_is_single_and_settled_id_can_be_reused() {
+    let (mut e, observed) = engine(false);
+    e.handle(1., Event::Command(setting(7, "twice")));
+    let first: Vec<_> = e.drain_actions().collect();
+    assert_eq!(successes(&first, 7), 1);
+    assert_eq!(observed.lock().unwrap().projections, 1);
+    assert_eq!(
+        observed.lock().unwrap().results,
+        [Ok(()), Err("Revoked".into())]
+    );
+    e.handle(2., Event::Command(setting(7, "local")));
+    let second: Vec<_> = e.drain_actions().collect();
+    assert_eq!(successes(&second, 7), 1);
+    assert_eq!(observed.lock().unwrap().projections, 2);
+}
+#[test]
+fn bound_context_cannot_be_relabelled_as_local_success() {
+    let (mut e, observed) = engine(false);
+    e.handle(1., Event::Command(setting(7, "bound")));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(actions.is_empty());
+    assert!(e.store().hedged());
+    assert_eq!(observed.lock().unwrap().projections, 0);
 }

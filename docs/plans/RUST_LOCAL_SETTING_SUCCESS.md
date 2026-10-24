@@ -167,3 +167,25 @@ and action drain are fenced. It is a preservation control, not another RED;
 the expanded original target has 3 assertion REDs / 6 GREEN / 0 ignored. The
 control also passes independently with all features. The proposed local commit
 will additionally retain its explicit poison through projection and cleanup.
+
+## Runtime source checkpoint
+
+cxxyqr cleared the exact private LocalSetting phase and terminal patch against
+`31c85e6e1a5`, and independently executed all nine original Engine controls
+in both feature modes. This clearance covers the common cleanup reservation:
+the Fresh generation owns no managed request, root timer, observer or held order
+lock, and the single terminal notice is reserved before generation spend.
+
+The implementation adds no Context or write attempt and leaves general
+empty-journal validation unchanged. Ten new internal custody controls cover
+receipt causes and fractional expiry, invalid clock, last/exhausted resource
+identity, original duplicate stamp, foreign dispatch and spent entry. Eight
+additional Engine controls pin Setting command classification, reject
+Place/Cancel/Amend substitution, preserve Bound authority and permit settled-ID
+reuse after exactly one success. These are new-contract controls, separate
+from the original three assertion REDs and six working controls.
+
+The same seam also serves the held Polymarket and Kraken local fixed-setting
+successes. Consumer adoption and their native Store projections remain separate.
+#1919 composition was reviewed by fe7lgm: preserve its physical-owner funnel,
+add LocalSetting only to command finish, and retain non-Context refusals.
