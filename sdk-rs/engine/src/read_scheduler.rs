@@ -331,7 +331,8 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
     }
 
     /// Extend one explicit budget's pause. Unsent reservations are invalidated;
-    /// already issued reads retain their original response deadlines.
+    /// already issued ordinary reads retain their response deadlines. Task-bound
+    /// reads retain cleanup custody and retire before replacement.
     pub fn pause(&mut self, group: &G, until: f64) -> Result<(), Error> {
         time(until)?;
         let index = self
@@ -344,15 +345,19 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
         }
         self.groups[index].until = until;
         for read in &mut self.reads {
-            if read.group == index && read.active.is_some_and(|active| !active.issued) {
-                #[cfg(feature = "http-plans")]
-                if read.retain_until_retired {
-                    let active = read.active.as_mut().expect("checked active token");
-                    if active.state == ActiveState::Live {
-                        active.state = ActiveState::Retiring(AfterRetirement::Pause);
-                    }
-                    continue;
+            if read.group != index {
+                continue;
+            }
+            #[cfg(feature = "http-plans")]
+            if read.retain_until_retired
+                && let Some(active) = read.active.as_mut()
+            {
+                if active.state == ActiveState::Live {
+                    active.state = ActiveState::Retiring(AfterRetirement::Pause);
                 }
+                continue;
+            }
+            if read.active.is_some_and(|active| !active.issued) {
                 read.active = None;
                 read.pending = Some(until);
                 // The replacement has not been prepared, so it covers dirty
@@ -650,6 +655,31 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
         Ok(())
     }
 
+    /// Exact task settlement after the Plan terminal proof. Expiry cannot
+    /// release its replacement before the separate cleanup acknowledgement.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn finish_task(
+        &mut self,
+        token: Attempt,
+        now: f64,
+        success: bool,
+    ) -> Result<bool, Error> {
+        time(now)?;
+        let Some(read) = self.reads.iter_mut().find(|read| {
+            read.retain_until_retired
+                && read
+                    .active
+                    .is_some_and(|active| active.token == token && active.issued)
+        }) else {
+            return Ok(false);
+        };
+        let active = read.active.as_mut().expect("exact task token");
+        if active.live() {
+            active.state = ActiveState::Retiring(AfterRetirement::Finished(success));
+        }
+        Ok(true)
+    }
+
     #[cfg(feature = "http-plans")]
     pub(crate) fn retiring(&self, key: &K) -> Option<Attempt> {
         self.reads
@@ -807,6 +837,29 @@ mod tests {
         assert!(next != first);
         assert!(!scheduler.mark_issued(first, 500.).unwrap());
         assert!(scheduler.mark_issued(next, 500.).unwrap());
+    }
+
+    #[cfg(feature = "http-plans")]
+    #[test]
+    fn retained_pause_retires_an_admitted_child_before_further_release() {
+        let mut scheduler = retained();
+        let first = ready(&mut scheduler, 0.);
+        assert!(scheduler.mark_issued(first, 0.).unwrap());
+        scheduler.pause(&"private", 100.).unwrap();
+        assert!(scheduler.retiring(&"orders") == Some(first));
+        assert!(scheduler.admit(first, 101.).unwrap().is_none());
+        assert!(
+            scheduler
+                .take_ready(101., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            scheduler
+                .ack_retired(first, 200., |_| unreachable!())
+                .unwrap()
+        );
+        assert!(ready(&mut scheduler, 200.) != first);
     }
 
     #[cfg(feature = "http-plans")]

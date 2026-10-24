@@ -539,7 +539,7 @@ entries. Each physical entry stores its full `Owner`, and immutable/mutable
 lookup, terminal retirement and Execution-only projection compare that exact
 variant. This avoids a new `HashMap<Owner, CommandOwner>` instantiation without
 relying on a lookup-time numeric uniqueness assumption. Insertions still use the
-shared monotonic ID allocator and assert numeric vacancy before mutation; a
+shared monotonic ID allocator and assert numeric vacancy before the map insert; a
 collision cannot replace another owner. The same-generation adversarial
 control covers both directions, including denied mutable access and retirement.
 No family WASM size result is claimed before CI.
@@ -569,3 +569,51 @@ registered Background contexts: available namespaces produce Deferred, while
 exhausted I/O or signing IDs produce hard Capacity, with no IDs, credits,
 Contexts or actions consumed. Five foundation controls pass, including the
 physical-map collision assertion preserving the original entry.
+
+
+## Runtime admission, activation and cleanup checkpoint
+
+The draft now wires `register_background_task`, `request_background_task` and
+`admit_background_plan` to one-use `BackgroundActivation` callbacks. The retained
+`SelectedRead` supplies each child's credential and route through the existing
+selected-read queue; this is not G2c account/config provenance. Physical
+Background owners reuse the shared Plan declaration and terminal transactions.
+Registration holds no idle Context slots. Admission reserves the aggregate
+150-slot cap inside the shared 256 pool before namespaces or activation spend.
+The common transaction additionally reserves its timer action before commit.
+
+`cancel_background_task`, `supersede_background_task`, group pause, expiry and
+Session retirement retain the scheduler token until physical cleanup and the
+native owner-retirement callback complete. Pausing a task-bound admitted child
+moves it to Retiring even if its scheduler lease is already marked issued;
+ordinary scheduler reads retain their previous behavior. Both pending preparation
+and continuation authority are revoked immediately. Replacement waits for the
+shared pause floor and exact private retirement acknowledgement. A successful
+dirty cycle resets the three-admission budget at its next activation; a cancelled
+cycle resets only on fresh demand. Retry backoff starts after cleanup, at 1s/2s.
+
+Background root expiry drains all native failure callbacks before the common
+seal. A native callback may record retry eligibility during that scope but may
+not seal early. Invalid/unrepresentable scheduler clocks produce a typed task
+refusal with demand cleanup, rather than a controller panic or immediate loop.
+
+The three original assertions are active after fixture admission migration.
+Fourteen real Engine controls pass, covering original 40s/two 20s geometry, unrelated
+callback denial, completed-cycle denial, dirty cycles, cancel/new demand/max3,
+parent retirement/late transport, prepared/signing/bound pause refusal, root
+expiry, 150+106 saturation/recovery, full 256 without active Background occupancy,
+aggregate share refusal, and sticky ready/cleanup panic fencing. Scoped unit controls cover the seven Session
+operations available on this pin, unchanged-resource refusals, task storage and
+unrepresentable clocks. The eighth Scoped Session attack and private-anchor
+route composition remain explicit integration controls for actual #1897.
+
+This checkpoint is not a frozen runtime or native BloFin adoption clearance.
+Plan, Session and API owners must review the exact source; feature-off and
+order-locks checks, remaining adversarial cleanup controls, WASM-size CI and
+actual prerequisite integration remain required before readiness.
+
+The Session state stores its exact optional parent index. Retirement reads it
+before removing the Session, then cascades only that parent's indexed tasks
+after removal; an anchor with no tasks takes the empty O(1) path. Idle task
+registrations also hold no timer: a count of armed parent timers avoids scanning
+idle parent registrations on unrelated timer events.

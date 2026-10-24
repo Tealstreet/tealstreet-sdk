@@ -22,6 +22,7 @@ pub(super) struct PreparedPlanSeal {
     pub sealed: Vec<crate::execution_group::Sealed>,
     /// The physical owner's live requests, listed before the seal.
     pub retired: Vec<RequestId>,
+    pub background_retry: bool,
 }
 
 pub(super) fn terminal_ordinals(

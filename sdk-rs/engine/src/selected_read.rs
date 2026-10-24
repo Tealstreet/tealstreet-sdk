@@ -210,7 +210,31 @@ impl SelectedRead {
         Ok(AdmittedRead { selected, context })
     }
 
-    fn credential(&self) -> Credential {
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn queue_owned_context<P>(
+        &self,
+        cx: &mut Cx<'_, P>,
+        context: Context,
+        request: ReadRequest,
+        recipe: impl FnOnce(&Identity) -> Box<dyn SignStep>,
+        pending: P,
+    ) -> Result<RequestId, (P, Error)> {
+        if context.operation() != Operation::Read
+            || context.credential() != Some(&self.credential())
+        {
+            return Err((pending, Error::Invalid));
+        }
+        queue_read(
+            cx,
+            context,
+            request,
+            recipe(&self.identity),
+            self.scope.map(|scope| (self.selection.slot(), scope)),
+            pending,
+        )
+    }
+
+    pub(crate) fn credential(&self) -> Credential {
         self.selection.credential(self.identity.credential.clone())
     }
 }

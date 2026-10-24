@@ -54,9 +54,15 @@ mod background_delivery_tests;
 #[path = "request_context_background_plan_tests.rs"]
 mod background_plan_tests;
 
+#[cfg(feature = "http-plans")]
+#[path = "request_context_background_plan.rs"]
+pub(super) mod background;
+
 struct CommandOwner {
     #[cfg(feature = "http-plans")]
     physical: Option<Owner>,
+    #[cfg(feature = "http-plans")]
+    background_task: Option<usize>,
     generation: u64,
     /// Exact logical completion authority survives expired-handle cleanup.
     phase: CommandPhase,
@@ -226,6 +232,8 @@ pub(super) struct ContextRegistry {
     /// checks the full stored owner before exposing its Plan or journal.
     #[cfg(feature = "http-plans")]
     physical: HashMap<u64, CommandOwner>,
+    #[cfg(feature = "http-plans")]
+    background: background::Tasks,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
     /// Order-read epoch at each live owner's first released Read: one logical
@@ -562,6 +570,8 @@ impl ContextRegistry {
                 .or_insert(CommandOwner {
                     #[cfg(feature = "http-plans")]
                     physical: None,
+                    #[cfg(feature = "http-plans")]
+                    background_task: None,
                     generation,
                     phase: CommandPhase::Context {
                         root: context.clone(),
@@ -714,6 +724,8 @@ impl ContextRegistry {
 
     /// Retirement authority only; expiry cannot create fresh send permission.
     fn validate_handle(&self, context: &Context) -> Result<(), Error> {
+        #[cfg(feature = "http-plans")]
+        self.validate_background_owner(context.owner())?;
         if matches!(context.owner(), Owner::Command { id, .. } if self.expired(id)) {
             return Err(Error::Revoked);
         }
@@ -991,6 +1003,10 @@ impl ContextRegistry {
 
     /// A command owner outside a Plan or Preflight; non-command owners pass.
     pub(super) fn context_phase(&self, context: &Context) -> bool {
+        #[cfg(feature = "http-plans")]
+        if self.physical_owner(context.owner()) {
+            return false;
+        }
         let Owner::Command { id, .. } = context.owner() else {
             return true;
         };
@@ -1590,7 +1606,7 @@ impl<P> Cx<'_, P> {
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
         #[cfg(feature = "http-plans")]
-        if self.io.http_preflight_ready.is_some() {
+        if self.io.http_preflight_ready.is_some() || self.io.http_background_activation.is_some() {
             return Err(Error::Revoked);
         }
         if !self.io.entry_context_allowed(scope) {

@@ -19,6 +19,12 @@ pub use ownership::{
     HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
 };
 
+#[cfg(feature = "http-plans")]
+#[path = "request_context_background.rs"]
+mod background;
+#[cfg(feature = "http-plans")]
+pub use background::{BackgroundActivation, BackgroundTask, BackgroundTaskPolicy};
+
 #[path = "http_evidence.rs"]
 mod evidence;
 pub(crate) use evidence::ResponseProof;

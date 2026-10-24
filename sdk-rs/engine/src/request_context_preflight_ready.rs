@@ -79,6 +79,9 @@ impl<P> Cx<'_, P> {
         &self,
         owner: Owner,
     ) -> Result<(), Error> {
+        if self.io.http_background_activation.is_some() && !self.background_activation_owns(owner) {
+            return Err(Error::Revoked);
+        }
         // A ready founder's own physical Plan (#1919) is its same admission.
         if self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
             ready.owner() != owner && !self.io.request_contexts.founded_by(owner, ready.owner())
@@ -97,9 +100,12 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         let state = self.io.request_contexts.preflight_state(handle)?;
-        if self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
-            !ready.issued_by(&self.io.request_contexts.issuer) || ready.owner() != handle.owner()
-        }) || self.io.http_plan_ready.is_some()
+        if self.io.http_background_activation.is_some()
+            || self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
+                !ready.issued_by(&self.io.request_contexts.issuer)
+                    || ready.owner() != handle.owner()
+            })
+            || self.io.http_plan_ready.is_some()
             || self.io.http_plan_expiring.is_some()
         {
             return Err(Error::Revoked);
@@ -213,6 +219,7 @@ impl<P> Cx<'_, P> {
 impl<V: Venue> Engine<V> {
     #[inline]
     pub(in crate::engine) fn flush_preflight_readiness(&mut self, now: f64) {
+        self.flush_background_tasks(now);
         if self.io.request_contexts.preflight_ready.is_empty() {
             return;
         }

@@ -92,17 +92,14 @@ pub struct Plan {
 }
 
 impl Plan {
+    #[cfg(test)]
     pub(crate) fn new(preflight: &Preflight, deadline: f64) -> Self {
-        Self {
-            issuer: preflight.issuer.clone(),
-            owner: preflight.owner,
-            deadline,
-        }
+        Self::issued(&preflight.issuer, preflight.owner(), deadline)
     }
-    /// The same admitted Plan, owned by its execution's physical owner.
-    pub(crate) fn with_owner(preflight: &Preflight, owner: Owner, deadline: f64) -> Self {
+
+    pub(crate) fn issued(issuer: &Arc<()>, owner: Owner, deadline: f64) -> Self {
         Self {
-            issuer: preflight.issuer.clone(),
+            issuer: issuer.clone(),
             owner,
             deadline,
         }

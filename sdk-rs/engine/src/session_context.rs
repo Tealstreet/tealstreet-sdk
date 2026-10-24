@@ -26,6 +26,8 @@ struct State {
     writes: HashMap<u64, Write>,
     /// A released write had no proven outcome. Only retirement clears it.
     unresolved: bool,
+    #[cfg(feature = "http-plans")]
+    background_parent: Option<usize>,
 }
 
 #[derive(Default)]
@@ -54,6 +56,8 @@ impl Sessions {
                 policy,
                 writes: HashMap::new(),
                 unresolved: false,
+                #[cfg(feature = "http-plans")]
+                background_parent: None,
             },
         );
         Ok(())
@@ -65,6 +69,17 @@ impl Sessions {
 
     pub(super) fn retire(&mut self, generation: u64) -> bool {
         self.live.remove(&generation).is_some()
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(super) fn background_parent(&self, generation: u64) -> Option<usize> {
+        self.live.get(&generation)?.background_parent
+    }
+    #[cfg(feature = "http-plans")]
+    pub(super) fn bind_background_parent(&mut self, generation: u64, index: usize) {
+        let state = self.live.get_mut(&generation).expect("live task Session");
+        assert!(state.background_parent.is_none_or(|held| held == index));
+        state.background_parent = Some(index);
     }
 
     /// Validate before any registry commit; this reserves nothing.
@@ -221,7 +236,7 @@ impl State {
 }
 
 impl ContextRegistry {
-    fn validate_session(&self, session: &Session) -> Result<u64, Error> {
+    pub(super) fn validate_session(&self, session: &Session) -> Result<u64, Error> {
         let Owner::Session { generation } = session.owner() else {
             unreachable!("session handles always carry a session owner");
         };
@@ -238,7 +253,10 @@ impl<P> Cx<'_, P> {
     /// or drain them.
     pub(super) fn session_scope(&self) -> Result<(), Error> {
         #[cfg(feature = "http-plans")]
-        if self.io.http_preflight_ready.is_some() || self.io.http_plan_ready.is_some() {
+        if self.io.http_preflight_ready.is_some()
+            || self.io.http_plan_ready.is_some()
+            || self.io.http_background_activation.is_some()
+        {
             return Err(Error::State);
         }
         Ok(())
@@ -281,7 +299,13 @@ impl<P> Cx<'_, P> {
         let waiters = self.drain_waits(generation, VenueError::new("Session retired"));
         self.io.retire_http_owner(session.owner());
         let registry = &mut self.io.request_contexts;
+        #[cfg(feature = "http-plans")]
+        let background = registry.sessions.background_parent(generation);
         registry.sessions.retire(generation);
+        #[cfg(feature = "http-plans")]
+        if let Some(index) = background {
+            registry.retire_background_parent(generation, index);
+        }
         registry
             .contexts
             .retain(|_, context| context.owner() != session.owner());

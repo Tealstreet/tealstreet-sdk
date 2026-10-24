@@ -1470,6 +1470,10 @@ struct Io<P> {
     http_plan_expiring: Option<crate::request_context::Plan>,
     #[cfg(feature = "http-plans")]
     http_preflight_ready: Option<crate::request_context::Preflight>,
+    #[cfg(feature = "http-plans")]
+    http_background_activation: Option<request_context_registry::background::ActivationKey>,
+    #[cfg(feature = "http-plans")]
+    http_background_retiring: Option<crate::request_context::Owner>,
     http_owner_poison: bool,
     #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
@@ -1569,6 +1573,10 @@ impl<P> Default for Io<P> {
             http_plan_expiring: None,
             #[cfg(feature = "http-plans")]
             http_preflight_ready: None,
+            #[cfg(feature = "http-plans")]
+            http_background_activation: None,
+            #[cfg(feature = "http-plans")]
+            http_background_retiring: None,
             http_owner_poison: false,
             #[cfg(feature = "http-plans")]
             http_plan_poison: false,
@@ -2383,7 +2391,7 @@ impl<P> Cx<'_, P> {
         observer: bool,
     ) -> Result<(), crate::request_context::Error> {
         #[cfg(feature = "http-plans")]
-        if self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
+        if self.io.http_background_activation.is_some() || self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
             !matches!(ready.owner(), crate::request_context::Owner::Command { id, .. } if id == command)
         }) {
             return Err(crate::request_context::Error::Revoked);
@@ -2609,6 +2617,23 @@ pub trait Venue {
         &mut self,
         _cx: &mut Cx<'_, Self::Pending>,
         _preflight: &crate::request_context::Preflight,
+    ) {
+    }
+
+    #[cfg(feature = "http-plans")]
+    fn on_background_task_ready(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _task: &crate::request_context::BackgroundTask,
+        _activation: &crate::request_context::BackgroundActivation,
+    ) {
+    }
+
+    #[cfg(feature = "http-plans")]
+    fn on_background_task_failed(
+        &mut self,
+        _task: &crate::request_context::BackgroundTask,
+        _error: crate::VenueError,
     ) {
     }
 
@@ -3351,6 +3376,8 @@ impl<V: Venue> Engine<V> {
         self.process_socket_work(now);
         self.flush_http_owner_retirements();
         self.flush_http_plans(now);
+        #[cfg(feature = "http-plans")]
+        self.flush_background_tasks(now);
         self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
         self.restore_shared_tickers(false, now);
         self.flush_http_owner_retirements();
@@ -3411,6 +3438,12 @@ impl<V: Venue> Engine<V> {
         self.io.http_responses.prune(now);
         // Expired observers detach before any delivery can project to them.
         self.sweep_executions(now);
+        #[cfg(feature = "http-plans")]
+        if self.queue_background_timer(&event) {
+            self.flush_background_tasks(now);
+            self.flush_preflight_readiness(now);
+            return;
+        }
         if self.expire_plan_timer(now, &event) {
             self.flush_preflight_readiness(now);
             return;
@@ -4534,11 +4567,20 @@ impl<V: Venue> Engine<V> {
             // A caught hook panic permanently fences the engine. No unwind
             // reset guard or fabricated allocator failure is used.
             self.io.http_owner_poison = true;
+            let background = self.io.request_contexts.background_retirement(&token);
             let wake = self.venue.on_http_owner_retired_preflight(&token);
             assert!(
                 self.io.request_contexts.complete_retirement(&token),
                 "HTTP owner retirement changed during cleanup"
             );
+            if let Some(slot) = background {
+                Cx {
+                    now: self.io.dispatch_now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                }
+                .acknowledge_background_retirement(slot, token.preflight().owner());
+            }
             if let Some(wake) = wake {
                 let _ = self.io.request_contexts.queue_preflight_ready(&wake);
             }

@@ -58,6 +58,7 @@ impl ContextRegistry {
             command,
             CommandOwner {
                 physical: None,
+                background_task: None,
                 generation,
                 phase: CommandPhase::Preflight(State::new(policy)),
                 last_deadline: now,

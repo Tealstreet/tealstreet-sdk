@@ -58,17 +58,13 @@ fn background_and_execution_physical_owners_never_alias_a_generation() {
 }
 
 #[test]
-fn retained_background_registration_and_retirement_balance_pending() {
+fn unregistered_physical_background_cannot_register_attempts() {
     let mut registry = ContextRegistry::default();
     let owner = Owner::Background { generation: 7 };
     let entry = owner_entry(&mut registry, owner, 100.);
     registry.insert_physical(7, entry);
     let context = registry.contexts[&1].clone();
-    registry
-        .register_attempt(&context, RequestId(9), 0.)
-        .unwrap();
-    assert!(registry.owner_entry(owner).unwrap().pending == 1);
-    registry.retire_attempt(&context, RequestId(9));
+    assert!(registry.register_attempt(&context, RequestId(9), 0.) == Err(Error::Revoked));
     assert!(registry.owner_entry(owner).unwrap().pending == 0);
 }
 
@@ -181,7 +177,15 @@ fn hard_namespace_exhaustion_wins_over_simultaneous_background_pool_pressure() {
                     .set_test_ids(ResourceIds::starting_at(MAX_RESOURCE_ID + 1));
             }
             let ids = cx.io.next_id;
+            let signing = (
+                cx.io.signing.available_ids(1),
+                cx.io.signing.available_ids(MAX_RESOURCE_ID),
+            );
             let contexts = cx.io.request_contexts.contexts.len();
+            let slots = (
+                cx.io.request_contexts.reserved_contexts,
+                cx.io.request_contexts.plan_index.len(),
+            );
             let expected = if exhausted == 0 {
                 Error::CapacityDeferred
             } else {
@@ -228,8 +232,21 @@ fn hard_namespace_exhaustion_wins_over_simultaneous_background_pool_pressure() {
             };
             assert!(result == Err(expected));
             assert!(cx.io.next_id == ids);
+            assert!(
+                signing
+                    == (
+                        cx.io.signing.available_ids(1),
+                        cx.io.signing.available_ids(MAX_RESOURCE_ID)
+                    )
+            );
             assert!(cx.io.request_contexts.contexts.len() == contexts);
-            assert!(cx.io.request_contexts.reserved_contexts == 0);
+            assert!(
+                slots
+                    == (
+                        cx.io.request_contexts.reserved_contexts,
+                        cx.io.request_contexts.plan_index.len()
+                    )
+            );
             assert!(cx.io.actions.is_empty());
         }
     }
