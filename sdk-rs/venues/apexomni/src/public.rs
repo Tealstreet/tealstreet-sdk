@@ -402,7 +402,8 @@ impl ApexOmni {
                 cx.store.set_markets(rows);
                 cx.store.set_tickers(tickers);
                 self.connect_public(cx);
-                self.start_private(cx);
+                // Queued only after the symbols read retires.
+                self.follow_ups.push(crate::read::FollowUp::StartPrivate);
             }
         }
     }

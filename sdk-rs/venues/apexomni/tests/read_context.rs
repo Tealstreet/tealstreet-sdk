@@ -650,3 +650,117 @@ fn public_data_only_with_a_passphrase_still_signs_symbols() {
     managed(&output, 1);
     assert_eq!(output.intents, [RoutingIntent::Primary]);
 }
+
+// codex-uufub4 review controls: a typed integrity failure is not a transport
+// loss, and a completed page leg releases capacity before its successor.
+#[test]
+fn an_integrity_failure_fails_strictly_without_a_transport_retry() {
+    let (mut engine, _) = seeded();
+    let first = command(
+        &mut engine,
+        20.,
+        Command::FetchAccount { command: COMMAND },
+        None,
+    );
+    let request = first.requests[0].id;
+    engine.handle(
+        21.,
+        Event::HttpStart {
+            request,
+            status: 200,
+            headers: "",
+        },
+    );
+    engine.handle(
+        21.,
+        Event::HttpChunk {
+            request,
+            data: &[0xff],
+        },
+    );
+    engine.handle(21., Event::HttpEnd { request });
+    let out = drain(&mut engine, 21.);
+    assert!(
+        out.requests.is_empty(),
+        "{} new requests",
+        out.requests.len()
+    );
+    assert_eq!(
+        terminal(&out, COMMAND).unwrap_err().kind,
+        Some(ErrorKind::Internal)
+    );
+}
+
+#[test]
+fn a_completed_history_leg_releases_capacity_before_the_next_alias() {
+    let (mut engine, snapshot) = seeded();
+    for request in &snapshot.requests {
+        let body = if request.url.ends_with("/v3/account") {
+            ACCOUNT
+        } else {
+            ORDERS
+        };
+        for balance in reply(&mut engine, 11., request, body).requests {
+            reply(
+                &mut engine,
+                12.,
+                &balance,
+                r#"{"code":0,"data":{"totalEquityValue":"1000","initialMargin":"0","maintenanceMargin":"0"}}"#,
+            );
+        }
+    }
+    for peer in 0..254 {
+        let out = command(
+            &mut engine,
+            20.,
+            Command::FetchAccount {
+                command: 1000 + peer,
+            },
+            None,
+        );
+        assert_eq!(out.requests.len(), 1, "peer {peer}");
+    }
+    let first = command(&mut engine, 21., fills(), None);
+    assert_eq!(first.requests.len(), 1, "root plus first leg fit");
+    let next = reply(&mut engine, 22., &first.requests[0], ORDERS);
+    assert_eq!(next.requests.len(), 1, "the next alias fits");
+}
+
+/// Live FetchAccount peers, each holding one command context.
+fn peers(engine: &mut TestEngine, now: f64, from: u32, count: u32) {
+    for peer in from..from + count {
+        let out = command(engine, now, Command::FetchAccount { command: peer }, None);
+        assert_eq!(out.requests.len(), 1, "peer {peer}");
+    }
+}
+
+#[test]
+fn symbols_retire_before_the_snapshot_legs_are_queued_under_full_pressure() {
+    let mut engine = engine(Some("pass"));
+    engine.start(0.);
+    let symbols = drain(&mut engine, 0.).requests.remove(0);
+    peers(&mut engine, 1., 1000, 254);
+    let snapshot = reply(&mut engine, 10., &symbols, MARKETS);
+    assert_eq!(snapshot.requests.len(), 2, "both snapshot legs fit");
+    managed(&snapshot, 2);
+}
+
+#[test]
+fn the_completing_snapshot_leg_retires_before_balance_under_full_pressure() {
+    let (mut engine, snapshot) = seeded();
+    peers(&mut engine, 11., 1000, 254);
+    let (positions, orders): (Vec<_>, Vec<_>) = snapshot
+        .requests
+        .iter()
+        .partition(|r| r.url.ends_with("/v3/account"));
+    assert!(
+        reply(&mut engine, 12., positions[0], ACCOUNT)
+            .requests
+            .is_empty()
+    );
+    peers(&mut engine, 13., 2000, 1);
+    let balance = reply(&mut engine, 14., orders[0], ORDERS);
+    assert_eq!(balance.requests.len(), 1, "balance fits");
+    signed(&balance.requests[0], "/v3/account-balance");
+    managed(&balance, 1);
+}

@@ -517,6 +517,8 @@ impl ApexOmni {
             request.fallback = true;
             request.candidate = 0;
         }
+        // The completed page leg retires before its successor is minted.
+        let _ = cx.finish_http_context(leg);
         self.request_history(cx, request);
     }
     pub(crate) fn history_failed(
@@ -540,6 +542,8 @@ impl ApexOmni {
             request.fallback = true;
             request.candidate = 0;
         }
+        // The completed page leg retires before its successor is minted.
+        let _ = cx.finish_http_context(leg);
         self.request_history(cx, request);
     }
     fn finish_history(&self, cx: &mut Cx<'_, Pending>, mut request: Request, leg: &Context) {

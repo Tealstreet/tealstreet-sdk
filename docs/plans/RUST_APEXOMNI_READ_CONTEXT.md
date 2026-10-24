@@ -49,7 +49,10 @@ and attaches `cx.sign_http`. Wrapper state lives in `Pending::SignedAuth`.
   Background `AdmittedRead` whose context rides in `account::Request`.
   - Validate with `validate_background_read_http_delivery` before item or
     response codecs.
-  - `finish_http_context` on every terminal before replacement work.
+  - Order on completion: validate, publish natively, `finish_http_context`,
+    then queue any successor (symbols to the snapshot legs, the completing
+    snapshot leg to balance) as a deferred `FollowUp`. A successor never needs
+    a registry slot beside the read it replaces.
   - Balance stays independent after commit; a failed balance cannot roll
     back the committed pair.
 - **Symbols.** Select first, then branch on the selected identity (m26ps4
@@ -66,7 +69,7 @@ and attaches `cx.sign_http`. Wrapper state lives in `Pending::SignedAuth`.
     `Slots::select` identity only, never presence of material (m26ps4 pin 2).
     Its comment stays. The credential-selection checker has no term for it, and
     ApeX keeps no venue-local selection, so no ApeX checker entry is needed.
-  - Background Read with the 20 s native timeout. The signed branch carries
+  - Background Read with a NEW 20 s admission-to-expiry bound (see below). The signed branch carries
     `RetryPolicy::ReadFailure` solely for its one native signature resend via
     `http_retry_context(ReadFailure)`; it has zero transport retries. The
     unsigned branch uses `RetryPolicy::Never`. The seed `Backoff` stays the
@@ -165,6 +168,19 @@ Readiness controls, added with the source change (all GREEN):
   through `ReadHistoryRows` admitted under the exact delivered leg.
 - Unsigned symbols use `RetryPolicy::Never`, so a signature-shaped refusal is a
   failure and the startup backoff, not a resend.
+- Only a typed `Network` failure spends the native transport budget. Every other
+  typed cause from `on_http_failed` (integrity, `Internal`, a physical timeout)
+  fails strictly with its own kind (codex-uufub4 P1).
+- A completed or refused history leg retires before its alias, fallback or resend
+  leg is minted from the original root (codex-uufub4 P2).
+
+**NEW caller-visible bounds.** These are not legacy timeout parity. Each
+context's 20 s `TIMEOUT_MS` runs from admission to expiry, so it now also bounds
+Prepare, Bind and signing, not only the released HTTP exchange.
+- Background reads and FetchAccount keep that one admission deadline across
+  their `AdmittedRead::retry` resends and retries.
+- Each history page is a fresh 20 s physical leg, clipped to the caller's
+  original root deadline.
 
 Existing native suites keep their bodies. Their fixtures adopt
 `prepared_actions` at the time of the event that produced each drain, through

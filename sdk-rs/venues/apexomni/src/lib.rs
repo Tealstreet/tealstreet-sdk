@@ -44,6 +44,8 @@ pub struct ApexOmni {
     public: public::Public,
     account: account::Account,
     trading: trading::Trading,
+    /// Successor reads a completing Background read queues after it retires.
+    follow_ups: Vec<read::FollowUp>,
 }
 
 #[derive(serde::Deserialize)]
@@ -128,6 +130,7 @@ impl ApexOmni {
             public: public::Public::default(),
             account: account::Account::new(),
             trading: trading::Trading::default(),
+            follow_ups: Vec::new(),
         }
     }
 
@@ -140,13 +143,11 @@ impl ApexOmni {
     }
 
     fn transport_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        let network = || trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
         match read::split(pending) {
-            Split::Read(read, native) => self.read_transport_failed(cx, *read, native, error),
+            Split::Read(read, native) => self.read_transport_failed(cx, *read, native, network()),
             Split::Candles(pending) => self.candle_transport_failed(cx, pending, error.into()),
-            Split::Trade(pending) => {
-                let error = trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
-                self.trading_failed(cx, pending, error)
-            }
+            Split::Trade(pending) => self.trading_failed(cx, pending, network()),
         }
     }
 
@@ -286,10 +287,11 @@ impl Venue for ApexOmni {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
-            Pending::Candles(pending) => self.candle_transport_failed(cx, pending, error),
-            Pending::Trade(request) => self.trading_failed(cx, request, error),
-            pending => self.transport_failed(cx, pending, &error.message),
+        // The engine's typed cause is kept; only Network may spend a native retry.
+        match read::split(pending) {
+            Split::Read(read, native) => self.read_transport_failed(cx, *read, native, error),
+            Split::Candles(pending) => self.candle_transport_failed(cx, pending, error),
+            Split::Trade(request) => self.trading_failed(cx, request, error),
         }
     }
     fn on_http_preparation_failed(

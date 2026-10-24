@@ -795,7 +795,7 @@ impl ApexOmni {
         self.snapshot_read(cx, "/v3/open-orders", Some(ArrayAt::Field("data")), pending);
     }
 
-    fn request_balance(&mut self, cx: &mut Cx<'_, Pending>) {
+    pub(crate) fn request_balance(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.balance_pending {
             return;
         }
@@ -1171,7 +1171,8 @@ impl ApexOmni {
             self.account.taker_fee = taker;
         }
         self.account.initialized = true;
-        self.request_balance(cx);
+        // Queued only after the completing snapshot leg retires.
+        self.follow_ups.push(crate::read::FollowUp::Balance);
     }
 
     fn commit_positions(

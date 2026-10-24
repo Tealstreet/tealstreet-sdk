@@ -94,6 +94,13 @@ impl Read {
     }
 }
 
+/// Reads a completion queues once its own context has retired, so a successor
+/// never needs a second registry slot beside the read it replaces.
+pub(crate) enum FollowUp {
+    StartPrivate,
+    Balance,
+}
+
 pub(crate) enum Split {
     Read(Box<Read>, Native),
     Candles(public::Candles),
@@ -204,16 +211,17 @@ impl ApexOmni {
                 .map(|(admitted, ())| Custody::Admitted(admitted))
                 .map_err(|refusal| (Custody::Admitted(refusal.read), refusal.error)),
             Custody::Leg(leg) => match native.root() {
-                Some(root) => root
-                    .leg(
-                        cx,
-                        ReadLegPolicy {
-                            timeout_ms: TIMEOUT_MS,
-                            pacing: None,
-                        },
-                    )
-                    .map(Custody::Leg)
-                    .map_err(|error| (Custody::Leg(leg), error)),
+                Some(root) => {
+                    // The refused page leg retires before the resend leg is minted.
+                    let _ = cx.finish_http_context(leg.context());
+                    let policy = ReadLegPolicy {
+                        timeout_ms: TIMEOUT_MS,
+                        pacing: None,
+                    };
+                    root.leg(cx, policy)
+                        .map(Custody::Leg)
+                        .map_err(|error| (Custody::Leg(leg), error))
+                }
                 None => Err((Custody::Leg(leg), Error::Invalid)),
             },
         };
@@ -275,6 +283,7 @@ impl ApexOmni {
                 if background {
                     let _ = cx.finish_http_context(&context);
                 }
+                self.run_follow_ups(cx);
             }
         }
     }
@@ -299,16 +308,18 @@ impl ApexOmni {
         }
     }
 
+    /// Only a typed network loss spends the native transport budget; every other
+    /// typed cause (integrity, Internal, a physical timeout) fails strictly as itself.
     pub(crate) fn read_transport_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         read: Read,
         native: Native,
-        error: &str,
+        error: VenueError,
     ) {
-        let error = crate::trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
         // Markets defer to the startup backoff.
-        if read.unsigned.method == Method::Get
+        if error.kind == Some(safe_cex_engine::ErrorKind::Network)
+            && read.unsigned.method == Method::Get
             && read.retries < 3
             && !matches!(native, Native::Public(_))
         {
@@ -335,6 +346,16 @@ impl ApexOmni {
         }
         if background {
             let _ = cx.finish_http_context(&context);
+        }
+        self.run_follow_ups(cx);
+    }
+
+    fn run_follow_ups(&mut self, cx: &mut Cx<'_, Pending>) {
+        for follow_up in std::mem::take(&mut self.follow_ups) {
+            match follow_up {
+                FollowUp::StartPrivate => self.start_private(cx),
+                FollowUp::Balance => self.request_balance(cx),
+            }
         }
     }
 }
