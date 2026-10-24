@@ -1415,6 +1415,65 @@ impl Store {
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_unrelated_read_terminal_does_not_allocate_metadata_state() {
+        use crate::request_context::{Operation, Policy, RetryPolicy};
+        use crate::{Action, Command, Cx, Engine, Event, Notice, Response, SocketId, Venue};
+        struct Read;
+        impl Venue for Read {
+            type Pending = ();
+            fn start(&mut self, _: &mut Cx<'_, ()>) {}
+            fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
+                let root = cx
+                    .admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    })
+                    .unwrap();
+                cx.done_context(&root, "[]".into()).unwrap();
+            }
+            fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: crate::TimerId) {}
+            fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+            fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+            fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+            fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+            fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+            fn book(&self, _: &str) -> Option<&crate::book::Book> {
+                None
+            }
+            fn books(&self) -> Box<dyn Iterator<Item = (&str, &crate::book::Book)> + '_> {
+                Box::new(std::iter::empty())
+            }
+        }
+        let mut engine: Engine<Read> = crate::test_support::seeded_engine(Read);
+        assert!(engine.store().metadata.is_none());
+        engine.handle(
+            0.,
+            Event::Command(Command::FetchCandles {
+                command: 7,
+                symbol: "BTCUSD".into(),
+                interval: crate::model::Interval::M1,
+                limit: Some(2),
+                from_ms: None,
+                to_ms: None,
+            }),
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a,
+                    Action::Notice(Notice::CommandDone { command: 7, result }) if result == "[]"
+                ))
+                .count(),
+            1
+        );
+        assert!(engine.store().metadata.is_none());
+    }
+
     fn snapshot_order(id: &str) -> Order {
         Order {
             id: id.into(),

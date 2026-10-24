@@ -878,3 +878,17 @@ execution of expiry -> same-id reuse -> stale Plan and timer rejection -> new
 expiry. The exact hook follows successful request_contexts.finish and
 untrack_read_root; Seal::Stale returns before Store cleanup. This source result
 is separate from fresh CI and owner source review.
+
+The bounded common-funnel review found that metadata_write_finished eagerly
+materializes metadata state even for an unrelated command. A genuine Read entry
+and done_context control first proves one successful terminal with Store metadata
+absent before entry, then fails the final metadata-is-None assertion on unchanged
+cleanup (one assertion RED, zero ignored). Its initial fixture compile typo was
+corrected before this evidence run. Make cleanup a no-op when metadata is absent;
+pending-write retirement and generation-isolation controls remain mandatory.
+
+Current landing cf05cf13663 is integrated by plain merge. Shared documentation
+keeps incoming sections and the own readiness/metadata sections; the existing
+Read-capacity outcome wording correction is retained. A local merge commit
+accidentally included unresolved doc markers; the next commit removes them without
+rewriting history. No source conflict or local core resolution was introduced.
