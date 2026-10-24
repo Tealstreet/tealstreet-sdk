@@ -3012,6 +3012,17 @@ No private signer, account/history/trading reducer, scheduler or engine code
 changes in this slice. Family performance/size evidence remains a CI gate.
 
 
+### Hyperliquid spot candle tail
+
+The six spot candle terminals now reuse the existing perps managed Read path.
+The obsolete pending owner and its numeric completions are removed; generic info,
+Builder, History and socket paths remain unchanged. The original checkpoint ran
+two working controls plus nine compiling assertion REDs on unchanged production.
+All eleven now pass alongside ten existing candle and43 spot controls. Two gated
+new-test metadata expectations were corrected to the existing perps NotSent
+contract; primary RED boundaries and native wire/result assertions are retained.
+
+
 ## Crypto.com local trading admission
 
 Immediate cancel/amend validation, leverage validation, unsupported margin,

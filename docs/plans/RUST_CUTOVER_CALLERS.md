@@ -6855,6 +6855,57 @@ evidence. Existing safe-cex startup/subscribed-order-book consumers require no
 new input; host dispatch uses the existing managed prepare/bind/claim protocol.
 
 
+### Hyperliquid spot candles share managed Read custody
+
+Standalone and merged spot FetchCandles now use the existing perps public Read
+Context: unsigned,20s from command admission, Never retry. Admission precedes
+native interval/market/range validation. Preparation and host claim time consume
+that original deadline; expired or unreleased replies cannot publish candles.
+Native POST/info body, @coin mapping, header order, rows and local error strings
+remain. Existing perps metadata is retained: an unreleased preparation failure or
+timeout carries NotSent; a released Read timeout has no financial outcome.
+No signer, Session, Plan or socket authority is introduced. Six real legacy
+terminal occurrences are removed (Hyperliquid37->31, lib9->3).
+
+## BingX history pages retain the original caller Read root
+
+Remote fills, orders, income and unsigned public trades now require managed
+Prepare/Bind/Claim. One original engine caller-wait root spans all native
+windows, RangeWalk chunks, 200 ms page delays and the single signature resend.
+Each physical child keeps the native 20 s bound, including preparation, capped
+by that root. The caller's configured wait is retained exactly; absence of a
+host override defaults at external receipt, while invalid/missing receipt
+provenance refuses through shared admission without a new venue timeout.
+
+Every native page error still rejects the whole query, even after accepted
+rows: no partial rows or INCOMPLETE marker. Engine root expiry also rejects
+strictly. Shared physical Network/Timeout and admission failures retain typed
+Read errors with no write outcome; unclassified native errors receive the
+bridge's Internal kind with unchanged text. Provider/preparation refusals keep
+their typed NotSent fields and create no account-auth evidence or deactivation.
+The SDK's listener timeout remains separate from engine cancellation/expiry.
+
+GET selection remains Secondary when configured, otherwise Primary; selection
+and opaque identity stay fixed through every page and resend. Native query/body
+bytes, filters, dedup, sorting, limits, page caps and strict truncation remain.
+The existing 100001/signature-verification refusal re-signs once per page using
+a fresh root-bound child, with no new transport retry. Rejected-attempt staged
+rows/errors are discarded before that resend; the old wrapper retained them,
+though normal signature-refusal envelopes have no rows. Exact delivery gates
+and generation cleanup make late responses inert, including after ID reuse.
+Local history replies, account cycles, metadata groups, trading and the shared
+legacy signer funnel remain with their existing owners.
+
+
+### Backpack managed command candle stream
+
+Supported `FetchCandles` uses genuine engine Read admission and managed unsigned HTTP. The exact X-Broker-Id header and native /api/v1/klines query survive preparation/bind/re-preparation; streaming starts only after final claim. One original twenty-second root owns the list, with zero automatic retries. Exact delivery validation runs before row parsing, malformed diagnostics and response/status handling, so expired or reused owners cannot publish rows or complete another caller.
+
+Bounds remain floor-seconds in startTime/endTime, while native candle response timestamps remain milliseconds. Limit is ignored and no local bound filtering is added. Server order, duplicate timestamps, accepted finite negative/zero values, empty-list success and whole-list failure after a malformed row are preserved, together with the native malformed-row diagnostic. Unsupported interval, startup, WS candles, subscribed books, private sessions and history retain their existing behavior.
+
+Initial Read admission rejection emits one typed engine failure without an outcome. Preparation refusal and parked expiry preserve the engine's local pre-release NotSent fact and typed/native metadata; this is an attempt fact, not proof about a whole command's money effects. Released transport/deadline/integrity failures retain their engine kind without a financial outcome; malformed streamed envelopes receive the shared typed Internal failure. Native row/non-2xx error messages retain their existing fields, with no partial successful list. The separate public depth-query NotSent compatibility contract stays in place. SDK worker/hosted error receivers continue to consume the existing structured fields; no upstream deployment is claimed.
+
+
 ## Crypto.com immediate trading command custody
 
 Seven immediate trading refusals now require genuine credential-free Mutation
