@@ -2808,6 +2808,61 @@ The exact prune is history.rs14F/18O plus History's lib signing-failure1F/1O.
 Discovery's two list/sign sites and the OKX staging entry remain because actual
 Markets/Tickers consumers still use them, confirmed with the signer owner.
 
+## Crypto.com read-command Context adoption
+
+~~Public candle commands publish numeric terminals after direct HTTP, without
+shared preparation/root-deadline custody; five local history terminals bypass
+Context admission.~~ Candle Pending carries its issued Read root through managed
+release and shared delivery validation, then uses Context finalizers. Local
+history branches alone borrow genuine entry without a numeric fallback; valid
+native history remains untouched. Exactly nine occurrences/seven entries are
+removed,30/27 becomes21/20. No background discovery, private signer, account,
+trading or shared-policy migration is implied. Architecture gate No: all
+release, lifetime, root-validation and finalization authority stays in the engine.
+
+### Crypto.com Read adoption on actual shared seams
+
+The five local history branches now invoke genuine entry directly; the historical
+finish_local_history issuer/finalizer wrapper is removed. One pure policy serves
+local terminals and unsigned candles. The shared public-auth-health fix is actual:
+the original public_typed_route_auth_errors_keep_metadata_without_auth_health_evidence
+control preserves AuthInvalid/Expired/Permission metadata while health stays0,
+without any venue workaround. Exact seven-fingerprint/nine-occurrence prune is
+unchanged; discovery's shared get sender and every private/retrying site remain.
+
+### Lighter local history command authority
+
+Seven synchronous legacy history terminals now consume genuine shared Read roots.
+Original test-only5a0303:4GREEN/15assertionRED/0ignored; all19 nowPASS. Native
+validation and credential-presence precedence remain unchanged; shared entry
+refusal owns capacity/clock failure without numeric fallback. Exact inventory
+history10->3, Lighter41->34occurrences; remote paging/auth/source untouched.
+
+### GRVT local history command authority
+
+Seven immediate history failures now consume shared Read admission and fail their
+exact original root. Original test-only checkpoint7b2fa480691 gives four native
+controls PASS and15 assertion REDs; all19 pass after adoption. Genuine retained
+owners pin capacity, reuse and duplicate custody; real login fixtures preserve
+native session/validation precedence without private-state mutation. History
+inventory11F/11O becomes4F/4O; family53F/56O becomes46F/49O. Remote source is exact.
+
+## KuCoin local command refusal ownership
+
+Eight numeric local failure sites now use shared genuine command admission and
+Context failure, reducing KuCoin from 56 to 48 lexical occurrences (51 to 43
+fingerprints). No signer, private request helper, successful no-I/O setting or
+remote completion is converted. Source and inventory reviews found no venue-local
+retry, classifier, owner registry or completion algorithm.
+
+## Bitrue initial local refusal ownership
+
+Three initial synchronous numeric failure occurrences now use shared Mutation
+entry and Context failure. Bitrue shrinks 33 to 30 occurrences and 20 to 18
+fingerprints. The repeated planning-error fingerprint decreases only 2 to 1;
+the queued remote-flow error remains. Signing and successful local settings are
+held for their separately owned migrations/seam.
+
 ## GRVT replay coverage diagnostic proof
 
 The final-capture controls retain two original assertion REDs and eight working
