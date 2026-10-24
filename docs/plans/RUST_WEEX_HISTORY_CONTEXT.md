@@ -2,7 +2,7 @@
 
 Owner: codex-cxxyqr, transferred from codex-uufub4 by the overseer.
 Original RED baseline: actual `ba3d7da1d3aaba26d6c40d6615fdc467d6ec185d`.
-Current runtime integration: actual `5f86ae51717`.
+Current runtime integration: actual `c55cd23074d` (plain merges preserve all incoming source).
 Branch: `feat/rust-weex-history-context`. Status: source checkpoint; readiness review pending.
 
 ## Scope and dependencies
