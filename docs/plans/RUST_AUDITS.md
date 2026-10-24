@@ -3077,3 +3077,36 @@ legacy cursor branch is removed rather than retained beside a managed terminal.
 Exact-owner retirement drops only its queued work. Private cursor history stays
 legacy; no signer or key-selection migration is claimed. Three public lexical
 fingerprints/four occurrences are removed; history retains its private witness.
+
+### Paradex config/local-entry original controls
+
+Plan b29ea97d0d4, original e743120ab7b: 22 compiling assertion REDs and four
+working controls against unchanged actual77f124 source/map, zero ignored.
+All26 original assertions pass with the seven-site implementation. This receipt
+covers real retained-peer capacity, native metadata, duplicate custody, receipt
+expiry and config Prepare/Bind/Claim/expiry/retry; CI and independent source
+review are separate gates.
+
+
+## Lighter identity caller and physical custody
+
+The complete unsigned identity candidate chain uses a tracked caller Read root
+and unsigned20s/Never children. Exact live DATA validation precedes decoding;
+failure-only continuation uses the engine's typed released callback, validates
+the original root and retires the expired current child before the next candidate.
+Preparation refusals are strict. Candidate construction, parsing and private
+account/signing paths remain unchanged. Exact inventory identity3->0/family33->30
+removes one physical request and two numeric terminals, with no rename prune or
+new engine helper. Original plan/API receipts do not substitute for source review.
+
+
+## Hyperliquid local setting terminal authority
+
+Nine local numeric terminals use shared LocalSetting success or genuine Mutation
+admission plus fail_context. The Store one-way projection is inside the sealed
+local-setting closure; all validation and key-check precedence remain native.
+Only trading22->15 and trading/schedule3->1 inventory occurrences change, family
+31->22, with every retained hash count and foreign manifest byte preserved.
+Valid writes, queues, signatures, nonces, account, History, Builder and sockets
+remain exact. Original checks precede source and expose custody gaps, not new
+financial outcome defects or an altered signing model.
