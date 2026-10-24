@@ -34,6 +34,10 @@ impl std::ops::DerefMut for TestEngine {
     }
 }
 impl TestEngine {
+    /// Managed HTTP released at the latest event time; legacy actions pass through.
+    fn drain_actions(&mut self) -> std::vec::IntoIter<Action> {
+        safe_cex_engine::test_support::prepared_actions(&mut self.inner, self.now).into_iter()
+    }
     fn handle(&mut self, now: f64, event: Event<'_>) {
         self.now = now;
         self.inner.handle(now, event);
@@ -1176,7 +1180,7 @@ fn write_provider(hmac_only: bool) -> (Arc<dyn Signer>, Identities) {
 fn managed_provider_cancel_stages_prepare_before_any_signed_http() {
     let mut e = ready();
     e.handle(NOW + 10., Event::Command(hmac_cancel()));
-    let staged = e.drain_actions().collect::<Vec<_>>();
+    let staged = e.inner.drain_actions().collect::<Vec<_>>();
     assert!(
         staged.iter().any(|a| matches!(a, Action::ManagedHttp(_))),
         "cancel must enter trusted preparation before signing"
@@ -1397,7 +1401,7 @@ fn remote_actions(e: &mut TestEngine) -> Vec<Action> {
     use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
     let now = e.now;
     e.inner.prepare_dispatch(now);
-    let mut queue = std::collections::VecDeque::from(e.drain_actions().collect::<Vec<_>>());
+    let mut queue = std::collections::VecDeque::from(e.inner.drain_actions().collect::<Vec<_>>());
     let mut out = vec![];
     while let Some(action) = queue.pop_front() {
         match action {
@@ -1435,7 +1439,7 @@ fn remote_actions(e: &mut TestEngine) -> Vec<Action> {
             },
             action => out.push(action),
         }
-        queue.extend(e.drain_actions().collect::<Vec<_>>());
+        queue.extend(e.inner.drain_actions().collect::<Vec<_>>());
     }
     out
 }
