@@ -131,3 +131,29 @@ Scoped execution:66/66 PASS,0 skipped across the producer originals/hostile
 controls and existing cpu-ci/cohort/artifact/request-budget tests. This is not
 fresh CI, a real CPU replay run, or merge clearance. CI's existing
 `rust:test-harness` glob includes the new control file without workflow edits.
+
+## Empty step-list evidence from this PR
+
+The first fresh run40115798965 fails in planner120941231106 with
+`CPU certification: missing producer step inventory`, before any refresh.
+Retained jobs response `4caaea2cc84c624d009ee9ea4b726d501fea6f64a08d58f1d81845c66aa8ae0f`
+has all32 successful original measurement jobs carrying `steps: []`. The
+cpu-plan ZIP12569321810 matches the API and upload-log digest
+`11dd0bc4ce388d2d013163ab864b56a1fe262f45cf0ad6f6141b53fe1949ce45`.
+A later observation populates those lists with the same pinned identities,
+but still contains nonterminal steps; it is diagnostic, not certification.
+
+Treat only a valid empty array as an unmaterialized, nonterminal inventory
+under the existing shared six-refresh/five-second budget. Never bind it or
+infer success from an empty list. Missing/non-array inventories and malformed
+step records still fail immediately. Once nonempty, requested upload-step
+uniqueness and all existing success/identity/provenance checks still apply.
+An empty list that never materializes fails at the same cap with run/job and
+an explicit empty-inventory diagnostic. Do not increase the cap or retry HTTP.
+
+Before production, add assertion REDs for empty-to-terminal convergence and
+empty-list exhaustion. Keep malformed inventory, missing/duplicate upload,
+attempt/identity and HTTP working controls, and pin empty-to-pending-to-terminal
+convergence without accepting the intermediate snapshot. Send the exact delta
+to dazzy3; fresh CI is required after any production change. No workflow retry
+has been started for the failed run.
