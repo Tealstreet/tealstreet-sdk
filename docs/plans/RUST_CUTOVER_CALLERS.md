@@ -6640,6 +6640,36 @@ private sessions, paged Futures candle reads and existing Spot OHLC remain open
 or unchanged. This prune is 17 fingerprints / 19 occurrences; no new signing or
 whole-family custody claim is made.
 
+## GRVT replay protocol coverage at final capture
+
+GRVT replay reports evaluate private-stream coverage at the logical end of the
+lifecycle. An interim observation before authentication acknowledgement does not
+leave missing-stream diagnostics after the valid subscriptions complete. Genuine
+unsubscribed private data, wrong subaccount selectors and missing coverage on an
+active replacement generation remain final failures. Execution identity and
+order/caller-identity differences remain strict account diagnostics.
+
+### Crypto.com replay protocol declaration accuracy
+
+Crypto.com's current private replay no longer declares missing subscription
+errors introduced by observing the audit before the authentication ACK. TS
+requires its four private channels; Rust additionally requires `user.trade`.
+Invalid authentication, subscriptions sent before the ACK and unanswered final
+heartbeats still appear as protocol failures. The remaining execution, hedge
+mode and caller-identity differences retain strict FAIL; this reporting change
+establishes no native financial parity.
+
+### Binance Spot replay acknowledgement diagnostics
+
+Replay checkpoints do not finalize Binance Spot's acknowledgement coverage.
+A signed subscription can therefore be observed before its ACK without creating
+false final missing-subscription or missing-request errors after the actual
+lifecycle completes. Genuine signature, typed-ID correlation and pre-ACK event
+violations remain failures, as do incomplete live replacement generations and
+unanswered final requests. The remaining fill-price, time-in-force, client-ID
+and order-lifecycle differences retain strict FAIL; financial parity is not
+established by protocol reporting.
+
 ## MEXC local write refusal custody
 
 Low-level write commands whose native step construction fails retain the same

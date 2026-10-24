@@ -1507,6 +1507,40 @@ Store preservation, capacity recovery, successful native one-way mode, saturated
 signed wire and genuine duplicate-owner protection with 270 fixed-clock reuses.
 No original test is ignored or rewritten to claim a legacy removal.
 
+## GRVT final-coverage replay controls
+
+Healthy final completion, pre-ACK checkpoint observation, genuine earlier
+private-data faults, late selector faults and incomplete replacement generations
+are controlled through the real shared audit/capture APIs. The scoped GRVT and
+declaration-policy run passes 32 tests. Verification of the authenticated reports
+with the narrowed manifest retains one public PASS and one declared private FAIL,
+zero unexpected failures and zero unobserved declarations. Five-pair repeatability
+and fresh composed CI remain separate qualification work; no native parity is
+implied by protocol coverage.
+
+### Crypto.com terminal audit controls
+
+Twelve real-audit controls cover healthy authentication and heartbeat exchange,
+pre-ACK checkpoint observation, persistent invalid HMAC and early subscription
+faults, a final missing heartbeat before memory collection, and the distinct
+TS four-channel/Rust five-channel requirements. The original capture has two
+assertion REDs with ten working GREEN controls; final-only capture passes all
+twelve. Full raw comparison excludes only top-level metrics and protocol errors,
+retaining all other receiver fields and the sixty ordered financial/identity
+failures. The nine removed protocol declarations each require exact current-tape
+absence; every other manifest byte is preserved.
+
+### Binance Spot acknowledgement coverage controls
+
+Sixteen actual-audit controls preserve independently signed subscription bytes,
+exact typed ACK correlation, pre-ACK event rejection, explicit closed/connected
+generations and final unanswered requests captured before memory settling.
+The original capture has two final-assertion REDs and fourteen GREEN controls;
+terminal-only capture passes all sixteen. Full raw comparison omits only
+metrics and protocolErrors, retains every financial field and ordered fixer,
+and proves each of the four removed current-tape protocol keys absent. Other
+public/private Binance cases keep their exact declarations and verifier status.
+
 ## MEXC local write admission controls
 
 Original test-only checkpoint2c0755b5607 executes13 actual-Engine controls on
