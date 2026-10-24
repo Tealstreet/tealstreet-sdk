@@ -623,11 +623,20 @@ fix belongs at Bind, once, for every owner kind.
    cross-owner order today (host Prepare completion is unordered) and does not
    claim one here; each owner sequences its own calls (a serial Plan has one
    live call, GRVT's FIFO queue one write at a time). A mixed control pins the
-   observed behaviour.
+   observed behaviour. No call binds inside the announcing callback: Bind
+   needs the host's `http_prepared` event, so a call the venue issues in that
+   callback, like a woken one, binds only after its own Prepare completes
+   (dazzy3 B1: documented, not held).
+   A woken call that reads NotReady again re-parks with `seen` unchanged
+   (NotReady never advances `seen`) and needs a newer announce (dazzy3 B4).
+   Pacing: the wake re-prepare keeps the call's pacing position exactly as
+   the Stale reprepare does, with no fresh slot and no double count (dazzy3 B2).
 4. Bind side effects. Re-prepare is today's Stale reprepare. The old signing
    attempt is cancelled and a fresh one is allocated at the next Bind; a nonce
    reservation is released exactly as a Stale reprepare releases it. No new
-   reservation semantics.
+   reservation semantics. The parked attempt was never claimed, so a re-sign
+   reusing or exceeding its nonce is safe either way. P8 pins whichever the
+   Stale path gives (dazzy3 B5).
 5. Expiry. The call keeps its window timer. Expiry while parked is the
    existing unreleased Timeout, NotSent. Health is unchanged and no auth-kind
    count moves (kind Timeout).
@@ -659,22 +668,22 @@ every change to any bundle value; `session_bearer` and
 `session_ready` after every refresh. A refresh that is never announced leaves
 parked calls to expire at their window.
 
-### Recipe-controlled header order
+### Venue-declared header order (shared assembly)
 
-Native order differs per venue: Paradex sends `Authorization` before
-`Content-Type`, while BreakoutProp and GRVT send `Content-Type` first.
-Today's bundle-first insertion already changes BreakoutProp's order. Proposed
-shape (OPEN for dazzy3/fe7lgm):
-- `SessionPlacement::{First, After(&'static str)}`, declared by the recipe.
-  `After(name)` inserts the bundle immediately after the first recipe header
+Native order differs per venue but not per request: Paradex sends
+`Authorization` before `Content-Type` at its one Session-bearing site, while
+BreakoutProp and GRVT send `Content-Type` first. Today's bundle-first insertion
+already changes BreakoutProp's order. Shape (dazzy3 B6, replacing the
+per-recipe proposal):
+- `SessionPlacement::{First, After(&'static str)}`, declared with the bundle:
+  `SessionHeaders::placed(self, SessionPlacement)`, default `First`. Header
+  order is a venue-wide wire property and the hook already owns the bundle,
+  so one declaration covers signed and unsigned requests. No new request entry
+  point or `SignStep` method. Per-request variance waits for a consumer.
+- `After(name)` inserts the bundle immediately after the first packet header
   with that name (case-insensitive), or first when the request carries none.
-  It is a shared assembly rule, not a venue insertion.
-- Signed recipes declare it through a defaulted `SignStep` method (default
-  `First`, so no existing recipe changes). Unsigned managed requests take it
-  through an additive entry point named for what it adds
-  (`request_managed_placed`); the existing entry points keep `First`.
-- Collision, limit and wipe rules are unchanged: placement runs inside
-  `attach_session_headers`.
+  It is a shared assembly rule inside `attach_session_headers`, not a venue
+  insertion. Collision, limit and wipe rules are unchanged.
 - Consumers: GRVT `After("Content-Type")`, BreakoutProp `After("Content-Type")`
   (restoring native), Paradex `First`. Each is pinned by a native-wire test in
   its own slice; moving BreakoutProp is a native-restoring wire change that
@@ -707,7 +716,23 @@ shape (OPEN for dazzy3/fe7lgm):
   Prepare order and asserts no cross-owner guarantee beyond FIFO among
   parked calls.
 - R4 is rewritten: NotReady at Bind parks, then times out (the old immediate
-  failure is gone).
+  failure is gone). Adopters (dazzy3 B3): no venue implements
+  `session_bearer` yet; only `session_bearer.rs` does. The unlanded consumer
+  pins (zs5e83's Paradex b29ea97d0d4, BreakoutProp DXAPI, GRVT) move their
+  NotReady expectation to park-then-Timeout. Parity: native waits with no
+  timeout, so the call window is a new bound, disclosed per venue in CALLERS
+  (GRVT's 20 s is ruled).
+- P4 also: a woken call that reads NotReady again re-parks with `seen`
+  unchanged and wakes only on a newer announce.
+- P1 runs with a paced policy and asserts the wake keeps the pacing position
+  (no fresh slot, no double count).
+- P8 also pins the nonce a nonce-signed recipe gets on re-sign, matching the
+  Stale path.
+- P13 announcing callback (dazzy3 B1): the venue issues a new bound call in
+  the same callback that calls `session_ready`. Neither binds inside the
+  callback; both bind after their own Prepare on the new revision.
 - Order: O1 `After("Content-Type")` puts the bundle after Content-Type
   (unsigned and signed); O2 the default stays First; O3 `After` with no anchor
-  is First; O4 collision and limits still apply after placement.
+  is First. For a no-body GET (no Content-Type) the GRVT and BreakoutProp
+  slices assert native's actual order for that request, not just the engine
+  rule (dazzy3 B7); O4 collision and limits still apply after placement.
