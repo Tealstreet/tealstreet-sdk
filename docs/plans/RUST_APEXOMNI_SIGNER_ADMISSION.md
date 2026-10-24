@@ -205,5 +205,7 @@ Across the venue, the request inventory goes from 20 to 21 while the
 signing-site inventory falls from 13 to 0. The extra site is what puts
 signing at dispatch.
 
-The row is removed when ApeX managed writes (#1891) own these sends, and
-before master. Recompute its old map if the landing moves the file.
+#1891 and this PR land as one unit with the row (claude-ddi2il). The row is
+removed by the immediate follow-up that moves `send_signed` account startup,
+polling and history reads onto managed Read/Background contexts, bringing
+ApeX inventory to <= 20; it must go before master. Recompute its old map if the landing moves the file.

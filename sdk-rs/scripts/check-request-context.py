@@ -437,7 +437,7 @@ SIGNER_POLICY_BOOTSTRAPS = {'venues/binance/src/history.rs': ({'153ef00b195a92e1
 # claude-ddi2il, same exit; remove before master.
 # ApeX dispatch-time signing staging (#2008): three rehashed legacy staging calls plus
 # one sign_http (four exact digests, no canonical 6cf35cca), approved by claude-ddi2il;
-# removed when ApeX managed writes (#1891) own the sends. Remove before master.
+# removed by the ApeX read-path follow-up (managed Read/Background reads). Remove before master.
 STAGING_BOOTSTRAPS = {'venues/apexomni/src/lib.rs': ({'0adb175953636afd100d2ddc68ad421af677dc89c16a52471e5cb4c54aefe898': 1,
     '49ba30affa9b727ea990dacbdef5a8033af5fbd08fe892e2fe8fcc8e080c596a': 1,
     '97ed964385cc7a52fcd23993359dd831f672724592d73be7beda8c73e36fe2b9': 1},
