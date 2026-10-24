@@ -134,7 +134,7 @@ for (const ownsEngine of [false, true]) {
   });
 }
 
-test('NEW-CONTRACT: a throwing healthy retirement cannot strand command or resource cleanup', () => {
+test('NEW-CONTRACT: a failed retirement fences the engine without stranding host cleanup', () => {
   const calls = [];
   const host = new EngineHost({
     retireIdentitySnapshot() { calls.push('retire identity'); throw new Error('retirement failed'); },
@@ -158,14 +158,16 @@ test('NEW-CONTRACT: a throwing healthy retirement cannot strand command or resou
   host.dispose();
   assert.deepEqual(calls.filter(call => call !== 'retire identity'), [
     'clear command deadline', 'settle command', 'abort HTTP', 'cancel primitive',
-    'cancel hosted', 'close socket', 'dispose transport', 'free engine',
+    'cancel hosted', 'close socket', 'dispose transport',
   ]);
   for (const map of [host.commands, host.requests, host.primitiveSignings,
     host.hostedSignings, host.sockets]) assert.equal(map.size, 0);
   assert.deepEqual(calls, [
     'retire identity', 'clear command deadline', 'settle command', 'abort HTTP',
-    'cancel primitive', 'cancel hosted', 'close socket', 'dispose transport', 'free engine',
+    'cancel primitive', 'cancel hosted', 'close socket', 'dispose transport',
   ]);
+  assert.equal(host.dead, true);
+  assert.equal(host.deadError.cause.message, 'retirement failed');
 });
 
 for (const FatalError of [WebAssembly.RuntimeError, RangeError]) {
@@ -319,3 +321,31 @@ test('NEW-CONTRACT: final seal follows host injection and precedes startup', () 
     ]);
   } finally { host.dispose(); }
 });
+
+for (const ownsEngine of [false, true]) {
+  for (const failure of ['ordinary error', 'missing required hook']) {
+    test(`NEW-CONTRACT: ${failure} makes ${ownsEngine ? 'owned' : 'borrowed'} required retirement terminal`, () => {
+      let frees = 0;
+      let retired = 0;
+      let resources = 0;
+      const cause = new Error('required retirement failed');
+      const engine = {
+        identitySnapshotRequired: () => true,
+        sealIdentitySnapshot() {},
+        retireIdentitySnapshot() { retired++; throw cause; },
+        free() { frees++; },
+      };
+      const host = new EngineHost(engine, { now: () => 0, dispose() { resources++; } }, {}, { ownsEngine });
+      if (failure === 'missing required hook') engine.retireIdentitySnapshot = undefined;
+      host.dispose();
+      host.dispose();
+      assert.equal(resources, 1);
+      assert.equal(host.disposed, true);
+      assert.equal(host.dead, true, 'failed required retirement must not remain healthy');
+      assert.equal(frees, 0, 'unknown snapshot state cannot be freed or resumed');
+      assert.equal(retired, failure === 'ordinary error' ? 1 : 0);
+      if (failure === 'ordinary error') assert.equal(host.deadError.cause, cause);
+      else assert.match(host.deadError.cause.message, /retirement hook.*missing/);
+    });
+  }
+}

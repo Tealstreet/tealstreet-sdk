@@ -173,7 +173,7 @@ test('disposal releases the local-provider allocation and injected callback exac
 });
 
 
-test('borrowed engines keep caller ownership and owned trap cleanup frees once', () => {
+test('trapped engines are never freed for owned or borrowed hosts', () => {
   for (const ownsEngine of [undefined, false, true]) {
     let frees = 0;
     let host;
@@ -184,7 +184,7 @@ test('borrowed engines keep caller ownership and owned trap cleanup frees once',
     host = new EngineHost(engine, { now: () => 1 }, {}, { ownsEngine });
     host.start();
     host.dispose();
-    assert.equal(frees, ownsEngine ? 1 : 0);
+    assert.equal(frees, 0);
   }
 });
 

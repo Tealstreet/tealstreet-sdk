@@ -16,7 +16,7 @@ const result = () => ({ values: [[107, 101, 121], Array(32).fill(55)], receipt: 
 
 // The fake models the native one-shot capture boundary, not cryptography. Actual
 // WASM tests separately verify family canonical work and provider execution.
-function rig(signer) {
+function rig(signer, wrapEngine = (engine) => engine) {
   let now = 1000;
   let nextTimer = 1;
   let nextCapture = 1;
@@ -62,8 +62,9 @@ function rig(signer) {
     fetch() { throw new Error('signing must not perform HTTP'); },
     openSocket() { throw new Error('signing must not open sockets'); },
   };
-  const host = new EngineHost(engine, transport, {}, signer === undefined ? {} : { signer });
-  return { host, engine, calls, captures, timers, setNow: (value) => { now = value; }, setRevision: (value) => { revision = value; } };
+  const wrappedEngine = wrapEngine(engine);
+  const host = new EngineHost(wrappedEngine, transport, {}, signer === undefined ? {} : { signer });
+  return { host, engine: wrappedEngine, calls, captures, timers, setNow: (value) => { now = value; }, setRevision: (value) => { revision = value; } };
 }
 
 test('hosted clock uses the transport clock without starting or emitting I/O', () => {
@@ -359,3 +360,44 @@ test('dispatch liveness guard leaves hosted HTTP and WS captures independently u
     r.host.dispose();
   }
 });
+
+for (const entry of ['failEngine', 'fatal retirement']) {
+  test(`pending hosted signing never cancels through WASM after ${entry}`, async () => {
+    let poisoned = false;
+    let retired = 0;
+    let complete;
+    let signal;
+    const accesses = [];
+    const fatal = new WebAssembly.RuntimeError('hosted cleanup poisoned');
+    const r = rig((_, context) => {
+      signal = context.signal;
+      return new Promise(resolve => { complete = resolve; });
+    }, engine => new Proxy({
+      ...engine,
+      retireIdentitySnapshot() { retired++; poisoned = true; throw fatal; },
+    }, {
+      get(target, property, receiver) {
+        if (poisoned) accesses.push(String(property));
+        return Reflect.get(target, property, receiver);
+      },
+    }));
+    const pending = r.host.hostedSigning(request);
+    const rejected = assert.rejects(pending, { kind: 'internal', outcome: 'notSent' });
+    await tick();
+    assert.equal(r.host.hostedSignings.size, 1);
+    if (entry === 'failEngine') { poisoned = true; r.host.failEngine(fatal); }
+    else r.host.dispose();
+    await rejected;
+    assert.equal(signal.aborted, true);
+    assert.equal(r.host.hostedSignings.size, 0);
+    assert.equal(r.timers.size, 0);
+    complete(result());
+    await tick();
+    assert.equal(r.calls.some(([kind]) => kind === 'finish'), false);
+    if (entry === 'fatal retirement') assert.equal(retired, 1, 'private retirement entry must execute');
+    assert.deepEqual(accesses, [], 'poisoned signing cleanup must not read cancelHostedSigning');
+    assert.equal(r.calls.some(([kind]) => kind === 'cancel'), false);
+    assert.equal(r.captures.size, 1, 'native captures remain inert instead of entering poisoned WASM');
+    r.host.dispose();
+  });
+}
