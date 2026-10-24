@@ -369,3 +369,37 @@ fn identity_delivery_after_original_root_maximum_cannot_publish_native_id() {
     );
     unchanged(&e);
 }
+
+#[test]
+fn bad_secondary_seed_keeps_native_identity_refusal_and_no_send() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    for (secret, message) in [
+        ("not base64!".to_string(), "Invalid Backpack base64 seed"),
+        (STANDARD.encode([8; 31]), "Ed25519 seed must be 32 bytes"),
+    ] {
+        for public_data_only in [false, true] {
+            let mut e = engine(Options {
+                public_data_only,
+                read_credentials: Some(safe_cex_engine::ReadCredentials {
+                    key: "read-key".into(),
+                    secret: secret.clone(),
+                    passphrase: None,
+                }),
+                ..Default::default()
+            });
+            let actions = ask(&mut e, 7, 10.);
+            let error = failure(&actions, 7);
+            assert_eq!(
+                error.message,
+                if public_data_only {
+                    "Backpack account identity requires credentials"
+                } else {
+                    message
+                }
+            );
+            assert_eq!(error.kind, None);
+            assert_eq!(error.outcome, None);
+            unchanged(&e);
+        }
+    }
+}
