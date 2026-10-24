@@ -51,8 +51,9 @@ local refusal. Admit the genuine operation first, then settle only that Context;
 Rejected already published its terminal, Revoked grants nothing. Failed entry
 must leave acknowledged, jobs, native reservations and Store untouched. An
 admitted routing-capacity refusal may then run the same native cleanup before
-its diagnostic/failure; the other two refusal branches retain their native
-no-cleanup ordering.
+its diagnostic/failure. Other refusal branches retain native no-cleanup ordering
+except CancelSymbolOrders: that caller carries its earlier cleanup intent into
+a successfully admitted local failure, including missing-credential refusal.
 
 For a valid native remote job, leave the existing cleanup/insert/advance path
 without a newly issued managed root. This is a refusal-only cutover, not partial
@@ -201,3 +202,17 @@ pass40 tests across3 targets, with all original assertions unchanged.
 The first updated-tip ratchet pass was followed by a full-bans provenance failure
 on another newer Bitrue prune. Keep that failure visible and integrate its actual
 landing before the final provenance pass; no checker override is used.
+
+Bounded review tightened the symbol-cancel positive to require the remaining
+step be DELETE/order/Call::Cancel(live), not merely a length of1, so a duplicate
+retired ID cannot pass. A finite admitted keyless symbol-cancel positive also
+pins native cleanup before its AuthInvalid refusal. These supplement the denied
+entry negatives: cleanup is deferred by failed admission, not removed from the
+admitted native path. The expanded executed receipt is recorded after rerun.
+
+Final expanded original target executes **24 assertion REDs /9 native positives
+/0 ignored**, all compiling and reaching behavioral assertions. The two bounded
+review findings above are fixed before runtime work. Current-tip integration
+`2ad79101a0d` genuinely merges actuale4059dc97384; both request-context checks
+(15 controls) and full bans pass after preserving its incoming inventory/prunes.
+Runtime/source maps remain unchanged; only the cfg(test) declaration is added.

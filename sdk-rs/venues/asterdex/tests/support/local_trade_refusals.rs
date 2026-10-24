@@ -695,6 +695,33 @@ fn valid_symbol_cancel_keeps_store_and_live_ack_routing_without_duplicates() {
     let inner = &e.venue().inner;
     assert!(!inner.trading.acknowledged.contains_key("retired"));
     assert!(inner.trading.acknowledged.contains_key("live"));
-    assert_eq!(inner.trading.jobs.get(&OWNER).unwrap().steps.len(), 1);
+    let steps = &inner.trading.jobs.get(&OWNER).unwrap().steps;
+    assert_eq!(steps.len(), 1);
+    let remaining = steps.front().unwrap();
+    assert_eq!(remaining.method, Method::Delete);
+    assert_eq!(remaining.endpoint, "order");
+    assert!(
+        matches!(&remaining.call, super::Call::Cancel { id, filled_at_amend: None } if id == "live")
+    );
     assert_eq!(e.venue().peers.len(), 256);
+}
+
+#[test]
+fn admitted_keyless_symbol_cancel_keeps_native_cleanup_before_auth_refusal() {
+    let mut e = seeded_symbol_cancel();
+    native(
+        &act(&mut e, NOW, Case::SymbolCancel, OWNER),
+        Case::SymbolCancel,
+    );
+    assert!(!e.venue().inner.trading.acknowledged.contains_key("retired"));
+    assert_eq!(
+        e.venue()
+            .inner
+            .trading
+            .acknowledged
+            .get("live")
+            .map(String::as_str),
+        Some("BTCUSDT")
+    );
+    assert!(e.venue().inner.trading.jobs.is_empty());
 }
