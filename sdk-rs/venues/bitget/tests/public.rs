@@ -1,6 +1,7 @@
+use crate::support::FixtureOptions as Options;
 mod support;
 use safe_cex_engine::{Command, Event, Venue};
-use safe_cex_venue_bitget::{Options, Product};
+use safe_cex_venue_bitget::Product;
 use support::*;
 
 #[test]
@@ -335,11 +336,12 @@ fn ticker_indexes_follow_reordered_market_and_ticker_seeds_and_last_duplicates()
     let btc = &btc["data"][0];
     let eth =
         serde_json::from_str::<serde_json::Value>(&btc.to_string().replace("BTC", "ETH")).unwrap();
-    let mut engine =
-        safe_cex_engine::test_support::seeded_engine(Reloadable(BitgetFutures::new(Options {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Reloadable(BitgetFutures::new(
+        safe_cex_venue_bitget::Options {
             public_data_only: true,
-            ..Options::default()
-        })));
+            ..Default::default()
+        },
+    )));
     engine.start(1_000_000.0);
     let actions = engine.drain_actions().collect::<Vec<_>>();
     reply(
