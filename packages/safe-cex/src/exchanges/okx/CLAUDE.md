@@ -1248,7 +1248,9 @@ Hosted HTTP reuses `okx.signing.ts`, a standalone request serializer also used b
 the TS API interceptor; no TS venue is constructed. Four-alias browser and
 keyless RemoteSigner captures use owned primary refs and Base64 output.
 Native private/business WS work has three typed byte parts (seconds, GET,
-/users/self/verify), whose concatenation and MAC are unchanged. That shape lets
+/users/self/verify), whose concatenation and MAC are unchanged. The bridge
+decodes them only against the declared `secondsTimestamp`/`secondsSuffix` wire
+codec, which Bitget shares with its own `/user/verify` suffix. That shape lets
 the shared bridge preserve numeric legacy `extraData.timestamp` from the exact
 prepared receipt without confusing an HTTP preimage with WS work. Native login
 JSON keeps its existing string timestamp. Private PayloadSigner remains typed
