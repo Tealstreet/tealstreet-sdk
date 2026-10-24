@@ -36,7 +36,7 @@ type Rule = {
   signerSetup?: CredentialSetupPolicy;
   remoteSigning?: RemoteSigningPolicy;
   /** Family-specific trusted setup mapping, declared rather than name-matched. */
-  setupMapping?: 'asterdex';
+  setupMapping?: 'asterdex' | 'apexomni';
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
 };
 
