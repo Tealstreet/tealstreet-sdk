@@ -51,6 +51,10 @@ impl<P> Cx<'_, P> {
         if !self.entry_callback(founder) {
             return Err(Error::Revoked);
         }
+        // A tracked caller-wait root stays a plain Command Read owner.
+        if self.io.request_contexts.tracked_owner(founder) {
+            return Err(Error::Invalid);
+        }
         if !self.io.next_id.available(1) {
             return Err(Error::Capacity);
         }
@@ -125,6 +129,9 @@ impl<P> Cx<'_, P> {
         if !self.entry_callback(root) {
             return Err(Error::Revoked);
         }
+        if self.io.request_contexts.tracked_owner(root) {
+            return Err(Error::Invalid);
+        }
         self.sweep_executions();
         let joined = self
             .io
@@ -140,6 +147,7 @@ impl<P> Cx<'_, P> {
         root: &Context,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(root.owner())?;
         let sealed = self
             .io
             .request_contexts
@@ -180,6 +188,7 @@ impl<P> Cx<'_, P> {
         execution: &ExecutionHandle,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(execution.0.owner())?;
         if self
             .io
             .request_contexts
@@ -284,6 +293,16 @@ impl<P> Cx<'_, P> {
         let Owner::Command { id: founder, .. } = preflight.owner() else {
             return Err(Error::Invalid);
         };
+        // A #1949 receipt cap is command-only: a capped Preflight never founds
+        // a shared execution, refused before any group, credit or identity.
+        if self
+            .io
+            .request_contexts
+            .preflight_receipt_cap(preflight)?
+            .is_some()
+        {
+            return Err(Error::Invalid);
+        }
         self.io
             .request_contexts
             .prepare_planned_execution(founder, key)?;
@@ -302,7 +321,7 @@ impl<P> Cx<'_, P> {
     /// Retire a sealed physical Plan owner. It has no command: no notice,
     /// order lock or entry completion; observers are sealed separately.
     pub(super) fn finish_physical_plan(&mut self, owner: Owner, retired: Vec<RequestId>) {
-        self.io.retire_http_owner(owner, retired);
+        self.io.retire_physical_owner(owner, retired);
         if !self.io.request_contexts.finish_physical(owner) {
             self.io.http_owner_poison = true;
             panic!("HTTP physical owner retirement bookkeeping failed");

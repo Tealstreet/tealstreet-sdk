@@ -1169,6 +1169,207 @@ Error::Capacity without weakening kind/outcome, no-I/O or retirement assertions.
 The 32 focused BloFin controls and three shared bridge controls pass; scoped
 strict Clippy/fmt and request-context checks with 15 regressions pass. The historical
 run of 501 native tests is distinct; fresh CI and a venue merge window remain gates.
+
+## WOO local history custody controls
+
+Real Engine<Woo> controls cover each original local refusal at invalid engine
+time, finite native error metadata/precedence, repeated settlement and same-ID
+reuse, zero I/O/Store effects, Fills aliases, unchanged private credential refusal
+and unchanged unsigned public GET dispatch. Three original assertion REDs plus
+four compatibility passes become seven passes without assertion changes. Shared
+capacity and revoked-entry mechanics retain the existing engine-suite coverage.
+
+### Paradex local history admission controls
+
+Original RED checkpoint `45c743903b8` adds one focused fixture without editing
+production, shared support or inventory: four local branches emit their old
+result/error instead of a shared capacity refusal; the clock control likewise
+exposes unowned completion. Three native compatibility controls pass alongside
+those five REDs. After adoption all eight original tests pass unchanged.
+The test uses real Engine callbacks,256 unclaimed managed book peers and exact
+terminal metadata, never a manufactured Context. Recovery reuses the freed slot
+and individually retires every remaining peer. Fixed-clock300-cycle reuse and
+refill exercise owner retirement without deadline expiry hiding a leak.
+The original managed public-trades and private history suite stays unchanged.
+Exact inventory target is Paradex55->51/history13->9; broader native, strict,
+ratchet, independent review and CI evidence will be recorded separately.
+
+Local history verification on reviewed integration `56dacc36562` genuinely
+includes actual landing `23d0d490009` (#1892 background executions and #1817
+credential selection). All513 Paradex/Binance tests pass across42 targets,
+none ignored, including the same eight original local-history controls.
+Strict all-target/all-feature Paradex Clippy, scoped formatting, bans, the
+request-context scanner and all15 ratchet tests pass. Source/adversarial,
+caller and full-map reviews are CLEAN on this actual integration; architecture
+No. The seven-path diff preserves every unowned incoming blob and all foreign
+manifest entries, with only the four planned Paradex history occurrences pruned.
+CI and an authorized train slot remain separate gates.
+
+
+## Subscription handoff ordering controls
+
+The assertion-only real OKX private reconnect test fails on the original
+managed adapter (HTTP index 2 before subscription index 5); the identical native
+pre-#1771 control passes in an isolated source/target. The corrected control
+compares the complete concatenated action batches and fires the actual queued
+wakeup, preserving the subscription-before-refresh assertion.
+
+Seventeen engine controls cover actual managed Prepare/Bind/Claim, final-batch
+fencing, callback retirement/replacement, required-interest removal and wire
+changes, refusal, additive supersession, pacing, repair/no-op, auth and delayed
+signing, bounded atomic admission, last-safe ID/rearm, duplicate/early/expired
+wakeups, HTTP-delivery isolation, command-entry refusal and caught fatal state.
+Existing OKX account, product and reconciliation fixtures drive genuine wakeups
+at their native reconnect times; their financial assertions stay unchanged.
+The focused engine/OKX all-target/all-feature run passes 1,241 tests.
+
+Three actual EngineHost bookkeeping controls fail against the original host
+and pass with inline/cleared/superseded timer ownership repaired. The full scoped
+host-unit command passes 194 tests. These local correctness results do not make
+a CPU, memory, size or replay-parity claim; those measurements belong to CI.
+
+Engine feature modes pass: feature-off 718, managed-sockets 820, http-plans 806,
+and combined 908 tests. Strict focused Clippy is clean. The initial bans run
+fails because the newer remote landing has already pruned unrelated Paradex
+and Phemex history inventory; this branch must integrate those actual changes
+before a current-landing ratchet pass is claimed.
+
+Runtime review added an eighteenth control: an early host one-shot must return
+an explicit rearm at the unchanged handoff time, run no early callback, run
+exactly one later callback and release its credit. This assertion fails on the
+initial implementation. A fourth actual-host control covers inline early
+rearming without losing the subsequent handle. The integrated predecessor run
+passes 1,269 focused tests, strict Clippy, formatting and bans; its initial stale
+inventory failure is resolved by genuine actual-landing integration.
+
+The refreshed complete host-unit command passes 195 tests, including all four
+handoff controls. Uufub4 independently executes the archived handoff file 4/4;
+ih35js's source/control clearance carries no independent build claim.
+
+The nineteenth handoff control covers #1932 composition: both initial arming and
+a previously armed wake remain blocked during the exact expiry barrier, retain
+the pending credit and barrier, and resume once afterward with a fresh timer.
+The unguarded integrated source is assertion RED at aa6613f7677.
+
+
+### Bitunix public REST managed Read proof
+
+Plan756a precedes original tests fda4818/c2aa (10 then14 assertion REDs, five
+compatibility controls GREEN); public source follows. Native authority tests
+cover Prepare/Bind/Claim, stale/duplicate/reused command IDs, invalid clock,
+entry capacity, typed provider refusal, expiry, parser versus transport failure,
+public auth isolation and both seeds' repeated fixed-clock retirement. Existing
+private/socket native assertions are preserved through genuine preparation
+fixtures. Immediate managed queue-capacity is reviewed defense/shared-engine
+coverage, explicitly not a native execution receipt (owner ruling in plan).
+
+### WEEX local history original REDs and typed Read completion
+
+The new dedicated local-history target compiled against unchanged actual
+`a828ede7ebb`:3native controls passed and8intended assertion REDs exposed seven
+capacity bypasses plus invalid-clock publication. Test-only commit
+`d5746d2d490` and the committed plan received three independent CLEAN reviews.
+After the seven scoped terminal replacements, the same11controls pass without
+changing their assertions. A genuine retained-root probe covers the keyless
+case without credential fabrication; duplicate/recovery/300-cycle refill and
+full-capacity native remote wire controls keep custody and fallthrough explicit.
+No new per-venue lifecycle, retry, signer, history finalizer or engine seam.
+
+Scoped WEEX/Binance native verification passes506tests,0failed/ignored;
+strict WEEX all-target/all-feature Clippy, scoped formatting, source scan and
+all15request-context checker tests pass. Implementation review/CI remain separate.
+
+### WEEX FetchAccount local and remote Read custody
+
+Original identity controls on actual `a828ede7ebb` expose five full-capacity
+entry failures and invalid-clock numeric publication. Three native controls
+PASS beside six intentional assertion REDs; test-only `902335f2b6f` is the
+reviewed strict-Clippy refinement of original `a55a561b921`. The same nine
+controls now PASS, with genuine engine-root capacity/recovery/peer isolation,
+300fixed-clock local completions/refill, exact native diagnostics and metadata,
+independent primary/secondary HMAC wire, primary stableId attribution and Store
+preservation. Plan, original REDs and the refinement each have three independent
+CLEAN reviews. No new provider key, fabricated Context, engine API or venue
+lifecycle/helper was introduced. Broader native/strict/ratchet/final review and
+CI evidence are separate gates.
+
+Pre-integration native504WEEX/Binance tests and strict WEEX Clippy/fmt pass.
+Whole-map provenance is blocked by newer Aster inventory shrink in origin;
+actual integration and fresh gates follow, with no foreign manifest edits.
+
+Actual integration e336f67b7de genuinely includes15bd7821b52; all unowned incoming
+blobs and foreign prunes are preserved. Fresh504native tests, strict Clippy/fmt,
+full bans and both request-context checks (15tests) PASS. Three independent
+implementation reviews are CLEAN; architecture No. Exact own identity2F/2O
+prune is verified; the parallel #1951 history prune is not credited here.
+
+### Binance identity preflight Read admission
+
+Plan `3a0598f1892` precedes original-control commit `84e327e2c8f`.
+With unchanged production, four real full-registry controls are assertion RED:
+missing/disabled/incomplete-primary/incomplete-secondary identity preflights
+publish local messages rather than the engine's capacity refusal. The existing
+valid-command capacity control and all six identity compatibility controls are
+GREEN, including 300 same-clock/same-command local refusals and exact selected
+signer request bytes. The same eleven tests pass after conversion, with no
+transport, extra diagnostic or Store mutation on initial admission refusal.
+No manufactured Context or fixture bypass is used.
+
+## Phemex unsigned public-trades custody controls
+
+Original checkpoint fc1b87973fa compiles13 controls on unchanged15bd production:
+8 behavioral assertion REDs and5 native passes, zero ignored. The dedicated
+public target retains those selected assertions; held signed REDs remain on
+feat/rust-phemex-bounded-history-context at321992b680c. Additional controls pin
+invalid-entry refusal, typed route metadata without auth evidence and cleanup
+after a pause exceeds the original20s root. Existing native history fixtures
+use the shared prepared-action driver and monotonic response clocks; only the
+unsigned transport-kind expectation changes to Network, while strict financial
+rows, errors, no-prefix/no-gap and signed-path assertions remain. Rebuilt CI
+continues to own replay, CPU, size and retained-memory certification.
+
+## Selected managed signed Read custody
+
+One non-Clone engine wrapper retains selected opaque identity, egress/evidence
+and original Context through queue and retry, with exact typed refusal and
+pending return. Missing-selection command diagnostics precede a single typed
+terminal under genuine local authority. Provider/prepare metadata and ordered
+recipe headers remain unchanged. Genuine engine controls cover capacity,
+duplicate entry, phase custody, expiry, retry, streaming and account evidence;
+native compatibility controls do not substitute for later venue adoption.
+
+## BingX identity original Read owner
+
+One AdmittedRead couples selection, credential and terminal authority without a
+venue admission or numeric fallback. Exact managed delivery is checked before
+native response decoding/publication. Local config precedence and 20s/Never
+remain native; typed transport/refusal errors keep checked diagnostic ordering.
+Only identity.rs loses two legacy terminal occurrences; other inventory is intact.
+
+
+## Shared CPU remeasurement controls
+
+Policy controls cover mean passing and failing, missing/failed second samples,
+5% boundaries, all three objectives, category changes, output/report tampering
+and unchanged strict failures. Runtime controls cover archive/path/type/link
+validation, prevalidated restoration, exact Node/dependency/module identities
+and initial/final loader cache snapshots. Coordinator controls reject foreign
+same-source run/job payloads, substituted physical runners and missing runtime
+authority, duplicate/retried second jobs and incomplete suite/case rosters.
+Workflow controls pin all 32 final required names and 110 original workloads,
+allow only an eligible projection to schedule a second runner, and require final
+certification even after missing or failed upstream work. Declared public FAILs
+remain declared results without CPU rescue. Measurements in CI report first and
+second samples separately; this methodology makes no runtime speedup claim.
+
+The first real second-runner archive exposed a mismatched transport bound. The
+shared size validator preserves the original bound in an extraction before
+regressions are committed: 5 RED with 16 working controls. The observed
+743,167,768-byte runtime case is checked without allocating a giant buffer;
+metadata/log/ordinary bounds, 4 GiB overflow, empty response recovery/exhaustion,
+mixed socket/empty budgets and CDN credential stripping remain explicit controls.
+Routing tests cover every registered suite and reject unknown runtime names.
+
 Metadata/settings freshness: BingX query ownership and both adapters' background
 Store observations/write fences use the shared settings boundary. WEEX explicit
 leverage reads retain incoming managed Context/native-revision behavior and do

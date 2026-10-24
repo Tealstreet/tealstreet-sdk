@@ -842,3 +842,33 @@ passed34, including the full-key/index checks. The now-unused own metadata
 bootstrap exemption and its historical-only unit control are removed: both
 checker files are byte-identical to actual c473342d483. Incoming staging and
 all other bounds remain intact; the generated BingX account map is removal-only.
+
+## Frozen #1919 reintegration and terminal write-fence cleanup
+
+Integrate canonical `2f4a08b449cb69316cf9d657f7c12f9e696c50a0` by plain merge.
+Keep its Plan/Execution/FounderObserver source unchanged, both metadata/identity
+BingX arms, and incoming WEEX Plan trading with the existing Store write fences.
+A Store start refusal fails that exact Plan before send; a response clears its
+fence only after exact Plan delivery validation. Remove the orphaned BingX
+legacy metadata request helper instead of retaining an unused alternate path.
+
+Native-owner disposition (codex-uufub4): every validated terminal also retires
+its Store metadata write owner. Add one idempotent metadata_write_finished call
+in the common finish_sealed_command after exact seal/registry retirement;
+Seal::Stale must return before it. No new emitter, timer, completion API or
+Plan policy. This closes expiry/no-callback latching while preventing an old
+Plan's stale seal from clearing a reused command's pending write.
+
+Before that hook, add compiling Engine controls for explicit Plan failure,
+authenticated local success, and Plan expiry with same-id generation reuse and
+stale Plan/timer rejection. These must establish actual pending Store state,
+then require it to retire with exactly one terminal. The stale replay must
+leave the new generation pending until its own terminal. Fresh CI and bounded
+owner review of the exact common-funnel hunk remain required.
+
+Original merged-source terminal controls execute 3 assertion RED / 0 ignored:
+explicit Plan refusal, authenticated local success and Plan expiry each emit
+one terminal but leave metadata_write_pending true. No compile/setup failure is
+counted (the fixture uses the current StepBound/CallBound schema). Same-id
+reuse/stale-seal checks follow the expiry assertion and are not claimed executed
+until the fix makes that first assertion pass. Logs stay outside Git.

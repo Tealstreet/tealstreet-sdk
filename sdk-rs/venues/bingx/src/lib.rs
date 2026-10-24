@@ -32,7 +32,7 @@ pub struct Options {
 }
 
 pub enum Pending {
-    Identity(CommandId),
+    Identity(safe_cex_engine::selected_read::AdmittedRead),
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
@@ -973,16 +973,13 @@ impl Venue for Bingx {
             }
             return;
         }
-        if let Pending::Identity(command) = pending {
-            self.identity_response(cx, command, response);
+        if let Pending::Identity(read) = pending {
+            self.identity_response(cx, read, response);
             return;
         }
         let pending = match pending {
             Pending::Signed(signed) => {
-                if !signed.resent
-                    && !matches!(&signed.inner, Pending::Identity(_))
-                    && signature_rejected(response.body)
-                {
+                if !signed.resent && signature_rejected(response.body) {
                     if signed.context.is_some() {
                         self.resend_managed(cx, *signed);
                     } else {
@@ -991,9 +988,6 @@ impl Venue for Bingx {
                 } else {
                     let context = signed.context;
                     match (&context, signed.inner) {
-                        (Some(context), Pending::Identity(_)) => {
-                            self.identity_response_context(cx, context, response)
-                        }
                         (Some(context), Pending::Candles { rows, valid, .. }) => {
                             self.candle_response_context(cx, context, response, rows, valid)
                         }
@@ -1167,11 +1161,7 @@ impl Venue for Bingx {
         response: Response<'_>,
     ) {
         match pending {
-            Pending::Signed(signed)
-                if !signed.resent
-                    && !matches!(&signed.inner, Pending::Identity(_))
-                    && signature_rejected(response.body) =>
-            {
+            Pending::Signed(signed) if !signed.resent && signature_rejected(response.body) => {
                 if signed.context.is_some() {
                     self.resend_managed(cx, *signed);
                 } else {
@@ -1213,10 +1203,7 @@ impl Venue for Bingx {
         match pending {
             Pending::Signed(signed) => {
                 if let Some(context) = &signed.context
-                    && matches!(
-                        &signed.inner,
-                        Pending::Identity(_) | Pending::Candles { .. }
-                    )
+                    && matches!(&signed.inner, Pending::Candles { .. })
                 {
                     let _ = cx.command_error_context(context, error.message.clone());
                     let _ = cx.fail_context(context, error);
@@ -1232,7 +1219,7 @@ impl Venue for Bingx {
                 self.on_sign_error(cx, signed.inner, error);
                 managed::finish(cx, context);
             }
-            Pending::Identity(command) => identity::fail_command(cx, command, error),
+            Pending::Identity(read) => self.identity_failed(cx, read, error),
             Pending::History(request) => self.history.on_sign_failed(cx, request, error),
             Pending::Trade(request) => {
                 self.trading
@@ -1245,6 +1232,17 @@ impl Venue for Bingx {
             }
             // Provider refusal is typed and is never venue-auth evidence.
             Pending::Metadata(leg) => account::fail_metadata_plan(cx, &leg, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Identity(read) => self.identity_failed(cx, read, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
@@ -1265,10 +1263,7 @@ impl Venue for Bingx {
             }
             Pending::Signed(signed) => {
                 if let Some(context) = &signed.context
-                    && matches!(
-                        &signed.inner,
-                        Pending::Identity(_) | Pending::Candles { .. }
-                    )
+                    && matches!(&signed.inner, Pending::Candles { .. })
                 {
                     let _ = cx.command_error_context(context, error.to_owned());
                     let _ = cx.fail_context(context, error);
@@ -1280,8 +1275,8 @@ impl Venue for Bingx {
                 managed::finish(cx, context);
                 return;
             }
-            Pending::Identity(command) => {
-                self.identity_failed(cx, command, error);
+            Pending::Identity(read) => {
+                self.identity_failed(cx, read, error.into());
                 return;
             }
             Pending::History(request) => {
@@ -1387,8 +1382,8 @@ impl Venue for Bingx {
             Command::SetPositionMode { .. } => cx.store.invalidate_metadata(None),
             _ => {}
         }
-        if let Command::FetchAccount { command } = command {
-            self.fetch_identity(cx, command);
+        if let Command::FetchAccount { .. } = command {
+            self.fetch_identity(cx);
             return;
         }
         match command {

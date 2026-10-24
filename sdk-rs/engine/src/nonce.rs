@@ -122,6 +122,51 @@ impl<P> crate::Cx<'_, P> {
     }
 }
 
+/// A venue-issued nonce sequence (Lighter), one per engine, never above `LIMIT`.
+/// It is seeded only from a validated venue reply requested under the current
+/// ticket, reserved before signing, and invalidated on any refusal or doubt.
+#[derive(Debug, Default)]
+pub struct VenueCounter<const LIMIT: u64> {
+    next: Option<u64>,
+    epoch: u64,
+}
+
+/// Captured with a seed request; a reply after an invalidation cannot reseed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SeedTicket(u64);
+
+impl<const LIMIT: u64> VenueCounter<LIMIT> {
+    pub fn seeded(&self) -> bool {
+        self.next.is_some()
+    }
+
+    pub fn ticket(&self) -> SeedTicket {
+        SeedTicket(self.epoch)
+    }
+
+    /// Install a venue-validated next nonce; false if stale, seeded or above LIMIT.
+    pub fn seed(&mut self, ticket: SeedTicket, value: u64) -> bool {
+        let fresh = ticket.0 == self.epoch && self.next.is_none() && value <= LIMIT;
+        if fresh {
+            self.next = Some(value);
+        }
+        fresh
+    }
+
+    /// Reserve the next nonce; past LIMIT the counter is exhausted and unseeded.
+    pub fn take(&mut self) -> Option<u64> {
+        let nonce = self.next.filter(|nonce| *nonce <= LIMIT)?;
+        self.next = nonce.checked_add(1);
+        Some(nonce)
+    }
+
+    /// Forget the sequence; the next send must reseed from the venue.
+    pub fn invalidate(&mut self) {
+        self.next = None;
+        self.epoch = self.epoch.wrapping_add(1);
+    }
+}
+
 /// Kraken's secret-digest domain only, until its signer migration moves it to
 /// `NonceKey::stable_id`. No other domain can be reached through this entry.
 #[doc(hidden)]
@@ -181,6 +226,31 @@ mod tests {
             NonceKey::stable_id(&address.to_ascii_lowercase()),
             NonceKey::ethereum_address(address)
         );
+    }
+
+    #[test]
+    fn venue_counter_reserves_in_order_until_its_limit() {
+        let mut counter = VenueCounter::<8>::default();
+        assert_eq!(counter.take(), None);
+        assert!(!counter.seed(counter.ticket(), 9), "above the limit");
+        assert!(counter.seed(counter.ticket(), 7));
+        assert!(!counter.seed(counter.ticket(), 7), "already seeded");
+        assert_eq!((counter.take(), counter.take()), (Some(7), Some(8)));
+        assert_eq!(counter.take(), None, "past the limit");
+        let mut last = VenueCounter::<{ u64::MAX }>::default();
+        assert!(last.seed(last.ticket(), u64::MAX));
+        assert_eq!((last.take(), last.seeded()), (Some(u64::MAX), false));
+    }
+
+    #[test]
+    fn venue_counter_drops_seeds_requested_before_an_invalidation() {
+        let mut counter = VenueCounter::<100>::default();
+        let stale = counter.ticket();
+        counter.invalidate();
+        assert!(!counter.seed(stale, 7));
+        assert!(counter.seed(counter.ticket(), 7));
+        counter.invalidate();
+        assert_eq!(counter.take(), None);
     }
 
     #[test]
