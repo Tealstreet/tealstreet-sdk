@@ -741,3 +741,31 @@ that signature; this compile failure is excluded from RED evidence. Canonical
 scanner verification also corrected the plan table's swapped done/fail labels;
 the two actual fingerprints and their counts were already exact. Production
 and every inventory remain unchanged.
+
+
+Original-source evidence: plan e93893972d5 precedes test-only020a9275c79
+and the explicit compile-only RequestId correction bbf2b521844. Against
+unchanged actual9a757 source, all16 controls compile and execute:9GREEN,
+7assertionRED,0ignored. The three clock cases fail at their first NaN kind
+assertion (native absent kind vs shared InvalidInput); later infinity loop
+iterations are unexecuted post-cutover gates. The three capacity cases fail
+at absent kind vs Internal; their later prior-owner completion assertions are
+unexecuted until GREEN. A real signed native identity response at21001 after
+entry1000 still publishes its ID, failing the planned20s completion bound.
+That is an adoption-bound RED on a currently unmanaged path, not a claim that
+an admitted shared root already exists or that the signer is incorrect.
+
+Working controls: all three native local messages/fields and secondary-first
+precedence, correlated diagnostic before terminal, zero local physical work
+and unchanged Store; immediate ID reuse; all three duplicate cases suppress
+correlated diagnostic/terminal leakage AND execute successful real prior book
+Prepare/Bind/Claim/response; independent book delivery; native signed identity
+route/read key/exact high-precision success JSON and failure behavior. Duplicate
+suppression is already correct and must not be presented as an original bug.
+The late-response RED's following Store assertion is not claimed executed.
+
+Only the plan and new identity_context control file differ from actual9a757.
+Every production source, inventory, key-selection map and combo5b file remains
+byte-identical. Scoped Cargo uses4jobs; no full workspace or extra CI started.
+The private-path selected authority/delivery composition remains an explicit
+source gate before a two-terminal implementation or either fingerprint prune.
