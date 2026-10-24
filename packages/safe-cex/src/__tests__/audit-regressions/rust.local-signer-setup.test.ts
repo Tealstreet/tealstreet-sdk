@@ -89,14 +89,14 @@ describe('trusted local signer setup', () => {
     });
     expect(() => setup.construct(Engine as never, 'binance', '{}')).toThrow(/consumed/);
   });
-  it('forwards the declared base64Text key encoding to the Rust provider unchanged', () => {
+  it.each(['base64Text', 'base58'] as const)('forwards the declared %s key encoding to the Rust provider unchanged', (encoding) => {
     let received: unknown;
     class Engine {
       constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); }
     }
-    new LocalSignerSetup({ ...options(), localSigner: { primary: { secretEncoding: 'base64Text' as const } } })
+    new LocalSignerSetup({ ...options(), localSigner: { primary: { secretEncoding: encoding } } })
       .construct(Engine as never, 'binance', '{}');
-    expect(received).toMatchObject({ primary: { secretEncoding: 'base64Text' } });
+    expect(received).toMatchObject({ primary: { secretEncoding: encoding } });
   });
   it('refuses provider metadata on unmigrated Rust families before construction', () => {
     expect(() => new RustEngineExchange('kraken', { ...options(), localSigner: {} }, new DefaultStore()))

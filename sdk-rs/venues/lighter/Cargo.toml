@@ -16,3 +16,4 @@ workspace = true
 
 [dev-dependencies]
 safe-cex-engine = { workspace = true, features = ["test-support"] }
+safe-cex-crypto = { workspace = true, features = ["schnorr"] }
