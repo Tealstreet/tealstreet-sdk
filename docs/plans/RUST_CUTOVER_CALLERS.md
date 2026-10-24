@@ -6399,6 +6399,8 @@ distinguish the following:
 
 
 
+
+
 ## Retained command readiness
 
 With the engine's `http-plans` feature, native FIFO commands can park their own
@@ -6750,6 +6752,8 @@ Valid signed account/trading/history, separate Spot/Futures nonce domains,
 private sessions, paged Futures candle reads and existing Spot OHLC remain open
 or unchanged. This prune is 17 fingerprints / 19 occurrences; no new signing or
 whole-family custody claim is made.
+
+
 
 
 
@@ -7286,6 +7290,8 @@ Capacity refusal produces one shared failure, with no numeric fallback or
 physical action. The local helper must never be called from a delayed funding
 callback, accepted page delivery or queued trading work. Inventory: Orderly
 28F/29O to 25F/26O, solely the three documented initial failure fingerprints.
+
+
 
 
 ## Independent Mutation Plan gateway failures

@@ -88,6 +88,8 @@ mod planned_execution {
         reject_first: bool,
         /// The only write is definitively refused and the Plan completes.
         reject_only: bool,
+        /// An earlier attempt of the founder's intent may have reached the venue.
+        inherited: bool,
         /// Answers are resendable refusals; `resend_attempts` is the declared
         /// budget, and `accept_resend` accepts the second attempt instead.
         resend: bool,
@@ -95,8 +97,6 @@ mod planned_execution {
         accept_resend: bool,
         grants: Vec<bool>,
         resends: Vec<Result<(), Error>>,
-        /// An earlier attempt of the founder's intent may have reached the venue.
-        inherited: bool,
         /// Each accepted write publishes its identity to the observers.
         progress: bool,
         /// Receipts per accepted write (one when zero).
