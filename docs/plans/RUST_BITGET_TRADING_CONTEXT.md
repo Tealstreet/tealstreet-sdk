@@ -194,40 +194,24 @@ adds `condition-waits`, which pulls in `serial-plans` and `http-plans`. It
 needs nothing else: no `http-mutation-barriers` (calls are serial, never
 grouped) and no `metadata-freshness`.
 
-Bitget venue WASM, engine at size defaults since #2099 (`31176dfe121`):
+Bitget venue WASM, engine at size defaults since #2099. fe7lgm measured
+on tip `31176dfe121` composed with #2094 (`6eeaed703e7`), with no venue use:
 
-| Build | Bytes | Source |
-| --- | ---: | --- |
-| tip, no `http-plans` | 1 309 917 | #2099 PR run 40136607427 |
-| plus `http-plans`, no venue use | 1 349 551 | scratch run 40129484009 (base `bcaaa4acc56`) |
-| override | 1 363 968 | `wasm-budget.mjs` |
+| Bitget engine features | Bytes | Delta |
+| --- | ---: | ---: |
+| `order-locks` (today) | 1 311 021 | 0 |
+| plus `http-plans` | 1 361 149 | +50 128 |
+| plus `condition-waits` (with `serial-plans`) | 1 364 215 | +53 194 |
+| override | 1 363 968 | |
 
-- **`http-plans`:** about **+39.6 KB** on Bitget. This is measured, but across
-  two nearby bases, so it is approximate. It leaves about **14.4 KB** of
-  Bitget headroom for everything else.
-- **`serial-plans` + `condition-waits`, no venue use:** **+6 093** on Bitget
-  over `http-plans` alone. fe7lgm measured this on `94fce389079`, which is
-  tip `30a2b59fe79` plus gated #2092/#2094 and **predates #2099**, so the
-  engine was at opt-level 3. There, `http-plans` alone cost +65 830
-  (1 363 079 to 1 428 909) and `condition-waits` +71 923 (to 1 435 002). At
-  the post-#2099 size default the `http-plans` cost is about 39.6 KB, so
-  expect the serial and condition-wait code to be proportionally smaller
-  (about +4 KB, unmeasured at z).
-- **Engine paths kept alive by use:** `admit_serial_plan`,
-  `continue_serial_plan(_after)`, `serial_plan_condition_wait`,
-  `park_preflight_for` and the streamed journal (about 300 + 240 source
-  lines) keep their bodies once Bitget calls them. Estimate: **+3 to +6 KB**,
-  measurable only on the adoption build.
-- **Venue code:** an estimated **+2 to +4 KB** (about +200 / -120 lines in
-  `trading.rs`, minus the `send` body branch and the `Pending::Trade`
-  sign-error arm). Calibration: slice 2 cost +2 461 bytes before its trim and
-  about +0.9 KB after, for about 100 net lines.
-- **#2077 (slice 2, held):** about +0.9 KB more on Bitget if it lands first.
-- **Expected Bitget total at z:** 1 310 157 + about 39.6 + 4 + (3 to 6) +
-  (2 to 4) + 0.9 KB, so about **1 360 to 1 365 KB**, on the edge of the
-  1 363 968 override. Slice 3 may not fit without a Bitget trim or a budget
-  ruling. Measure the enabled-no-use build at z on the current tip first,
-  before writing source.
+- The features alone put Bitget **247 bytes over** the override, before any
+  slice 3 code.
+- Still to add: the engine paths that Bitget's calls keep alive (an estimated
+  +3 to +6 KB), venue code (an estimated +2 to +4 KB) and #2077 (about
+  +0.9 KB). Expected total: about **1 370 to 1 375 KB, about 6 to 11 KB over**.
+- So slice 3 needs a Bitget budget ruling from Sam, or a trim of at least
+  about 10 KB elsewhere in Bitget, before any source. Production is held on
+  that decision.
 
 Combined bundle (all features unioned):
 
