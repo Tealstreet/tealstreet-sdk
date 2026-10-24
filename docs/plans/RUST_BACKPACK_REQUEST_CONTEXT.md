@@ -559,3 +559,15 @@ Cargo build. Freeze the plan/control commit, send bounded review, and report the
 slice/count. No production application, manifest prune, push, PR or extra CI is
 part of this plan/RED checkpoint. Existing three CI watchers remain sole at
 120-second intervals; no new watcher is needed here.
+
+Original-source checkpoint: plan `781734ad009` precedes separate original
+controls `740d55a3b04`. On unchanged actual `557de7ae7fb` source, the single
+scoped file compiles and executes twelve cases: four GREEN, eight assertion
+RED, zero ignored. All four native branches report absent kind rather than
+shared InvalidInput at invalid command clocks, and absent kind rather than
+shared Internal at capacity. Native messages/fields, precedence, no I/O/Store,
+real duplicate prior-owner delivery and immediate ID reuse are working controls.
+Capacity delivery past each failing kind assertion remains a mandatory GREEN
+post-cutover gate, not original execution evidence. Only this plan and the new
+test file differ from base; production, all inventories, key-selection and
+combo-5b source are unchanged. No runtime implementation or prune is applied.
