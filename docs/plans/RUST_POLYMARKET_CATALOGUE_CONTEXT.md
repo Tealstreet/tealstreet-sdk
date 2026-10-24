@@ -133,3 +133,14 @@ startup fixture, separately from the public-only new target. The manifest
 removes only the named count-one Gamma sender; all foreign and selection
 entries remain exact. Committed source preservation, native/caller review,
 actual landing integration, CI/family size/performance and READY remain gates.
+
+Plain merge dce2b925b12 integrates actual ae108f958c6 (#1896 after #2051/#2031).
+Only README/CALLERS require manual resolution: full incoming then the own row
+or suffix exactly once. Runtime and original controls remain byte-exact to the
+source checkpoint. Ten own paths differ from incoming; all 5,688 unowned entries
+and every foreign/selection inventory remain exact. Original fixture assertions
+are token-exact, including the existing private-startup proof. Fresh integrated
+160/160 scoped tests, strict all-target Clippy, changed-file fmt and normal full
+bans (including request/signing/socket inventory controls) pass. CI owns full
+feature/WASM/size/performance evidence; exact native/caller and committed core
+reviews are requested in parallel with the draft publication.
