@@ -321,6 +321,13 @@ export class EngineHost {
     this.disposed = false;
     this.started = false;
     this.deadError = undefined;
+    this.cleanupStarted = false;
+    this.identitySnapshotRequired = engine.identitySnapshotRequired?.() === true;
+    if (this.identitySnapshotRequired) {
+      if (typeof engine.sealIdentitySnapshot !== 'function' || typeof engine.retireIdentitySnapshot !== 'function')
+        throw new TypeError('Snapshot-aware engine requires seal and retirement hooks');
+      engine.sealIdentitySnapshot();
+    }
     this.wsEncoder = undefined;
     this.wsScratch = undefined;
     this.wsScratchBusy = false;
@@ -605,6 +612,18 @@ export class EngineHost {
 
   cleanup() {
     this.assertHttpHandoffIdle();
+    if (this.cleanupStarted) return;
+    this.disposed = true;
+    this.cleanupStarted = true;
+    if (this.deadError === undefined) {
+      try {
+        const retire = this.engine.retireIdentitySnapshot;
+        if (typeof retire === 'function') retire.call(this.engine);
+        else if (this.identitySnapshotRequired) throw new TypeError('Required identity retirement hook is missing');
+      } catch (error) {
+        this.deadError = new EngineDeadError(error);
+      }
+    }
     const attempt = (fn) => {
       try { fn(); } catch { /* A broken transport must not strand the remaining resources. */ }
     };
@@ -635,7 +654,7 @@ export class EngineHost {
     this.signer = undefined;
     const ownsEngine = this.ownsEngine;
     this.ownsEngine = false;
-    if (ownsEngine) attempt(() => this.engine.free?.());
+    if (ownsEngine && this.deadError === undefined) attempt(() => this.engine.free?.());
   }
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
@@ -787,14 +806,14 @@ export class EngineHost {
     const duration = deadlineMs - this.transport.now();
     if (!Number.isInteger(id) || id <= 0 || id > 0xffff_ffff || this.hostedSignings.has(id)
       || !Number.isFinite(duration) || duration <= 0 || duration > 5000) {
-      this.engine.cancelHostedSigning?.(id);
+      this.cancelHostedCapture(id);
       return Promise.reject(new ExchangeError('Invalid hosted signing request', { kind: 'invalidInput', outcome: 'notSent' }));
     }
     if (!this.signer) {
       try {
         return Promise.resolve(JSON.parse(this.invokeHosted(this.engine.localHostedSigning, id, this.transport.now())));
       } catch (error) {
-        try { this.engine.cancelHostedSigning(id); } catch { /* Preserve the closed native error. */ }
+        this.cancelHostedCapture(id);
         return Promise.reject(error);
       }
     }
@@ -803,7 +822,7 @@ export class EngineHost {
       const pending = this.primitiveSigning(work, duration, execute, (result, code) => {
         this.hostedSignings.delete(id);
         if (code || this.disposed) {
-          try { this.engine.cancelHostedSigning(id); } catch { /* Keep a closed signing error. */ }
+          this.cancelHostedCapture(id);
           reject(new ExchangeError(code === 'timedOut' ? 'Hosted signing timed out' : 'Hosted signing failed', {
             kind: code === 'timedOut' ? 'timeout' : code === 'refused' ? 'invalidInput' : 'internal', outcome: 'notSent',
           }));
@@ -815,6 +834,18 @@ export class EngineHost {
       this.hostedSignings.set(id, pending);
       pending.start();
     });
+  }
+
+  cancelHostedCapture(id) {
+    this.assertHttpHandoffIdle();
+    if (this.deadError !== undefined) return;
+    try { this.engine.cancelHostedSigning?.(id); }
+    catch (error) {
+      if ((typeof WebAssembly !== 'undefined' && error instanceof WebAssembly.RuntimeError) || error instanceof RangeError) {
+        if (this.disposed) this.deadError = new EngineDeadError(error);
+        else this.failEngine(error);
+      }
+    }
   }
 
   signPayload(action) {

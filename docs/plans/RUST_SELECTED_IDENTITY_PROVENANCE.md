@@ -658,3 +658,14 @@ trap for owned and borrowed engines, while healthy owned disposal still frees
 exactly once. Late callbacks must check the host fence before evaluating engine
 properties. The original post-poison hosted cancellation is reproduced before
 its guard; it is not an absent-snapshot-contract RED.
+
+First applied host source adds final seal after injection, once-only retirement
+behind the unchanged group-idle guard, terminal deadError for every retirement
+exception/missing required hook, and no free after deadError. Hosted signing
+now shares one guarded native-capture cancellation helper across invalid-admission,
+local-signing error and async cleanup; poisoned cleanup never enters that export.
+The original hosted-cancellation RED and updated trap/free ownership RED precede
+the source fix in `a5c469704c5`. Source checks: 97 focused provenance/signing/fatal
+controls and 65 host/managed-HTTP compatibility controls PASS. G2b group fence
+controls run separately; no group source or completion API is changed. Rust
+installed snapshot/registry/native hooks remain unimplemented in this slice.

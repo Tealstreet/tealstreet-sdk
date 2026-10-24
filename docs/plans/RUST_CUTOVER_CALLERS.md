@@ -6859,10 +6859,11 @@ account-subject snapshots are immutable within an engine after startup; no live
 configuration replacement is required. The old engine is torn down before its
 replacement becomes available. Teardown cancels and fences old requests,
 preparations, provider jobs, sockets and timers; cancellation never proves a
-released write unsent or clears prior Unknown/partial-ID evidence. G2c's snapshot
-installation and explicit retirement hooks remain planned; existing setter-after-
-startup refusal is preserved, and tests for new snapshot APIs are labelled
-NEW-CONTRACT rather than invented original regressions.
+released write unsent or clears prior Unknown/partial-ID evidence. Snapshot-aware
+Rust hosts seal after final entropy/provider injection and before startup.
+Healthy host cleanup retires before settling commands and releasing resources;
+retirement failure fences the engine. A dead host never enters an engine export
+or frees its WASM engine; host-owned cancellation still preserves Unknown/IDs.
 
 G2c snapshot installation will freeze all dependent identities, provider and setup
 policy setters immediately, including before startup. Account construction must
