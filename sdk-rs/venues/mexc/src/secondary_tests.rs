@@ -26,10 +26,7 @@ fn probe(
                 "/secondary-test",
                 String::new(),
                 false,
-                Pending::Markets {
-                    rows: vec![],
-                    malformed: Default::default(),
-                },
+                Pending::Identity(0),
             );
         }
     })

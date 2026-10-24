@@ -19,11 +19,15 @@ fn probe(
     venue: Cryptocom,
 ) -> ProbeVenue<Cryptocom, impl FnMut(&mut Cryptocom, &mut Cx<'_, Pending>)> {
     ProbeVenue::new(venue, |venue, cx| {
+        // ProbeVenue ignores responses; this genuine fixture Context is only
+        // the carrier field, never authority for the legacy signed request.
+        let context = cx.http_context(Scope::Background, read_policy()).unwrap();
         venue.signed(
             cx,
             "private/get-trades",
             &sign::Params::default(),
             Pending::Markets {
+                context,
                 rows: vec![],
                 indexes: Default::default(),
                 skipped: Default::default(),
