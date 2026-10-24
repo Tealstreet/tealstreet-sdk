@@ -157,6 +157,7 @@ fn identity_provider_refusal_is_one_not_sent_terminal() {
 
 #[derive(Clone, Copy)]
 enum BadResult {
+    Unchanged,
     Receipt,
     Headers,
     Count,
@@ -167,6 +168,7 @@ enum BadResult {
 struct CorruptProvider {
     inner: Arc<dyn Signer>,
     bad: BadResult,
+    ws_only: bool,
 }
 impl Signer for CorruptProvider {
     fn sign(&self, _: SignRequest) -> SignFuture {
@@ -183,7 +185,11 @@ impl Signer for CorruptProvider {
             Ok(result) => result,
             Err(error) => return Some(Err(error)),
         };
+        if self.ws_only && work.context.method != "WS" {
+            return Some(Ok(result));
+        }
         match self.bad {
+            BadResult::Unchanged => {}
             BadResult::Receipt => {
                 result.receipt.stamp_ms = result.receipt.stamp_ms.map(|stamp| stamp + 1.)
             }
@@ -201,6 +207,7 @@ impl Signer for CorruptProvider {
 #[test]
 fn malformed_provider_results_cannot_release_identity_or_leak_material() {
     for bad in [
+        BadResult::Unchanged,
         BadResult::Receipt,
         BadResult::Headers,
         BadResult::Count,
@@ -210,14 +217,31 @@ fn malformed_provider_results_cannot_release_identity_or_leak_material() {
     ] {
         let (options, signer) = support::fixture::setup(options());
         let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options));
-        e.set_signer(Some(Arc::new(CorruptProvider { inner: signer, bad })))
-            .unwrap();
+        e.set_signer(Some(Arc::new(CorruptProvider {
+            inner: signer,
+            bad,
+            ws_only: false,
+        })))
+        .unwrap();
         let actions = ask(&mut e, NOW);
+        if matches!(bad, BadResult::Unchanged) {
+            let request = http(&actions, "private/get-accounts");
+            let delivered = respond(&mut e, NOW, &request, 200, IDENTITY);
+            assert_eq!(
+                terminals(&delivered),
+                vec![Ok(
+                    r#"{"userId":"9007199254740993","affiliateId":null}"#.into()
+                )]
+            );
+            continue;
+        }
         no_private_http(&actions);
         let t = terminals(&actions);
         assert_eq!(t.len(), 1);
         let error = t[0].as_ref().unwrap_err();
         assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert_eq!(error.kind, Some(ErrorKind::Internal));
+        assert_eq!(error.message, "Invalid signing result");
         for material in [
             "fixture-primary-key",
             "fixture-primary-material",
@@ -225,6 +249,66 @@ fn malformed_provider_results_cannot_release_identity_or_leak_material() {
             "untrusted",
         ] {
             assert!(!error.message.contains(material));
+        }
+    }
+}
+
+#[test]
+fn malformed_provider_results_cannot_release_ws_auth() {
+    for bad in [
+        BadResult::Unchanged,
+        BadResult::Receipt,
+        BadResult::Headers,
+        BadResult::Count,
+        BadResult::Mac,
+        BadResult::Crlf,
+        BadResult::Utf8,
+    ] {
+        let (options, signer) = support::fixture::setup(options());
+        let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options));
+        e.set_signer(Some(Arc::new(CorruptProvider {
+            inner: signer,
+            bad,
+            ws_only: true,
+        })))
+        .unwrap();
+        let mut h = Harness {
+            engine: e,
+            actions: vec![],
+            failures: vec![],
+            now: NOW,
+        };
+        h.engine.start(NOW);
+        h.collect();
+        h.reply("public/get-instruments", support::INSTRUMENTS);
+        h.reply("public/get-tickers", support::TICKERS);
+        h.load();
+        let socket = h.socket(true);
+        h.actions.clear();
+        h.event(Event::WsOpened { socket });
+        let timer = h
+            .actions
+            .iter()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 1000. => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        h.actions.clear();
+        h.now = NOW + 1000.;
+        h.event(Event::TimerFired { timer });
+        let auth = h.actions.iter().filter(|action| matches!(action, Action::WsSend { text, .. } if text.contains("public/auth"))).count();
+        assert_eq!(auth, usize::from(matches!(bad, BadResult::Unchanged)));
+        if !matches!(bad, BadResult::Unchanged) {
+            assert_eq!(
+                h.actions
+                    .iter()
+                    .filter(
+                        |action| matches!(action, Action::WsClose { socket: own } if *own == socket)
+                    )
+                    .count(),
+                1
+            );
         }
     }
 }
@@ -514,28 +598,32 @@ fn posted_read_keeps_primary_identity_without_route_or_auth_evidence() {
 }
 #[test]
 fn invalid_secondary_blocks_start_before_discovery() {
-    let mut opts = options();
-    opts.read_credentials = Some(secondary(false));
-    let expected = opts
-        .read_credentials
-        .as_ref()
-        .unwrap()
-        .validate()
-        .unwrap_err();
-    let mut e = engine(opts);
-    e.start(NOW);
-    let a = actions(&mut e, NOW);
-    assert!(!a.iter().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
-    )));
-    assert_eq!(a.iter().filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::CONFIG_INVALID && event.message == expected)).count(), 1);
+    for public_data_only in [false, true] {
+        for primary in [false, true] {
+            let mut opts = options();
+            opts.public_data_only = public_data_only;
+            if !primary {
+                opts.key = None;
+                opts.secret = None;
+            }
+            opts.read_credentials = Some(secondary(false));
+            let expected = "Secondary read credentials require a nonempty key and secret";
+            let mut e = engine(opts);
+            e.start(NOW);
+            let a = actions(&mut e, NOW);
+            assert!(!a.iter().any(|a| matches!(
+                a,
+                Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
+            )));
+            assert_eq!(a.iter().filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::CONFIG_INVALID && event.message == expected)).count(), 1);
+        }
+    }
 }
 #[test]
 fn invalid_secondary_identity_error_precedes_public_only_and_missing_primary() {
     for public_data_only in [false, true] {
         let read = secondary(false);
-        let expected = read.validate().unwrap_err();
+        let expected = "Secondary read credentials require a nonempty key and secret";
         let mut e = engine(Options {
             public_data_only,
             read_credentials: Some(read),

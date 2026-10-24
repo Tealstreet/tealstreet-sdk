@@ -7303,8 +7303,11 @@ signing, account/trading reducers and credential selection are unchanged.
 Private REST remains POST through Primary with no route or account-read tag,
 including configurations with a valid unused secondary. Native and JS trusted
 setup consume that secondary once under the separate declared ValidateOnly
-prerequisite; startup and identity retain the exact invalid-secondary message
-and precedence. The venue receives only an opaque Primary and bounded status.
+prerequisite. Registry construction preserves its existing invalid-secondary
+InvalidInput refusal, exact message and absent command outcome before entering
+the venue arm. A directly constructed venue instead retains its CONFIG_INVALID
+startup notice and identity validation precedence. The venue receives only an
+opaque Primary and bounded status.
 Hosted setup sends no unused secondary material. REST and WS auth share the
 native sorted Text/u64/Strings envelope, millisecond stamp without a counter,
 and exact receipt/outbound binding. WS retains its native one-second auth

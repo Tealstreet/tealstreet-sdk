@@ -94,9 +94,21 @@ Option<Result<(), &'static str>>. None means no secondary. Shared setup rejects
 injected secondary identities, metadata on an undeclared family and simultaneous
 raw read credentials plus metadata. Consume the reviewed prerequisite pin; do
 not add these shared surfaces to this PR. Only the bounded status is used later;
-drop all later raw validate calls and any dual path. Invalid secondary blocks BOTH start()
-(CONFIG_INVALID before discovery) and fetch_identity (validation failure before
-public-data-only/missing-primary failure). Keep exact messages and precedence.
+drop all later raw validate calls and any dual path. Registry construction
+already refuses an invalid read key before entering the Crypto venue arm:
+InvalidInput, the exact validation text, and no command outcome. ValidateOnly
+must preserve that same refusal for a false flag. Only direct venue construction
+can reach the venue's own CONFIG_INVALID startup notice before discovery and
+identity validation before public-data-only/missing-primary failure. Pin both
+boundaries separately; do not claim a registry-built bad-key engine starts.
+The registry consumer target cryptocom_validation pins rejected construction
+and a valid/absent-key working control; the direct-venue target keeps startup
+and identity precedence. These assertions must survive metadata activation.
+On archived actual a8c0403bd08, this registry target executes two working
+controls and one assertion RED: false readCredentialsValid is ignored and
+construction succeeds. That RED is held for the reviewed prerequisite plus
+atomic Crypto declaration activation. The direct-venue target separately pins
+the literal CONFIG_INVALID message across public-only/Primary combinations.
 At the reviewed5b-final inventory, Crypto lib.rs has ReadCredentials1 and
 read_credentials3; identity.rs has read_credentials1. Remove all five mentions
 through trusted setup validation metadata, with no relocation into another
