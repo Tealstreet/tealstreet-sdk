@@ -319,6 +319,10 @@ no-default-features with http-plans/test-support (29 per mode, zero ignored).
 Strict engine all-target Clippy passes in both modes; feature-off library check
 and workspace fmt pass. The initial Clippy placement failure was corrected by
 moving the unchanged cleanup helpers before the inline test module.
-The provenance ratchet currently refuses 14 foreign venue inventory entries
-already pruned on the landing branch; this implementation changes no venue,
-checker or inventory blob. Actual landing integration and fresh CI remain gates.
+The initial provenance check refused 14 foreign venue inventory entries already
+pruned on the landing branch. Plain merges of actual `b43525cb103` and then
+`77f12408947` resolve that stale base; only README/CALLERS conflicts needed
+incoming-first resolution with the branch sections retained once. Every non-doc
+path equals the automatic merge, and the integrated provenance/bans check passes.
+The 29 controls per mode, compatibility targets, strict Clippy and fmt also pass
+on the integrated engine. Fresh exact-head CI remains a gate.
