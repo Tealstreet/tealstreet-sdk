@@ -7571,6 +7571,16 @@ pagination, signed writes, queues, account/socket state and financial reducers
 are outside this slice. Inventory decreases from25 to10; #2031's ticker CPU
 change lands first and must be preserved on actual integration before freeze.
 
+## BreakoutProp options refusal is engine-owned
+
+FetchOptionChain, FetchOptionExpiries and FetchAccountGreeks are refused by the
+engine before command entry, because BreakoutProp declares
+`capabilities.options = false`. The venue's own options arm was unreachable and
+is deleted. Callers see the same result as before: "Options are not enabled on
+this account", no kind, no outcome and no I/O, at any entry clock. Nothing
+changes for SDK or TS callers. See
+[RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md).
+
 ## Polymarket unsigned midpoint seed batches
 
 Each unsigned POST /midpoints batch now admits an existing Background Read and
