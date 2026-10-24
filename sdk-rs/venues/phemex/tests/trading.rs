@@ -1,9 +1,7 @@
 //! Documented g-API payloads and mutation lifecycle regressions.
 mod support;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{
-    Action, Command, Event, HttpRequest, Method, Notice, Response, SocketId,
-};
+use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Response, SocketId};
 use safe_cex_venue_phemex::PhemexPerpetuals;
 use serde_json::{Value, json};
 use support::{Options, PreparedEngine as Engine};
