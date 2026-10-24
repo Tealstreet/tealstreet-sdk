@@ -10,7 +10,7 @@ fn streams_nested_symbols_and_seeds_zero_tickers_before_socket() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 0.0).remove(0);
     assert!(r.url.ends_with("/v3/symbols"));
     e.handle(
         1.0,
@@ -37,7 +37,7 @@ fn streams_nested_symbols_and_seeds_zero_tickers_before_socket() {
     assert_eq!(m.precision.amount, 0.001);
     assert_eq!(m.limits.leverage.max, 100.0);
     assert_eq!(e.store().tickers()[0].last, 0.0);
-    assert!(e.drain_actions().any(|a|matches!(a,Action::WsConnect{channel:Some(SocketChannel::Public),url,..} if url.starts_with("wss://quote.omni.apex.exchange/realtime_public?v=2&timestamp=3&"))));
+    assert!(e.prepared(3.0).any(|a|matches!(a,Action::WsConnect{channel:Some(SocketChannel::Public),url,..} if url.starts_with("wss://quote.omni.apex.exchange/realtime_public?v=2&timestamp=3&"))));
 }
 #[test]
 fn error_seed_does_not_commit_partial_markets() {
@@ -47,11 +47,11 @@ fn error_seed_does_not_commit_partial_markets() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 0.0).remove(0);
     response(&mut e, &r, 1.0, &body);
     assert!(e.store().markets().is_empty());
     assert!(
-        !e.drain_actions()
+        !e.prepared(1.0)
             .any(|a| matches!(a, Action::WsConnect { .. }))
     );
 }
@@ -133,10 +133,10 @@ fn subscriptions_are_reference_counted_and_reconnect_uses_real_testnet_public_ro
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 0.0).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
     let s = e
-        .drain_actions()
+        .prepared(10.0)
         .find_map(|a| {
             if let Action::WsConnect {
                 socket,
@@ -154,7 +154,7 @@ fn subscriptions_are_reference_counted_and_reconnect_uses_real_testnet_public_ro
         })
         .unwrap();
     e.handle(20.0, Event::WsOpened { socket: s });
-    e.drain_actions().for_each(drop);
+    e.prepared(20.0).for_each(drop);
     for _ in 0..2 {
         e.handle(
             30.0,
@@ -164,7 +164,7 @@ fn subscriptions_are_reference_counted_and_reconnect_uses_real_testnet_public_ro
         );
     }
     assert_eq!(
-        e.drain_actions()
+        e.prepared(30.0)
             .filter(|a| matches!(a,Action::WsSend{text,..} if text.contains("orderBook200")))
             .count(),
         1
@@ -184,7 +184,7 @@ fn subscriptions_are_reference_counted_and_reconnect_uses_real_testnet_public_ro
         },
     );
     let t = e
-        .drain_actions()
+        .prepared(50.0)
         .find_map(|a| {
             if let Action::SetTimer { timer, .. } = a {
                 Some(timer)
@@ -194,7 +194,7 @@ fn subscriptions_are_reference_counted_and_reconnect_uses_real_testnet_public_ro
         })
         .unwrap();
     e.handle(1050.0, Event::TimerFired { timer: t });
-    assert!(e.drain_actions().any(|a|matches!(a,Action::WsConnect{channel:Some(SocketChannel::Public),url,..} if url.contains("timestamp=1050"))));
+    assert!(e.prepared(1050.0).any(|a|matches!(a,Action::WsConnect{channel:Some(SocketChannel::Public),url,..} if url.contains("timestamp=1050"))));
 }
 #[test]
 fn socket_ping_pong_and_watchdog_close_dead_feed() {
@@ -211,13 +211,13 @@ fn socket_ping_pong_and_watchdog_close_dead_feed() {
         .unwrap();
     ws(&mut e, s, 100.0, r#"{"op":"ping"}"#);
     assert!(
-        e.drain_actions().any(
+        e.prepared(100.0).any(
             |a| matches!(a,Action::WsSend{text,..} if text==r#"{"op":"pong","args":["100"]}"#)
         )
     );
     e.handle(30100.0, Event::TimerFired { timer: watchdog });
     assert!(
-        e.drain_actions()
+        e.prepared(30100.0)
             .any(|a| matches!(a,Action::WsClose{socket} if socket==s))
     );
 }
@@ -248,7 +248,7 @@ fn fetch_candles_uses_seconds_bounds_daily_omission_and_sorted_results() {
         r#"{"code":0,"data":{"BTCUSDT":[{"t":2000,"o":"2","h":"4","l":"1","c":"3","v":"7"},{"t":1000,"o":"1","h":"3","l":"1","c":"2","v":"5"}]}}"#,
     );
     let result = e
-        .drain_actions()
+        .prepared(1_700_000_000_001.0)
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { result, .. }) = a {
                 Some(result)
@@ -321,7 +321,7 @@ fn depth_gap_recovers_snapshot_and_ignores_duplicates_and_pre_snapshot_deltas() 
         r#"{"topic":"orderBook200.H.BTCUSDT","type":"delta","data":{"u":10,"a":[],"b":[["1","99"]]}}"#,
     );
     assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(1.0, 2.0)]);
-    e.drain_actions().for_each(drop);
+    e.prepared(33.0).for_each(drop);
     ws(
         &mut e,
         s,
@@ -330,7 +330,7 @@ fn depth_gap_recovers_snapshot_and_ignores_duplicates_and_pre_snapshot_deltas() 
     );
     assert!(e.book("BTCUSDT").unwrap().is_empty());
     let sends: Vec<_> = e
-        .drain_actions()
+        .prepared(34.0)
         .filter_map(|a| {
             if let Action::WsSend { text, .. } = a {
                 Some(text)
@@ -374,10 +374,10 @@ fn secondary_trade_uses_decimal_quote_conversion_and_rollover_without_backflow()
     // the option controls whether recent trades supplement subscribed candles.
     let mut other = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options::default()));
     other.start(0.0);
-    let request = requests(&mut other).remove(0);
+    let request = requests(&mut other, 0.0).remove(0);
     response(&mut other, &request, 10.0, MARKETS);
     let socket = other
-        .drain_actions()
+        .prepared(10.0)
         .find_map(|a| {
             if let Action::WsConnect {
                 socket,
@@ -474,7 +474,7 @@ fn candle_query_actions(body: &str) -> Vec<Action> {
     );
     let request = prepared_requests(&mut e, 100.0).remove(0);
     response(&mut e, &request, 101.0, body);
-    e.drain_actions().collect()
+    e.prepared(101.0).collect()
 }
 
 #[test]

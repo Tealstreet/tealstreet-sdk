@@ -2,10 +2,10 @@
 mod support;
 use safe_cex_engine::model::{MarginType, OrderStatus, PositionMode};
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketId, TimerId,
+    Action, Command, Event, HttpRequest, Notice, RequestId, Response, SocketId, TimerId,
 };
 use safe_cex_venue_phemex::PhemexPerpetuals;
-use support::Options;
+use support::{Options, PreparedEngine as Engine};
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 2_000.0;
 
@@ -72,7 +72,7 @@ fn envelope(currency: &str, total: f64, used: f64, rows: &str) -> String {
     )
 }
 fn started() -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
-    let mut e = support::engine(Options {
+    let mut e = support::prepared_engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
@@ -1214,8 +1214,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -1377,7 +1377,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
 }
 #[test]
 fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
-    let mut e = support::engine(Options {
+    let mut e = support::prepared_engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
