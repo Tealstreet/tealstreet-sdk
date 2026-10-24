@@ -1262,6 +1262,7 @@ impl Venue for Backpack {
                 let url = format!("{REST}/api/v1/klines?{}", sign::query(&params));
                 match cx.request_managed_with_headers(
                     context.clone(),
+                    None,
                     Method::Get,
                     url,
                     PUBLIC_READ_HEADERS,
@@ -1292,6 +1293,7 @@ impl Venue for Backpack {
                 let url = format!("{REST}/api/v1/depth?{}", sign::query(&params));
                 if let Err((pending, error)) = cx.request_managed_with_headers(
                     context.clone(),
+                    None,
                     Method::Get,
                     url,
                     PUBLIC_READ_HEADERS,

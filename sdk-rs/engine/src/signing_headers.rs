@@ -30,6 +30,10 @@ pub(crate) fn validate_unsigned(headers: &[(&str, &str)]) -> Result<(), SignErro
     validate_pairs(headers.iter().copied())
 }
 
+pub(crate) fn validate_owned(headers: &[(&str, String)]) -> Result<(), SignError> {
+    validate_pairs(headers.iter().map(|(name, value)| (*name, value.as_str())))
+}
+
 fn validate_pairs<'a>(
     headers: impl ExactSizeIterator<Item = (&'a str, &'a str)>,
 ) -> Result<(), SignError> {

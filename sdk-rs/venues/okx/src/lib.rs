@@ -410,6 +410,7 @@ impl Okx {
         let recipe = sign::Http::new(identity, path.into()).demo(self.options.testnet);
         if let Err((pending, error)) = cx.request_signed_managed(
             context,
+            None,
             Method::Get,
             format!("{}{path}", self.rest()),
             None,
@@ -455,6 +456,7 @@ impl Okx {
         let sent = if self.options.testnet {
             cx.request_managed_with_headers(
                 leg,
+                None,
                 Method::Get,
                 url,
                 sign::DEMO_HEADERS,
@@ -462,7 +464,7 @@ impl Okx {
                 pending,
             )
         } else {
-            cx.request_managed(leg, Method::Get, url, None, pending)
+            cx.request_managed(leg, None, Method::Get, url, None, pending)
         };
         match sent {
             Ok(id) => cx.stream_response(id, ArrayAt::EnvelopeField("data")),

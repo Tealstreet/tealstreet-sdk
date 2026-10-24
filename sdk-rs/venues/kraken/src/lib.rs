@@ -202,6 +202,7 @@ impl Kraken {
         self.skipping_markets.clear();
         match cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             format!("{}/derivatives/api/v3/instruments", self.host()),
             None,
@@ -232,6 +233,7 @@ impl Kraken {
         self.live_tickers.begin();
         match cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             format!("{}/derivatives/api/v3/tickers", self.host()),
             None,

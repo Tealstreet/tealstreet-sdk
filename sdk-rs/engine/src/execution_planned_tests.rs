@@ -104,6 +104,7 @@ mod planned_execution {
             let leg = cx.plan_leg_context(&plan, &slot).unwrap();
             cx.request_signed_managed(
                 leg.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,
@@ -181,6 +182,7 @@ mod planned_execution {
             if self.read {
                 cx.request_managed(
                     leg.clone(),
+                    None,
                     Method::Get,
                     "https://venue.test/read".into(),
                     None,
@@ -190,6 +192,7 @@ mod planned_execution {
             } else {
                 cx.request_signed_managed(
                     leg.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/write".into(),
                     None,
@@ -234,6 +237,7 @@ mod planned_execution {
                 // A member's only physical work is the Plan's.
                 let sent = cx.request_signed_managed(
                     root.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/own-root".into(),
                     None,
@@ -321,6 +325,7 @@ mod planned_execution {
                     if let Ok(leg) = resent {
                         cx.request_signed_managed(
                             leg.clone(),
+                            None,
                             Method::Post,
                             "https://venue.test/write".into(),
                             None,

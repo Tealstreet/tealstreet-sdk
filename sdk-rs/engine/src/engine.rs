@@ -1449,6 +1449,52 @@ impl Polls {
 #[path = "engine_socket.rs"]
 mod managed_sockets;
 
+/// An engine-held action queue: the undrained queue, or the transient
+/// dispatch queue. Its actions may hold a Bearer or signed packet, so the
+/// engine wipes what it still holds on drop, unwinding included. A drained
+/// action is the host's to dispose of, as signer headers are.
+struct Wiping<C>(C)
+where
+    for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>;
+
+type Actions = Wiping<Vec<Action>>;
+
+impl Default for Actions {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl<C> std::ops::Deref for Wiping<C>
+where
+    for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>,
+{
+    type Target = C;
+    fn deref(&self) -> &C {
+        &self.0
+    }
+}
+
+impl<C> std::ops::DerefMut for Wiping<C>
+where
+    for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>,
+{
+    fn deref_mut(&mut self) -> &mut C {
+        &mut self.0
+    }
+}
+
+impl<C> Drop for Wiping<C>
+where
+    for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>,
+{
+    fn drop(&mut self) {
+        for action in &mut self.0 {
+            crate::signing_dispatch::wipe(action);
+        }
+    }
+}
+
 struct Io<P> {
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
@@ -1476,6 +1522,10 @@ struct Io<P> {
     #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
     managed_http: crate::IdMap<RequestId, http_lifecycle::Managed>,
+    /// Managed requests bound to each Session generation's Bearer.
+    bearer_bound: HashMap<u64, Vec<RequestId>>,
+    /// Bound preparations a Session retire fenced, failed after the callback.
+    bearer_fenced: Vec<crate::request_context::Preparation>,
     http_pacing: crate::request_context::SendPacing,
     http_responses: crate::request_context::ReconciliationResponses,
     http_write_revision: u64,
@@ -1488,7 +1538,7 @@ struct Io<P> {
     order_read_tokens: crate::IdMap<RequestId, u64>,
     #[cfg(feature = "order-locks")]
     order_response_token: Option<u64>,
-    actions: Vec<Action>,
+    actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
     execution_timer: Option<(TimerId, f64)>,
@@ -1586,6 +1636,8 @@ impl<P> Default for Io<P> {
             http_responses: Default::default(),
             http_write_revision: 0,
             managed_http: Default::default(),
+            bearer_bound: HashMap::new(),
+            bearer_fenced: Vec::new(),
             http_pacing: Default::default(),
             entropy: None,
             #[cfg(feature = "order-locks")]
@@ -1596,7 +1648,7 @@ impl<P> Default for Io<P> {
             order_read_tokens: Default::default(),
             #[cfg(feature = "order-locks")]
             order_response_token: None,
-            actions: Vec::new(),
+            actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
             read_roots: Vec::with_capacity(256),
@@ -2669,6 +2721,19 @@ pub trait Venue {
         _data: &crate::request_context::ReconciliationData,
         _response: Response<'_>,
     ) {
+    }
+
+    /// Called only while preparing a Session-bound managed request: the one
+    /// place the token is copied. No I/O, `Cx` or state change.
+    fn session_bearer(&self, _generation: u64) -> crate::request_context::SessionBearer {
+        crate::request_context::SessionBearer::NotReady
+    }
+
+    /// The current revision only, or `None` when not ready: the claim-time
+    /// fence, and the signed path's readiness check before provider work. It
+    /// must not touch, clone or allocate the token.
+    fn session_bearer_revision(&self, _generation: u64) -> Option<u64> {
+        None
     }
 
     /// Fixed per-engine send-group floors; individual attempts may only extend
@@ -4072,6 +4137,7 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "http-plans")]
         self.io.request_contexts.end_preflight_admission();
         self.io.request_contexts.end_plan_admission();
+        self.flush_bearer_fences(now);
         self.flush_http_owner_retirements();
         self.finish_deferred_commands(now);
         self.restore_shared_tickers(false, now);
@@ -4515,8 +4581,12 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    /// Outer paths without `finish_event_scope` (start, delivery exit,
+    /// `drain_actions`) still deliver a retire's Bearer fences.
     #[cfg(not(feature = "http-plans"))]
-    fn flush_http_plans(&mut self, _now: f64) {}
+    fn flush_http_plans(&mut self, now: f64) {
+        self.flush_bearer_fences(now);
+    }
 
     #[cfg(not(feature = "http-plans"))]
     fn expire_plan_timer(&mut self, _now: f64, _event: &Event<'_>) -> bool {
@@ -4555,11 +4625,16 @@ impl<V: Venue> Engine<V> {
         self.io.request_contexts.plan_scan_visits()
     }
 
+    /// A Plan-ready callback, the Plan timer, delivery exit and
+    /// `drain_actions` run no `finish_event_scope`: a retire there is fenced
+    /// at this tail, not left queued for a later event.
     #[cfg(feature = "http-plans")]
     fn flush_http_plans(&mut self, now: f64) {
         if self.io.request_contexts.has_plans() {
             self.flush_live_http_plans(now);
         }
+        // Bearer fences first, then parked Slots (which drain fences per pass).
+        self.flush_bearer_fences(now);
         // Last, at every outer Plan flush, including after the final Plan
         // sealed: parked Slots whose Session ended or whose Plan sealed.
         self.flush_plan_session_waits(now);
@@ -4722,7 +4797,9 @@ impl<V: Venue> Engine<V> {
             self.sign_failed(now, outbound, error);
             self.assert_live();
         }
-        let mut queued = std::collections::VecDeque::from(std::mem::take(&mut self.io.actions));
+        let mut queued = Wiping(std::collections::VecDeque::from(std::mem::take(
+            &mut *self.io.actions,
+        )));
         loop {
             self.assert_live();
             while let Some(action) = queued.pop_front() {

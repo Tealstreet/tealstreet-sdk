@@ -209,6 +209,7 @@ impl Consumer {
             self.contexts.push(context.clone());
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 method,
                 format!("https://openapi.blofin.com{path}"),
                 body,
@@ -254,6 +255,7 @@ impl Venue for Consumer {
                 .unwrap();
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 "https://venue.test/clock".into(),
                 None,

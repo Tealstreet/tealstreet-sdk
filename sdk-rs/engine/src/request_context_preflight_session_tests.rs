@@ -62,7 +62,14 @@ fn terms() -> CallTerms {
     }
 }
 fn queue(cx: &mut Cx<'_, u32>, read: Context) -> Result<RequestId, (u32, Error)> {
-    cx.request_managed(read, Method::Get, "https://venue.test/read".into(), None, 0)
+    cx.request_managed(
+        read,
+        None,
+        Method::Get,
+        "https://venue.test/read".into(),
+        None,
+        0,
+    )
 }
 
 impl Reads {

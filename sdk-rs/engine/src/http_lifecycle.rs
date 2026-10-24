@@ -2,7 +2,8 @@
 use super::*;
 use crate::request_context::{
     Attempt, Claim, Context, Error, HttpAction, HttpRelease, Lifecycle, Operation, Owner, Permit,
-    Preparation, Prepared, ReleaseTime, ResponseProof,
+    Preparation, Prepared, ReleaseTime, ResponseProof, RoutingIntent, SecretHeaderValue, Session,
+    SessionBearer,
 };
 
 #[cfg(test)]
@@ -25,9 +26,78 @@ pub(super) struct Managed {
     response_started: bool,
     signing_attempt: Option<RequestId>,
     recipe: Option<crate::signing_dispatch::Pending>,
+    /// Decided at issue from the binding; reprepare never re-derives it.
+    intent: RoutingIntent,
+    bearer: Option<Bearer>,
     #[cfg(feature = "http-mutation-barriers")]
     group: Option<Box<mutation_group::Member>>,
     waiting_route: Option<Prepared>,
+}
+
+/// A Session-bound packet's generation and the revision its header carries.
+/// The engine keeps no token: only the Bind packet holds a copy.
+#[derive(Clone, Copy)]
+struct Bearer {
+    generation: u64,
+    revision: Option<u64>,
+}
+
+impl Bearer {
+    /// Claim-time fence: no token copy, clone or allocation.
+    fn current<V: Venue>(
+        &self,
+        venue: &V,
+        registry: &request_context_registry::ContextRegistry,
+    ) -> Result<Option<u64>, Error> {
+        if !registry.session_generation_live(self.generation) {
+            return Err(Error::Revoked);
+        }
+        Ok(venue.session_bearer_revision(self.generation))
+    }
+
+    /// The Bind-site read: the one copy of the token, recorded by revision.
+    fn read<V: Venue>(
+        &mut self,
+        venue: &V,
+        registry: &request_context_registry::ContextRegistry,
+    ) -> Result<SecretHeaderValue, Error> {
+        if !registry.session_generation_live(self.generation) {
+            return Err(Error::Revoked);
+        }
+        match venue.session_bearer(self.generation) {
+            SessionBearer::Ready { value, revision } => {
+                self.revision = Some(revision);
+                Ok(value)
+            }
+            SessionBearer::NotReady => Err(Error::State),
+        }
+    }
+}
+
+fn bearer_refused(reason: Error) -> VenueError {
+    VenueError::new(match reason {
+        Error::Revoked => "Session retired",
+        Error::State => "Session bearer is not ready",
+        _ => "Session bearer header is refused",
+    })
+}
+
+/// Insert the Bind packet's one token copy, then re-check the header limits;
+/// a packet the header would overflow is refused with the copy wiped.
+fn attach_bearer(
+    headers: &mut Vec<(&'static str, String)>,
+    value: &SecretHeaderValue,
+) -> Result<(), Error> {
+    headers.insert(0, ("Authorization", value.expose().to_owned()));
+    if crate::signing_headers::validate_owned(headers).is_err() {
+        zeroize::Zeroize::zeroize(&mut headers.remove(0).1);
+        return Err(Error::Invalid);
+    }
+    Ok(())
+}
+
+fn is_authorization(name: &str) -> bool {
+    name.eq_ignore_ascii_case("Authorization")
 }
 
 impl Managed {
@@ -78,6 +148,7 @@ impl<P> Cx<'_, P> {
     pub fn request_managed(
         &mut self,
         context: Context,
+        bearer: Option<&Session>,
         method: Method,
         url: String,
         body: Option<String>,
@@ -85,6 +156,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<RequestId, (P, Error)> {
         self.queue_managed(
             context,
+            bearer,
             method,
             url,
             body,
@@ -96,9 +168,11 @@ impl<P> Cx<'_, P> {
     /// Queue unsigned HTTP with static public codec headers. The existing
     /// managed boundary validates and snapshots them before allocating IDs.
     /// Credential-bearing contexts still require the signed entry point.
+    #[allow(clippy::too_many_arguments)]
     pub fn request_managed_with_headers(
         &mut self,
         context: Context,
+        bearer: Option<&Session>,
         method: Method,
         url: String,
         headers: &'static [(&'static str, &'static str)],
@@ -107,6 +181,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<RequestId, (P, Error)> {
         self.queue_managed(
             context,
+            bearer,
             method,
             url,
             body,
@@ -118,9 +193,11 @@ impl<P> Cx<'_, P> {
     /// Retain an unsigned recipe at creation; canonicalisation waits for route
     /// readiness. Mutations require command authority and a reconciliation codec
     /// before physical release; the engine owns their write evidence.
+    #[allow(clippy::too_many_arguments)]
     pub fn request_signed_managed(
         &mut self,
         context: Context,
+        bearer: Option<&Session>,
         method: Method,
         url: String,
         body: Option<String>,
@@ -129,6 +206,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<RequestId, (P, Error)> {
         self.queue_managed(
             context,
+            bearer,
             method,
             url,
             body,
@@ -137,41 +215,83 @@ impl<P> Cx<'_, P> {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn queue_managed(
         &mut self,
         context: Context,
+        bearer: Option<&Session>,
         method: Method,
         url: String,
         body: Option<String>,
         recipe: ManagedRecipe,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
+        let leg = context.leg();
         #[cfg(feature = "http-plans")]
         let admission = match self.owned_http_admission(&context) {
             Ok(admission) => admission,
             Err(error) => return Err((pending, error)),
         };
-        let result = self.queue_managed_admitted(
-            context,
-            method,
-            url,
-            body,
-            recipe,
-            pending,
-            #[cfg(feature = "http-plans")]
-            admission.as_ref(),
-        );
+        // After admission, so a refused binding fails an owning Plan like any
+        // other issue refusal.
+        let resolved = self.resolve_bearer(&context, bearer);
+        let generation = resolved.as_ref().ok().copied().flatten();
+        let result = match resolved {
+            Ok(bearer) => self.queue_managed_admitted(
+                context,
+                bearer,
+                method,
+                url,
+                body,
+                recipe,
+                pending,
+                #[cfg(feature = "http-plans")]
+                admission.as_ref(),
+            ),
+            Err(error) => Err((pending, error)),
+        };
         #[cfg(feature = "http-plans")]
         if let (Some(admission), Err((_, error))) = (admission.as_ref(), &result) {
             self.fail_owned_admission(admission, *error);
         }
+        match (generation, &result) {
+            (Some(generation), Ok(_)) => self.io.request_contexts.bind_leg_bearer(leg, generation),
+            (Some(generation), Err(_)) => self.io.drop_empty_bearer_bound(generation),
+            _ => {}
+        }
         result
+    }
+
+    /// Binding grants nothing: issuer and liveness only, never session scope.
+    /// A same-leg retry or resend inherits the leg's binding. Index storage is
+    /// reserved here, before any effect.
+    fn resolve_bearer(
+        &mut self,
+        context: &Context,
+        bearer: Option<&Session>,
+    ) -> Result<Option<u64>, Error> {
+        let registry = &self.io.request_contexts;
+        let generation = match bearer {
+            Some(session) => Some(registry.validate_session(session)?),
+            None => match registry.leg_bearer(context) {
+                Some(generation) if !registry.session_generation_live(generation) => {
+                    return Err(Error::Revoked);
+                }
+                generation => generation,
+            },
+        };
+        if let Some(generation) = generation {
+            self.io.request_contexts.reserve_leg_bearer()?;
+            self.io.reserve_bearer_bound(generation)?;
+        }
+        Ok(generation)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn queue_managed_admitted(
         &mut self,
         context: Context,
+        bearer: Option<u64>,
         method: Method,
         url: String,
         body: Option<String>,
@@ -195,6 +315,12 @@ impl<P> Cx<'_, P> {
             Ok(key) => key.map(|key| Box::new(mutation_group::Member::new(key))),
             Err(error) => return Err((pending, error)),
         };
+        // A group claims its members together; until that claim checks every
+        // member's Bearer (R11), a Bearer-bound group member is refused.
+        #[cfg(feature = "http-mutation-barriers")]
+        if bearer.is_some() && group.is_some() {
+            return Err((pending, Error::Invalid));
+        }
         if let Err(error) = self.io.http_pacing.check(context.pacing(), self.now) {
             return Err((pending, error));
         }
@@ -209,7 +335,13 @@ impl<P> Cx<'_, P> {
         let headers = step
             .as_ref()
             .map_or(public_headers, |step| step.unsigned_http_headers());
-        if crate::signing_headers::validate_unsigned(headers).is_err() {
+        // On a bound request the engine alone sets `Authorization`, and it is
+        // never routed to explicit public egress. Unbound requests are unchanged.
+        if crate::signing_headers::validate_unsigned(headers).is_err()
+            || (bearer.is_some()
+                && (headers.iter().any(|(name, _)| is_authorization(name))
+                    || context.route().is_some()))
+        {
             return Err((pending, Error::Invalid));
         }
         let headers = headers
@@ -309,7 +441,10 @@ impl<P> Cx<'_, P> {
         if let Some(admission) = admission {
             self.io.request_contexts.commit_owned_admission(admission);
         }
-        let intent = context.routing_intent();
+        let intent = match (bearer, context.routing_intent()) {
+            (Some(_), RoutingIntent::Public) => RoutingIntent::Primary,
+            (_, intent) => intent,
+        };
         let lifecycle = Lifecycle::with_deadline(
             context,
             Attempt {
@@ -330,11 +465,23 @@ impl<P> Cx<'_, P> {
                 response_started: false,
                 signing_attempt,
                 recipe: None,
+                intent,
+                bearer: bearer.map(|generation| Bearer {
+                    generation,
+                    revision: None,
+                }),
                 #[cfg(feature = "http-mutation-barriers")]
                 group,
                 waiting_route: None,
             },
         );
+        if let Some(generation) = bearer {
+            self.io
+                .bearer_bound
+                .entry(generation)
+                .or_default()
+                .push(request);
+        }
         self.io.pending.insert(
             request,
             PendingHttp {
@@ -490,12 +637,53 @@ impl<P> Io<P> {
         }
     }
 
+    fn reserve_bearer_bound(&mut self, generation: u64) -> Result<(), Error> {
+        self.bearer_bound
+            .try_reserve(1)
+            .map_err(|_| Error::Capacity)?;
+        self.bearer_bound
+            .entry(generation)
+            .or_default()
+            .try_reserve(1)
+            .map_err(|_| Error::Capacity)
+    }
+
+    fn drop_empty_bearer_bound(&mut self, generation: u64) {
+        if self
+            .bearer_bound
+            .get(&generation)
+            .is_some_and(Vec::is_empty)
+        {
+            self.bearer_bound.remove(&generation);
+        }
+    }
+
+    /// Queue every unreleased packet bound to a retired generation for a typed
+    /// failure after the current callback; released packets still deliver.
+    pub(super) fn fence_bearer_generation(&mut self, generation: u64) {
+        for request in self.bearer_bound.remove(&generation).unwrap_or_default() {
+            if let Some(managed) = self.managed_http.get(&request)
+                && managed.lifecycle.release().is_none()
+            {
+                self.bearer_fenced.push(managed.lifecycle.preparation());
+            }
+        }
+    }
+
     fn take_managed_with_cancel(
         &mut self,
         request: RequestId,
         cancel: Option<Action>,
     ) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
+        if let Some(bearer) = managed.bearer
+            && let Some(bound) = self.bearer_bound.get_mut(&bearer.generation)
+        {
+            bound.retain(|id| *id != request);
+            if bound.is_empty() {
+                self.bearer_bound.remove(&bearer.generation);
+            }
+        }
         #[cfg(feature = "http-mutation-barriers")]
         if managed.group.is_some() {
             self.actions.retain(|action| !matches!(action,
@@ -617,6 +805,23 @@ impl<V: Venue> Engine<V> {
                 let mut request = managed.original.clone();
                 request.timeout_ms =
                     Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
+                if let Some(bearer) = managed.bearer.as_mut() {
+                    match bearer
+                        .read(&self.venue, &self.io.request_contexts)
+                        .and_then(|value| attach_bearer(&mut request.headers, &value))
+                    {
+                        Ok(()) => {}
+                        Err(reason) => {
+                            self.http_preparation_failed(
+                                now,
+                                token,
+                                reason,
+                                bearer_refused(reason),
+                            );
+                            return;
+                        }
+                    }
+                }
                 self.io
                     .actions
                     .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
@@ -686,6 +891,18 @@ impl<V: Venue> Engine<V> {
         let Some(attempt) = managed.signing_attempt else {
             return;
         };
+        // The token is read at the signed Bind; refuse before provider work.
+        if let Some(bearer) = managed.bearer {
+            let ready = match bearer.current(&self.venue, &self.io.request_contexts) {
+                Ok(Some(_)) => Ok(()),
+                Ok(None) => Err(Error::State),
+                Err(reason) => Err(reason),
+            };
+            if let Err(reason) = ready {
+                self.http_preparation_failed(now, token, reason, bearer_refused(reason));
+                return;
+            }
+        }
         let ready = managed.lifecycle.begin_signing().and_then(|_| {
             self.io
                 .signing
@@ -769,6 +986,37 @@ impl<V: Venue> Engine<V> {
             .and_then(|()| managed.lifecycle.permit());
         match (prepared, outbound) {
             (Ok(permit), Some(Action::Http(mut packet))) if packet.id == request => {
+                // Added after signing, so the venue signature never covers it.
+                if let Some(bearer) = managed.bearer.as_mut() {
+                    let read = if packet
+                        .headers
+                        .iter()
+                        .any(|(name, _)| is_authorization(name))
+                        || packet
+                            .signer_headers
+                            .iter()
+                            .any(|(name, _)| is_authorization(name))
+                    {
+                        Err(Error::Invalid)
+                    } else {
+                        bearer
+                            .read(&self.venue, &self.io.request_contexts)
+                            .and_then(|value| attach_bearer(&mut packet.headers, &value))
+                    };
+                    match read {
+                        Ok(()) => {}
+                        Err(reason) => {
+                            crate::signing_dispatch::wipe(&mut Action::Http(packet));
+                            self.http_preparation_failed(
+                                now,
+                                token,
+                                reason,
+                                bearer_refused(reason),
+                            );
+                            return;
+                        }
+                    }
+                }
                 packet.timeout_ms = Some(
                     (managed.lifecycle.deadline().min(pending.deadline) - now)
                         .ceil()
@@ -886,6 +1134,22 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    /// Fail the attempts a Session retire fenced, each through the common
+    /// preparation-failure path after the retiring callback has returned.
+    /// Runs until the queue is empty, in place to keep the storage reserved at
+    /// retire: a failure callback that retires another Session is drained here.
+    pub(super) fn flush_bearer_fences(&mut self, now: f64) {
+        while !self.io.bearer_fenced.is_empty() {
+            let token = self.io.bearer_fenced.remove(0);
+            self.http_preparation_failed(
+                now,
+                token,
+                Error::Revoked,
+                bearer_refused(Error::Revoked),
+            );
+        }
+    }
+
     /// The host checks its bound resource, calls this, and immediately invokes
     /// its transport API on Released, with no intervening await or actor hop.
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
@@ -919,6 +1183,24 @@ impl<V: Venue> Engine<V> {
                 VenueError::new("HTTP request context is no longer active"),
             );
             return Err(error);
+        }
+        if let Some(bearer) = managed.bearer {
+            match bearer.current(&self.venue, &self.io.request_contexts) {
+                Err(reason) => {
+                    self.http_preparation_failed(now, preparation, reason, bearer_refused(reason));
+                    return Err(reason);
+                }
+                Ok(revision) if revision.is_none() || revision != bearer.revision => {
+                    self.http_preparation_failed(
+                        now,
+                        preparation,
+                        Error::Stale,
+                        VenueError::new("Session bearer revision moved"),
+                    );
+                    return Err(Error::Stale);
+                }
+                Ok(_) => {}
+            }
         }
         let release_flag = self
             .io
@@ -1122,13 +1404,16 @@ impl<V: Venue> Engine<V> {
                 preparation: token,
                 signing: old_signing,
             })));
+        if let Some(bearer) = managed.bearer.as_mut() {
+            bearer.revision = None;
+        }
         let mut http = managed.original.clone();
         http.timeout_ms = Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
         self.io
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
                 preparation: managed.lifecycle.preparation(),
-                intent: managed.lifecycle.context().routing_intent(),
+                intent: managed.intent,
                 request: http,
             })));
     }
@@ -1692,6 +1977,7 @@ mod tests {
                 let request = if self.signed {
                     cx.request_signed_managed(
                         context.clone(),
+                        None,
                         Method::Post,
                         "https://venue.test/read".into(),
                         Some("{}".into()),
@@ -1701,6 +1987,7 @@ mod tests {
                 } else {
                     cx.request_managed(
                         context.clone(),
+                        None,
                         Method::Post,
                         "https://venue.test/read".into(),
                         Some("{}".into()),
@@ -1836,6 +2123,7 @@ mod tests {
                     let context = cx.http_resend_context(&pending.0, grant.unwrap()).unwrap();
                     cx.request_signed_managed(
                         context.clone(),
+                        None,
                         Method::Post,
                         "https://venue.test/write".into(),
                         Some("{}".into()),
@@ -2094,6 +2382,7 @@ mod tests {
                 .unwrap();
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/candles".into(),
                 None,
@@ -2160,6 +2449,7 @@ mod tests {
                 .unwrap();
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/read".into(),
                 None,
@@ -2320,6 +2610,7 @@ mod tests {
             };
             let result = cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -2370,6 +2661,38 @@ mod tests {
         narrow_physical_window(&mut engine, token, 50.);
         let actions = route(&mut engine, token, 10.);
         assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { request, .. } if request.timeout_ms == Some(40) && request.url == "https://venue.test/read" && request.body.as_deref() == Some("{}")))));
+    }
+
+    /// The Bind packet's Bearer copy is wiped with the packet: on a signed
+    /// refusal, and for any action the host never drained when the engine drops.
+    #[test]
+    fn bind_wipe_zeroizes_the_bearer_copy() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            ..Probe::default()
+        });
+        let mut bind = route(&mut engine, tokens[0], 10.)
+            .into_iter()
+            .find(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. })))
+            .expect("bind");
+        let Action::ManagedHttp(managed) = &mut bind else {
+            unreachable!()
+        };
+        let HttpAction::Bind { request, .. } = managed.as_mut() else {
+            unreachable!()
+        };
+        request
+            .headers
+            .insert(0, ("Authorization", "Bearer jwt-secret".into()));
+        crate::signing_dispatch::wipe(&mut bind);
+        let Action::ManagedHttp(managed) = &bind else {
+            unreachable!()
+        };
+        let HttpAction::Bind { request, .. } = managed.as_ref() else {
+            unreachable!()
+        };
+        assert!(request.headers.iter().all(|(_, value)| value.is_empty()));
+        assert!(request.url.is_empty());
     }
 
     #[test]
@@ -2948,6 +3271,7 @@ mod tests {
         let request = if signed {
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 Some("{}".into()),
@@ -2957,6 +3281,7 @@ mod tests {
         } else {
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 Some("{}".into()),
@@ -4433,6 +4758,7 @@ mod tests {
             };
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/read".into(),
                 None,
@@ -4781,6 +5107,7 @@ mod tests {
             let result = if credential {
                 cx.request_managed(
                     context.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/write".into(),
                     None,
@@ -4789,6 +5116,7 @@ mod tests {
             } else {
                 cx.request_signed_managed(
                     context.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/write".into(),
                     None,
@@ -4966,6 +5294,7 @@ mod tests {
                 .unwrap();
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,

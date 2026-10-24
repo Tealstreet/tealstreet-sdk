@@ -75,6 +75,7 @@ impl Venue for Probe {
         self.socket = Some(cx.connect("wss://background-read.test"));
         cx.request_managed(
             actual.clone(),
+            None,
             Method::Get,
             "https://background-read.test/catalogue".into(),
             None,
@@ -123,6 +124,7 @@ impl Venue for Probe {
         self.argument = Some(leg.clone());
         cx.request_managed(
             leg.clone(),
+            None,
             Method::Get,
             "https://background-read.test/execution".into(),
             None,

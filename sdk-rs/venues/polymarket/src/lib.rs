@@ -643,6 +643,7 @@ impl Polymarket {
                 };
                 match cx.request_managed(
                     read.context.clone(),
+                    None,
                     Method::Get,
                     path,
                     None,
