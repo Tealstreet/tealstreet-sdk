@@ -1,7 +1,6 @@
 //! Serialized nonce allocation and submissions. Transport failures never replay writes.
 use crate::{Lighter, Pending, sign};
 use safe_cex_engine::model::*;
-use safe_cex_engine::url;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -528,30 +527,7 @@ impl Lighter {
                 }
             }
         }
-        let (path, body) = if count == 1 {
-            (
-                "sendTx",
-                format!(
-                    "tx_type={}&tx_info={}",
-                    signed[0].tx_type,
-                    url::encode_form(&signed[0].tx_info)
-                ),
-            )
-        } else {
-            let types = signed.iter().map(|s| s.tx_type).collect::<Vec<_>>();
-            let infos = signed
-                .iter()
-                .map(|s| s.tx_info.as_str())
-                .collect::<Vec<_>>();
-            (
-                "sendTxBatch",
-                format!(
-                    "tx_types={}&tx_infos={}",
-                    url::encode_form(&serde_json::to_string(&types).unwrap()),
-                    url::encode_form(&serde_json::to_string(&infos).unwrap())
-                ),
-            )
-        };
+        let (path, body) = sign::send_body(&signed);
         if let Effect::Setting { symbol, .. } = &effect {
             self.account_setting_write(symbol);
         }
