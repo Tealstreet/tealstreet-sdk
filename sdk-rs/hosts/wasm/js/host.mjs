@@ -327,6 +327,7 @@ export class EngineHost {
   }
 
   start() {
+    this.assertHttpHandoffIdle();
     if (this.disposed || this.started) return;
     this.started = true;
     this.run(this.invoke(this.engine.start, this.transport.now()));
@@ -334,7 +335,25 @@ export class EngineHost {
 
   get dead() { return this.deadError !== undefined; }
 
+  deferHttpNotification(callback, value, binary = false) {
+    const group = this.managedHttp?.groupHandoff;
+    if (!group) return false;
+    if (binary || group.notificationCount === group.notifications.length) {
+      group.notificationFatal = true;
+      return true;
+    }
+    const slot = group.notifications[group.notificationCount++];
+    slot.callback = callback;
+    slot.value = value;
+    return true;
+  }
+
+  assertHttpHandoffIdle() {
+    if (this.managedHttp?.groupHandoff) throw new Error('HTTP group handoff cannot be interrupted');
+  }
+
   failEngine(error) {
+    this.assertHttpHandoffIdle();
     if (this.disposed) return;
     this.deadError = new EngineDeadError(error);
     this.disposed = true;
@@ -344,6 +363,7 @@ export class EngineHost {
 
   // Preserve native argument counts without per-message closures or rest arrays.
   invoke(fn, a, b, c, d) {
+    this.assertHttpHandoffIdle();
     if (this.disposed) return;
     try {
       if (this.engine.failed?.()) {
@@ -374,6 +394,7 @@ export class EngineHost {
 
   /** Send a command; resolves with its result for commands that report one. */
   command(command, options) {
+    this.assertHttpHandoffIdle();
     if (this.disposed) return Promise.reject(this.deadError ?? new EngineDisposedError());
     let timeoutMs;
     let onEvent;
@@ -416,10 +437,12 @@ export class EngineHost {
         try {
           const clock = typeof this.transport.setTimeout === 'function' && typeof this.transport.clearTimeout === 'function'
             ? this.transport : globalThis;
-          const timer = clock.setTimeout(() => {
+          const notify = () => {
+            if (this.deferHttpNotification(notify)) return;
             const current = this.commands.get(reply);
             if (current) this.settleCommand(reply, new CommandTimeoutError(timeoutMs, current.identity), true);
-          }, Math.max(0, timeoutMs - (this.transport.now() - startedAt)));
+          };
+          const timer = clock.setTimeout(notify, Math.max(0, timeoutMs - (this.transport.now() - startedAt)));
           pending.clearDeadline = () => clock.clearTimeout(timer);
           // Also tolerate synchronous timer adapters and disposal during scheduling.
           if (this.commands.get(reply) !== pending) {
@@ -447,6 +470,7 @@ export class EngineHost {
   }
 
   settleCommand(id, value, rejected = false) {
+    this.assertHttpHandoffIdle();
     const pending = this.commands.get(id);
     if (!pending) return;
     this.commands.delete(id);
@@ -456,6 +480,7 @@ export class EngineHost {
   }
 
   commandProgress(id, receipts, complete, late) {
+    this.assertHttpHandoffIdle();
     if (!Number.isSafeInteger(id) || id <= 0 || id >= this.nextCommand || !this.receiptSession) return;
     const event = Object.freeze({ receiptKey: `${this.receiptSession}:${id}`, commandId: id,
       receipts: Object.freeze(receipts), complete, late });
@@ -464,6 +489,7 @@ export class EngineHost {
   }
 
   commandDiagnostic(level, message) {
+    this.assertHttpHandoffIdle();
     try { this.handlers.onLog?.(level, message); }
     catch (cause) { throw new CommandDiagnosticCallbackError(cause); }
   }
@@ -475,6 +501,7 @@ export class EngineHost {
    * fills go out, for flushing those at the venue's faster book cadence.
    */
   flush(marketOnly = false) {
+    this.assertHttpHandoffIdle();
     if (this.disposed) return;
     const frame = this.invoke(this.engine.takeFrame, this.transport.now(), marketOnly);
     if (frame) this.handlers.onFrame?.(frame.buffer);
@@ -483,6 +510,7 @@ export class EngineHost {
   /** The whole current state as one frame (an ArrayBuffer), for a consumer
    * that starts late or skipped frames; later flushes apply on top of it. */
   snapshot() {
+    this.assertHttpHandoffIdle();
     if (this.disposed) throw this.deadError ?? new EngineDisposedError();
     const frame = this.invoke(this.engine.snapshotFrame, this.transport.now());
     if (this.deadError) throw this.deadError;
@@ -491,6 +519,7 @@ export class EngineHost {
 
   /** Current private state and unflushed catalog; caller applies/forwards it. */
   accountSnapshot() {
+    this.assertHttpHandoffIdle();
     if (this.disposed) throw this.deadError ?? new EngineDisposedError();
     if (typeof this.engine.accountSnapshotFrame !== 'function') throw new Error('Engine does not support private account snapshots');
     const frame = this.invoke(this.engine.accountSnapshotFrame, this.transport.now());
@@ -500,6 +529,7 @@ export class EngineHost {
 
   /** The venue's capability record; fixed for the engine's lifetime, so read once. */
   capabilities() {
+    this.assertHttpHandoffIdle();
     if (this.capabilityRecord) return this.capabilityRecord;
     if (this.disposed) throw this.deadError ?? new EngineDisposedError();
     const json = this.invoke(this.engine.capabilities);
@@ -509,6 +539,7 @@ export class EngineHost {
 
   /** Engine health counters; see `Health` in sdk-rs/engine/src/log.rs. */
   health() {
+    this.assertHttpHandoffIdle();
     if (this.disposed) throw new Error('engine disposed');
     const json = this.engine.health?.();
     return json ? JSON.parse(json) : undefined;
@@ -525,6 +556,7 @@ export class EngineHost {
    * venue runs its own reconnect. Returns how many sockets were closed.
    */
   reconnectSockets(channel) {
+    this.assertHttpHandoffIdle();
     if (this.disposed) return 0;
     let closed = 0;
     for (const [id, record] of [...this.socketRecords]) {
@@ -542,6 +574,7 @@ export class EngineHost {
   }
 
   socketClosed(id, code) {
+    this.assertHttpHandoffIdle();
     const record = this.socketRecords.get(id);
     if (!record) return;
     this.socketRecords.delete(id);
@@ -559,16 +592,19 @@ export class EngineHost {
   }
 
   socketChanged() {
+    this.assertHttpHandoffIdle();
     try { this.handlers.onSocketChange?.(); } catch { /* Health observers must not break socket handling. */ }
   }
 
   dispose() {
+    this.assertHttpHandoffIdle();
     if (this.disposed) return;
     this.disposed = true;
     this.cleanup();
   }
 
   cleanup() {
+    this.assertHttpHandoffIdle();
     const attempt = (fn) => {
       try { fn(); } catch { /* A broken transport must not strand the remaining resources. */ }
     };
@@ -604,6 +640,7 @@ export class EngineHost {
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
   async receive(id, { status, headers = '', body }, active = () => true) {
+    this.assertHttpHandoffIdle();
     if (this.disposed || !active()) return;
     const { engine, transport } = this;
     this.run(this.invoke(engine.httpStart, id, status, headers, transport.now()));
@@ -635,6 +672,7 @@ export class EngineHost {
   }
 
   async request(action) {
+    this.assertHttpHandoffIdle();
     const id = action.request;
     const controller = new AbortController();
     this.requests.set(id, controller);
@@ -659,6 +697,7 @@ export class EngineHost {
   // Provider calls from dispatch and signing-only capture share cancellation,
   // bounds, receipt validation and sanitized closed errors.
   primitiveSigning(work, timeoutMs, execute, complete) {
+    this.assertHttpHandoffIdle();
     const expectedReceipt = signingReceipt(work?.receipt);
     const expectedCount = work?.operations?.length;
     const controller = new AbortController();
@@ -684,7 +723,11 @@ export class EngineHost {
       timer: undefined,
       cancel: () => finish(undefined, 'unavailable'),
       start: () => {
-        try { pending.timer = this.transport.setTimeout(() => finish(undefined, 'timedOut'), timeoutMs); }
+        const notify = () => {
+          if (this.deferHttpNotification(notify)) return;
+          finish(undefined, 'timedOut');
+        };
+        try { pending.timer = this.transport.setTimeout(notify, timeoutMs); }
         catch { finish(undefined, 'unavailable'); return; }
         if (settled) { clearTimer(); return; }
         Promise.resolve().then(() => {
@@ -703,6 +746,7 @@ export class EngineHost {
   }
 
   sign(action) {
+    this.assertHttpHandoffIdle();
     if (this.engine.signingPending && !this.invoke(this.engine.signingPending, action.attempt)) return;
     const id = action.attempt;
     const pending = this.primitiveSigning(action.work, action.timeoutMs,
@@ -717,6 +761,7 @@ export class EngineHost {
   }
 
   hostedSigningClock() {
+    this.assertHttpHandoffIdle();
     if (this.disposed) throw new EngineDisposedError();
     if (typeof this.engine.hostedSigningClock !== 'function')
       throw new ExchangeError('Hosted signing is unsupported', { kind: 'unsupported', outcome: 'notSent' });
@@ -724,12 +769,14 @@ export class EngineHost {
   }
 
   invokeHosted(fn, ...args) {
+    this.assertHttpHandoffIdle();
     const output = this.invoke(fn, ...args);
     if (this.disposed) throw this.deadError ?? new EngineDisposedError();
     return output;
   }
 
   hostedSigning(input) {
+    this.assertHttpHandoffIdle();
     if (this.disposed) return Promise.reject(new EngineDisposedError());
     if (typeof this.engine.prepareHostedSigning !== 'function')
       return Promise.reject(new ExchangeError('Hosted signing is unsupported', { kind: 'unsupported', outcome: 'notSent' }));
@@ -771,6 +818,7 @@ export class EngineHost {
   }
 
   signPayload(action) {
+    this.assertHttpHandoffIdle();
     const id = action.request;
     const controller = new AbortController();
     const finish = (error, result) => {
@@ -785,7 +833,11 @@ export class EngineHost {
         this.run(this.invoke(this.engine.payloadSigned, id, result.signature, result.headers, this.transport.now()));
       }
     };
-    const timer = this.transport.setTimeout(() => finish(new Error('Payload signing timed out')), action.timeoutMs);
+    const notify = () => {
+      if (this.deferHttpNotification(notify)) return;
+      finish(new Error('Payload signing timed out'));
+    };
+    const timer = this.transport.setTimeout(notify, action.timeoutMs);
     this.signings.set(id, { controller, timer });
     Promise.resolve().then(() => {
       if (this.disposed || controller.signal.aborted) return;
@@ -811,6 +863,7 @@ export class EngineHost {
   }
 
   clearSocketFailure(id) {
+    this.assertHttpHandoffIdle();
     const pending = this.socketFailures.get(id);
     if (!pending) return;
     this.socketFailures.delete(id);
@@ -819,6 +872,7 @@ export class EngineHost {
   }
 
   socketFailed(id, message) {
+    this.assertHttpHandoffIdle();
     const socket = this.sockets.get(id);
     this.sockets.delete(id);
     this.socketClosed(id, 1006);
@@ -831,12 +885,14 @@ export class EngineHost {
     this.socketFailures.set(id, pending);
     try {
       // A broken provider cannot recursively reconnect venues without their own backoff.
-      pending.handle = this.transport.setTimeout(() => {
+      const notify = () => {
+        if (this.deferHttpNotification(notify)) return;
         if (this.socketFailures.get(id) !== pending) return;
         this.socketFailures.delete(id);
         this.timers.delete(pending.key);
         if (!this.disposed && !this.sockets.has(id)) this.run(this.invoke(this.engine.wsClose, id, 1006, this.transport.now()));
-      }, 1_000);
+      };
+      pending.handle = this.transport.setTimeout(notify, 1_000);
       this.timers.set(pending.key, pending.handle);
     } catch {
       this.socketFailures.delete(id);
@@ -845,6 +901,7 @@ export class EngineHost {
   }
 
   run(actionsJson) {
+    this.assertHttpHandoffIdle();
     if (this.disposed || !actionsJson) return;
     let unknown;
     let callbackFailure;
@@ -884,6 +941,7 @@ export class EngineHost {
   }
 
   execute(action) {
+    this.assertHttpHandoffIdle();
     if (this.disposed) return;
     const { engine, transport } = this;
     switch (action?.op) {
@@ -900,9 +958,11 @@ export class EngineHost {
         const wsMessage = typeof engine.wsMessageActions === 'function' ? engine.wsMessageActions : engine.wsMessage;
         if (action.headers?.length && !transport.webSocketHeaders) {
           this.handlers.onLog?.('warning', 'WebSocket upgrade headers unavailable; continuing REST reconciliation');
-          transport.setTimeout(() => {
+          const notify = () => {
+            if (this.deferHttpNotification(notify)) return;
             if (!this.disposed) this.run(this.invoke(engine.wsClose, id, 1006, transport.now()));
-          }, 0);
+          };
+          transport.setTimeout(notify, 0);
           break;
         }
         const stats = this.socketStats[action.channel] ?? this.socketStats.public;
@@ -920,12 +980,13 @@ export class EngineHost {
         let socket;
         let connecting = true;
         try {
-          socket = transport.connect(action.url, {
+          const callbacks = {
             binary: action.binary === true,
             channel: action.channel,
             context: action.context,
             headers: action.headers && Object.fromEntries(action.headers),
             onOpen: () => {
+              if (this.deferHttpNotification(callbacks.onOpen, undefined)) return;
               if (this.disposed || !(connecting || (socket && this.sockets.get(id) === socket))) return;
               if (this.socketRecords.get(id) === record && !record.open) {
                 record.open = true;
@@ -935,6 +996,7 @@ export class EngineHost {
               this.run(this.invoke(engine.wsOpen, id, transport.now()));
             },
             onMessage: (text) => {
+              if (this.deferHttpNotification(callbacks.onMessage, text)) return;
               if (this.disposed || (!connecting && (!socket || this.sockets.get(id) !== socket))) return;
               received();
               if (!wsMessageBytes) {
@@ -963,6 +1025,7 @@ export class EngineHost {
               this.run(actions);
             },
             onBinary: (data) => {
+              if (this.deferHttpNotification(callbacks.onBinary, undefined, true)) return;
               if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
               received();
               if (engine.wsBinary) this.run(this.invoke(engine.wsBinary, id, data, transport.now()));
@@ -975,12 +1038,14 @@ export class EngineHost {
               }
             },
             onClose: (code) => {
+              if (this.deferHttpNotification(callbacks.onClose, code)) return;
               if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
               this.sockets.delete(id);
               this.socketClosed(id, code ?? 1006);
               this.run(this.invoke(engine.wsClose, id, code ?? 1006, transport.now()));
             },
-          });
+          };
+          socket = transport.connect(action.url, callbacks);
         } catch {
           connecting = false;
           this.socketFailed(id, 'WebSocket transport connection failed');
@@ -1019,12 +1084,14 @@ export class EngineHost {
         let fired = false;
         let armed = false;
         let handle;
-        handle = transport.setTimeout(() => {
+        const notify = () => {
+          if (this.deferHttpNotification(notify)) return;
           if (fired || this.disposed || (armed && this.timers.get(id) !== handle)) return;
           fired = true;
           this.timers.delete(id);
           this.run(this.invoke(engine.timer, id, transport.now()));
-        }, Math.max(0, action.at - transport.now()));
+        };
+        handle = transport.setTimeout(notify, Math.max(0, action.at - transport.now()));
         armed = true;
         if (this.disposed || fired) transport.clearTimeout(handle);
         else this.timers.set(id, handle);

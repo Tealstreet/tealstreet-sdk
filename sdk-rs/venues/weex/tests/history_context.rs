@@ -60,6 +60,9 @@ fn drain(e: &mut Engine<WeexFutures>, now: f64) -> Output {
                     output.claimed += 1;
                     output.requests.push(request);
                 }
+                HttpAction::BindGroup { .. } => {
+                    panic!("WEEX fixture declares no Mutation barriers")
+                }
                 HttpAction::Cancel { .. } => {}
             },
             action => output.actions.push(action),

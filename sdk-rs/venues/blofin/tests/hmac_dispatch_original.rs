@@ -222,6 +222,9 @@ fn release_actions(engine: &mut Engine<Blofin>, now: f64) -> Vec<Action> {
                     ));
                     released = Some(request.clone());
                 }
+                HttpAction::BindGroup { .. } => {
+                    panic!("BloFin fixture declares no Mutation barriers")
+                }
                 HttpAction::Cancel { preparation, .. } => {
                     let request = preparation.attempt().request;
                     if routes.get(&request) == Some(preparation) {

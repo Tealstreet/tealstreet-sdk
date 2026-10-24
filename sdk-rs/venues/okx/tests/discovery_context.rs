@@ -68,6 +68,9 @@ impl Cycle {
                             self.requests.push(request);
                         }
                     }
+                    HttpAction::BindGroup { .. } => {
+                        panic!("OKX fixture declares no Mutation barriers")
+                    }
                     HttpAction::Cancel { .. } => {}
                 },
                 Action::Http(request) => self.requests.push(request),
