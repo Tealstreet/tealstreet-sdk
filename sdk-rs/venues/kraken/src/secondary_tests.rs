@@ -18,7 +18,8 @@ fn options() -> Options {
 // ProbeVenue ignores responses; this native carrier grants no Context authority.
 fn probe_pending() -> Pending {
     Pending::Candles {
-        command: None,
+        root: None,
+        context: None,
         symbol: String::new(),
         interval: Interval::M1,
         generation: None,

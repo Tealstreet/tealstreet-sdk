@@ -6,9 +6,20 @@ use crate::{Cryptocom, Pending};
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Outcome, TimerId, VenueError, num};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+fn local_mutation_policy() -> Policy {
+    Policy {
+        operation: Operation::Mutation,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
 
 #[derive(Clone)]
 pub enum Call {
@@ -214,8 +225,11 @@ impl Cryptocom {
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, orders)),
             Command::CancelOrders { command, ids } => {
                 if let Some(id) = ids.iter().find(|id| cx.store.order(id).is_none()) {
-                    cx.fail(
-                        command,
+                    let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                        return;
+                    };
+                    let _ = cx.fail_context(
+                        &context,
                         not_sent(format!(
                             "Order {id} not found; cancellation requires a reconciled order"
                         )),
@@ -257,14 +271,20 @@ impl Cryptocom {
                 amount,
             } => {
                 let Some(order) = cx.store.order(&id) else {
-                    cx.fail(command, not_sent(format!("Order not found: {id}")));
+                    let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                        return;
+                    };
+                    let _ = cx.fail_context(&context, not_sent(format!("Order not found: {id}")));
                     return;
                 };
                 let price = price.unwrap_or(order.price);
                 let amount = amount.unwrap_or(order.amount);
                 if !price.is_finite() || price <= 0.0 || !amount.is_finite() || amount <= 0.0 {
-                    cx.fail(
-                        command,
+                    let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                        return;
+                    };
+                    let _ = cx.fail_context(
+                        &context,
                         not_sent("A positive price and quantity are required"),
                     );
                     return;
@@ -312,8 +332,11 @@ impl Cryptocom {
                     || !(1.0..=100.0).contains(&leverage)
                     || leverage.fract() != 0.0
                 {
-                    cx.fail(
-                        command,
+                    let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                        return;
+                    };
+                    let _ = cx.fail_context(
+                        &context,
                         not_sent("Crypto.com account leverage must be an integer from 1 to 100"),
                     );
                     return;
@@ -328,27 +351,34 @@ impl Cryptocom {
                 )
             }
             Command::SetMarginType {
-                command,
+                command: _,
                 symbol,
                 isolated,
             } => {
-                cx.fail(command, not_sent(format!("Crypto.com does not support switching {symbol} to {} margin through Exchange v1", if isolated { "isolated" } else { "cross" })).kind(ErrorKind::Unsupported));
+                let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                    return;
+                };
+                let _ = cx.fail_context(&context, not_sent(format!("Crypto.com does not support switching {symbol} to {} margin through Exchange v1", if isolated { "isolated" } else { "cross" })).kind(ErrorKind::Unsupported));
                 return;
             }
-            Command::SetPositionMode { command, .. } => {
-                cx.notice(
-                    Level::Warn,
-                    code::COMMAND_UNSUPPORTED,
-                    "Position mode is always hedged on Crypto.com",
-                );
-                cx.done(command, "[]".into());
+            Command::SetPositionMode { .. } => {
+                if cx.done_local_setting("[]".into(), |_| {}).is_ok() {
+                    cx.notice(
+                        Level::Warn,
+                        code::COMMAND_UNSUPPORTED,
+                        "Position mode is always hedged on Crypto.com",
+                    );
+                }
                 return;
             }
             _ => return,
         };
         if self.credentials.is_none() {
-            cx.fail(
-                command,
+            let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
                 not_sent("Crypto.com credentials are required").kind(ErrorKind::AuthInvalid),
             );
             return;
@@ -360,8 +390,11 @@ impl Cryptocom {
                 self.drive_trading(cx);
             }
             Err(error) => {
-                cx.command_error(command, &error);
-                cx.fail(command, not_sent(error));
+                let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                    return;
+                };
+                let _ = cx.command_error_context(&context, &error);
+                let _ = cx.fail_context(&context, not_sent(error));
             }
         }
     }

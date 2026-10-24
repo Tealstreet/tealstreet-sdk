@@ -242,6 +242,7 @@ impl TxFlow {
             let mut rows = std::mem::take(&mut self.seed_tickers);
             self.live_tickers.finish(cx.store, &mut rows);
             cx.store.set_tickers(rows);
+            self.index_tickers(cx.store);
             self.open_sockets(cx);
         }
         // TS records the account execution window after the paced seed; once every
@@ -359,6 +360,20 @@ impl TxFlow {
         cx.store
             .update_ticker(symbol, |t| Self::ticker_update(t, row, seed));
     }
+    fn index_tickers(&mut self, store: &safe_cex_engine::Store) {
+        for instrument in self.instruments.values_mut() {
+            instrument.ticker_index = None;
+        }
+        for (index, ticker) in store.tickers().iter().enumerate() {
+            if let Some(instrument) = self
+                .assets
+                .get(&ticker.symbol)
+                .and_then(|asset| self.instruments.get_mut(asset))
+            {
+                instrument.ticker_index = Some(index as u32);
+            }
+        }
+    }
     fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
         let Ok(frame) = PublicFrame::decode(text) else {
             return false;
@@ -390,10 +405,22 @@ impl TxFlow {
                 }
             }
             PublicFrame::Ticker(row) => {
-                if let Some(symbol) = self.symbol(row.instrument_id).map(str::to_owned) {
+                if let Some(instrument) = self.instruments.get(&row.instrument_id) {
+                    let symbol = instrument.name.as_str();
                     let mask = Self::ticker_mask(&row, false);
-                    Self::apply_ticker(cx, &symbol, row, false);
-                    self.live_tickers.record(cx.store, &symbol, mask);
+                    if let Some(index) = instrument.ticker_index.filter(|index| {
+                        cx.store
+                            .tickers()
+                            .get(*index as usize)
+                            .is_some_and(|ticker| ticker.symbol == symbol)
+                    }) {
+                        cx.store.update_ticker_at(index, |ticker| {
+                            Self::ticker_update(ticker, row, false)
+                        });
+                    } else {
+                        Self::apply_ticker(cx, symbol, row, false);
+                    }
+                    self.live_tickers.record(cx.store, symbol, mask);
                 }
             }
             PublicFrame::Depth(row) => {

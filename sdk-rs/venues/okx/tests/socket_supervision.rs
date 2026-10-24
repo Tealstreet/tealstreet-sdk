@@ -722,10 +722,15 @@ fn reconnect_subscription_precedes_its_account_refresh() {
     )).expect("private subscription");
     let refresh = out
         .iter()
-        .position(|action| {
-            matches!(action,
-                Action::Http(request) if request.url.contains("/api/v5/account/")
-            )
+        .position(|action| match action {
+            Action::Http(request) => request.url.contains("/api/v5/account/"),
+            // Account-cycle reads are managed: their Prepare is the earliest staging.
+            Action::ManagedHttp(http) => matches!(
+                &**http,
+                safe_cex_engine::request_context::HttpAction::Prepare { request, .. }
+                    if request.url.contains("/api/v5/account/")
+            ),
+            _ => false,
         })
         .expect("account HTTP refresh");
     assert!(
