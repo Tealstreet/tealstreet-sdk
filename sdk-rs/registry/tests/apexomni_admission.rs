@@ -148,3 +148,40 @@ fn a_64_byte_omni_key_seed_is_refused_at_setup() {
         "Invalid OmniKey seed: expected 65-byte Ethereum signature"
     );
 }
+
+/// The no-options JSON setup path keeps the ApeX admission: a malformed
+/// OmniKey seed is refused, a secondary never installs, a valid seed installs.
+#[test]
+fn json_setup_keeps_the_apexomni_secondary_and_seed_refusals() {
+    use safe_cex_venues::local_signer_from_json_for;
+    let primary = |seed: String| {
+        json!({
+            "key": "api-key",
+            "secret": "bXlzZWNyZXQ=",
+            "passphrase": "pass",
+            "extra": { "zklinkSeed": { "value": seed, "encoding": "hex" } },
+        })
+    };
+    let (_, identities) = local_signer_from_json_for(
+        "apexomni",
+        json!({ "primary": primary(seed()) }).to_string(),
+    )
+    .unwrap();
+    let installed = identities.primary.expect("primary identity");
+    assert!(installed.extra.contains_key(&ExtraKey::ZklinkSeed));
+
+    // The family policy declares no secondary slot, so setup refuses it before
+    // admission; either way no read identity installs.
+    let secondary = json!({ "primary": primary(seed()), "secondary": primary(seed()) });
+    assert!(local_signer_from_json_for("apexomni", secondary.to_string()).is_err());
+
+    let short = json!({ "primary": primary("11".repeat(10)) });
+    let Err(refused) = local_signer_from_json_for("apexomni", short.to_string()) else {
+        panic!("a malformed OmniKey seed must be refused");
+    };
+    assert!(
+        refused.message.contains("Invalid OmniKey seed"),
+        "{}",
+        refused.message
+    );
+}

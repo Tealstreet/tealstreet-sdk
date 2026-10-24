@@ -1,6 +1,7 @@
 mod support;
 use safe_cex_engine::model::Balance;
 use safe_cex_engine::{Action, Engine, Event, SocketChannel, SocketId, TimerId};
+use support::Prepared;
 type LivenessEngine = Engine<safe_cex_venue_apexomni::ApexOmni>;
 const REJECTED: &str = r#"{"op":"login","success":false,"ret_msg":"bad key"}"#;
 const ACCEPTED: &str = r#"{"op":"login","success":true}"#;
@@ -18,10 +19,10 @@ fn connecting() -> (LivenessEngine, SocketId, f64, bool) {
         },
     );
     e.start(0.0);
-    let request = support::requests(&mut e).remove(0);
+    let request = support::requests(&mut e, 0.0).remove(0);
     support::response(&mut e, &request, 10.0, support::MARKETS);
     let socket = e
-        .drain_actions()
+        .prepared(10.0)
         .find_map(|a| match a {
             Action::WsConnect {
                 socket,
@@ -41,7 +42,7 @@ fn started() -> (LivenessEngine, SocketId, f64, TimerId) {
         e.handle(opened_at, Event::WsOpened { socket });
     }
     let timer = e
-        .drain_actions()
+        .prepared(opened_at)
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if at_ms == opened_at + 5000.0 => Some(timer),
             _ => None,
@@ -66,7 +67,7 @@ fn rejected_login_closes_preserves_state_and_increases_retry_backoff() {
                 text: REJECTED,
             },
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = e.prepared(now).collect();
         assert_eq!(
             actions
                 .iter()
@@ -100,12 +101,12 @@ fn rejected_login_closes_preserves_state_and_increases_retry_backoff() {
         );
         e.handle(now, Event::WsClosed { socket, code: 1006 });
         assert!(
-            e.drain_actions().next().is_none(),
+            e.prepared(now).next().is_none(),
             "retired socket events must be inert"
         );
         e.handle(at, Event::TimerFired { timer: retry });
         let replacement = e
-            .drain_actions()
+            .prepared(at)
             .find_map(|a| match a {
                 Action::WsConnect {
                     socket,
@@ -123,12 +124,12 @@ fn rejected_login_closes_preserves_state_and_increases_retry_backoff() {
                 text: REJECTED,
             },
         );
-        assert!(e.drain_actions().next().is_none());
+        assert!(e.prepared(at).next().is_none());
         socket = replacement;
         now = at;
         e.handle(now, Event::WsOpened { socket });
         watch = e
-            .drain_actions()
+            .prepared(now)
             .find_map(|a| match a {
                 Action::SetTimer { timer, .. } => Some(timer),
                 _ => None,
@@ -141,10 +142,10 @@ fn rejected_login_closes_preserves_state_and_increases_retry_backoff() {
 fn continuous_pongs_cannot_extend_the_authentication_deadline() {
     let (mut e, socket, now, first_watch) = started();
     e.handle(now + 4999.0, Event::WsMessage { socket, text: PONG });
-    e.drain_actions().for_each(drop);
+    e.prepared(now + 4999.0).for_each(drop);
     e.handle(now + 5000.0, Event::TimerFired { timer: first_watch });
     let mut timers: Vec<_> = e
-        .drain_actions()
+        .prepared(now + 5000.0)
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -157,10 +158,10 @@ fn continuous_pongs_cannot_extend_the_authentication_deadline() {
             break timer;
         }
         e.handle(at - 1.0, Event::WsMessage { socket, text: PONG });
-        e.drain_actions().for_each(drop);
+        e.prepared(at - 1.0).for_each(drop);
         e.handle(at, Event::TimerFired { timer });
         timers = e
-            .drain_actions()
+            .prepared(at)
             .filter_map(|a| match a {
                 Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
                 _ => None,
@@ -168,10 +169,10 @@ fn continuous_pongs_cannot_extend_the_authentication_deadline() {
             .collect();
     };
     e.handle(now + 9999.0, Event::WsMessage { socket, text: PONG });
-    e.drain_actions().for_each(drop);
+    e.prepared(now + 9999.0).for_each(drop);
     e.handle(now + 10_000.0, Event::TimerFired { timer: watch });
     assert!(
-        e.drain_actions()
+        e.prepared(now + 10_000.0)
             .any(|a| matches!(a, Action::WsClose { socket: s } if s == socket))
     );
 }
@@ -186,7 +187,7 @@ fn accepted_login_cancels_auth_deadline_and_stale_timer_cannot_close_socket() {
             text: ACCEPTED,
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(now + 1.0).collect();
     assert!(
         actions
             .iter()
@@ -207,20 +208,20 @@ fn accepted_login_cancels_auth_deadline_and_stale_timer_cannot_close_socket() {
         },
     );
     assert!(
-        e.drain_actions().next().is_none(),
+        e.prepared(now + 2.0).next().is_none(),
         "duplicate login acknowledgements are inert"
     );
     e.handle(now + 10_000.0, Event::TimerFired { timer: old_watch });
-    assert!(e.drain_actions().next().is_none());
+    assert!(e.prepared(now + 10_000.0).next().is_none());
     e.handle(now + 10_001.0, Event::WsMessage { socket, text: PONG });
-    e.drain_actions().for_each(drop);
+    e.prepared(now + 10_001.0).for_each(drop);
     e.handle(
         now + 10_001.0,
         Event::TimerFired {
             timer: active_watch,
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(now + 10_001.0).collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
     assert!(
         actions
@@ -234,11 +235,11 @@ fn validated_private_snapshot_establishes_auth_without_delaying_subscriptions() 
     let (mut e, socket, now, old_watch) = started();
     e.handle(now + 1.0, Event::WsMessage { socket, text: r#"{"topic":"ws_zk_accounts_v3","type":"snapshot","contents":{"orders":[],"positions":[],"fills":[]}}"# });
     assert!(
-        e.drain_actions()
+        e.prepared(now + 1.0)
             .any(|a| matches!(a, Action::ClearTimer { timer } if timer == old_watch))
     );
     e.handle(now + 10_000.0, Event::TimerFired { timer: old_watch });
-    assert!(e.drain_actions().next().is_none());
+    assert!(e.prepared(now + 10_000.0).next().is_none());
 }
 
 #[test]
@@ -252,7 +253,7 @@ fn malformed_private_rows_cannot_cancel_the_auth_deadline() {
     ] {
         let (mut e, socket, now, watch) = started();
         e.handle(now + 1.0, Event::WsMessage { socket, text });
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = e.prepared(now + 1.0).collect();
         assert!(
             !actions
                 .iter()
@@ -260,10 +261,10 @@ fn malformed_private_rows_cannot_cancel_the_auth_deadline() {
             "{text}"
         );
         e.handle(now + 9999.0, Event::WsMessage { socket, text: PONG });
-        e.drain_actions().for_each(drop);
+        e.prepared(now + 9999.0).for_each(drop);
         e.handle(now + 10_000.0, Event::TimerFired { timer: watch });
         assert!(
-            e.drain_actions()
+            e.prepared(now + 10_000.0)
                 .any(|a| matches!(a, Action::WsClose { socket: s } if s == socket)),
             "{text}"
         );
@@ -280,7 +281,7 @@ fn unrelated_subscription_rejection_does_not_retire_authenticated_socket() {
             text: ACCEPTED,
         },
     );
-    e.drain_actions().for_each(drop);
+    e.prepared(now + 1.0).for_each(drop);
     e.handle(
         now + 2.0,
         Event::WsMessage {
@@ -289,7 +290,7 @@ fn unrelated_subscription_rejection_does_not_retire_authenticated_socket() {
         },
     );
     assert!(
-        !e.drain_actions()
+        !e.prepared(now + 2.0)
             .any(|a| matches!(a, Action::WsClose { .. }))
     );
 }
@@ -309,14 +310,14 @@ fn valid_wallet_only_snapshot_or_delta_establishes_ackless_authentication() {
             },
         );
         assert!(
-            e.drain_actions()
+            e.prepared(now + 1.0)
                 .any(|a| matches!(a, Action::ClearTimer { timer } if timer == old_watch)),
             "{kind}"
         );
         e.handle(now + 9999.0, Event::WsMessage { socket, text: PONG });
-        e.drain_actions().for_each(drop);
+        e.prepared(now + 9999.0).for_each(drop);
         e.handle(now + 10_000.0, Event::TimerFired { timer: old_watch });
-        assert!(e.drain_actions().next().is_none());
+        assert!(e.prepared(now + 10_000.0).next().is_none());
     }
 }
 
@@ -343,15 +344,15 @@ fn invalid_wallet_only_rows_with_pongs_do_not_cancel_authentication_deadline() {
             },
         );
         assert!(
-            !e.drain_actions()
+            !e.prepared(now + 1.0)
                 .any(|a| matches!(a, Action::ClearTimer { timer } if timer == watch)),
             "{wallet}"
         );
         e.handle(now + 9999.0, Event::WsMessage { socket, text: PONG });
-        e.drain_actions().for_each(drop);
+        e.prepared(now + 9999.0).for_each(drop);
         e.handle(now + 10_000.0, Event::TimerFired { timer: watch });
         assert!(
-            e.drain_actions()
+            e.prepared(now + 10_000.0)
                 .any(|a| matches!(a, Action::WsClose { socket: s } if s == socket)),
             "{wallet}"
         );
