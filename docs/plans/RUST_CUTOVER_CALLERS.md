@@ -6761,3 +6761,23 @@ can expire before outbound. Each native orderBookDetails/orderBooks attempt has
 its own budget. Native endpoint fallback and shared startup backoff are retained,
 with the old attempt retired before follow-up. No command result is introduced.
 All four deployments keep their headers/body, route, catalog codec and metadata.
+
+## MEXC unsigned discovery and subscription snapshot custody
+
+Markets, ticker discovery and subscription depth snapshots use unsigned managed
+Background Reads with an immutable 20-second bound per operation. Public route
+preparation and final release precede HTTP. At deadline equality, including before
+host timer ingress, payload rows and stream completion cannot load markets or
+tickers, mutate volume-unit metadata or replace a subscription book. Expired
+responses are discarded before headers reach the venue, so they supply no new
+Retry-After evidence. A still-live operation from an old subscription generation
+retains native 429 pause evidence without publishing stale book data.
+
+Failed preparation, submission, transport and timeout retire their own Context
+and retain native startup backoff or depth resync. The first depth resync remains
+exactly 500ms; discovery keeps its nominal1/2/4-second jittered backoff. The native
+private startup after markets, malformed catalogue recovery, book generation and
+version fences, contract-size scaling and buffer limits remain. Public reads
+carry no credential and publish neither command terminals nor account-auth
+evidence. Existing safe-cex startup/subscribed-order-book consumers require no
+new input; host dispatch uses the existing managed prepare/bind/claim protocol.

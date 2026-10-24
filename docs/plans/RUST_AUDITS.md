@@ -2957,3 +2957,14 @@ read with exact delivery validation and retirement before fallback/retry. No
 signer, private authority, session or engine policy is changed. Original new
 targets execute seven native controls PASS and15 intended assertion REDs, zero
 ignored. Exact own prune is four singleton occurrences across three keys.
+
+## MEXC unsigned discovery and depth Context adoption
+
+The public catalogue/ticker streamed sender and subscription-depth GET sender
+now use existing Background Read issuance and managed HTTP. Exact delivery is
+validated before row decoding, metadata edits and publication; native generation,
+response and financial checks remain. Failure-only retirement permits expired
+current cleanup without DATA or newer-owner authority. The exact removal-only
+manifest delta is two MEXC lib fingerprints/occurrences,18 to16 in the venue.
+No private signer, account/history/trading reducer, scheduler or engine code
+changes in this slice. Family performance/size evidence remains a CI gate.

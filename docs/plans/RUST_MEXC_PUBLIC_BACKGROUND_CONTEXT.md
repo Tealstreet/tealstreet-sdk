@@ -122,3 +122,17 @@ The initial test compile errors were corrected before this execution receipt.
 No runtime, fixture or manifest byte changed. The source, caller and full-map
 reviews found the two fingerprint labels swapped, a 500ms depth-backoff assertion
 and the expired-header scope; this checkpoint corrects all three.
+
+## Managed implementation checkpoint
+
+The two existing unsigned builders issue actual Background Read Contexts and
+submit through `request_managed`; catalogue/ticker streaming is attached through
+`stream_response(EnvelopeField("data"))`. Exact original handles travel in Pending.
+The row callback validates before metadata/staging changes; the response callback
+retains native envelope/429 ordering, validates before DATA, and retires after
+the synchronous native publication callback. Failure callbacks retire first and
+retain native recovery. Every original control passes (18/18), with221 native
+MEXC tests, strict Clippy/fmt, bans and both inventory checks passing.
+Public fixture glue drives the existing shared prepare/bind/final-claim executor;
+no local signer, validator or dispatcher is introduced. Runtime reviews and CI
+remain separate gates; no readiness, family-byte or performance claim yet.
