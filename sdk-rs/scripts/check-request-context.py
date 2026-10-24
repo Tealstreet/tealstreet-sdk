@@ -224,6 +224,13 @@ def cx_type(segment, offset):
     return None
 
 
+def inferred(segment):
+    """`_`, `&_` or `&'a mut _`: the compiler, not the text, chooses the type."""
+    rest = [token for k, token in enumerate(segment)
+            if token not in {'&', 'mut', "'"} and not (k and segment[k - 1] == "'")]
+    return rest == ['_']
+
+
 def parameter(part):
     if ':' in part:
         colon = part.index(':')
@@ -265,7 +272,7 @@ def bindings(stream):
                     allowed_types.add(position)
             if name:
                 declarations.add(offset + part.index(name))
-                if kind is None:
+                if kind is None or inferred(kind):
                     kind_name = 'closure' if untyped else 'other'
                 else:
                     kind_name = 'cx' if cx_type(kind, 0) is not None else 'other'
@@ -308,6 +315,90 @@ def bindings(stream):
     return found, declarations, allowed_types
 
 
+PATTERN_WORDS = {'mut', 'ref', 'let', 'if', 'while', 'for', 'in', 'match', 'box', 'self', 'true', 'false'}
+FLOW = {'cx', 'closure', 'derived'}
+
+
+def value_use(stream, found, index):
+    """A Cx-flow binding used as a value rather than through a member."""
+    token = stream[index]
+    return (IDENT.fullmatch(token) is not None and not (index and stream[index - 1] in {'.', '::'})
+            and stream[index + 1:index + 2] != ['.'] and resolve(found, token, index) in FLOW)
+
+
+def pattern_names(stream, start, end):
+    return [k for k in range(start, end)
+            if IDENT.fullmatch(stream[k]) and stream[k] not in PATTERN_WORDS and stream[k][0].islower()
+            and stream[k + 1:k + 2] not in [['('], ['{'], ['::'], ['!']] and stream[k - 1:k] != ['::']]
+
+
+def enclosing_end(stream, index):
+    depth = 0
+    for k in range(index, len(stream)):
+        if stream[k] in {'(', '[', '{'}:
+            depth += 1
+        elif stream[k] in {')', ']', '}'}:
+            if depth == 0:
+                return k
+            depth -= 1
+    return len(stream)
+
+
+def derived_bindings(stream, found):
+    """Untyped let/for/match bindings fed by a Cx value: conservatively Cx-bound."""
+    for i, token in enumerate(stream):
+        if token == 'let':
+            equals = i + 1
+            while equals < len(stream) and stream[equals] not in {'=', ';'}:
+                equals = group_end(stream, equals) if stream[equals] in {'(', '[', '{'} else equals + 1
+            if equals >= len(stream) or stream[equals] != '=':
+                continue
+            colon = next((k for k in range(i + 1, equals) if stream[k] == ':'), None)
+            if colon is not None and not inferred(stream[colon + 1:equals]):
+                continue
+            pattern = (i + 1, colon if colon is not None else equals)
+            if stream[i - 1:i] in [['if'], ['while']]:
+                initializer_end = equals + 1
+                while initializer_end < len(stream) and stream[initializer_end] != '{':
+                    initializer_end = (group_end(stream, initializer_end)
+                                       if stream[initializer_end] in {'(', '['} else initializer_end + 1)
+                if initializer_end >= len(stream):
+                    continue
+                scope = (initializer_end, group_end(stream, initializer_end))
+            else:
+                initializer_end = expression_end(stream, equals + 1)
+                scope = (initializer_end, enclosing_end(stream, initializer_end))
+        elif token == 'for':
+            within = i + 1
+            while within < len(stream) and stream[within] != 'in':
+                within += 1
+            if within >= len(stream):
+                continue
+            body = within + 1
+            while body < len(stream) and stream[body] != '{':
+                body = group_end(stream, body) if stream[body] in {'(', '['} else body + 1
+            if body >= len(stream):
+                continue
+            pattern, equals, initializer_end = (i + 1, within), within, body
+            scope = (body, group_end(stream, body))
+        elif token == 'match':
+            body = i + 1
+            while body < len(stream) and stream[body] != '{':
+                body = group_end(stream, body) if stream[body] in {'(', '['} else body + 1
+            if body >= len(stream):
+                continue
+            if any(value_use(stream, found, k) for k in range(i + 1, body)):
+                end = group_end(stream, body)
+                for k in pattern_names(stream, body + 1, end - 1):
+                    found.append((stream[k], 'derived', k, end))
+            continue
+        else:
+            continue
+        if any(value_use(stream, found, k) for k in range(equals + 1, initializer_end)):
+            for k in pattern_names(stream, *pattern):
+                found.append((stream[k], 'derived', *scope))
+
+
 def resolve(found, name, index):
     best = None
     for bound, kind, start, end in found:
@@ -336,7 +427,7 @@ def call_argument(stream, index):
     if opening <= 0 or stream[opening] != '(':
         return False
     callee = stream[opening - 1]
-    return (callee in {'>', ')', ']', '!'} or bool(IDENT.fullmatch(callee))) and callee not in CALL_PREFIX_KEYWORDS
+    return (callee in {'>', ')', ']'} or bool(IDENT.fullmatch(callee))) and callee not in CALL_PREFIX_KEYWORDS
 
 
 def check_cx_names(stream, allowed_types):
@@ -352,22 +443,21 @@ def check_cx_names(stream, allowed_types):
 
 
 def check_cx_values(stream, found, declarations):
+    macros = [(i + 2, group_end(stream, i + 2)) for i in range(len(stream))
+              if stream[i + 1:i + 2] == ['!'] and stream[i + 2:i + 3] in [['('], ['{'], ['[']]
+              and stream[i] != 'macro_rules']
     for i, token in enumerate(stream):
         if not IDENT.fullmatch(token) or i in declarations or (i and stream[i - 1] in {'.', '::'}):
             continue
         kind = resolve(found, token, i)
         if kind == 'cx':
-            if stream[i + 1:i + 2] == ['.'] and stream[i + 2:i + 3] != ['.'] or call_argument(stream, i):
+            member = stream[i + 1:i + 2] == ['.'] and stream[i + 2:i + 3] != ['.']
+            if member or call_argument(stream, i):
                 continue
+            # A macro's own argument is a token tree it may rebind or splice.
+            if any(start < i < end for start, end in macros):
+                raise InventoryRefusal('Cx value inside a macro')
             raise InventoryRefusal('Cx alias or rebinding')
-        if kind == 'closure':
-            before = i - 1
-            while before >= 0 and stream[before] in {'&', 'mut', '*'}:
-                before -= 1
-            assigned = (before >= 1 and stream[before] == '=' and stream[before - 1] not in {'=', '!', '<', '>'}
-                        and stream[i + 1:i + 2] in [[';'], [','], [')']])
-            if assigned or (before >= 0 and stream[before] == 'match'):
-                raise InventoryRefusal('closure parameter rebinding')
 
 
 def test_ranges(stream):
@@ -409,6 +499,7 @@ def context_fingerprints(source):
     found, declarations, allowed_types = bindings(stream)
     check_cx_names(stream, allowed_types)
     check_cx_values(stream, found, declarations)
+    derived_bindings(stream, found)
     tests = test_ranges(stream)
     prod, test = collections.Counter(), collections.Counter()
     counted = []
@@ -433,13 +524,13 @@ def context_fingerprints(source):
                 end = group_end(stream, end)
             start = receiver_start(stream, i)
             if stream[i - 1] == '.':
-                legacy = start == i - 2 and resolve(found, stream[i - 2], i) in {'cx', 'closure'}
+                # A call, index, macro or field result over a Cx value counts too.
+                legacy = call and ((start == i - 2 and resolve(found, stream[i - 2], i) in FLOW) or any(
+                    value_use(stream, found, k) for k in range(start, i - 1)))
             else:
                 path = stream[start:i]
                 arguments = range(i + 1, end) if call else range(0)
-                legacy = CX in path or any(
-                    resolve(found, stream[k], k) in {'cx', 'closure'} and call_argument(stream, k)
-                    for k in arguments if IDENT.fullmatch(stream[k]))
+                legacy = CX in path or any(value_use(stream, found, k) for k in arguments)
             if legacy:
                 counted.append(i)
                 add(start, end, i)
@@ -498,13 +589,19 @@ def request_sites():
                 candidates = [folder / f'{segments[-1]}.rs', folder / segments[-1] / 'mod.rs']
             resolved += [(candidate.resolve(), is_test) for candidate in candidates if candidate.resolve() in sources]
         children[path] = resolved
-    test_files = set()
-    pending = [child for links in children.values() for child, is_test in links if is_test]
-    while pending:
-        current = pending.pop()
-        if current not in test_files:
-            test_files.add(current)
-            pending += [child for child, _ in children.get(current, [])]
+    def reachable(starts, follow_test):
+        seen, pending = set(), list(starts)
+        while pending:
+            current = pending.pop()
+            if current not in seen:
+                seen.add(current)
+                pending += [child for child, is_test in children.get(current, []) if follow_test or not is_test]
+        return seen
+
+    # A file any prod declaration reaches stays prod; only test-only files move.
+    roots = [path for path in sources if path.name in {'lib.rs', 'main.rs'} and path.parent.name == 'src']
+    test_files = reachable([child for links in children.values() for child, is_test in links if is_test],
+                           True) - reachable(roots, False)
     prod, test = {}, {}
     for path, source in sources.items():
         relative = str(path.relative_to(root))
@@ -564,7 +661,8 @@ def git(*args):
     return subprocess.run(['git', '-C', str(ROOT), *args], text=True, capture_output=True, check=True).stdout
 
 
-def previous_manifests(inventory=None):
+def previous_manifests(inventory=None, predecessor=None):
+    """Per-ref baselines; a ref without `inventory` is bounded by `predecessor`."""
     inventory = inventory or MANIFEST
     base = os.environ.get('GITHUB_BASE_REF') or 'feat/rust-rewrite'
     parents = git('rev-list', '--parents', '-n', '1', 'HEAD').split()[1:]
@@ -577,14 +675,15 @@ def previous_manifests(inventory=None):
             if not re.fullmatch(r'[a-f0-9]{40}', exact):
                 raise ValueError('invalid event base commit')
             refs.append(exact)
-    relative = git('rev-parse', '--show-prefix').strip() + inventory
     previous = []
     for ref in refs:
         # A missing ref is not a missing manifest. CI must fetch history first.
         git('rev-parse', '--verify', f'{ref}^{{commit}}')
-        files = git('ls-tree', '--full-name', '--name-only', ref, '--', inventory).splitlines()
-        if relative in files:
-            previous.append((ref, manifest(git('show', f'{ref}:{relative}'))))
+        for name in [inventory, predecessor]:
+            path = git('rev-parse', '--show-prefix').strip() + name if name else None
+            if path and path in git('ls-tree', '--full-name', '--name-only', ref, '--', name).splitlines():
+                previous.append((ref, manifest(git('show', f'{ref}:{path}'))))
+                break
     return previous
 
 
@@ -593,7 +692,7 @@ def main():
         prod, test = request_sites()
         failures = check(prod, manifest((ROOT / MANIFEST).read_text()), previous_manifests())
         failures += ['test inventory: ' + failure for failure in check(
-            test, manifest((ROOT / TEST_MANIFEST).read_text()), previous_manifests(TEST_MANIFEST))]
+            test, manifest((ROOT / TEST_MANIFEST).read_text()), previous_manifests(TEST_MANIFEST, MANIFEST))]
     except InventoryRefusal as refusal:
         failures = [f'cannot verify legacy inventory: {refusal}']
     except (ValueError, OSError, KeyError, TypeError, subprocess.CalledProcessError) as error:
