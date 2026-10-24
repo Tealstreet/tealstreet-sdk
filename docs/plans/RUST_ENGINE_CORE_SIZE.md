@@ -14,23 +14,29 @@ Bitget's own code shrank. No profile or budget change.
    refuses a Session parent with `Invalid` before spending any identity. No
    venue on the landing derives Session legs. The in-flight Session PRs
    (#1889, #1851, #1905, #1908, #1897) do not call `http_leg_context`.
-2. **ID-keyed maps use an in-crate multiplicative hasher (`IdMap`).** Every
-   engine map keyed by an engine-issued integer identity (RequestId, TimerId,
-   CommandId, u64/u32 context IDs, Owner) used `RandomState` SipHash. Those
-   keys never come from a peer, so HashDoS resistance buys nothing there. One
-   multiply per word is smaller and faster. String-keyed maps keep
-   `RandomState`. No new dependency.
+2. **Engine-issued ID maps use an in-crate multiplicative hasher (`IdMap`).**
+   Maps keyed only by identities the engine itself issues (RequestId, TimerId,
+   reserved context, root, group and session IDs) used `RandomState` SipHash.
+   No peer, host or caller chooses those keys, so HashDoS resistance buys
+   nothing there; one multiply per word is smaller and faster. Caller-chosen
+   keys keep `RandomState`: CommandId (from the caller's command envelope) and
+   Owner (which embeds it) in `commands`, `read_marks`, execution
+   `members`/`observers` and `active_commands`, as do all String and venue/wire
+   keys. `IdMap` is crate-private, so venues cannot name it. No new dependency.
 
 ## Measurements
 
 Local `yarn rust:build-wasm` bytes; local builds run ~650-900 B above CI.
 
-| Family | Landing 2f5105596db | + Session legs | + IdMap |
+| Family | Landing ceae26c3795 | #2028 | Delta |
 | --- | ---: | ---: | ---: |
-| asterdex | 1,322,304 | 1,322,304 | 1,321,100 (-1,204) |
-| bybit | 1,303,973 | 1,303,328 | 1,303,082 (-891) |
-| bitget | 1,321,122 | 1,321,122 | 1,318,980 (-2,142) |
-| bitget + #1977 68f6e4db183 | 1,365,967 | 1,363,662 | 1,361,815 (-4,152) |
+| asterdex | 1,322,304 | 1,321,423 | -881 |
+| bybit | 1,304,188 | 1,303,467 | -721 |
+| bitget | 1,321,122 | 1,319,276 | -1,846 |
+
+Earlier, with all ID-like maps on `IdMap` and Bitget + #1977 68f6e4db183, the
+Session split alone saved 2,305 B. That saving applies once Bitget derives
+command legs.
 
 ## Controls
 
