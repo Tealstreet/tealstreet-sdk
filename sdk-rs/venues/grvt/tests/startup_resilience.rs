@@ -1,3 +1,4 @@
+use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{Action, Event, Response};
 use safe_cex_venue_grvt::{Grvt, Options};
 
@@ -15,8 +16,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         ..Options::default()
     }));
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -56,8 +57,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
             .expect("bounded public discovery backoff");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = prepared_actions(&mut engine, now)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -85,8 +86,8 @@ fn empty_or_all_malformed_catalogue_retains_current_state_and_recovers_after_bac
                 ..Options::default()
             }));
             engine.start(0.0);
-            let mut request = engine
-                .drain_actions()
+            let mut request = prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) => Some(request),
                     _ => None,
@@ -118,8 +119,8 @@ fn empty_or_all_malformed_catalogue_retains_current_state_and_recovers_after_bac
                     })
                     .unwrap();
                 engine.handle(300_000.0, Event::TimerFired { timer: refresh });
-                request = engine
-                    .drain_actions()
+                request = prepared_actions(&mut engine, 300_000.0)
+                    .into_iter()
                     .find_map(|action| match action {
                         Action::Http(request) => Some(request),
                         _ => None,
@@ -160,8 +161,8 @@ fn empty_or_all_malformed_catalogue_retains_current_state_and_recovers_after_bac
                 })
                 .unwrap();
             engine.handle(now + 1000.0, Event::TimerFired { timer: retry });
-            let recovered = engine
-                .drain_actions()
+            let recovered = prepared_actions(&mut engine, now + 1000.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) => Some(request),
                     _ => None,

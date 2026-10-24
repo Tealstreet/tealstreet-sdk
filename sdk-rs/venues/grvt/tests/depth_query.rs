@@ -14,8 +14,8 @@ fn engine(testnet: bool) -> Engine<Grvt> {
         ..Default::default()
     }));
     e.start(0.0);
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
