@@ -176,3 +176,20 @@ The same ruling extends every job that can bind producers by12min:
 workflow control pins those minima. Historical successful planner40111065296
 (job120925982479) ran16:34:15–16:40:33Z (6min18s); the timeout change is
 explicitly ruled rather than inferred from that one observation.
+
+## Reviewed amended implementation
+
+Plan58dcc and originals4ef9fe51a2c precede the amended runtime. Against
+unchanged ca364 production/workflow, the revised controls execute23 GREEN
+and10 assertion REDs: four empty-list shapes plus the ruled cap, shared and
+concurrent budget, first-refresh spacing pair and workflow timeout boundary.
+The latter budget/timeout assertions pin the new ruled contract. Dazzy3
+independently reproduced them and cleared exact patch SHA256
+`81e3a04ae196e138908afad6a30b9a967b32cc5e2ee093f8cb9c2f51065d2948`.
+
+The applied cpu-ci.mjs and rust.yml are byte-exact to that reviewed patch.
+Scoped CPU controls pass79/79 with0 skipped; install-Yarn controls pass9/9
+with0 skipped. The first combined command named an absent .mjs installer
+test; its actual .cjs file was then run separately, so only that separate
+receipt supplies installer evidence. Fresh PR-triggered CI on the pushed
+head remains required; no retry of the failed original workflow is evidence.

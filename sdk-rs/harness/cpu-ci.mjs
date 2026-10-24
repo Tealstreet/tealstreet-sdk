@@ -157,8 +157,8 @@ export async function currentPhysical(context, name) {
   return { run, job: selected[0] };
 }
 
-const PRODUCER_STEP_REFRESH_LIMIT = 6;
-const PRODUCER_STEP_REFRESH_MS = 5_000;
+const PRODUCER_STEP_REFRESH_LIMIT = 20;
+const PRODUCER_STEP_REFRESH_MS = 30_000;
 const producerIdentity = job => Object.fromEntries(['id', 'run_id', 'run_attempt', 'runner_id',
   'name', 'head_sha', 'head_branch', 'status', 'conclusion', 'started_at'].map(key => [key, job[key]]));
 const workflowIdentity = run => Object.fromEntries(['id', 'run_number', 'run_attempt', 'workflow_id',
@@ -177,22 +177,24 @@ async function terminalProducer(context, jobName, stepName) {
     const identity = producerIdentity(job), workflow = workflowIdentity(run);
     originalJob ??= identity; originalRun ??= workflow;
     insist(same(identity, originalJob) && same(workflow, originalRun), 'producer physical identity changed during step metadata refresh');
-    insist(Array.isArray(job.steps) && job.steps.length > 0 && job.steps.every(step => step && typeof step.name === 'string'),
+    insist(Array.isArray(job.steps) && job.steps.every(step => step && typeof step.name === 'string'),
       'missing producer step inventory');
+    const empty = job.steps.length === 0;
     const upload = job.steps.filter(step => step.name === stepName);
-    insist(upload.length === 1, `missing unique successful step ${stepName}`);
-    if (upload[0].status === 'completed' && upload[0].conclusion != null)
+    insist(empty || upload.length === 1, `missing unique successful step ${stepName}`);
+    if (!empty && upload[0].status === 'completed' && upload[0].conclusion != null)
       insist(upload[0].conclusion === 'success', `missing unique successful step ${stepName}`);
     const pending = job.steps.filter(step => step.status !== 'completed' || step.conclusion == null);
-    if (!pending.length) {
+    if (!empty && !pending.length) {
       const bound = context.bindings?.find(binding => binding.job.id === job.id);
       insist(!bound || same(bound.job, job), 'physical producer changed after artifact binding');
       return { run, job };
     }
     context.producerStepRefreshes ??= 0;
     insist(context.producerStepRefreshes < PRODUCER_STEP_REFRESH_LIMIT,
-      `producer steps not terminal after ${PRODUCER_STEP_REFRESH_LIMIT} refreshes: run ${run.id}, job ${job.id} ${job.name}; ` +
-      pending.map(step => `${step.name} [${step.status}/${step.conclusion}]`).join(', '));
+      `${empty ? 'empty inventory' : 'producer steps not terminal'} after ${PRODUCER_STEP_REFRESH_LIMIT} refreshes: ` +
+      `run ${run.id}, job ${job.id} ${job.name}; ` +
+      (empty ? 'empty step inventory' : pending.map(step => `${step.name} [${step.status}/${step.conclusion}]`).join(', ')));
     context.producerStepRefreshes++;
     await new Promise(resolve => setTimeout(resolve, PRODUCER_STEP_REFRESH_MS));
     inventory = await evidenceInventory(context, true);
