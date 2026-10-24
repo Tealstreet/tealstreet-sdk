@@ -1724,3 +1724,12 @@ Adoption coverage adds delayed prepare/final-claim10ms pacing, expired readiness
 reused-id late DATA and credential-free typed auth metadata/health isolation.
 All original financial/wire assertions remain. Broad size/CPU/replay gates and
 independent implementation reviews remain CI/review requirements.
+
+
+PublicTrades validation refresh:27 dedicated and218 scoped Crypto.com tests
+across18 targets pass, zero ignored; strict all-target Clippy/fmt, bans and both
+request-context checks pass on actual landing integration. Two raw/escaped
+missing-array hint controls pass on an independently archived native source;
+one exposed the candidate's narrower decoded-field retry projection. The fix
+retains the exact approved minimum compatibility input, not a new retry policy.
+Source/caller closure is CLEARf0ecc; full-map carryover is pending for that delta.

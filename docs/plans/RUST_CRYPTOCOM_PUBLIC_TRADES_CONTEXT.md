@@ -2,7 +2,7 @@
 
 Plan-first base: actual landing 1e2458b1c98. Owner: codex-ih35js. Scope is
 unsigned PublicTrades only; implement after/stacked on reviewed #2052, as ruled
-by claude-ddi2il. This checkpoint contains no production changes.
+by claude-ddi2il. Plan/original checkpoints below precede the managed implementation.
 
 ## Exact inventory and ownership
 
@@ -265,3 +265,26 @@ The preparation-refusal control now asserts the engine's pre-release NotSent
 attempt fact, matching the existing managed candle/depth route controls. This
 is documented in CALLERS; no adapter projection or shared engine change is
 made. Released public read failures/root expiry still have no financial outcome.
+
+
+## Integrated validation
+
+Actual #2052 ee949145954 and current landing7501c8c4412 are genuinely merged.
+Shared docs retain incoming content plus the own suffix once. Protected Crypto
+account/trading/identity/sign/wire, engine/crypto/registry/hosts and all unowned
+paths are incoming-exact. Credential-selection terms are unchanged.
+
+Refreshed scoped Crypto.com suite:218 tests across18 targets (including empty
+doc tests), zero ignored. All27 dedicated PublicTrades controls pass, including
+the original21 plus four managed boundaries and two raw/escaped retry controls.
+Strict all-target Clippy, fmt/diff, full bans and request checker plus15 tests
+pass after actual integration. Source/adversarial and caller closure are CLEAR
+at f0ecc467daa; full-map is CLEAR at12a602fa57c, with bounded carryover requested
+for the later compatibility/control delta. Architecture gate: No.
+
+The two raw/escaped controls both pass against separately archived unchanged
+Crypto.com1e245 source with byte-identical engine/crypto dependencies. Before
+the compatibility fix, the candidate had one assertion RED and one working
+control; no claim of two executed candidate REDs is made. The archive and logs
+are local evidence, not committed build/profiling artifacts. Broad certification,
+family bytes/CPU and exact-head CI remain pending; no merge readiness is claimed.
