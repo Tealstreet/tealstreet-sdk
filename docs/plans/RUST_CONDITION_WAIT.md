@@ -40,7 +40,7 @@ impl<P> Cx<'_, P> {
     pub fn preflight_condition_wait(
         &mut self,
         preflight: &Preflight,
-        bound_ms: u32,
+        bound_ms: Option<u32>,
     ) -> Result<ConditionWait, Error>;
 
     /// Between serial calls, from the current call's exact custody under the
@@ -51,7 +51,7 @@ impl<P> Cx<'_, P> {
         plan: &Plan,
         slot: &Slot,
         context: &Context,
-        bound_ms: u32,
+        bound_ms: Option<u32>,
     ) -> Result<ConditionWait, Error>;
 
     /// From any callback, borrowed included. Grants nothing directly: it
@@ -71,6 +71,16 @@ impl<P> Cx<'_, P> {
   venue calls `fail_preflight` or `fail_plan`. The engine never chooses the
   native message. A serial Plan's projection keeps every streamed accepted
   ID, so the projection stays exact even if a venue parks with IDs.
+- **Bound.** `bound_ms` is computed by the venue per call, so it need not be
+  a constant. Bitget passes `shared_deadline - now` so that every queued
+  command fails at native's one shared 10 s deadline. `None` means no engine
+  bound, for Bitget's queue behind an active job, which native never bounds
+  (ruling needed). A caller receipt never bounds a parked owner: a
+  WriteAfterReads Preflight binds no receipt, so caller-wait expiry is not a
+  terminal (as serial Plan RED18).
+- **Concurrency.** Many owners may each hold one wait at once, up to the
+  engine's existing `CAPACITY`; past it, a new wait is Capacity and spends
+  nothing.
 - **Single use, one per owner.** A handle releases once. A second wait on the
   same owner is State. A stale handle (expired, released, or a reused command
   generation) is Revoked and spends nothing. Release after expiry, and expiry
@@ -79,10 +89,11 @@ impl<P> Cx<'_, P> {
   one reserved Context. The wait uses the Plan's one timer, so it excludes a
   delayed continuation. The RED19 stops (revoke, Session retirement,
   shutdown, cancel) end a parked Plan at once, because nothing is live.
-- **Out of scope.** Commands queued behind the active job are venue state in
-  Bitget's queue, each with its own entry. Failing them at the bound is the
-  venue's own sealed work, not this primitive. Declared Plans keep their
-  current surface.
+- **Bitget queue.** Each command queued behind the active job is its own
+  WriteAfterReads Preflight, parked with `preflight_condition_wait`. At
+  detection it uses the shared remaining bound; behind an active job it uses
+  `None`. The venue releases the next one when the active job ends, and its
+  ready hook admits it. Declared Plans keep their current surface.
 
 ## REDs (before source)
 
@@ -105,6 +116,14 @@ impl<P> Cx<'_, P> {
    live.
 7. The RED19 stops end a parked Plan or Preflight immediately, with one
    terminal.
+8. Three Preflights park at once with computed bounds (10 s, 4 s, 1 s from one
+   shared deadline) and all expire at the same instant. Past `CAPACITY`, a new
+   wait is Capacity.
+9. An unbounded (`None`) park survives past the 120 s caller wait with no
+   terminal and is released by the venue in a borrowed callback.
+10. A mid-Plan expiry after an earlier released and accepted call: `fail_plan`
+    projects the accepted IDs and a failure that is not NotSent (native
+    `trade_fail` keeps the IDs once anything was effective).
 
 ## Gates
 
