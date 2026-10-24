@@ -252,7 +252,7 @@ The history/write/WS post-provider assertions are gated by their first RED, not
 counted executed. Exact deferred-provider release/reprepare and cross-engine
 nonce claims await uufub4's reviewed real-engine API controls; this target does
 not invent a nonce constructor or reservation fixture. Missing/malformed subject
-shared taxonomy and eight-repair proposal are documented requirements, not an
+shared taxonomy and the overseer-approved eight-repair bound are documented requirements, not an
 executed native consumer migration. Production remains held for exact nonce and
 session fit, original review, and actual dependency integration.
 
@@ -266,3 +266,21 @@ Clippy on only the new target passes. No production or dependency is pulled into
 this plan branch. Actual5b219 is landed now, but nonce and session API review
 remain production gates; the source-order paragraph is historical, not a claim
 that the dispatch nonce seam has landed.
+
+
+### Actual 5b checkpoint
+
+Plain-merged actual219d4bc6725 at5a89019d6d3 with no conflict. Only this plan and
+the new dispatch_signer_adoption target differ from that landing; all production,
+existing fixtures, Cargo and inventories remain byte-exact incoming. Re-executed
+the unchanged 20 originals: 9 intended assertion REDs / 11 GREEN / zero ignored.
+The prior fixture compile/mistaken read-only positive remain excluded. No WIP
+push or duplicate CI run is needed for this local plan/original checkpoint.
+
+uufub4's shared nonce plan/original028e4db578f has bounded consumer/API/original
+fit CLEAR: separate reservation and global released-floor fences at provider
+apply/final Claim, exact decimal u64 receipt, private raw-ms ceiling and eight
+pre-send repairs. Its legacy allocator probe is explicitly original fence
+exposure, not trusted mint/raw-clock/HMAC/wipe/group/repair readiness proof.
+Exact source hooks, #2024 composition, old secret-digest to stable-subject
+continuity and session-generation API fit remain review gates before production.
