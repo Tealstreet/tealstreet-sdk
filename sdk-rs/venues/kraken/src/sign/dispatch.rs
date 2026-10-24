@@ -1,7 +1,6 @@
 //! Atomic Kraken recipes. Native callers and socket authority are adopted separately.
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::credential_selection::{CredentialRole, Selection};
-use safe_cex_engine::nonce::{KRAKEN, NonceClaim, NonceError, NonceSelectionError};
 use safe_cex_engine::request_context::Credential;
 use safe_cex_engine::signing::{
     Algorithm, Context, Encoding, Identities, Identity, Operation, PayloadPart, SignError,
@@ -17,13 +16,17 @@ const SPOT_HEADERS: &[(&str, &str)] = &[("Content-Type", FORM), ("Accept", "appl
 pub struct Selected {
     selection: Selection,
     identity: Identity,
-    claim: NonceClaim,
+    claim: safe_cex_engine::nonce::NonceClaim,
     spot: bool,
 }
 impl Selected {
-    pub fn futures(ids: &Identities, role: CredentialRole) -> Result<Self, NonceSelectionError> {
+    pub fn futures(
+        ids: &Identities,
+        role: CredentialRole,
+    ) -> Result<Self, safe_cex_engine::nonce::NonceSelectionError> {
         let slots = super::setup::futures_slots(ids);
-        let (selection, identity, claim) = slots.select_with_nonce(role, &KRAKEN)?;
+        let (selection, identity, claim) =
+            slots.select_with_nonce(role, &safe_cex_engine::nonce::KRAKEN)?;
         Ok(Self {
             selection,
             identity: identity.clone(),
@@ -31,9 +34,13 @@ impl Selected {
             spot: false,
         })
     }
-    pub fn spot(ids: &Identities, role: CredentialRole) -> Result<Self, NonceSelectionError> {
+    pub fn spot(
+        ids: &Identities,
+        role: CredentialRole,
+    ) -> Result<Self, safe_cex_engine::nonce::NonceSelectionError> {
         let slots = super::setup::spot_slots(ids);
-        let (selection, identity, claim) = slots.select_with_nonce(role, &KRAKEN)?;
+        let (selection, identity, claim) =
+            slots.select_with_nonce(role, &safe_cex_engine::nonce::KRAKEN)?;
         Ok(Self {
             selection,
             identity: identity.clone(),
@@ -78,7 +85,7 @@ impl Selected {
 
 pub struct Http {
     identity: Identity,
-    claim: NonceClaim,
+    claim: safe_cex_engine::nonce::NonceClaim,
     method: Method,
     url: String,
     body: Option<String>,
@@ -92,7 +99,7 @@ impl Http {
     /// Consume the claim minted by a retained read queue or a selected direct request.
     pub fn futures(
         identity: &Identity,
-        claim: NonceClaim,
+        claim: safe_cex_engine::nonce::NonceClaim,
         method: Method,
         path: &str,
         form: &str,
@@ -134,7 +141,7 @@ impl Http {
     /// Spot never accepts a Secondary claim, including one minted outside its factory.
     pub fn spot(
         identity: &Identity,
-        claim: NonceClaim,
+        claim: safe_cex_engine::nonce::NonceClaim,
         path: &str,
         form: &str,
         freshness_ms: f64,
@@ -161,7 +168,7 @@ impl Http {
     #[allow(clippy::too_many_arguments)]
     fn new(
         identity: &Identity,
-        claim: NonceClaim,
+        claim: safe_cex_engine::nonce::NonceClaim,
         method: Method,
         url: String,
         body: Option<String>,
@@ -250,7 +257,7 @@ impl Http {
     }
 }
 impl SignStep for Http {
-    fn nonce_claim(&self) -> Option<&NonceClaim> {
+    fn nonce_claim(&self) -> Option<&safe_cex_engine::nonce::NonceClaim> {
         Some(&self.claim)
     }
     fn unsigned_http_headers(&self) -> &'static [(&'static str, &'static str)] {
@@ -273,7 +280,8 @@ impl SignStep for Http {
         let nonce = dispatch
             .reserve_nonce(&self.claim)
             .map_err(|error| match error {
-                NonceError::InvalidTime | NonceError::InvalidClaim => SignError::InvalidRequest,
+                safe_cex_engine::nonce::NonceError::InvalidTime
+                | safe_cex_engine::nonce::NonceError::InvalidClaim => SignError::InvalidRequest,
                 _ => SignError::Unavailable,
             })?;
         let (body, work) = self.work(nonce, dispatch.stamp_ms())?;

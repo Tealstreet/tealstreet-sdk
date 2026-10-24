@@ -606,3 +606,35 @@ its separate harness artifact. That wrapper is not production SDK API and must
 not reserve/seed or masquerade as a real family consumer. V5 is codec+actual
 recipe MAC only; V3/V4 genuine reservations and stale-Claim repair remain engine
 proof obligations. Native Kraken-family adoption stays a later gate.
+
+### Published recipe slice and held adoption originals
+
+The recipe draft stacks on nonce #2093 at 7cfb791b1f9 after plain-merging the
+actual 6b landing and subsequent tip. Recipe logic remains exact to reviewed cbc6c9b9634 after reversing only the
+explicit nonce-path qualification required by the credential checker. Native
+private callers and their credential/nonce
+namespace remain unchanged; this slice does not adopt them.
+
+The unchanged dispatch_signer_adoption target specifies that later native
+cutover. Cargo runs it explicitly with the private-adoption-originals test
+feature, rather than treating its deliberately unsatisfied future contract as an
+implemented recipe regression. No original assertion is removed, ignored or
+weakened. Default recipe CI does not certify those held originals. Re-enable the
+target in ordinary test execution with the actual private adoption; its original
+immutable checkpoints and the separate adoption plan remain the evidence.
+
+Run the held target with:
+
+```sh
+CARGO_BUILD_JOBS=4 cargo test -p safe-cex-venue-kraken \
+  --features private-adoption-originals --test dispatch_signer_adoption
+```
+
+Post-stack validation on nonce7cfb791b1f9 plus actual9cc6eac669c: default Kraken
+crate337PASS/0failed/0ignored, including the16 recipe controls and11 library
+controls. Strict all-target Clippy also compiles the opt-in originals; formatting,
+bans and all ratchets pass. Explicit execution of the held original target gives
+13GREEN/10assertionRED/0ignored, the same future-native-adoption failures. Its
+source blob is byte-exact CBC. No engine/registry/host source differs from the
+nonce head; no existing public engine item is changed by this recipe slice.
+All three inventories and every native Kraken caller blob equal the actual tip.

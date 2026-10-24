@@ -4,6 +4,13 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+private-adoption-originals = []
+
+[[test]]
+name = "dispatch_signer_adoption"
+required-features = ["private-adoption-originals"]
+
 [dependencies]
 safe-cex-engine = { workspace = true, features = ["order-locks"] }
 safe-cex-crypto = { workspace = true, features = ["hmac-sha512"] }
