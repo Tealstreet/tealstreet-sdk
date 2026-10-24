@@ -421,3 +421,13 @@ The secret scanner also flagged historical plan prose at commit 48f8b6cbe57,
 line 271 (the API-fit attribution sentence), not signing material. Reword the
 current sentence. An exact historical fingerprint allowance requires the
 maintainer's explicit approval; no broad rule/path exemption or history rewrite.
+
+A second independent original CI failure is in the Bitrue SDK boundary fixture:
+its fake transport provides request() but no managed prepareHttp(), so dispatch
+refuses Unsupported before sending. Carry the existing shared recorded-transport
+adapter into this Bitrue test, retaining every native financial/signature assertion.
+The shared public cutover fixture already has the adapter and is unchanged.
+The isolated native host closure now enables dispatch signing; 20 host controls,
+strict Clippy, full local bans/ratchets and both current/historical secret scans
+pass. The exact historical allowance was explicitly granted by the maintainer.
+Fresh WASM/replay CI must still prove both original boundary failures corrected.
