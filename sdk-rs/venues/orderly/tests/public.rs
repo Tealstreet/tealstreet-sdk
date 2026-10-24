@@ -8,7 +8,7 @@ use support::Clock;
 
 type Driver = Engine<Orderly>;
 fn actions(e: &mut Driver) -> Vec<Action> {
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, 1000.0)
 }
 fn requests(e: &mut Driver) -> Vec<HttpRequest> {
     actions(e)

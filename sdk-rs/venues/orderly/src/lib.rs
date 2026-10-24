@@ -1350,3 +1350,7 @@ impl Venue for Orderly {
         )
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/public_seed_custody.rs"]
+mod public_seed_custody;

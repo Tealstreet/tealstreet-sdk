@@ -127,3 +127,35 @@ Log: /tmp/codex-orderly-public-seed-source.log. This local checkpoint remains
 unpublished while the scoped source-stage pressure, stream and credit controls,
 fixture collection, inventory update and source reviews are completed. No CI,
 READY or full native-suite claim is made by this checkpoint.
+
+## Source and custody checkpoint on actual BloFin landing
+
+Actual `2caa80214f0` is plain-merged; no Orderly production source conflicts.
+The eleven original controls remain byte-exact to the reviewed original pin.
+Nine added actual-Engine controls cover Context pressure/recovery/all 256 credits,
+physical queue refusal after successful Context admission, preparation refusal,
+late preparation, streamed prefix plus exact final expiry, independent concurrent
+market deliveries, ticker preparation/Network/Timeout cleanup and late 429,
+and nonfinite admission without IO or a NaN retry timer.
+
+The scoped Orderly crate executes 241 tests PASS, zero ignored. Strict all-target
+Clippy and normal bans/ratchets pass. The only request inventory change removes
+`dee025771565` count one: actual family 24 fingerprints/25 occurrences becomes
+23/24. Signing, credentials, selection and foreign request entries are unchanged.
+No CI or source-review clearance is claimed by this local checkpoint.
+
+Existing startup collectors drive real Prepare/Bind/Claim at their native clocks.
+The command-candle pressure fixture now completes both real startup seeds before
+filling all 256 command slots; its original count, owner and recovery assertions
+are unchanged. The suppressed-public-feed check separately pins exactly two
+bootstrap HTTP deadline timers, each cleared at that same clock, then retains its
+no-public-retry assertion for every other timer and socket close. Its previous
+blanket timer check included the newly required HTTP admission timers.
+The WASM recorded transport gains only the shared preparation import and field;
+removing those two lines restores the entire previous fixture.
+
+Fixture-development corrections are excluded from evidence: one HttpChunk string
+was changed to bytes; the second failure uses native exponential backoff, and a
+second failure while a native retry is already armed adds no timer. Failure
+absence checks permit required exact cancellation while rejecting Prepare,
+Bind, signing and wire work. Original test assertions were not changed.

@@ -38,8 +38,8 @@ fn public() -> Driver {
         ..Default::default()
     }));
     e.start(0.);
-    let requests: Vec<_> = e
-        .drain_actions()
+    let requests: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -60,7 +60,7 @@ fn public() -> Driver {
             },
         },
     );
-    let _ = e.drain_actions().count();
+    let _ = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
     assert!(
         e.store().loaded().orders,
         "native public-only startup marks empty account tables loaded"
