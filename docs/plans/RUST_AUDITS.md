@@ -3010,3 +3010,18 @@ current cleanup without DATA or newer-owner authority. The exact removal-only
 manifest delta is two MEXC lib fingerprints/occurrences,18 to16 in the venue.
 No private signer, account/history/trading reducer, scheduler or engine code
 changes in this slice. Family performance/size evidence remains a CI gate.
+## WOO socket authority adoption
+
+WOO's two physical connect sites use the landed managed-socket core. Native
+code retains protocol construction, book/candle facts and account decoding;
+Engine owns epochs, auth evidence, timers, retry and complete interest release.
+The public AnyText/ControlPolicy::None policy preserves cached-index ticker
+processing without a second control JSON parse. Native private refusal continues
+through reconnect without revoking the public sibling or clearing financial state.
+
+Compatibility review found financial fixtures delivering private data before
+an open and a signing fixture opening years after connection creation. They now
+establish valid ingress custody while retaining their original result and wire
+assertions. No account reducer or native snapshot token logic is changed. Socket
+inventory pruning is WOO-only; the request inventory and every other family stay
+exact. Bitunix remains excluded under Sam's explicit option-1 decision.

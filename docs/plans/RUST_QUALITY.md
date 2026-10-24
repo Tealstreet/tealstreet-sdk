@@ -1655,3 +1655,27 @@ reference tests across26 targets pass (target counts include empty doc tests).
 Strict Clippy/fmt, bans and both inventory checks pass after the fix. Independent
 source/adversarial, caller and full-map delta reviews are CLEAR atbec93dd562a;
 architecture gate No. CI family size/CPU and other CI gates remain pending.
+## WOO managed socket controls
+
+Plan cd7acf34bbb preceded test-only checkpoint bc5415d7c09. Four real-engine
+assertions fail on the original WOO path: duplicate public interest replay,
+duplicate private auth/read issuance, late public data publishing before expiry,
+and expired private auth releasing subscriptions. Both native live-wire controls
+pass on that source; the remaining compatibility run passes 194 tests.
+
+Managed controls retain those assertions and cover accepted private execution,
+full reconnect interest bytes, native book-seed buffering/generation fences and
+candle reference counts. Financial account fixtures establish a real open/auth
+stream before injecting native data. The fractional-signature fixture anchors
+connection creation to the same epoch clock as its fractional open. All existing
+account financial/wire assertions remain intact. Rebuilt CI owns the public CPU,
+retained-memory and module-size evidence; native checks alone make no such claim.
+
+The focused all-feature engine/WOO run passes 1,180 tests across 25 targets;
+strict Clippy and formatting pass. A separate malformed-auth control covers
+missing and mistyped success proof, closure and inert late acceptance. The ten
+managed-socket controls pass. Source preservation compares all non-socket account
+methods and all 191 existing account assertion lines; signer, HTTP recipe,
+history, trading and build-profile files are unchanged. The first repository ban
+run stops on a landed Lighter inventory delta absent from this branch; the
+current-landing integration must carry that delta before its ban check.
