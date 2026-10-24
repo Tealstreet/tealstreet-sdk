@@ -6864,6 +6864,8 @@ Rust hosts seal after final entropy/provider injection and before startup.
 Healthy host cleanup retires before settling commands and releasing resources;
 retirement failure fences the engine. A dead host never enters an engine export
 or frees its WASM engine; host-owned cancellation still preserves Unknown/IDs.
+Managed-HTTP post-release bookkeeping stops at the host disposal fence before
+evaluating engine callbacks; already released send evidence is retained.
 
 G2c snapshot installation will freeze all dependent identities, provider and setup
 policy setters immediately, including before startup. Account construction must

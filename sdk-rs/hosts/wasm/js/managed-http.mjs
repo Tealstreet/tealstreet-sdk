@@ -149,6 +149,7 @@ export class ManagedHttp {
 
   // A post-release observer cannot change send evidence or strand response work.
   post(callback) {
+    if (this.host.disposed) return;
     try { callback(); }
     catch {
       try { this.host.handlers.onLog?.('warning', 'HTTP post-release callback failed'); }

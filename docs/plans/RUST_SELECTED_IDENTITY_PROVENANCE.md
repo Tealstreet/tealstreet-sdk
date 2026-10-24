@@ -673,7 +673,15 @@ installed snapshot/registry/native hooks remain unimplemented in this slice.
 Late-callback source review retains the stricter zero-property-access boundary.
 A managed HTTP control now poisons the host synchronously inside a real bound
 dispatch, then verifies resources/timers are retired and no engine callbacks ran.
-Its final assertion exposes one late prepareDispatch property read in post-release
-bookkeeping. The proposed fix is an early disposed check in ManagedHttp::post,
-not a change to group claim, bound readiness or dispatch; that exact shared-host
-hunk goes to the G2b owner before applying.
+Its original final assertion exposed one late prepareDispatch property read in
+post-release bookkeeping (`e336e9cc9a0`). The G2b owner cleared the exact one-line
+early disposed check in ManagedHttp::post. With that guard applied, the scoped
+managed-HTTP file and all 25 group-fence controls pass: 36 tests, zero failures
+or skips. Healthy post-release drain/response ordering remains covered by its
+existing working control; group claim, bound readiness and dispatch are unchanged.
+
+P3(a) remains OPEN for the broader audit of late async callbacks that evaluate
+host.engine.X arguments before invoke's disposed guard. The demonstrated managed
+post path is fixed; this does not claim every socket/abort/fetch callback has been
+audited for zero property access. No late WASM export entry is permitted, and full
+Rust snapshot/native/deferred-completion readiness remains separately gated.
