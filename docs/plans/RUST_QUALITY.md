@@ -1575,3 +1575,37 @@ controls: command-owner capacity/recovery, expired/sub-ms receipt, duplicate
 original owner/diagnostic, Background Context independence, all credential
 configurations, true-mode refusal and absent symbol behavior. No fabricated
 Context or missing-method compile failure is evidence.
+
+## Flat-position unavailable PnL projection
+
+Original financial-evidence controls reproduce two assertion failures: native
+NaN creates a null-PnL row, and native/TS unavailable evidence differs. Five
+working controls retain real finite PnL, numeric strings, non-flat positions and
+genuine PnL mismatches. Admission now uses the same finite conversion as the
+projection, preserving zero and losses while excluding unavailable sentinels.
+Declaration pruning requires fresh inverse replay evidence for each removed key.
+
+### Public refusal and catalog custody controls
+
+Paradex uses genuine retained peers to pin local candle and book-entry capacity,
+clock/reuse and duplicate custody, with native GET/schema and saturated candle
+fallthrough controls. Lighter pins exact public catalog wire across four hosts,
+spot filtering/precision, endpoint fallback/backoff, real Prepare/Bind/Claim,
+preclaim/released expiry, failed streamed prefixes and inert stale/duplicate work.
+A255-peer registry-pressure control forces each catalog attempt to retire before
+fallback/retry and successful slot reuse; expiry cannot conceal a root leak.
+Existing startup fixtures retain their assertions while using shared preparation.
+
+## Joined order-read authority: WOO and Crypto.com
+
+WOO's regular/algo pages and Crypto.com's regular/advanced reads carry one owned
+Store token across the logical census. All native classification/membership and
+initial execution-baseline publication is inside the admitted callback; later
+metadata/repair HTTP and timers stay outside. ACK invalidation follows the
+existing validated order-only success boundaries, including absent rows and
+partial success. Per-ID WS progress, terminal fences and rejection retention
+remain unchanged. Capture/late exhaustion, accepted/refused/malformed ACKs,
+both WOO arrival orders, Crypto auth/transport retry after ACK, WS peer progress
+and later WOO amend/fill behavior have bounded native controls. Native original
+RED receipts distinguish the two accepted-write crossings from API-adoption
+controls; no live/private or full-parity claim follows from local tests.

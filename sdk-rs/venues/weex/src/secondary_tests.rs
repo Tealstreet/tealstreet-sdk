@@ -21,7 +21,13 @@ fn probe(
 ) -> ProbeVenue<WeexFutures, impl FnMut(&mut WeexFutures, &mut Cx<'_, Pending>)> {
     ProbeVenue::new(venue, |venue, _cx| {
         for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
-            let (identity, slot) = venue.credentials.select(method).unwrap();
+            let role = if method == Method::Get {
+                safe_cex_engine::credential_selection::CredentialRole::Read { scope: None }
+            } else {
+                safe_cex_engine::credential_selection::CredentialRole::Mutation
+            };
+            let (selection, identity) = venue.slots.select(role).unwrap();
+            let slot = selection.slot();
             let (expected, expected_slot) = if method == Method::Get {
                 (
                     venue.credentials.read.as_ref().unwrap(),

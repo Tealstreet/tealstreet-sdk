@@ -1707,3 +1707,239 @@ fn grouped_positions_count_unique_ids_and_each_anonymous_row_keep_cached_exposur
     assert_eq!(e.health().rows_skipped - health, 1);
     assert_eq!(e.store().positions(), before);
 }
+
+// Snapshot authority is distinct from the per-ID WS clocks.
+#[test]
+fn snapshot_token_rejects_both_join_orders_after_explicit_invalidation() {
+    for algo_first in [false, true] {
+        let (mut e, socket, mut reads, _) = start();
+        load(&mut e, &mut reads);
+        let before = e.store().orders().to_vec();
+        e.drain_actions().for_each(drop);
+        e.handle(70.0, Event::WsOpened { socket });
+        let mut reads = requests(&mut e);
+        let normal = take(&mut reads, "/v1/orders?");
+        let algo = take(&mut reads, "/v3/algo/orders?");
+        if algo_first {
+            response(&mut e, &algo, 80.0, &algos(""));
+        } else {
+            response(&mut e, &normal, 80.0, &page(""));
+        }
+        e.store_mut().invalidate_order_snapshots();
+        if algo_first {
+            response(&mut e, &normal, 90.0, &page(""));
+        } else {
+            response(&mut e, &algo, 90.0, &algos(""));
+        }
+        assert_eq!(e.store().orders(), before, "algo_first={algo_first}");
+        assert!(!requests(&mut e).iter().any(|r| r.url.contains("/orders?")));
+    }
+}
+
+#[test]
+fn snapshot_token_accepted_cancel_ack_fences_an_older_join() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    let before = e.store().orders().to_vec();
+    e.drain_actions().for_each(drop);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let normal = take(&mut reads, "/v1/orders?");
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    e.handle(
+        75.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 907,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let writes = requests(&mut e);
+    let cancel = writes
+        .iter()
+        .find(|r| r.method == safe_cex_engine::Method::Delete)
+        .unwrap();
+    response(&mut e, cancel, 76.0, r#"{"success":true}"#);
+    response(&mut e, &normal, 80.0, &page(""));
+    response(&mut e, &algo, 90.0, &algos(""));
+    assert_eq!(e.store().orders(), before);
+}
+
+#[test]
+fn snapshot_token_capture_and_late_exhaustion_leave_orders_and_polling_owned() {
+    for late in [false, true] {
+        let (mut e, socket, mut reads, timer) = start();
+        load(&mut e, &mut reads);
+        let before = e.store().orders().to_vec();
+        e.drain_actions().for_each(drop);
+        if !late {
+            safe_cex_engine::test_support::exhaust_order_snapshots(e.store_mut());
+        }
+        e.handle(70.0, Event::WsOpened { socket });
+        let mut reads = requests(&mut e);
+        if late {
+            let normal = take(&mut reads, "/v1/orders?");
+            let algo = take(&mut reads, "/v3/algo/orders?");
+            response(&mut e, &normal, 80.0, &page(""));
+            safe_cex_engine::test_support::exhaust_order_snapshots(e.store_mut());
+            response(&mut e, &algo, 90.0, &algos(""));
+        } else {
+            assert!(!reads.iter().any(|r| r.url.contains("/orders?")));
+        }
+        assert_eq!(e.store().orders(), before);
+        e.drain_actions().for_each(drop);
+        e.handle(2010.0, Event::TimerFired { timer });
+        assert!(
+            e.drain_actions()
+                .any(|a| matches!(a, Action::SetTimer { .. }))
+        );
+    }
+}
+
+#[test]
+fn snapshot_token_ws_peer_stays_current_and_healthy_algo_rows_commit() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.drain_actions().for_each(drop);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let normal = take(&mut reads, "/v1/orders?");
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    let sibling = e.store_mut().begin_orders_snapshot().unwrap();
+    response(&mut e, &normal, 80.0, &page(ORDER));
+    ws(
+        &mut e,
+        socket,
+        85.0,
+        r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedPrice":59000}}"#,
+    );
+    assert!(e.store().orders_snapshot_current(&sibling));
+    response(&mut e, &algo, 90.0, &algos(&ALGO.replace("65000", "65500")));
+    assert_eq!(e.store().order("9007199254740993").unwrap().filled, 0.006);
+    assert_eq!(e.store().order("44").unwrap().price, 65500.0);
+    assert!(e.store().orders_snapshot_current(&sibling));
+}
+
+#[test]
+fn snapshot_token_invalid_placement_ack_does_not_invalidate_but_valid_id_does() {
+    for (body, accepted) in [
+        (r#"{"success":false,"message":"refused"}"#, false),
+        (r#"{"success":true,"order_id":"bad"}"#, false),
+        (r#"{"success":true,"order_id":123}"#, true),
+    ] {
+        let (mut e, _, mut reads, _) = start();
+        load(&mut e, &mut reads);
+        e.drain_actions().for_each(drop);
+        let token = e.store_mut().begin_orders_snapshot().unwrap();
+        let order = serde_json::from_str(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":59000}"#,
+        )
+        .unwrap();
+        e.handle(
+            100.0,
+            Event::Command(Command::PlaceOrders {
+                command: 910,
+                orders: vec![order],
+            }),
+        );
+        let writes = requests(&mut e);
+        let write = writes
+            .iter()
+            .find(|r| r.method == safe_cex_engine::Method::Post && r.url.ends_with("/v1/order"))
+            .unwrap();
+        response(&mut e, write, 110.0, body);
+        assert_eq!(
+            e.store().orders_snapshot_current(&token),
+            !accepted,
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn snapshot_token_rejected_algo_join_does_not_poison_later_amend_routing() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    ws(
+        &mut e,
+        socket,
+        65.0,
+        r#"{"topic":"algoexecutionreportv2","data":{"symbol":"PERP_BTC_USDT","algoOrderId":92,"rootAlgoOrderId":92,"algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","quantity":0.01,"triggerPrice":58000,"totalExecutedQuantity":0,"reduceOnly":true}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let normal = take(&mut reads, "/v1/orders?");
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    response(&mut e, &normal, 80.0, &page(""));
+    e.store_mut().invalidate_order_snapshots();
+    response(
+        &mut e,
+        &algo,
+        90.0,
+        &algos(&ALGO.replace("\"algoOrderId\":43", "\"algoOrderId\":92")),
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        110.0,
+        Event::Command(Command::AmendOrder {
+            command: 92,
+            id: "92".into(),
+            price: Some(58500.0),
+            amount: None,
+        }),
+    );
+    let writes = requests(&mut e);
+    let amend = writes
+        .iter()
+        .find(|r| r.url.ends_with("/v3/algo/order/92"))
+        .unwrap();
+    assert_eq!(amend.body.as_deref(), Some(r#"{"triggerPrice":"58500"}"#));
+}
+
+#[test]
+fn snapshot_token_discarded_initial_join_cannot_seed_execution_prefix_or_readiness() {
+    for fresh_read in [false, true] {
+        let (mut e, socket, mut reads, _) = start();
+        let info = take(&mut reads, "accountinfo");
+        response(&mut e, &info, 30.0, INFO);
+        reads.extend(requests(&mut e));
+        let positions = take(&mut reads, "/v3/positions");
+        response(&mut e, &positions, 40.0, POS);
+        let normal = take(&mut reads, "/v1/orders?");
+        let algo = take(&mut reads, "/v3/algo/orders?");
+        response(&mut e, &normal, 50.0, &page(ORDER));
+        e.store_mut().invalidate_order_snapshots();
+        response(&mut e, &algo, 60.0, &algos(""));
+        assert!(!e.store().loaded().orders);
+        assert!(e.store().orders().is_empty());
+        e.drain_actions().for_each(drop);
+        if fresh_read {
+            e.handle(70.0, Event::WsOpened { socket });
+            let mut reads = requests(&mut e);
+            let normal = take(&mut reads, "/v1/orders?");
+            let algo = take(&mut reads, "/v3/algo/orders?");
+            response(
+                &mut e,
+                &normal,
+                75.0,
+                &page(&ORDER.replace("0.005", "0.004")),
+            );
+            response(&mut e, &algo, 80.0, &algos(""));
+            assert!(e.store().loaded().orders);
+        }
+        e.take_frame(85.0);
+        ws(
+            &mut e,
+            socket,
+            90.0,
+            r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedPrice":59000}}"#,
+        );
+        let amounts = fill_amounts(&mut e);
+        assert_eq!(amounts.len(), 1);
+        let expected = if fresh_read { 0.002 } else { 0.006 };
+        assert!(
+            (amounts[0] - expected).abs() < 1e-12,
+            "fresh_read={fresh_read}: {amounts:?}"
+        );
+    }
+}

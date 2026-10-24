@@ -661,9 +661,6 @@
     "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
   },
-  "venues/lighter/src/lib.rs": {
-    "1edfac341aacb74280c04d466785c3f6d76a4871da14449c5712b67a351a608e": 1
-  },
   "venues/lighter/src/limits.rs": {
     "0b656f6ecb232b6e58dda360591ebef081f74c048b07c021b2589b269fb21488": 1,
     "26fc6022675dbea66e5c0e605347b6e0bdfc680e7a2744ff5621ba94df81790f": 1,
@@ -777,9 +774,6 @@
     "c8154248a24f58ded15a175a8afd344f331635f51e564a526d510748797ff231": 1,
     "e473c92d9c3a15cbdf8752a673c64963c9ef531ee4a7e47ae60d1abe5e32659e": 1
   },
-  "venues/paradex/src/depth_query.rs": {
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-  },
   "venues/paradex/src/history.rs": {
     "156d12f0af1aa73d997695a9ee5ae2f0b10efdaf05fbf3c5a44b49c0b8c67eb3": 4,
     "4f41451eb1e1a039f8b647eaee00abfdc9027246d230dff2fad9129e9919c3e7": 2,
@@ -793,12 +787,10 @@
     "d04c9c210338abd029de862338a9937ff19e38f96097cbfba0efb4bbf2728caf": 1
   },
   "venues/paradex/src/public.rs": {
-    "03068ad7442b394da421e7d1e0e04829b66c8bf11ddefd0dfdf69862ab1fa97f": 1,
     "094a464645386463fbc12779495700591cd0fc4570d7257183d9928fc29b60f5": 1,
     "9eb2532ffa305903307527ed26561752ae2716a465c7347f6bb03d38987efb3d": 1,
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
     "d5350d6b7eb9bb6083de59c2c42f6ec4de997ccda8d28c277c0803969d9f2a77": 1,
-    "da04770a10b1e89bc8090a23a76b5cb0ac39bd576ec7a35134c4bb8873d55eaf": 1,
     "f4ff4cf72ac7033d5f05a949c3bebdf69840234f87e83ff025e63bdb7d7999b6": 1
   },
   "venues/paradex/src/trading.rs": {
