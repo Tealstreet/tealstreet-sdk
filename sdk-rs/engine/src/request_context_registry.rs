@@ -168,6 +168,7 @@ pub(super) use owned_call::Admission as OwnedAdmission;
 #[path = "request_context_planned.rs"]
 mod planned;
 #[cfg(feature = "http-plans")]
+#[cfg(feature = "http-mutation-barriers")]
 pub(in crate::engine) use planned::MutationGroupKey;
 
 #[cfg(not(feature = "http-plans"))]

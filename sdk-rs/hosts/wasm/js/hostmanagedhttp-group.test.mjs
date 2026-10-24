@@ -221,3 +221,21 @@ test('ordinary binary delivery outside a handoff stays immediate', () => {
   assert.equal(r.host.dead, false);
   r.host.dispose();
 });
+
+for (const missing of ['httpGroupPending', 'httpClaimGroup']) {
+  test(`a host without ${missing} refuses before any bind or claim`, async () => {
+    const r = rig();
+    r.host.engine[missing] = undefined;
+    const prepare = r.host.transport.prepareHttp;
+    r.host.transport.prepareHttp = async (...args) => {
+      const resource = await prepare(...args);
+      resource.bind = () => assert.fail('unsupported group cannot bind a resource');
+      return resource;
+    };
+    await r.start();
+    assert.equal(r.events.some(([kind]) => kind === 'claim' || kind === 'send'), false);
+    assert.deepEqual(r.events.filter(([kind]) => kind === 'preparationFailed'), [['preparationFailed', tokens[0], 'unsupported']]);
+    assert.equal(r.host.managedHttp.resources.size, 0);
+    r.host.dispose();
+  });
+}

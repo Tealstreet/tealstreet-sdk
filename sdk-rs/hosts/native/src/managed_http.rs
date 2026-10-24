@@ -1,4 +1,5 @@
 //! Prepared resources stay in the same actor that claims and hands off HTTP.
+#[cfg(feature = "http-mutation-barriers")]
 #[path = "managed_http_group.rs"]
 mod group;
 use super::*;
@@ -133,7 +134,17 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     Err(error) => self.fail_http_preparation(preparation, error),
                 }
             }
+            #[cfg(feature = "http-mutation-barriers")]
             HttpAction::BindGroup { permit, members } => self.bind_http_group(permit, members),
+            #[cfg(not(feature = "http-mutation-barriers"))]
+            HttpAction::BindGroup { members, .. } => {
+                if let Some(member) = members.first() {
+                    self.fail_http_preparation(
+                        member.preparation,
+                        HttpPrepareError::Invalid("HTTP Mutation barriers unsupported by host"),
+                    );
+                }
+            }
             HttpAction::Cancel {
                 preparation,
                 signing,

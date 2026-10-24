@@ -1,8 +1,10 @@
 //! Lossless host preparation tokens; claiming never drains engine actions.
 use super::*;
 use safe_cex_engine::request_context::{
-    Claim, Error, GroupClaim, GroupPermit, HttpAction, Permit, Preparation, Prepared, RoutingIntent,
+    Claim, Error, HttpAction, Permit, Preparation, Prepared, RoutingIntent,
 };
+#[cfg(feature = "http-mutation-barriers")]
+use safe_cex_engine::request_context::{GroupClaim, GroupPermit};
 
 #[derive(Serialize)]
 pub(super) struct HttpPacket<'a> {
@@ -188,12 +190,14 @@ impl WasmEngine {
         Ok(self.flush())
     }
 
+    #[cfg(feature = "http-mutation-barriers")]
     #[wasm_bindgen(js_name = httpGroupPending)]
     pub fn http_group_pending(&self, permit: &str) -> bool {
         GroupPermit::from_wire(permit).is_ok_and(|token| self.inner.http_group_pending(&token))
     }
 
     /// Fixed output storage precedes claim: 0 denied, 1 released, 2 wait at slot 0.
+    #[cfg(feature = "http-mutation-barriers")]
     #[wasm_bindgen(js_name = httpClaimGroup)]
     pub fn http_claim_group(&mut self, permit: &str, now: f64, bounds: &mut [f64]) -> u32 {
         let Ok(token) = GroupPermit::from_wire(permit) else {

@@ -34,12 +34,12 @@ impl ClaimDraft {
     }
 }
 impl Lifecycle {
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "http-mutation-barriers")]
     pub(crate) fn group_needs_activation(&self) -> bool {
         matches!(self.state, State::Prepared(_))
     }
 
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "http-mutation-barriers")]
     pub(crate) fn validate_group_activation(&self, now: f64) -> Result<(), Error> {
         let State::Prepared(route) = self.state else {
             return Err(Error::State);
@@ -53,7 +53,7 @@ impl Lifecycle {
         Ok(())
     }
 
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "http-mutation-barriers")]
     pub(crate) fn group_activation_bound(&self) -> f64 {
         match self.state {
             State::Prepared(route) => self.deadline.min(route.expires_at.unwrap_or(f64::MAX)),
@@ -61,7 +61,7 @@ impl Lifecycle {
         }
     }
 
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "http-mutation-barriers")]
     pub(crate) fn group_send_before(&self, release: &HttpRelease) -> Result<f64, Error> {
         let State::Permitted(route, _) = self.state else {
             return Err(Error::State);

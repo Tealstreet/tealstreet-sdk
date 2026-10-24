@@ -2665,7 +2665,7 @@ pub trait Venue {
     /// Explicit pure group admission; the default refuses group support.
     /// Implementations must not mutate state, schedule work or use interior
     /// mutability here. This first contract accepts only Unscheduled.
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "http-mutation-barriers")]
     fn prepare_group_http_release(
         &self,
         _pending: &Self::Pending,

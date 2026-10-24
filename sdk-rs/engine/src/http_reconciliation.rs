@@ -11,7 +11,7 @@ pub(crate) const DATA_LIMIT: usize = 8 * 1024;
 const TOTAL_LIMIT: usize = 4 * 1024 * 1024;
 const GRACE_MS: f64 = 30_000.;
 
-#[cfg(all(test, feature = "http-plans"))]
+#[cfg(all(test, feature = "http-mutation-barriers"))]
 #[path = "http_group_storage_tests.rs"]
 mod group_storage_tests;
 
@@ -142,7 +142,7 @@ impl Responses {
 
     /// Prepare every record and container slot before publishing any member.
     /// The caller completes one synchronous release transaction after success.
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "http-mutation-barriers")]
     pub(crate) fn insert_group(&mut self, records: Vec<Record>, now: f64) -> Result<(), Error> {
         if !now.is_finite() {
             return Err(Error::Invalid);

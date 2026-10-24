@@ -1,5 +1,5 @@
 //! G2b original asynchronous preparation-barrier controls.
-#![cfg(all(feature = "test-support", feature = "http-plans"))]
+#![cfg(all(feature = "test-support", feature = "http-mutation-barriers"))]
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::classify::WriteFact;

@@ -996,6 +996,7 @@ impl SendPacing {
         })
     }
     #[cfg(feature = "http-plans")]
+    #[cfg(feature = "http-mutation-barriers")]
     pub(crate) fn validate_mutation_group(&self, pacing: Option<Pacing>) -> Result<(), Error> {
         self.validate_zero(pacing)
     }

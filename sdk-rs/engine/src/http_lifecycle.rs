@@ -9,7 +9,7 @@ use crate::request_context::{
 #[path = "http_unsigned_headers_tests.rs"]
 mod unsigned_headers_tests;
 
-#[cfg(feature = "http-plans")]
+#[cfg(feature = "http-mutation-barriers")]
 #[path = "http_group.rs"]
 mod mutation_group;
 
@@ -25,7 +25,7 @@ pub(super) struct Managed {
     response_started: bool,
     signing_attempt: Option<RequestId>,
     recipe: Option<crate::signing_dispatch::Pending>,
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "http-mutation-barriers")]
     group: Option<Box<mutation_group::Member>>,
     waiting_route: Option<Prepared>,
 }
@@ -175,7 +175,7 @@ impl<P> Cx<'_, P> {
         if let Err(error) = self.io.request_contexts.validate(&context, self.now) {
             return Err((pending, error));
         }
-        #[cfg(feature = "http-plans")]
+        #[cfg(feature = "http-mutation-barriers")]
         let group = match self
             .io
             .request_contexts
@@ -319,7 +319,7 @@ impl<P> Cx<'_, P> {
                 response_started: false,
                 signing_attempt,
                 recipe: None,
-                #[cfg(feature = "http-plans")]
+                #[cfg(feature = "http-mutation-barriers")]
                 group,
                 waiting_route: None,
             },
@@ -481,7 +481,7 @@ impl<P> Io<P> {
 
     fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
-        #[cfg(feature = "http-plans")]
+        #[cfg(feature = "http-mutation-barriers")]
         if managed.group.is_some() {
             self.actions.retain(|action| !matches!(action,
                 Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::BindGroup { members, .. }
@@ -520,7 +520,7 @@ impl<P> Io<P> {
     }
 }
 
-#[cfg(not(feature = "http-plans"))]
+#[cfg(not(feature = "http-mutation-barriers"))]
 impl<V: Venue> Engine<V> {
     pub fn http_group_pending(&self, _: &crate::request_context::GroupPermit) -> bool {
         false
@@ -567,7 +567,7 @@ impl<V: Venue> Engine<V> {
                 }
                 managed.lifecycle.prepared(token, prepared)
             });
-        #[cfg(feature = "http-plans")]
+        #[cfg(feature = "http-mutation-barriers")]
         if managed.group.is_some() {
             match prepared_result {
                 Ok(()) => self.pump_mutation_group(now, request),
@@ -751,7 +751,7 @@ impl<V: Venue> Engine<V> {
                         .max(1.) as u32,
                 );
                 managed.recipe = Some(pending);
-                #[cfg(feature = "http-plans")]
+                #[cfg(feature = "http-mutation-barriers")]
                 if let Some(member) = &mut managed.group {
                     member.packet = Some(packet);
                     member.permit = Some(permit);
@@ -793,7 +793,7 @@ impl<V: Venue> Engine<V> {
         self.io.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
-        #[cfg(feature = "http-plans")]
+        #[cfg(feature = "http-mutation-barriers")]
         if self
             .io
             .managed_http
@@ -862,7 +862,7 @@ impl<V: Venue> Engine<V> {
     /// its transport API on Released, with no intervening await or actor hop.
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
         self.assert_live();
-        #[cfg(feature = "http-plans")]
+        #[cfg(feature = "http-mutation-barriers")]
         if self
             .io
             .managed_http
@@ -1032,7 +1032,7 @@ impl<V: Venue> Engine<V> {
             );
             return;
         }
-        #[cfg(feature = "http-plans")]
+        #[cfg(feature = "http-mutation-barriers")]
         if managed
             .group
             .as_ref()
@@ -1073,7 +1073,7 @@ impl<V: Venue> Engine<V> {
             );
             return;
         }
-        #[cfg(feature = "http-plans")]
+        #[cfg(feature = "http-mutation-barriers")]
         if let Some(member) = &mut managed.group {
             member.reset();
         }
@@ -1127,7 +1127,7 @@ impl<V: Venue> Engine<V> {
         };
         let request = *request;
         if now.is_finite() && now < managed.lifecycle.deadline() {
-            #[cfg(feature = "http-plans")]
+            #[cfg(feature = "http-mutation-barriers")]
             if managed
                 .group
                 .as_ref()

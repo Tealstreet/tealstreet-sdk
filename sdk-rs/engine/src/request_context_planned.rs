@@ -6,8 +6,10 @@ use crate::{Action, TimerId};
 #[path = "request_context_conditional.rs"]
 mod conditional;
 use conditional::{AdmissionDeclaration, terminal_ordinals};
+#[cfg(feature = "http-mutation-barriers")]
 #[path = "request_context_group_plan.rs"]
 mod mutation_group;
+#[cfg(feature = "http-mutation-barriers")]
 pub(in crate::engine) use mutation_group::MutationGroupKey;
 use std::ops::Range;
 
@@ -23,6 +25,7 @@ struct Body {
     timer: TimerId,
     schedule: Schedule,
     terminals: Vec<usize>,
+    #[cfg(feature = "http-mutation-barriers")]
     barriers: Vec<Range<usize>>,
     entries: Vec<Entry>,
     handoff: Option<Delivery>,
@@ -375,7 +378,7 @@ impl<P> Cx<'_, P> {
             terminals,
             barriers,
         } = declaration;
-        if physical && !barriers.is_empty() {
+        if (!cfg!(feature = "http-mutation-barriers") || physical) && !barriers.is_empty() {
             return Err(Error::Invalid);
         }
         let (intent, old_read) = self.preflight_plan_origin(preflight)?;
@@ -398,6 +401,7 @@ impl<P> Cx<'_, P> {
         }
         let schedule = Schedule::from_steps(steps)?;
         let terminals = terminal_ordinals(steps, &policy, terminals)?;
+        #[cfg(feature = "http-mutation-barriers")]
         let barriers = mutation_group::normalize(steps, &policy, barriers, &self.io.http_pacing)?;
         let bound = schedule.bound();
         let native_deadline = bound.deadline(self.now)?;
@@ -551,6 +555,7 @@ impl<P> Cx<'_, P> {
             timer,
             schedule,
             terminals,
+            #[cfg(feature = "http-mutation-barriers")]
             barriers,
             entries,
             handoff: self.io.http_delivery.clone(),
@@ -1176,6 +1181,7 @@ impl<P> Cx<'_, P> {
                 .as_ref()
                 .ok_or(Error::State)?
                 .validate_failed_attempt(delivery.attempt.request)?;
+            #[cfg(feature = "http-mutation-barriers")]
             if body.barriers.iter().any(|range| range.contains(&index)) {
                 self.io
                     .request_contexts
@@ -1387,3 +1393,7 @@ impl<P> Cx<'_, P> {
         self.finish_sealed_command(id, Some(result), Seal::Success)
     }
 }
+
+#[cfg(all(test, not(feature = "http-mutation-barriers")))]
+#[path = "request_context_group_disabled_tests.rs"]
+mod disabled_barrier_tests;

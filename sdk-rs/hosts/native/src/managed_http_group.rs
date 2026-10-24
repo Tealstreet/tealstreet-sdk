@@ -229,6 +229,6 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 }
 
-#[cfg(all(test, feature = "http-plans"))]
+#[cfg(all(test, feature = "http-mutation-barriers"))]
 #[path = "managed_http_group_tests.rs"]
 mod tests;

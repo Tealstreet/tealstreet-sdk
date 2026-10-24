@@ -672,3 +672,34 @@ IDs; and same-composed-head Bybit feature-off/on CI size measurement with pinned
 profiles/tools. The full capability-on group behavior must remain byte-equivalent
 except for conditional compilation. This is a proposal, not an applied feature,
 an attribution result, a size fix or permission to freeze.
+
+The exact conditional artifact `aee3c129aed7841a` and supplemental controls
+`1d787d111ade8f81` have core source/reconstruction/execution clearance. They are
+applied locally. The applied workspace compiles all test targets with all features;
+the private off-admission control, twenty-nine group/pacing controls and
+thirty-five JS controls pass, with formatting and bans clean. The Plan owner
+subsequently cleared the exact conditional hunks, including the pre-origin
+refusal and unchanged owner-generic seals, founder and receipt paths.
+
+The isolated native proof at `hosts/native/tests/barrier-feature-unification`
+must run twice in CI, once without host support and once with `host-barriers`.
+Core independently executed both public `Host::run` modes: with host support
+disabled it binds and sends nothing and yields InvalidInput/NotSent; with support
+enabled it binds/checks both resources before two sends and one success. A root
+workspace all-features run cannot certify the negative because feature
+unification would enable the host. Separate same-head Bybit off/on measurements
+with unchanged profiles, pinned tools and budget remain required. The proposed
+CI plumbing `d4dfc4abfbdd62f8` is now core- and auditor-cleared and applied with
+the conditional source in the same change, as the auditor requires. It adds
+explicit isolated host-off/on proof invocations and a dispatch-only same-head
+Bybit comparison. The enabled measurement is diagnostic while no shipping
+build opts into barriers; future adopters still owe their own budget gates.
+No size attribution is inferred before that CI measurement completes.
+
+Plan-owner review also clears the unapplied inherited-uncertainty control
+`f8290a233e55d73f`: a real Preflight fact gives Unknown on an unreleased group
+failure, versus NotSent without the fact, with one terminal and no HTTP. The
+reviewed dependency composition is #2020 `be661facc08`, which contains #2016
+`6e29a1414ae` and its owner-resolved physical/Command journal propagation.
+Execution against that genuine dependency remains separate from the current
+capability checks; neither dependency is described as an actual landing.
