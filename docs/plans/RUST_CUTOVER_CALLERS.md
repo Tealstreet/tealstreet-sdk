@@ -6689,3 +6689,29 @@ path. This consumes the existing shared custody rule, with no venue counter.
 SDK placeOrder(s), cancellation/amend and setting callers keep existing validation
 and dispatch choices; this entry describes low-level refusal behavior and adds
 no new SDK calls or successful write capability.
+
+## HTTP pacing sets and signing eligibility
+
+A venue declares primitive floors through `http_pacing()` and optional immutable
+flat sets through `http_pacing_sets()`. `PacingSet { group, constraints }` gives a
+set its own declaration ID; member references name primitive IDs only. Sets share
+primitive release clocks and cannot nest, duplicate members or collide with
+primitive IDs. Engine construction validates and resolves bounded member indices.
+
+A Context's existing `Pacing { group, minimum_gap_ms }` selects one primitive or
+one set. Its outer minimum extends each member floor. For WOO, a set containing
+global100/algo500 with outer0 charges both on algo POST; ordinary writes select
+global100, PUT global200. Ordinary interleaving does not reset the algo clock.
+All bounds pass before one admission; only Released charges all members. Failed
+admission, stale/expired requests and waits consume none. Raw deadlines remain
+immutable through signing waits and route reprepare.
+
+Signed HTTP now retains a prepared resource without invoking its recipe/provider
+while any selected primitive is blocked. Its existing timer wakes at the earliest
+eligibility, route-expiry or physical-deadline boundary. Final Claim rechecks all
+bounds, including releases made by other requests after signing. Hosts continue
+to prepare, bind and Claim through the existing protocol; no wire change.
+Admission paths requiring no pacing must use `SendPacing::validate_zero`, which
+expands registered sets and checks every effective floor, including outer0 sets.
+G2b's owner composes its zero-pacing helper onto this resolver before IDs; this
+section does not claim that unlanded G2b adoption has occurred.

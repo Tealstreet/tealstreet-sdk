@@ -127,3 +127,18 @@ reprepare and a later competing primitive release before delayed final Claim.
 Recipe preparation counter proves no invocation before the expanded algo floor.
 Combined feature and existing lifecycle regression checks remain in progress;
 independent review, strict checks and fresh CI precede readiness.
+
+### Integrated local verification
+
+Plain-merged actual0953e342633 (MEXC local refusals plus docs/harness landings) at
+e5f42ecc558. All own engine source/tests are byte-exact5c1c1098196; no engine
+conflict or manual resolution. This removes the earlier foreign MEXC ratchet
+failure against the advanced remote; full check-bans.sh now passes normally.
+Dedicated15/15 passes in all four modes: baseline/test-support, managed-sockets,
+http-plans, and combined order-locks+managed-sockets+http-plans. Existing pure
+Lifecycle47, default HTTP49 and combined HTTP109 controls pass. Combined strict
+Clippy, workspace fmt check and secret scan pass. No full local suite or CI pass
+is claimed. CI's engine-feature-modes uses --all-targets and its explicit
+order-locks,test-support closure executes this new integration target. Source
+review remains on exact5c1 with unchanged source after integration; no readiness
+or merge permission follows from these local checks.
