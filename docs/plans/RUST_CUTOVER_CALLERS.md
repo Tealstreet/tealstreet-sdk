@@ -6551,6 +6551,38 @@ is explicitly a new admission-through-preparation/response whole-command bound,
 distinct from the old host's physical HTTP timeout fallback. Raw candle t/order
 and malformed numeric-string-to-zero coercion remain unchanged.
 
+### Bitget caller adoption: candles, identity, account reads and trade entry (slice 1)
+
+This covers `bitget`, `bitgetusdc` and `bitgetinverse`.
+[Plan](RUST_BITGET_CALLER_ADOPTION.md).
+
+- **`fetchCandles`** is admitted as one command Read before the interval
+  check. It sends one unsigned managed GET with only `X-CHANNEL-API-CODE:
+  Tealstreet`, prepared with the Public routing intent. The URL, limits and
+  rows are unchanged. Unsupported intervals and post-send failures keep their
+  text with kind and outcome absent and no diagnostic.
+- **`fetchAccount`** is admitted as one command Read. Public-only and invalid
+  read-key refusals happen before any HTTP with the same text and diagnostic.
+  It sends one managed signed GET with the read key when configured, else the
+  primary key. Failure texts and the equal diagnostic are unchanged.
+- An unanswered candle or identity read fails once with kind `timeout` at the
+  shared 20 s deadline; a late reply adds nothing. More than 256 outstanding
+  managed reads, Background account reads included, give one typed capacity
+  failure before any HTTP.
+- **Account reads** (settings probe, positions, balance and order pages) are
+  Background managed Reads with no retry. The degraded balance read keeps the
+  primary key and prepares with the Primary routing intent. An unanswered
+  probe ends at 20 s and takes the existing transport route into Classic
+  detection, unless UTA is confirmed. A probe that was never released
+  (signing or host preparation did not finish) backs off instead and is not
+  Classic evidence. An unanswered balance, position or order
+  read ends at 20 s and the next poll reads again. It no longer latches the
+  poll forever. Classic/UTA routes, backoff, 40009 and rate-limit pauses are
+  unchanged.
+- **Trade entry refusals** keep their text, no kind and `notSent` through a
+  terminal-only Mutation owner, with no lock or queued job left behind.
+- History, writes, discovery and the private socket are unchanged.
+
 ### OKX account-cycle reads under Background Context
 
 This covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`. [Plan](RUST_OKX_ACCOUNT_CYCLE.md).
