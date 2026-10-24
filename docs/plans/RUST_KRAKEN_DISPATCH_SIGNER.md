@@ -412,7 +412,7 @@ not a nonce-core freeze or landing. No firm owner ETA: correction review,6b
 barrier guard and host/Bearer/StampFloor composition remain open. Do not edit the
 dispatcher, copy its allocator, or infer readiness from this recipe phase.
 
-Recipe interface: a private selected wrapper is minted only by the shared
+Recipe interface: an opaque selected wrapper is minted only by the shared
 Slots::select_with_nonce(role,&KRAKEN). It retains the exact Identity, Selection
 and non-Clone NonceClaim; every physical request needs a fresh wrapper. Futures
 Slots use secondary_requires_primary:true, while Spot drops the ignored read
@@ -453,3 +453,40 @@ mint seam from its retained snapshot: report that composition gap before later
 account adoption rather than reselecting by method or copying a read helper.
 Raw legacy callers are not a fallback for the new recipes; the recipes have no
 raw path. Local only, no PR/push/CI until reviews authorize the intended head.
+
+### Local recipe checkpoint
+
+Exact committed nonce dependency d2e0dc1e139 is now an ancestor (anchor merge
+2814b7d08de); its runtime files match the corrected artifact. No new core edits.
+The opaque Selected type has private identity/claim/product fields; product
+checks prevent a Futures read selection from signing a Spot request. Trusted
+setup exports policy declarations and Slots factories only; constructor/capsule
+adoption is still separate, including ignoring raw secondary material for Spot.
+
+New target dispatch_recipes first failed solely on missing dispatch/setup APIs
+at 1b47dba4052 (NEW-CONTRACT compile RED, not a native assertion regression).
+Source now passes 13 controls, zero ignored: the three independent HMAC vectors,
+secondary GET exact query/secret and managed Prepare intent, same-key/different
+secret trusted-subject continuity across engines, cross-product continuity,
+read-only/role and malformed-subject refusals, Base64 decoding/untrimmed key,
+provider refusal/receipt/MAC/header/key tampering, deferred success and refusal
+with inert duplicate/late completion, path/freshness and product restrictions.
+The Futures and Spot packet vectors use genuine FetchAccount Read admission in
+a thin recipe probe, not native write execution or economic settlement proof.
+The native signer comparisons are parity checks; literal vectors are independent.
+
+The initial managed-egress assertion incorrectly inspected the legacy packet
+route field. The corrected fixture validates the actual Prepare RoutingIntent
+through real Prepared/Bind/Claim. Its first deferred fixture incorrectly used
+the immediate-only helper; the dedicated driver now preserves external Sign
+work and returns genuine provider results through Event::Signed. Neither
+fixture correction changes runtime or existing native originals.
+
+Scoped recipe13 + existing library10 PASS, scoped lib/target strict Clippy,
+explicit changed-file rustfmt and diff-check PASS (jobs4, sequential builds).
+Full bans fails only on nine foreign request-inventory provenance checks versus
+the newer remote tip. Current scanner exactly matches the manifest; all nine
+foreign source files and the entire manifest are byte-exact to2814b7d08de, and
+the ratchet against that exact composed prerequisite passes. No all-workspace,
+WASM/hosted, CI, nonce-core certification or native adoption claim. The existing
+23 native-adoption originals remain untouched; no legacy-site prune is claimed.
