@@ -3000,6 +3000,15 @@ recovery remains separate from strict root/local refusal. Shared list/sign
 consumer deletion is deferred to the remaining account/discovery/write owners;
 this conversion does not remove or relax any staging/checker inventory row.
 
+### Phemex dispatch-signing custody candidate
+
+Full native funnel and WS auth now use opaque provider recipes, removing14
+legacy lib credential/material fingerprints. Typed signer refusal preserves
+accepted-prefix IDs and native rollback revisions; actual-release raw expiry
+is accumulated as a maximum before the native5s reconciliation skew. Production
+wire/financial controls pass. Independent source/caller reviews are CLEAR;
+full-map/HMAC review, final CI and the combined #1970/#1974 landing remain gates.
+
 ## MEXC unsigned discovery and depth Context adoption
 
 The public catalogue/ticker streamed sender and subscription-depth GET sender
@@ -3021,3 +3030,25 @@ two working controls plus nine compiling assertion REDs on unchanged production.
 All eleven now pass alongside ten existing candle and43 spot controls. Two gated
 new-test metadata expectations were corrected to the existing perps NotSent
 contract; primary RED boundaries and native wire/result assertions are retained.
+
+
+## Crypto.com local trading admission
+
+Immediate cancel/amend validation, leverage validation, unsupported margin,
+missing primary key and placement-plan errors now consume actual Mutation entry
+authority before their existing NotSent projection. Fixed position mode uses
+shared LocalSetting with no financial Store change. Rejected admission supplies
+the only failure; revoked custody adds no fallback. Credential-free local errors
+do not count as remote auth evidence. Remote jobs/signing/classification and all
+other venue files remain unchanged; no engine or key-selection algorithm added.
+
+
+## Crypto.com public discovery delivery ownership
+
+Markets/Tickers now carry their original Background Read Context through
+streaming and publication. Actual shared delivery validation precedes row
+parsing/staging and response handling; expiry equality cannot commit a live
+prefix. Shared Context cleanup is separate from DATA admission: already-admitted
+failure keeps its native retry even after sibling issuance prunes expired
+retirement metadata. Completed catalogue retires before successor admission so
+capacity cannot strand ticker startup. No local issuer/timer/selection algorithm.

@@ -55,6 +55,8 @@ enum Phase {
 pub struct Supervisor {
     config: Config,
     phase: Phase,
+    #[cfg(feature = "managed-sockets")]
+    snapshot_deadline: Option<f64>,
     since: f64,
     received: f64,
     idle_enabled: bool,
@@ -87,6 +89,8 @@ impl Supervisor {
         Self {
             config,
             phase: Phase::Stopped,
+            #[cfg(feature = "managed-sockets")]
+            snapshot_deadline: None,
             since: 0.0,
             received: 0.0,
             idle_enabled: true,
@@ -101,6 +105,10 @@ impl Supervisor {
     /// Call before connecting (or acquiring a connection token).
     pub fn connecting<P>(&mut self, cx: &mut Cx<'_, P>) {
         self.cancel(cx);
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.snapshot_deadline = None;
+        }
         self.phase = Phase::Connecting;
         self.since = cx.now;
         self.received = cx.now;
@@ -124,6 +132,10 @@ impl Supervisor {
 
     pub fn authenticated<P>(&mut self, cx: &mut Cx<'_, P>) {
         if self.phase == Phase::Authenticating {
+            #[cfg(feature = "managed-sockets")]
+            {
+                self.snapshot_deadline = None;
+            }
             self.phase = Phase::Ready;
             self.since = cx.now;
             self.received = cx.now;
@@ -173,6 +185,16 @@ impl Supervisor {
     /// delayed timer delivery cannot revive an expired connection. This query
     /// does not consume the timer or change phase.
     pub fn expired(&self, now: f64) -> Option<Timeout> {
+        #[cfg(feature = "managed-sockets")]
+        if matches!(self.phase, Phase::Connecting | Phase::Authenticating)
+            && self.snapshot_deadline.is_some_and(|at| {
+                now >= at
+                    && !(self.phase == Phase::Connecting
+                        && self.since + self.config.connect_timeout_ms <= at)
+            })
+        {
+            return Some(Timeout::Auth);
+        }
         match self.phase {
             Phase::Connecting if now >= self.since + self.config.connect_timeout_ms => {
                 Some(Timeout::Connect)
@@ -191,6 +213,19 @@ impl Supervisor {
                 Some(Timeout::Idle)
             }
             _ => None,
+        }
+    }
+
+    #[cfg(feature = "managed-sockets")]
+    pub(crate) fn retain_snapshot_deadline<P>(&mut self, cx: &mut Cx<'_, P>, at: f64) {
+        assert!(self.phase == Phase::Connecting && at.is_finite() && at > cx.now);
+        self.snapshot_deadline = Some(at);
+        if self
+            .watch_at
+            .zip(self.next_watch_at(cx.now))
+            .is_none_or(|(old, new)| new < old)
+        {
+            self.rearm(cx);
         }
     }
 
@@ -240,6 +275,10 @@ impl Supervisor {
             cx.clear_timer(timer);
         }
         self.watch_at = None;
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.snapshot_deadline = None;
+        }
         self.phase = Phase::Stopped;
         self.next_ping = None;
     }
@@ -307,6 +346,11 @@ impl Supervisor {
             }
             Phase::Ready => idle,
             Phase::Stopped | Phase::Waiting => return None,
+        };
+        #[cfg(feature = "managed-sockets")]
+        let deadline = match (deadline, self.snapshot_deadline) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
         };
         let deadline = match (deadline, self.next_ping) {
             (Some(at), Some(ping)) => Some(at.min(ping)),
