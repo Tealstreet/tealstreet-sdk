@@ -131,6 +131,48 @@ Also:
 - Planned executions (#1919) need no special case: a failed bound leg projects
   through the execution journal to the founder and every observer.
 
+## Session-seam review (claude-55ao7t, folded)
+
+**Blocker, routing: resolved by option (i).** A Bearer-bound request is private
+by definition. Paradex's private requests are unsigned plus a Bearer, though,
+so their Context has no credential and its `routing_intent` would be Public.
+That could send them through public/CORS egress, the leak #1897 closes.
+- Neither existing seam fits:
+  - #1897's `session_scoped_context` needs a `private_egress` session, and a
+    credentialed session cannot grant one;
+  - a credentialed context cannot use the unsigned `request_managed` entry.
+- **Decision (i):** a Bearer binding implies **Primary egress** on the bound
+  context. The binding is itself the proof of privacy, so no fake credential is
+  needed.
+  - The bound context's routing intent is Primary from issue onward.
+  - It never resolves to Public or PublicCors.
+  - It conflicts with an explicit `PublicCors`/`Direct` egress, which refuses
+    `Invalid`.
+- This is a joint session/egress change with claude-55ao7t.
+
+Notes:
+1. **Retire fan-out without venue access.** `retire_session` runs in `Cx` with
+   no venue access, so failing other owners' bound packets is queued typed
+   `NotSent` failures, never venue callbacks.
+   - Bound requests are indexed per generation, like G1's parent index. A
+     request with no binding stays O(1), with no `managed_http` scan.
+   - The cascade runs after `sessions.retire`, so the parent is dead first and
+     today's order is kept.
+   - The claim-time generation check is the real fence; the cascade is cleanup
+     and notification.
+2. **Already-released packets.** A packet released before retire still delivers
+   its response to its own owner, as in #1897's
+   `retirement_fences_sends_on_its_egress_but_not_sent_write_outcomes`.
+3. **Binding validation.** Binding uses `validate_session` (issuer plus live)
+   but does not take `session_scope()`. A retained Preflight, Plan or
+   background-activation owner binding its own request is legitimate; only
+   minting or draining session work is refused in those scopes.
+4. **Generation mapping.** The hook gets a raw generation. That grants nothing,
+   but the venue must map generation to token, so a token from an old
+   generation can never serve a new one (pinned in R3).
+5. The binding is a parameter and the hook returns the full value, agreeing
+   with claude-fe7lgm. The RED diff goes to claude-55ao7t before any source.
+
 ## REDs (engine; compile REDs where the API is new)
 
 - **R1 (just-in-time read).** A bound request issued while the venue holds
@@ -140,7 +182,8 @@ Also:
   claim, so the packet reprepares, the released header is the new token, and
   only one HTTP is sent.
 - **R3 (retire fence).** The Session is retired after prepare and before
-  release:
+  release, and the venue's new-generation token never serves an old-generation
+  packet:
   - no HTTP;
   - the owner fails typed `NotSent`;
   - a late signing or HTTP callback for that attempt is ignored.
@@ -165,14 +208,21 @@ Also:
 - **R11 (P2-4, groups).** An announced mutation group sees a moved revision on
   one member: the whole group fails precommit, and no single member is
   reprepared.
+- **R12 (blocker, egress).** A bound keyless request prepares with intent
+  Primary, never Public or PublicCors, and an explicit public egress on a bound
+  request refuses `Invalid`.
+- **R13 (released before retire).** A packet released before retire still
+  delivers its response to its owner.
+- **R14 (binding scope).** A retained Preflight or Plan owner can bind its own
+  request; minting or draining session work in those scopes is still refused.
 - **R7 (no authority).** Binding to a retired Session refuses `Revoked`, and a
   bound request without a live Session never sends.
 
 ## Open questions
 
 Answered by claude-fe7lgm: the binding is a parameter, the hook returns the
-full value, and WS stays venue-owned. Still waiting on codex-zs5e83 (consumer)
-and claude-55ao7t (session seam).
+full value, and WS stays venue-owned. claude-55ao7t's blocker is resolved by
+option (i). Still waiting on codex-zs5e83 (consumer).
 
 ## Ownership
 
