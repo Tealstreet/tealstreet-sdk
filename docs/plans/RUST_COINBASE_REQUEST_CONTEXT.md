@@ -161,3 +161,111 @@ Failure-containment proof: `f1210ee4cd5` contains four original-source controls 
 
 
 Final local containment gates pass: full Coinbase/Binance native suites, strict all-target Clippy, formatting, bans and both request-context ratchet checks. Final source/adversarial, caller and full-map reviews are clean, architecture gate **No**. No relevant finding exists in the current audit/quality ledgers to strike; execution-group owner will link this fix from its section B. CI, actual landing integration/revert guard and overseer merge window remain required.
+
+
+## P0 write adoption, classifier pin 2026-10-23
+
+Audited actual `6741c1c6609437e32090c76745a56ca6c2262445`. Production and
+inventory remain unchanged; this appendix supersedes draft WRITE API names.
+
+| Audit row | Reverified native path | Required caller contract |
+| --- | --- | --- |
+| #21 | `trading.rs::apply_trade_response`, Cancel branch, validates result IDs and applies successes, then returns a message-only error for failed peers. `trading_finish_error` does not attach accepted cancel IDs. | One failure with exact successful cancellation IDs in Partial; preserve each Store effect and caller order, without forcing Unknown for fully definitive mixed results. |
+| #25 | Place branch treats DUPLICATE_CLIENT_ORDER_ID as plain VenueError. | Explicit Unknown, no resend, no fabricated native ID; keep original message and unresolved identity reservation/reconciliation. |
+
+Decode the existing native reason fields (`error`, new_order_failure_reason,
+preview_failure_reason, failure_reason) as typed Text evidence, retaining the
+codec's existing precedence and contradictory/missing-field checks. Freeze a
+finite, evidence-backed list of existing definitive refusal codes in the one
+family CodeTable; duplicate-client is explicitly Unknown. `UNKNOWN_*`, an
+unknown reason, success:false alone or arbitrary status are not a new refusal
+table. Do not claim ORDER_NOT_FOUND proves a successful cancel for every intent;
+intent-specific Satisfied requires the reviewed protocol evidence. Move no new
+bare-status refusal rows without evidence. Successful create still needs a
+valid ID and matching product/client/side; the existing identity mismatch and
+missing-ID cases stay uncertain.
+
+### Landed classifier and write-journal boundary
+
+Use actual #1837 (`e0322577e354739dde6d7e5011e74ab660145885`), not the
+older draft signatures. Declare one family `classify::CodeTable` with `rows`,
+`success`, explicit `unlisted: Verdict::Unknown(None)` and evidence-backed
+`status` entries only. `Key::Message` is exact and code-less; never mix message
+and code rows or introduce substring/prefix inference. Decode integer codes
+strictly via the native codec / `classify::decode_int`, never through f64.
+Engine precedence owns transport, 408/5xx, native evidence, status and malformed
+success. A native code or 2xx alone never proves successful execution.
+
+A genuine command Context uses the actual command entry and real credential;
+managed signed HTTP carries it through Pending. At the exact delivered attempt,
+`classify_write(&ctx, &TABLE, native, message)` creates the failure Fact.
+`http_write_fact(&ctx, WriteFact::Failed { fact, known_effects }, reports)`
+records it; `http_write_failure` is the whole-failure shortcut. Complete native
+success reports `WriteFact::Accepted { order_ids }`; malformed success uses
+`http_write_unproven`. A real batch acknowledgement uses `http_write_batch`
+with caller-ordered items and the native expected count. The codec proves
+identity/uniqueness and correlation; preserve individually known IDs as
+reconciliation evidence without invented caller counts on an incomplete reply.
+
+Only the engine's opaque resend grant may feed `http_resend_context`, retaining
+the original root, deadline and one-shot budget. Use `http_write_leg_intent`
+only for permitted intent narrowing before release. Finish once through
+`done_context`/`fail_context`; CommandWrites owns aggregation, partial IDs and
+whole-command demotion. Do not use private engine-test-only `http_write_result`,
+transitional unmanaged `classify::write`, local status/outcome ladders or a
+numeric completion fallback. A preparation refusal's local NotSent fact is
+valid, but prior released siblings still determine the whole-command outcome.
+
+No runtime conversion is authorized in this plan/tests slice. Missing reusable
+signing, session, Plan/CallWindow or reconciliation ownership remains a shared
+prerequisite; no per-venue replacement. On adoption, reverify actual seam pins,
+remove RED ignore markers while retaining behavior assertions, prune only the
+venue's genuinely removed legacy fingerprints, and add a landed CALLERS
+appendix. Plan/tests preparation neither prunes inventory nor closes P0 rows.
+
+### Phases, reservations and original RED controls
+
+Start with a single Spot create or explicit cancel request once the ES256/
+Ed25519 provider and claude-19pt8s recipe land. Keep separate read/trading key
+roles, portfolio binding, JWT canonical bytes, native product domains and the
+shared 334ms/capacity-256 REST scheduler. The current legacy queue cannot race
+an independent managed release clock. Multi-create, 100-ID cancel chunks,
+INTX/CFM close reservations, confirmation reads and cancel/replace wait for
+shared Plan admission and exact read/background ownership. Never borrow a
+command Read or relabel session/key-permission mutation as public work.
+
+#1799 holds lib.rs and support/history_family.rs at this audit. Leave them
+untouched. The existing `tests/trading.rs` private Session is unoccupied; append
+ignored original-source regressions there and inspect raw drain_actions before
+its convenience collector flattens metadata. A two-ID cancellation ACK with
+one success and one ORDER_NOT_FOUND failure must retain the successful ID in
+Partial; its fully definitive mixed outcome may remain unset. A native
+DUPLICATE_CLIENT_ORDER_ID placement failure must be Unknown with the unchanged
+native message and no invented partial ID. Run `cargo test -p
+safe-cex-venue-coinbase --test trading p0_write_ -- --ignored --nocapture`.
+Both controls must compile and fail their behavioral assertions on original
+production source. Reuse the existing authenticated startup fixture; do not
+weaken account readiness or add test secrets.
+
+GREEN adoption also covers 101-ID cross-chunk cancellation preserving the
+first 100 accepted IDs; missing/duplicate/foreign ACK IDs preserve evidence but
+remain uncertain; 408/5xx override native refusal; old JWT generation and late
+reply cannot finalize a new owner; preparation NotSent after accepted effects
+cannot erase them. Keep CFM/INTX reduction and fill reconciliation semantics;
+classification must not release a duplicate-client placement reservation just
+because the error envelope is well-formed. Remove `effective` demotion only
+with genuine full-command journal adoption. No scanner prune or CALLERS landed
+claim in this preparation slice; recheck the existing full inventory before
+implementation. Venue + Binance, scoped strict Clippy/fmt, bans, both ratchets,
+three independent reviews and exact-head CI remain the implementation gates.
+
+Architecture gate: No for native evidence/tests and shared API planning.
+Admission, credential/session authority, scheduling, retry and aggregation
+remain engine/provider concerns rather than a Coinbase substitute.
+
+Local plan/test evidence: 2 original-source controls compile and fail
+by the intended behavior assertions; normal venue suites pass
+(194 tests, 2 explicit ignored RED controls).
+Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
+pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
+controls expose defects; they are not GREEN adoption or P0 closure evidence.
