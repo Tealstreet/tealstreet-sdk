@@ -767,6 +767,11 @@ per-recipe proposal):
   drains fences and wakes until both are empty. A wake walks `bearer_parked`
   in place, one re-prepare at a time, re-reading the revision each step.
   `reprepare_http` removes the park entry on every path.
+- The wake loop terminates: each step removes one entry, and nothing inside it
+  can re-park. A park happens only while handling the host's Prepared event or
+  a signing result, never within `reprepare_http`. A control pins a venue whose
+  revision and bundle hooks disagree (an obligation breach): each announce
+  re-prepares the call once and it re-parks (dazzy3).
 - `attach_session_headers` inserts at `SessionPlacement` (`First`, or right
   after the first matching header, else first). Overflow wipes exactly the
   inserted range.

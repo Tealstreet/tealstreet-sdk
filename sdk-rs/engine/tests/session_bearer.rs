@@ -87,6 +87,9 @@ struct Shared {
     paced: bool,
     /// A preparation-failure callback announces the bundle again.
     announce_on_failure: bool,
+    /// Obligation breach: the revision hook reports Ready while the bundle
+    /// hook answers NotReady.
+    revision_disagrees: bool,
     /// Token the venue caches for the generation it opens on retire.
     next_generation_token: Option<&'static str>,
     bearer: bool,
@@ -171,6 +174,7 @@ impl Shared {
             recipe_accept: false,
             paced: false,
             announce_on_failure: false,
+            revision_disagrees: false,
             next_generation_token: None,
             bearer: true,
             bind_retired: false,
@@ -629,7 +633,8 @@ impl Venue for Probe {
     }
     fn session_bearer_revision(&self, generation: u64) -> Option<u64> {
         let shared = self.shared.borrow();
-        (shared.token.is_some() && shared.serves(generation)).then_some(shared.revision)
+        ((shared.token.is_some() || shared.revision_disagrees) && shared.serves(generation))
+            .then_some(shared.revision)
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         let private_egress = self.shared.borrow().session_egress.then(|| {
@@ -2600,4 +2605,27 @@ fn a_call_that_left_the_park_by_a_host_stale_is_not_woken_again() {
         "{:?}",
         shared.borrow().failures
     );
+}
+
+/// dazzy3: a venue whose revision hook says Ready while its bundle hook says
+/// NotReady (an obligation breach) cannot spin the wake. Re-parking needs the
+/// host's Prepared event, so each announce re-prepares the call once and the
+/// drain returns; the call stays parked to its window.
+#[test]
+fn a_disagreeing_revision_and_bundle_cannot_spin_the_wake() {
+    let (mut e, shared) = engine(|shared| {
+        shared.token = None;
+        shared.revision_disagrees = true;
+    });
+    let issued = ask(&mut e, 1);
+    parks(&mut e, &shared, NOW + 1., issued[0].0);
+    let mut token = issued[0].0;
+    for step in 0..3 {
+        let woken = prepare_actions(announce(&mut e, &shared, NOW + 2. + f64::from(step)));
+        assert_eq!(woken.len(), 1, "one re-prepare per announce");
+        assert_eq!(woken[0].0.attempt().request, token.attempt().request);
+        token = woken[0].0;
+        parks(&mut e, &shared, NOW + 2.5 + f64::from(step), token);
+    }
+    assert!(shared.borrow().failures.is_empty());
 }
