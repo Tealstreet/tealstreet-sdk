@@ -1609,3 +1609,12 @@ both WOO arrival orders, Crypto auth/transport retry after ACK, WS peer progress
 and later WOO amend/fill behavior have bounded native controls. Native original
 RED receipts distinguish the two accepted-write crossings from API-adoption
 controls; no live/private or full-parity claim follows from local tests.
+
+## BloFin local leverage Read controls
+
+Five native tests retain two compiling original capacity assertion REDs plus
+three working controls: exact validation/credential precedence, Store/empty
+financial state preservation, duplicate original-owner release, and 300 sequential
+failures with 255 Background peers and one free Context slot. Capacity recovery
+releases exact Background roots. No fabricated Context, numeric fallback or
+missing-method compile failure is regression evidence.

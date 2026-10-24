@@ -2980,3 +2980,11 @@ BloFin remains a separate design item: startup execution-prefix seeding can be
 valid even when newer WS order-state revisions reject row replacement, and the
 seed path releases queued executions. Preserve that dual evidence policy before
 moving it to a shared admission boundary; this pair changes no BloFin source.
+
+## BloFin local leverage refusal custody
+
+Two account.rs numeric failures now use shared genuine Read admission followed
+by fail_context on that exact root. BloFin 23->21 occurrences / 19->17 fingerprints;
+only the two singleton rows are removed. No signer, trading, history, closed
+position or successful private read is converted. The coherent custody cutover
+remains with codex-zs5e83. No per-venue admission/completion implementation.
