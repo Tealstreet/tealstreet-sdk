@@ -263,6 +263,7 @@ impl Grvt {
     pub(crate) fn book_query_send(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         let context = request.leg.clone();
         let pending = Pending {
+            context: None,
             path: "/lite/v1/book",
             body: request.body.clone(),
             job: Job::BookQuery(Box::new(request)),

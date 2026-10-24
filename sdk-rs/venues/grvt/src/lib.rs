@@ -52,6 +52,8 @@ pub struct Pending {
     pub(crate) attempts: u8,
     pub(crate) auth_resent: bool,
     pub(crate) auth_generation: u64,
+    /// Engine authority of managed work (the session login); None for legacy.
+    pub(crate) context: Option<safe_cex_engine::request_context::Context>,
 }
 pub(crate) enum Job {
     BookQuery(Box<depth_query::Request>),
@@ -188,6 +190,13 @@ impl Grvt {
             refresh: None,
         }
     }
+    fn edge(&self) -> &'static str {
+        if self.options.testnet {
+            "https://edge.testnet.grvt.io"
+        } else {
+            "https://edge.grvt.io"
+        }
+    }
     fn mdg(&self) -> &'static str {
         if self.options.testnet {
             "https://market-data.testnet.grvt.io"
@@ -212,6 +221,7 @@ impl Grvt {
                 attempts: 0,
                 auth_resent: false,
                 auth_generation: self.account.generation,
+                context: None,
             },
         );
     }
@@ -242,19 +252,6 @@ impl Grvt {
                 self.mdg(),
                 vec![("Content-Type", "application/json".into())],
                 Some(ArrayAt::Envelope(&[&["r"], &["result"]])),
-            ),
-            Job::Account(account::Request::Login) => (
-                if self.options.testnet {
-                    "https://edge.testnet.grvt.io"
-                } else {
-                    "https://edge.grvt.io"
-                },
-                vec![
-                    ("Content-Type", "application/json".into()),
-                    ("X-Grvt-Remember-Me", "true".into()),
-                    ("Cookie", "rm=true".into()),
-                ],
-                None,
             ),
             Job::History(request) => (
                 if request.is_public() {
@@ -914,6 +911,9 @@ impl Venue for Grvt {
             self.book_query_response(cx, *request, response);
             return;
         }
+        if let Some(context) = pending.context.take() {
+            self.login_answered(cx, context, &response);
+        }
         if let Err(error) = wire::check(&response) {
             let code = wire::code(&response);
             if code == "1000"
@@ -1101,6 +1101,10 @@ impl Venue for Grvt {
             let _ = cx.fail_plan(&request.plan, "GRVT candle read failed");
             return;
         }
+        if pending.context.take().is_some() {
+            self.login_failed(cx, pending);
+            return;
+        }
         let read = match &pending.job {
             Job::Trade(request) => request.is_read(),
             Job::Account(account::Request::Builders { .. }) => false,
@@ -1135,7 +1139,6 @@ impl Venue for Grvt {
             return;
         }
         match pending.job {
-            Job::Account(account::Request::Login) => self.account_login_unavailable(cx),
             Job::Trade(request) => {
                 self.trade_failed(cx, request, error, safe_cex_engine::Outcome::Unknown)
             }

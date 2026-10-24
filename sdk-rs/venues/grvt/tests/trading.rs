@@ -7,6 +7,10 @@ use serde::Deserialize;
 use std::collections::VecDeque;
 const NOW: f64 = 1_700_000_000_000.;
 const CATALOG: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6}]}"#;
+/// Releases managed work (the session login) through the immediate fixture.
+fn drain(e: &mut Engine<Grvt>) -> std::vec::IntoIter<Action> {
+    safe_cex_engine::test_support::prepared_actions(e, NOW + 3.).into_iter()
+}
 fn boot() -> Engine<Grvt> {
     boot_with_socket().0
 }
@@ -33,8 +37,7 @@ fn boot_with_builders(
         ..Options::default()
     }));
     e.start(NOW);
-    let mut pending: VecDeque<_> = e
-        .drain_actions()
+    let mut pending: VecDeque<_> = drain(&mut e)
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -83,7 +86,7 @@ fn boot_with_builders(
                 },
             },
         );
-        for action in e.drain_actions() {
+        for action in drain(&mut e) {
             match action {
                 Action::Http(request) => pending.push_back(request),
                 Action::WsConnect {
@@ -108,8 +111,7 @@ fn authenticated() -> (Engine<Grvt>, SocketId) {
             text: r#"{"type":"auth_success"}"#,
         },
     );
-    let mut pending: VecDeque<_> = engine
-        .drain_actions()
+    let mut pending: VecDeque<_> = drain(&mut engine)
         .filter_map(|action| {
             if let Action::Http(request) = action {
                 Some(request)
@@ -137,7 +139,7 @@ fn authenticated() -> (Engine<Grvt>, SocketId) {
                 },
             },
         );
-        pending.extend(engine.drain_actions().filter_map(|action| {
+        pending.extend(drain(&mut engine).filter_map(|action| {
             if let Action::Http(request) = action {
                 Some(request)
             } else {
@@ -173,7 +175,7 @@ fn opts() -> PlaceOrderOpts {
 }
 fn command(e: &mut Engine<Grvt>, c: Command) -> Vec<Action> {
     e.handle(NOW + 2., Event::Command(c));
-    safe_cex_engine::test_support::prepared_actions(e, NOW + 2.)
+    drain(e).collect()
 }
 fn http(actions: Vec<Action>, suffix: &str) -> HttpRequest {
     actions
@@ -199,7 +201,7 @@ fn reply(e: &mut Engine<Grvt>, r: &HttpRequest, status: u16, body: &str) -> Vec<
             },
         },
     );
-    e.drain_actions().collect()
+    drain(e).collect()
 }
 fn done(actions: &[Action], id: u32) -> Option<Result<String, String>> {
     actions.iter().find_map(|a| match a {
@@ -713,7 +715,7 @@ fn uncertain_write_is_not_retried_and_exposes_reconciliation_identity() {
             error: "connection reset",
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = drain(&mut e).collect();
     assert!(
         done(&actions, 6)
             .unwrap()
@@ -980,7 +982,7 @@ fn explicit_session_rejection_resends_identical_signed_order_once() {
         "auth/api_key/login",
     );
     e.handle(NOW+4.,Event::HttpResponse{request:login.id,response:Response{status:200,headers:"Set-Cookie: gravity=renewed-session; Path=/\nX-Grvt-Account-Id: renewed-account",body:r#"{"sub_account_id":"9007199254740993"}"#}});
-    let resent = http(e.drain_actions().collect(), "create_order");
+    let resent = http(drain(&mut e).collect(), "create_order");
     assert_eq!(resent.body, original.body);
     assert!(
         resent
@@ -1220,7 +1222,7 @@ fn terminal_execution_survives_store_removal_through_every_amendment_boundary() 
             e.store().order("42").is_none(),
             "terminal original is removed from Store"
         );
-        e.drain_actions();
+        drain(&mut e);
         let response = match stage {
             0 => OPEN,
             1 => r#"{"r":{"a":true}}"#,
@@ -1278,7 +1280,7 @@ fn fill_topic_only_execution_aborts_pending_inspection_and_final_proof() {
             0.2,
             "fill feed does not update the order snapshot"
         );
-        e.drain_actions();
+        drain(&mut e);
         let actions = reply(
             &mut e,
             &pending,
@@ -1326,7 +1328,7 @@ fn authoritative_unchanged_fill_cancellation_still_allows_replacement() {
         },
     );
     assert!(e.store().order("42").is_none());
-    e.drain_actions();
+    drain(&mut e);
     let replacement = http(reply(&mut e, &verify, 200, CANCELED), "create_order");
     assert_eq!(body(&replacement).o.l[0].s, "0.8");
 }
@@ -1365,7 +1367,7 @@ fn unchanged_fill_but_older_inspection_or_cancellation_proof_is_rejected() {
                 text: &newer,
             },
         );
-        e.drain_actions();
+        drain(&mut e);
         let actions = reply(
             &mut e,
             &pending,
@@ -1455,15 +1457,14 @@ fn authentication_resend_rechecks_execution_progress_for_pending_verify_and_plac
                 text: &unrelated,
             },
         );
-        let timer = e
-            .drain_actions()
+        let timer = drain(&mut e)
             .find_map(|action| match action {
                 Action::SetTimer { timer, at_ms } if at_ms == NOW + 1004. => Some(timer),
                 _ => None,
             })
             .unwrap();
         e.handle(NOW + 1004., Event::TimerFired { timer });
-        let snapshot = http(e.drain_actions().collect(), "open_orders");
+        let snapshot = http(drain(&mut e).collect(), "open_orders");
         let login = http(
             reply(&mut e, &pending, 401, r#"{"c":1000,"m":"expired"}"#),
             "auth/api_key/login",
@@ -1476,7 +1477,7 @@ fn authentication_resend_rechecks_execution_progress_for_pending_verify_and_plac
             .replacen("}}}", "}}]}", 1);
         reply(&mut e, &snapshot, 200, &snapshot_body);
         e.handle(NOW+1005.,Event::HttpResponse{request:login.id,response:Response{status:200,headers:"Set-Cookie: gravity=renewed-session; Path=/\nX-Grvt-Account-Id: renewed-account",body:r#"{"sub_account_id":"9007199254740993"}"#}});
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = drain(&mut e).collect();
         assert!(
             done(&actions, 95)
                 .unwrap()
@@ -1512,7 +1513,7 @@ fn exhaust_builder_check(e: &mut Engine<Grvt>, first: HttpRequest) -> Vec<Action
         );
         let timer = timer_at(&actions, NOW + 3. + delay);
         e.handle(NOW + 3. + delay, Event::TimerFired { timer });
-        check = http(e.drain_actions().collect(), "get_authorized_builders");
+        check = http(drain(e).collect(), "get_authorized_builders");
     }
     reply(e, &check, 403, PROXY_REJECTED)
 }
@@ -1839,7 +1840,7 @@ fn failed_grvt_builder_checks_never_claim_missing_approval() {
             assert!(done(&actions, 94).is_none());
             let timer = timer_at(&actions, NOW + 3. + delay);
             e.handle(NOW + 3. + delay, Event::TimerFired { timer });
-            check = http(e.drain_actions().collect(), "get_authorized_builders");
+            check = http(drain(&mut e).collect(), "get_authorized_builders");
         }
         let actions = reply(&mut e, &check, status, body);
         let error = structured_failure(&actions, 94);
@@ -1885,7 +1886,7 @@ fn public_rest_book_headers_and_rejections_cannot_replace_private_session() {
             headers: "Set-Cookie: gravity=foreign-session; Path=/\nX-Grvt-Account-Id: foreign-account",
             body,
         }});
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = drain(&mut e).collect();
         assert!(!actions.iter().any(|a| matches!(
             a,
             Action::Http(_) | Action::Notice(Notice::AccountAuth { .. })

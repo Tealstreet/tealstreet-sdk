@@ -264,3 +264,20 @@ checker, map, wire, native status, credential or Session contract changes here.
 After the correction, the changed-crate native run passes 236 controls, zero
 ignored. The original 23-test byte prefix is exact; four source-stage controls
 are appended. No existing financial/native assertion was changed.
+
+
+## Landed login Session composition
+
+The candle branch plain-merges actual #1905 through a10974b2f22. Candles
+routes before the native login context take in response/failure callbacks;
+its Pending.context remains None. Other jobs keep the engine default
+preparation-failure delegation.
+
+A real login preparation-refusal control starts the native login, refuses its
+actual Prepare, and checks the old Session retires before exactly one fresh
+Primary login Prepare. The refused request and duplicate failure are inert;
+the new login passes Bind/Claim. No login production path is changed by the
+control. After the earlier disk-full write failure was cleared, the changed
+GRVT crate passes 239 controls and strict all-target Clippy. The write failed
+before the test file or build existed; no passing check from that disk-full
+interval is used as evidence.
