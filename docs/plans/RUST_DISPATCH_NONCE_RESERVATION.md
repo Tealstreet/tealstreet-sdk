@@ -579,3 +579,12 @@ getter cannot release a nonce without its fence. Pin a true-at-construction,
 false-at-Claim control to prove that refusal, and false-at-construction denial
 before IDs. The method preserves dyn compatibility; the paired release build
 will decide whether its constant default removes enough code.
+
+
+The overseer's ruling fixes the method spelling to the object-safe static
+`fn dispatch_nonce() -> bool where Self: Sized { false }`, matching http_release.
+Kraken and KrakenSpot return true without changing any native funnel. Keep
+Io.nonce_unscheduled as the captured release-mode fact used by barrier refusal;
+store nonce permission separately. Ordinary Plans and the default-capability
+pure mode retain their existing behavior. The changing-static-getter control
+still proves that an optimization selector cannot bypass captured permission.
