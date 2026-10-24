@@ -109,4 +109,59 @@ mod tests {
             None
         );
     }
+
+    // Receipt-bound stamp floor (RUST_STAMP_FLOOR.md). REDs: StampFloor,
+    // SigningRelease::stamp_floor and DispatchContext::stamp_after are new.
+    fn stamped(stamp_ms: Option<f64>) -> SigningRelease {
+        SigningRelease::new(
+            SignReceipt {
+                stamp_ms,
+                expiry_ms: None,
+            },
+            at(0., 0.),
+        )
+        .unwrap()
+    }
+    fn floor(stamp_ms: f64) -> Option<StampFloor> {
+        stamped(Some(stamp_ms)).stamp_floor()
+    }
+    fn dispatch(now_ms: f64) -> crate::DispatchContext<'static> {
+        crate::DispatchContext::new(now_ms, None)
+    }
+
+    /// R1: without a floor, the current stamp, never negative.
+    #[test]
+    fn stamp_after_without_a_floor_is_the_nonnegative_current_stamp() {
+        assert_eq!(dispatch(1_000.75).stamp_after(None), Ok(1_000.));
+        assert_eq!(dispatch(-1.5).stamp_after(None), Ok(0.));
+    }
+
+    /// R2: a floor holds against fixed and backward clocks, and the clock
+    /// still wins once it passes the floor.
+    #[test]
+    fn stamp_after_a_floor_is_strictly_later_on_fixed_and_backward_clocks() {
+        let floor = floor(1_000.);
+        assert_eq!(dispatch(1_000.4).stamp_after(floor), Ok(1_001.));
+        assert_eq!(dispatch(900.).stamp_after(floor), Ok(1_001.));
+        assert_eq!(dispatch(1_500.).stamp_after(floor), Ok(1_500.));
+        assert_eq!(dispatch(-1.5).stamp_after(self::floor(5.)), Ok(6.));
+    }
+
+    /// R3: floor + 1 must stay a safe integer; it is refused, never rounded.
+    #[test]
+    fn stamp_after_refuses_past_the_safe_integer_edge() {
+        const MAX: f64 = 9_007_199_254_740_991.;
+        assert_eq!(
+            dispatch(0.).stamp_after(floor(MAX)),
+            Err(crate::signing::SignError::InvalidRequest)
+        );
+        assert_eq!(dispatch(0.).stamp_after(floor(MAX - 1.)), Ok(MAX));
+    }
+
+    /// R4: a floor exists exactly when the released receipt carried a stamp.
+    #[test]
+    fn stamp_floor_comes_only_from_a_released_stamp() {
+        assert!(stamped(None).stamp_floor().is_none());
+        assert_eq!(dispatch(0.).stamp_after(floor(42.)), Ok(43.));
+    }
 }
