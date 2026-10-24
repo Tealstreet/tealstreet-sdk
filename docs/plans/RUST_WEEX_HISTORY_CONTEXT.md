@@ -33,10 +33,15 @@ managed.rs, sign.rs and engine sources are outside this history slice.
 | Fills | GET `/capi/v3/userTrades`; sorted encoded query; 7-day windows, at most 1,000 windows, one response per window; limit clamped 1..100. |
 | Orders | GET `/capi/v3/order/history`, then `/capi/v3/allAlgoOrders` per 90-day window, at most 1,000 windows; one response per endpoint, normal page=0. Algo hasMore records existing incomplete coverage rather than adding pagination. |
 | Public trades | One unsigned GET `/capi/v3/market/trades`, limit clamped 1..1,000, preserving native response order. |
-| Ranged income | Primary-only signed POST `/capi/v3/account/income`; exact existing JSON body and items stream; 100-day RangeWalk windows with native splitting, per-walk bound 100 and lifetime request budget 10,000; limit=100. Preserve 100 ms PAGE_DELAY and pause eligibility. |
+| Ranged income | Primary-only signed POST `/capi/v3/account/income`; exact existing JSON body and items stream; 100-day RangeWalk windows, split threshold/page_limit=100 rows, max_pages_per_chunk=50 and lifetime request budget 10,000 physical requests; limit=100. Preserve 100 ms PAGE_DELAY after each page and ChunkDone, and pause eligibility. |
 | Single income | Same primary-only POST, one response, native limit clamped 1..100. Existing hasNextPage/nextKey produces incomplete coverage. |
 
-GET private lists select ReadRole::Read (secondary if configured, otherwise
+Preserve the existing primary-presence local gate before signed command_root:
+fills, orders and income return `[]` without HTTP when primary is absent, even
+if a secondary read key is configured. A secondary-only account must not begin
+new signed history work. The local client-order-id refusal also stays intact.
+
+After that gate, GET private lists select ReadRole::Read (secondary if configured, otherwise
 primary), scope None, reproducing native GET selection. Income uses
 ReadRole::Primary { reason: PrimaryReason::History, scope: None }, reproducing
 native POST primary selection explicitly. Do not generalize POST to secondary.
@@ -65,8 +70,11 @@ the same immutable root and do not create another caller wait.
 3. Mint a fresh 20 s child only at eligible send, after native pause and pacing.
    Signed children are ReadRoot::leg and ReadLeg::queue with the existing WEEX
    dispatch::Http recipe, exact path/query/body and stream selector. Unsigned
-   trades use http_leg_context and request_managed_with_headers, preserving the
-   existing static headers. No child is minted while parked.
+   trades use http_leg_context and request_managed_with_headers with the native
+   empty header vector. No child is minted while parked. Keep the history pause
+   gate before public get; the shared get helper also has deferred_gets, so any
+   history continuation retained there must be removed by exact owner on root
+   expiry. Never mint a physical child before either parking boundary.
    A local child-mint or queue-admission refusal strictly rejects the exact live
    root with its typed Read error, retiring its read and pacing state; it never
    enters accepted-prefix recovery. Only proven already-revoked owners drop
@@ -80,12 +88,17 @@ the same immutable root and do not create another caller wait.
    sort/final shape and coverage text. Finish the old physical Context after
    accepting that page and before sending/parking the continuation. Keep the
    logical root live until the one history terminal.
-6. A live-root later-page native/transport failure preserves accepted-only
-   recovery and one command-owned INCOMPLETE marker; first-page failure rejects.
+6. A live-root native/transport failure preserves accepted-only recovery and
+   one command-owned INCOMPLETE marker only when accepted rows are nonempty.
+   With no accepted rows it rejects on any page: empty earlier windows do not
+   turn a later failure into an empty partial success or create a marker.
    Failed/staged rows and identities never enter the finalizer. Provider or
    preparation refusal is strict even after accepted pages, retaining the exact
    typed VenueError with no retry or auth inference. Read entry/cap failures use
    canonical Read projection (outcome None), not fabricated NotSent.
+   Preserve native REQUEST_FAILED notice before non-strict failure routing.
+   Preserve global 429 rate::delay/paused_until handling before failure routing,
+   including a page that subsequently fails; it remains a shared egress pause.
 7. Root expiry is engine-owned strict Timeout, including equality: no rows,
    marker or finalizer. Implement read_root_retired(Owner, Vec<Pending>) without
    Cx: remove only the matching-generation read and parked continuation; drop
@@ -116,6 +129,14 @@ or timer-order variant so an early assertion cannot hide later evidence.
   auth rejection/deactivation. Disarmed provider delegates to the same native
   recipe. A public read uses no signer. Primary/secondary and income primary
   selection stay covered independently.
+- Preserve native negatives independently: three empty fills windows then a
+  Network failure reject without rows/marker; secondary-only private fills,
+  orders and income return `[]` with no I/O. A 429 keeps REQUEST_FAILED and
+  parks a subsequent public request until its Retry-After boundary.
+- Keep symbol, orderId and window filtering, newest-first sort except public
+  trades, symbol|id and income_identity dedup, millisecond flooring and fill
+  seconds conversion. Missing native fill id still emits ROW_SKIPPED and an
+  INCOMPLETE gap. Existing native fixtures remain preservation gates.
 
 Record actual RED counts and assertion locations; API-shape controls relying on
 #1983 are absent-by-dependency until its actual pin, not ignored or claimed run.
@@ -171,3 +192,18 @@ codex-uufub4 cleared bounded bridge/core fit at plan `a80c8ac5f7d`, including
 the actual #1983 dependency, retained original root and exact page/attempt
 admission. The child-mint/queue-refusal source gate above folds in that review;
 it is not a runtime or CI clearance.
+
+## Native review follow-up
+
+claude-4yjlw0's native review corrected the accepted-empty rule, primary-presence
+gate, RangeWalk split/chunk/request bounds, empty public headers and shared
+pause/failure notice handling. The plan above includes those corrections.
+
+Five added preservation controls pass on unchanged baseline production: three
+empty fills windows followed by a fourth-window Network failure rejects with no
+INCOMPLETE marker; secondary-only fills, orders and income each return local
+`[]` without physical work; a 429 emits REQUEST_FAILED and parks the next public
+query until Retry-After, then releases it with no headers and completes.
+Expanded target: **6 original assertion RED / 7 GREEN / 0 ignored**. The six
+original test bodies and expected failures are unchanged. These five controls
+are native preservation evidence, not additional original REDs.

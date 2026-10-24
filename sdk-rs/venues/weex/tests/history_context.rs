@@ -316,3 +316,152 @@ fn native_public_empty_response_completes_once_inside_the_bound() {
     assert_eq!(terminals(&output), [Ok("[]".into())]);
     assert_eq!(markers(&output), 0);
 }
+
+#[test]
+fn empty_fills_windows_do_not_authorize_later_partial_success() {
+    let mut e = engine();
+    let mut output = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(NOW - 30. * 86_400_000.),
+            to_ms: Some(NOW),
+            limit: Some(1),
+        },
+        1000,
+    );
+    for page in 1..=3 {
+        assert_eq!(output.requests.len(), 1);
+        assert!(output.requests[0].url.contains("userTrades"));
+        output = reply(&mut e, NOW + f64::from(page), &output.requests[0], "[]");
+        assert!(terminals(&output).is_empty());
+    }
+    assert_eq!(output.requests.len(), 1, "fourth native fills window");
+    e.handle(
+        NOW + 4.,
+        Event::HttpFailed {
+            request: output.requests[0].id,
+            error: "empty-prefix page reset",
+        },
+    );
+    let failed = drain(&mut e, NOW + 4.);
+    let results = terminals(&failed);
+    assert_eq!(results.len(), 1);
+    assert!(results[0].is_err(), "empty accepted prefix cannot recover");
+    assert_eq!(markers(&failed), 0);
+    assert!(failed.requests.is_empty());
+    assert_eq!(
+        failed
+            .actions
+            .iter()
+            .filter(|action| matches!(action,
+                Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::REQUEST_FAILED
+            ))
+            .count(),
+        1
+    );
+}
+
+fn secondary_only_private(read: Query) {
+    let mut e = support::setup::engine(Options {
+        read_credentials: Some(ReadCredentials {
+            key: "read-key".into(),
+            secret: "read-secret".into(),
+            passphrase: Some("read-pass".into()),
+        }),
+        ..Default::default()
+    });
+    let output = query(&mut e, read, 1000);
+    assert_eq!(terminals(&output), [Ok("[]".into())]);
+    assert_eq!(markers(&output), 0);
+    assert!(output.requests.is_empty());
+    assert_eq!((output.legacy, output.prepared, output.claimed), (0, 0, 0));
+    assert!(
+        output
+            .actions
+            .iter()
+            .all(|action| matches!(action, Action::Notice(_)))
+    );
+}
+
+#[test]
+fn secondary_without_primary_keeps_private_fills_local_empty() {
+    secondary_only_private(Query::Fills {
+        symbol: None,
+        order_id: None,
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+}
+
+#[test]
+fn secondary_without_primary_keeps_private_orders_local_empty() {
+    secondary_only_private(orders());
+}
+
+#[test]
+fn secondary_without_primary_keeps_private_income_local_empty() {
+    secondary_only_private(income(true));
+}
+
+#[test]
+fn a_history_429_keeps_the_native_pause_and_request_failed_notice() {
+    let mut e = engine();
+    let first = query(&mut e, public(), 2000);
+    e.handle(
+        NOW + 10.,
+        Event::HttpResponse {
+            request: first.requests[0].id,
+            response: Response {
+                status: 429,
+                headers: "Retry-After: 1",
+                body: "rate limited",
+            },
+        },
+    );
+    let failed = drain(&mut e, NOW + 10.);
+    assert_eq!(terminals(&failed).len(), 1);
+    assert!(terminals(&failed)[0].is_err());
+    assert_eq!(
+        failed
+            .actions
+            .iter()
+            .filter(|action| matches!(action,
+                Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::REQUEST_FAILED
+            ))
+            .count(),
+        1
+    );
+    e.handle_command(
+        NOW + 11.,
+        Command::Query {
+            command: 7,
+            query: public(),
+        },
+        Some(2000),
+    )
+    .unwrap();
+    let parked = drain(&mut e, NOW + 11.);
+    assert!(parked.requests.is_empty());
+    assert_eq!((parked.prepared, parked.claimed), (0, 0));
+    assert!(terminals(&parked).is_empty());
+    let timer = parked
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 1010. => Some(*timer),
+            _ => None,
+        })
+        .expect("Retry-After keeps the public history parked");
+    e.handle(NOW + 1010., Event::TimerFired { timer });
+    let released = drain(&mut e, NOW + 1010.);
+    assert_eq!(released.requests.len(), 1);
+    assert!(released.requests[0].url.contains("market/trades"));
+    assert!(released.requests[0].headers.is_empty());
+    let done = reply(&mut e, NOW + 1011., &released.requests[0], "[]");
+    assert_eq!(terminals(&done), [Ok("[]".into())]);
+}
