@@ -58,16 +58,11 @@ pub(crate) fn read(
         params,
         at,
     } = read;
-    let retry = if matches!(&pending, Pending::Identity(_)) {
-        RetryPolicy::Never
-    } else {
-        RetryPolicy::ReadFailure
-    };
     let selected = SelectedRead::select(slots, ReadRole::Read { scope: evidence });
     let policy = ReadPolicy {
         timeout_ms: 20_000,
         pacing: None,
-        retry,
+        retry: RetryPolicy::ReadFailure,
     };
     let Ok(admitted) = SelectedRead::scoped(cx, selected, scope, policy) else {
         return Err((Box::new(pending), refused()));
@@ -144,8 +139,13 @@ pub(crate) fn session_credential(credentials: &Credentials, method: Method) -> C
 }
 /// Re-sign a refused read once under a retry of its own Read authority.
 pub(crate) fn retry(cx: &mut Cx<'_, Pending>, mut signed: Signed) -> Queued {
-    let Some(Custody::Read(read)) = signed.custody.take() else {
-        return Err((Box::new(Pending::Signed(Box::new(signed))), refused()));
+    let read = match signed.custody.take() {
+        Some(Custody::Read(read)) => read,
+        // Other authority is never re-signed here; keep it so `finish` retires it.
+        other => {
+            signed.custody = other;
+            return Err((Box::new(Pending::Signed(Box::new(signed))), refused()));
+        }
     };
     match read.retry(cx, RetryEvidence::ReadFailure, ()) {
         Ok((read, ())) => {

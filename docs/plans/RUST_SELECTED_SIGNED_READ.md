@@ -79,6 +79,16 @@ venue-facing entry.
   shrinks exactly, with no new sites. If #1831 lands first, the credential
   inventory shrinks too.
 
+**Follow-up (tracked, not in this PR).** Three legacy paths still take the
+HTTP method as the key-choice input:
+- BingX `Credentials::identity(method)`, used by the unmanaged `issue`/`stage`
+  and listen-key `session_write`;
+- BingX `account::tag_read`, used by the unmanaged signature `resend`;
+- WEEX's temporary staging `signed_request`, which maps GET to Read and
+  everything else to Mutation from the stored `Slots`.
+They leave with their own engine-level cutovers (session and Mutation roles,
+and the staging removal before master), not as more per-venue rules.
+
 ## REDs (each shown failing first)
 
 - R1 (engine): `SelectedRead::scoped` issues under `Command(id)` with the
