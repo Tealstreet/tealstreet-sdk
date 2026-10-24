@@ -1,6 +1,7 @@
 //! TxFlow testnet perpetuals, using separate node and API-service feeds.
 mod account;
 mod history;
+mod local_context;
 pub mod sign;
 mod socket_codec;
 mod trading;
@@ -591,11 +592,19 @@ impl TxFlow {
             return;
         };
         let Some(asset) = self.asset(cx, &symbol) else {
-            cx.fail(command, "Market not found");
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err("Market not found".into()),
+            );
             return;
         };
         if !supported(interval) {
-            cx.fail(command, interval.unsupported("TxFlow"));
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err(interval.unsupported("TxFlow").into()),
+            );
             return;
         }
         let end = to_ms.unwrap_or(cx.now);
@@ -609,7 +618,11 @@ impl TxFlow {
             || end > 9_007_199_254_740_991.0
             || from_ms.is_some_and(|t| t < 0.0)
         {
-            cx.fail(command, "Invalid candle time range");
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err("Invalid candle time range".into()),
+            );
             return;
         }
         #[derive(Serialize)]
