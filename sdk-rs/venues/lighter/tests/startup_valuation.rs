@@ -26,7 +26,7 @@ fn before_quotes(
     let mut public = None;
     let mut logs = vec![];
     for _ in 0..20 {
-        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
         if actions.is_empty() {
             break;
         }

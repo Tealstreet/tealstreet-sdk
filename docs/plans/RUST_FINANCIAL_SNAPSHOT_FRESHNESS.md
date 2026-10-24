@@ -402,3 +402,102 @@ caller-contract and full-map reviews are CLEAN. The scope is fourteen paths:
 four native source modules, three existing native test files, three exact-site
 inventory/checker files and four existing plan/caller docs. Draft CI and a fresh
 complete current-head raw proof remain required; queue order is unchanged.
+
+## Next pair: WOO and Crypto.com (plan before implementation)
+
+Base: actual Bitrue history `726948e78f7db7ab9fc3e0fc19e107602eb110f0`.
+Only Binance and Bitunix use the shared token on this landing;25 other venue
+crates remain. Backpack/Paradex are already covered by a separate queued draft,
+so this pair is disjoint and does not claim their draft as merged. Exclude
+BingX,WEEX,OKX,Bitget,Bybit and queued AsterDEX/MEXC/Phemex/Polymarket reporter
+files. BloFin was inspected but not selected: its complete startup census seeds
+execution prefixes even when WS revisions reject row replacement, and emits
+queued executions. Preserve that policy for a separately designed adoption.
+
+Architecture gate: YES, this is a consumer fan-out of a cross-cutting concern.
+Use existing Store begin/commit/invalidate only; add no engine/venue epoch or
+counter copy. Keep both families' existing per-ID observation revisions because
+these also order WS peers/settings and prevent server-lag regressions; those are
+not replaced by the selective write fence. Token capture observes without
+advancing and sibling snapshot publication must not invalidate it.
+
+WOO: add one owned token to OrdersJoin before generation/inflight construction,
+move it through the existing regular/algo page join, and validate before native
+algo classifications, initial cumulative seeding and Store rows are published.
+The infallible commit callback reads current rows and keeps rejected identities,
+newer per-ID WS rows, terminal status and monotonic filled totals exactly as now.
+Keep generation routing, page metadata/budgets and healthy-peer WS progress.
+Accepted native order-write ACKs invalidate even absent Store rows, after native
+identity/result validation and before scheduling refresh. Leverage/mode ACKs do
+not invalidate order tokens. Do not invalidate on generic account_upsert/WS.
+After a discarded read, clear join ownership and let native poll cadence retry;
+no extra hot-loop or command outcome change. Capture exhaustion issues neither
+order endpoint, creates no join and leaves ordinary polling/positions available.
+
+Crypto.com: add Account.order_token ownership captured once when Balance starts
+normal Orders, retaining it across regular->advanced join and same-read retries.
+Failed/invalid reads clear both order_rows and token. Exhaustion schedules the
+ordinary reconciliation timer and issues no orders HTTP request. At completion,
+take both lists/token and commit all advanced membership/pruning and Store rows
+inside the shared callback, preserving family-specific rejection retention,
+per-ID WS versions, timestamps and terminal filtering. Calls to schedule/retry,
+notices and transport remain outside. Accepted Place/Amend/Cancel/CancelAll
+results invalidate once their existing native response contract succeeds,
+including empty Store and partial successful batches. LeverageAccount/Leverage
+and malformed/refused mutations do not gain acceptance semantics. Do not infer
+new native IDs or optimistic rows beyond the existing trading contract.
+
+Scope: two account modules, two narrow trading ACK hooks, existing account tests
+(and trading tests only if needed), plus existing freshness/AUDITS/QUALITY/CALLERS
+docs. No sign/request/header/identity/socket/history/metadata/build changes.
+Exact legacy maps should stay equal because tokens live in account/join state,
+not request-renderer syntax; if an unavoidable same-site re-expression changes a
+hash, use the standing literal full-map rebind pattern with old/new/count and
+independent full-map negative controls. No new HTTP site or exemption.
+
+Verification: plan commit and independent correctness/adversarial review first;
+original focused engine/WOO/Crypto.com/Binance baseline; native accepted ACK vs
+older joined response controls on original code before claiming any bug; preserve
+ordinary WS healthy-peer/terminal/empty/failed-page controls. Add explicit token
+invalidation/absent-row and capture/late exhaustion tests (API-adoption REDs are
+not original production bugs). Bound native cache evidence using later amend
+routing or cumulative-fill suffix controls. Then focused native suites, strict
+all-target Clippy/scoped fmt/bans/root typecheck+lint, both implementation/tests/
+caller reviews. Draft once clean. CI/proof watches for1784–1787 remain running;
+all merges stay after ApeX1772 and1783 in owner queue order. Future shared actual
+integration/current full CI/proof/separate guard/separate merge remain required.
+No local release WASM/replay/timing/size sweep or comparator/budget relaxation.
+
+Both independent plan audits are CLEAN with these explicit continuation rules:
+Crypto.com clears token/regular half only on terminal abandonment; bounded40101
+and transport retries retain the exact original token plus regular builder,
+including when an ACK crossed the failed attempt. WOO metadata refresh and
+stop_awaiting_price consumption/immediate reread run only after accepted commit;
+a rejected token waits ordinary poll cadence. Preserve mapping-time diagnostic
+forget/report timing and the existing stop-price flag (no reporter repair).
+BloFin's bootstrap seeding is a separate design item; no BloFin source changes.
+
+### WOO/Crypto.com local implementation evidence
+
+The original1140-test/58-group focused baseline passes. Twelve added native tests
+then produce10 failing original controls and2 WS-peer compatibility passes on
+exact726948 sources. Only the two native accepted-cancel-ACK crossings are called
+original correctness gaps; explicit Store invalidation/exhaustion and cache/
+startup-seed controls assert the new engine contract. The missing expected amend
+route is a route-lookup failure, not mislabeled as a literal assertion RED.
+Migrated controls pass all12, including ACK before auth/transport retry and WOO
+initial discard followed by either direct0.006 execution or fresh0.004 prefix
+then0.006 report delivering0.002. Same-ID WS and healthy peers progress without
+invalidating sibling tokens.
+
+Current original receipt SHA
+`8247a288238253e42238e4ffc1a39d95e0fc5e0ba8c5a13ce96c6d5d404fd6b3`
+binds four original source modules, both final test files, both complete run logs
+and exact migrated-source restoration. Earlier original receipts stay historical.
+The full legacy lexical map remains153 paths/1232sites, byte-identical to the
+landing manifest; full-map SHA
+`9a098b9b5f0a8961c66836a57cc848b92d92d5036216cef94b350c5625821a36`.
+No inventory, checker, harness, engine, signing, build or request recipe changes.
+Both independent plan/source/test/caller/architecture reviews are CLEAN. Final
+focused native/Clippy/fmt/bans/root checks and draft CI receipts are recorded in
+the PR body; no historical replay proof or disposition qualifies a later head.
