@@ -131,9 +131,11 @@ impl Polymarket {
             Command::FetchMaxLeverage { .. } => {
                 public_read::local(cx, Operation::Read, Ok("1".into()))
             }
-            Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. } => cx.done(command, "[]".into()),
+            Command::SetLeverage { .. }
+            | Command::SetMarginType { .. }
+            | Command::SetPositionMode { .. } => {
+                let _ = cx.done_local_setting("[]".into(), |_| {});
+            }
             Command::Query { query, .. } => {
                 let result: Result<String, String> = match query {
                     Query::OrderByClientId { .. } => {
