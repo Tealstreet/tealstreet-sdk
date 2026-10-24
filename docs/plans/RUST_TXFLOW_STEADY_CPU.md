@@ -79,3 +79,27 @@ Node WASM grows from 1,083,572 to 1,084,212 bytes (+640), inside the unchanged
 1,343,488-byte ceiling. Raw runs, normal and named artifacts, profiles and logs
 are under `/tmp/codex-txflow-steady-study/`. Full CI and Linux CPU/memory gates
 remain pending; no performance gate, tape or assertion is weakened.
+
+
+## Actual landing integration after infrastructure rerun
+
+The authorized fresh workflow_dispatch40089557443 on unchanged06eb does not
+provide a green proof: the banned-pattern job120859273610 rejects stale foreign
+BloFin account inventory after #2022; browser cold-start120863456174 fails before
+measurement with apexomni Chrome debugging-port timeout. Neither is a measured
+TxFlow CPU regression, and neither justifies a threshold or identity-check edit.
+The full job logs were retained outside the repository. No repeat environment
+identity mismatch is claimed from those failures.
+
+A genuine automatic plain merge integrates actual3573b9212e5, including the
+foreign BloFin and Kraken/Polymarket inventory pruning. All own TxFlow runtime,
+wire and projection-test blobs remain byte-exact to06eb/source868915. All
+incoming paths outside the five-file CPU slice are retained; no manual source
+resolution or new local build is needed for this mechanical integration. The
+previous local92 scoped checks and controlled before/after measurements apply
+to that exact own source; fresh composed CI/performance/size remains required.
+
+During local verification, #2034 landed atdb6fa45bbb7 and the next normal
+ratchet correctly rejected the now-stale MEXC lib inventory. A second genuine
+plain merge carries that actual foreign prune; this is inventory convergence,
+not a checker exemption or a change to the CPU implementation.
