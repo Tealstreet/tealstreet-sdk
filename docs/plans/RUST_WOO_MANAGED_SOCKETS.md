@@ -167,3 +167,21 @@ production hunks and appended tests merge automatically; owner review of that
 exact resolution is requested. This trial is not actual #1788 integration or a
 runtime claim for its appended cases. Wait for the actual snapshot-owner landing
 and then recheck that composition without rewriting either frozen head.
+
+Actual #1788 is now `9330c11bdea731368cb1254fa3dc068d11380cdd`. Scratch
+merge `b9194ff8d1f` genuinely integrates it. The only source conflict used
+mxb4mq's bounded CLEAR: managed imports plus OrderSnapshotToken; no retired
+socket imports and no token/reducer/trading body resolution. Docs retain actual
+landing content plus the adapter suffix once. No frozen branch was rewritten.
+
+The exact composed targets execute account61 PASS/two FAIL and managed sockets
+nine PASS/the same two ordering FAIL, zero ignored. The appended token cases
+`snapshot_token_rejected_algo_join_does_not_poison_later_amend_routing` and
+`snapshot_token_discarded_initial_join_cannot_seed_execution_prefix_or_readiness`
+currently send financial ingress from bare-start unopened sockets. Their new
+managed composition fails respectively at the missing amend request and fill
+count. Repair requires a genuine established stream, plus real close/backoff/
+replacement/open/auth where a later refresh is needed, preserving classification
+before snapshot start and every original financial assertion. Exact fixture-only
+repair proposal was sent to the snapshot owner; no such edit is included here.
+These failures and actual #1943 seed handoff adoption remain readiness gates.
