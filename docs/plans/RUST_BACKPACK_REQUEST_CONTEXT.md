@@ -842,3 +842,10 @@ working control and pin Primary write selection/provider output in dual setup.
 No stable_id or nonce domain is introduced. LocalIdentity Secret copies remain
 zeroizing; no third durable raw credential copy. Review the precise registry
 hunk before apply; if1990/2033 land first, recompose their signer setup policy.
+
+Expanded registry originals ac4d5c2517e:9 executed,7GREEN/2assertionRED,
+zero ignored, jobs4. The same two missing-secondary assertions fail; original
+provider-output suffixes remain gated until GREEN. Added working controls pin
+empty-read-key native construction refusal and Primary Mutation selection plus
+exact RFC provider output despite a configured secondary. Proposed registry
+source is not applied and is under owner review separately.
