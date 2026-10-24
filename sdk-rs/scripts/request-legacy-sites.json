@@ -697,8 +697,6 @@
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
   },
   "venues/mexc/src/lib.rs": {
-    "2cb4c59f38cca507a15b20d1ace303afd27defc1b4fe0aba50dddcbcb1f9c37c": 1,
-    "a1d7eb3cdf7f4e938351efa132ee68dac79fc9e6e26db557c0ffd67282e9ae14": 1,
     "e7ec3b5f8c170e9a5887721f2eedda084ecf9f5a5eba8d1e899957c63019e0bb": 1
   },
   "venues/mexc/src/secondary_tests.rs": {
