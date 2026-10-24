@@ -7715,6 +7715,20 @@ ApeX now signs only through the provider at dispatch
 - **`sign::request` and `sign::ws_login`** are legacy test oracles taking
   `sign::LegacyCredentials`; the venue never calls them.
 
+
+### CPU producer step metadata convergence
+
+CPU artifact authentication now waits for every step in its exact completed,
+successful attempt1 producer to become terminal. The command shares at most
+twenty complete metadata inventory refreshes, thirty seconds apart, across all
+artifact bindings, including valid empty step lists. Exhaustion reports the
+run, physical job and pending steps or the explicit empty-inventory cap;
+HTTP refusals, changed identity and retry aliases fail closed. This is an API
+metadata wait, not a replay/measurement retry or a new timing sample. Exact
+upload/checkout windows, ZIP/digest checks, raw observations and final
+provenance validation remain enforced. No venue policy or legacy non-Rust
+production changes. Plan: RUST_CPU_PRODUCER_STEP_METADATA.md.
+
 ## ApeX managed reads (#2066)
 
 Every ApeX non-trading read now passes managed host preparation
