@@ -494,12 +494,7 @@ impl BybitLinear {
         path: &'static str,
         payload: String,
     ) -> bool {
-        let identity = if method == Method::Get {
-            self.read_credentials.as_ref().or(self.credentials.as_ref())
-        } else {
-            self.credentials.as_ref()
-        };
-        let Some(identity) = identity else {
+        let Some(identity) = self.signing_identity(method) else {
             return false;
         };
         let mut url = format!("{}{}", self.paths.rest, path);
@@ -513,7 +508,6 @@ impl BybitLinear {
         let pending = Pending {
             category: self.category,
             rest: Rest {
-                method,
                 path,
                 payload,
                 stream: false,
@@ -1557,12 +1551,6 @@ impl BybitLinear {
                 self.apply_position_mode(cx, *hedged);
                 Decision::Next(Vec::new())
             }
-            Call::Hyro(_) | Call::ResolveMode { .. } => Self::unproven(
-                cx,
-                context,
-                "Bybit ordinary plan carried a legacy call",
-                &[],
-            ),
         }
     }
 

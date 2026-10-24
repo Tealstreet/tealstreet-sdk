@@ -3515,3 +3515,41 @@ fn hyro_recv_window_refusal_corrects_the_next_attempt_clock() {
         Some((h.now + 600_000.).floor().to_string())
     );
 }
+
+/// Bybit has no symbol-addressed cancel: the command is refused before any
+/// I/O instead of finishing without a terminal.
+#[test]
+fn cancel_orders_with_symbols_is_refused_not_left_open() {
+    for variant in [Variant::Linear, Variant::Hyrotrader] {
+        let mut h = ready(variant);
+        h.requests.clear();
+        h.command(Command::CancelOrdersWithSymbols {
+            command: 130,
+            orders: vec![safe_cex_engine::model::CancelOrderRef {
+                id: "any".into(),
+                symbol: "BTCUSDT".into(),
+            }],
+        });
+        let failure = h.notices.iter().find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 130,
+                error,
+            } => Some(error),
+            _ => None,
+        });
+        assert_eq!(
+            failure.and_then(|error| error.kind),
+            Some(safe_cex_engine::ErrorKind::Unsupported),
+            "{variant:?}: {failure:?}"
+        );
+        assert_eq!(
+            h.outcomes,
+            [(130, Some(safe_cex_engine::Outcome::NotSent))],
+            "{variant:?}"
+        );
+        assert!(
+            !h.paths().iter().any(|p| p.contains("/v5/order/")),
+            "{variant:?}"
+        );
+    }
+}

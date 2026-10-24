@@ -6913,3 +6913,11 @@ them as fixtures.
 | A native refusal | Classified: keeps its `kind` and the native `venueCode` (was `internal` and no code) | Branch on `kind`. |
 | A signature/timestamp refusal (`10002`/`10004`) | Re-read once as a managed retry with Bybit's clock; host text never re-sends | None. |
 | Credentials | Unchanged: the read key when configured, else the primary; keyless account history is `[]` with no request | None. |
+
+### Bybit legacy executor removed (D-bybit)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| Every trading command runs on the managed ordinary path; the legacy job executor, text resend and unmanaged `send()` are gone | Unchanged shapes; no host text ever re-sends a request | None. |
+| Fill repair (`/v5/execution/list` for a lost fill) is a managed Background read | Re-reads once on a native `10002`/`10004`; text never re-sends | None. |
+| `cancelOrdersWithSymbols` | Typed `NotSent` `unsupported` before any request (as #2010) | Use `cancelOrders` with order ids. |

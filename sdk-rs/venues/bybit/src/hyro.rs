@@ -6,7 +6,7 @@ use crate::sign::{Body, Query};
 use crate::trading::acknowledgement::{self as ack, Answer};
 use crate::trading::ordinary::Ordinary;
 use crate::wire::{OrderRow, present};
-use crate::{BybitLinear, Pending, Rest, venue_error};
+use crate::{BybitLinear, Pending, Rest, Then, venue_error};
 use safe_cex_engine::model::{Order, OrderIdentityKind, OrderIdentityReceipt, PlaceOrderOpts};
 use safe_cex_engine::{CommandId, Cx, Response, VenueError};
 use serde::Deserialize;
@@ -127,7 +127,7 @@ impl Intent {
 }
 
 /// A link-filtered reconcile read, outside any command.
-pub(crate) struct Lookup {
+pub struct Lookup {
     key: String,
     link: String,
     history: bool,
@@ -375,7 +375,8 @@ impl BybitLinear {
             "/v5/order/realtime"
         };
         let rest = Rest::get(path, link_query(&read.link)).signed();
-        self.hyro_read(cx, rest, read);
+        // A reconcile read on its own Background authority.
+        self.send_read(cx, rest, Then::Hyro(read));
     }
 
     /// Classify one link-filtered order read for this lot.

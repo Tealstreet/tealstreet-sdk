@@ -1,7 +1,7 @@
 use super::*;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::Action;
-use safe_cex_engine::test_support::{ProbeVenue, http_requests};
+use safe_cex_engine::test_support::{ProbeVenue, prepared_actions};
 const PRIMARY_SECRET: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
 const READ_SECRET: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
 fn setup() -> (Options, safe_cex_engine::signing::Provider) {
@@ -32,9 +32,9 @@ fn probe(
     venue: BybitLinear,
 ) -> ProbeVenue<BybitLinear, impl FnMut(&mut BybitLinear, &mut Cx<'_, Pending>)> {
     ProbeVenue::new(venue, |venue, cx| {
+        use safe_cex_engine::request_context::{Credential, Policy, Scope};
         for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
             let rest = Rest {
-                method,
                 path: "/secondary-test",
                 payload: if method == Method::Get {
                     "category=linear&symbol=BTC%26USDT".into()
@@ -45,7 +45,34 @@ fn probe(
                 signed: true,
                 resent: false,
             };
-            venue.send(cx, rest, Then::Tickers(vec![]));
+            if method == Method::Get {
+                venue.send_read(cx, rest, Then::Tickers(vec![]));
+                continue;
+            }
+            // Bybit writes sign on a command plan; drive that recipe on a Background leg.
+            let identity = venue.signing_identity(method).cloned().unwrap();
+            let policy = Policy {
+                credential: Some(Credential {
+                    slot: safe_cex_engine::CredentialSlot::Primary,
+                    reference: identity.credential.clone(),
+                }),
+                ..venue.read_policy(false, 20_000).unwrap()
+            };
+            let context = cx.http_context(Scope::Background, policy).unwrap();
+            let step = sign::Http::new(identity, rest.payload.clone(), venue.recv_window)
+                .with_header_policy(venue.signing_policy.header_policy());
+            let url = format!("{}{}", venue.paths.rest, rest.path);
+            let body = Some(rest.payload.clone());
+            let pending = Pending {
+                category: venue.category,
+                rest,
+                then: Then::Tickers(vec![]),
+                read: Some(context.clone()),
+            };
+            assert!(
+                cx.request_signed_managed(context, method, url, body, Box::new(step), pending)
+                    .is_ok()
+            );
         }
     })
 }
@@ -55,10 +82,12 @@ fn secondary_get_keeps_primary_mutations() {
     let mut engine = safe_cex_engine::test_support::seeded_engine(probe(BybitLinear::new(options)));
     engine.set_signer(Some(signer)).unwrap();
     engine.start(1700000000000.0);
-    engine.prepare_dispatch(1700000001234.75);
-    let requests: Vec<_> = http_requests(&mut engine)
+    let requests: Vec<_> = prepared_actions(&mut engine, 1700000001234.75)
         .into_iter()
-        .filter(|r| r.url.contains("secondary-test"))
+        .filter_map(|action| match action {
+            Action::Http(request) if request.url.contains("secondary-test") => Some(request),
+            _ => None,
+        })
         .collect();
     assert_eq!(requests.len(), 4);
     for request in requests {

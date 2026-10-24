@@ -1652,7 +1652,7 @@ impl BybitLinear {
             .str("orderId", &id)
             .num("limit", 100.0)
             .opt_str("cursor", cursor.as_deref());
-        self.send(
+        self.send_read(
             cx,
             Rest::get("/v5/execution/list", query).signed(),
             Then::Account(Request::FillRepair {
