@@ -16,7 +16,7 @@ mod wire;
 use safe_cex_engine::ErrorKind;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
-use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
@@ -398,57 +398,6 @@ impl WeexFutures {
             Ok(data) => managed::complete(cx, context, data),
             Err(error) => managed::reject(cx, context, error.to_string()),
         }
-    }
-    /// Legacy-owned private requests: native owners keep their lifecycle, and the
-    /// one temporary staging site hands canonical work to the injected provider.
-    #[allow(clippy::too_many_arguments)]
-    fn signed_request(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        method: Method,
-        path: &str,
-        query: &str,
-        body: Option<String>,
-        task: Task,
-        stream: Option<ArrayAt>,
-    ) -> bool {
-        // This legacy staging site still keys its role on the method: GETs read,
-        // everything else is a primary-key Mutation.
-        let role = if method == Method::Get {
-            CredentialRole::Read { scope: None }
-        } else {
-            CredentialRole::Mutation
-        };
-        let Ok((selection, identity)) = self.slots.select(role) else {
-            return false;
-        };
-        let slot = selection.slot();
-        let mut pairs: Vec<_> = query.split('&').filter(|p| !p.is_empty()).collect();
-        pairs.sort_unstable_by_key(|p| p.split('=').next().unwrap_or(""));
-        let path_query = if pairs.is_empty() {
-            path.to_owned()
-        } else {
-            format!("{path}?{}", pairs.join("&"))
-        };
-        let recipe = dispatch_signing::Http::new(identity.clone(), method, path_query, body);
-        let (url, headers, body) = recipe.unsigned();
-        let scope = account::auth_scope(&task);
-        let pending = Pending {
-            task,
-            invalid: false,
-            skipped: Vec::new(),
-            seed_generation: self.seed_generation,
-        };
-        let id = if let Some(at) = stream {
-            cx.request_streamed_body(method, url, headers, body, at, pending)
-        } else {
-            cx.request(method, url, headers, body, pending)
-        };
-        cx.sign_http(id, Box::new(recipe));
-        if let Some(scope) = scope {
-            cx.tag_account_read(id, slot, scope);
-        }
-        true
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.socket = Some(
@@ -1002,6 +951,12 @@ impl Venue for WeexFutures {
                 .paused_until
                 .max(cx.now + rate::delay(response, cx.now));
         }
+        if let Task::History(request) = &p.task
+            && !self.history_delivery_current(cx, request)
+        {
+            Self::finish_history_page(cx, request);
+            return;
+        }
         if response.status >= 400 {
             self.fail(
                 cx,
@@ -1171,6 +1126,7 @@ impl Venue for WeexFutures {
         owner: safe_cex_engine::request_context::Owner,
         _pending: Vec<Pending>,
     ) {
+        self.retire_history(owner);
         self.deferred_gets.retain(|deferred| match &deferred.task {
             Task::BookQuery(query) => query.owner() != owner,
             _ => true,
