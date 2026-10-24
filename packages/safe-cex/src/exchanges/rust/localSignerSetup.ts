@@ -90,17 +90,13 @@ export class LocalSignerSetup {
     const primaryMetadata = effectiveIdentityMetadata(setupMetadata.primary, policy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(setupMetadata.secondary, policy.secondary);
     const validateOnly = policy.readCredentials === 'validateOnly';
-    const readKey =
+    if (validateOnly && setupMetadata.secondary !== undefined) invalidMetadata();
+    this.readCredentialsValid = validateOnly ? readCredentialsValidity(options) : undefined;
+    const secondary = !validateOnly && (
       options.secondary_key !== undefined ||
       options.secondary_secret !== undefined ||
-      options.secondary_passphrase !== undefined;
-    if (validateOnly && setupMetadata.secondary !== undefined) invalidMetadata();
-    // The same rule as Rust: both fields nonempty, untrimmed.
-    this.readCredentialsValid = validateOnly && readKey
-      ? typeof options.secondary_key === 'string' && options.secondary_key.length > 0
-        && typeof options.secondary_secret === 'string' && options.secondary_secret.length > 0
-      : undefined;
-    const secondary = !validateOnly && (readKey || setupMetadata.secondary !== undefined);
+      options.secondary_passphrase !== undefined ||
+      setupMetadata.secondary !== undefined);
     if (secondary && (!credentialPresent(options.secondary_key, secondaryMetadata?.trimCredential === true)
       || (!secondarySigningFromPrimary && !options.secondary_secret))) {
       const message = 'Rust engine secondary signing keys require a nonempty key and secret';
@@ -114,8 +110,10 @@ export class LocalSignerSetup {
     this.primaryComplete = this.credentialPresence.key && this.credentialPresence.secret;
     resolveSetupPassphrase('primary', this.primaryComplete, options.passphrase, options.passphrase, policy.primary, options.publicDataOnly === true);
     resolveSetupPassphrase('secondary', secondary, options.secondary_passphrase, options.passphrase, policy.secondary, options.publicDataOnly === true);
+    // A public-only PublicRead provider holds no primary (native drops it too).
+    const primaryDropped = policy.readCredentials === 'publicRead' && options.publicDataOnly === true;
     this.#credentials = {
-      ...(options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined
+      ...(!primaryDropped && (options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined)
         ? { primary: { ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase } }
         : {}),
       ...(secondary
@@ -150,6 +148,12 @@ export class LocalSignerSetup {
     this.#credentials = undefined;
   }
 }
+
+/** A ValidateOnly read key's `ReadCredentials::validate` result, without the key.
+ * Presence follows the legacy bridge (a truthy `secondary_key`); validity is
+ * Rust's rule: key and secret both nonempty, untrimmed. */
+export const readCredentialsValidity = (options: ExchangeOptions): boolean | undefined =>
+  options.secondary_key ? typeof options.secondary_secret === 'string' && options.secondary_secret.length > 0 : undefined;
 
 /** Splice the result in as text: re-parsing could round large numeric options.
  * A caller-supplied duplicate key is refused by the Rust parser. */

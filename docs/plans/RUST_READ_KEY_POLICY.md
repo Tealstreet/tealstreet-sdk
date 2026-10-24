@@ -186,3 +186,17 @@ change.
     the options JSON as text.
   - Controls in `rust.read-key-policy.test.ts`. They fail on the pre-change
     source (4 REDs); the 2 unchanged-default controls pass.
+- Independent review (findings, all addressed):
+  - **P1:** ValidateOnly ran only in dispatch-signing setup, and none of its
+    consumers is a dispatch family. Now `build_with_signer` converts a raw
+    ValidateOnly key on every path, after the unchanged native refusal
+    (`413ff6fbc1a`), and the JS non-dispatch bridge sends only the result.
+  - **P2:** JS PublicRead drops the primary from public-only setup.
+  - **P2:** wiring tests drive `build_with_signer` and the JSON setup
+    through a test-only declaration; mutation-checked.
+  - **P3:** JS read-key presence follows the legacy bridge, a truthy
+    `secondary_key`, in both JS paths, so an empty saved field is still "no
+    read key".
+  - **P3, consumer gate:** `DelegatedSignerSetup` does not apply the policy.
+    A ValidateOnly family must not enable delegated remote signing until it
+    does.
