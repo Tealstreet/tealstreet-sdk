@@ -307,9 +307,9 @@ fn startup_mode_and_metadata_reads_respect_the_rate_limit_pause() {
         }),
     );
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = public_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, MARKETS);
-    let early = requests(&mut e);
+    let early = public_requests(&mut e, 100.);
     let ticker = early
         .iter()
         .find(|r| r.url.contains("contract/ticker"))
@@ -848,11 +848,11 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
         recv_window: None,
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = public_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, &catalogue_with("0"));
     assert!(e.store().market("BTCUSDT").is_some());
     assert!(e.store().market("BADUSDT").is_none());
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = prepared(&mut e, 100.);
     assert!(
         actions
             .iter()
@@ -866,7 +866,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
         })
         .expect("partial catalogue retry");
     e.handle(1100.0, Event::TimerFired { timer: retry });
-    let reread = requests(&mut e)
+    let reread = public_requests(&mut e, 1100.)
         .into_iter()
         .find(|r| r.url.contains("contract/detail"))
         .expect("catalogue re-read");
@@ -1289,10 +1289,10 @@ fn mode_read(body: &str, status: u16) -> (support::TestEngine, Vec<Action>) {
         secret: Some("replay-secret".into()),
     }));
     e.start(0.0);
-    let r = support::requests(&mut e).remove(0);
+    let r = support::public_requests(&mut e, 0.).remove(0);
     support::response(&mut e, &r, support::MARKETS);
     // Private startup no longer waits for tickers, so the mode read may come with them.
-    let mut pending = support::requests(&mut e);
+    let mut pending = support::public_requests(&mut e, 100.);
     let tickers = pending
         .iter()
         .position(|r| r.url.contains("contract/ticker"))
@@ -1432,7 +1432,7 @@ fn refresh_that_filters_a_held_market_keeps_it_with_its_position_and_order() {
             timer: retry.expect("partial catalogue retry"),
         },
     );
-    let reread = requests(&mut e)
+    let reread = public_requests(&mut e, 1100.)
         .into_iter()
         .find(|r| r.url.contains("contract/detail"))
         .expect("catalogue re-read");
@@ -1456,7 +1456,7 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let (mut rereads, mut warned) = (0, false);
     while let Some(timer) = retry.take() {
         e.handle(1100.0, Event::TimerFired { timer });
-        let reread = requests(&mut e)
+        let reread = public_requests(&mut e, 1100.)
             .into_iter()
             .find(|r| r.url.contains("contract/detail"))
             .expect("catalogue re-read");

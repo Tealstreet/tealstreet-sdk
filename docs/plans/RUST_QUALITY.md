@@ -1619,6 +1619,43 @@ failures with 255 Background peers and one free Context slot. Capacity recovery
 releases exact Background roots. No fabricated Context, numeric fallback or
 missing-method compile failure is regression evidence.
 
+## OKX closed-position managed controls
+
+Ten original compiling assertion REDs and six native working controls now pass
+through the managed adapter. Five additional managed controls pin dequeue-time
+child bounds, release-aware typed timeout fields, provider/preparation metadata
+and accepted-prefix recovery, reversed equal-deadline ingress order, and an
+explicit180s caller receipt completing after the default120s boundary. All21
+controls and all9 existing closed-position tests pass without ignored tests or
+removed financial assertions. Existing fixtures only drive managed preparation
+and advance each native100ms page clock. Capacity uses genuine retained peers;
+reuse controls now reach and pass their stale-timer/DATA assertions. Family
+WASM/replay/CPU/memory certification remains CI's responsibility.
+
+## MEXC unsigned Background Read verification
+
+Plan3690a27236f precedes original controlsc58c123d68c:18 executed controls,
+11 assertion RED/7 working GREEN/zero ignored against unchanged production.
+The same18 assertions pass after managed adoption. They cover parked dispatch,
+preparation refusal, deadline equality, expired stream end, native startup retry,
+exact500ms depth recovery, old-response isolation, a concurrent live symbol,
+malformed-envelope429 precedence, wire values and buffered version replay.
+All221 MEXC native tests pass across18 targets including the empty doc target;
+strict all-target/all-feature Clippy, scoped fmt, full bans and both request
+ratchets (15 checker tests) pass. Existing native test expectations stay intact;
+public fixture collectors now drive the shared prepared-action executor at their
+explicit event times. Signed secondary probes use an inert Identity continuation
+instead of a public Markets continuation.
+
+Two independent runtime findings received their own assertion-RED commit221bfbfc2ff
+and fixbec93dd562a: expired cleanup metadata must not suppress native failure
+recovery; accepted catalogue custody must retire before successor admission. All
+20 controls now pass; refreshed223 MEXC tests across19 targets and305 Binance
+reference tests across26 targets pass (target counts include empty doc tests).
+Strict Clippy/fmt, bans and both inventory checks pass after the fix. Independent
+source/adversarial, caller and full-map delta reviews are CLEAR atbec93dd562a;
+architecture gate No. CI family size/CPU and other CI gates remain pending.
+
 
 ### Hyperliquid spot candle custody controls
 
