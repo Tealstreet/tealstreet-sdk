@@ -1,7 +1,7 @@
 mod support;
 use safe_cex_engine::model::{MarginType, OrderStatus, OrderType, PositionSide};
 use safe_cex_engine::{Action, Command, Event, HttpRequest, Notice, SocketChannel, SocketId};
-use safe_cex_venue_apexomni::{ApexOmni, Options};
+use safe_cex_venue_apexomni::Options;
 use support::*;
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -14,35 +14,7 @@ const ORDERS: &str = r#"{"code":0,"data":[{"id":"parent","symbol":"BTC-USDT","st
 const BALANCE: &str = r#"{"code":0,"data":{"totalEquityValue":"1000","availableBalance":"800","initialMargin":"100","maintenanceMargin":"20"}}"#;
 
 fn seeded() -> (TestEngine, SocketId, Vec<HttpRequest>) {
-    let (provider, identities) = safe_cex_crypto::signer::LocalSigner::from_setup_with_policy(
-        safe_cex_crypto::signer::LocalSetup {
-            primary: Some(safe_cex_crypto::signer::LocalIdentity {
-                key: safe_cex_crypto::signer::Secret::new("key".into()),
-                secret: safe_cex_crypto::signer::Secret::new("secret".into()),
-                passphrase: Some(safe_cex_crypto::signer::Secret::new("passphrase".into())),
-                ..Default::default()
-            }),
-            secondary: None,
-        },
-        safe_cex_engine::signing::CredentialSetupPolicy {
-            primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
-                secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text),
-                ..Default::default()
-            }),
-            secondary: None,
-        },
-    )
-    .unwrap();
-    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("passphrase".into()),
-        omni_key_seed: Some("11".repeat(65)),
-        identity: identities.primary.clone(),
-        ..Default::default()
-    }));
-    e.set_identities(identities).unwrap();
-    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    let mut e = private_engine(Options::default(), &Material::default());
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
@@ -774,12 +746,17 @@ fn private_pong_reports_rounded_one_way_latency() {
 
 #[test]
 fn missing_passphrase_does_not_open_a_permanently_unauthenticated_socket() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        omni_key_seed: Some("11".repeat(65)),
-        ..Default::default()
-    }));
+    let mut e = private_engine(
+        Options {
+            ..Default::default()
+        },
+        &Material {
+            key: "key",
+            signing: "secret",
+            passphrase: None,
+            seed: Some(("11".repeat(65)).to_string()),
+        },
+    );
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
@@ -798,13 +775,17 @@ fn missing_passphrase_does_not_open_a_permanently_unauthenticated_socket() {
 
 #[test]
 fn silent_private_handshake_is_closed_and_reconnected_without_open_event() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("passphrase".into()),
-        omni_key_seed: Some("11".repeat(65)),
-        ..Default::default()
-    }));
+    let mut e = private_engine(
+        Options {
+            ..Default::default()
+        },
+        &Material {
+            key: "key",
+            signing: "secret",
+            passphrase: Some("passphrase"),
+            seed: Some(("11".repeat(65)).to_string()),
+        },
+    );
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
@@ -995,13 +976,17 @@ fn malformed_terminal_ws_identity_cannot_remove_or_tombstone_a_live_order() {
 
 #[test]
 fn account_identity_can_be_read_before_start_without_an_omni_seed() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("passphrase".into()),
-        omni_key_seed: None,
-        ..Default::default()
-    }));
+    let mut engine = private_engine(
+        Options {
+            ..Default::default()
+        },
+        &Material {
+            key: "key",
+            signing: "secret",
+            passphrase: Some("passphrase"),
+            seed: None,
+        },
+    );
     engine.handle(
         1700000000123.0,
         Event::Command(Command::FetchAccount { command: 77 }),

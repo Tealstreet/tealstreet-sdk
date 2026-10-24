@@ -113,27 +113,26 @@ fn refs_only_private_ws_login_is_signed_by_the_provider() {
     );
 }
 
-/// R6: without the zklinkSeed role, private start refuses typed and sends no
-/// private HTTP; public discovery is unaffected.
+/// R6: without the zklinkSeed role, private start reports the typed seed
+/// refusal. As in legacy, only order signing is blocked (each order's
+/// capability check refuses); account monitoring and cancels still run.
 #[test]
-fn refs_without_the_zklink_role_refuse_private_start_typed() {
+fn refs_without_the_zklink_role_report_the_seed_and_keep_monitoring() {
     let mut e = refs_only(false);
     let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 30.0);
-    assert!(
-        !actions.iter().any(|action| matches!(
-            action,
-            Action::Http(request) if request.url.contains("/v3/account")
-                || request.url.contains("/v3/open-orders")
-        )),
-        "no private I/O"
-    );
     assert!(
         actions.iter().any(|action| matches!(
             action,
             Action::Notice(Notice::Event(event))
                 if event.code == safe_cex_engine::log::code::CONFIG_INVALID
-                    && event.message.contains("OmniKey")
+                    && event.message.starts_with("Invalid OmniKey seed")
         )),
-        "typed not-ready refusal"
+        "typed seed refusal"
+    );
+    assert!(
+        actions.iter().any(
+            |action| matches!(action, Action::Http(request) if request.url.ends_with("/v3/account"))
+        ),
+        "account monitoring continues"
     );
 }
