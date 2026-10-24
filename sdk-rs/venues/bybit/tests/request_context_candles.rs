@@ -173,6 +173,8 @@ fn cached_balance_info_and_trade_refusals_at_capacity_need_command_authority() {
     assert_eq!(failure(&h, 49).outcome, Some(Outcome::NotSent));
     for command in [46, 47, 49] {
         let error = failure(&h, command);
+        // Today's kind; G1 (#1955) types occupancy refusals as retryable
+        // Capacity, and this assertion moves with it.
         assert_eq!(
             error.kind,
             Some(ErrorKind::Internal),
