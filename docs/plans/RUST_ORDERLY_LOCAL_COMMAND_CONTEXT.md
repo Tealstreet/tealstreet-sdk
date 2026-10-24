@@ -108,3 +108,22 @@ Read projection (no NotSent); runtime error projection was not changed.
 Physical history send/parse/page/retirement, native validation and all incoming
 5b source remain outside this delta. The inventory removes exactly the three
 listed fingerprints; no new entries, bootstrap rows or checker changes.
+
+## Integrated local receipt
+
+Production 0d36c12cd42 was plain-merged with actual 10d01de5279 at 818a59570f4.
+The only manual resolution was CALLERS, authorized by the train owner: entire
+incoming bytes plus the exact own suffix once. All Orderly/engine/host/crypto
+source and tests are byte-exact to the locally tested production pin. All other
+incoming tracked paths and all foreign manifest entries are preserved.
+
+Executed: original local_history_context 12 PASS, new local_history_admission
+4 PASS, native history 25 PASS; zero ignored. Scoped strict Clippy and fmt PASS.
+The initial admission fixture compile attempt omitted mandatory Venue forwarding
+methods; it ran no tests and was corrected. Three capacity expectations then
+exposed the fixture's generic NotSent projection; they now pin the correct Read
+outcome None without changing production. The initial 9d ban run failed solely
+on the foreign landed BingX shrink; after the actual merge full bans PASS,
+including 1 signing + 15 request + 8 socket negative controls. No exemptions or
+predicate changes. Draft publication and full Rust CI proceed in parallel with
+production reviews; no READY/landing or broad CI result is claimed here.
