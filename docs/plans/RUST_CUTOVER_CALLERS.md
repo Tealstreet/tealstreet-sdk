@@ -7836,3 +7836,18 @@ precommit NotSent is not a released financial outcome. Late callbacks cannot
 retire a reused command generation. Native discovery, account/history and write
 senders remain; only three command candle terminals are removed (25 to 22 on
 this base, or 10 to 7 after the separate local-custody slice lands).
+
+
+## Backpack supported-history Read custody
+
+Fills/orders/funding select Read(scope=None) once through default Slots and
+retain that exact provider binding for every page. Public trades retain a real
+keyless caller root with static X-Broker-Id:1200 and native Public egress.
+All four routes use one ReadCursorHistory under the genuine caller receipt.
+Each physical page has a NEW 20,000ms cap, clipped to the original root, no
+pacing and Never retry; page boundaries never renew the caller wait. Exact
+root/leg DATA admission precedes streamed rows, status, diagnostics and final
+success. Accepted-prefix failure cleanup keeps native paging/economic facts,
+drops unaccepted page rows/IDs/skips and retires the exact leg before another.
+The Backpack publicRead row preserves saved-read-key private GET history in
+public_data_only through a read-only provider; no primary or hosted authority.
