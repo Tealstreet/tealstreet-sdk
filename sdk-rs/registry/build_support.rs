@@ -136,7 +136,7 @@ enum ExtraFieldPolicy {
     AliasPrimary,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 enum ExtraKey {
     ZklinkSeed,
@@ -297,14 +297,26 @@ pub fn generate(json: &str) -> Result<String, String> {
     }
     for policy in std::iter::once(&rules.default).chain(rules.venues.values()) {
         // An alias names the primary's ref, so only a secondary may declare one.
-        if policy
+        let primary_extra = policy
             .signer_setup
             .primary
             .as_ref()
-            .and_then(|primary| primary.extra.as_ref())
-            .is_some_and(|extra| extra.field == ExtraFieldPolicy::AliasPrimary)
-        {
+            .and_then(|primary| primary.extra.as_ref());
+        if primary_extra.is_some_and(|extra| extra.field == ExtraFieldPolicy::AliasPrimary) {
             return Err("aliasPrimary is valid only on a secondary extra policy".into());
+        }
+        // A secondary alias names the primary's declared key and decodes nothing.
+        if let Some(alias) = policy
+            .signer_setup
+            .secondary
+            .as_ref()
+            .and_then(|secondary| secondary.extra.as_ref())
+            .filter(|extra| extra.field == ExtraFieldPolicy::AliasPrimary)
+            && (primary_extra.is_none_or(|extra| extra.key != alias.key)
+                || alias.trim
+                || alias.encoding.is_some())
+        {
+            return Err("aliasPrimary must name the primary's declared extra key".into());
         }
         if policy
             .remote_signing
@@ -444,6 +456,26 @@ mod tests {
             )
             .is_err()
         );
+        // A secondary alias without the primary's key, or with decoding, fails.
+        for (primary, secondary) in [
+            (
+                r#"{"extra":{"key":"zklinkSeed"}}"#,
+                r#"{"extra":{"key":"kucoinBroker","field":"aliasPrimary"}}"#,
+            ),
+            (
+                r#"{}"#,
+                r#"{"extra":{"key":"kucoinBroker","field":"aliasPrimary"}}"#,
+            ),
+            (
+                r#"{"extra":{"key":"kucoinBroker","trim":true}}"#,
+                r#"{"extra":{"key":"kucoinBroker","field":"aliasPrimary","trim":true}}"#,
+            ),
+        ] {
+            let json = format!(
+                r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"k":{{"signerSetup":{{"primary":{primary},"secondary":{secondary}}}}}}}}}"#
+            );
+            assert!(generate(&json).is_err(), "{primary} {secondary}");
+        }
     }
 
     #[test]
