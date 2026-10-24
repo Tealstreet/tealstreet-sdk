@@ -68,3 +68,13 @@ lands first. No other lane claims this file. Signer branch remains plan/RED-only
 4. Independent source/adversarial, caller and full-map reviews, draft PR and full
    CI. No merge without a window. Architecture: shared #1989 owns the concern;
    the venue only supplies native Store projection/result.
+
+## Executed consumer evidence
+
+Original tests committed at `b16e7262fdd` against unchanged venue source:
+six assertion REDs (capacity and sub-ms receipt for each command), four working
+controls. The duplicate is already intercepted by Engine and is explicitly a
+GREEN diagnostic/original-owner control, not a new migration failure. Final
+source makes all ten tests GREEN with identical assertions. Missing-receipt and
+managed internal resource refusal remain shared-engine defense, not a fabricated
+native receipt. No credential, Context or HTTP is created by this adoption.

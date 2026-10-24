@@ -6558,3 +6558,15 @@ capacity and reused ownership produce one engine refusal without a financial
 outcome. Both Lighter and Robinhood, on mainnet/testnet, keep the same contract.
 Remote history requests, pagination, authentication and byte-level query/codec
 behavior are unchanged; this slice issues no remote-fallthrough Context.
+
+## KuCoin Spot fixed-setting local success
+
+SetLeverage still ignores the requested value and returns `[]` after storing
+leverage/buy/sell 1 through the original Store::update_setting (including its
+unknown-symbol default insertion). SetMarginType and SetPositionMode remain
+successful `[]` no-ops, before credentials, including public-only/keyless setup.
+The shared LocalSetting seam now refuses expired/sub-ms waits or exhausted
+command-owner capacity before projection and success; there is no numeric
+fallback or duplicate terminal. Duplicate live ids retain their original owner
+and diagnostic. No transport, signer, timer, Context or journal is added.
+

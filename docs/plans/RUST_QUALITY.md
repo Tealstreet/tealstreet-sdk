@@ -1480,3 +1480,12 @@ reuse and invalid-clock recovery. Native result/error precedence, all four
 Lighter/Robinhood deployments, duplicate custody, repeated immediate completion
 and saturated remote byte/schema controls remain covered. All19 focused tests
 PASS after original4GREEN/15RED. No shared policy, timer, wrapper or scanner change.
+
+## KuCoin Spot fixed-setting admission evidence
+
+Ten native LocalSetting controls cover six original capacity/expired-wait REDs,
+constant projection, unknown symbols, configuration precedence, Background-only
+capacity and duplicate original-owner release. Tests use genuine command
+receipts; no missing-method compile failure or fabricated Context is evidence.
+Exact Spot trading inventory removes only the two-occurrence success row.
+

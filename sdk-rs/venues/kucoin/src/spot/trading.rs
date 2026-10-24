@@ -366,15 +366,14 @@ impl KucoinSpot {
                 })();
                 (command, result)
             }
-            Command::SetLeverage {
-                command, symbol, ..
-            } => {
-                cx.store.update_setting(&symbol, |s| {
-                    s.leverage = 1.0;
-                    s.buy_leverage = Some(1.0);
-                    s.sell_leverage = Some(1.0);
+            Command::SetLeverage { symbol, .. } => {
+                let _ = cx.done_local_setting("[]".into(), |store| {
+                    store.update_setting(&symbol, |s| {
+                        s.leverage = 1.0;
+                        s.buy_leverage = Some(1.0);
+                        s.sell_leverage = Some(1.0);
+                    });
                 });
-                cx.done(command, "[]".into());
                 return;
             }
             Command::FetchLeverage { symbol, .. } => {
@@ -392,8 +391,8 @@ impl KucoinSpot {
                 let _ = cx.done_context(&context, "1".into());
                 return;
             }
-            Command::SetMarginType { command, .. } | Command::SetPositionMode { command, .. } => {
-                cx.done(command, "[]".into());
+            Command::SetMarginType { .. } | Command::SetPositionMode { .. } => {
+                let _ = cx.done_local_setting("[]".into(), |_| {});
                 return;
             }
             Command::FetchAccount { command } => {

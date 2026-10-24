@@ -2837,3 +2837,12 @@ Original test-only5a0303:4GREEN/15assertionRED/0ignored; all19 nowPASS. Native
 validation and credential-presence precedence remain unchanged; shared entry
 refusal owns capacity/clock failure without numeric fallback. Exact inventory
 history10->3, Lighter41->34occurrences; remote paging/auth/source untouched.
+
+## KuCoin Spot fixed-setting completion custody
+
+Closed two legacy success sites covering three Setting commands through actual
+#1989 done_local_setting. Six original assertion REDs and four working native
+controls now pass unchanged. Native keyless/pre-credential semantics, unknown
+symbol insertion and successful mode no-ops are preserved. Shared engine owns
+receipt, command capacity and sole terminal; signer/private REST remain held.
+
