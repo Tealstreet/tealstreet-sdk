@@ -8195,6 +8195,20 @@ waiter list or terminal fan-out. Callers retain native fallback and error
 handling; no numeric fallback stands in for managed completion.
 See [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md).
 
+### TxFlow unsigned account-setting polls
+
+Each activeAssetData setting poll retains one keyless Background Read Context
+through managed Prepare/Bind/Claim and exact current-generation DATA validation.
+Explicit Primary egress preserves account routing for the wallet/vault query;
+there is no fabricated credential, Session or PublicCors override. The new
+20,000 ms admission-to-expiry bound includes stalled preparation and binding,
+with Never retry at the physical layer and no aggregate account-poll deadline.
+Successful DATA publishes native setting/hedged state while its exact Context
+remains live, then retires custody before the native 100 ms successor. Failure
+and revision-stale current replies also retire before that successor; the
+60-second refresh and setting/hedge reducers retain native behavior. Admission pressure follows one bounded successor; nonfinite
+refusal creates no timer or HTTP. Old callbacks cannot clear replacement owners.
+
 ## Paradex command candle Read ownership
 
 FetchCandles retains the original caller Read root across documented klines and
