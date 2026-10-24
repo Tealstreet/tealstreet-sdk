@@ -5,6 +5,9 @@ use super::*;
 mod call;
 pub(super) use call::State;
 
+#[path = "request_context_preflight_ready.rs"]
+mod ready;
+
 impl ContextRegistry {
     fn prepare_preflight(
         &mut self,
@@ -32,6 +35,12 @@ impl ContextRegistry {
             + 1;
         self.retirements
             .try_reserve_exact(required.saturating_sub(self.retirements.len()))
+            .map_err(|_| Error::Capacity)?;
+        self.preflight_ready
+            .try_reserve_exact(required.saturating_sub(self.preflight_ready.len()))
+            .map_err(|_| Error::Capacity)?;
+        self.preflight_initial
+            .try_reserve_exact(required.saturating_sub(self.preflight_initial.len()))
             .map_err(|_| Error::Capacity)?;
         Ok(())
     }
@@ -64,7 +73,9 @@ impl ContextRegistry {
                 credentialed,
             },
         );
-        Preflight::new(&self.issuer, command, generation)
+        let handle = Preflight::new(&self.issuer, command, generation);
+        self.preflight_initial.push(handle.clone());
+        handle
     }
 
     fn preflight_owner(&self, preflight: &Preflight) -> Result<&CommandOwner, Error> {
@@ -136,6 +147,10 @@ impl ContextRegistry {
         let Owner::Command { id, .. } = token.preflight().owner() else {
             return false;
         };
+        self.preflight_ready
+            .retain(|held| held.owner() != token.preflight().owner());
+        self.preflight_initial
+            .retain(|held| held.owner() != token.preflight().owner());
         self.commands.remove(&id);
         self.contexts
             .retain(|_, context| context.owner() != token.preflight().owner());
@@ -225,6 +240,7 @@ impl<P> Cx<'_, P> {
     /// Cached ReadOnly completion. Outstanding read-call and write-plan
     /// completion use their own authority operations; they cannot bypass this.
     pub fn done_preflight(&mut self, preflight: &Preflight, result: String) -> Result<(), Error> {
+        self.validate_preflight_activation(preflight)?;
         let seal = self.io.request_contexts.seal_preflight(
             preflight,
             self.now,
@@ -244,6 +260,7 @@ impl<P> Cx<'_, P> {
         preflight: &Preflight,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        self.validate_preflight_failure_custody(preflight)?;
         let seal = self.io.request_contexts.seal_preflight(
             preflight,
             self.now,

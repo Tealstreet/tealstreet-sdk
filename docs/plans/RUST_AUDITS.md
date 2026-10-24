@@ -3032,3 +3032,14 @@ shared LocalSetting with no financial Store change. Rejected admission supplies
 the only failure; revoked custody adds no fallback. Credential-free local errors
 do not count as remote auth evidence. Remote jobs/signing/classification and all
 other venue files remain unchanged; no engine or key-selection algorithm added.
+
+
+## Crypto.com public discovery delivery ownership
+
+Markets/Tickers now carry their original Background Read Context through
+streaming and publication. Actual shared delivery validation precedes row
+parsing/staging and response handling; expiry equality cannot commit a live
+prefix. Shared Context cleanup is separate from DATA admission: already-admitted
+failure keeps its native retry even after sibling issuance prunes expired
+retirement metadata. Completed catalogue retires before successor admission so
+capacity cannot strand ticker startup. No local issuer/timer/selection algorithm.

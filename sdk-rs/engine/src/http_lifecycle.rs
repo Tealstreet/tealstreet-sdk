@@ -129,11 +129,7 @@ impl<P> Cx<'_, P> {
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
         #[cfg(feature = "http-plans")]
-        let admission = match self
-            .io
-            .request_contexts
-            .owned_admission(&context, self.io.http_delivery.as_ref())
-        {
+        let admission = match self.owned_http_admission(&context) {
             Ok(admission) => admission,
             Err(error) => return Err((pending, error)),
         };
@@ -689,6 +685,7 @@ impl<V: Venue> Engine<V> {
         self.io.request_contexts.exit_delivery(&delivery);
         self.finish_event_scope(now);
         self.sweep_executions(now);
+        self.flush_preflight_readiness(now);
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
         }

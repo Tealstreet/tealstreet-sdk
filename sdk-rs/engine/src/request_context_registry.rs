@@ -204,6 +204,10 @@ pub(super) struct ContextRegistry {
     executions: execution::Executions,
     #[cfg(feature = "http-plans")]
     retirements: VecDeque<HttpOwnerRetirement>,
+    #[cfg(feature = "http-plans")]
+    preflight_ready: VecDeque<Preflight>,
+    #[cfg(feature = "http-plans")]
+    preflight_initial: Vec<Preflight>,
     /// Scoped delivery loans outlive temporary marker removal and even owner
     /// cleanup. Readiness may run only after the true outermost scope exits.
     #[cfg(feature = "http-plans")]
@@ -219,7 +223,7 @@ pub(super) struct ContextRegistry {
     /// Order-read epoch at each live owner's first released Read: one logical
     /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
     #[cfg(feature = "order-locks")]
-    read_marks: HashMap<Owner, u64>,
+    read_marks: Vec<(Owner, u64)>,
 }
 
 impl ContextRegistry {
@@ -227,7 +231,11 @@ impl ContextRegistry {
     /// its earliest released Read. A mark only ever keeps a fence longer.
     #[cfg(feature = "order-locks")]
     pub(super) fn read_mark(&mut self, owner: Owner, epoch: u64) -> u64 {
-        *self.read_marks.entry(owner).or_insert(epoch)
+        if let Some((_, mark)) = self.read_marks.iter().find(|(held, _)| *held == owner) {
+            return *mark;
+        }
+        self.read_marks.push((owner, epoch));
+        epoch
     }
     #[cfg(all(test, feature = "order-locks"))]
     pub(super) fn read_mark_count(&self) -> usize {
@@ -240,17 +248,16 @@ impl ContextRegistry {
         if self.read_marks.is_empty() {
             return;
         }
-        let mut live: std::collections::HashSet<Owner> =
-            self.contexts.values().map(Context::owner).collect();
-        live.extend(self.commands.iter().map(|(id, owner)| Owner::Command {
-            id: *id,
-            generation: owner.generation,
-        }));
-        self.read_marks.retain(|owner, _| live.contains(owner));
+        let (contexts, commands) = (&self.contexts, &self.commands);
+        self.read_marks.retain(|(owner, _)| {
+            matches!(owner, Owner::Command { id, generation }
+                if commands.get(id).is_some_and(|live| live.generation == *generation))
+                || contexts.values().any(|context| context.owner() == *owner)
+        });
     }
     fn forget_read_mark(&mut self, _owner: Owner) {
         #[cfg(feature = "order-locks")]
-        self.read_marks.remove(&_owner);
+        self.read_marks.retain(|(held, _)| *held != _owner);
     }
     pub(super) fn prune(&mut self, now: f64) {
         self.contexts.retain(|_, old| old.deadline() > now);
@@ -1375,6 +1382,7 @@ impl<P> Cx<'_, P> {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
             Owner::Session { generation } => {
+                self.session_scope()?;
                 let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
                 return self.io.request_contexts.issue_session(
                     identity,
@@ -1396,6 +1404,10 @@ impl<P> Cx<'_, P> {
         parent: Option<&Context>,
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
+        #[cfg(feature = "http-plans")]
+        if self.io.http_preflight_ready.is_some() {
+            return Err(Error::Revoked);
+        }
         if !self.io.entry_context_allowed(scope) {
             return Err(Error::Revoked);
         }
@@ -1557,6 +1569,7 @@ impl<P> Cx<'_, P> {
     /// event. This is completion authority only: no send permission or deadline
     /// extension. The caller must finish in the same callback without yielding.
     pub(crate) fn validate_completion_context(&self, context: &Context) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(context.owner())?;
         let Owner::Command { id, .. } = context.owner() else {
             return Err(Error::Invalid);
         };
@@ -1950,6 +1963,7 @@ impl<P> Cx<'_, P> {
         intent: crate::classify::Intent,
         protection_cancel: bool,
     ) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(context.owner())?;
         self.io.request_contexts.validate(context, self.now)?;
         let Owner::Command { id, generation } = context.owner() else {
             return Err(Error::Invalid);
@@ -2009,6 +2023,7 @@ impl<P> Cx<'_, P> {
     /// Command generation stays live until done/fail or its final bound expires.
     /// Expired current handles may retire; this grants no send/retry permission.
     pub fn finish_http_context(&mut self, context: &Context) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(context.owner())?;
         self.io.request_contexts.validate_legacy(context)?;
         self.io.request_contexts.validate_handle(context)?;
         self.io.retire_http_leg(context);
@@ -2448,6 +2463,56 @@ mod tests {
             assert!(cx.io.timers.is_empty());
             assert!(cx.io.request_contexts.commands.contains_key(&7));
         }
+    }
+
+    /// A re-mark keeps the owner's earliest epoch; other owners are separate.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_read_mark_keeps_its_owners_earliest_epoch() {
+        let mut registry = ContextRegistry::default();
+        let first = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+        let other = registry.issue(2, Scope::Background, policy(), 0.).unwrap();
+        assert_eq!(registry.read_mark(first.owner(), 5), 5);
+        assert_eq!(registry.read_mark(first.owner(), 9), 5);
+        assert_eq!(registry.read_mark(other.owner(), 9), 9);
+        assert_eq!(registry.read_mark_count(), 2);
+    }
+
+    /// A sweep keeps live owners in any phase and drops dead or regenerated
+    /// ones; forgetting one owner leaves the others.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn read_marks_live_exactly_as_long_as_their_owners() {
+        let mut registry = ContextRegistry::default();
+        let command = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+        let background = registry.issue(2, Scope::Background, policy(), 0.).unwrap();
+        let Owner::Command { id, generation } = command.owner() else {
+            panic!("a command scope has a command owner");
+        };
+        registry.read_mark(command.owner(), 1);
+        registry.read_mark(background.owner(), 1);
+        registry.read_mark(
+            Owner::Command {
+                id,
+                generation: generation + 1,
+            },
+            1,
+        );
+        registry.read_mark(
+            Owner::Background {
+                generation: u64::MAX,
+            },
+            1,
+        );
+        registry.forget_dead_read_marks();
+        assert_eq!(registry.read_mark_count(), 2, "dead and regenerated swept");
+        registry.forget_read_mark(background.owner());
+        assert_eq!(registry.read_mark_count(), 1);
+        assert_eq!(
+            registry.read_mark(command.owner(), 9),
+            1,
+            "the live mark stays"
+        );
     }
 
     fn policy() -> Policy {
