@@ -1431,6 +1431,93 @@ same primary egress before signing. Fresh complete native, strict/fmt and invent
 provenance results are recorded in the plan checkpoint; CI and replacement#1976
 composition remain separate readiness gates.
 
+## Crypto.com managed candles and local history controls
+
+Original regression commit cc2916a8037 precedes source edits. Fixture correction
+b89ca9aaa52 permits only engine Cancel cleanup and preserves native streamed
+malformed-body behavior; its independent original-source rerun proves nine
+assertion REDs and seven native controls, with no compile failure counted. All
+sixteen pass after the cutover. The discarded Internal expectation on ordinary
+malformed text is explicitly excluded from RED evidence.
+
+Actual managed book peers fill256 owners; local and candle admissions refuse
+without dispatch, then recover after one peer settles. Controls cover invalid
+clocks/finite ID reuse, single preparation/bind/claim, parked/released expiry,
+stale callbacks, typed setup/network errors, native full error fields/auth health,
+raw candle order/timestamps/numeric coercion, all timeframes/live-UAT roots and
+credential combinations. All five local branches, native validation precedence,
+explicitly ranged Income limit0, and valid private/public history continuations
+remain controlled. Exact scanner prune removes only Crypto lib/history entries;
+no existing assertion is removed. Full native/replay/size verification follows.
+Local Crypto.com/Binance verification passes432 tests across41 targets, strict
+Clippy/fmt and fifteen ratchet controls. A later independent-review callback
+control exposes the engine's credential-free public typed-error auth-health
+accounting defect (health1 versus0); shared-owner closure remains required.
+The adapter preserves kind/metadata and adds no local demotion or exemption.
+
+### Crypto.com refreshed original and managed controls
+
+The test-only original branch is genuinely merged onto actual6a6845c4491; its
+expanded checkpoint1d576566cb4 runs both targets with --no-fail-fast and proves
+16 behavioral assertion REDs plus seven native positives, zero ignored. Seven
+added controls pin private range/nanosecond and unsupported-interval admission
+at bad clock/full capacity, retained genuine peers and real settlement recovery,
+and stale bind/item/failure/timer isolation with a distinct exact replacement row.
+The original public-auth-health regression from27b051a8907 is retained verbatim
+and passes against the actual shared fix. Managed targets pass24 controls.
+
+One original working expectation is intentionally updated: malformed delivered
+text at200 keeps its exact message but now carries shared Internal/NotSent. The
+unchanged native baseline is preserved in the original checkpoint; this change
+is declared in CALLERS rather than hidden by stripping the engine's typed cause.
+HTTP500 still returns its native string-only error. Existing financial assertions
+remain; tests/public.rs only drives the genuine prepared executor at its old clocks.
+
+### Lighter local history Read evidence
+
+Genuine256peer roots exercise seven local terminal capacity refusals, slot/ID
+reuse and invalid-clock recovery. Native result/error precedence, all four
+Lighter/Robinhood deployments, duplicate custody, repeated immediate completion
+and saturated remote byte/schema controls remain covered. All19 focused tests
+PASS after original4GREEN/15RED. No shared policy, timer, wrapper or scanner change.
+
+### GRVT local history Read evidence
+
+Seven capacity controls use256 genuine retained Read peers. Invalid-clock,
+retirement/reuse, duplicate-owner and2800 immediate-terminal controls accompany
+native precision/error-precedence checks on both deployments. Saturated public
+trades retains exact legacy POST route, headers, body and nonempty output schema.
+All19 focused tests pass after15 original assertion failures. Existing source
+outside the seven branches, held fixtures and foreign inventory stay unchanged.
+
+## KuCoin refusal admission controls
+
+Ten original assertion REDs cover eight lexical local refusals, including all
+three Spot unsupported variants. They pass after admission conversion, alongside
+native error/credential ordering, UUID entropy, Store preservation and public
+wire controls. Duplicate ownership and more than 256 fixed-clock reuses pin
+retirement; saturated-registry valid private wire controls pin unchanged signed
+fallthrough. The isolated suite contains 18 executed controls, with no ignores.
+
+## Bitrue initial refusal regression controls
+
+Three original compiling capacity assertion REDs pass after shared entry
+adoption. Seven isolated controls also pin keyed/keyless/public-only ordering,
+Store preservation, capacity recovery, successful native one-way mode, saturated
+signed wire and genuine duplicate-owner protection with 270 fixed-clock reuses.
+No original test is ignored or rewritten to claim a legacy removal.
+
+## GRVT final-coverage replay controls
+
+Healthy final completion, pre-ACK checkpoint observation, genuine earlier
+private-data faults, late selector faults and incomplete replacement generations
+are controlled through the real shared audit/capture APIs. The scoped GRVT and
+declaration-policy run passes 32 tests. Verification of the authenticated reports
+with the narrowed manifest retains one public PASS and one declared private FAIL,
+zero unexpected failures and zero unobserved declarations. Five-pair repeatability
+and fresh composed CI remain separate qualification work; no native parity is
+implied by protocol coverage.
+
 ### Crypto.com terminal audit controls
 
 Twelve real-audit controls cover healthy authentication and heartbeat exchange,
