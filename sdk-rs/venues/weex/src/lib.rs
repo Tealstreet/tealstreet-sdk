@@ -16,9 +16,11 @@ mod wire;
 use safe_cex_engine::ErrorKind;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
+use safe_cex_engine::selected_read::{ReadRole, SelectedRead};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
@@ -159,6 +161,8 @@ pub struct WeexFutures {
     trading: trading::State,
     history: history::State,
     credentials: sign::Credentials,
+    /// Configured keys, built once. GET reads use the read key, even without a primary.
+    slots: Slots<safe_cex_engine::signing::Identity>,
     /// Trusted caller-assigned primary stableId; never derived from key material.
     identity: Option<String>,
     /// A supplied primary identity lacks a valid key/signing/passphrase ref.
@@ -190,6 +194,11 @@ impl WeexFutures {
             primary: primary.filter(complete),
             read: options.read_credentials.filter(complete),
         };
+        let slots = Slots::new(
+            credentials.primary.clone(),
+            credentials.read.clone(),
+            SlotPolicy::default(),
+        );
         Self {
             public: Connection::default(),
             active_symbols: HashSet::new(),
@@ -200,6 +209,7 @@ impl WeexFutures {
             trading: trading::State::default(),
             history: history::State::default(),
             credentials,
+            slots,
             identity,
             incomplete_credentials,
             invalid_read_credentials,
@@ -264,14 +274,15 @@ impl WeexFutures {
             cx.fail(command, String::from("WEEX account reads are rate limited"));
             return;
         }
-        let Some(signer) = self.credentials.select(Method::Get) else {
+        let selected = SelectedRead::select(&self.slots, ReadRole::Read { scope: None });
+        if selected.is_err() {
             cx.fail(command, String::from("WEEX leverage requires credentials"));
             return;
-        };
+        }
         let revision = self.account.settings_revision();
         if let Err(error) = managed::read(
             cx,
-            signer,
+            selected,
             command,
             format!("/capi/v3/account/symbolConfig?symbol={market_id}"),
             self.seed_generation,
@@ -374,9 +385,17 @@ impl WeexFutures {
         task: Task,
         stream: Option<ArrayAt>,
     ) -> bool {
-        let Some((identity, slot)) = self.credentials.select(method) else {
+        // This legacy staging site still keys its role on the method: GETs read,
+        // everything else is a primary-key Mutation.
+        let role = if method == Method::Get {
+            CredentialRole::Read { scope: None }
+        } else {
+            CredentialRole::Mutation
+        };
+        let Ok((selection, identity)) = self.slots.select(role) else {
             return false;
         };
+        let slot = selection.slot();
         let mut pairs: Vec<_> = query.split('&').filter(|p| !p.is_empty()).collect();
         pairs.sort_unstable_by_key(|p| p.split('=').next().unwrap_or(""));
         let path_query = if pairs.is_empty() {

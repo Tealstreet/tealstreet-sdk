@@ -176,11 +176,7 @@ impl Kraken {
                 };
                 (*command, result)
             }
-            Command::SetPositionMode {
-                command,
-                hedged,
-                symbol: _,
-            } => {
+            Command::SetPositionMode { hedged, .. } => {
                 if *hedged {
                     crate::public_context::local(
                         cx,
@@ -189,7 +185,7 @@ impl Kraken {
                             .kind(ErrorKind::Unsupported)),
                     );
                 } else {
-                    cx.done(*command, "null".into());
+                    let _ = cx.done_local_setting("null".into(), |_| {});
                 }
                 return true;
             }
