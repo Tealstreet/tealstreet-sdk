@@ -124,7 +124,7 @@ generic forms (now inside a `Cx` fn), `macro_rules!`/`include!` refusal,
 malformed input, the exact shrink ratchet, the strict schema, base/event refs
 and the real-git baseline.
 
-## Review revision (claude-4yjlw0, plan `e71c051f37e`)
+## Review revision (claude-4yjlw0, plan `e71c051f37e`); superseded by the escape fallback below
 
 - **P1, expression receivers.** A legacy method call also counts when its
   receiver expression uses a Cx-flow value outside member access:
@@ -153,7 +153,7 @@ The new controls (`test_cx_flowing_through_expressions_and_bindings_is_counted`,
 `#[path]` cases) were written after the fix in the same revision. They pass
 against it; they are controls, not pre-fix REDs.
 
-## Rebaseline at the actual base `49f7d1857b6`
+## First rebaseline at `49f7d1857b6` (superseded below)
 
 The base manifest has 712 entries. Of these, 463 are kept in prod
 byte-identical and 1 (BingX `account.rs`) moves byte-identical to the test
@@ -172,7 +172,7 @@ Every drop is listed by path, digest, count and reason in
 `RUST_REQUEST_CONTEXT_PRECISION_MAPPING.json`. Each new map is a per-digest
 subset of the base map. The socket inventory is unchanged.
 
-## Second review revision (claude-4yjlw0, `e0b0743555c`)
+## Second review revision (claude-4yjlw0, `e0b0743555c`); superseded by the escape fallback below
 
 - **P1.** A legacy call counts when its receiver chain is rooted at a derived
   or untyped-closure binding, at any depth (`w.0.request`, `h.cx.done`,
@@ -197,3 +197,54 @@ traced: only method receivers and `let`/assignment targets are tainted.
 Generic callees are closed. A generic parameter can call `request`/`fail`
 only through a trait implemented for `Cx`, and such an impl is refused.
 Review must reject the free-function store shape as deliberate evasion.
+
+## Escape fallback (ruling claude-ddi2il, definition pinned with claude-4yjlw0)
+
+Chasing each syntax shape is replaced by one conservative rule. A Cx-typed
+parameter, a Cx-typed closure parameter, or an untyped or `_`-containing
+closure parameter is possibly-Cx. Such a binding **escapes** on any use other
+than these two:
+- a member receiver (`cx.store`, `cx.request(..)`);
+- an **analysed call argument**. That requires all of:
+  - a lowercase callee, so not a wrapper or constructor (`Some(cx)`, `W(cx)`);
+  - no `&mut local` co-argument, so `std::mem::replace(&mut slot, cx)` and
+    `Vec::push(&mut v, cx)` escape;
+  - not a method on a local receiver. `self` and concrete non-Cx typed
+    parameters are excepted, because they could hold a Cx only through a type
+    naming `Cx`, which is refused. So `v.push(cx)`, `h.set(cx)` and
+    `v.push(W(cx))` escape;
+  - a call that is a whole statement, block tail or returned value. A bound,
+    assigned (to a name, field, index or deref target), chained, nested or
+    macro-wrapped result escapes. That covers `let c = id(cx)` through a venue
+    generic.
+
+A closure that captures a possibly-Cx binding from outside it escapes, since
+it may be stored or returned.
+
+Where a binding escapes, its whole scope (the function or closure body)
+counts every legacy reference and every method-named macro, exactly as the old
+lexical scan did. Precision drops apply only where no Cx escapes. Outside
+escaping scopes, a call counts on a possibly-Cx receiver. So do `Cx::m(..)`,
+`<Cx as T>::m(..)`, or any path call handed a possibly-Cx argument. Type-name
+refusals (aliases, fields, `Option<&mut Cx>` parameters, Cx-returning
+functions, trait impls) stay.
+
+REDs: each of 4yjlw0's holes plus a generic-identity escape, in
+`test_an_escaping_cx_counts_every_reference_in_its_function` and
+`test_a_generic_escape_counts`. Each escape shape makes two unrelated
+references count, and the analysed shapes record nothing.
+
+Rebaseline at `49f7d1857b6` (712 entries): 556 kept in prod and 1 moved to
+test, both byte-identical, with 155 drops:
+
+| reason | count |
+| --- | --- |
+| macro | 108 |
+| self-helper | 29 |
+| field read | 13 |
+| other member | 4 |
+| qualified | 1 |
+
+The mapping JSON lists each drop. The self-helper drops are intentional: they
+occur only where the caller's Cx does not escape, and the helper body stays
+inventoried.
