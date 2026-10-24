@@ -77,7 +77,7 @@ fn ticker_seed_prepares_before_any_physical_http() {
     assert_eq!(
         actions
             .iter()
-            .filter(|a| matches!(a, Action::ManagedHttp(HttpAction::Prepare { .. })))
+            .filter(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. })))
             .count(),
         1
     );

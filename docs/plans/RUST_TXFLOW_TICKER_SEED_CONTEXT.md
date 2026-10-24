@@ -74,3 +74,6 @@ only, CARGO_BUILD_JOBS=4 sequentially; CI owns workspace/feature/size/performanc
 Original fixture compile correction: the first build matched HttpAction::Prepare
 as a tuple variant. It is a struct variant; the pattern is now `{ .. }`. No
 assertion or runtime changed. That compile failure is excluded from RED counts.
+The outer ManagedHttp action boxes HttpAction; the next compile-only correction
+uses `action.as_ref()` before matching Prepare. This second fixture type error
+is also excluded from RED evidence.
