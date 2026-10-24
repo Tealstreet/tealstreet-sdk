@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| BreakoutProp options refusal (unreachable arm deleted) | One-site prune; engine pre-entry refusal pinned by a control | Before changing BreakoutProp options handling or its capability flags. | [RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md) |
 | BingX local candle refusal custody | Draft conversion; source review/CI pending | Before replacing the three synchronous candle refusals; remote/key-selection paths excluded. | [RUST_BINGX_LOCAL_CANDLE_CONTEXT.md](RUST_BINGX_LOCAL_CANDLE_CONTEXT.md) |
 | WEEX local leverage refusal custody | Draft conversion; source review/CI pending | Before replacing three synchronous FetchLeverage refusals; selection and signed read remain unchanged. | [RUST_WEEX_LOCAL_LEVERAGE_CONTEXT.md](RUST_WEEX_LOCAL_LEVERAGE_CONTEXT.md) |
 | WEEX leverage initial managed admission | Draft implementation; source review pending | Before replacing the one numeric setup fallback; key choice and physical bound are unchanged. | [RUST_WEEX_LEVERAGE_ADMISSION_CONTEXT.md](RUST_WEEX_LEVERAGE_ADMISSION_CONTEXT.md) |
@@ -354,3 +355,18 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 - [Paradex config/local entry](RUST_PARADEX_LOCAL_ENTRY.md) and [remaining engine seams](RUST_PARADEX_ENGINE_GAPS.md): seven-site managed/local slice after the hosted signing decision.
 
 | Lighter unsigned identity Read | Managed implementation under review | Before changing FetchAccount candidate custody, original caller expiry or the exact three-site identity prune. | [RUST_LIGHTER_IDENTITY_CONTEXT.md](RUST_LIGHTER_IDENTITY_CONTEXT.md) |
+
+| Hyperliquid local settings and schedule refusals | Shared local terminal adoption under review | Before changing the nine synchronous pre-signing local terminals or their exact inventory prune. | [RUST_HYPERLIQUID_LOCAL_SETTINGS_CONTEXT.md](RUST_HYPERLIQUID_LOCAL_SETTINGS_CONTEXT.md) |
+| Multi-constraint release pacing | Shared engine prerequisite; plan and RED phase | Before composing several HTTP rate groups at one Claim or signing after pacing waits. | [RUST_MULTI_CONSTRAINT_PACING.md](RUST_MULTI_CONSTRAINT_PACING.md) |
+
+| Kraken Futures unsigned PublicTrades ownership | Managed implementation; focused proof and source review in progress | Before changing caller-root cursor pages or accepted-only failure recovery. | [RUST_KRAKEN_FUTURES_PUBLIC_TRADES_CONTEXT.md](RUST_KRAKEN_FUTURES_PUBLIC_TRADES_CONTEXT.md) |
+
+| Receipt-bound stamp floor | Focused gates/reviews clear; full CI pending | Before monotonic per-request signature or transport reissues; floor grants no resend authority. | [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md) |
+
+| Bitrue dispatch signing | Production candidate; original REDs green, review and CI pending | Before replacing inline Bitrue HMAC, selection or native signature resend. | [RUST_BITRUE_DISPATCH_SIGNER.md](RUST_BITRUE_DISPATCH_SIGNER.md) |
+
+| GRVT unsigned candle Read Plan | Managed adoption under review | Before changing candle caller limits, streaming or the six-attempt transport budget. | [RUST_GRVT_CANDLE_CONTEXT.md](RUST_GRVT_CANDLE_CONTEXT.md) |
+
+| GRVT unsigned book command | Managed source under review; stacked after candle draft | Before changing independent FetchOrderBook command ownership, native errors or the six-attempt transport budget. | [RUST_GRVT_BOOK_QUERY_CONTEXT.md](RUST_GRVT_BOOK_QUERY_CONTEXT.md) |
+
+| TxFlow immediate local command custody | Draft adoption; original controls green | Before migrating local history/candle/trading completion or composing with the ticker CPU slice. | [RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md](RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md) |
