@@ -331,6 +331,103 @@ and retries inherit it. There is no second Context field.
 (codex-hcmq3f) as session Mutations behind the #1842 gate. Then KuCoin
 `bullet-public` as a session Read (codex-9czdjh, after its header use).
 
+### GRVT API-key login (stacked on #1897; cleared by codex-zs5e83)
+
+**Scope.** Only the login moves (`grvt/src/account.rs` `login`, AUTH row of
+[RUST_GRVT_REQUEST_CONTEXT.md](RUST_GRVT_REQUEST_CONTEXT.md)). Exact inventory
+prune: GRVT **56→55**, `account.rs` **12→11** (`3bb318de…`).
+
+**Original REDs** (`grvt/tests/login_session.rs`, both fail on the legacy
+source):
+- The login is prepared as managed session work on the primary private
+  egress. That means intent `Primary`, no explicit route and a 20 s bound,
+  with exact URL, body and the three static headers.
+- A hung login is reissued at its engine bound when the host reports
+  nothing. Every due timer fires in real order.
+  - The same test also proves a late success to the abandoned login installs
+    nothing, while the current login opens the account.
+
+**Shape.**
+- **Session.** One keyless session owns API-key logins:
+  - `private_egress` comes from a `Slots` `SessionAuth` selection over the
+    configured key.
+  - Each login is its own session Mutation with `RetryPolicy::Never` and the
+    20 s host default the unmanaged login relied on.
+  - It is sent through `request_managed_with_headers`; the API key stays in
+    the body.
+- **Repeat-safety decision: not repeat-safe**, per the contract above (GRVT
+  and BreakoutProp relogin retire and open a new generation).
+  - **Evidence.** No GRVT documentation says whether a second API-key login
+    leaves an earlier cookie valid. Repeat-safety would need that cited venue
+    fact, so the session takes the conservative contract.
+  - **Cost.** None to the caller. The legacy path already sent each reissue
+    as a fresh request after a failure, so the budget and timing are the
+    same; only the fence is new.
+  - **Rule.** Any login that does not succeed (transport failure, expiry,
+    unproven 2xx, refusal or failed preparation) retires the session. The
+    reissue opens a new generation, so the engine drops the abandoned login's
+    late answer.
+  - Retry count and presentation are unchanged.
+- **Outcomes.**
+  - Success with both session headers records `Accepted`, then finishes. The
+    existing `account_response` and `account_failed` presentation is
+    unchanged.
+  - Transport failure or expiry retires the session and reissues, up to the
+    legacy budget of five, then `account_login_unavailable`. The existing
+    network-retry fixtures pin this.
+  - `fail_authentication` retires the session.
+- **Waiting reads.** They stay in the venue's `account.waiting`. The #1842
+  gate needs managed owners, and those reads are still legacy. A failed login
+  settles them from its session callback (the #1897 completion fix).
+- **Not included.** Cookie-bearing reads and writes stay legacy for now. They
+  adopt `session_scoped_context` in their own slices.
+
+**Fixtures.** Action drains in
+`tests/{account,history,identity,products,markets_refresh,trading}.rs` switch
+to `test_support::prepared_actions` at each event's time, with no assertion
+changed. They also pass on the legacy source, where only the two REDs fail.
+
+### BreakoutProp password login (stacked on #1897 and #1885 `6ead08efef0`)
+
+**Scope: transport only (owner and overseer ruling, 2026-10-23).** The DXtrade
+`/login` moves onto the session core. The existing password body rides the
+approved private session egress, with no new holder, no logging and no echo.
+- **Still OPEN:** provider send-time presentation (claude-19pt8s) and remote
+  readiness. Both are required before any signer-migrated claim; see CALLERS.
+- **Inventory: no prune.** Login shares the generic `drive` sender
+  (`34b6cbe6…`, the DISPATCH row), which stays for every other operation.
+
+**Original REDs:**
+- #1885's `p0_write_login_{401,403}_*` controls, un-ignored with their
+  assertions unchanged. A waiter keeps `AuthInvalid`/`AuthPermission`,
+  `AUTH_REJECTED` is logged, the venue deactivates, and nothing leaks.
+- New `tests/login_session.rs`: the login is prepared with intent `Primary`,
+  no route, the configured `timeout_ms`, and exact URL, body and header.
+
+All three fail on the legacy source.
+
+**Shape.**
+- **Session.** One keyless session with private egress (a `SessionAuth`
+  selection) owns logins.
+  - Each login is a session Mutation with `RetryPolicy::Never`, dispatched
+    from `drive`, so venue pacing (rolling 5/1000 ms) and queue order are
+    unchanged.
+  - **Not repeat-safe**, per the contract above. Any login that does not
+    succeed (transport failure, expiry, non-2xx, a 2xx whose token is
+    unusable, or refusal) retires the session. Only an accepted token records
+    `Accepted`. A reissue (the existing 1/2/3 s network retries) opens a new
+    generation, so the engine drops late answers to an abandoned login.
+- **Typed failure.** A login 401/403 is `http_failure(status)`. Queued waiters,
+  including candle commands, get NotSent errors carrying
+  `AuthInvalid`/`AuthPermission`. Every other login or discover failure
+  leaves waiters untyped as before (pinned by
+  `only_a_credential_refusal_types_the_waiters_it_never_sent`).
+- **Not included.** Discover and token-bearing reads and writes stay on the
+  generic sender. They adopt `session_scoped_context` with their slices.
+
+**Fixtures.** `tests/support.rs` drains through
+`test_support::prepared_actions`, with no assertion changed.
+
 ### Cadence and socket linkage (Phase C, after #1771 merges)
 
 The keepalive interval, failure backoff and expiry-driven recreation are
