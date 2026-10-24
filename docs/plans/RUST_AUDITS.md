@@ -2837,3 +2837,12 @@ Original test-only5a0303:4GREEN/15assertionRED/0ignored; all19 nowPASS. Native
 validation and credential-presence precedence remain unchanged; shared entry
 refusal owns capacity/clock failure without numeric fallback. Exact inventory
 history10->3, Lighter41->34occurrences; remote paging/auth/source untouched.
+
+### GRVT local history command authority
+
+Seven immediate history failures now consume shared Read admission and fail their
+exact original root. Original test-only checkpoint7b2fa480691 gives four native
+controls PASS and15 assertion REDs; all19 pass after adoption. Genuine retained
+owners pin capacity, reuse and duplicate custody; real login fixtures preserve
+native session/validation precedence without private-state mutation. History
+inventory11F/11O becomes4F/4O; family53F/56O becomes46F/49O. Remote source is exact.
