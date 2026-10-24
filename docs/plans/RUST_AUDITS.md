@@ -2862,3 +2862,11 @@ entry and Context failure. Bitrue shrinks 33 to 30 occurrences and 20 to 18
 fingerprints. The repeated planning-error fingerprint decreases only 2 to 1;
 the queued remote-flow error remains. Signing and successful local settings are
 held for their separately owned migrations/seam.
+
+## BloFin local leverage refusal custody
+
+Two account.rs numeric failures now use shared genuine Read admission followed
+by fail_context on that exact root. BloFin 23->21 occurrences /19->17 fingerprints;
+only the two singleton rows are removed. No signer, trading, history, closed
+position or successful private read is converted. The coherent custody cutover
+remains with codex-zs5e83. No per-venue admission/completion implementation.

@@ -1506,3 +1506,12 @@ adoption. Seven isolated controls also pin keyed/keyless/public-only ordering,
 Store preservation, capacity recovery, successful native one-way mode, saturated
 signed wire and genuine duplicate-owner protection with 270 fixed-clock reuses.
 No original test is ignored or rewritten to claim a legacy removal.
+
+## BloFin local leverage Read controls
+
+Five native tests retain two compiling original capacity assertion REDs plus
+three working controls: exact validation/credential precedence, Store/empty
+financial state preservation, duplicate original-owner release, and300 sequential
+failures with255 Background peers and one free Context slot. Capacity recovery
+releases exact Background roots. No fabricated Context, numeric fallback or
+missing-method compile failure is regression evidence.

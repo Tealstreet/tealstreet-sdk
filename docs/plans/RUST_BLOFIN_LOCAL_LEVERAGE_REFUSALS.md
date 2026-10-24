@@ -59,3 +59,12 @@ binding, synthetic signer, inventory exemption or unrelated prune.
 4. Independent source/adversarial, caller and full-map reviews; draft PR and full
    CI. No merge without a window. Architecture: no per-venue admission, retry,
    classification or completion algorithm; consumer of shared command/Read APIs.
+
+## Executed original controls
+
+Original tests committed at `f74dfcb8399` compiled against unchanged native source:
+two assertion REDs at command admission capacity, three working controls. The
+capacity expectation clears the generic Error::venue_error Mutation outcome:
+Read admission owns no Outcome. Duplicate diagnostic is an existing GREEN;
+sequential failures with only one Context slot free pin retirement. No compile
+failure is counted as regression evidence. Tests stay identical after adoption.

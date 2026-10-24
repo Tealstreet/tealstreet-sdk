@@ -6639,3 +6639,14 @@ Valid signed account/trading/history, separate Spot/Futures nonce domains,
 private sessions, paged Futures candle reads and existing Spot OHLC remain open
 or unchanged. This prune is 17 fingerprints / 19 occurrences; no new signing or
 whole-family custody claim is made.
+
+## BloFin local FetchLeverage Read refusals
+
+Unknown market still precedes margin/mode-not-loaded before credentials, with
+exact native messages and absent kind/outcome fields. Each of these two local
+refusals now acquires its genuine shared Read owner; capacity refusal supersedes
+the native error with one typed Read failure and no write Outcome. No numeric
+fallback or extra terminal occurs. Duplicate live ids preserve their diagnostic
+and original owner. No Store change, HTTP, provider, timer or private credential
+is introduced. Valid signed leverage queries retain their original issuance,
+path, request fields, revision checks, response handling and native retries.
