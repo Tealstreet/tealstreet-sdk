@@ -23,6 +23,8 @@ def modes():
     grouped = {(): ['engine baseline'], ('order-locks', 'test-support'): ['explicit CI control'],
                # No family enables serial Plans or condition waits before adoption; one
                # control keeps both compiled and tested (condition-waits implies serial-plans).
+               # The family closures WITHOUT them are the off-build control; after an
+               # adopter, workspace tests unify them on, so never fold those modes away.
                ('condition-waits', 'http-plans', 'order-locks', 'serial-plans', 'test-support'):
                ['serial Plan and condition wait control']}
     for family in families:
