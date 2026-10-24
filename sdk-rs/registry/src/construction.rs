@@ -288,7 +288,7 @@ pub(crate) mod test_policy {
     }
     /// Declares `policy` for `venue` until the guard drops. The wiring tests
     /// that use it need a compiled dispatch family (WEEX).
-    #[cfg_attr(not(feature = "weex"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "weex", feature = "backpack")), allow(dead_code))]
     pub(crate) fn declare(venue: &'static str, policy: ReadCredentialsPolicy) -> impl Drop {
         struct Guard;
         impl Drop for Guard {

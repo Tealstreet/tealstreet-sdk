@@ -2231,3 +2231,7 @@ mod tests {
 #[cfg(test)]
 #[path = "read_key_policy_tests.rs"]
 mod read_key_policy_tests;
+
+#[cfg(all(test, feature = "backpack"))]
+#[path = "backpack_public_read_tests.rs"]
+mod backpack_public_read_tests;
