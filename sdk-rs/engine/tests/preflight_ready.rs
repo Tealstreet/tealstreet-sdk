@@ -117,6 +117,7 @@ fn admit_one(cx: &mut Cx<'_, Context>, preflight: &Preflight) -> Result<Plan, Er
             calls: &calls,
         }],
         PlanPolicy {
+            independent_calls: false,
             operation: Operation::Mutation,
             credential: Some(credential()),
             pacing: None,

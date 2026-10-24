@@ -76,6 +76,8 @@ impl Preflight {
 /// Common semantics; per-call windows and retry credits come from the plan.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlanPolicy {
+    /// Independent Mutation calls may settle an unproven reply and continue siblings.
+    pub independent_calls: bool,
     pub operation: Operation,
     pub credential: Option<Credential>,
     pub pacing: Option<Pacing>,

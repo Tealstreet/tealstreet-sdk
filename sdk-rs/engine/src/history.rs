@@ -5,6 +5,12 @@ use crate::paging::{CursorPage, CursorStep, CursorWalk, PageRow, RangeWalk, Stal
 use crate::request_context::{Attempt, Context, Error as ContextError, Owner};
 use crate::{CommandId, Cx, ErrorKind, Level, Value, VenueError};
 
+#[cfg(feature = "http-plans")]
+#[path = "history_plan.rs"]
+mod plan;
+#[cfg(feature = "http-plans")]
+pub use plan::{PlanFailureAdmission, PlanHistoryRows, PlanReadCompletion, PlanRowsAdmission};
+
 /// Missing coverage in automatic account reconciliation, not a user query.
 /// Severity is an engine policy; venues report the native coverage fact.
 #[derive(Clone, Copy, Debug)]
