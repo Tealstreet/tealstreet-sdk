@@ -85,11 +85,16 @@ Use engine Slots<Identity>(primary,None,default); role Read has scope None,
 Mutation for writes and SessionAuth for WS. Pin actual route/evidence, not just
 HMAC bytes. Do not invent a primary reason or fake credential to force routing.
 
-M26 confirmed existing composition suffices: trusted setup computes
-Option<Result<(), &'static str>> once via ReadCredentials::validate, then erases
-raw read material. None means no secondary. Only that bounded result is used
-later; drop all later raw validate calls and any dual path. No Crypto-specific
-identity/validation type or algorithm. Invalid secondary blocks BOTH start()
+The overseer assigned the shared ValidateOnly prerequisite separately to m26.
+Its plan pin is00231507a4c, RUST_READ_KEY_POLICY.md. The construction declaration
+drives native and JS setup once: validate, erase/drop the unused secondary, and
+carry EngineOptions.read_credentials_valid (JSON readCredentialsValid). The
+venue maps that Option<bool> through ReadCredentials::status into its stored
+Option<Result<(), &'static str>>. None means no secondary. Shared setup rejects
+injected secondary identities, metadata on an undeclared family and simultaneous
+raw read credentials plus metadata. Consume the reviewed prerequisite pin; do
+not add these shared surfaces to this PR. Only the bounded status is used later;
+drop all later raw validate calls and any dual path. Invalid secondary blocks BOTH start()
 (CONFIG_INVALID before discovery) and fetch_identity (validation failure before
 public-data-only/missing-primary failure). Keep exact messages and precedence.
 At the reviewed5b-final inventory, Crypto lib.rs has ReadCredentials1 and
@@ -305,10 +310,12 @@ Ship one complete cutover; these are local implementation checkpoints, not
 separately shipped staging paths. Plain-merge the reviewed #2061 head or its
 actual landing first, preserving its exclusive managed public-history authority.
 
-1. Trusted setup and custody: update the Crypto registry arm/provider setup and
-   TS construction together with Options. Keep only opaque Primary identity,
-   public settings and the once-computed secondary validation result. Erase raw
-   secondary inputs and use that metadata alone at start and identity. Private
+1. Trusted setup and custody: stack on m26's separate ValidateOnly prerequisite,
+   then update only the Crypto registry/provider construction and consumer
+   activation together with Options. Keep only opaque Primary identity,
+   public settings and the once-computed secondary validation result. The
+   prerequisite owns shared construction declarations and native/JS transport;
+   this consumer uses its metadata alone at start and identity. Private
    POST selection stays Primary with Read scope=None, no route/tag evidence.
    Hosted setup sends only the required Primary signing material. Coordinate
    shared-file regions before editing: registry/lib.rs is also touched by #2033,

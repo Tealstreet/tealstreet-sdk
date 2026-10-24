@@ -7,9 +7,10 @@ use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Outcome, Query,
     ReadCredentials, Response, VenueError,
 };
-use safe_cex_venue_cryptocom::{Cryptocom, Options, sign::Params};
+use safe_cex_venue_cryptocom::{Cryptocom, sign::Params};
 use std::sync::Arc;
 use support::Harness;
+use support::fixture::Options;
 
 const NOW: f64 = 1_710_000_000_000.;
 const OWNER: u32 = 700;
@@ -26,6 +27,26 @@ impl Signer for Parked {
     }
 }
 struct Refused;
+struct ParkedWs(Arc<dyn Signer>);
+impl Signer for ParkedWs {
+    fn sign(&self, work: SignRequest) -> SignFuture {
+        if work.context.method == "WS" {
+            Box::pin(std::future::pending())
+        } else {
+            self.0.sign(work)
+        }
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        if work.context.method == "WS" {
+            None
+        } else {
+            self.0.sign_ready(work)
+        }
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: safe_cex_engine::signing::Algorithm) -> Capability {
+        self.0.can_sign(key, algorithm)
+    }
+}
 impl Signer for Refused {
     fn sign(&self, _: SignRequest) -> SignFuture {
         Box::pin(async { Err(SignError::Refused) })
@@ -48,10 +69,10 @@ fn options() -> Options {
     }
 }
 fn engine(opts: Options) -> TestEngine {
-    safe_cex_engine::test_support::seeded_engine(Cryptocom::new(opts))
+    support::fixture::engine(opts)
 }
 fn actions(e: &mut TestEngine, now: f64) -> Vec<Action> {
-    safe_cex_engine::test_support::prepared_actions(e, now)
+    support::fixture::actions(e, now)
 }
 fn ask(e: &mut TestEngine, now: f64) -> Vec<Action> {
     e.handle(
@@ -133,6 +154,80 @@ fn identity_provider_refusal_is_one_not_sent_terminal() {
     assert_eq!(t.len(), 1);
     assert_eq!(t[0].as_ref().unwrap_err().outcome, Some(Outcome::NotSent));
 }
+
+#[derive(Clone, Copy)]
+enum BadResult {
+    Receipt,
+    Headers,
+    Count,
+    Mac,
+    Crlf,
+    Utf8,
+}
+struct CorruptProvider {
+    inner: Arc<dyn Signer>,
+    bad: BadResult,
+}
+impl Signer for CorruptProvider {
+    fn sign(&self, _: SignRequest) -> SignFuture {
+        Box::pin(async { Err(SignError::Unavailable) })
+    }
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: safe_cex_engine::signing::Algorithm) -> Capability {
+        self.inner.can_sign(key, algorithm)
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        let mut result = match self.inner.sign_ready(work)? {
+            Ok(result) => result,
+            Err(error) => return Some(Err(error)),
+        };
+        match self.bad {
+            BadResult::Receipt => {
+                result.receipt.stamp_ms = result.receipt.stamp_ms.map(|stamp| stamp + 1.)
+            }
+            BadResult::Headers => result
+                .headers
+                .push(("X-Provider".into(), "untrusted".into())),
+            BadResult::Count => result.values.push(vec![1]),
+            BadResult::Mac => result.values[1].truncate(31),
+            BadResult::Crlf => result.values[0] = b"provider-key\r\n".to_vec(),
+            BadResult::Utf8 => result.values[0] = vec![0xff],
+        }
+        Some(Ok(result))
+    }
+}
+#[test]
+fn malformed_provider_results_cannot_release_identity_or_leak_material() {
+    for bad in [
+        BadResult::Receipt,
+        BadResult::Headers,
+        BadResult::Count,
+        BadResult::Mac,
+        BadResult::Crlf,
+        BadResult::Utf8,
+    ] {
+        let (options, signer) = support::fixture::setup(options());
+        let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options));
+        e.set_signer(Some(Arc::new(CorruptProvider { inner: signer, bad })))
+            .unwrap();
+        let actions = ask(&mut e, NOW);
+        no_private_http(&actions);
+        let t = terminals(&actions);
+        assert_eq!(t.len(), 1);
+        let error = t[0].as_ref().unwrap_err();
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        for material in [
+            "fixture-primary-key",
+            "fixture-primary-material",
+            "provider-key",
+            "untrusted",
+        ] {
+            assert!(!error.message.contains(material));
+        }
+    }
+}
 #[test]
 fn identity_caller_deadline_equality_denies_success_data() {
     let mut e = engine(options());
@@ -208,8 +303,9 @@ fn startup_private_snapshot_waits_for_provider_after_public_catalogue() {
 }
 #[test]
 fn private_ws_auth_waits_for_provider_at_native_ready_boundary() {
-    let mut e = engine(options());
-    e.set_signer(Some(Arc::new(Parked))).unwrap();
+    let (options, signer) = support::fixture::setup(options());
+    let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options));
+    e.set_signer(Some(Arc::new(ParkedWs(signer)))).unwrap();
     let mut h = Harness {
         engine: e,
         actions: vec![],
@@ -220,6 +316,7 @@ fn private_ws_auth_waits_for_provider_at_native_ready_boundary() {
     h.collect();
     h.reply("public/get-instruments", support::INSTRUMENTS);
     h.reply("public/get-tickers", support::TICKERS);
+    h.load();
     let socket = h.socket(true);
     h.actions.clear();
     h.event(Event::WsOpened { socket });
@@ -240,7 +337,11 @@ fn private_ws_auth_waits_for_provider_at_native_ready_boundary() {
             .any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("public/auth"))),
         "raw credentials must not bypass parked WS provider"
     );
-    assert!(h.actions.iter().any(|a| matches!(a, Action::Sign { .. })));
+    assert!(
+        h.actions.iter().any(|a| matches!(a, Action::Sign { .. })),
+        "parked WS work: {:?}",
+        h.actions
+    );
 }
 fn placement(id: &str) -> safe_cex_engine::model::PlaceOrderOpts {
     let mut order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_str(
@@ -251,6 +352,16 @@ fn placement(id: &str) -> safe_cex_engine::model::PlaceOrderOpts {
     order
 }
 fn pace(h: &mut Harness) {
+    if h.actions
+        .iter()
+        .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        && !h
+            .actions
+            .iter()
+            .any(|a| matches!(a,Action::SetTimer {at_ms,..} if *at_ms==h.now+20.))
+    {
+        return;
+    }
     let i = h
         .actions
         .iter()
@@ -502,7 +613,7 @@ fn recipe_envelope(method: &'static str, params: Params, now: f64, auth: bool) -
     .unwrap();
     let identity = identities.primary.unwrap();
     let venue = ProbeVenue::new(
-        Cryptocom::new(Options::default()),
+        support::fixture::venue(Options::default()),
         move |_: &mut Cryptocom, cx: &mut safe_cex_engine::Cx<'_, _>| {
             if auth {
                 let url = "wss://stream.crypto.com/exchange/v1/user";

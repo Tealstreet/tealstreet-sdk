@@ -1,8 +1,5 @@
 //! The venue signs sorted parameter names and their unseparated values.
-//! `Envelope` is the dispatch recipe: the shared signer owns credentials and
-//! the HMAC. `Credentials` is the legacy local signer, removed when the managed
-//! request conversion adopts the recipe.
-use safe_cex_crypto::{Encoding, hmac_sha256};
+//! The shared provider owns credentials and the HMAC; Envelope binds the wire.
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -80,54 +77,13 @@ fn envelope_json(
     .expect("envelope fields serialize")
 }
 
-pub struct Credentials {
-    pub key: String,
-    pub secret: String,
-}
-impl Credentials {
-    pub fn envelope(&self, method: &str, params: &Params, now: f64, auth: bool) -> String {
-        let nonce = safe_cex_engine::time::wire_stamp_ms(now) as u64;
-        let payload = format!(
-            "{method}{nonce}{}{}{nonce}",
-            self.key,
-            params.signing_text()
-        );
-        let sig = hmac_sha256(self.secret.as_bytes(), payload.as_bytes(), Encoding::Hex);
-        envelope_json(method, &self.key, (!auth).then_some(params), &sig, nonce)
-    }
-}
-safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use safe_cex_engine::signing::{Identity, SignError, SignResult};
     use safe_cex_engine::{Action, SignStep};
     #[test]
-    fn sorted_fields_and_array_values_match_hmac_oracle() {
-        let params = Params::default()
-            .text("type", "MARKET")
-            .text("side", "SELL")
-            .text("quantity", "0.01")
-            .text("instrument_name", "BTCUSD-PERP")
-            .strings("exec_inst", vec!["REDUCE_ONLY".into()]);
-        let credentials = Credentials {
-            key: "replay-key".into(),
-            secret: "replay-secret".into(),
-        };
-        let body = credentials.envelope("private/create-order", &params, 1610000000000.0, false);
-        // Independent Python hmac.sha256 oracle, using the documented signing formula.
-        assert!(body.contains("e9f8f06c03ce0214c03b5157d0a71fe3407d018fd0d96966a17c250bf93bd8bf"));
-        assert!(body.contains(r#""nonce":1610000000000"#));
-        assert!(
-            !credentials
-                .envelope("public/auth", &Params::default(), 1.0, true)
-                .contains("params")
-        );
-    }
-
-    #[test]
-    fn recipe_apply_refuses_malformed_provider_results_and_foreign_actions() {
+    fn recipe_apply_without_preparation_and_foreign_transports_are_refused() {
         use safe_cex_engine::signing::SignReceipt;
         use safe_cex_engine::{HttpRequest, RequestId};
         let identity: Identity = serde_json::from_str(

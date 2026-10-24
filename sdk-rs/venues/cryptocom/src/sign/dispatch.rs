@@ -62,6 +62,13 @@ impl Envelope {
     }
 }
 impl SignStep for Envelope {
+    fn unsigned_http_headers(&self) -> &'static [(&'static str, &'static str)] {
+        if self.params.is_some() {
+            &[("Content-Type", "application/json")]
+        } else {
+            &[]
+        }
+    }
     fn prepare(
         &mut self,
         outbound: &mut Action,

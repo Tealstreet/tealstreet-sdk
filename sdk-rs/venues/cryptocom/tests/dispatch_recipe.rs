@@ -1,12 +1,14 @@
 //! The exported dispatch recipe reproduces the legacy local envelope bytes
 //! through the real engine dispatcher and an injected local provider.
+mod support;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::test_support::{ProbeVenue, prepared_actions};
 use safe_cex_engine::{Action, Engine, Method};
+use safe_cex_venue_cryptocom::Cryptocom;
 use safe_cex_venue_cryptocom::sign::{Envelope, Params};
-use safe_cex_venue_cryptocom::{Cryptocom, Options};
 use std::sync::Arc;
+use support::fixture::Options;
 
 const REST: &str = "https://api.crypto.com/exchange/v1/private/create-order";
 const USER: &str = "wss://stream.crypto.com/exchange/v1/user";
@@ -39,7 +41,7 @@ fn rest_and_ws_auth_recipes_match_the_legacy_envelope_bytes() {
     let (signer, identity) = provider();
     let ws_identity = identity.clone();
     let venue = ProbeVenue::new(
-        Cryptocom::new(Options::default()),
+        support::fixture::venue(Options::default()),
         move |_: &mut Cryptocom, cx: &mut safe_cex_engine::Cx<'_, _>| {
             // ProbeVenue ignores this carrier on response; the signed request
             // remains the same legacy recipe control, not a managed Read.
