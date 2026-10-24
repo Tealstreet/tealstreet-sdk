@@ -419,3 +419,60 @@ fn unregistered_direct_constructor_keeps_native_missing_credentials_refusal() {
     assert_eq!(error.outcome, None);
     unchanged(&e);
 }
+
+fn identity_request_with_wait(e: &mut Driver, wait_ms: u32) -> safe_cex_engine::HttpRequest {
+    e.handle_command(1000., Command::FetchAccount { command: 7 }, Some(wait_ms))
+        .unwrap();
+    let mut requests = safe_cex_engine::test_support::prepared_actions(e, 1000.)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        });
+    let request = requests.next().expect("native identity read exists");
+    assert!(requests.next().is_none());
+    assert_eq!(request.url, "https://api.backpack.exchange/api/v1/account");
+    request
+}
+
+#[test]
+fn genuine_short_caller_wait_caps_identity_transport() {
+    let mut e = live();
+    let request = identity_request_with_wait(&mut e, 37);
+    assert!(
+        request.timeout_ms.is_some_and(|timeout| timeout <= 37),
+        "physical read must retain the genuine37ms caller bound"
+    );
+}
+
+#[test]
+fn genuine_short_caller_wait_accepts_native_identity_before_expiry() {
+    let mut e = live();
+    let request = identity_request_with_wait(&mut e, 37);
+    let actions = identity_response(&mut e, request.id, 1036., r#"{"accountId":"within"}"#);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(action,
+        Action::Notice(Notice::CommandDone { command: 7, result })
+        if result == r#"{"userId":"within","affiliateId":null}"#))
+            .count(),
+        1
+    );
+    unchanged(&e);
+}
+
+#[test]
+fn genuine_short_caller_wait_cannot_publish_native_identity_after_expiry() {
+    let mut e = live();
+    let request = identity_request_with_wait(&mut e, 37);
+    let actions = identity_response(&mut e, request.id, 1038., r#"{"accountId":"late"}"#);
+    assert!(
+        !actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 7, .. })
+        )),
+        "the original37ms receipt cannot become a fresh20s wait"
+    );
+    unchanged(&e);
+}
