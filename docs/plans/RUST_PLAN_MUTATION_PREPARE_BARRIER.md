@@ -3,8 +3,9 @@
 G2b plan-first checkpoint, 2026-10-24. Owner codex-hcmq3f; first consumer
 claude-4yjlw0's BloFin hedged leverage. Core review codex-uufub4, classification
 review claude-dazzy3. Base actual a828ede7ebb54bc9c032ea61365213abac5e3dca.
-Plan, original-source REDs and a private Lifecycle extraction checkpoint;
-the group runtime remains unimplemented. No merge permission.
+Plan, original-source REDs and the reviewed shared engine/host implementation
+are committed locally in successive checkpoints below. Final CI remains open;
+there is no merge permission.
 G2 mixed-leg runtime stacks on this slice, not the converse.
 
 ## Native requirement and scope
@@ -591,3 +592,32 @@ pacing owner's actual-landing carry `e5fda51769f` is also merged. Both integrati
 preserve the reviewed G2b engine and host sources byte for byte; only document
 conflicts needed resolution. Neither dependency is described as an actual
 landing. Native source review and final integrated CI remain open.
+
+## Native handoff applied after fixture correction
+
+The pacing owner verified committed `68e0f9b702b` preserves every reviewed
+engine/host/crypto/registry source from `e2dc8144bbc` byte for byte. The frozen
+#1939 dependency and reviewed pacing carry are genuine ancestors. This is a
+source-preservation receipt, not a new test run or an actual-landing claim.
+
+Core independently executed native artifact `a81781da54b4` and found a fixture
+failure: its six-event drain stopped before the second response End when a
+genuine timer appeared first. That run remains two PASS and one assertion FAIL;
+the event trace establishes no production defect. Test-only correction
+`5e30f3c31a79` waits for two actual preparations and drains a bounded number of
+events to the genuine command terminal, handling incidental timers. It adds an
+actually armed timer and retains the send-order, two-reply, single-terminal and
+accepted-ID/Unknown assertions. No production hunk changed to fix the fixture.
+
+Core independently reran the exact corrected artifact: three genuine Engine+
+Host controls PASS, none ignored. All resources bind and pass readiness before
+one claim; both handoffs precede callbacks. Precommit bind/readiness failure
+sends neither member with the shared NotSent projection. A first-send panic
+still attempts the sibling and produces one Unknown with its accepted ID.
+The exact native source and fixture are now applied locally, byte-exact to the
+reviewed archive. Applied checks pass fourteen group and fifteen pacing engine
+controls, eight native managed-HTTP controls (including the three group cases),
+and thirty-three JS host controls, all without ignored cases. Native scoped
+strict Clippy, formatting and the full bans script pass. Final CI remains a
+separate gate; this checkpoint does not claim READY, a family custody cutover
+or landing.
