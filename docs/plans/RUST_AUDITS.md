@@ -2855,6 +2855,14 @@ fingerprints). No signer, private request helper, successful no-I/O setting or
 remote completion is converted. Source and inventory reviews found no venue-local
 retry, classifier, owner registry or completion algorithm.
 
+## Bitrue initial local refusal ownership
+
+Three initial synchronous numeric failure occurrences now use shared Mutation
+entry and Context failure. Bitrue shrinks 33 to 30 occurrences and 20 to 18
+fingerprints. The repeated planning-error fingerprint decreases only 2 to 1;
+the queued remote-flow error remains. Signing and successful local settings are
+held for their separately owned migrations/seam.
+
 ## KuCoin Spot fixed-setting completion custody
 
 Closed two legacy success sites covering three Setting commands through actual
@@ -2862,4 +2870,3 @@ Closed two legacy success sites covering three Setting commands through actual
 controls now pass unchanged. Native keyless/pre-credential semantics, unknown
 symbol insertion and successful mode no-ops are preserved. Shared engine owns
 receipt, command capacity and sole terminal; signer/private REST remain held.
-

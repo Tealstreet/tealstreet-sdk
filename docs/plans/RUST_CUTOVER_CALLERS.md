@@ -6586,6 +6586,18 @@ IDs and later batch errors keep their original order. Valid private/public wire
 paths stay legacy, and KCS steady public events gain no admission work. Successful
 keyless fixed settings remain held for the shared local-setting success seam.
 
+## Bitrue initial local trading refusal admission
+
+Three synchronous trading refusals now acquire their genuine shared Mutation
+owner before returning the existing error. Shared entry refusal can supersede
+the native error, producing one NotSent terminal; duplicate callbacks retain the
+original owner. Free-capacity messages, kinds and credential/public-only ordering
+are unchanged. Refusal creates no HTTP, signing-provider work or Store effect.
+
+The queued trade_next error, native builder/entropy behavior, valid private wire
+and successful SetPositionMode(false) stay unchanged. This does not migrate the
+signer or admit keyless successful settings; that success awaits the shared seam.
+
 ## KuCoin Spot fixed-setting local success
 
 SetLeverage still ignores the requested value and returns `[]` after storing
@@ -6596,4 +6608,3 @@ The shared LocalSetting seam now refuses expired/sub-ms waits or exhausted
 command-owner capacity before projection and success; there is no numeric
 fallback or duplicate terminal. Duplicate live ids retain their original owner
 and diagnostic. No transport, signer, timer, Context or journal is added.
-

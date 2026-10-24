@@ -78,3 +78,11 @@ GREEN diagnostic/original-owner control, not a new migration failure. Final
 source makes all ten tests GREEN with identical assertions. Missing-receipt and
 managed internal resource refusal remain shared-engine defense, not a fabricated
 native receipt. No credential, Context or HTTP is created by this adoption.
+
+## Actual refusal-slice integration
+
+Actual #1986 `45548167038` and #1993 `5f86ae51717` are genuinely integrated.
+The remaining KuCoin inventory is now 48 -> 46 occurrences, 43 -> 42 fingerprints;
+this slice still removes exactly the same count-two success row. Incoming
+refusal source/tests and all unrelated inventory entries are retained. Original
+LocalSetting controls remain byte-identical to `b16e7262fdd`.

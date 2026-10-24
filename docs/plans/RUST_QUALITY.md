@@ -1499,6 +1499,14 @@ wire controls. Duplicate ownership and more than 256 fixed-clock reuses pin
 retirement; saturated-registry valid private wire controls pin unchanged signed
 fallthrough. The isolated suite contains 18 executed controls, with no ignores.
 
+## Bitrue initial refusal regression controls
+
+Three original compiling capacity assertion REDs pass after shared entry
+adoption. Seven isolated controls also pin keyed/keyless/public-only ordering,
+Store preservation, capacity recovery, successful native one-way mode, saturated
+signed wire and genuine duplicate-owner protection with 270 fixed-clock reuses.
+No original test is ignored or rewritten to claim a legacy removal.
+
 ## KuCoin Spot fixed-setting admission evidence
 
 Ten native LocalSetting controls cover six original capacity/expired-wait REDs,
@@ -1506,4 +1514,3 @@ constant projection, unknown symbols, configuration precedence, Background-only
 capacity and duplicate original-owner release. Tests use genuine command
 receipts; no missing-method compile failure or fabricated Context is evidence.
 Exact Spot trading inventory removes only the two-occurrence success row.
-
