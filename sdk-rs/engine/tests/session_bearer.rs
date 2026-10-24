@@ -34,6 +34,8 @@ struct Shared {
     next_generation_token: Option<&'static str>,
     bearer: bool,
     bind_retired: bool,
+    /// Retire the Session from inside a response delivery.
+    retire_on_response: bool,
     recipe_authorization: bool,
     signed: bool,
     egress: Option<Egress>,
@@ -61,6 +63,7 @@ impl Shared {
             next_generation_token: None,
             bearer: true,
             bind_retired: false,
+            retire_on_response: false,
             recipe_authorization: false,
             signed: false,
             egress: None,
@@ -200,6 +203,28 @@ impl Probe {
         self.shared.borrow_mut().failures.push(error.clone());
         let _ = cx.fail_context(&pending.context, error);
     }
+    /// Retire the Session, optionally reopening a new generation in the same
+    /// callback (outside any readiness scope).
+    fn retire_now(&self, cx: &mut Cx<'_, Pending>) {
+        let mut shared = self.shared.borrow_mut();
+        let Some(session) = shared.session.take() else {
+            return;
+        };
+        let waiters = cx.retire_session(&session).unwrap();
+        assert!(waiters.is_empty());
+        shared.retired = Some(session);
+        if let Some(token) = shared.next_generation_token {
+            shared.session = Some(
+                cx.open_session(SessionPolicy {
+                    credential: None,
+                    repeat_safe: true,
+                })
+                .unwrap(),
+            );
+            shared.token = Some(token);
+            shared.revision = 1;
+        }
+    }
     #[cfg(feature = "http-plans")]
     fn preflight(&self, cx: &mut Cx<'_, Pending>) {
         use safe_cex_engine::request_context::plan::{CallTerms, RetryWindow};
@@ -300,28 +325,18 @@ impl Venue for Probe {
         self.issue(cx, root, false);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        let mut shared = self.shared.borrow_mut();
-        if shared.retire_timer != Some(timer) {
-            return;
-        }
-        let session = shared.session.take().unwrap();
-        let waiters = cx.retire_session(&session).unwrap();
-        assert!(waiters.is_empty());
-        shared.retired = Some(session);
-        if let Some(token) = shared.next_generation_token {
-            shared.session = Some(
-                cx.open_session(SessionPolicy {
-                    credential: None,
-                    repeat_safe: true,
-                })
-                .unwrap(),
-            );
-            shared.token = Some(token);
-            shared.revision = 1;
+        if self.shared.borrow().retire_timer == Some(timer) {
+            self.retire_now(cx);
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: Response<'_>) {
         self.shared.borrow_mut().responses += 1;
+        // The sibling leg's delivery only retires; the command stays open for
+        // its bound root.
+        if self.shared.borrow().retire_on_response {
+            self.retire_now(cx);
+            return;
+        }
         let _ = cx.done_context(&pending.context, "[]".into());
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -540,7 +555,7 @@ fn r2_signed_revision_moved_before_claim_reprepares_with_the_new_token() {
 }
 
 /// R3: retiring the Session after prepare fences a command-owned bound packet;
-/// the Read owner gets one typed failure with no outcome, and a late response
+/// the Read owner gets one typed NotSent failure, and a late response
 /// reaches no callback. The new generation's token never serves it, even when
 /// its text is unchanged.
 #[test]
@@ -558,7 +573,7 @@ fn r3_session_retired_after_prepare_never_releases_and_fails_typed() {
         e.drain_actions().for_each(drop);
         assert!(
             one_typed_read_failure(&shared, ErrorKind::InvalidInput),
-            "the Read owner was not failed once, typed, with no outcome"
+            "the Read owner was not failed once, typed and NotSent"
         );
         respond(&mut e, NOW + 4., &request);
         assert_eq!(
@@ -588,8 +603,46 @@ fn r3_signed_late_signing_result_after_retire_binds_nothing() {
     assert_eq!(shared.borrow().failures.len(), 1);
 }
 
+/// R3, nested: a retire inside another request's response delivery fails the
+/// bound packet once after that callback, and it never releases.
+#[test]
+fn r3_retire_inside_a_response_delivery_fails_the_bound_packet_after_it() {
+    let (mut e, shared) = engine(|shared| {
+        shared.sibling = true;
+        shared.retire_on_response = true;
+        shared.next_generation_token = Some("C");
+    });
+    let issued = ask(&mut e, 1);
+    assert_eq!(issued.len(), 2);
+    let mut bound = None;
+    let mut sibling = None;
+    for (preparation, ..) in issued {
+        let (permit, request) = prepared(&mut e, NOW + 1., preparation).expect("packet");
+        if authorization(&request).is_some() {
+            bound = Some(permit);
+        } else {
+            sibling = Some((permit, request));
+        }
+    }
+    let (permit, request) = sibling.expect("unbound sibling");
+    assert!(matches!(
+        e.claim_http(NOW + 2., permit),
+        Ok(Claim::Released(_))
+    ));
+    respond(&mut e, NOW + 3., &request);
+    assert!(shared.borrow().retired.is_some());
+    assert!(one_typed_read_failure(&shared, ErrorKind::InvalidInput));
+    assert!(!matches!(
+        e.claim_http(NOW + 4., bound.expect("bound packet")),
+        Ok(Claim::Released(_))
+    ));
+    e.drain_actions().for_each(drop);
+    assert_eq!(shared.borrow().responses, 1);
+    assert_eq!(shared.borrow().failures.len(), 1);
+}
+
 /// R4: a venue that is NotReady at prepare gets no HTTP; the Read owner gets
-/// one typed failure with no outcome.
+/// one typed NotSent failure.
 #[test]
 fn r4_venue_not_ready_at_prepare_sends_nothing_and_fails_typed() {
     for signed in [false, true] {
@@ -667,6 +720,22 @@ fn r6_recipe_authorization_header_is_refused() {
         SecretHeaderValue::new("x".repeat(8193)).err(),
         Some(Error::Invalid)
     );
+}
+
+/// R6 control: an unbound request keeps its own `Authorization` header, so
+/// venues that send one today can still move to managed requests.
+#[test]
+fn control_r6_unbound_recipe_authorization_is_unchanged() {
+    let (mut e, shared) = engine(|shared| {
+        shared.bearer = false;
+        shared.recipe_authorization = true;
+    });
+    let issued = ask(&mut e, 1);
+    assert_eq!(issued.len(), 1);
+    assert!(shared.borrow().issue_errors.is_empty());
+    let (_, request) = prepared(&mut e, NOW + 1., issued[0].0).expect("unbound packet");
+    assert!(authorization(&request).is_some());
+    assert_eq!(shared.borrow().hook_calls, 0);
 }
 
 /// R7: binding to a retired Session refuses Revoked and nothing is prepared.

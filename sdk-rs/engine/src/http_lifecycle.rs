@@ -271,11 +271,12 @@ impl<P> Cx<'_, P> {
         let headers = step
             .as_ref()
             .map_or(public_headers, |step| step.unsigned_http_headers());
-        // The engine alone sets `Authorization`, and a bound request is never
-        // routed to explicit public egress.
+        // On a bound request the engine alone sets `Authorization`, and it is
+        // never routed to explicit public egress. Unbound requests are unchanged.
         if crate::signing_headers::validate_unsigned(headers).is_err()
-            || headers.iter().any(|(name, _)| is_authorization(name))
-            || (bearer.is_some() && context.route().is_some())
+            || (bearer.is_some()
+                && (headers.iter().any(|(name, _)| is_authorization(name))
+                    || context.route().is_some()))
         {
             return Err((pending, Error::Invalid));
         }
