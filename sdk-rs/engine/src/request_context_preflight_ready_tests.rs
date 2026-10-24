@@ -97,7 +97,7 @@ impl ScopeProbe {
             }
             SessionAttack::Leg => {
                 assert_eq!(
-                    cx.http_leg_context(self.session_parent.as_ref().unwrap(), policy())
+                    cx.session_leg_context(self.session_parent.as_ref().unwrap(), policy())
                         .err(),
                     Some(Error::State),
                 );
@@ -188,6 +188,7 @@ impl Venue for ScopeProbe {
                         calls: &calls,
                     }],
                     PlanPolicy {
+                        independent_calls: false,
                         operation: Operation::Read,
                         credential: None,
                         pacing: None,
@@ -252,6 +253,7 @@ impl Venue for ScopeProbe {
                             calls: &calls,
                         }],
                         PlanPolicy {
+                            independent_calls: false,
                             operation: Operation::Read,
                             credential: None,
                             pacing: None,
@@ -327,6 +329,7 @@ impl Venue for ScopeProbe {
                             calls: &calls,
                         }],
                         PlanPolicy {
+                            independent_calls: false,
                             operation: Operation::Read,
                             credential: None,
                             pacing: None,

@@ -709,7 +709,6 @@ mod tests {
         Action, Command, Engine, ErrorKind, Event, Response, SocketChannel, Venue, VenueError,
         book::Book, socket::Config,
     };
-    use std::collections::HashMap;
 
     struct Probe {
         policies: Vec<FeedPolicy>,
@@ -820,7 +819,7 @@ mod tests {
     struct Harness {
         engine: Engine<Probe>,
         now: f64,
-        timers: HashMap<TimerId, f64>,
+        timers: crate::IdMap<TimerId, f64>,
         closes: Vec<SocketId>,
         connects: Vec<SocketId>,
     }
@@ -849,7 +848,7 @@ mod tests {
                 )
                 .unwrap(),
                 now,
-                timers: HashMap::new(),
+                timers: Default::default(),
                 closes: Vec::new(),
                 connects: Vec::new(),
             };
