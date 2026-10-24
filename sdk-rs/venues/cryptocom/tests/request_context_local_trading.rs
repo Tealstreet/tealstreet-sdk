@@ -1,10 +1,12 @@
 //! Original real-entry controls for seven local refusals and a fixed Setting ack.
+mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Error, HttpAction, Preparation};
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, Notice, Outcome, Response, VenueError,
 };
-use safe_cex_venue_cryptocom::{Cryptocom, Options};
+use safe_cex_venue_cryptocom::Cryptocom;
+use support::fixture::Options;
 
 type TestEngine = Engine<Cryptocom>;
 const NOW: f64 = 1_710_000_000_000.;
@@ -127,11 +129,11 @@ fn stored_order() -> Order {
     }
 }
 fn engine(private: bool) -> TestEngine {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    let mut e = support::fixture::engine(Options {
         key: private.then(|| "local-fixture-identity".into()),
         secret: private.then(|| "local-fixture-material".into()),
         ..Default::default()
-    }));
+    });
     e.store_mut().set_markets(vec![Market {
         id: SYMBOL.into(),
         symbol: SYMBOL.into(),
@@ -166,7 +168,7 @@ fn engine(private: bool) -> TestEngine {
 }
 fn execute(e: &mut TestEngine, now: f64, command: Command) -> Vec<Action> {
     e.handle(now, Event::Command(command));
-    e.drain_actions().collect()
+    support::fixture::actions(e, now)
 }
 fn terminal(actions: &[Action], owner: u32) -> Vec<Result<String, VenueError>> {
     actions
@@ -254,15 +256,15 @@ fn entry_refusal(actions: &[Action], owner: u32, kind: ErrorKind) {
     no_work(actions);
 }
 fn peer(e: &mut TestEngine, now: f64, owner: u32) -> Preparation {
-    let a = execute(
-        e,
+    e.handle(
         now,
-        Command::FetchOrderBook {
+        Event::Command(Command::FetchOrderBook {
             command: owner,
             symbol: SYMBOL.into(),
             limit: None,
-        },
+        }),
     );
+    let a: Vec<_> = e.drain_actions().collect();
     a.into_iter()
         .find_map(|a| match a {
             Action::ManagedHttp(action) => match *action {

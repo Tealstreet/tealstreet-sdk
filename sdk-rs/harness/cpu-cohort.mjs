@@ -224,8 +224,16 @@ export function requireGithubResponseSize(length, kind = 'metadata') {
   check(integer(length) && length <= limit, 'empty/oversized GitHub response');
 }
 
-export function createGithubReader({ repository, token, fetch: fetchImpl = globalThis.fetch }) {
-  check(typeof repository === 'string' && /^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(repository) && typeof fetchImpl === 'function', 'invalid GitHub reader');
+const GITHUB_TRANSPORT_ATTEMPTS = 3;
+const NETWORK_CODES = new Set(['EPIPE', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN',
+  'ENOTFOUND', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT']);
+const networkFailure = error => error instanceof Error &&
+  (NETWORK_CODES.has(error.code) || error instanceof TypeError && NETWORK_CODES.has(error.cause?.code));
+const sleepForGithubRetry = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+export function createGithubReader({ repository, token, fetch: fetchImpl = globalThis.fetch, sleep = sleepForGithubRetry }) {
+  check(typeof repository === 'string' && /^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(repository) && typeof fetchImpl === 'function' && typeof sleep === 'function', 'invalid GitHub reader');
   check(token === undefined || typeof token === 'string', 'invalid read token');
   const snapshots = [], snapshotKeys = new Set(), logs = new Map(), logIndices = new Map();
   const immutableResponses = new Map(), completedJobs = new Set();
@@ -237,7 +245,8 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
     const url = `https://api.github.com/repos/${repository}/${path}`;
     const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
     let response, initialStatus, raw;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < GITHUB_TRANSPORT_ATTEMPTS; attempt++) {
+      let retryReason;
       try {
         response = await fetchImpl(url, { method: 'GET', headers, redirect: 'manual', cache: 'no-store' });
         initialStatus = response.status;
@@ -246,20 +255,26 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
           check(location.protocol === 'https:' && !location.username && !location.password && /(?:\.githubusercontent\.com|\.blob\.core\.windows\.net)$/.test(location.hostname), 'untrusted artifact/log redirect');
           response = await fetchImpl(location.href, { method: 'GET', redirect: 'error', cache: 'no-store' });
         }
-        check(response.status === 200, `GitHub evidence unavailable (${response.status})`);
-        raw = Buffer.from(await response.arrayBuffer());
-        if (!raw.length && immutable && ['artifact', 'runtime-artifact'].includes(kind) && attempt === 0) {
-          console.warn(`Retrying immutable artifact read after empty HTTP 200: ${path}`);
-          continue;
+        if (response.status >= 500 && response.status <= 599 && attempt + 1 < GITHUB_TRANSPORT_ATTEMPTS) {
+          retryReason = `HTTP ${response.status}`;
+          await response.body?.cancel();
+        } else {
+          check(response.status === 200, `GitHub evidence unavailable (${response.status})`);
+          raw = Buffer.from(await response.arrayBuffer());
+          if (!raw.length && immutable && ['artifact', 'runtime-artifact'].includes(kind) && attempt === 0) {
+            retryReason = 'empty immutable artifact HTTP 200';
+          } else {
+            requireGithubResponseSize(raw.length, kind);
+            break;
+          }
         }
-        requireGithubResponseSize(raw.length, kind);
-        break;
       } catch (error) {
-        // Retrieval of the same immutable bytes can recover one closed socket.
-        // This never repeats a measurement or accepts an HTTP refusal.
-        if (!(immutable && binary && attempt === 0 && error instanceof TypeError && error.cause?.code === 'UND_ERR_SOCKET')) throw error;
-        console.warn(`Retrying immutable evidence read after socket closure: ${path}`);
+        if (!networkFailure(error) || attempt + 1 === GITHUB_TRANSPORT_ATTEMPTS) throw error;
+        retryReason = error.code ?? error.cause.code;
       }
+      // Retrieval repeats the original authority URL, never timing or a verdict.
+      console.warn(`Retrying GitHub evidence read ${attempt + 2}/${GITHUB_TRANSPORT_ATTEMPTS} after ${retryReason}: ${path}`);
+      await sleep((attempt + 1) * 1000);
     }
     const contentSha256 = sha(raw), snapshotKey = `${path}\0${contentSha256}`;
     if (!snapshotKeys.has(snapshotKey)) {

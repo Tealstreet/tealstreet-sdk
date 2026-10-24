@@ -8048,6 +8048,122 @@ removals comprise one reachable refusal adoption and one dead-arm deletion.
 The independent catalog slice and its two inventory removals are separate.
 
 
+### Coinbase immediate local command custody
+
+Ten initial-entry completion sites now use shared Read ownership or keyless
+Mutation refusal: portfolio lookup, cached/unavailable leverage, initial
+history validation, startup queue capacity and trading validation/refusals.
+Native messages, JSON, Unsupported/NotSent metadata, validation order and the
+256-entry warning remain intact. Invalid or expired caller entry is rejected
+before local completion through the cause-aware shared API. No physical I/O,
+signed/private custody, FIFO pacing or deferred callback is adopted. The three
+candle validation sites, Instruments discovery and Daily seed remain held for
+retained command ownership and coordinated native REST release. Coinbase's
+legacy inventory decreases from 34 to 24 occurrences.
+
+## Order-lock capacity refusal
+
+For venues with `guard_order_mutations`, entry holds at most 64 order-lock
+scopes (`RUST_ORDER_LOCK_CAPACITY.md`). An order command refused only by that
+cap (a new placement, amend or cancel) now fails before entry with "Order
+command capacity reached: 64 order commands are in flight; retry after one
+finishes", `kind: Internal` and `outcome: NotSent`, and nothing is sent.
+Before, it reported "Order amendment or cancellation is already in flight"
+with no outcome. Placements take a scope only where `guard_pending_placements`
+is set: AsterDEX, Bitget, Bitrue, BloFin, BreakoutProp, OKX and Phemex at this
+base. Native queues have no such cap, so the 65th concurrent order command is a
+disclosed difference. Genuine conflicts are unchanged: an amend or cancel
+behind an in-flight command on the same order, or a placement behind an
+in-flight cancel-all, still report "Order amendment or cancellation is already
+in flight" with no outcome, and the uncertain cancel-all refusal is unchanged.
+
+
+## Orderly unsigned startup seed custody
+
+Markets and Tickers now admit independent keyless Background Read contexts for
+`/v1/public/info` and `/v1/public/futures`. Each physical leg has a new 20-second
+admission bound covering Prepare, Bind and streamed response; there is no aggregate
+startup-chain bound, signing, pacing or managed retry. Native per-Seed Backoff
+remains the recovery owner. Exact DATA validation precedes decoding and global
+effects; matching failure cleanup retires its returned Context even at expiry.
+Markets and Tickers retain live DATA custody through native map/Store publication,
+then retire before native account startup/ticker admission or socket/funding hooks. Independently issued reads retain independent custody.
+Only the common unsigned seed sender is pruned; key selection and other funnels
+are unchanged.
+
+## Crypto.com private dispatch and Plan custody
+
+Private REST remains POST through Primary with no route or account-read tag,
+including configurations with a valid unused secondary. Native and JS trusted
+setup consume that secondary once under the separate declared ValidateOnly
+prerequisite. Registry construction preserves its existing invalid-secondary
+InvalidInput refusal, exact message and absent command outcome before entering
+the venue arm. A directly constructed venue instead retains its CONFIG_INVALID
+startup notice and identity validation precedence. The venue receives only an
+opaque Primary and bounded status.
+Hosted setup sends no unused secondary material. REST and WS auth share the
+native sorted Text/u64/Strings envelope, millisecond stamp without a counter,
+and exact receipt/outbound binding. WS retains its native one-second auth
+eligibility; shared signing order may hold it behind earlier parked HTTP work.
+
+Identity and private history use the original caller-wait Read root and fresh
+20s children at eligible dequeue. Exact root/child delivery precedes decoding
+and Store effects. Root expiry is strict, with no partial history or INCOMPLETE
+marker; live-root released failures retain native retry budgets and recovery.
+Preparation/provider and local submission refusals are strict. Background
+account stages retain their native counters, snapshot tokens and financial
+reducers; failure-only cleanup retires the exact returned Pending without
+granting DATA authority.
+
+Trading uses the genuine WriteAfterReads Preflight and serial Mutation Plan.
+Each final write reserves two physical attempts, so a batch of at most128 final
+writes can be admitted within the256-credit bound; larger declarations refuse
+atomically before progress or I/O. Leverage's prerequisite has its separate
+20s read attempts and only the native one40101 resend. The final Plan starts
+after that read; no caller-wait cap is claimed for WriteAfterReads. The final
+span is40000*N plus declared step waits, with20ms between settled jobs and an
+immediate proven40101 resend. Network,408,5xx and malformed replies never grant
+a write resend.
+
+After the last settled call the native20ms timer may seal the same live Plan,
+then release one parked FIFO owner through shared ready custody. There is no
+tail extension: root expiry at or before that timer wins, produces one failure
+and retires the old timer's authority. Both equality event orders and the live
+tail/FIFO positive are pinned. All-failed batches fail; partial and unknown
+outcomes retain the journal's accepted IDs. Malformed success ACKs now carry
+Internal/Unknown,5xx carries VenueUnavailable/Unknown, and an unlisted native
+error carries Unknown instead of an untyped outcome. The shared classifier
+owns these projections; native decoded code/message and rejection text remain.
+
+Fixture setup installs an opaque LocalSigner before startup. Host collectors
+drive actual Prepare/Bind/Claim; capacity controls deliberately retain raw
+Prepare tokens. The parked-WS provider control completes prior HTTP setup so
+it tests the WS provider boundary independently of the shared signing barrier.
+Existing financial assertions remain in place; eager-signing comparisons are
+replaced by independent literal envelopes, including the WS HMAC vector.
+
+Private read integrity failures retain the engine's typed cause. Identity and
+History fail strictly without retry or partial history; Account retires the
+exact active read and schedules one native poll, without an inline resend.
+Only genuine Network/physical Timeout callbacks spend native transport budgets.
+The separately documented native40101 response/list-error compatibility retains
+its minimal text check and shared counters; typed integrity failures never enter
+that compatibility path. Old contexts retire before successor reads are minted.
+
+The native build API refuses a caller-preset readCredentialsValid result as
+"Unexpected read credential validation result" (InvalidInput, no outcome).
+Trusted host setup may carry its computed false result, which retains the
+native secondary-credentials validation error before venue construction.
+
+Crypto.com actual6b composition declares independent Mutation calls only for
+native best-effort trading batches. A released failed row settles through its
+exact failure custody, then the next sibling becomes eligible after20ms; the
+failed call is never resent. Coupled jobs, including leverage, remain strict.
+This declaration does not grant DATA or erase failure evidence: all-failed jobs
+fail, partial jobs retain accepted IDs, and the original Plan root still wins
+at expiry before the native final20ms timer. Read Plans do not opt in.
+
+
 
 
 

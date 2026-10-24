@@ -6,6 +6,8 @@ use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::RetryPolicy;
+use safe_cex_engine::selected_read::{AdmittedRead, ReadPolicy, ReadRequest, SelectedRead};
 use safe_cex_engine::{Cx, Fill, Method, OrderSnapshotToken, TimerId, num};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -50,6 +52,7 @@ pub enum Rows {
     Orders(SnapshotBuilder<String, Order>),
 }
 pub struct Request {
+    pub(crate) context: Option<AdmittedRead>,
     pub read: Read,
     pub revision: u64,
     pub rows: Rows,
@@ -62,6 +65,7 @@ pub struct Request {
 
 #[derive(Default)]
 pub struct Account {
+    active_read: Option<safe_cex_engine::request_context::Context>,
     pub timer: Option<TimerId>,
     pub busy: bool,
     pub revision: u64,
@@ -418,29 +422,6 @@ impl Cryptocom {
         self.connect(cx, 1);
         self.reconcile(cx);
     }
-    pub(crate) fn signed(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        path: &str,
-        params: &Params,
-        pending: Pending,
-        streamed: bool,
-    ) {
-        let Some(credentials) = &self.credentials else {
-            return;
-        };
-        let body = credentials.envelope(path, params, cx.now, false);
-        let request = cx.request(
-            Method::Post,
-            format!("{}/{path}", self.rest),
-            vec![("Content-Type", "application/json".into())],
-            Some(body),
-            pending,
-        );
-        if streamed {
-            cx.stream_response(request, ArrayAt::Path(&["result", "data"]));
-        }
-    }
     pub(crate) fn reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.busy {
             return;
@@ -448,26 +429,99 @@ impl Cryptocom {
         self.account.busy = true;
         self.read_account(cx, Read::Positions, 0);
     }
-    fn read_account(&self, cx: &mut Cx<'_, Pending>, read: Read, retries: u8) {
+    fn read_account(&mut self, cx: &mut Cx<'_, Pending>, read: Read, retries: u8) {
         let rows = match read {
             Read::Positions => Rows::Positions(SnapshotBuilder::default()),
             Read::Balance => Rows::Balance(None),
             _ => Rows::Orders(SnapshotBuilder::default()),
         };
-        self.signed(
+        let request = Request {
+            context: None,
+            read,
+            revision: self.account.revision,
+            rows,
+            invalid: false,
+            skipped: Skipped::default(),
+            retries,
+        };
+        let admitted = match SelectedRead::background(
             cx,
-            read.path(),
-            &Params::default(),
-            Pending::Account(Request {
-                read,
-                revision: self.account.revision,
-                rows,
-                invalid: false,
-                skipped: Skipped::default(),
-                retries,
-            }),
-            true,
+            self.selected_read(),
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(admitted) => admitted,
+            Err(_) => {
+                self.account_failed(
+                    cx,
+                    request,
+                    "Crypto.com account read admission failed",
+                    crate::reads::FailureRecovery::Strict,
+                );
+                return;
+            }
+        };
+        self.account.active_read = Some(admitted.context().clone());
+        let url = format!("{}/{}", self.rest, read.path());
+        let queued = admitted.queue(
+            cx,
+            ReadRequest {
+                method: Method::Post,
+                url: url.clone(),
+                body: None,
+                stream: Some(ArrayAt::Path(&["result", "data"])),
+            },
+            |identity| {
+                Box::new(crate::sign::Envelope::http(
+                    identity.clone(),
+                    read.path(),
+                    Params::default(),
+                    &url,
+                ))
+            },
+            |admitted| {
+                Pending::Account(Request {
+                    context: Some(admitted),
+                    ..request
+                })
+            },
         );
+        if let Err((Pending::Account(request), error)) = queued {
+            self.account_failed(
+                cx,
+                request,
+                &error.read_venue_error().message,
+                crate::reads::FailureRecovery::Strict,
+            );
+        }
+    }
+    pub(crate) fn account_delivery(
+        &self,
+        cx: &Cx<'_, Pending>,
+        request: &Request,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        let read = request
+            .context
+            .as_ref()
+            .ok_or(safe_cex_engine::request_context::Error::Revoked)?;
+        if self.account.active_read.as_ref() != Some(read.context()) {
+            return Err(safe_cex_engine::request_context::Error::Revoked);
+        }
+        cx.validate_background_read_http_delivery(read.context())
+    }
+    fn retire_account_read(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request) -> bool {
+        if request.context.as_ref().map(AdmittedRead::context) != self.account.active_read.as_ref()
+        {
+            return false;
+        }
+        if let Some(read) = request.context.take() {
+            let _ = cx.finish_http_context(read.context());
+        }
+        self.account.active_read = None;
+        true
     }
     fn schedule_reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.busy = false;
@@ -479,13 +533,14 @@ impl Cryptocom {
     pub(crate) fn account_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        request: Request,
+        mut request: Request,
         error: &str,
-        transport: bool,
+        recovery: crate::reads::FailureRecovery,
     ) {
-        if (error.contains("40101") && request.retries < 1)
-            || (transport && !error.contains("40101") && request.retries < 3)
-        {
+        if !self.retire_account_read(cx, &mut request) {
+            return;
+        }
+        if recovery.retry(error, request.retries) {
             self.read_account(cx, request.read, request.retries + 1);
             return;
         }
@@ -583,9 +638,17 @@ impl Cryptocom {
             Rows::Balance(None) => request.invalid = true,
         }
     }
-    pub(crate) fn account_response(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+    pub(crate) fn account_response(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
+        if !self.retire_account_read(cx, &mut request) {
+            return;
+        }
         if request.invalid {
-            self.account_failed(cx, request, "invalid account row", false);
+            self.account_failed(
+                cx,
+                request,
+                "invalid account row",
+                crate::reads::FailureRecovery::Strict,
+            );
             return;
         }
         let fresh_balance = request.revision >= self.account.balance_revision;
@@ -722,7 +785,7 @@ impl Cryptocom {
                 }
             }
             Rows::Orders(rows) => {
-                if matches!(request.read, Read::Orders) {
+                if let Read::Orders = request.read {
                     self.account.order_rows = Some(rows);
                     self.read_account(cx, Read::AdvancedOrders, 0);
                 } else {
@@ -790,10 +853,20 @@ impl Cryptocom {
         }
     }
     pub(crate) fn authenticate(&self, cx: &mut Cx<'_, Pending>) {
-        if let (Some(credentials), Some(socket)) = (&self.credentials, self.sockets[1].socket) {
-            cx.send(
+        use safe_cex_engine::credential_selection::CredentialRole;
+        if let (Ok((_, identity)), Some(socket)) = (
+            self.slots.select(CredentialRole::SessionAuth),
+            self.sockets[1].socket,
+        ) {
+            let url = if self.options.testnet {
+                "wss://uat-stream.3ona.co/exchange/v1/user"
+            } else {
+                "wss://stream.crypto.com/exchange/v1/user"
+            };
+            cx.send_signed(
                 socket,
-                credentials.envelope("public/auth", &Params::default(), cx.now, true),
+                String::new(),
+                Box::new(crate::sign::Envelope::ws_auth(identity.clone(), url)),
             );
         }
     }
