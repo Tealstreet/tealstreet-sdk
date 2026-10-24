@@ -44,7 +44,8 @@ family_args() {
     build_args+=(--config 'profile.release.package.safe-cex-venue-asterdex.opt-level=3')
   elif [[ $family == bitget ]]; then
     # Size defaults fit dispatch signing; the engine stays at speed for the CPU gate.
-    build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level=3')
+    build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level=3'
+      --config 'profile.release.package.safe-cex-venue-bitget.opt-level=2')
   elif [[ $family == woo ]]; then
     # Keep WOO ticker decoding throughput within the fixed CPU and size gates.
     build_args+=(--config 'profile.release.package.safe-cex-venue-woo.opt-level=3')
