@@ -40,6 +40,14 @@ pub fn actions(engine: &mut Engine<Okx>) -> Vec<Action> {
 pub fn prepared(engine: &mut Engine<Okx>, now: f64) -> Vec<Action> {
     safe_cex_engine::test_support::prepared_actions(engine, now)
 }
+/// Removes the first HTTP request; managed reads also arm deadline timers.
+pub fn take_http(actions: &mut Vec<Action>) -> Action {
+    let i = actions
+        .iter()
+        .position(|a| matches!(a, Action::Http(_)))
+        .expect("an HTTP request");
+    actions.remove(i)
+}
 pub fn reply(engine: &mut Engine<Okx>, action: &Action, body: &str, now: f64) {
     let Action::Http(r) = action else {
         panic!("expected request")
@@ -62,17 +70,17 @@ pub fn envelope(row: &str) -> String {
 pub fn public(options: Options) -> (Engine<Okx>, SocketId, SocketId) {
     let mut engine = engine(options);
     engine.start(1_709_209_849_123.0);
-    let request = actions(&mut engine)
+    let request = prepared(&mut engine, 1_709_209_849_123.0)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap();
     reply(&mut engine, &request, &envelope(MARKET), 1.0);
-    let request = actions(&mut engine)
+    let request = prepared(&mut engine, 1.0)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap();
     reply(&mut engine, &request, &envelope(TICKER), 2.0);
-    let sockets: Vec<_> = actions(&mut engine)
+    let sockets: Vec<_> = prepared(&mut engine, 2.0)
         .into_iter()
         .filter_map(|a| {
             if let Action::WsConnect { socket, url, .. } = a {
@@ -128,10 +136,10 @@ pub fn trading_engine_with(
     let mut e = engine(options);
     configure(&mut e);
     e.start(0.0);
-    let a = prepared(&mut e, 0.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     let mut out = prepared(&mut e, 1.0);
-    let a = out.remove(0);
+    let a = take_http(&mut out);
     reply(&mut e, &a, &envelope(TICKER), 2.0);
     out.extend(prepared(&mut e, 2.0));
     let a = out

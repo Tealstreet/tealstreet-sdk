@@ -2665,6 +2665,10 @@ pub trait Venue {
     fn http_pacing(&self) -> &[crate::request_context::Pacing] {
         &[]
     }
+    /// Flat immutable sets share the registered primitive clocks.
+    fn http_pacing_sets(&self) -> &[crate::request_context::PacingSet] {
+        &[]
+    }
 
     /// Final synchronous admission. This callback cannot queue more work or
     /// alter the engine's clocks, preparation/signing state or original bound.
@@ -3002,10 +3006,11 @@ impl<V: Venue> Engine<V> {
         })?;
         let mut store = Store::default();
         store.set_quantity_units(venue.capabilities().quantity_units);
-        let http_pacing =
-            crate::request_context::SendPacing::new(venue.http_pacing()).map_err(|_| {
-                VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput)
-            })?;
+        let http_pacing = crate::request_context::SendPacing::with_sets(
+            venue.http_pacing(),
+            venue.http_pacing_sets(),
+        )
+        .map_err(|_| VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput))?;
         Ok(Self {
             venue,
             store,

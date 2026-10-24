@@ -163,7 +163,7 @@ fn local_query(branch: Local) -> Query {
 }
 fn query(e: &mut Engine<Probe>, now: f64, command: u32, query: Query) -> Vec<Action> {
     e.handle(now, Event::Command(Command::Query { command, query }));
-    e.drain_actions().collect()
+    support::managed::drain(e, now)
 }
 fn local(e: &mut Engine<Probe>, now: f64, command: u32, branch: Local) -> Vec<Action> {
     query(e, now, command, local_query(branch))
@@ -424,7 +424,7 @@ fn duplicate_cannot_complete_peer_and_local_ids_retire_without_expiry() {
     }
 }
 #[test]
-fn valid_remote_fallthrough_keeps_native_wire_at_full_context_capacity() {
+fn valid_remote_fallthrough_requires_capacity_then_keeps_native_wire() {
     for family in 0..3 {
         let budget_end = match family {
             0 => 1_000. * 7. * DAY,
@@ -444,10 +444,27 @@ fn valid_remote_fallthrough_keeps_native_wire_at_full_context_capacity() {
                 park(&mut e, owner);
             }
             let actions = query(&mut e, NOW, 830, range(family, bounds.0, bounds.1));
-            assert!(
-                terminal(&actions, 830).is_empty(),
-                "remote path must not acquire an unused Read root: {actions:?}"
-            );
+            let capacity = safe_cex_engine::request_context::Error::Capacity;
+            refused(&actions, 830, ErrorKind::Internal, &capacity.to_string());
+            retire(&mut e, 1);
+            let one_free = query(&mut e, NOW, 830, range(family, bounds.0, bounds.1));
+            assert_eq!(terminal(&one_free, 830), [Err(capacity.read_venue_error())]);
+            assert!(one_free.iter().all(|action| matches!(
+                action,
+                Action::SetTimer { .. }
+                    | Action::ClearTimer { .. }
+                    | Action::Notice(Notice::CommandFailed { command: 830, .. })
+            )));
+            for action in &one_free {
+                if let Action::SetTimer { timer, .. } = action {
+                    assert!(one_free.iter().any(|action| matches!(action,
+                        Action::ClearTimer { timer: cleared } if cleared == timer
+                    )));
+                }
+            }
+            retire(&mut e, 2);
+            let actions = query(&mut e, NOW, 830, range(family, bounds.0, bounds.1));
+            assert!(terminal(&actions, 830).is_empty());
             let requests: Vec<_> = actions
                 .iter()
                 .filter_map(|a| {
@@ -491,7 +508,7 @@ fn valid_remote_fallthrough_keeps_native_wire_at_full_context_capacity() {
                     Method::Get
                 }
             );
-            for owner in 1..=256 {
+            for owner in 3..=256 {
                 retire(&mut e, owner);
             }
             no_store_effects(&mut e);
@@ -502,6 +519,23 @@ fn valid_remote_fallthrough_keeps_native_wire_at_full_context_capacity() {
         for owner in 1..=256 {
             park(&mut e, owner);
         }
+        let actions = query(
+            &mut e,
+            NOW,
+            840,
+            Query::PublicTrades {
+                symbol: "BTCUSDT".into(),
+                limit: Some(0),
+            },
+        );
+        refused(
+            &actions,
+            840,
+            ErrorKind::Internal,
+            &safe_cex_engine::request_context::Error::Capacity.to_string(),
+        );
+        retire(&mut e, 1);
+        retire(&mut e, 2);
         let actions = query(
             &mut e,
             NOW,
@@ -536,4 +570,130 @@ fn valid_remote_fallthrough_keeps_native_wire_at_full_context_capacity() {
         assert_eq!(request.body, None);
         no_store_effects(&mut e);
     }
+}
+
+#[test]
+fn child_capacity_refusal_after_accepted_rows_is_strict_and_releases_the_root() {
+    let mut e = engine(private());
+    let orders = || Query::OrderHistory {
+        symbol: None,
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    };
+    let actions = query(&mut e, NOW, 830, orders());
+    let first = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("/order/history") => {
+                Some(request.clone())
+            }
+            _ => None,
+        })
+        .unwrap();
+    let public = query(
+        &mut e,
+        NOW + 1.,
+        831,
+        Query::PublicTrades {
+            symbol: "BTCUSDT".into(),
+            limit: Some(1),
+        },
+    );
+    let public = public
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) => Some(request.clone()),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        NOW + 5.,
+        Event::HttpResponse {
+            request: public.id,
+            response: Response {
+                status: 429,
+                headers: "Retry-After: 1",
+                body: "rate limited",
+            },
+        },
+    );
+    let failed_public = support::managed::drain(&mut e, NOW + 5.);
+    assert_eq!(terminal(&failed_public, 831).len(), 1);
+    e.handle(NOW + 10., Event::HttpResponse { request: first.id, response: Response {
+        status: 200, headers: "",
+        body: r#"[{"orderId":"accepted","symbol":"BTCUSDT","side":"BUY","positionSide":"LONG","status":"FILLED","type":"LIMIT","time":1764400000000,"price":"65000","origQty":"0.01","executedQty":"0.01","avgPrice":"64999.5","updateTime":1764400001234}]"#,
+    }});
+    let parked = support::managed::drain(&mut e, NOW + 10.);
+    assert!(terminal(&parked, 830).is_empty());
+    assert!(
+        !parked
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    let timer = parked
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 1005. => Some(*timer),
+            _ => None,
+        })
+        .expect("next signed page parked behind native pause");
+    for command in 1..=255 {
+        e.handle(
+            NOW + 20.,
+            Event::Command(Command::FetchOrderBook {
+                command,
+                symbol: PROBE.into(),
+                limit: Some(1),
+            }),
+        );
+        assert!(
+            e.drain_actions().next().is_none(),
+            "retained peer {command}"
+        );
+    }
+    e.handle(
+        NOW + 20.,
+        Event::Command(Command::FetchOrderBook {
+            command: 901,
+            symbol: PROBE.into(),
+            limit: Some(1),
+        }),
+    );
+    let control: Vec<_> = e.drain_actions().collect();
+    let capacity = only_terminal(&control, 901).unwrap_err();
+    assert_eq!(capacity.outcome, None);
+    assert_eq!(capacity.kind, Some(ErrorKind::Internal));
+
+    e.handle(NOW + 1005., Event::TimerFired { timer });
+    let refused = support::managed::drain(&mut e, NOW + 1005.);
+    assert_eq!(terminal(&refused, 830), [Err(capacity)]);
+    assert!(
+        refused.iter().all(|action| matches!(
+            action,
+            Action::ClearTimer { .. } | Action::Notice(Notice::CommandFailed { command: 830, .. })
+        )),
+        "no partial rows, marker or next physical work: {refused:?}"
+    );
+
+    e.handle(
+        NOW + 1006.,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec![RETIRE.into()],
+        }),
+    );
+    let retired: Vec<_> = e.drain_actions().collect();
+    assert_eq!(terminal(&retired, 1).len(), 1);
+    let recovered = query(&mut e, NOW + 1007., 830, orders());
+    assert!(terminal(&recovered, 830).is_empty());
+    assert_eq!(
+        recovered
+            .iter()
+            .filter(|action| matches!(action,
+                Action::Http(request) if request.url.contains("/order/history")
+            ))
+            .count(),
+        1,
+        "strict refusal freed its root; peers stay live"
+    );
 }

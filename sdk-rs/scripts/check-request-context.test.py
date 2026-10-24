@@ -92,9 +92,11 @@ class RequestContextBan(unittest.TestCase):
         self.assertEqual(hashlib.sha256(json.dumps(after, sort_keys=True).encode()).hexdigest(),
                          '6318d427aca63f36566df341d8ed3facc9b9f49b68a0d08f4d774567b83df9a9')
         original = ban.git('show', '848924471635eee7a0c61c64407a861c3aea37f3:sdk-rs/' + path)
-        current_source = (ban.ROOT / path).read_text()
+        landed_source = ban.git('show', '77f124089477a6aed502d9b02aa7f08752b7bfa5:sdk-rs/' + path)
         self.assertEqual(dict(ban.fingerprints(original)), before)
-        self.assertEqual(dict(ban.fingerprints(current_source)), after)
+        self.assertEqual(dict(ban.fingerprints(landed_source)), after)
+        live = {path: dict(ban.fingerprints((ban.ROOT / path).read_text()))}
+        self.assertFalse(ban.check(live, live, [('landed', current)]))
         self.assertEqual(set(before) - set(after), {
             '5c28b0ebae1f2a54f344d52c2c422801c8e82381c7fd8ad95d13cd549e88ddec'})
         self.assertEqual(set(after) - set(before), {

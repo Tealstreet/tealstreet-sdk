@@ -1109,12 +1109,6 @@ impl Kind {
         }
     }
 }
-pub(crate) fn auth_scope(task: &Task) -> Option<safe_cex_engine::AccountReadScope> {
-    let Task::Account(r) = task else {
-        return None;
-    };
-    Some(r.kind.auth_scope())
-}
 impl WeexFutures {
     /// One endpoint's rejection holds back its scope siblings' acceptance.
     pub(crate) fn account_auth(
