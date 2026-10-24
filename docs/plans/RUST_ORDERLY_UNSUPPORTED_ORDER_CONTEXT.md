@@ -85,3 +85,27 @@ none of those later source gates is claimed by original RED evidence.
 Only scoped local Cargo with CARGO_BUILD_JOBS=4, one own build at a time.
 Logs stay outside Git. No push/PR/production/merge or broad build is part of
 this plan/RED-only checkpoint.
+
+## Original executed receipt
+
+Plan14f9cbcf83f precedes original test7a0bc0786cc. First compiled execution
+reached the two intended shared-entry assertions plus three fixture-only
+failures: the public-only helper wrongly expected unloaded orders. Native
+startup marks that empty table loaded. Fixture correction8ba8750e93d pins the
+actual loaded flag plus empty orders/positions, without production changes.
+Those three earlier fixture failures are excluded from custody RED evidence.
+
+Corrected original command:
+`cargo test -p safe-cex-venue-orderly --test unsupported_order_context`
+Result:11 executed, **2 assertion RED / 9 GREEN / 0 ignored**. BBO and TickSize
+each fail at the intended typed-kind assertion (Unsupported vs InvalidInput);
+every preceding full-batch/financial-frame/NotSent assertion passed. All native
+finite-clock controls pass, including private ready idle/busy, public-keyless
+precedence, nonfinite tick payloads and a genuine active write finishing with
+its exact large order ID, no delayed rejected batch, then one native successor
+POST with original symbol and caller identity fields.
+Log `/tmp/codex-orderly-unsupported-order-original-corrected.log` stays outside
+Git. Scoped strict Clippy and fmt PASS. Canonical scanner/source manifest agree;
+only README, this plan and the new test differ from actuale932. All runtime,
+prior fixtures, inventories, checker algorithms and 5b files remain byte-exact.
+No new source application, PR, CI, production or READY claim.
