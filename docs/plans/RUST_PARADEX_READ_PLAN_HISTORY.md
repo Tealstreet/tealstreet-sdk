@@ -44,18 +44,22 @@ tests. Preserve all existing history financial/geometry assertions.
    `PlanHistoryRows` supply exact Plan/Slot/Context/Attempt authority, atomic page
    acceptance/Slot settlement and the common prepared terminal. The local stack
    is a reviewed dependency, never an actual landing claim.
-2. The reviewed retained-Preflight/command-Plan Session wait composition must
+2. The complete retained-Preflight/command-Plan Session wait composition must
    actually land (fe7lgm's 9e23/a115 proposal is not an installed capability).
    Capture the original caller receipt in the genuine command callback before
    auth/queueing. Park that same owner without a fresh command, guessed 20s root
    or early physical leg. Resume only the exact Session generation, current
    owner and retained cap. Waiting before activation spends no physical window.
+   Phase-1 #2037 alone does not supply retained Preflight wait or retry. Its
+   a2c54 review also found early ordinary readiness and missing outer flush
+   paths, which must close on a reviewed pin before consumption.
 3. m26ps4's Session-fenced JIT Bearer hook must actually land. JWT remains owned
    by Account and is read at actual prepare and every reprepare/new attempt,
    behind exact target/attempt/Session validation. Do not bake Authorization into
    queued work, manufacture a SignStep/credential or put JWT in engine Identity.
-   A 401 refresh needs a new authorized attempt and current JWT, never reuse of
-   an old packet; the native retry policy must first be audited and declared.
+   Current native private history has no automatic 401 resend. Preserve that
+   strict failure; any future refresh/resend would require a separately reviewed
+   declared attempt and current JWT, never reuse of an old packet.
 
 #2011 alone does not unlock private adoption. Exact wait/JIT signatures,
 credential selection and context issuance need joint Plan/Session/header-owner
@@ -93,7 +97,9 @@ History never publishes balance, orders, positions, subscription books or frames
 The fallback is successful empty DATA, not a refusal or retry. Lookup open and
 history stages use the same owner and completion. Restart clears current cursor,
 staged rows and page identity, while retaining accepted rows and the native seen
-set. No provider/native failure is reclassified as successful empty discovery.
+set. Preserve the native cumulative raw-row counter: an empty later page after
+accepted fills finishes that prefix without entering aggregate fallback. No
+provider/native failure is reclassified as successful empty discovery.
 Unbounded page exhaustion, repeated cursors and malformed rows remain strict;
 finite bounded exhaustion retains its native INCOMPLETE policy through one
 prepared DATA terminal. An incomplete lookup never becomes a definitive miss.
@@ -103,7 +109,10 @@ prepared DATA terminal. An incomplete lookup never becomes a definitive miss.
 Begin a receipt-bound ReadOnly Preflight at genuine entry. Missing/expired
 receipt uses shared rejection without another numeric terminal. Retain it through
 initial Session wait, admit the final Plan only in exact resumed custody, then
-bind `PlanReadCompletion::from_plan` before selecting any Slot. After binding,
+bind `PlanReadCompletion::from_plan` before selecting any Slot. Preserve native
+unknown-market local results before this binding, using genuine Read or retained
+ReadOnly-Preflight completion with no fabricated DATA. Keep credentials and
+validation precedence; unknown-symbol lookup remains nondefinitive. After binding,
 no cloned Plan done/fail or standalone Slot settlement is an escape hatch.
 
 Use `PlanHistoryRows` as the sole accepted-output/terminal owner and native
@@ -161,3 +170,49 @@ Plan and original REDs are the only work in this phase. Production implementatio
 and its Cargo http-plans opt-in wait on all actual prerequisites and renewed
 native/Plan/history source review. Draft PR and lane handoff follow evidence;
 full adoption CI includes family WASM/CPU with unchanged budgets/profiles.
+
+
+## Original evidence checkpoint
+
+Plan `7aa780e0cc2` preceded the new
+`venues/paradex/tests/request_context_private_history.rs` target. The current
+production and all existing tests remain byte-exact to actual `77f12408947`;
+only the reviewed #2011 dependency is stacked underneath this phase.
+
+Each negative case runs independently. The expected original result is 17
+assertion REDs and nine GREEN controls, zero ignored tests:
+
+| Original assertion | Cases | Observed legacy mismatch |
+| --- | --- | --- |
+| Prepare before private dispatch, four families on each network | 8 | Legacy `Action::Http` emitted |
+| Unclaimed DATA cannot finish an empty result | 1 | One numeric success accepted |
+| Full shared Read pool denies private walk before dispatch | 1 | No terminal; private HTTP bypasses pool; 256 held genuine peers plus a canonical refusal control establish saturation |
+| Configured 1234ms caller cap bounds first page | 1 | HTTP timeout is None |
+| Original root equality after accepted DATA is strict | 1 | Accepted prefix succeeds without a marker instead of one Timeout failure |
+| JWT wait expires at original receipt equality | 1 | No terminal |
+| Late JWT cannot release work for the expired root | 1 | One private history HTTP emitted |
+| HTTP 503, native error envelope and malformed stream cannot recover a prefix | 3 | Each emits partial success plus marker instead of one strict failure |
+
+The nine GREEN controls cover exact authenticated native wire and financial
+rows on both networks/all four families; accepted-prefix transport recovery;
+empty-prefix transport failure; finite-limit early DATA; successful empty
+fills discovery and single aggregate page; complete two-stage lookup miss;
+strict lookup transport failure; unknown-market local results; and accepted
+fills followed by an empty page without aggregate fallback. The existing native
+`history` target also passes all 30 tests without changes.
+
+These are compiling native product assertions. No missing method, fake Context,
+private auth injection or fixture panic is counted as a RED. The initial draft
+of the extra accepted-fills/empty-page control incorrectly expected aggregate
+fallback and panicked looking for that route. Source inspection confirmed the
+native cumulative counter, and the corrected GREEN now preserves that behavior;
+that fixture mistake is not counted as product evidence.
+
+The first failing assertion bounds each RED's evidence: later typed metadata,
+no-marker or no-I/O assertions are source-stage gates until the primary mismatch
+is fixed. Native wire positives exercise actual delegated-auth startup and
+headers; they do not prove future JIT provider custody. Legacy transport-prefix
+recovery is a working behavior control, not an engine-released proof witness.
+Physical Timeout, held Prepare/Bind/Claim, generation and exact Session/JWT
+retirement remain postcutover certification gates. No private production or
+inventory adoption is claimed by this checkpoint.
