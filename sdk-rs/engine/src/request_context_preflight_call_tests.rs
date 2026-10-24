@@ -1,3 +1,5 @@
+// Probe pendings are whole Contexts, returned by refused managed requests.
+#[allow(clippy::result_large_err)]
 mod preflight_calls {
     use super::*;
     use crate::request_context::{Preflight, PreflightPolicy, PreflightPurpose, RetryEvidence,
