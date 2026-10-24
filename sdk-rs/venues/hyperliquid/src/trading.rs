@@ -7,6 +7,7 @@ use crate::{
     sign,
 };
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -153,25 +154,39 @@ impl Hyperliquid {
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         if self.spot {
             match &command {
-                Command::SetLeverage {
-                    command, leverage, ..
-                } => {
+                Command::SetLeverage { leverage, .. } => {
                     if *leverage == 1.0 {
-                        cx.done(*command, "[]".into());
+                        let _ = cx.done_local_setting("[]".into(), |_| {});
                     } else {
                         let error = not_sent("Hyperliquid spot supports 1x leverage only");
-                        cx.fail(*command, error.kind(ErrorKind::Unsupported));
+                        let Ok(context) = cx.admit_http_command(Policy {
+                            operation: Operation::Mutation,
+                            credential: None,
+                            timeout_ms: 20_000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        }) else {
+                            return;
+                        };
+                        let _ = cx.fail_context(&context, error.kind(ErrorKind::Unsupported));
                     }
                     return;
                 }
-                Command::SetMarginType {
-                    command, isolated, ..
-                } => {
+                Command::SetMarginType { isolated, .. } => {
                     if !isolated {
-                        cx.done(*command, "[]".into());
+                        let _ = cx.done_local_setting("[]".into(), |_| {});
                     } else {
                         let error = not_sent("Hyperliquid spot supports cross margin only");
-                        cx.fail(*command, error.kind(ErrorKind::Unsupported));
+                        let Ok(context) = cx.admit_http_command(Policy {
+                            operation: Operation::Mutation,
+                            credential: None,
+                            timeout_ms: 20_000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        }) else {
+                            return;
+                        };
+                        let _ = cx.fail_context(&context, error.kind(ErrorKind::Unsupported));
                     }
                     return;
                 }
@@ -179,15 +194,11 @@ impl Hyperliquid {
             }
         }
         // TS: leverage and margin on a merged spot pair are silent no-ops (always 1x cross).
-        if let Command::SetLeverage {
-            command, symbol, ..
-        }
-        | Command::SetMarginType {
-            command, symbol, ..
-        } = &command
+        if let Command::SetLeverage { symbol, .. } | Command::SetMarginType { symbol, .. } =
+            &command
             && self.spot_market(cx, symbol)
         {
-            cx.done(*command, "[]".into());
+            let _ = cx.done_local_setting("[]".into(), |_| {});
             return;
         }
         let mut replacement = None;
@@ -346,20 +357,24 @@ impl Hyperliquid {
                     isolated: Some(isolated),
                 }]),
             ),
-            Command::SetPositionMode {
-                command,
-                hedged,
-                symbol: _,
-            } => {
+            Command::SetPositionMode { hedged, .. } => {
                 if hedged {
-                    cx.fail(
-                        command,
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Mutation,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) else {
+                        return;
+                    };
+                    let _ = cx.fail_context(
+                        &context,
                         not_sent("Hyperliquid supports one-way positions only")
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.store.set_hedged(false);
-                    cx.done(command, "[]".into());
+                    let _ = cx.done_local_setting("[]".into(), |store| store.set_hedged(false));
                 }
                 return;
             }

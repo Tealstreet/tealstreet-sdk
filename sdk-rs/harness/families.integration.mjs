@@ -23,7 +23,7 @@ for (const family of venueFamilies) {
     for (const target of ['web', 'node']) {
       const size = statSync(new URL(`${target}/${family}/safe_cex_wasm_bg.wasm`, pkg)).size;
       // One source of truth for the single-venue budget: wasm-budget.mjs.
-      const error = wasmBudgetError(size, 'venue');
+      const error = wasmBudgetError(size, 'venue', family);
       assert.equal(error, undefined, `${target} ${family}: ${error}`);
     }
     const engine = await import(new URL(`web/${family}/safe_cex_wasm.js`, pkg));

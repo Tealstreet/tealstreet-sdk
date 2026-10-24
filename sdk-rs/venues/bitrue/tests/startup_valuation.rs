@@ -1,6 +1,8 @@
 //! Funded private snapshots must remain usable before public prices arrive.
+mod support;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, TimerId};
-use safe_cex_venue_bitrue::{Bitrue, Options};
+use safe_cex_venue_bitrue::Bitrue;
+use support::Options;
 
 const MARKETS: &str = r#"[{"symbol":"E-BTC-USDT","pricePrecision":1,"multiplier":1,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
 // E-BAD-USDT is skipped as malformed (zero multiplier).
@@ -23,11 +25,11 @@ impl Harness {
     }
     fn with_markets(markets: &str) -> Self {
         let mut h = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
+            engine: support::engine(Options {
                 key: Some("key".into()),
                 secret: Some("secret".into()),
                 ..Options::default()
-            })),
+            }),
             requests: vec![],
             timers: vec![],
             logs: vec![],
@@ -39,7 +41,9 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in
+            safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now).into_iter()
+        {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),

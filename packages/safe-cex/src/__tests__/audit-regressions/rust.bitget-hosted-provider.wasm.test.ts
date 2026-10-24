@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 const stamp = 1_709_209_849_123;
 const seconds = 1_709_209_849;
@@ -21,7 +22,7 @@ afterEach(() => {
 const fixture = (name: Alias, options: Partial<ExchangeOptions> = {}) => {
   setWasmEngineLoader(loadNodeEngine);
   const io = vi.fn(() => { throw new Error('Signing capture must not use network'); });
-  setRustEngineTransport(() => ({ now: () => stamp, request: io, connect: io,
+  setRustEngineTransport(() => ({ prepareHttp: prepareRecordedHttp, now: () => stamp, request: io, connect: io,
     setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) }));
   const store = new DefaultStore();
   const input: ExchangeOptions = { engine: 'rust', key: 'owned-primary-public', secret: 'fixture-primary-material',
@@ -93,6 +94,7 @@ it.each(aliases)('actual WASM %s native private login and signed HTTP dispatch u
   const quote = name === 'bitgetinverse' ? 'USD' : name === 'bitgetusdc' ? 'USDC' : 'USDT';
   const symbol = name === 'bitgetusdc' ? 'BTCPERP' : `BTC${quote}`;
   setRustEngineTransport(() => ({
+    prepareHttp: prepareRecordedHttp,
     now: () => stamp,
     request: async ({ url, headers }) => {
       requests.push({ url, headers });

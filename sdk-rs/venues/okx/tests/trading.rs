@@ -1303,7 +1303,7 @@ fn ready_engine() -> (
         ..Default::default()
     });
     e.start(0.0);
-    let a = prepared(&mut e, 0.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     // Private startup begins with the catalogue, alongside the ticker seed.
     let out = prepared(&mut e, 1.0);
@@ -1911,10 +1911,10 @@ fn unready_engine() -> (safe_cex_engine::Engine<safe_cex_venue_okx::Okx>, Action
         ..Default::default()
     });
     e.start(0.0);
-    let a = prepared(&mut e, 0.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     let mut out = prepared(&mut e, 1.0);
-    let a = out.remove(0);
+    let a = take_http(&mut out);
     reply(&mut e, &a, &envelope(TICKER), 2.0);
     out.extend(prepared(&mut e, 2.0));
     let config = out
