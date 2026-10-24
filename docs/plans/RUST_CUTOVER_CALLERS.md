@@ -7714,3 +7714,18 @@ ApeX now signs only through the provider at dispatch
   until P8.
 - **`sign::request` and `sign::ws_login`** are legacy test oracles taking
   `sign::LegacyCredentials`; the venue never calls them.
+
+## Order-lock capacity refusal
+
+For venues with `guard_order_mutations`, entry holds at most 64 order-lock
+scopes (`RUST_ORDER_LOCK_CAPACITY.md`). A new placement refused only by that
+cap now fails before entry with "Order command capacity reached: 64 order
+commands are in flight; retry after one finishes", `kind: Internal` and
+`outcome: NotSent`, and nothing is sent. Placements take a scope only where
+`guard_pending_placements` is set: AsterDEX, Bitget, Bitrue, BloFin,
+BreakoutProp, OKX and Phemex at this base. Native queues have no such cap, so
+the 65th concurrent placement is a disclosed difference. Conflict refusals
+(including a placement behind an in-flight cancel-all) and amend or cancel
+refusals at the cap are unchanged: "Order amendment or cancellation is already
+in flight" with no outcome.
+
