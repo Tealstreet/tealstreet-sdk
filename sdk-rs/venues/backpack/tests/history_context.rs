@@ -135,8 +135,16 @@ fn expired_data(route: Route, now: f64) {
         "expired history DATA cannot publish final success"
     );
     assert!(
-        !actions.iter().any(|a| matches!(a, Action::Http(_))),
-        "no continuation after root expiry"
+        !actions.iter().any(|a| match a {
+            Action::Http(_) => true,
+            Action::ManagedHttp(action) => matches!(
+                **action,
+                safe_cex_engine::request_context::HttpAction::Prepare { .. }
+                    | safe_cex_engine::request_context::HttpAction::Bind { .. }
+            ),
+            _ => false,
+        }),
+        "no raw or managed continuation after root expiry"
     );
 }
 macro_rules! receipt_cases {
@@ -240,6 +248,18 @@ fn second_page_cannot_finish_beyond_original_expiry() {
     assert!(
         done(&actions).is_empty(),
         "page2 success still requires the original caller root"
+    );
+    assert!(
+        !actions.iter().any(|action| match action {
+            Action::Http(_) => true,
+            Action::ManagedHttp(action) => matches!(
+                **action,
+                safe_cex_engine::request_context::HttpAction::Prepare { .. }
+                    | safe_cex_engine::request_context::HttpAction::Bind { .. }
+            ),
+            _ => false,
+        }),
+        "page2 expiry forbids raw and managed continuation"
     );
 }
 #[test]

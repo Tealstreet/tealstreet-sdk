@@ -114,3 +114,12 @@ Only the final exact-header assertion is RED evidence; the later response
 assertion remains gated until GREEN. No primary, fake ref or keyless signed
 root is introduced. These are managed-adoption source gates, not changes to
 the preserved native public-only behavior.
+
+Hcmq3f bounded plan/native/original-source CLEAR at58a651987f1; no runtime
+clearance or independent execution inferred. Expiry suffixes additionally
+forbid managed Prepare/Bind as well as raw HTTP. The unchanged earlier failed
+success assertion still gates those suffixes on original source. Source patch
+must retain exact selected/private or keyless/public roots, DATA before any
+item/status/diagnostic, released-failure/live-root recovery and page-local
+row/ID/skip discard. One live leg, 50-page retirement, pressure and JS parity
+remain explicit source-stage checks.
