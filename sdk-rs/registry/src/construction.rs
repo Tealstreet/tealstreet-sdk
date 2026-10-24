@@ -135,6 +135,10 @@ pub fn signer_setup_mapping(venue: &str) -> Option<SetupMapping> {
 
 /// The family's declared read-key policy.
 pub fn read_credentials_policy(venue: &str) -> ReadCredentialsPolicy {
+    #[cfg(test)]
+    if let Some(policy) = test_policy::get(venue) {
+        return policy;
+    }
     venue_rule(venue)
         .unwrap_or(&DEFAULT_RULE)
         .bridge
@@ -266,4 +270,31 @@ pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
         public_data_only,
         explicit_private_error,
     })
+}
+
+/// Test-only declaration for one family, since no shipped row declares a policy.
+#[cfg(test)]
+pub(crate) mod test_policy {
+    use super::ReadCredentialsPolicy;
+    use std::cell::Cell;
+    thread_local! {
+        static DECLARED: Cell<Option<(&'static str, ReadCredentialsPolicy)>> = const { Cell::new(None) };
+    }
+    pub(crate) fn get(venue: &str) -> Option<ReadCredentialsPolicy> {
+        DECLARED
+            .get()
+            .filter(|(declared, _)| *declared == venue)
+            .map(|(_, policy)| policy)
+    }
+    /// Declares `policy` for `venue` until the guard drops.
+    pub(crate) fn declare(venue: &'static str, policy: ReadCredentialsPolicy) -> impl Drop {
+        struct Guard;
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                DECLARED.set(None);
+            }
+        }
+        DECLARED.set(Some((venue, policy)));
+        Guard
+    }
 }

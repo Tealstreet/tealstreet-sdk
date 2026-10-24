@@ -176,3 +176,99 @@ fn the_bridge_record_carries_the_policy_only_when_declared() {
         );
     }
 }
+
+#[test]
+fn a_raw_validate_only_key_becomes_its_result_on_every_path() {
+    for (read, valid) in [
+        (
+            r#"{"readCredentials":{"key":"read","secret":"value"}}"#,
+            Some(true),
+        ),
+        (r#"{"readCredentials":{"key":"read"}}"#, Some(false)),
+        ("{}", None),
+    ] {
+        let mut converted = options(read);
+        take_validate_only_read_key(ValidateOnly, &mut converted);
+        assert!(converted.read_credentials.is_none());
+        assert_eq!(converted.read_credentials_valid, valid, "{read}");
+        let mut kept = options(read);
+        take_validate_only_read_key(Install, &mut kept);
+        assert_eq!(kept.read_credentials.is_some(), valid.is_some());
+        assert_eq!(kept.read_credentials_valid, None);
+    }
+    assert!(
+        read_key_options(
+            ValidateOnly,
+            &options(r#"{"readCredentials":{"key":"read","secret":"value"}}"#)
+        )
+        .is_err()
+    );
+}
+
+/// Wiring through the real entry points, with a test-only declaration.
+#[cfg(feature = "weex")]
+mod wiring {
+    use super::*;
+    use construction::test_policy;
+
+    struct Built;
+    impl Visit for Built {
+        type Output = ();
+        fn visit<V: safe_cex_engine::Venue + 'static>(self, _: safe_cex_engine::Engine<V>) {}
+    }
+    fn entropy() -> Option<safe_cex_engine::entropy::Entropy> {
+        Some(safe_cex_engine::test_support::seeded_entropy(17))
+    }
+    fn build(json: &str) -> Result<(), VenueError> {
+        build_with_signer("weex", options(json), entropy(), None, Built)
+    }
+
+    #[test]
+    fn construction_keeps_the_native_refusal_and_refuses_stray_or_doubled_results() {
+        let _declared = test_policy::declare("weex", ValidateOnly);
+        let refused = build(r#"{"publicDataOnly":true,"readCredentialsValid":false}"#).unwrap_err();
+        assert_eq!(refused.message, NATIVE);
+        assert_eq!(
+            (refused.kind, refused.outcome),
+            (Some(ErrorKind::InvalidInput), None)
+        );
+        let raw = build(r#"{"publicDataOnly":true,"readCredentials":{"key":"read"}}"#).unwrap_err();
+        assert_eq!(raw.message, NATIVE, "the raw refusal point is unchanged");
+        assert!(build(r#"{"publicDataOnly":true,"readCredentials":{"key":"read","secret":"value"},"readCredentialsValid":true}"#).is_err());
+        let mut injected_secondary = options(r#"{"publicDataOnly":true}"#);
+        injected_secondary.signing = Some(injected(false, true));
+        assert!(build_with_signer("weex", injected_secondary, entropy(), None, Built).is_err());
+    }
+
+    #[test]
+    fn controls_construct() {
+        build(r#"{"publicDataOnly":true}"#).unwrap();
+        // Undeclared, WEEX's own arm refuses raw read material (dispatch custody).
+        assert!(
+            build(r#"{"publicDataOnly":true,"readCredentials":{"key":"read","secret":"value"}}"#)
+                .is_err()
+        );
+        let _declared = test_policy::declare("weex", ValidateOnly);
+        build(r#"{"publicDataOnly":true,"readCredentialsValid":true}"#).unwrap();
+        // Declared, the raw key is converted to its result before the arm sees it.
+        build(r#"{"publicDataOnly":true,"readCredentials":{"key":"read","secret":"value"}}"#)
+            .unwrap();
+    }
+
+    #[test]
+    fn an_undeclared_family_refuses_a_result_and_keeps_its_read_key() {
+        assert_eq!(construction::read_credentials_policy("weex"), Install);
+        assert!(build(r#"{"publicDataOnly":true,"readCredentialsValid":true}"#).is_err());
+    }
+
+    #[test]
+    fn the_json_setup_refuses_a_read_identity_for_a_validate_only_family() {
+        let setup = r#"{"primary":{"key":"k","secret":"s","passphrase":"p"},"secondary":{"key":"r","secret":"t"}}"#;
+        assert!(local_signer_from_json_for_mode("weex", setup.into(), false).is_ok());
+        let _declared = test_policy::declare("weex", ValidateOnly);
+        let Err(error) = local_signer_from_json_for_mode("weex", setup.into(), false) else {
+            panic!("a read identity was installed for a ValidateOnly family");
+        };
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    }
+}

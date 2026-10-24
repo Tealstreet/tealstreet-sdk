@@ -803,11 +803,31 @@ pub fn build<T: Visit>(
 
 /// The validation result travels only for a ValidateOnly family, never with
 /// the material, and a false result keeps the native construction refusal.
+/// Every path, dispatch-signing or not: an already validated ValidateOnly key
+/// is wiped and replaced by its result before any venue sees options.
+fn take_validate_only_read_key(
+    policy: construction::ReadCredentialsPolicy,
+    options: &mut EngineOptions,
+) {
+    if policy == construction::ReadCredentialsPolicy::ValidateOnly
+        && let Some(mut read) = options.read_credentials.take()
+    {
+        let valid = read.validate().is_ok();
+        read.erase_secrets();
+        options.read_credentials_valid = Some(valid);
+    }
+}
+
 fn read_key_options(
     policy: construction::ReadCredentialsPolicy,
     options: &EngineOptions,
 ) -> Result<(), VenueError> {
     let validate_only = policy == construction::ReadCredentialsPolicy::ValidateOnly;
+    if validate_only && options.read_credentials.is_some() {
+        return Err(invalid(
+            "This venue validates read credentials without installing them",
+        ));
+    }
     match options.read_credentials_valid {
         Some(_) if options.read_credentials.is_some() || !validate_only => {
             return Err(invalid("Unexpected read credential validation result"));
@@ -891,10 +911,15 @@ pub fn build_with_signer<T: Visit>(
         feature = "okx"
     ))]
     local_signing_rules(venue, &options)?;
+    let read_policy = construction::read_credentials_policy(venue);
+    if options.read_credentials.is_some() && options.read_credentials_valid.is_some() {
+        return Err(invalid("Unexpected read credential validation result"));
+    }
     if let Some(read) = &options.read_credentials {
         read.validate().map_err(invalid)?;
     }
-    read_key_options(construction::read_credentials_policy(venue), &options)?;
+    take_validate_only_read_key(read_policy, &mut options);
+    read_key_options(read_policy, &options)?;
     #[cfg(feature = "kraken")]
     if matches!(venue, "kraken" | "krakenspot")
         && !options.public_data_only
