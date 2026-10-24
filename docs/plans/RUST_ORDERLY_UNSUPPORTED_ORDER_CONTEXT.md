@@ -2,9 +2,11 @@
 
 ## Checkpoint and boundaries
 
-Plan and original REDs only on actual `e932d2b45019f9b0ade2ae192462c4f2428afe10`.
+Original plan/RED checkpoint on actual `e932d2b45019f9b0ade2ae192462c4f2428afe10`.
 Branch `feat/rust-orderly-unsupported-order-context`, owner codex-5c57jl.
-No production, inventory or existing-test edits are authorized here.
+Following uufub4's exact d9658b5502c plan/API CLEAR, the user authorized
+production and source-stage controls, then a draft PR and CI in parallel with
+source review. Original test assertions and existing native tests stay exact.
 Hcmq3f released Orderly source/fixture ownership; notify that lane of this pick.
 
 This slice targets ONE numeric failure in trading.rs::trade_command: any
@@ -109,3 +111,26 @@ Git. Scoped strict Clippy and fmt PASS. Canonical scanner/source manifest agree;
 only README, this plan and the new test differ from actuale932. All runtime,
 prior fixtures, inventories, checker algorithms and 5b files remain byte-exact.
 No new source application, PR, CI, production or READY claim.
+
+## Production adoption and source-stage controls
+
+The first unsupported-field branch now calls a private trading.rs helper.
+Full None/Expired receipt rejection precedes keyless Mutation admission; the
+native Unsupported/NotSent error finishes through fail_context. Shared
+admission refusal owns its failure, with no numeric fallback. The native
+field-presence predicate, preceding trade_id extraction, all subsequent guards,
+queue changes, planning, physical signing/writes and reducers remain unchanged.
+Only a8f3774dc23d is removed from the request inventory; no new entries or
+checker changes. #2051 remains a separate unlanded history slice at this point.
+
+New unsupported_order_admission controls allocate256 actual Background Read
+peers from a preceding no-ID callback, then independently test BBO and TickSize
+capacity failure exactly once as Mutation/NotSent. Freeing those peers restores
+the original native error. A retained genuine Mutation root blocks both
+same-ID queries; its own fail_context emits one pre-write NotSent terminal.
+Then540 local rejections at one clock and one reused command ID all preserve
+single-terminal behavior, after which all256 peer credits allocate again.
+No fabricated accepted-write fact is needed. The initial fixture tried to
+complete that unconfirmed Mutation root successfully; the engine correctly
+projected failure, so the control now asserts the owner's real failure path.
+Production was unchanged by that fixture correction.
