@@ -784,3 +784,43 @@ high-precision JSON and late-response assertions. The overseer approved the
 two-occurrence slice only after this review AND actual5b; exact private-path
 selection/provider/DATA hooks remain separately source-gated. No production,
 prune, push or API readiness follows from this bounded plan review.
+
+## Post-5b identity provider composition
+
+Actual combo5b219d4bc6725 is now genuinely integrated at3cdc61f3c68;
+all bans and four inventory ratchets pass. This removes the earlier landing
+prerequisite, not the exact provider/source-review gate. Current Backpack
+registry construction installs only primary Identity and no secondary; native
+FetchAccount can nevertheless use a secondary-only read key. The overseer
+approved a bounded registry/provider/Options extension with m26ps4 registry
+review in addition to hcmq3f native/caller fit review.
+
+Proposed construction carries a real secondary Identity in Options, minted
+by the same LocalSigner setup as the primary, and registers both on Engine.
+A secondary-only non-public account can install that provider without creating
+a primary. Public-only setup still installs nothing. Preserve existing primary
+seed setup refusals; malformed secondary seed failures must retain native
+FetchAccount timing/message/precedence rather than create a new startup
+failure or silently fall back to primary. Raw fields remain only for existing
+unadopted account/socket paths under their already-documented dual custody.
+
+SelectedRead::select uses genuine Slots<Identity>, ReadRole::Read(scope None)
+and the native secondary-only eligibility rule (no primary requirement).
+SelectedRead::command carries Read20s/Never/no pacing; the full command_wait
+None/Expired/Remaining gate precedes local or signed admission. The queued
+ReadRequest is GET/api/v1/account with no body; sign::Http retains the exact
+accountQuery recipe, static broker header and native window. Pending stores
+the issued AdmittedRead/Context; DATA authority is validated before status,
+JSON parsing or diagnostics, and typed preparation/transport failures settle
+only that authority. No numeric fallback, fake KeyRef or keyless signed root.
+Primary availability before startup and malformed-secondary precedence remain
+native facts to pin in controls, not permission to manufacture identities.
+
+Before registry source edits, append original construction controls proving
+actual secondary Identity/provider installation for dual and secondary-only
+setups, including exact provider Present/Ed25519 output. Preserve the existing
+primary-signature, malformed-primary and public/keyless working controls.
+These tests target absent provider composition, not an absent API compile
+failure. Review the exact registry hunk with m26ps4 and the full identity
+composition with hcmq3f before applying runtime changes. No provider/runtime
+change or selection/inventory prune belongs to this plan checkpoint.
