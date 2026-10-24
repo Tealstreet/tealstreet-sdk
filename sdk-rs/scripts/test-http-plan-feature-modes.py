@@ -23,9 +23,14 @@ def modes():
     grouped = {
         (): ['engine baseline'],
         ('order-locks', 'test-support'): ['explicit CI control'],
+        # metadata-freshness OFF control: standalone Bitget with test support.
+        ('order-locks', 'polling-control', 'test-support'): ['metadata freshness OFF control'],
         # dispatch-nonce OFF control keeps ordinary Plan/read signing enabled.
         ('http-plans', 'order-locks', 'test-support'): ['dispatch nonce OFF control'],
     }
+    grouped[('metadata-freshness', 'test-support')] = ['metadata-only CI control']
+    grouped[('http-plans', 'metadata-freshness', 'order-locks', 'test-support')] = [
+        'metadata Plan CI control']
     grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'order-locks', 'test-support')] = ['explicit nonce control']
     for family in families:
         tree = subprocess.check_output([
