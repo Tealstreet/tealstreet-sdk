@@ -69,6 +69,7 @@ impl Venue for Consumer {
             },
         ];
         let policy = PlanPolicy {
+            independent_calls: false,
             operation: if read {
                 Operation::Read
             } else {

@@ -220,6 +220,7 @@ impl Venue for Consumer {
                 &preflight,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Mutation,
                     credential: Some(credential(CredentialSlot::Primary)),
                     pacing: None,
