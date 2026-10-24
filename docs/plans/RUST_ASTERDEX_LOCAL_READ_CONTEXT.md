@@ -188,5 +188,25 @@ Retain all26 original controls byte-exact and re-run Aster/Binance native, stric
 Clippy/fmt/ratchets/bans. The exact5F10O prune remains unchanged. Request bounded
 independent layout reviews and send the immutable candidate to core for an
 apples-to-apples Aster measurement with its existing prototype, without merging
-unreviewed core source here. No profile/budget/test relaxation, local WASM build
-or PR1987 head change is implied by the experiment.
+unreviewed core source here. No profile/budget/test relaxation or local WASM
+build is part of the experiment.
+
+## Integration after the CPU planner fix
+
+The overseer lifted the CI hold after #2082 landed at `bcaaa4acc56` and directed
+each held PR to integrate that landing and take one PR-triggered run. #2004 and
+#2006 are now actual. PR1987 consumes the prepared lean candidate `8fc37922a56`
+and genuinely integrates `bcaaa4acc56` at `01ee2918a3f`. Its two production blobs
+are byte-exact to the lean candidate; all 26 original controls are byte-exact
+to the original implementation. The original size/native control `f6365cb67eb`
+remains in history, not a claim about the current PR head.
+
+Scoped refresh: the 26 original controls and 95 native account/history/public
+controls pass. Full bans and the request, credential and signing ratchets pass.
+Scoped strict library/original-target Clippy and crate fmt checks pass.
+Only incoming-first plus exact own suffix resolutions were needed in the four
+shared docs. The exact own request prune remains 5F/10O; every foreign manifest
+entry and all unowned source are preserved. A fresh bounded lean-source review
+is requested; earlier source clearance at `f6365cb67eb` is not inherited for
+the changed layout. Fresh CI owns current family size/CPU/memory/replay proof,
+including the shared engine changes; no budget or profile change is made.
