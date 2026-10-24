@@ -841,8 +841,9 @@ Items, each a test written before any source change:
 - **P3 (restack review):**
   - a Bearer-bound group member is refused at issue before any effect, with
     its reservation dropped;
-  - a signed bound call waiting on pacing whose Session retires refuses
-    Revoked when signing begins;
+  - a signed bound call waiting on pacing whose Session retires fails
+    Revoked ("Session retired"), NotSent, at the retire itself (the Bearer
+    fence reaches every unreleased bound call), with no provider work;
   - the same call whose bundle goes NotReady now parks (phase 3) instead of
     refusing.
 - **P9.** No parked call carries a group: covered by the issue-time refusal

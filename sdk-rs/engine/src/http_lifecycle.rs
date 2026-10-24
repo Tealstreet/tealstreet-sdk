@@ -197,7 +197,9 @@ impl Managed {
 impl<P> Cx<'_, P> {
     /// Queue semantic, unsigned HTTP work. Private recipes use the signed
     /// entry point; a missing signing recipe must never send an unsigned account
-    /// request. Failure preserves the caller's continuation.
+    /// request. Failure preserves the caller's continuation. With `bearer`, a
+    /// request that would join a Mutation group is refused `Invalid` and its
+    /// Plan fails "Session-bound requests cannot join a Mutation group".
     pub fn request_managed(
         &mut self,
         context: Context,
@@ -245,7 +247,8 @@ impl<P> Cx<'_, P> {
 
     /// Retain an unsigned recipe at creation; canonicalisation waits for route
     /// readiness. Mutations require command authority and a reconciliation codec
-    /// before physical release; the engine owns their write evidence.
+    /// before physical release; the engine owns their write evidence. A
+    /// Session-bound group member is refused as in `request_managed`.
     #[allow(clippy::too_many_arguments)]
     pub fn request_signed_managed(
         &mut self,
@@ -291,7 +294,8 @@ impl<P> Cx<'_, P> {
         let generation = resolved.as_ref().ok().copied().flatten();
         // A group claims its members together, and that claim checks no
         // member's Bearer (R11, deferred to its first consumer), so a
-        // Session-bound request cannot join a Mutation group.
+        // Session-bound request cannot join a Mutation group. Decided first,
+        // so it wins over a later expiry or capacity refusal; all are NotSent.
         #[cfg(feature = "http-mutation-barriers")]
         let refusal = (generation.is_some()
             && self

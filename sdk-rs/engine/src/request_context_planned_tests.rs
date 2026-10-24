@@ -1894,6 +1894,10 @@ mod planned_calls {
             .collect();
         assert_eq!(failed.len(), 1, "exactly one Plan terminal");
         assert_eq!(failed[0].outcome, Some(crate::Outcome::NotSent));
+        // The bound leg's fence is the terminal (the parked unit never reached
+        // its ended hook).
+        assert_eq!(failed[0].message, "Session retired");
+        assert_eq!(failed[0].kind, Some(ErrorKind::InvalidInput));
         assert!(e.venue.wait_ended.is_empty(), "no ended hook after the seal");
         assert_eq!(e.venue.wait_expired.len(), 1, "the parked pending comes back once");
         assert_eq!(e.venue.expired_while_live, [false], "after the Plan terminal");

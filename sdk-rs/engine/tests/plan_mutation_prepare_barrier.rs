@@ -176,6 +176,10 @@ struct Consumer {
     bind_session: bool,
     session: Option<safe_cex_engine::request_context::Session>,
     issue_errors: Vec<safe_cex_engine::request_context::Error>,
+    /// The pending each refused issue returned, and whether the context matched.
+    returned_own_pending: Vec<bool>,
+    /// A following non-group request bound to the same Session.
+    follow_up: Option<Result<safe_cex_engine::RequestId, safe_cex_engine::request_context::Error>>,
 }
 impl Consumer {
     fn issue(&mut self, cx: &mut Cx<'_, Context>) {
@@ -229,9 +233,36 @@ impl Consumer {
                 )),
                 context,
             );
-            if let Err((_, error)) = issued {
+            if let Err((returned, error)) = issued {
                 assert!(self.bind_session, "unexpected issue refusal: {error:?}");
                 self.issue_errors.push(error);
+                self.returned_own_pending
+                    .push(self.contexts.last() == Some(&returned));
+                // The refusal left the Session's index usable: an ordinary
+                // bound read on it issues.
+                let read = cx
+                    .http_context(
+                        safe_cex_engine::request_context::Scope::Background,
+                        safe_cex_engine::request_context::Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 20_000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        },
+                    )
+                    .unwrap();
+                self.follow_up = Some(
+                    cx.request_managed(
+                        read.clone(),
+                        self.session.as_ref(),
+                        Method::Get,
+                        "https://venue.test/after".into(),
+                        None,
+                        read,
+                    )
+                    .map_err(|(_, error)| error),
+                );
                 return;
             }
         }
@@ -1467,10 +1498,23 @@ fn a_session_bound_group_member_is_refused_not_sent_before_any_effect() {
         engine.venue().issue_errors,
         [safe_cex_engine::request_context::Error::Invalid]
     );
+    assert_eq!(
+        engine.venue().returned_own_pending,
+        [true],
+        "its own pending back"
+    );
     assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::ManagedHttp(_) | Action::Sign { .. })),
+        matches!(engine.venue().follow_up, Some(Ok(_))),
+        "a following bound issue on the same Session succeeds"
+    );
+    // Only the follow-up read prepares; nothing of the group member does.
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Sign { .. })
+            || matches!(a, Action::ManagedHttp(managed) if matches!(
+                managed.as_ref(),
+                safe_cex_engine::request_context::HttpAction::Prepare { request, .. }
+                    if request.url.contains("blofin")
+            ))),
         "a refused group member reached the host"
     );
     let error = failed_once(&actions, safe_cex_engine::Outcome::NotSent);
