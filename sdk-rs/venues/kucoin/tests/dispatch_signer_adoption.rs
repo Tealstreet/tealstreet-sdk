@@ -332,3 +332,122 @@ fn native_secondary_identity_broker_mac_binds_the_read_api_key() {
         )
     );
 }
+
+fn write_retry_pair() -> (Harness<Kucoin>, HttpRequest, HttpRequest) {
+    let mut h = fixture(Kucoin::new(broker_options(None)));
+    h.engine
+        .handle_command(
+            NOW,
+            Command::CancelSymbolOrders {
+                command: 93,
+                symbol: String::new(),
+            },
+            Some(120_000),
+        )
+        .unwrap();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+    let first = http(&actions).clone();
+    assert_eq!(first.method, Method::Delete);
+    assert!(first.url.ends_with("/api/v3/orders"));
+    h.engine.handle(
+        NOW + 1.,
+        safe_cex_engine::Event::HttpResponse {
+            request: first.id,
+            response: safe_cex_engine::Response {
+                status: 400,
+                headers: "",
+                body: r#"{"code":"400005","msg":"Invalid KC-API-SIGN"}"#,
+            },
+        },
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW + 1.);
+    let second = http(&actions).clone();
+    assert_eq!(first.method, second.method);
+    assert_eq!(first.url, second.url);
+    assert_eq!(first.body, second.body);
+    (h, first, second)
+}
+fn header<'a>(request: &'a HttpRequest, name: &str) -> &'a str {
+    request
+        .headers
+        .iter()
+        .find(|(key, _)| *key == name)
+        .unwrap()
+        .1
+        .as_str()
+}
+
+#[test]
+fn native_futures_write_400005_recomputes_stamp_and_stamp_bearing_macs() {
+    let (_, first, second) = write_retry_pair();
+    assert_eq!(header(&first, "KC-API-TIMESTAMP"), "1234");
+    assert_eq!(header(&second, "KC-API-TIMESTAMP"), "1235");
+    for name in ["KC-API-SIGN", "KC-API-PARTNER-SIGN"] {
+        assert_ne!(header(&first, name), header(&second, name));
+    }
+    assert_eq!(
+        header(&first, "KC-API-PASSPHRASE"),
+        header(&second, "KC-API-PASSPHRASE")
+    );
+}
+
+#[test]
+fn original_futures_write_retry_prepares_two_atomic_provider_batches() {
+    let (h, _, _) = write_retry_pair();
+    let requests = h.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "each write attempt must prepare a fresh atomic provider batch"
+    );
+    assert_eq!(requests[0].receipt.stamp_ms, Some(1234.));
+    assert_eq!(requests[1].receipt.stamp_ms, Some(1235.));
+    assert!(requests.iter().all(|request| request.operations.len() == 4));
+}
+
+#[test]
+fn native_raw_query_vectors_include_plus_space_and_exact_passphrase_bytes() {
+    let credentials = safe_cex_venue_kucoin::sign::Credentials {
+        key: "vec-key".into(),
+        secret: "vec-secret".into(),
+        passphrase: "vec-pass".into(),
+        broker: Some(safe_cex_venue_kucoin::sign::BrokerOptions {
+            partner: "vec-partner".into(),
+            broker_key: "vec-broker".into(),
+            broker_name: "vec-name".into(),
+            verify: None,
+        }),
+    };
+    let headers = safe_cex_venue_kucoin::sign::headers(
+        &credentials,
+        Method::Get,
+        "/api/v1/fills?symbol=XBTUSDTM&tag=a+b c",
+        "",
+        1712345678901.,
+    );
+    for (index, expected) in [
+        (3, "0ePxUrECY39K3CDMSZwivyQ9XkWaAiArn/m+n9J4XYU="),
+        (4, "T/lfqwDY7hXYb2+FkkGNjx/w8JkbAsSZadi+D6UO4Vg="),
+        (8, "z6fb1jvHciuBj6IGZAYxnHwx0tQ8KqBW9RmlkLVSQ24="),
+    ] {
+        assert_eq!(headers[index].1, expected);
+    }
+}
+
+#[test]
+fn native_debug_never_exposes_primary_read_or_broker_material() {
+    let options = broker_options(None);
+    let debug = format!("{options:?} {:?}", options.broker.as_ref().unwrap());
+    assert!(debug.contains("REDACTED") || debug.contains("redacted"));
+    for material in [
+        "fixture-primary-key",
+        "fixture-primary-secret",
+        "fixture-primary-passphrase",
+        "fixture-read-key",
+        "fixture-read-secret",
+        "fixture-read-passphrase",
+        "fixture-broker-secret",
+    ] {
+        assert!(!debug.contains(material));
+    }
+}

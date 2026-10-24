@@ -206,3 +206,22 @@ fn existing_role_ref_cannot_cross_into_hmac_or_presentation() {
         Err(SignError::InvalidRequest)
     );
 }
+
+#[test]
+fn new_contract_broker_alias_debug_contains_only_opaque_refs() {
+    let (_, ids) = install(Some("broker-secret"), true);
+    let debug = format!("{ids:?}");
+    for material in [
+        "api-key",
+        "api-secret",
+        "read-key",
+        "read-secret",
+        "broker-secret",
+    ] {
+        assert!(!debug.contains(material));
+    }
+    assert_eq!(
+        ids.primary.as_ref().unwrap().extra.get(&role()),
+        ids.secondary.as_ref().unwrap().extra.get(&role())
+    );
+}
