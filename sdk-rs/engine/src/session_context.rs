@@ -2,9 +2,10 @@
 //! Sessions are engine-issued owners beside commands. They join no command
 //! journal, change no orders and hold no key or token value.
 use super::super::{Action, Engine, TimerId, Venue};
-use super::{ContextRegistry, Cx, RequestId};
+use super::{ContextRegistry, Cx, RequestId, Scope};
 use crate::request_context::{
-    Context, Error, Operation, Owner, Policy, Session, SessionPolicy, Waiter, WriteResult,
+    Context, Egress, Error, Operation, Owner, Policy, Session, SessionEgress, SessionPolicy,
+    Waiter, WriteResult,
 };
 use crate::{ErrorKind, Outcome, VenueError};
 use std::collections::HashMap;
@@ -42,6 +43,10 @@ impl Sessions {
         {
             return Err(Error::Invalid);
         }
+        // Signer iff credential: a signed session needs no unsigned egress.
+        if policy.private_egress.is_some() && policy.credential.is_some() {
+            return Err(Error::Invalid);
+        }
         if self.live.len() >= SESSIONS {
             return Err(Error::Capacity);
         }
@@ -61,6 +66,11 @@ impl Sessions {
 
     pub(super) fn live(&self, generation: u64) -> bool {
         self.live.contains_key(&generation)
+    }
+
+    pub(super) fn egress(&self, generation: u64) -> Option<Egress> {
+        self.live.get(&generation)?.policy.private_egress?;
+        Some(Egress::Session(SessionEgress::new(generation)))
     }
 
     pub(super) fn retire(&mut self, generation: u64) -> bool {
@@ -252,6 +262,13 @@ impl<P> Waits<P> {
         self.entries.len()
     }
 
+    pub(in crate::engine) fn parked_units(&self) -> usize {
+        self.entries
+            .iter()
+            .filter(|wait| wait.unit.plan().is_some())
+            .count()
+    }
+
     pub(in crate::engine) fn reserve_ended(&mut self) -> Result<(), Error> {
         let parked = self
             .entries
@@ -349,9 +366,21 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    /// Session lifetimes belong to session, socket and timer callbacks. A
+    /// retained Preflight's or a Plan's readiness scope may not mint, retire
+    /// or drain them.
+    pub(super) fn session_scope(&self) -> Result<(), Error> {
+        #[cfg(feature = "http-plans")]
+        if self.io.http_preflight_ready.is_some() || self.io.http_plan_ready.is_some() {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
     /// Issue a session owner. It reserves no HTTP, timer or socket and has no
     /// deadline; each operation captures its own bound in `session_context`.
     pub fn open_session(&mut self, policy: SessionPolicy) -> Result<Session, Error> {
+        self.session_scope()?;
         let generation = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         self.io.request_contexts.sessions.open(generation, policy)?;
         Ok(Session::new(&self.io.request_contexts.issuer, generation))
@@ -363,11 +392,32 @@ impl<P> Cx<'_, P> {
     /// Record a write's codec fact before `finish_http_context`: finishing
     /// first discards the attempt, and its outcome stays unknown.
     pub fn session_context(&mut self, session: &Session, policy: Policy) -> Result<Context, Error> {
+        self.session_scope()?;
         let generation = self.io.request_contexts.validate_session(session)?;
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         self.io
             .request_contexts
             .issue_session(identity, generation, policy, self.now, None)
+    }
+
+    /// Work owned by a command or the background that carries this session's
+    /// login or token: it rides the session's private egress, and retirement
+    /// fences its sends. Routing only: the scope still decides write authority.
+    pub fn session_scoped_context(
+        &mut self,
+        session: &Session,
+        scope: Scope,
+        policy: Policy,
+    ) -> Result<Context, Error> {
+        self.session_scope()?;
+        let generation = self.io.request_contexts.validate_session(session)?;
+        let egress = self
+            .io
+            .request_contexts
+            .sessions
+            .egress(generation)
+            .ok_or(Error::Invalid)?;
+        self.make_http_context(scope, policy, None, Some(egress))
     }
 
     /// Discard the session's work and revoke it, with no venue callback in
@@ -379,6 +429,7 @@ impl<P> Cx<'_, P> {
         &mut self,
         session: &Session,
     ) -> Result<Vec<(Context, P, VenueError)>, Error> {
+        self.session_scope()?;
         let generation = self.io.request_contexts.validate_session(session)?;
         let waiters = self.drain_waits(generation, VenueError::new("Session retired"));
         self.io.retire_http_owner(session.owner());
@@ -399,6 +450,7 @@ impl<P> Cx<'_, P> {
         pending: P,
     ) -> Result<(), (P, Error)> {
         let checked = (|| {
+            self.session_scope()?;
             let generation = self.io.request_contexts.validate_session(session)?;
             self.io.request_contexts.validate(owner, self.now)?;
             // An owner waiting on its own session could never become ready.
@@ -456,6 +508,9 @@ impl<P> Cx<'_, P> {
     /// their continuation is never stranded. A foreign handle drains nothing.
     #[must_use = "returned waiters must be failed or re-dispatched"]
     pub fn session_ready(&mut self, session: &Session) -> Vec<Waiter<P>> {
+        if self.session_scope().is_err() {
+            return vec![];
+        }
         let Ok(generation) = self.io.request_contexts.validate_session(session) else {
             return vec![];
         };
@@ -515,6 +570,9 @@ impl<P> Cx<'_, P> {
         session: &Session,
         error: VenueError,
     ) -> Vec<(Context, P, VenueError)> {
+        if self.session_scope().is_err() {
+            return vec![];
+        }
         match self.io.request_contexts.validate_session(session) {
             Ok(generation) => self.drain_waits(generation, error),
             Err(_) => vec![],
@@ -602,6 +660,7 @@ impl<V: Venue> Engine<V> {
                 || self.io.http_delivery.is_some()
                 || self.io.http_plan_ready.is_some()
                 || self.io.http_plan_expiring.is_some()
+                || self.io.http_preflight_ready.is_some()
                 || !self.io.request_contexts.plan_scope_clear()
             {
                 return;

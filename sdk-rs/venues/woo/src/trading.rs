@@ -1422,6 +1422,7 @@ impl Woo {
                             }),
                     }
                     if !matches!(accepted, Accepted::Leverage { .. } | Accepted::Mode { .. }) {
+                        cx.store.invalidate_order_snapshots();
                         self.account_refresh(cx);
                     }
                 }

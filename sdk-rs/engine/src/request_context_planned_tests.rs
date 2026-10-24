@@ -1,3 +1,5 @@
+// Probe pendings are whole Contexts, returned by refused managed requests.
+#[allow(clippy::result_large_err)]
 mod planned_calls {
     use super::*;
     use crate::request_context::{
@@ -8,6 +10,7 @@ mod planned_calls {
     #[derive(Default)]
     struct Plans {
         plan: Option<Plan>,
+        preflight: Option<crate::request_context::Preflight>,
         slot: Option<Slot>,
         long: bool,
         write: bool,
@@ -47,6 +50,7 @@ mod planned_calls {
         /// Park the second parallel Slot on this Session too.
         park_second: Option<crate::request_context::Session>,
         retire_in_ended: Option<crate::request_context::Session>,
+        retire_in_expired: Option<crate::request_context::Session>,
         fail_in_ended: bool,
         /// Park a failed call's retry on this Session in its failure callback.
         park_retry_on: Option<crate::request_context::Session>,
@@ -165,6 +169,7 @@ mod planned_calls {
                     },
                 )
                 .unwrap();
+            self.preflight = Some(owner.clone());
             let timeout = if self.timeout == 0 {
                 20_000
             } else {
@@ -466,6 +471,9 @@ mod planned_calls {
                 .is_some_and(|plan| cx.io.request_contexts.plan_registered(plan));
             self.expired_while_live.push(live);
             self.wait_expired.push((pending, error));
+            if let Some(session) = self.retire_in_expired.take() {
+                assert!(cx.retire_session(&session).unwrap().is_empty());
+            }
         }
         fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {
             self.retired += 1
@@ -1521,6 +1529,7 @@ mod planned_calls {
             .open_session(crate::request_context::SessionPolicy {
                 credential: None,
                 repeat_safe: true,
+                private_egress: None,
             })
             .unwrap();
         e.drain_actions().for_each(drop);
@@ -1552,18 +1561,12 @@ mod planned_calls {
     /// window cannot be queued after it, so the wait must precede issue.
     #[test]
     fn a_plan_leg_issued_before_a_long_wait_has_expired_when_login_returns() {
-        let (mut e, plan, _) = plan_wait_fixture(true);
+        let (e, plan, _) = plan_wait_fixture(true);
         let leg = e.venue.unqueued.clone().unwrap();
         let after_login = leg.deadline() + 1.;
         assert!(after_login < plan.deadline(), "the Plan root outlives the leg window");
-        let queued = Cx { now: after_login, store: &mut e.store, io: &mut e.io }.request_managed(
-            leg.clone(),
-            Method::Get,
-            "https://venue.test/read".into(),
-            None,
-            leg,
-        );
-        assert_eq!(queued.map(|_| ()).map_err(|(_, error)| error), Err(Error::TimedOut));
+        // The issued leg's own logical window has lapsed; no custody can revive it.
+        assert_eq!(e.io.request_contexts.validate(&leg, after_login), Err(Error::TimedOut));
     }
     fn wait_token_policy() -> Policy {
         Policy {
@@ -1579,6 +1582,7 @@ mod planned_calls {
             .open_session(crate::request_context::SessionPolicy {
                 credential: None,
                 repeat_safe: true,
+                private_egress: None,
             })
             .unwrap()
     }
@@ -1672,6 +1676,22 @@ mod planned_calls {
         assert_eq!(leg.owner(), plan.owner());
     }
 
+    /// #1896 readiness owns the callback like Plan readiness does: the flush
+    /// holds an ended wait until that custody exits, then delivers it once.
+    #[test]
+    fn an_ended_wait_waits_out_preflight_readiness_custody() {
+        let (mut e, _, old) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&old).unwrap();
+        e.io.http_preflight_ready = e.venue.preflight.clone();
+        assert!(e.io.http_preflight_ready.is_some());
+        e.flush_plan_session_waits(2.);
+        assert!(e.venue.wait_ended.is_empty() && e.venue.wait_expired.is_empty());
+        e.io.http_preflight_ready = None;
+        e.flush_plan_session_waits(3.);
+        assert_eq!(e.venue.wait_ended.len(), 1);
+    }
+
     /// N6: parking needs Plan custody, an unparked Slot and a live Session, and
     /// every refusal spends nothing.
     #[test]
@@ -1681,7 +1701,7 @@ mod planned_calls {
         let token = e.venue.park_token.clone().unwrap();
         let slot = e.venue.slot.clone().unwrap();
         let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
-        let retired = cx.open_session(crate::request_context::SessionPolicy { credential: None, repeat_safe: true }).unwrap();
+        let retired = cx.open_session(crate::request_context::SessionPolicy { credential: None, repeat_safe: true, private_egress: None }).unwrap();
         let _ = cx.retire_session(&retired).unwrap();
         let before = (cx.io.next_id, cx.io.timers.len());
         let again = cx.plan_session_wait(&plan, &slot, None, &session, token.clone());
@@ -1731,27 +1751,26 @@ mod planned_calls {
         assert_eq!(e.venue.wait_ended.len(), 2);
     }
 
-    /// A callback inside the flush that ends another parked wait is served in
-    /// the same flush, not stranded until an unrelated event.
+    /// A no-custody callback inside the flush that retires another Session is
+    /// served in the same flush, not stranded until an unrelated event.
     #[test]
     fn a_wait_ended_inside_the_flush_is_delivered_in_the_same_flush() {
         let mut e = crate::test_support::seeded_engine(Plans { idle: true, parallel: true, ..Default::default() });
         e.start(0.);
         let first = open(&mut e, 0.);
         let second = open(&mut e, 0.);
-        e.venue.park_on = Some(first.clone());
+        e.venue.park_on = Some(first);
         e.venue.park_second = Some(second.clone());
-        e.venue.retire_in_ended = Some(second);
+        e.venue.retire_in_expired = Some(second);
         start(&mut e, 0.);
         assert_eq!(e.venue.park_result, Some(Ok(())));
         e.drain_actions().for_each(drop);
-        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&first).unwrap();
+        let plan = e.venue.plan.clone().unwrap();
+        Cx { now: 1., store: &mut e.store, io: &mut e.io }.fail_plan(&plan, "venue gave up").unwrap();
         flush(&mut e, 2.);
-        assert_eq!(e.venue.wait_ended.len(), 2, "both parked Slots ended in one flush");
+        assert_eq!(e.venue.wait_expired.len(), 2, "both pendings returned in one flush");
+        assert!(e.venue.wait_ended.is_empty());
     }
-
-    /// A Plan sealed while its Slot is parked is never resumed by a later
-    /// session_ready; the sealed sweep returns the pending once.
     #[test]
     fn a_sealed_plan_is_not_resumed_by_a_later_session_ready() {
         let (mut e, plan, session) = parked(0.);
@@ -1886,5 +1905,24 @@ mod planned_calls {
         };
         queue(&mut cx, leg, false).unwrap();
         assert_eq!(prepares(&e.drain_actions().collect::<Vec<_>>()), 1);
+    }
+
+    /// A no-delivery resume is issue custody for its own event only: a leg
+    /// resumed but not queued is refused in the next engine event.
+    #[test]
+    fn a_resumed_but_unqueued_leg_is_refused_in_the_next_event() {
+        let (mut e, _, session) = parked(0.);
+        e.drain_actions().for_each(drop);
+        assert!(e.io.session_resumed.capacity() >= 1, "reserved at park");
+        let mut cx = Cx { now: 30_000., store: &mut e.store, io: &mut e.io };
+        let Some(crate::request_context::Waiter::Ready(leg, _)) = cx.session_ready(&session).into_iter().next() else {
+            panic!("resumes");
+        };
+        e.handle(30_001., Event::TimerFired { timer: TimerId(u64::MAX - 1) });
+        e.drain_actions().for_each(drop);
+        let mut cx = Cx { now: 30_002., store: &mut e.store, io: &mut e.io };
+        let refused = queue(&mut cx, leg, false);
+        assert_eq!(refused.map(|_| ()).map_err(|(_, error)| error), Err(Error::Revoked));
+        assert_eq!(prepares(&e.drain_actions().collect::<Vec<_>>()), 0);
     }
 }

@@ -769,6 +769,7 @@ fn a_preflight_read_cannot_park_on_a_session_today() {
             .open_session(crate::request_context::SessionPolicy {
                 credential: None,
                 repeat_safe: true,
+                private_egress: None,
             })
             .unwrap();
         let read = cx
