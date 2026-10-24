@@ -548,6 +548,7 @@ pub(crate) fn wipe(action: &mut Action) {
     match action {
         Action::Http(http) => wipe_http(http),
         // A Bind may carry the Session Bearer, the engine's one token copy.
+        #[cfg(feature = "session-bearer")]
         Action::ManagedHttp(managed) => {
             if let crate::request_context::HttpAction::Bind { request, .. } = &mut **managed {
                 wipe_http(request);

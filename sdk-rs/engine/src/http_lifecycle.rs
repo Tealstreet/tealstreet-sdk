@@ -222,6 +222,7 @@ fn attach_session_headers(
     Ok(())
 }
 
+#[cfg(feature = "session-bearer")]
 fn is_authorization(name: &str) -> bool {
     name.eq_ignore_ascii_case("Authorization")
 }
@@ -495,10 +496,12 @@ impl<P> Cx<'_, P> {
             .map_or(public_headers, |step| step.unsigned_http_headers());
         // On a bound request the engine alone sets `Authorization`, and it is
         // never routed to explicit public egress. Unbound requests are unchanged.
-        if crate::signing_headers::validate_unsigned(headers).is_err()
-            || (bearer.is_some()
-                && (headers.iter().any(|(name, _)| is_authorization(name))
-                    || context.route().is_some()))
+        if crate::signing_headers::validate_unsigned(headers).is_err() {
+            return Err((pending, Error::Invalid));
+        }
+        #[cfg(feature = "session-bearer")]
+        if bearer.is_some()
+            && (headers.iter().any(|(name, _)| is_authorization(name)) || context.route().is_some())
         {
             return Err((pending, Error::Invalid));
         }
@@ -599,10 +602,13 @@ impl<P> Cx<'_, P> {
         if let Some(admission) = admission {
             self.io.request_contexts.commit_owned_admission(admission);
         }
+        #[cfg(feature = "session-bearer")]
         let intent = match (bearer, context.routing_intent()) {
             (Some(_), RoutingIntent::Public) => RoutingIntent::Primary,
             (_, intent) => intent,
         };
+        #[cfg(not(feature = "session-bearer"))]
+        let intent = context.routing_intent();
         let lifecycle = Lifecycle::with_deadline(
             context,
             Attempt {

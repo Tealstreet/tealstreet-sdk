@@ -1453,18 +1453,25 @@ mod managed_sockets;
 /// dispatch queue. Its actions may hold a Bearer or signed packet, so the
 /// engine wipes what it still holds on drop, unwinding included. A drained
 /// action is the host's to dispose of, as signer headers are.
+#[cfg(feature = "session-bearer")]
 struct Wiping<C>(C)
 where
     for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>;
 
+#[cfg(feature = "session-bearer")]
 type Actions = Wiping<Vec<Action>>;
+/// Without `session-bearer` no queued packet carries a Session Bearer.
+#[cfg(not(feature = "session-bearer"))]
+type Actions = Vec<Action>;
 
+#[cfg(feature = "session-bearer")]
 impl Default for Actions {
     fn default() -> Self {
         Self(Vec::new())
     }
 }
 
+#[cfg(feature = "session-bearer")]
 impl<C> std::ops::Deref for Wiping<C>
 where
     for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>,
@@ -1475,6 +1482,7 @@ where
     }
 }
 
+#[cfg(feature = "session-bearer")]
 impl<C> std::ops::DerefMut for Wiping<C>
 where
     for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>,
@@ -1484,6 +1492,7 @@ where
     }
 }
 
+#[cfg(feature = "session-bearer")]
 impl<C> Drop for Wiping<C>
 where
     for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>,
@@ -4810,9 +4819,12 @@ impl<V: Venue> Engine<V> {
             self.sign_failed(now, outbound, error);
             self.assert_live();
         }
+        #[cfg(feature = "session-bearer")]
         let mut queued = Wiping(std::collections::VecDeque::from(std::mem::take(
             &mut *self.io.actions,
         )));
+        #[cfg(not(feature = "session-bearer"))]
+        let mut queued = std::collections::VecDeque::from(std::mem::take(&mut self.io.actions));
         loop {
             self.assert_live();
             while let Some(action) = queued.pop_front() {
