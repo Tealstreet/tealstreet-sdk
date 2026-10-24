@@ -676,7 +676,18 @@ impl WasmEngine {
         }
         .validate()
         .map_err(hosted_error)?;
-        Ok(serde_json::json!({"stampMs": stamp_ms, "revision": revision.to_string()}).to_string())
+        // Fields in json!'s sorted-key order keep the output byte-identical.
+        #[derive(serde::Serialize)]
+        struct Clock {
+            revision: String,
+            #[serde(rename = "stampMs")]
+            stamp_ms: f64,
+        }
+        serde_json::to_string(&Clock {
+            revision: revision.to_string(),
+            stamp_ms,
+        })
+        .map_err(|_| hosted_error(SignError::InvalidRequest))
     }
 
     #[wasm_bindgen(js_name = prepareHostedSigning)]
@@ -723,7 +734,23 @@ impl WasmEngine {
                 timeout,
             )
             .map_err(hosted_error)?;
-        Ok(serde_json::json!({"id": prepared.id.get(), "work": prepared.work, "deadlineMs": prepared.deadline_ms}).to_string())
+        // Fields in json!'s sorted-key order; `work` stays a sorted-key Value
+        // so the bytes handed to the signer are unchanged.
+        #[derive(serde::Serialize)]
+        struct Prepared {
+            #[serde(rename = "deadlineMs")]
+            deadline_ms: f64,
+            id: u32,
+            work: serde_json::Value,
+        }
+        let work = serde_json::to_value(&prepared.work)
+            .map_err(|_| hosted_error(SignError::InvalidRequest))?;
+        serde_json::to_string(&Prepared {
+            deadline_ms: prepared.deadline_ms,
+            id: prepared.id.get(),
+            work,
+        })
+        .map_err(|_| hosted_error(SignError::InvalidRequest))
     }
 
     /// Executes only this account's already prepared work, never caller refs.
