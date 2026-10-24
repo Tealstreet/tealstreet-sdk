@@ -724,6 +724,33 @@ fn stream_interval(interval: Interval) -> Option<&'static str> {
     })
 }
 
+fn refuse_candle_query(cx: &mut Cx<'_, Pending>, error: impl Into<safe_cex_engine::VenueError>) {
+    use safe_cex_engine::CommandWait;
+    use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+
+    let remaining = match cx.command_wait() {
+        Some(CommandWait::Remaining(remaining)) => remaining,
+        Some(CommandWait::Expired) => {
+            let _ = cx.reject_expired_command(Operation::Read);
+            return;
+        }
+        None => {
+            let _ = cx.reject_unstamped_command(Operation::Read);
+            return;
+        }
+    };
+    let Ok(context) = cx.admit_http_command(Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: remaining.min(20_000),
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }) else {
+        return;
+    };
+    let _ = cx.fail_context(&context, error);
+}
+
 fn interval_ms(interval: Interval) -> Option<f64> {
     stream_interval(interval).map(|_| interval.ms())
 }
@@ -1434,11 +1461,11 @@ impl Venue for Bingx {
                 to_ms,
             } => {
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.fail(command, format!("unknown market {symbol}"));
+                    refuse_candle_query(cx, format!("unknown market {symbol}"));
                     return;
                 };
                 let Some(step) = interval_ms(interval) else {
-                    cx.fail(command, interval.unsupported("BingX"));
+                    refuse_candle_query(cx, interval.unsupported("BingX"));
                     return;
                 };
                 let end = to_ms.unwrap_or(cx.now);
@@ -1448,7 +1475,7 @@ impl Venue for Bingx {
                     end - step * f64::from(limit.unwrap_or(500).min(1500))
                 };
                 if !start.is_finite() || !end.is_finite() || start > end {
-                    cx.fail(command, "invalid candle time range");
+                    refuse_candle_query(cx, "invalid candle time range");
                     return;
                 }
                 let params = Params::new()

@@ -28,7 +28,7 @@ const identityMetadata = (input: unknown): LocalIdentityMetadata | undefined => 
   const { stableId, secretEncoding, trimCredential } = value;
   if (stableId !== undefined && (typeof stableId !== 'string' || !stableId.trim() || new TextEncoder().encode(stableId).length > 256 || /[\u0000-\u001f\u007f-\u009f]/u.test(stableId)))
     return invalidMetadata();
-  if (secretEncoding !== undefined && (typeof secretEncoding !== 'string' || !['utf8', 'base64', 'hex', 'pem', 'base64Text'].includes(secretEncoding)))
+  if (secretEncoding !== undefined && (typeof secretEncoding !== 'string' || !['utf8', 'base64', 'hex', 'pem', 'base64Text', 'base58'].includes(secretEncoding)))
     return invalidMetadata();
   if (trimCredential !== undefined && typeof trimCredential !== 'boolean') return invalidMetadata();
   return { stableId, secretEncoding, trimCredential } as LocalIdentityMetadata;
