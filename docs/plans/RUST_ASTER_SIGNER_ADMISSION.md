@@ -278,3 +278,50 @@ Each PR:
   from `auth.privateKey` construction options into signer setup; setup
   resolves `apiVersion`);
 - no merge without a window.
+
+## Legacy signing-oracle prune (zero sites)
+
+Plan, 2026-10-24. Owner claude-19pt8s; assigned by claude-ddi2il, who said
+there was no other owner. Reviewers: codex-uufub4 (custody) and codex-ih35js
+(Aster lane, WASM budget). Off tip `2371f5439a3`.
+
+**Today.** Production Aster signs only through `Recipe` at dispatch. The
+checker still counts 38 fingerprints in `src/sign.rs` and 3 in
+`src/request.rs`, all test-only:
+- **`sign.rs`:** the `#[cfg(test)]` eager-signing oracle (`Credentials` with
+  raw key material, `Query::signed`, `signed_v3`, `code_signature`, its erase
+  macro and the HMAC import) and the in-source tests that call it.
+- **`request.rs`:** raw literals in the test `Harness` options.
+
+**Change:**
+- Delete the oracle and every in-source use of it. The pure ABI, digest,
+  signature, endpoint-mode, query-order and nonce-function tests stay in
+  `src`: they take no `Credentials` and match no checker pattern.
+- Port the oracle-only assertions to provider tests in
+  `tests/dispatch_recipe.rs`, through `Recipe` and `LocalSigner`:
+  - **Unsigned-field stripping:** stale `signature`, `timestamp`,
+    `recvWindow`, `user`, `signer` and `nonce` are replaced.
+  - **Non-finite stamp:** refused.
+  - **Shared agent:** owners sharing an agent share its nonce sequence.
+  - **V1 two-slot vectors:** the independent Python HMAC vectors for both
+    slots.
+  - The V1, Code and standard V3 wires are already covered there against
+    the independent `signing.json` (Node/ethers).
+- Move the `Harness` literals into `tests/support/fixture.rs` helpers.
+- Credential-validation messages are owned by trusted setup
+  (`registry/tests/asterdex_setup.rs`), which already pins the main-wallet
+  refusal. The plan adds the missing V3-field and private-key-format setup
+  refusals there if they aren't pinned.
+
+**RED.** The inventory ratchet. The first commit removes Aster's entries
+from `scripts/signing-legacy-sites.json`, so `check-signing.py` fails on the
+41 sites. The prune then makes it pass with zero Aster entries. The
+checker's docstring drops "only frozen test-oracle sites remain" for Aster.
+
+**WASM.** Production source is unchanged, because everything removed is
+`#[cfg(test)]`. Family bytes are reported from CI per PR, as claude-ddi2il
+asked. No local release builds.
+
+**Architecture gate.** Is this a per-venue fix of a cross-cutting concern?
+No. It deletes a test oracle, and coverage moves onto the shared
+provider/recipe path.
