@@ -120,3 +120,36 @@ production waits for those reviews and the original-control review. Overseer
 approved REDs, review, production and parallel CI. Local cargo is only this
 crate/target with CARGO_BUILD_JOBS=4, one build at a time; no workspace/all-feature
 sweep. Full CI owns WASM, replay and workspace proof. Do not touch frozen2033.
+
+## Original execution checkpoint
+
+Native/geometry fit is CLEAR from codex-hcmq3f at4d8b97cd79a; fe7lgm root/API
+fit is CLEAR with the same new-policy and shared-metadata declarations.
+On unchanged10d production, the new target compiles and executes25 tests:
+**14 intended assertion REDs, 11 working GREENs, zero ignored**.
+
+The RED first assertions expose raw HTTP before preparation (command, background,
+second page, route-refusal and held-permit controls), capacity bypass for command
+and poll, duplicate command reissue, invalid-clock HTTP, late success beyond the
+original caller wait (including a staged first page), expired background candle
+publication, and absent caller/physical deadline timers. The deadline assertions
+are NEW-CONTRACT custody/policy specifications; native raw packets declare no
+request_timeout, so they are not mislabeled as an existing20s native policy bug.
+
+Preparation/Bind/Claim, typed pre-release localNotSent, late-result silence,
+capacity recovery and peer-preservation suffixes remain gated by their first RED.
+No executed proof of those future suffixes is claimed. The11 working controls
+pin unsigned wire and numeric conversion, default-window clamping, explicit-range
+limit behavior, native sort/duplicate winner, multi-page continuation, strict
+no-progress/later-page failure, ten-page bound, empty success, native five-second
+polling/current generation, local validation precedence and zero-wait entry.
+Shared missing-receipt behavior remains core coverage; no synthetic native
+unstamped-entry seam or fabricated Context was introduced for this checkpoint.
+
+Initial compilation used floating waits instead of the API's u32 and is excluded
+from the RED receipt. A fixture initially chose a socket supervisor's five-second
+wake instead of the first native poll timer; its corrected working control now
+passes. Those setup failures are not adoption defect evidence. Source/maps/Cargo
+and existing tests across219 Kraken/engine/crypto/registry/checker paths remain
+byte-exact10d. Scoped target strict Clippy and rustfmt/diff checks pass with
+CARGO_BUILD_JOBS=4 and sequential builds. No full-workspace/all-feature build.
