@@ -170,4 +170,5 @@ fixture failures because the recorded transport lacked prepareHttp. Reusing the
 shared recorded preparation helper changes no assertion or production code.
 Against that CI artifact, the unchanged fixture reproduces two assertion failures
 and fourteen passes; the corrected fixture passes all sixteen tests. Scoped
-ESLint passes with its existing test-file warning. Full fresh CI remains required.
+ESLint with --no-ignore passes; the initial default invocation skipped this file.
+Independent source review clears the two-line fixture correction. Fresh CI remains required.
