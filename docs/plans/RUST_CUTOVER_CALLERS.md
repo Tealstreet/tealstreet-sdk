@@ -7207,6 +7207,97 @@ claim:**
 This slice claims transport and session ownership only.
 [Plan](RUST_BACKGROUND_SESSION.md).
 
+### Kraken Futures managed candle pages
+
+FetchCandles keeps one genuine caller-wait Read root across its native ten-page
+walk. Every eligible page uses a fresh unsigned Read/Never physical child, capped
+at that exact original receipt deadline. Subscription pages use independent
+Background Reads; generation checks still guard both publication and in-flight
+cleanup, with native five-second polling and no logical20s poll-walk cap.
+
+The explicit20s admission-to-expiry page bound is NEW: the old chart packet had
+no request_timeout declaration. It includes route preparation and unclaimed Bind
+waiting, as well as transport. Root expiry is strict engine-owned Timeout with
+no prefix, rows or continuation. Local preparation refusal/timeout preserves
+shared typed fields including localNotSent; released Read failure retains the
+shared projection. No financial effect or new retry is inferred. Existing
+unsigned wire, codec, sorting/duplicate winner, paging budget and validation
+messages remain native. SDK host/outer wait contracts are unchanged.
+
+A walk needs two registry Context slots: root and current physical page. Initial
+root admission reserves only its own slot; if the first child cannot fit, one
+strict typed Capacity/localNotSent terminal retires the root without HTTP.
+
+
+## Backpack unsupported command candle intervals
+
+Unsupported FetchCandles intervals keep the exact native refusal message and
+absent error kind on a valid keyless Read entry. The shared receipt, clock and
+capacity checks run first; invalid clocks and unavailable capacity report their
+existing typed engine errors without a write outcome. Missing or expired
+receipts refuse without renewing the caller's bound. Duplicate IDs retain the
+prior owner's authority and eventual reply. Refusal creates no HTTP, managed
+preparation, signing, socket, timer or Store update. Supported candle intervals,
+query/stream behavior and unsupported WS subscription diagnostics are unchanged.
+
+
+## CPU runtime environment mismatch evidence
+
+Shared CPU runtime restoration reports every differing identity field, including
+nested Node component versions, with the sealed expected and runner actual
+values in deterministic dotted-field order. Identity rejection still precedes
+all restore writes. The existing image, architecture, Node and component
+bindings remain enforced; provisioner versions are outside that identity.
+
+
+## WEEX history pages retain the caller Read root (#2003)
+
+WEEX fills, normal/algo order history, public trades and income now retain the
+original caller receipt deadline across native windows, pauses and physical
+pages. Each physical call keeps 20 s and no retry; signed pages retain their
+selected identity. GET lists remain secondary-else-primary after the existing
+primary-presence gate; POST income remains primary-only.
+
+The engine now ends the query once with typed Read Timeout at root expiry,
+without rows or an INCOMPLETE marker. Before expiry, a failed page recovers only
+nonempty accepted output and its owned marker; an empty accepted prefix or a
+provider/preparation refusal rejects. The default caller wait is 120 s; callers
+requiring longer native walks must raise rustCommandTimeoutMs. A host listener
+timeout does not cancel transport or grant engine detach authority. NX remains
+on its existing TS path until Rust is selected; no executed NX adoption is
+claimed by this venue change.
+
+
+## Crypto.com unsigned PublicTrades caller-root ownership
+
+PublicTrades is an unsigned one-response Read with one immutable caller receipt
+root across native 10ms queue eligibility, route preparation and retries. Each
+eligible dequeue mints a fresh child capped at 20s and at that original root;
+late or reused-owner DATA cannot parse/stage/complete. Root expiry is strict
+Timeout with no prefix, INCOMPLETE marker or renewed work. Preparation/local
+submission refusal is strict; a released physical-child Timeout under a live
+root keeps the native retry path. Shared Context pacing additionally preserves
+the native 10ms physical send gap when independent preparations are delayed.
+
+Production/testnet URL, escaping, empty headers/body, default count25, wire
+count clamp150, caller truncation, duplicate row order and native financial
+fields remain unchanged. A failed streamed page is reset before retry; no
+unaccepted prefix is published. Missing-array streams keep native transport
+retry, whereas malformed rows in a valid array reject the whole page.
+
+Native retry counts remain exact: three released transport retries with 1000ms
+waits; the legacy 40101 hint caps at one retry, including code40001/message40101
+and transport-message40101 collisions. Native code/message fields are carried
+through the shared classifier. The minimum 40101 compatibility predicate uses
+the original error projection: decoded error fields for a valid envelope, raw
+body text for a missing-list envelope, and the transport message for a host
+failure. It is a known follow-up requiring a separate caller-policy ruling
+before removal. Strict route preparation keeps the shared pre-release NotSent
+attempt fact; released read failures and root expiry have no financial outcome.
+It grants no account-auth evidence or mutation rights. Public 40101 errors
+retain typed/native metadata without changing auth health. Private history,
+signing, account/trading reducers and credential selection are unchanged.
+
 ## Breakout immediate local command custody
 
 Local candle validation, leverage results, unsupported commands, fixed-account
