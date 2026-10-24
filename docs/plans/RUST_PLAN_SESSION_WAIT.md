@@ -188,6 +188,15 @@ New-contract REDs follow the API review:
 - N6: custody. Parking outside Plan custody, on an execution or Background
   Plan, on a group Slot, twice on one Slot, or with a foreign or stale Session
   gives `Revoked`/`State`/`Duplicate`. Each refusal spends no IDs or timers.
+- N4b (re-login ordering, with Bearer R14): retire the old Session and open
+  the new one in the same callback, which is outside any readiness scope. After
+  that callback, `on_plan_session_wait_ended` runs in ready custody and re-parks
+  on the new Session. Its login completes, the drain resumes, and there is one
+  HTTP. Opening a Session inside ready scope stays `State` (R14), so a venue
+  with no replacement Session can only `fail_plan`.
+- N6b (scope, with Bearer R14): in Plan-ready or Preflight-ready scope, parking
+  the owner's own unit succeeds, while `open_session`, `retire_session`,
+  `session_context` and `session_ready` in that scope are refused or empty.
 - N8 (mirrors Bearer R10b): a Plan with one parked Slot plus one bound
   unreleased leg on the same Session, then retire. The bound failure seals the
   Plan (one terminal), there is no `on_plan_session_wait_ended`, the parked
