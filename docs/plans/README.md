@@ -313,3 +313,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Paradex public refusals and Lighter catalog | Implementation under review; original REDs recorded | Before converting the last four immediately workable public request sites. | [RUST_PUBLIC_READ_TAIL.md](RUST_PUBLIC_READ_TAIL.md) |
 
 | BloFin local leverage Read refusals | Shared Read admission adoption under review | Before changing the two pre-credential local FetchLeverage refusal sites independently of signer cutover. | [RUST_BLOFIN_LOCAL_LEVERAGE_REFUSALS.md](RUST_BLOFIN_LOCAL_LEVERAGE_REFUSALS.md) |
+
+| Polymarket/Kraken fixed settings | LocalSetting adoption | Before changing the two held keyless fixed-setting success sites. | [RUST_FIXED_SETTING_ADOPTION.md](RUST_FIXED_SETTING_ADOPTION.md) |
