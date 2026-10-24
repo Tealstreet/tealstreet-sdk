@@ -11,7 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
-| TxFlow immediate local command custody | Plan and original-source controls | Before migrating local history/candle/trading completion or composing with the ticker CPU slice. | [RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md](RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md) |
+| TxFlow immediate local command custody | Draft adoption; original controls green | Before migrating local history/candle/trading completion or composing with the ticker CPU slice. | [RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md](RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md) |
 | Polymarket public read custody | Draft adoption; local checks pass | Before adopting public books/candles and local completion or pruning their inventory. | [RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md](RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md) |
 | Kraken public discovery and local custody | Draft adoption; local checks and independent reviews clear | Before managing unsigned discovery reads or local command terminals in Futures/Spot. | [RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md](RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md) |
 | Subscription handoff and native read continuation | Shared ordering correction | Before issuing native reads after managed subscription frames or changing final drain/timer custody. | [RUST_SOCKET_INTEREST_HANDOFF.md](RUST_SOCKET_INTEREST_HANDOFF.md) |

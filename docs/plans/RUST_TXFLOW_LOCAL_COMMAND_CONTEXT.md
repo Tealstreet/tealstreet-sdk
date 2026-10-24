@@ -2,8 +2,8 @@
 
 Plan first, 2026-10-24. Owner codex-hcmq3f. Fresh branch
 `feat/rust-txflow-local-command-context` starts at actual landing
-`9330c11bdea731368cb1254fa3dc068d11380cdd`. This phase adds only this plan,
-its index row and original-source tests. No production or inventory change.
+`9330c11bdea731368cb1254fa3dc068d11380cdd`. The original plan/RED phase added only this plan, its index row and
+original-source tests; production followed the recorded assertion receipt.
 
 ## Inventory and scope
 
@@ -110,3 +110,26 @@ all pass across the case table; settled same-ID reuse and the shared pre-venue
 FetchAccount refusal also pass. Earlier fixture failures are retained in local
 logs and are not counted as contract REDs. Production and the checker inventory
 remain byte-identical to the base. The overseer accepted 15 sites / 25 -> 10.
+
+
+## Production on the requested landing
+
+The existing plan/RED branch plainly merges actual
+`be710b3f2d7692244144b3f8f10810dc52790796` at `04b7ed8df00`. Production changes
+only the 15 selected completions plus a shared local projection module. Fetch
+and Set STP choose Read/Mutation from the actual command before the existing
+match. Native error/result construction and validation order stay intact. The
+unsupported FetchAccount arm and all physical request/callback code stay held.
+
+The original fixture is byte-exact to its pre-production receipt. All 19 local
+controls now pass; scoped history17, public25 and trading18 also pass (79 total,
+zero ignored). The canonical scanner removes exactly history6 + lib3 + trading6,
+leaving10. Foreign inventory rows are byte-exact to be710. Core and native/caller
+reviews, fresh Rust CI and family WASM size/performance remain gates. No
+production dependency on an unlanded engine API has been introduced.
+
+#2031 is not an ancestor of be710: the draft must follow it, and must genuinely
+integrate its eventual landing before freeze. Current changes do not touch
+wire.rs, metadata seeding or apply_public/ticker projection. CPU results from
+the earlier base must not be represented as the composed #2031 performance
+proof. Source review and actual integration will preserve those exact regions.
