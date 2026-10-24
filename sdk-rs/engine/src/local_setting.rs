@@ -43,6 +43,7 @@ impl ContextRegistry {
                 intent: Some(crate::classify::Intent::Setting),
                 leg_intents: Vec::new(),
                 credentialed: false,
+                inherited_uncertain: false,
             },
         );
         assert!(previous.is_none());

@@ -21,12 +21,12 @@ fn pending(policy: PublicFeedPolicy) -> (TestEngine, SocketId, Option<SocketId>,
     );
     engine.set_public_feed_policy(policy).unwrap();
     engine.start(0.);
-    let metadata = requests(&mut engine).remove(0);
+    let metadata = requests(&mut engine, 0.).remove(0);
     response(&mut engine, &metadata, 10., MARKETS);
     let mut public = None;
     let mut private = None;
     let mut http = Vec::new();
-    for action in engine.drain_actions() {
+    for action in engine.prepared(10.) {
         match action {
             Action::WsConnect {
                 socket,
@@ -47,7 +47,7 @@ fn pending(policy: PublicFeedPolicy) -> (TestEngine, SocketId, Option<SocketId>,
     if let Some(socket) = public {
         engine.handle(20., Event::WsOpened { socket });
     }
-    engine.drain_actions().for_each(drop);
+    engine.prepared(20.).for_each(drop);
     (engine, private, public, http)
 }
 
@@ -60,7 +60,7 @@ fn private_seed(engine: &mut TestEngine, http: Vec<HttpRequest>) {
         };
         response(engine, &request, 30., body);
     }
-    let balance = requests(engine)
+    let balance = requests(engine, 30.)
         .into_iter()
         .find(|request| request.url.ends_with("/v3/account-balance"))
         .unwrap();

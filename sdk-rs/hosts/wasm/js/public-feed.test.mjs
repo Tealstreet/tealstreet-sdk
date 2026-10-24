@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { Frame } from './wire.mjs';
+import { releasedHttpActions } from './managed-http-fixture.mjs';
 
 const built = new URL('../pkg/node/safe_cex_wasm.js', import.meta.url);
 const enabled = { skip: !existsSync(built) };
@@ -15,14 +16,14 @@ const construct = (options) => {
   return new WasmEngine('phemex', JSON.stringify(options));
 };
 const initialize = (engine, privateExpected = false) => {
-  const pending = actions(engine.start(now));
+  const pending = releasedHttpActions(engine, engine.start(now), now);
   const reply = (path, body) => {
     const index = pending.findIndex((action) => action.op === 'http' && new URL(action.url).pathname === path);
     assert.ok(index >= 0, `pending request for ${path}`);
     const [{ request }] = pending.splice(index, 1);
-    pending.push(...actions(engine.httpStart(request, 200, '', now)));
-    pending.push(...actions(engine.httpChunk(request, new TextEncoder().encode(body), now)));
-    pending.push(...actions(engine.httpEnd(request, now)));
+    pending.push(...releasedHttpActions(engine, engine.httpStart(request, 200, '', now), now));
+    pending.push(...releasedHttpActions(engine, engine.httpChunk(request, new TextEncoder().encode(body), now), now));
+    pending.push(...releasedHttpActions(engine, engine.httpEnd(request, now), now));
   };
   reply('/public/products', products);
   assert.equal(pending.filter((action) => action.op === 'wsConnect' && action.channel === 'private').length,

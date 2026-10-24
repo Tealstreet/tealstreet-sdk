@@ -143,6 +143,33 @@ impl Supervisor {
         }
     }
 
+    #[cfg(feature = "managed-sockets")]
+    pub(crate) fn authentication_progress<P>(&mut self, cx: &mut Cx<'_, P>) {
+        let Some(timeout) = self.config.auth_timeout_ms else {
+            return;
+        };
+        let deadline = cx.now + timeout;
+        if self.phase != Phase::Authenticating
+            || !cx.now.is_finite()
+            || !deadline.is_finite()
+            || deadline <= cx.now
+            || self.expired(cx.now).is_some()
+        {
+            return;
+        }
+        let Some(at) = self.next_watch_at_from(cx.now, cx.now) else {
+            return;
+        };
+        // Allocate before replacing the old origin/watch; exhaustion keeps the
+        // old bound intact and uses the existing fatal engine boundary.
+        let timer = cx.set_timer(at - cx.now);
+        if let Some(old) = self.watch.replace(timer) {
+            cx.clear_timer(old);
+        }
+        self.since = cx.now;
+        self.watch_at = Some(at);
+    }
+
     /// Call only for traffic belonging to the current connection.
     pub fn received(&mut self, now: f64) {
         if matches!(self.phase, Phase::Authenticating | Phase::Ready) {
@@ -332,13 +359,16 @@ impl Supervisor {
         }
     }
     fn next_watch_at(&self, now: f64) -> Option<f64> {
+        self.next_watch_at_from(now, self.since)
+    }
+    fn next_watch_at_from(&self, now: f64, since: f64) -> Option<f64> {
         let idle = self
             .idle_enabled
             .then_some(self.received + self.config.idle_timeout_ms);
         let deadline = match self.phase {
-            Phase::Connecting => Some(self.since + self.config.connect_timeout_ms),
+            Phase::Connecting => Some(since + self.config.connect_timeout_ms),
             Phase::Authenticating => {
-                let auth = self.config.auth_timeout_ms.map(|ms| self.since + ms);
+                let auth = self.config.auth_timeout_ms.map(|ms| since + ms);
                 match (auth, idle) {
                     (Some(a), Some(i)) => Some(a.min(i)),
                     (auth, idle) => auth.or(idle),
@@ -365,7 +395,6 @@ mod tests {
     use super::*;
     use crate::book::Book;
     use crate::{Action, Command, Engine, Event, Response, SocketId, Venue};
-    use std::collections::HashMap;
 
     struct Probe {
         supervisor: Supervisor,
@@ -451,7 +480,7 @@ mod tests {
     struct Harness {
         engine: Engine<Probe>,
         now: f64,
-        timers: HashMap<TimerId, f64>,
+        timers: crate::IdMap<TimerId, f64>,
         closed: Vec<SocketId>,
         pings: Vec<SocketId>,
     }
@@ -472,7 +501,7 @@ mod tests {
                 )
                 .unwrap(),
                 now,
-                timers: HashMap::new(),
+                timers: Default::default(),
                 closed: Vec::new(),
                 pings: Vec::new(),
             };
