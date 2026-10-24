@@ -92,3 +92,7 @@ a44fd8ea8eb80f4e805280933728c0642d35cf2f:packages/safe-cex/src/exchanges/coinbas
 # test key/secret; independently recomputed, never an account credential.
 # Exact historical occurrence only; no path or rule exemption.
 77f3a83f9fa9ffdfc6493e7903810ecf337464cd:sdk-rs/venues/phemex/tests/dispatch_signing.rs:generic-api-key:424
+
+# Maintainer-approved historical Bitrue plan attribution prose; no credential.
+# Current wording changed; only this original commit/file/rule/line is ignored.
+48f8b6cbe5788fabdc417e507b6cded77b23aa7a:docs/plans/RUST_BITRUE_DISPATCH_SIGNER.md:generic-api-key:271
