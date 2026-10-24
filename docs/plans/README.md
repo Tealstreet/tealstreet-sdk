@@ -312,3 +312,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | [WEEX account-cycle Background reads](RUST_WEEX_ACCOUNT_BACKGROUND.md) | Managed Background account pages; draft validation |
 
 | Parallel Mutation preparation | Engine/JS and pacing reviewed; native handoff open | Before releasing any parallel mutation leg while sibling preparation/signing is outstanding. | [RUST_PLAN_MUTATION_PREPARE_BARRIER.md](RUST_PLAN_MUTATION_PREPARE_BARRIER.md) |
+
+| Mixed Plan leg bindings | Plan; original REDs next | Before mixing Primary mutations and Secondary verification reads under one immutable Plan. | [RUST_PLAN_MIXED_LEGS.md](RUST_PLAN_MIXED_LEGS.md) |
