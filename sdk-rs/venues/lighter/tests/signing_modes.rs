@@ -20,7 +20,7 @@ fn startup(options: Options) -> Startup {
     };
     result.engine.start(NOW);
     for _ in 0..30 {
-        let actions = result.engine.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut result.engine, NOW);
         if actions.is_empty() {
             break;
         }
