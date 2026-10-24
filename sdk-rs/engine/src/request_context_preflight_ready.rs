@@ -190,8 +190,9 @@ impl<P> Cx<'_, P> {
             .io
             .request_contexts
             .owned_admission(context, self.io.http_delivery.as_ref())?;
-        if admission.as_ref().is_some_and(|a| a.predecessor.is_none())
-            && let Some(plan) = self.io.request_contexts.plan_from_context(context)
+        if admission.as_ref().is_some_and(|a| {
+            a.predecessor.is_none() && !self.io.session_resumed.contains(&a.attempt.request)
+        }) && let Some(plan) = self.io.request_contexts.plan_from_context(context)
             && !self.io.request_contexts.initial_plan_custody(&plan)?
             && !self
                 .io
