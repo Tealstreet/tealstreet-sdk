@@ -3,7 +3,8 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketContext,
     SocketId, TimerId,
 };
-use safe_cex_venue_bitget::{BitgetFutures, Options};
+use safe_cex_venue_bitget::{BitgetFutures, Options as NativeOptions, Product};
+type Options = FixtureOptions;
 
 // Bitget Classic contracts/tickers examples, reduced to the fields we consume.
 pub const CONTRACTS: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","baseCoin":"BTC","quoteCoin":"USDT","symbolStatus":"normal","pricePlace":"1","priceEndStep":"1","sizeMultiplier":"0.001","minTradeNum":"0.001","maxOrderQty":"120","maxLever":"125"}]}"#;
@@ -35,8 +36,17 @@ impl Harness {
         Self::started_expecting(options, false)
     }
     pub fn started_expecting(options: Options, expect_startup_failure: bool) -> Self {
+        Self::started_configure(options, expect_startup_failure, |_| {})
+    }
+    pub fn started_configure(
+        options: Options,
+        expect_startup_failure: bool,
+        configure: impl FnOnce(&mut Engine<BitgetFutures>),
+    ) -> Self {
+        let mut engine = engine(options);
+        configure(&mut engine);
         let mut h = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(options)),
+            engine,
             now: 1_000_000.0,
             requests: vec![],
             sockets: vec![],
@@ -252,4 +262,73 @@ impl Harness {
 /// A failed-read retry delay lies in the engine's jittered `[0.75, 1.0] * nominal`.
 pub fn jittered(actual: f64, nominal: f64) -> bool {
     (0.75 * nominal..=nominal).contains(&actual)
+}
+
+#[derive(Clone, Default)]
+pub struct FixtureOptions {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    pub testnet: bool,
+    pub public_data_only: bool,
+    pub key: Option<String>,
+    pub secret: Option<String>,
+    pub passphrase: Option<String>,
+    pub product: Product,
+}
+
+pub fn try_engine(
+    mut options: FixtureOptions,
+) -> Result<Engine<BitgetFutures>, safe_cex_engine::signing::SignError> {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::signing::{CredentialSetupPolicy, IdentitySetupPolicy, SetupFieldPolicy};
+    let primary =
+        if options.key.is_some() || options.secret.is_some() || options.passphrase.is_some() {
+            Some(LocalIdentity {
+                key: Secret::new(options.key.take().unwrap_or_default()),
+                secret: Secret::new(options.secret.take().unwrap_or_default()),
+                passphrase: options.passphrase.take().map(Secret::new),
+                ..Default::default()
+            })
+        } else {
+            None
+        };
+    let secondary = options
+        .read_credentials
+        .take()
+        .map(|mut read| LocalIdentity {
+            key: Secret::new(std::mem::take(&mut read.key)),
+            secret: Secret::new(std::mem::take(&mut read.secret)),
+            passphrase: read.passphrase.take().map(Secret::new),
+            ..Default::default()
+        });
+    let policy = CredentialSetupPolicy {
+        primary: Some(IdentitySetupPolicy {
+            passphrase: Some(SetupFieldPolicy::RequiredForPrivate),
+            ..Default::default()
+        }),
+        secondary: Some(IdentitySetupPolicy {
+            passphrase: Some(SetupFieldPolicy::RequiredWithPrimaryFallback),
+            ..Default::default()
+        }),
+    };
+    let (provider, identities) = LocalSigner::from_setup_with_policy_and_mode(
+        LocalSetup { primary, secondary },
+        policy,
+        options.public_data_only,
+    )?;
+    let mut engine =
+        safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(NativeOptions {
+            credentials: identities.primary,
+            read_credentials: identities.secondary,
+            testnet: options.testnet,
+            public_data_only: options.public_data_only,
+            product: options.product,
+        }));
+    engine
+        .set_signer(Some(std::sync::Arc::new(provider)))
+        .unwrap();
+    Ok(engine)
+}
+
+pub fn engine(options: FixtureOptions) -> Engine<BitgetFutures> {
+    try_engine(options).unwrap()
 }
