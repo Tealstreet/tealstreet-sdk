@@ -10,6 +10,7 @@ import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderType } from '../../types';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 it('preserves Bitrue private IDs, fill units, leverage and exact signed writes across the SDK wasm boundary', async () => {
   const symbol = 'E-BTC-USDT';
@@ -26,6 +27,7 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
   let placements = 0;
   const transport: Transport = {
     now: () => ++now,
+    prepareHttp: prepareRecordedHttp,
     connect: (url, handlers) => {
       if (url.includes('fapiws.bitrue.com')) privateSocket = handlers;
       queueMicrotask(() => handlers.onOpen());

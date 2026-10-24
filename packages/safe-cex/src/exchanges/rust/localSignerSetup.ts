@@ -9,6 +9,8 @@ type LocalIdentity = LocalIdentityMetadata & {
   passphrase?: string;
   /** Secondary only, set by a family setup mapping: sign with the primary's ref. */
   signingFromPrimary?: true;
+  /** Primary only, set by a family setup mapping: role-bound provider material. */
+  extra?: { zklinkSeed?: { value: string; encoding: 'hex' } };
 };
 type Credentials = { primary?: LocalIdentity; secondary?: LocalIdentity };
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
@@ -85,7 +87,12 @@ export class LocalSignerSetup {
   /** A ValidateOnly family's read-key result (Rust `ReadCredentials::validate`); the key never leaves. */
   readonly readCredentialsValid: boolean | undefined;
 
-  constructor(options: ExchangeOptions, policy: SignerSetupPolicy = {}, secondarySigningFromPrimary = false) {
+  constructor(
+    options: ExchangeOptions,
+    policy: SignerSetupPolicy = {},
+    secondarySigningFromPrimary = false,
+    zklinkSeed?: string,
+  ) {
     const setupMetadata = parseLocalSignerMetadata(options.localSigner);
     const primaryMetadata = effectiveIdentityMetadata(setupMetadata.primary, policy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(setupMetadata.secondary, policy.secondary);
@@ -114,7 +121,10 @@ export class LocalSignerSetup {
     const primaryDropped = policy.readCredentials === 'publicRead' && options.publicDataOnly === true;
     this.#credentials = {
       ...(!primaryDropped && (options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined)
-        ? { primary: { ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase } }
+        ? { primary: {
+          ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase,
+          ...(zklinkSeed ? { extra: { zklinkSeed: { value: zklinkSeed, encoding: 'hex' as const } } } : {}),
+        } }
         : {}),
       ...(secondary
         ? { secondary: secondarySigningFromPrimary
@@ -135,6 +145,7 @@ export class LocalSignerSetup {
         credentials.primary.key = undefined;
         credentials.primary.secret = undefined;
         credentials.primary.passphrase = undefined;
+        credentials.primary.extra = undefined;
       }
       if (credentials.secondary) {
         credentials.secondary.key = undefined;
@@ -175,6 +186,8 @@ export const withoutSigningCredentials = (options: ExchangeOptions): ExchangeOpt
     secondary_secret: _readSecret,
     secondary_passphrase: _readPassphrase,
     localSigner: _setupMetadata,
+    // ApeX's OmniKey seed is signing material: it lives only in provider setup.
+    omniKeySeed: _omniKeySeed,
     auth,
     ...routing
   } = options;

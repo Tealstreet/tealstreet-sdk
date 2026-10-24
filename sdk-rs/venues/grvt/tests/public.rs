@@ -1,4 +1,5 @@
 use safe_cex_engine::model::Interval;
+use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{
     Action, Command, Engine, Event, PublicFeedPolicy, RequestId, Response, SocketChannel, SocketId,
     TimerId, Venue,
@@ -15,8 +16,8 @@ fn boot_with_catalog(catalog: &str) -> (Engine<Grvt>, SocketId, Vec<String>) {
         ..Options::default()
     }));
     e.start(1700000000000.);
-    let request = e
-        .drain_actions()
+    let request = prepared_actions(&mut e, 1700000000000.)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -239,8 +240,8 @@ fn candle_requires_complete_valid_ohlc_and_nanosecond_time() {
             to_ms: None,
         }),
     );
-    let r = e
-        .drain_actions()
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 1700000000003.)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -263,8 +264,8 @@ fn silent_unopened_socket_has_watchdog_and_reconnect() {
         ..Options::default()
     }));
     e.start(1000.);
-    let r = e
-        .drain_actions()
+    let r = prepared_actions(&mut e, 1000.)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -435,8 +436,8 @@ fn catalog_refresh_remaps_ticker_state_sequences_and_subscriptions_by_native_id(
         ..Options::default()
     }));
     e.start(1000.);
-    let request = e
-        .drain_actions()
+    let request = prepared_actions(&mut e, 1000.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(request) => Some(request.id),
             _ => None,
@@ -489,8 +490,8 @@ fn catalog_refresh_remaps_ticker_state_sequences_and_subscriptions_by_native_id(
         r#"{"s":"v1.ticker.d","s1":"ETH_USDT_Perp","sn":"0","f":{"i":"ETH_USDT_Perp","lp":"200","op":"100","bv":"10","sv":"4"}}"#,
     );
     e.handle(301001., Event::TimerFired { timer: refresh });
-    let request = e
-        .drain_actions()
+    let request = prepared_actions(&mut e, 301001.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(request) => Some(request.id),
             _ => None,
@@ -658,8 +659,8 @@ struct Suppressed {
 }
 
 impl Suppressed {
-    fn collect(&mut self, e: &mut Engine<Grvt>) {
-        for action in e.drain_actions() {
+    fn collect(&mut self, e: &mut Engine<Grvt>, now: f64) {
+        for action in prepared_actions(e, now) {
             match action {
                 Action::Http(r) => self.requests.push(r.id),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
@@ -682,7 +683,7 @@ fn suppressed_public_feed_is_not_supervised() {
     let start = 1700000000000.;
     e.start(start);
     let mut h = Suppressed::default();
-    h.collect(&mut e);
+    h.collect(&mut e, start);
     let request = h.requests.remove(0);
     let response = Response {
         status: 200,
@@ -690,7 +691,7 @@ fn suppressed_public_feed_is_not_supervised() {
         body: CATALOG,
     };
     e.handle(start + 1., Event::HttpResponse { request, response });
-    h.collect(&mut e);
+    h.collect(&mut e, start + 1.);
     assert_eq!(e.store().markets().len(), 2, "public startup completed");
     let mut fired = 0;
     while let Some(&(timer, at)) = h
@@ -701,7 +702,21 @@ fn suppressed_public_feed_is_not_supervised() {
     {
         h.timers.retain(|(t, _)| *t != timer);
         e.handle(at, Event::TimerFired { timer });
-        h.collect(&mut e);
+        h.collect(&mut e, at);
+        while let Some(request) = h.requests.pop() {
+            e.handle(
+                at,
+                Event::HttpResponse {
+                    request,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: CATALOG,
+                    },
+                },
+            );
+            h.collect(&mut e, at);
+        }
         fired += 1;
     }
     assert_eq!(
@@ -709,7 +724,7 @@ fn suppressed_public_feed_is_not_supervised() {
         (0, 0),
         "no public connects or closes"
     );
-    assert_eq!(fired, 1, "only the unanswered catalog refresh fires");
+    assert_eq!(fired, 1, "only the serviced catalog refresh fires");
 }
 
 #[test]
@@ -746,7 +761,10 @@ fn rest_queries_do_not_publish_or_repair_live_book_or_account_state() {
                 limit: None,
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1700000000011.)
+            .into_iter()
+            .filter(|action| !matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+            .collect::<Vec<_>>();
         assert_eq!(actions.len(), 1);
         let Action::Http(request) = &actions[0] else {
             panic!("public REST query")
@@ -798,8 +816,8 @@ fn rest_queries_do_not_publish_or_repair_live_book_or_account_state() {
             limit: None,
         }),
     );
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1700000000013.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,

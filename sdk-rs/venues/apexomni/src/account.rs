@@ -571,17 +571,21 @@ impl ApexOmni {
             return;
         }
         self.account.started = true;
-        if self.options.public_data_only
-            || self.options.key.as_ref().is_none_or(String::is_empty)
-            || self.options.secret.as_ref().is_none_or(String::is_empty)
-        {
+        if self.options.public_data_only || self.options.identity.is_none() {
             cx.store.set_positions(vec![]);
             cx.store.set_orders(vec![]);
             cx.store.set_balance(Balance::default());
             return;
         }
-        // A bad seed only blocks order signing; monitoring and cancels still work.
-        if let Err(error) = sign::validate_seed(self.options.omni_key_seed.as_deref().unwrap_or(""))
+        // A missing or unusable zkLink role only blocks order signing (each
+        // order's capability check refuses); monitoring and cancels still work.
+        // Trusted setup already enforced the exact 65-byte seed.
+        if let Err(error) = cx
+            .can_sign(
+                safe_cex_engine::CredentialSlot::Primary,
+                &sign::CONTRACT_NEEDS[1..],
+            )
+            .map_err(|_| "Invalid OmniKey seed: expected 65-byte Ethereum signature")
         {
             cx.notice(
                 Level::Error,
@@ -593,9 +597,9 @@ impl ApexOmni {
         }
         if self
             .options
-            .passphrase
+            .identity
             .as_ref()
-            .is_none_or(String::is_empty)
+            .is_none_or(|identity| identity.passphrase.is_none())
         {
             cx.notice(
                 Level::Error,
@@ -642,18 +646,32 @@ impl ApexOmni {
             return false;
         }
         self.account.supervisor.opened(cx);
-        let login = match sign::ws_login(&self.options, cx.now) {
-            Ok(login) => login,
-            Err(error) => {
-                cx.notice(Level::Error, code::CONFIG_INVALID, error);
-                cx.close(socket);
-                self.account_close(cx, socket);
-                return true;
-            }
+        let Some(identity) = self.options.identity.clone() else {
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                "ApeX API key, signing key and passphrase are required",
+            );
+            cx.close(socket);
+            self.account_close(cx, socket);
+            return true;
         };
         self.account.open = true;
         self.account.opened_at = cx.now;
-        cx.send(socket, login);
+        // The provider signs the login at dispatch; it precedes the sends below.
+        let host = if self.options.testnet {
+            "qa-quote.omni.apex.exchange"
+        } else {
+            "quote.omni.apex.exchange"
+        };
+        cx.send_signed(
+            socket,
+            String::new(),
+            Box::new(sign::WsLogin::new(
+                identity,
+                format!("wss://{host}/realtime_private"),
+            )),
+        );
         // The production proxy expects all three subscriptions before a login ACK.
         cx.send(
             socket,
@@ -1223,10 +1241,7 @@ impl ApexOmni {
         let Command::FetchAccount { command } = command else {
             return Err(command);
         };
-        if self.options.public_data_only
-            || self.options.key.as_ref().is_none_or(String::is_empty)
-            || self.options.secret.as_ref().is_none_or(String::is_empty)
-        {
+        if self.options.public_data_only || self.options.identity.is_none() {
             cx.fail(command, "ApeX account identity requires API credentials");
             return Ok(());
         }

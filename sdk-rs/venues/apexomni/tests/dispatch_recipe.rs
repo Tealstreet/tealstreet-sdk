@@ -12,7 +12,7 @@ use safe_cex_engine::test_support::{prepared_actions, seeded_entropy};
 use safe_cex_engine::{
     Action, Command, Cx, Engine, HttpRequest, Response, SignStep, SocketId, TimerId, Venue,
 };
-use safe_cex_venue_apexomni::{Options, sign};
+use safe_cex_venue_apexomni::sign;
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -28,13 +28,12 @@ fn seed() -> String {
     format!("{}1b", "01".repeat(64))
 }
 
-fn legacy_options() -> Options {
-    Options {
+/// The legacy canonicalization oracle's credentials; never venue options.
+fn legacy_options() -> sign::LegacyCredentials {
+    sign::LegacyCredentials {
         key: Some("api-key".into()),
         secret: Some("mysecret".into()),
         passphrase: Some("pass".into()),
-        omni_key_seed: Some(seed()),
-        ..Options::default()
     }
 }
 

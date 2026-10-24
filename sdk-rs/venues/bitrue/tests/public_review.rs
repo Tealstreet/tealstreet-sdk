@@ -1,8 +1,10 @@
+mod support;
 use safe_cex_engine::{
     Action, Command, Engine, Event, Notice, Query, Response, SocketId, TimerId, wire,
 };
-use safe_cex_venue_bitrue::{Bitrue, Options};
+use safe_cex_venue_bitrue::Bitrue;
 use serde::Deserialize;
+use support::Options;
 
 const SYMBOL: &str = "E-BTC-USDT";
 const CANDLE: &str = r#"{"ds":"2024-01-01 08:00:00","open":60000,"high":60001,"low":59999,"close":60000,"vol":1000}"#;
@@ -46,10 +48,10 @@ fn completions(actions: &[Action]) -> Vec<(u32, Result<String, String>)> {
         .collect()
 }
 fn boot() -> (Engine<Bitrue>, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let r = e
         .drain_actions()

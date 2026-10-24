@@ -70,7 +70,7 @@ impl Harness {
     }
     fn requests(&mut self) -> Vec<(safe_cex_engine::RequestId, String)> {
         let mut requests = Vec::new();
-        for action in self.engine.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             match action {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),

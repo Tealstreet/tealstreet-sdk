@@ -1780,3 +1780,135 @@ The32 focused tests pass, including all four deployment wires, four-candidate
 order, first-row/first-present-field precedence, retained capacity recovery,
 clock refusal, caller expiry and released physical-timeout continuation. Local
 checks are scoped with four jobs; broader builds and performance remain in CI.
+
+
+## Hyperliquid local settings and schedule controls
+
+Original25 controls execute12 assertion REDs/13 GREEN on unchanged9d344 source.
+The exact target, strengthened before production to validate all255 retained
+peers after capacity recovery, now passes25/25 without ignored controls. Ten
+capacity cases cover nine lexical sites, including both commands sharing the
+merged-spot success line. Native result/error/Store, duplicate-owner, invalid
+clock, zero-wait and schedule4999/5000/None boundary assertions are retained.
+The existing trading, spot and schedule targets pass unchanged. No broad local
+workspace/all-feature or WASM/performance build substitutes for exact-head CI.
+
+### Kraken Futures PublicTrades custody controls
+
+Plan/original checkpoint f24c1588e45 was independently CLEAR (16 assertion REDs,
+13 native GREENs). Source composition uses actual #2058 883c5c8deb8. Controls
+cover exact caller/child bounds, held Prepare/Bind, strict typed preparation,
+capacity with two-slot/no-leak recovery, duplicate/clock/late work fences and
+accepted-only later transport/503/codec/physical-timeout recovery. The external
+NaN fixture adaptation and narrow first PublicTrades Network expectation are
+disclosed in the plan; private failure assertions remain unchanged. Full Rust,
+WASM and workspace checks belong to the one PR-triggered CI run.
+
+## StampFloor clock-boundary controls
+
+Original four new-API compile controls are retained from m26's handoff. Four
+additional frozen controls pin unsafe/non-finite current clocks, the maximum
+safe current stamp, and unchanged stamp_ms behavior; two fail at runtime on the
+inherited draft before correction. The opaque type has both a nameable positive
+doctest and a constructor-privacy compile-fail control. Shared release tests
+retain genuine prepare/bind/claim and no-release-on-denial behavior separately.
+No venue inventory prune or native migration receipt is claimed by this core PR.
+
+### Bitrue dispatch custody and physical Read legs
+
+Options retain only opaque Identity refs. Provider preparation/apply attest exact
+transport intent, ordered unsigned headers and atomic receipt/results before release.
+Original 25 assertions pass; additional caller-deadline, delayed provider and
+malformed-result controls execute through genuine Engine callbacks. The scanner
+changes 29/17 to21/14, distinguishing three genuine bracket completion removals
+from five conservative obsolete request-field matches. No bootstrap growth.
+Legacy execution/group/session/history ownership remains a separate blocker.
+
+Verification checkpoint: source/caller/full-map independent reviews are CLEAR at
+2024ec88acc after all fixes; no remaining High/Medium. The map reviewer explicitly
+confirmed typed-role reuse is semantic deduplication, with no hidden/renamed sites,
+21/14 exact source/manifest and original25assertions unchanged. All 5,621 unowned
+entries from the 5,653-entry incoming tree were preserved. Executed220Bitrue native
+controls plus1compile-fail doc, registry3, TS construction4, and earlier305Binance
+controls on identical engine source PASS.
+Focused strict/checker/fmt gates pass; full fresh CI and HMAC-owner source review
+are still pending. No WASM/replay/size result is inferred from native tests.
+
+
+## GRVT unsigned candle Read Plan controls
+
+The original 23 candle controls now pass, including all formerly Prepare-gated
+suffixes: unclaimed DATA, typed preparation cleanup, six immediate transport
+attempts, physical timeout, original caller cap, stale delivery and full-pool
+recovery with all 255 retained peer Contexts validated. Six library controls
+include the login-independent preparation callback delegation guard. Native
+product/public fixtures use real managed release without changing assertions.
+Scoped cargo checks use four jobs serially; workspace, feature and WASM/size/
+replay checks belong to CI. No execution or budget claim is made for those gates.
+
+
+## GRVT public book command controls
+
+All24 original controls pass, including exact released deadlines, 256-owner
+capacity/local-empty refusal and255-survivor recovery, unclaimed/stale DATA,
+strict preparation+integrity, six released transport attempts/no seventh and
+physical-Timeout versus HTTP408/504 DATA. Rate-limit controls retain native
+NotSent, clamped hint/code/message, no outbound or deferral timer. All260 GRVT
+tests and scoped strict Clippy/fmt pass with four jobs and sequential cargo.
+Native depth/public/trading fixture changes only drive real managed release;
+all previous assertions remain. Full workspace/features/WASM/replay belong to CI.
+
+## OKX selected history identity controls
+
+Nine new native controls and the existing lookup eight pass before and after
+adoption. They pin selected signing key separately from declared route intent,
+keyless/filtered-primary precedence, secondary-only cache refusal, primary
+lookup, unsigned demo public trades, and later-page identity/cursor retention.
+The original real credential inventory RED is now green. Focused history/closed/
+lookup/signer/root suites pass89 tests across7 targets; strict all-target Clippy,
+formatting and request/credential ratchets cover the scoped change. Existing
+financial assertions and fixtures are unchanged. Independent source/caller/map
+reviews and fresh exact-head CI remain required before READY.
+
+## GRVT fixed local setting controls
+
+Plan-first originals execute16 controls on unchanged production:7 intended
+assertion REDs/9 working GREENs/0 ignored. All16 now pass, including four real
+256-command capacity cases and exact first-peer retirement followed by native
+recovery and validation of all255 survivors. Separate NaN Event cases cover
+margin, hedged refusal and one-way projection. Native keyless/public-only,
+zero-wait and duplicate-owner assertions remain intact. The42 existing trading
+tests pass unchanged. Scoped strict GRVT Clippy and formatting are required;
+workspace, feature, WASM and performance coverage stays in CI.
+
+## GRVT local leverage Read refusal controls
+
+Plan-first12 originals execute4 intended assertion REDs/8 working GREENs on
+unchanged actual5d825. The exact target now passes12/12, including both real256
+Command Read capacity cases, exact first-peer retirement/native recovery and
+validation of all255 surviving peers. Genuine NaN Event, native metadata and
+market-before-account precedence, public-only/configured-but-unestablished,
+checked zero-wait and duplicate-owner assertions are retained. All44 existing
+account controls pass unchanged. Local Cargo remains scoped with four jobs;
+workspace/features, WASM and performance are CI gates.
+
+
+## GRVT catalog publication and deadline controls
+
+All26 original controls now pass, including the formerly gated Prepare/Bind,
+capacity recovery with255 surviving peers, timeout cleanup, fresh retry/refresh
+roots and stale stream-error suffixes. The real mid-stream item then expired
+final DATA control passes. A27th source-stage control pins unanswered catalog
+HTTP timeout/backoff under Shared public-feed mode without socket actions.
+Selected native account/login/products/refresh/public/startup and library targets
+bring the scoped total to123PASS/0ignored. Scoped all-target Clippy -D warnings
+passes with four jobs. Existing fixture transport collectors drive genuine
+Prepare/Bind/Claim; native assertions remain, with the socket-only fixture now
+servicing its allowed REST refresh. Workspace/features/WASM/performance remain
+CI gates; no local broad-build or full-CI claim.
+
+Post-review fixture check: the entire GRVT crate executes292PASS/0ignored.
+Depth-query startup also required the same genuine prepared_actions collector;
+only that bootstrap changes, with every assertion retained. The source-stage
+Shared-feed control now checks no socket actions at startup, timeout and retry.
+Production source remains byte-exact to0e0393051d5.
