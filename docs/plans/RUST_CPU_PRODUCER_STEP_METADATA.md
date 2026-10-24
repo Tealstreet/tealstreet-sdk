@@ -1,0 +1,195 @@
+# CPU producer step metadata convergence
+
+Owner: codex-mxb4mq. Reviewer: claude-dazzy3 (overseer routing).
+Base: actual landing `49f7d1857b66fc14f5164c8ca82ce42d48a53c1d`.
+
+## Problem and evidence
+
+GitHub can report a measurement job completed/success while its step list
+still contains pending/in-progress steps and null conclusions/timestamps.
+`evidenceInventory` caches that response. `authenticatedBundle` then rejects
+the exact upload step through `successfulStep`, although its API metadata
+becomes terminal shortly afterwards. This rejects the planner before a CPU
+verdict and cascades into the certification wrappers.
+
+- #1747, run40112254296: retained jobs response SHA256
+  `55f58c320b0fcb3bfd70259d6768f7e35bafd6e16690fe7acfb8b54a4dc803f2`,
+  `/tmp/codex-metadata-vec-cpu-plan-evidence/provenance`. All32 measurement
+  jobs are completed/success/attempt1. OKX120926583857 and
+  Binance120926584119 still have pending upload steps53–55.
+- #2076, run40111709129: producer120924624369 has strict upload step55
+  pending/null in the retained snapshot, completed/success in the later API
+  observation. Receipt `/tmp/codex-zs5e83-pr2076-cpu-plan-infra-retry.json`.
+  Its planner retry produced attempt2 aliases; this plan does not accept them.
+- #2070/#2071 also reported by the overseer; no independently captured raw
+  evidence for those two is claimed here.
+
+## Proposed shared boundary
+
+Change only `sdk-rs/harness/cpu-ci.mjs`, with scoped Node controls and this
+plan/CALLERS. No workflow, policy threshold, replay fixture/tape, venue, engine,
+measurement-attempt, or artifact format change.
+
+Before `authenticatedBundle` authenticates/binds an artifact, resolve its unique
+producer from the complete inventory. A producer must already be the original
+successful completed job. Require the requested upload step to exist exactly
+once. Missing/duplicate producers or upload steps, failed/cancelled jobs,
+wrong source/runner/run, and any attempt other than1 fail immediately.
+Artifact retrieval retains its existing order and bounded byte checks. A
+download is not accepted as authority until producer convergence and all
+existing authentication checks pass. Require its full artifact metadata to
+remain identical in the refreshed inventory too.
+
+If any producer step has a nonterminal status or null conclusion, wait for
+metadata convergence. All steps must have `status: completed` and a non-null
+conclusion before binding the whole job record. A completed skipped unrelated
+step is terminal; the required upload/checkout steps must still pass the
+existing success/timestamp checks. A completed step whose conclusion is null
+remains nonterminal. This also avoids binding a partially populated post-step
+list that would later differ at `evidenceEndCheck`.
+
+Use the existing uncached complete run/jobs/artifacts API reader to refresh
+`context.inventory`: at most20 refresh cycles per command/context, with30s
+spacing (at most10min scheduled delay, in addition to existing transport time).
+The budget is shared across suites/artifact bindings, not multiplied by32.
+Do not poll the active planner itself. Do not retry HTTP refusals, malformed
+responses, failed provenance checks, or measurement jobs.
+
+Pin explicit producer identity fields before waiting: `id`, `run_id`,
+`run_attempt`, `runner_id`, `name`, `head_sha`, `head_branch`, `status`,
+`conclusion`, `started_at`. Pin run `id`, `run_number`, `run_attempt`,
+`workflow_id`, `path`, `head_sha`, `head_branch`, `event`. This is dazzy3's C2
+choice; late `completed_at`/labels may settle, but the final strict validator
+still requires valid completion timestamps and exact whole-record bindings.
+Recheck identity, unique job name/id and attempt1 on every refresh. Replaced jobs,
+duplicate/attempt2 aliases or changed identity fail, including the aliases
+observed after #2076's retry. Replace the complete cached inventory with each
+fresh snapshot; never splice fields from different observations. Retain every
+distinct response's raw bytes/digest through the existing reader. The final
+strict authority and end-of-command checks remain unchanged.
+
+After convergence, use the terminal record consistently for upload/checkout
+authentication, returned bundle, measurement-window checks and bindings.
+Keep exact artifact id/size/digest/producer/ZIP checks, logged checkout and
+step windows unchanged. On exhaustion, fail explicitly with run/job/name,
+pending step names/statuses/conclusions and the20-refresh cap; do not cache an
+accepted bundle or mint plan/certificate/matrix output.
+
+## Originals and controls
+
+Tests call the existing exported `authenticatedBundle`, with deterministic
+reader snapshots and Node's virtual timers. No absent API/import failure is
+an original RED. Metadata-only binding exercises the same shared producer and
+upload authenticator; existing ZIP/digest controls remain required separately.
+
+Original assertion REDs:
+
+1. Pending upload in a completed successful producer becomes terminal on the
+   next same-job snapshot: accept only that fresh record and bind it.
+2. Upload already successful, another producer step still in progress: wait
+   for the whole job's terminal metadata rather than binding the stale record.
+3. A producer step never becomes terminal: exhaust the bounded refresh budget
+   with the explicit pending-step failure instead of accepting the record.
+
+Working controls: already-terminal producer (zero extra polling), failed
+upload, attempt2 job, duplicate upload step, corrupt digest/log authority and
+HTTP refusal still reject; no bundle/binding is accepted on failure. Test
+suffixes after original failing assertions are GREEN-stage requirements.
+
+Implementation-stage controls also pin a changed physical identity/attempt
+or duplicate producer on a refresh, completed/null convergence, skipped
+unrelated steps, shared budget across producers, retained raw observations and
+unchanged final provenance checks. No CPU remeasurement or replay rerun is
+part of metadata convergence.
+
+## Gates
+
+Commit plan before originals; keep production unchanged in the initial draft.
+Run scoped Node originals, record their exact assertion failures and working
+controls, then get dazzy3's bounded review. Production follows that review.
+After implementation: run scoped cpu-ci/cohort/artifact/request-budget tests,
+independent source review, fresh full CI and auditor placement. Never merge
+without a window. Backpack history work remains behind this priority fix.
+
+## Implementation and review conditions
+
+dazzy3 independently reproduced originals2839777933c as3 assertion REDs and6
+GREEN, then cleared implementation with C1–C5 conditions. Production adds one
+shared `terminalProducer` boundary. The original upload/checkout/digest/ZIP
+authenticators and `evidenceEndCheck` are unchanged. A cached accepted bundle
+keeps its original record; a later binding of the same producer may not
+substitute a different whole job record.
+
+GREEN-stage controls cover refresh-only attempt2 aliases, same-name duplicate
+producers, changed job/runner IDs, two producers sharing twenty refreshes total, concurrent bindings unable to overspend,
+late descriptive fields, active planner/certifier exclusion, immutable earlier
+bindings with final drift rejection, completed/null convergence, skipped
+unrelated steps, and preservation of both raw API observations. Exhaustion
+assertions include run1000, job100 and the pending step name/status/conclusion.
+
+Initial execution at ca364:66/66 PASS,0 skipped across the producer originals/hostile
+controls and existing cpu-ci/cohort/artifact/request-budget tests. This is not
+fresh CI, a real CPU replay run, or merge clearance. CI's existing
+`rust:test-harness` glob includes the new control file without workflow edits.
+
+## Empty step-list evidence from this PR
+
+The first fresh run40115798965 fails in planner120941231106 with
+`CPU certification: missing producer step inventory`, before any refresh.
+Retained jobs response `4caaea2cc84c624d009ee9ea4b726d501fea6f64a08d58f1d81845c66aa8ae0f`
+has all32 successful original measurement jobs carrying `steps: []`. The
+cpu-plan ZIP12569321810 matches the API and upload-log digest
+`11dd0bc4ce388d2d013163ab864b56a1fe262f45cf0ad6f6141b53fe1949ce45`.
+A later observation populates those lists with the same pinned identities,
+but still contains nonterminal steps; it is diagnostic, not certification.
+
+Treat only a valid empty array as an unmaterialized, nonterminal inventory
+under the overseer-approved shared twenty-refresh/thirty-second budget. Never bind it or
+infer success from an empty list. Missing/non-array inventories and malformed
+step records still fail immediately. Once nonempty, requested upload-step
+uniqueness and all existing success/identity/provenance checks still apply.
+An empty list that never materializes fails at the same cap with run/job and
+an explicit empty-inventory diagnostic. Do not exceed the ruled cap or retry HTTP.
+
+Before production, add assertion REDs for empty-to-terminal convergence and
+empty-list exhaustion. Keep malformed inventory, missing/duplicate upload,
+attempt/identity and HTTP working controls, and pin empty-to-pending-to-terminal
+convergence without accepting the intermediate snapshot. Send the exact delta
+to dazzy3; fresh CI is required after any production change. No workflow retry
+has been started for the failed run.
+
+## Revised wait-budget ruling
+
+After the empty snapshot before17:44:29Z, an observation at17:50:06Z still
+contained nonterminal metadata under the same32 pinned producer identities.
+This does not establish the exact convergence time, but demonstrates why a
+30s schedule cannot cover the observed lag. The overseer explicitly ruled
+20 complete-inventory refreshes at30s spacing, shared per command/context
+for both empty inventories and nonterminal steps (10min scheduled delay).
+All other identity/attempt/strict provenance checks remain unchanged. Pin
+the spacing and20-refresh cap for both shapes before applying production.
+No alternative artifact-API authority is included in this change.
+
+The same ruling extends every job that can bind producers by12min:
+`cpu-plan`20→32, `cpu-second`30→42 and `cpu-certify`30→42.
+`cpu-final` remains5min because its status-only command never waits. A
+workflow control pins those minima. Historical successful planner40111065296
+(job120925982479) ran16:34:15–16:40:33Z (6min18s); the timeout change is
+explicitly ruled rather than inferred from that one observation.
+
+## Reviewed amended implementation
+
+Plan58dcc and originals4ef9fe51a2c precede the amended runtime. Against
+unchanged ca364 production/workflow, the revised controls execute23 GREEN
+and10 assertion REDs: four empty-list shapes plus the ruled cap, shared and
+concurrent budget, first-refresh spacing pair and workflow timeout boundary.
+The latter budget/timeout assertions pin the new ruled contract. Dazzy3
+independently reproduced them and cleared exact patch SHA256
+`81e3a04ae196e138908afad6a30b9a967b32cc5e2ee093f8cb9c2f51065d2948`.
+
+The applied cpu-ci.mjs and rust.yml are byte-exact to that reviewed patch.
+Scoped CPU controls pass79/79 with0 skipped; install-Yarn controls pass9/9
+with0 skipped. The first combined command named an absent .mjs installer
+test; its actual .cjs file was then run separately, so only that separate
+receipt supplies installer evidence. Fresh PR-triggered CI on the pushed
+head remains required; no retry of the failed original workflow is evidence.
