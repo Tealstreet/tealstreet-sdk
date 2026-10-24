@@ -935,3 +935,61 @@ integration tests pass, zero ignored, with four jobs and serial builds. The
 exact source patch is subject to bounded core review and strict scoped checks.
 These are native correctness receipts; WASM savings remain unmeasured until the
 new freeze candidate has its single PR Rust run. No local WASM sweep is used.
+
+## 2026-10-25: isolate metadata freshness from non-consuming families
+
+Plan before source. The exact local comparison uses actual tip
+`10f3348569e57b28fc97f5ffd1cf03d2b68e943d` and #1747 head
+`1ad0251555f0fc31c4cba8c09ab02fa19e62aa59`. The official Bitget family build,
+with Rust 1.99.0, wasm-bindgen 0.2.129 and Binaryen 132 at -Oz, measures both
+web and Node at 1,362,767 bytes without #1747 and 1,366,603 with it: +3,836.
+The unchanged allowance is 1,363,968, so the base fits by 1,201 bytes and the
+candidate exceeds it by 2,635 locally. CI's candidate is 1,366,384 (+2,416);
+the 219-byte local/CI difference is not an allowance or a corrected CI result.
+The same pinned local comparison determines the size fix; CI remains final.
+
+An exact API-reference audit finds consuming venue code only in BingX
+(account, lib, metadata and trading) and WEEX (account and trading). Bitget
+does not call these APIs or import their types. Its common terminal currently
+links metadata write cleanup even though no metadata owner can be admitted.
+Generic fields named metadata in signing capture are unrelated and excluded.
+
+Proposed feature name: `metadata-freshness = []` in the engine. It is not a
+default feature and does not imply `http-plans`. Coordinate the single feature
+entry with fe7lgm and uufub4 before source edits. Only the BingX and WEEX engine
+dependencies enable it; standalone Bitget does not. Combined/workspace builds
+may unify the feature through the consuming families, which is expected.
+
+The source boundary is the entire new metadata facility, not a stub terminal:
+
+- Gate the public metadata module, including its nested work index and tests.
+  Keep the existing `http-plans` gates inside the module; no group or Plan API
+  becomes conditional on metadata freshness.
+- Gate Store's metadata field and the metadata-only methods as one impl block.
+  Gate only the metadata change notifications inside `set_settings` and
+  `update_setting`; their existing financial/settings operations stay active.
+- Gate the common validated terminal's metadata write-fence cleanup at its
+  existing location, after successful owner retirement. Do not move it or add
+  any emitter, fallback, runtime venue test, receipt or generation exception.
+- Enable the feature for BingX and WEEX. Their existing implementation and
+  financial rules remain unchanged. Do not gate the bounded Vec separately or
+  alter refusal, invalidation, publication, observer or exact-terminal logic.
+- Run the original metadata allocation control and both metadata integration
+  targets only with their explicit feature enabled. Preserve every assertion,
+  including dependent Plan policies, stale reuse and capacity controls.
+
+Validation first proves that standalone Bitget's feature graph omits the new
+feature while BingX and WEEX enable it. Check the engine with the feature off
+and with metadata freshness alone (without HTTP Plans), then run the original
+55 metadata library and 180 engine/BingX/WEEX integration controls with their
+required features. Run a scoped Bitget account control with the feature off;
+workspace feature unification is not evidence for this disabled configuration.
+
+Rebuild only the Bitget family using the identical pinned local command,
+profile, lockfile and optimizer. Aim to recover the baseline's approximate
+1,362,767 bytes and leave real margin; record web/Node bytes and hashes. Run
+native workspace all-targets, wasm32 workspace check and strict wasm32 Clippy,
+formatting, bans and ratchets with four jobs and serial builds. Source review
+by uufub4 must preserve the existing custody verdict. After plan/source review
+and local gates, push one freeze candidate and retain its one fresh PR-triggered
+Rust run. No budget, compiler profile, dependency version or host protocol edit.

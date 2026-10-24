@@ -402,4 +402,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 
 
-| Metadata/settings freshness | BingX query owner; WEEX background freshness; Plan composition pending | Before metadata read coalescing, per-symbol write fences or atomic settings publication. | [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md) |
+| Metadata/settings freshness | BingX/WEEX source reviewed; non-default feature isolation planned | Before metadata read coalescing, per-symbol write fences, atomic publication or family feature/size isolation. | [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md) |
