@@ -6212,41 +6212,6 @@ Raising a caller's timeout lengthens an adopting venue's root but never
 renews it. Plan consumers are not capped by the caller wait until the
 separate receipt-cap seam (#1949) lands.
 
-## Caller command wait in the engine (#1945)
-
-The WASM host now adds the effective caller wait to every reply command's
-native envelope as `timeoutMs`. The effective wait is the per-call
-`options.timeoutMs` if given, else the configured `rustCommandTimeoutMs`, and
-it is the same validated number that arms the host's own timer. No-reply
-controls send no field.
-
-- **Receipt stamp.** The engine stamps one absolute deadline per external
-  receipt. Native hosts and envelopes without the field get the SDK default of
-  120000 ms, stamped at receipt. Held and deferred commands keep the receipt
-  they arrived with.
-- **Refusals.** A present but invalid `timeoutMs` (null, non-integer, zero,
-  negative or over 2147483647) is refused at decode. A non-finite clock is
-  refused by `handle_command`, with a `JsError` and no dispatch.
-- **Venue behaviour.** Nothing changes until a venue adopts
-  `Cx::command_wait`.
-
-Two separate events, which callers must not conflate:
-
-- **Caller abandonment.** The host timer rejects the promise with
-  `COMMAND_TIMEOUT`. The engine keeps any in-flight transport, and a late
-  native reply is dropped by the host.
-- **Engine-root expiry.** An adopting venue uses the `Remaining` wait as its
-  original Read root and stops issuing work at that same absolute deadline. A
-  Fresh entry that is already expired ends through
-  `reject_expired_command`: one typed Timeout terminal with zero HTTP, timer or
-  Store effects, `NotSent` for a mutation and no outcome for a Read. After
-  admission, expiry ends through the existing Context or Plan authority and
-  never claims `NotSent`.
-
-Raising a caller's timeout lengthens an adopting venue's root but never
-renews it. Plan consumers are not capped by the caller wait until the
-separate receipt-cap seam (#1949) lands.
-
 ## Opt-in Read Plans retain the caller receipt deadline
 
 `begin_preflight_with_command_wait` opts a Read command into the original caller
@@ -6322,6 +6287,90 @@ metadata, logs and ordinary archives retain the 512 MiB response bound. Exact
 size, digest, producer, source, ZIP and restored-runtime checks remain required.
 This retrieval recovery adds no physical measurement and cannot repeat a failed
 second run.
+
+## Engine-owned expiry of caller-wait Read roots (#1945 follow-up)
+
+A venue that admits its original Read root with `Cx::admit_caller_read_root`
+gets a root bounded by the caller's exact receipt deadline. The engine ends
+that root itself at the deadline:
+
+- **Terminal.** The engine emits exactly one strict `CommandFailed` with
+  kind Timeout and no financial outcome.
+- **Nothing published.** Accepted history rows are not published, and no
+  INCOMPLETE marker or native finalizer runs, even when earlier pages were
+  accepted.
+- **Venue.** Outstanding requests are cancelled. Their continuations reach
+  `Venue::read_root_retired`, which runs with no `Cx` and only drops queued
+  work.
+- **Inert afterwards.** Late replies, binds and venue completions through the
+  expired root are inert.
+
+A page timeout while the root is still live keeps the venue's native
+accepted-only partial recovery.
+
+Missing receipts. A genuine command with no receipt of its own (an exhausted
+receipt sequence, a duplicate of a live legacy id, or an unstampable clock)
+is refused once:
+- a Read gets no outcome;
+- a Mutation gets `NotSent`.
+
+No default deadline is ever minted. Callers see a typed failure, not a
+120 s wait.
+
+Adopting venues must complete only through their root and must never use
+numeric `done` or `fail`. A numeric completion after the owner is removed is
+a separate gap that predates this change and is not closed here. Callers can
+distinguish the following:
+
+| Event | Meaning |
+| --- | --- |
+| Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
+| Engine Timeout terminal | The root expired. No further work is issued. |
+
+## Selected caller-wait roots and physical history pages
+
+Signed plain command reads can retain one selected identity, slot, route and
+account-evidence scope across physical pages. The original root captures the
+caller's exact receipt deadline. Each eligible page or native re-send gets a
+fresh Read/Never child capped by that root; a preceding page's shorter deadline
+does not bound the next page. Selection never changes midway through a query.
+
+Root expiry uses the shared strict Timeout terminal without accepted-row
+publication or an incomplete marker. A physical page timeout while the root is
+live retains the shared history caller's accepted-prefix recovery. Queued native
+state retires by exact owner through the shared expiry hook. Consumers complete
+only through their original root and keep their existing retry eligibility,
+paging, body validation and finalization policy. This helper changes no host
+wait, numeric completion contract or native venue issuer by itself.
+
+## TxFlow whole managed socket family
+
+TxFlow uses shared managed feeds for both api-ws and node ws. API is Public;
+node is Private unless public_data_only. Shared/Disabled public-feed policy
+suppresses public sockets/topics while retaining private node financial traffic.
+Both feeds retain receive-before-decode AnyText liveness, native JSON/ping bytes,
+10s connect,30s idle,10s ping and1s-to16s retry bounds. Duplicate/retired/expired
+socket ingress is inert before native publication. Only node retirement clears
+published books and invalidates the account generation/settings/read owners.
+
+Subscriptions represent the final desired set, reconciled against frames already
+returned to the host, with150ms pacing. Transient subscribe/unsubscribe flips may
+coalesce before release. They do not create an unbounded FIFO or a4096-flip close;
+actual retained-capacity refusal remains bounded by the shared core. Unsubscribe
+after an already-returned subscribe still emits the native unsubscribe frame at
+the existing cadence. The final set converges after a burst of flips.
+
+Private opening/reconnect refresh follows the complete desired node batch and a
+subsequent shared released-interest timer ingress. This deliberately replaces
+native HTTP-before-paced-private-frames ordering; it is host-action handoff, not
+peer acknowledgement. The callback selects current native read/revision state.
+Refresh intent survives refusal/retirement and is consumed only by native read
+ownership. Startup and poll reads remain independent; startup consumption prevents
+a later wake from adding a refresh the native early-open path never admitted.
+Public-only mode has no private refresh. A missing private address still fails
+configuration before I/O; the defensive no-address callback remains a guarded
+native no-op. HTTP builders, PublicCors/static headers, financial reducers,
+history, signing and trading retain their existing contracts.
 
 
 ### Replay protocol diagnostics at final capture

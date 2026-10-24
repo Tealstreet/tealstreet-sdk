@@ -779,7 +779,7 @@ fn book_and_chart_intents_before_metadata_subscribe_once_when_ready() {
 }
 
 #[test]
-fn subscription_fifo_sends_one_frame_per_150ms_and_paces_unsubscribe() {
+fn desired_subscriptions_coalesce_and_released_unsubscribe_keeps_150ms_pacing() {
     let (mut e, _, api) = ready();
     for interval in ["1m", "3m", "5m"] {
         e.handle(
@@ -797,48 +797,85 @@ fn subscription_fifo_sends_one_frame_per_150ms_and_paces_unsubscribe() {
             interval: safe_cex_engine::model::Interval::M1,
         }),
     );
-    for (index, (method, interval)) in [
-        ("subscribe", "1m"),
-        ("subscribe", "3m"),
-        ("subscribe", "5m"),
-        ("unsubscribe", "1m"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let actions = e.drain_actions().collect::<Vec<_>>();
-        let sent = actions
+    let first: Vec<_> = e.drain_actions().collect();
+    let timer = first
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer {
+                timer,
+                at_ms: 3150.0,
+            } => Some(*timer),
+            _ => None,
+        })
+        .expect("second desired frame is paced150ms");
+    let mut intervals = Vec::new();
+    let collect = |actions: &[Action], intervals: &mut Vec<String>| {
+        let sent: Vec<_> = actions
             .iter()
-            .filter_map(|a| match a {
+            .filter_map(|action| match action {
                 Action::WsSend { socket, text } => Some((*socket, text)),
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].0, api);
         let frame: serde_json::Value = serde_json::from_str(sent[0].1).unwrap();
-        assert_eq!(frame["method"], method);
-        assert_eq!(frame["subscription"]["interval"], interval);
-        let at = 3150.0 + index as f64 * 150.0;
-        let timer = actions
-            .iter()
-            .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
-                _ => None,
-            })
-            .unwrap();
-        e.handle(at, Event::TimerFired { timer });
-    }
+        assert_eq!(frame["method"], "subscribe");
+        intervals.push(frame["subscription"]["interval"].as_str().unwrap().into());
+    };
+    collect(&first, &mut intervals);
+    e.handle(3150.0, Event::TimerFired { timer });
+    collect(&e.drain_actions().collect::<Vec<_>>(), &mut intervals);
+    intervals.sort();
+    assert_eq!(
+        intervals,
+        ["3m", "5m"],
+        "transient1m coalesces before host release"
+    );
+    e.handle(
+        3150.0,
+        Event::Command(Command::UnsubscribeCandles {
+            symbol: "BTC-USDC".into(),
+            interval: safe_cex_engine::model::Interval::M3,
+        }),
+    );
+    let queued: Vec<_> = e.drain_actions().collect();
     assert!(
-        !e.drain_actions()
-            .any(|a| matches!(a, Action::WsSend { .. }))
+        !queued
+            .iter()
+            .any(|action| matches!(action, Action::WsSend { .. }))
+    );
+    let timer = queued
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer {
+                timer,
+                at_ms: 3300.0,
+            } => Some(*timer),
+            _ => None,
+        })
+        .expect("unsubscribe waits150ms after the last returned frame");
+    e.handle(3300.0, Event::TimerFired { timer });
+    let sent: Vec<_> = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::WsSend { socket, text } => {
+                assert_eq!(socket, api);
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        [r#"{"method":"unsubscribe","subscription":{"type":"candle","coin":"1","interval":"3m"}}"#]
     );
 }
 
 #[test]
-fn subscription_backlog_is_bounded_and_never_holds_up_heartbeat() {
+fn coalesced_churn_reaches_final_desired_state_without_fifo_overflow() {
     let (mut e, _, api, pending) = ready_with_timers(TICKER);
-    for _ in 0..100 {
+    let flip = |e: &mut Engine<TxFlow>, now| {
         for add in [true, false] {
             let command = if add {
                 Command::SubscribeCandles {
@@ -851,39 +888,71 @@ fn subscription_backlog_is_bounded_and_never_holds_up_heartbeat() {
                     interval: safe_cex_engine::model::Interval::M1,
                 }
             };
-            e.handle(3000.0, Event::Command(command));
+            e.handle(now, Event::Command(command));
         }
+    };
+    for _ in 0..100 {
+        flip(&mut e, 3000.0);
     }
-    e.drain_actions().for_each(drop);
+    e.handle(
+        3000.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTC-USDC".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    let burst: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !burst
+            .iter()
+            .any(|action| matches!(action, Action::WsClose { .. }))
+    );
+    let sent: Vec<_> = burst
+        .iter()
+        .filter_map(|action| match action {
+            Action::WsSend { socket, text } if *socket == api => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        [r#"{"method":"subscribe","subscription":{"type":"candle","coin":"1","interval":"1m"}}"#]
+    );
     for (timer, at) in pending.into_iter().filter(|(_, at)| *at == 12000.0) {
         e.handle(at, Event::TimerFired { timer });
     }
-    assert!(e.drain_actions().any(|a| matches!(a, Action::WsSend { socket, text } if socket == api && text == r#"{"method":"ping"}"#)));
-    for _ in 0..2050 {
-        for add in [true, false] {
-            let command = if add {
-                Command::SubscribeCandles {
-                    symbol: "BTC-USDC".into(),
-                    interval: safe_cex_engine::model::Interval::M1,
-                }
-            } else {
-                Command::UnsubscribeCandles {
-                    symbol: "BTC-USDC".into(),
-                    interval: safe_cex_engine::model::Interval::M1,
-                }
-            };
-            e.handle(13000.0, Event::Command(command));
-        }
-    }
-    let actions = e.drain_actions().collect::<Vec<_>>();
-    assert_eq!(
-        actions
-            .iter()
-            .filter(|a| matches!(a, Action::WsClose { socket } if *socket == api))
-            .count(),
-        1
+    assert!(
+        e.drain_actions()
+            .any(|action| matches!(action, Action::WsSend { socket, text }
+        if socket == api && text == r#"{"method":"ping"}"#))
     );
-    assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+    for _ in 0..2050 {
+        flip(&mut e, 13000.0);
+    }
+    let stable: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !stable
+            .iter()
+            .any(|action| matches!(action, Action::WsClose { .. } | Action::WsSend { .. }))
+    );
+    e.handle(
+        13000.0,
+        Event::Command(Command::UnsubscribeCandles {
+            symbol: "BTC-USDC".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    let sent: Vec<_> = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::WsSend { socket, text } if socket == api => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        [r#"{"method":"unsubscribe","subscription":{"type":"candle","coin":"1","interval":"1m"}}"#]
+    );
 }
 
 #[test]
@@ -940,7 +1009,8 @@ fn socket_rate_limit_discards_old_queue_and_restores_current_intents_on_reconnec
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(old_timers.iter().any(|(timer, _)| cleared.contains(timer)));
+        // Shared pacing has no extra empty-queue arm after the final frame.
+        // Only timers actually cleared by this retirement belong to its epoch.
         for (timer, at) in old_timers {
             if cleared.contains(&timer) {
                 e.handle(at, Event::TimerFired { timer });
