@@ -196,7 +196,7 @@ pub(super) enum Seal {
 pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
     contexts: crate::IdMap<u64, Context>,
-    commands: crate::IdMap<CommandId, CommandOwner>,
+    commands: std::collections::HashMap<CommandId, CommandOwner>,
     sessions: session::Sessions,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
@@ -218,7 +218,7 @@ pub(super) struct ContextRegistry {
     /// Order-read epoch at each live owner's first released Read: one logical
     /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
     #[cfg(feature = "order-locks")]
-    read_marks: crate::IdMap<Owner, u64>,
+    read_marks: std::collections::HashMap<Owner, u64>,
 }
 
 impl ContextRegistry {
@@ -239,7 +239,7 @@ impl ContextRegistry {
         if self.read_marks.is_empty() {
             return;
         }
-        let mut live: crate::id_map::IdSet<Owner> =
+        let mut live: std::collections::HashSet<Owner> =
             self.contexts.values().map(Context::owner).collect();
         live.extend(self.commands.iter().map(|(id, owner)| Owner::Command {
             id: *id,

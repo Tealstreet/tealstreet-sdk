@@ -8,7 +8,7 @@ pub(super) struct Executions {
     groups: Groups,
     /// Execution root identity (its `Owner::Execution` generation) to group.
     roots: crate::IdMap<u64, Execution>,
-    observers: crate::IdMap<CommandId, Observer>,
+    observers: std::collections::HashMap<CommandId, Observer>,
     /// Background read Context rooting each background execution.
     backgrounds: crate::IdMap<u64, Context>,
 }

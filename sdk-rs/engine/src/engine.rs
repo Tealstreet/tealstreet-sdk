@@ -1479,7 +1479,7 @@ struct Io<P> {
     #[cfg(feature = "order-locks")]
     order_locks: crate::order_locks::OrderLocks,
     #[cfg(feature = "order-locks")]
-    active_commands: crate::id_map::IdSet<CommandId>,
+    active_commands: std::collections::HashSet<CommandId>,
     #[cfg(feature = "order-locks")]
     order_read_tokens: crate::IdMap<RequestId, u64>,
     #[cfg(feature = "order-locks")]

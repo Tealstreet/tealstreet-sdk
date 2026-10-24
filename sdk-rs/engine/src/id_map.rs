@@ -1,11 +1,11 @@
 //! Maps keyed by engine-issued integer identities.
 use std::collections::HashMap;
-#[cfg(feature = "order-locks")]
-use std::collections::HashSet;
 use std::hash::{BuildHasherDefault, Hasher};
 
-/// Engine-issued IDs never come from a peer, so they need no HashDoS-resistant
-/// hashing; one multiply per word is smaller and faster than SipHash.
+/// Only for keys the engine itself issues (RequestId, TimerId, reserved
+/// context/root IDs): no peer, host or caller chooses them, so SipHash's
+/// HashDoS resistance buys nothing. Caller-chosen keys (CommandId, Owner,
+/// venue or wire IDs) must keep `RandomState`.
 #[derive(Default, Clone, Copy)]
 pub(crate) struct IdHasher(u64);
 
@@ -33,6 +33,3 @@ impl Hasher for IdHasher {
 }
 
 pub(crate) type IdMap<K, V> = HashMap<K, V, BuildHasherDefault<IdHasher>>;
-/// A set of engine-issued IDs, hashed like `IdMap`.
-#[cfg(feature = "order-locks")]
-pub(crate) type IdSet<K> = HashSet<K, BuildHasherDefault<IdHasher>>;

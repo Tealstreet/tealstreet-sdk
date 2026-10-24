@@ -96,7 +96,7 @@ struct Group {
 pub(crate) struct Groups {
     next: u64,
     groups: crate::IdMap<u64, Group>,
-    members: crate::IdMap<CommandId, (u64, u64)>,
+    members: std::collections::HashMap<CommandId, (u64, u64)>,
 }
 
 impl Entry {
