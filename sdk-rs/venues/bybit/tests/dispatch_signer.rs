@@ -981,3 +981,30 @@ fn hyro_host_failure_eligible_retry_then_provider_refusal_retains_ambiguity() {
     assert_eq!(error.kind, None);
     assert_eq!(error.venue_code, None);
 }
+
+const EMPTY_PAGE: &str = r#"{"retCode":0,"result":{"list":[]}}"#;
+
+/// RUST_REQUEST_CONTEXT required retry case for Hyro: a create that reached
+/// the venue keeps its uncertainty even when reconciliation found no row and
+/// the same-ID retry then fails at the signer.
+#[test]
+fn hyro_retry_refused_after_a_released_create_stays_unknown() {
+    let (mut h, gate) = ready(Variant::Hyrotrader);
+    h.command(Command::PlaceOrders {
+        command: 42,
+        orders: vec![order()],
+    });
+    let request = h.take("/v5/order/create");
+    h.event(Event::HttpFailed {
+        request: request.id,
+        error: "lost after dispatch",
+    });
+    h.respond("/v5/order/realtime", 200, EMPTY_PAGE);
+    // Both axes are now complete and absent: the same-ID retry is signed next.
+    gate.mode.store(2, Ordering::SeqCst);
+    h.respond("/v5/order/history", 200, EMPTY_PAGE);
+    assert_eq!(
+        h.outcomes.iter().filter(|(c, _)| *c == 42).collect::<Vec<_>>(),
+        [&(42, Some(Outcome::Unknown))]
+    );
+}
