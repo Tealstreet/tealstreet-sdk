@@ -328,3 +328,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Crypto.com public discovery ownership | Managed implementation under review | Before managing the last unsigned discovery sender and its Markets/Tickers continuations. | [RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md](RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md) |
 
 | Orderly initial history refusals | Implemented; bounded reviews and CI pending | Before converting the three initial history refusals; excludes combo-5b signer/source work. | [RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md](RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md) |
+| Crypto.com full private dispatch and RequestContext | Plan and original controls; shared source after 5b | Before removing the final eight private witnesses and raw signing funnel. | [RUST_CRYPTOCOM_PRIVATE_REQUEST_CONTEXT.md](RUST_CRYPTOCOM_PRIVATE_REQUEST_CONTEXT.md) |
