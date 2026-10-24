@@ -66,10 +66,13 @@ protocol time. WS public/auth uses the same nonce rules and omits params.
 Pin independent Python hmac literals for a REST Strings/u64 case and WS auth.
 Keep recipe parity and security evidence separate from legacy oracle deletion.
 At both prepare and apply, attest the exact method/host/path/headers/body params
-and receipt; reject provider headers, wrong receipt/value count/MAC length and
-CR/LF without partial mutation. Use shared validation primitives rather than
-another result-policy implementation. Preserve native Content-Type and replace
-only recipe-owned headers wholesale. Never retain provider key/MAC results in
+and receipt. HTTP headers are exactly Content-Type: application/json, with empty
+signer_headers; prepare requires body None (WS empty text). Apply requires its
+attested prepare, exactly two values, a32-byte MAC, matching receipt and no
+provider headers/CRLF. Replace body/text wholesale with id/nonce taken from the
+receipt stamp; do not trust mutable self.nonce as separate authority. No partial
+mutation on refusal. Use shared validation primitives rather than another
+result-policy implementation. Never retain provider key/MAC results in
 errors, Debug or unrelated continuations. Enumerate signing-map/check-signing
 family-flip exposure before changing it; no staging exemption is authorized.
 
@@ -89,20 +92,61 @@ later; drop all later raw validate calls and any dual path. No Crypto-specific
 identity/validation type or algorithm. Invalid secondary blocks BOTH start()
 (CONFIG_INVALID before discovery) and fetch_identity (validation failure before
 public-data-only/missing-primary failure). Keep exact messages and precedence.
-The shared credential inventory must shrink, never grow, after actual #1831.
+At the reviewed5b-final inventory, Crypto lib.rs has ReadCredentials1 and
+read_credentials3; identity.rs has read_credentials1. Remove all five mentions
+through trusted setup validation metadata, with no relocation into another
+venue file. Shared credential inventory is regenerated after actual #1831.
+
+## Signing inventory and vector literals
+
+Move the hardened recipe to src/sign/dispatch.rs and delete eager Credentials
+and its raw-material oracle. Keep Crypto outside the migrated-family scanner
+set, matching the owner's explicit WOO option: this checker scans sign/ even
+after a migrated flip, so a move plus flip alone adds primitive witness rows.
+No new baseline row or exclusion is requested. Existing Crypto baseline sites
+shrink: lib.rs11 -> at most2 required EraseSecrets trait/method witnesses,
+secondary_tests.rs3 ->0 through trusted fixture setup. Remove orphan Sensitive
+storage and raw-field handling; independently review the entire dispatch module
+for complete custody. The final scanner decides exact removal-only counts.
+This checker state is interim, not a permanent exemption: once the remaining
+two lib.rs EraseSecrets witnesses leave, a named follow-up flips Crypto into the
+migrated set and lists any newly exposed canonical primitive rows explicitly
+for owner review. Full dispatch/provider review and independent vectors remain
+mandatory before this cutover can be READY.
+
+Independent Python hmac literals use key fixture-primary-key, secret
+fixture-primary-material and nonce1710000000000. REST private/get-trades has
+exec_inst=[REDUCE_ONLY,POST_ONLY], instrument_name=BTCUSD-PERP and limit=u64::MAX:
+ad5455a0093aba156f0ad8f96ec18c599add648c4de5dbe3b2059ea1fbbc43aa.
+WS public/auth with no params:
+0e9d20117ab7df8097634d022b6241c57cc2eba952e8685cbb2240e43efa48fb.
+Both are committed as literals in the original target, separate from the native
+recipe's own calculation. Native same-ms and MAX-u64 rendering are also pinned.
 
 ## Request owners and policy
 
 Account polling: actual Background Read Contexts and selected dispatch helper,
-20s per physical operation. Validate exact delivery before stream codecs,
+20s per physical operation. Each stage shares one retry counter: signature-text
+40101 allows one immediate retry; other transport errors allow three immediate
+retries. A transport retry consumes the signature retry allowance and vice
+versa. Do not add a retry timer. Reset rows/skips for the retried stage and
+reset its counter only when advancing to the next read. Preserve the native
+raw/decoded text compatibility exactly, with dedicated mixed-error controls.
+Validate exact delivery before stream codecs,
 coverage/skips, snapshot tokens, stage/publication and next-read transitions.
 Typed failure cleanup consumes the exact Pending, keeps native retry/reset,
 and never implies DATA authority. Preserve positions -> balance -> regular
-orders -> advanced orders, 10s poll, partial publication and revision fencing.
+orders -> advanced orders on initial/every fourth successful cycle; intervening
+10s polls fetch only positions -> balance. Pin regular-order rows/token retention
+across an advanced-order retry, partial publication and revision fencing.
 Provider refusal must schedule native recovery once rather than leave busy set.
 
 Identity: genuine caller root before POST, immutable caller wait; fresh20s
-children under it, including the one native code40101 read retry. Preserve UUID
+children under it. Native identity retries immediately: code40101 once, ordinary
+transport up to three times, using one shared counter. Transport then40101 adds
+no signature retry; signature then transport has only the remaining counter
+budget. Reprepare each fresh20s child under the original root, without a new
+retry delay or renewed root. Preserve UUID
 text/integer/zero rules, primary signature and no financial Store publication.
 Local refusals and success/error diagnostic ordering use the same owned root.
 Duplicate IDs, capacity, missing receipt, preparation/provider refusal, equality
@@ -131,6 +175,24 @@ write resend; malformed ACK/unproven status is unknown; accepted partial IDs
 survive a later failure. Keep native read retries separate from write resend.
 Exact Plan source/physical-attempt/window geometry must be reviewed by uufub4
 before implementation; do not guess around unsupported constructors.
+This is a pre-source gate: declare two physical attempts for a write with the
+native single40101 resend; retain serial20ms step eligibility, the checked
+whole-batch credit ceiling, and genuine leverage Read-preflight -> Mutation-Plan
+custody. The exact constructor/credit/window table remains pending core review.
+Never admit a normal Read root and attempt fresh command-entry Mutation later.
+Empty keyed PlaceOrders/CancelOrders use done_empty_plan on genuine Preflight
+authority, with no synthetic physical call or accepted fact. Keyless empty
+batches still refuse credentials first; pin both plus duplicate/capacity gates.
+Native40101 write resends are immediate and bypass the inter-step20ms timer.
+Any added physical pacing fence must be explicitly reviewed and recorded in
+CALLERS, with delayed-provider/final-Claim/resend controls, not claimed as parity.
+
+New preparation/provider refusals have no eager-native equivalent: identity and
+history fail strictly through their exact root; writes record NotSent through
+the journal; account cleanup clears its busy state and schedules native poll
+recovery once; WS follows its existing failure/reconnect lifecycle. Pin each
+separately. A late WS signing result after close/reconnect is inert; retain the
+native one-second auth handoff and no financial or subscription work before auth.
 
 ## Original controls and gates
 
@@ -154,3 +216,13 @@ at a time. Full size/CPU/replay are CI. Independent source/caller/map plus HMAC,
 selection and core API reviews precede READY; draft CI runs alongside review.
 Architecture gate: No when this consumes existing engine composition; any shared
 API gap is handed to its owner before venue code, never solved by a local copy.
+
+Original checkpoint on unchanged f40d64831ee runtime: dedicated target executes
+26 tests, 13 assertion RED /13 GREEN /0 ignored. REDs expose provider bypass in
+identity/startup/WS, missing provider fallback, root deadline/duplicate/capacity,
+all-failed and partial write terminals, 500+40101 write resend, and unprepared
+recipe application. Positives pin exact vectors/stamps, selection/validation,
+secret erasure, empty-batch precedence, mixed retry counters, fourth-cycle orders
+and regular-order snapshot retention across advanced-order retry. The first WS
+fixture attempted to install the provider after startup; that setup error was
+corrected before counting its assertion RED. No runtime/map/Cargo edits.
