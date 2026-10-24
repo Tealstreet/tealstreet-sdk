@@ -11,7 +11,7 @@ use support::Options;
 struct Harness {
     engine: Engine<Bingx>,
     requests: Vec<HttpRequest>,
-    timers: Vec<TimerId>,
+    timers: Vec<(TimerId, f64)>,
     results: Vec<Result<String, String>>,
     now: f64,
 }
@@ -34,10 +34,16 @@ impl Harness {
 
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);
-        for action in self.engine.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             match action {
                 Action::Http(request) => self.requests.push(request),
-                Action::SetTimer { timer, .. } => self.timers.push(timer),
+                Action::SetTimer { timer, at_ms } => {
+                    self.timers.retain(|(existing, _)| *existing != timer);
+                    self.timers.push((timer, at_ms));
+                }
+                Action::ClearTimer { timer } => {
+                    self.timers.retain(|(existing, _)| *existing != timer)
+                }
                 Action::Notice(Notice::CommandDone { result, .. }) => self.results.push(Ok(result)),
                 Action::Notice(Notice::CommandFailed { error, .. }) => {
                     self.results.push(Err(error.legacy_text()))
@@ -64,8 +70,9 @@ impl Harness {
     }
 
     fn tick(&mut self) {
-        let timer = self.timers.remove(0);
-        self.now += 200.0;
+        self.timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let (timer, at_ms) = self.timers.remove(0);
+        self.now = at_ms;
         self.event(Event::TimerFired { timer });
     }
 
