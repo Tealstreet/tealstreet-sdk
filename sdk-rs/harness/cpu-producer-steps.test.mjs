@@ -118,6 +118,62 @@ test('working control: terminal original producer binds without a metadata poll'
   assert.equal(value.calls.downloads, 0);
 });
 
+test('empty-inventory original: a successful producer waits for its step list to materialize', async t => {
+  const value = fixture([job => { job.steps = []; }, () => {}]);
+  const result = await settle(t, value.read);
+  assert.ifError(result.error);
+  assert.equal(value.calls.jobs, 2);
+  assert.deepEqual(result.value.job, value.jobs[1]);
+  assert.deepEqual(value.context.bindings[0].job, value.jobs[1]);
+});
+
+test('empty-inventory original: empty then pending steps cannot bind an intermediate record', async t => {
+  const value = fixture([job => { job.steps = []; },
+    job => { job.steps[2] = pending(CPU_COHORT_STEPS.strict); }, () => {}]);
+  const result = await settle(t, value.read);
+  assert.ifError(result.error);
+  assert.equal(value.calls.jobs, 3);
+  assert.deepEqual(result.value.job, value.jobs[2]);
+  assert.deepEqual(value.context.bindings[0].job, value.jobs[2]);
+});
+
+test('empty-inventory original: an empty list exhausts the same bounded refresh budget', async t => {
+  const value = fixture([job => { job.steps = []; }]);
+  const result = await settle(t, value.read);
+  assert.match(result.error?.message ?? '', /producer steps not terminal after 6 refreshes/);
+  assert.match(result.error.message, /run 1000, job 100 Rust \/ replay measurement \(bitget\)/);
+  assert.match(result.error.message, /step inventory empty/);
+  assert.equal(value.calls.jobs, 7);
+  assert.equal(value.context.producerStepRefreshes, 6);
+  assert.equal(value.context.bindings.length, 0);
+  assert.equal(value.context.bundles.size, 0);
+});
+
+for (const [name, mutate, expected] of [
+  ['absent list', job => { delete job.steps; }, /missing producer step inventory/],
+  ['non-array list', job => { job.steps = {}; }, /missing producer step inventory/],
+  ['malformed step', job => { job.steps.push(null); }, /missing producer step inventory/],
+  ['nonempty list without upload', job => { job.steps.pop(); }, /missing unique successful step/],
+]) test(`empty-inventory working control: ${name} still fails without polling`, async () => {
+  const value = fixture([mutate]);
+  await assert.rejects(value.read, expected);
+  assert.equal(value.calls.jobs, 1);
+  assert.equal(value.context.producerStepRefreshes ?? 0, 0);
+  assert.equal(value.context.bindings.length, 0);
+  assert.equal(value.context.bundles.size, 0);
+});
+
+test('empty-inventory working control: HTTP 502 is not a convergence retry', async () => {
+  const value = fixture([() => {}]);
+  let reads = 0;
+  value.context.reader.listJobs = async () => { reads++; throw new Error('GitHub evidence unavailable (502)'); };
+  await assert.rejects(value.read, /GitHub evidence unavailable \(502\)/);
+  assert.equal(reads, 1);
+  assert.equal(value.context.producerStepRefreshes ?? 0, 0);
+  assert.equal(value.context.bindings.length, 0);
+  assert.equal(value.context.bundles.size, 0);
+});
+
 for (const [name, mutate, expected] of [
   ['failed upload', job => { job.steps[2].conclusion = 'failure'; }, /missing unique successful step/],
   ['attempt2 producer', job => { job.run_attempt = 2; }, /attempt1|physical/],
