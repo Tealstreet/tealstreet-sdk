@@ -46,3 +46,19 @@ Architecture gate: **No**. This corrects a harness assertion about the existing
 clock contract. It neither changes scheduling/signing policy nor relaxes the
 independent wire validator. Product code, TS venue bytes and Rust inventory stay
 exact. This is not a clock/runtime fix or a CI waiver.
+
+
+## Executed regression and focused verification
+
+Plan committed first at `299c636614b`. Original control commit `0d097c39e9c`
+adds the awaited native 1000 ms timer while retaining the old equality. Its
+isolated test fails at the intended assertion: expected 1760880001500, observed
+1760880002500. It passes through real replay, signing and timestamp validation
+before reaching that assertion.
+
+The implementation uses the observed post-sync boundary, or the captured timer
+boundary for the added control, as a lower bound for `readyBefore`. The exact
+rewind and all existing signed-wire, validator, mutation and replay-result
+assertions remain. Node 22 focused execution of the changed file passes all five
+tests, with zero failures or skips. Scoped Prettier and whitespace checks pass.
+No Rust or WASM build is needed for this test-only change; CI remains required.

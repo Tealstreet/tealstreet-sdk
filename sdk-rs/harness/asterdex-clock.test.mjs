@@ -177,7 +177,8 @@ VENUES.asterdex.createRequestValidator=function(...args){
         assert.ok(Number.isSafeInteger(timings.startupTimerBoundary));
         assert.ok(timings.startupTimerBoundary >= timings.after.oracle + 1000);
       }
-      assert.equal(timings.readyBefore, epoch + 1500);
+      assert.ok(Number.isSafeInteger(timings.readyBefore));
+      assert.ok(timings.readyBefore >= (startupTimer ? timings.startupTimerBoundary : timings.after.oracle));
       assert.equal(timings.readyAfter, epoch);
     } else assert.equal(timings.baseline, 22500);
     const replay = JSON.parse(readFileSync(out, 'utf8'));
