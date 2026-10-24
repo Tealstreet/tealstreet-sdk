@@ -2862,3 +2862,11 @@ entry and Context failure. Bitrue shrinks 33 to 30 occurrences and 20 to 18
 fingerprints. The repeated planning-error fingerprint decreases only 2 to 1;
 the queued remote-flow error remains. Signing and successful local settings are
 held for their separately owned migrations/seam.
+
+## Bitrue local fixed-setting success custody
+
+Closed the one numeric SetPositionMode(false) success using shared #1989
+done_local_setting. Native pre-credential ordering and the true-mode refusal
+remain unchanged. No venue-local admission, owner or completion algorithm.
+Bitrue inventory 30 -> 29 occurrences, 18 -> 17 fingerprints; all private
+signing/read/write migrations remain separate.

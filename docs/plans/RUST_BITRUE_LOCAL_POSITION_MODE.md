@@ -56,3 +56,11 @@ actual #1993. No signer source exists on our separate plan/RED-only branch.
 4. Independent source/adversarial, caller and full-map reviews; draft PR/full CI.
    Merge only in an explicit window. Architecture gate: No venue-local algorithm;
    only native Store projection/result is passed to the shared LocalSetting seam.
+
+## Executed originals
+
+Seven compiling native tests against unchanged source produced two assertion
+REDs (command-owner capacity and sub-ms receipt), plus five working controls.
+The duplicate is an existing Engine diagnostic/owner-preservation control,
+not a migration RED. No shared API compilation failure is counted as evidence.
+The same assertions are retained after the single direct source substitution.

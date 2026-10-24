@@ -6597,3 +6597,12 @@ are unchanged. Refusal creates no HTTP, signing-provider work or Store effect.
 The queued trade_next error, native builder/entropy behavior, valid private wire
 and successful SetPositionMode(false) stay unchanged. This does not migrate the
 signer or admit keyless successful settings; that success awaits the shared seam.
+
+## Bitrue local one-way setting completion
+
+SetPositionMode(false) still returns `[]` and stores hedged=false before
+credentials, including public-only/keyless setup and missing or unknown symbols.
+The shared LocalSetting seam now refuses exhausted command-owner capacity and
+expired/sub-ms waits before that projection or success. It adds no Context,
+HTTP, signer, timer or journal. Duplicate live ids retain the original owner
+and diagnostic; SetPositionMode(true) retains its Unsupported/NotSent refusal.

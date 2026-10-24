@@ -867,8 +867,7 @@ impl Bitrue {
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.store.set_hedged(false);
-                    cx.done(*command, "[]".into());
+                    let _ = cx.done_local_setting("[]".into(), |store| store.set_hedged(false));
                 }
                 return true;
             }
