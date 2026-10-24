@@ -141,3 +141,33 @@ work, the next asset succeeds, then only the failed asset retries and the whole
 seed completes. The existing eight original bodies remain an exact prefix.
 Both targets pass: 16 library tests and nine ticker controls, zero ignored.
 This is scoped new-control execution, separate from the earlier 159-test run.
+
+
+### Real-WASM injected transport correction
+
+Run 40113400131, Binance measurement job 120929616155, reaches a TxFlow WASM
+assertion at txflow.rust.wasm.test.ts:133: private state is ready but tickers are
+not loaded. This is not the unrelated setup timeout or an infrastructure retry.
+The exact retained CI TxFlow artifact 12567348657 reproduces one assertion
+failure and one passing control locally. Its WASM SHA256 is
+`87f64beb111da8c46a9167445288dc6d9feb04313b60b89fcb571b3a74128ebb`.
+
+TS reference startup awaits fetchTickers and publishes them before sockets and
+account startup; that successful-path ordering is preserved. The injected test
+transport, however, supplies request but no prepareHttp. The managed host
+therefore refuses the seed precommit as Unsupported; existing native failure
+Backoff/25ms/private progress then runs correctly. Production nativeTransport
+already supplies prepareFetch. The overseer reviewed this evidence and approved
+adding existing prepareRecordedHttp to this fixture, with no runtime fallback,
+readiness wait, relaxed assertion or production failure-policy change.
+
+The fixture changes exactly two lines (one import and one transport hook);
+removing those lines restores its original full blob. The same retained CI
+artifact then passes both original tests under the package Vitest configuration.
+A separate genuine-engine control passes unchanged runtime: no account reads
+before accepted seed completion, then tickers loaded and their exact native row
+present before private account requests are released. It is a working ordering
+control, not an invented RED. Scoped Clippy, formatting and explicit-file ESLint
+pass. Default ESLint ignored the WASM target, so the explicit check uses
+--no-ignore. Broader native/runtime evidence remains attached to unchanged source.
+Fresh composed CI and exact test-delta review remain gates before READY.
