@@ -1,7 +1,10 @@
 //! A rare configuration validation must not change account settings or reconciliation state.
-use crate::dispatch_signing::Http;
+use crate::dispatch_signing::{Http, url};
 use crate::{Pending, Task, WeexFutures, account_wire::AccountConfig};
-use safe_cex_engine::request_context::{Context, Credential, Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    LocalRefusal, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
 use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Serialize)]
@@ -51,9 +54,10 @@ impl WeexFutures {
             Self::identity_failed(cx, &context, crate::READ_CREDENTIALS_INVALID);
             return;
         }
-        let (Some(_), Some(signer)) = (
+        // Identity needs a configured primary; the read itself uses the read key.
+        let (Some(_), Ok(selected)) = (
             &self.credentials.primary,
-            self.credentials.select(Method::Get),
+            SelectedRead::select(&self.slots, ReadRole::Read { scope: None }),
         ) else {
             let Ok(context) = cx.admit_http_command(Policy {
                 operation: Operation::Read,
@@ -97,45 +101,45 @@ impl WeexFutures {
             Self::identity_failed(cx, &context, "WEEX account reads are rate limited");
             return;
         }
-        let (identity, slot) = signer;
-        let Ok(context) = cx.admit_http_command(Policy {
-            operation: Operation::Read,
-            credential: Some(Credential {
-                slot,
-                reference: identity.credential.clone(),
-            }),
-            timeout_ms: 20_000,
-            pacing: None,
-            retry: RetryPolicy::Never,
-        }) else {
+        let Ok(read) = SelectedRead::command(
+            cx,
+            Ok(selected),
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+            // Unused: the selection above is already present.
+            LocalRefusal {
+                diagnostic: None,
+                error: unavailable(),
+            },
+        ) else {
             return;
         };
-        let recipe = Http::new(
-            identity.clone(),
-            Method::Get,
-            "/capi/v3/account/accountConfig".into(),
-            None,
-        );
-        let (url, _, body) = recipe.unsigned();
-        let pending = Pending {
-            task: Task::Identity {
-                context: context.clone(),
-            },
-            invalid: false,
-            skipped: Vec::new(),
-            seed_generation: self.seed_generation,
+        let context = read.context().clone();
+        let path_query = String::from("/capi/v3/account/accountConfig");
+        let request = ReadRequest {
+            method: Method::Get,
+            url: url(&path_query),
+            body: None,
+            stream: None,
         };
-        if cx
-            .request_signed_managed(
-                context.clone(),
-                Method::Get,
-                url,
-                body,
-                Box::new(recipe),
-                pending,
-            )
-            .is_err()
-        {
+        let seed_generation = self.seed_generation;
+        let queued = read.queue(
+            cx,
+            request,
+            |identity| Box::new(Http::new(identity.clone(), Method::Get, path_query, None)),
+            |read| Pending {
+                task: Task::Identity {
+                    context: read.context().clone(),
+                },
+                invalid: false,
+                skipped: Vec::new(),
+                seed_generation,
+            },
+        );
+        if queued.is_err() {
             crate::managed::reject(
                 cx,
                 &context,

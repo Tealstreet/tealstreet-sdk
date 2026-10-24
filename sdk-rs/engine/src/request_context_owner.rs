@@ -56,6 +56,14 @@ impl Preflight {
         }
     }
 
+    /// A physical owner's retirement token, never a usable preflight.
+    pub(crate) fn for_owner(issuer: &Arc<()>, owner: Owner) -> Self {
+        Self {
+            issuer: issuer.clone(),
+            owner,
+        }
+    }
+
     pub fn owner(&self) -> Owner {
         self.owner
     }
@@ -88,6 +96,14 @@ impl Plan {
         Self {
             issuer: preflight.issuer.clone(),
             owner: preflight.owner,
+            deadline,
+        }
+    }
+    /// The same admitted Plan, owned by its execution's physical owner.
+    pub(crate) fn with_owner(preflight: &Preflight, owner: Owner, deadline: f64) -> Self {
+        Self {
+            issuer: preflight.issuer.clone(),
+            owner,
             deadline,
         }
     }

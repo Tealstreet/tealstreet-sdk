@@ -38,12 +38,12 @@ impl Http {
         }
     }
     pub fn unsigned(&self) -> (String, Vec<(&'static str, String)>, Option<String>) {
-        (
-            format!("{}{}", crate::paths::REST, self.path_query),
-            public_headers(),
-            self.body.clone(),
-        )
+        (url(&self.path_query), public_headers(), self.body.clone())
     }
+}
+/// The unsigned request URL, before any identity signs it.
+pub fn url(path_query: &str) -> String {
+    format!("{}{}", crate::paths::REST, path_query)
 }
 impl Http {
     fn attest(&self, outbound: &Action) -> Result<(), SignError> {

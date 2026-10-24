@@ -22,7 +22,9 @@ fn respond(e: &mut Engine<Grvt>, request: &HttpRequest, body: &str, headers: &st
             },
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, NOW + 2.)
+        .into_iter()
+        .collect()
 }
 fn boot() -> (Engine<Grvt>, TimerId) {
     let (e, refresh, _) = boot_with(r#"{"r":[]}"#);
@@ -37,7 +39,9 @@ fn boot_with(positions: &str) -> (Engine<Grvt>, TimerId, Option<safe_cex_engine:
         ..Options::default()
     }));
     e.start(NOW);
-    let mut pending: VecDeque<_> = e.drain_actions().collect();
+    let mut pending: VecDeque<_> = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect();
     let mut refresh = None;
     let mut private = None;
     while let Some(action) = pending.pop_front() {
@@ -91,8 +95,8 @@ fn boot_with(positions: &str) -> (Engine<Grvt>, TimerId, Option<safe_cex_engine:
 }
 fn refresh(e: &mut Engine<Grvt>, timer: TimerId, body: &str) -> Vec<Action> {
     e.handle(NOW + 300_002., Event::TimerFired { timer });
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(e, NOW + 300_002.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.ends_with("all_instruments") => Some(r),
             _ => None,
@@ -208,7 +212,9 @@ fn catalog_only_refresh_keeps_rails_and_updates_signing_hash_and_decimal_metadat
             }],
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 300_003.)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()
@@ -267,8 +273,8 @@ fn newly_listed_market_limits_wait_for_an_inflight_session_refresh() {
             },
         }),
     );
-    let query = e
-        .drain_actions()
+    let query = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 3.)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.ends_with("/order") => Some(request),
             _ => None,
@@ -364,8 +370,8 @@ fn refresh_with_a_malformed_row_for_a_held_market_keeps_the_market_and_position(
                 socket: private.expect("private socket"),
             },
         );
-        let read = e
-            .drain_actions()
+        let read = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 300_010.)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) if r.url.ends_with("/positions") => Some(r),
                 _ => None,

@@ -232,7 +232,7 @@ fn query_response_cannot_replace_a_newer_subscribed_book() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let subscription = requests(&mut e).pop().unwrap();
+    let subscription = public_requests(&mut e, 150.).pop().unwrap();
     book_response(
         &mut e,
         &subscription,

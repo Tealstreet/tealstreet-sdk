@@ -1,6 +1,7 @@
 //! TxFlow testnet perpetuals, using separate node and API-service feeds.
 mod account;
 mod history;
+mod local_context;
 pub mod sign;
 mod socket_codec;
 mod trading;
@@ -241,6 +242,7 @@ impl TxFlow {
             let mut rows = std::mem::take(&mut self.seed_tickers);
             self.live_tickers.finish(cx.store, &mut rows);
             cx.store.set_tickers(rows);
+            self.index_tickers(cx.store);
             self.open_sockets(cx);
         }
         // TS records the account execution window after the paced seed; once every
@@ -358,6 +360,20 @@ impl TxFlow {
         cx.store
             .update_ticker(symbol, |t| Self::ticker_update(t, row, seed));
     }
+    fn index_tickers(&mut self, store: &safe_cex_engine::Store) {
+        for instrument in self.instruments.values_mut() {
+            instrument.ticker_index = None;
+        }
+        for (index, ticker) in store.tickers().iter().enumerate() {
+            if let Some(instrument) = self
+                .assets
+                .get(&ticker.symbol)
+                .and_then(|asset| self.instruments.get_mut(asset))
+            {
+                instrument.ticker_index = Some(index as u32);
+            }
+        }
+    }
     fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
         let Ok(frame) = PublicFrame::decode(text) else {
             return false;
@@ -389,10 +405,22 @@ impl TxFlow {
                 }
             }
             PublicFrame::Ticker(row) => {
-                if let Some(symbol) = self.symbol(row.instrument_id).map(str::to_owned) {
+                if let Some(instrument) = self.instruments.get(&row.instrument_id) {
+                    let symbol = instrument.name.as_str();
                     let mask = Self::ticker_mask(&row, false);
-                    Self::apply_ticker(cx, &symbol, row, false);
-                    self.live_tickers.record(cx.store, &symbol, mask);
+                    if let Some(index) = instrument.ticker_index.filter(|index| {
+                        cx.store
+                            .tickers()
+                            .get(*index as usize)
+                            .is_some_and(|ticker| ticker.symbol == symbol)
+                    }) {
+                        cx.store.update_ticker_at(index, |ticker| {
+                            Self::ticker_update(ticker, row, false)
+                        });
+                    } else {
+                        Self::apply_ticker(cx, symbol, row, false);
+                    }
+                    self.live_tickers.record(cx.store, symbol, mask);
                 }
             }
             PublicFrame::Depth(row) => {
@@ -514,11 +542,19 @@ impl TxFlow {
             return;
         };
         let Some(asset) = self.asset(cx, &symbol) else {
-            cx.fail(command, "Market not found");
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err("Market not found".into()),
+            );
             return;
         };
         if !supported(interval) {
-            cx.fail(command, interval.unsupported("TxFlow"));
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err(interval.unsupported("TxFlow").into()),
+            );
             return;
         }
         let end = to_ms.unwrap_or(cx.now);
@@ -532,7 +568,11 @@ impl TxFlow {
             || end > 9_007_199_254_740_991.0
             || from_ms.is_some_and(|t| t < 0.0)
         {
-            cx.fail(command, "Invalid candle time range");
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err("Invalid candle time range".into()),
+            );
             return;
         }
         #[derive(Serialize)]

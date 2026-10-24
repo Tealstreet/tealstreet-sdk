@@ -9,6 +9,8 @@ type LocalIdentity = LocalIdentityMetadata & {
   passphrase?: string;
   /** Secondary only, set by a family setup mapping: sign with the primary's ref. */
   signingFromPrimary?: true;
+  /** Primary only, set by a family setup mapping: role-bound provider material. */
+  extra?: { zklinkSeed?: { value: string; encoding: 'hex' } };
 };
 type Credentials = { primary?: LocalIdentity; secondary?: LocalIdentity };
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
@@ -28,7 +30,7 @@ const identityMetadata = (input: unknown): LocalIdentityMetadata | undefined => 
   const { stableId, secretEncoding, trimCredential } = value;
   if (stableId !== undefined && (typeof stableId !== 'string' || !stableId.trim() || new TextEncoder().encode(stableId).length > 256 || /[\u0000-\u001f\u007f-\u009f]/u.test(stableId)))
     return invalidMetadata();
-  if (secretEncoding !== undefined && (typeof secretEncoding !== 'string' || !['utf8', 'base64', 'hex', 'pem', 'base64Text'].includes(secretEncoding)))
+  if (secretEncoding !== undefined && (typeof secretEncoding !== 'string' || !['utf8', 'base64', 'hex', 'pem', 'base64Text', 'base58'].includes(secretEncoding)))
     return invalidMetadata();
   if (trimCredential !== undefined && typeof trimCredential !== 'boolean') return invalidMetadata();
   return { stableId, secretEncoding, trimCredential } as LocalIdentityMetadata;
@@ -83,7 +85,12 @@ export class LocalSignerSetup {
   readonly primaryComplete: boolean;
   readonly credentialPresence: CredentialPresence;
 
-  constructor(options: ExchangeOptions, policy: CredentialSetupPolicy = {}, secondarySigningFromPrimary = false) {
+  constructor(
+    options: ExchangeOptions,
+    policy: CredentialSetupPolicy = {},
+    secondarySigningFromPrimary = false,
+    zklinkSeed?: string,
+  ) {
     const setupMetadata = parseLocalSignerMetadata(options.localSigner);
     const primaryMetadata = effectiveIdentityMetadata(setupMetadata.primary, policy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(setupMetadata.secondary, policy.secondary);
@@ -107,7 +114,10 @@ export class LocalSignerSetup {
     resolveSetupPassphrase('secondary', secondary, options.secondary_passphrase, options.passphrase, policy.secondary, options.publicDataOnly === true);
     this.#credentials = {
       ...(options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined
-        ? { primary: { ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase } }
+        ? { primary: {
+          ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase,
+          ...(zklinkSeed ? { extra: { zklinkSeed: { value: zklinkSeed, encoding: 'hex' as const } } } : {}),
+        } }
         : {}),
       ...(secondary
         ? { secondary: secondarySigningFromPrimary
@@ -128,6 +138,7 @@ export class LocalSignerSetup {
         credentials.primary.key = undefined;
         credentials.primary.secret = undefined;
         credentials.primary.passphrase = undefined;
+        credentials.primary.extra = undefined;
       }
       if (credentials.secondary) {
         credentials.secondary.key = undefined;
@@ -152,6 +163,8 @@ export const withoutSigningCredentials = (options: ExchangeOptions): ExchangeOpt
     secondary_secret: _readSecret,
     secondary_passphrase: _readPassphrase,
     localSigner: _setupMetadata,
+    // ApeX's OmniKey seed is signing material: it lives only in provider setup.
+    omniKeySeed: _omniKeySeed,
     auth,
     ...routing
   } = options;
