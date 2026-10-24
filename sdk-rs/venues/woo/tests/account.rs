@@ -42,6 +42,53 @@ fn established_stream() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
     engine.drain_actions().for_each(drop);
     (engine, socket, reads, timer)
 }
+
+fn reconnect_stream(
+    e: &mut TestEngine,
+    socket: SocketId,
+    closed_at: f64,
+) -> (SocketId, f64, Vec<HttpRequest>) {
+    e.handle(closed_at, Event::WsClosed { socket, code: 1006 });
+    let (timer, retry_at) = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms }
+                if (closed_at + 750. ..=closed_at + 1000.).contains(&at_ms) =>
+            {
+                Some((timer, at_ms))
+            }
+            _ => None,
+        })
+        .expect("private reconnect timer");
+    e.handle(retry_at, Event::TimerFired { timer });
+    let replacement = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel: Some(SocketChannel::Private),
+                ..
+            } => Some(socket),
+            _ => None,
+        })
+        .expect("replacement private socket");
+    assert_ne!(replacement, socket);
+    e.handle(
+        retry_at + 1.,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    let mut reads = requests(e);
+    ws(
+        e,
+        replacement,
+        retry_at + 2.,
+        r#"{"event":"auth","success":true}"#,
+    );
+    reads.extend(requests(e));
+    (replacement, retry_at + 2., reads)
+}
 /// Also returns the catalogue re-read timer a partial catalogue schedules.
 fn start_with_retry(
     markets: &str,
@@ -170,7 +217,10 @@ fn fill_amounts(e: &mut TestEngine) -> Vec<f64> {
         .collect()
 }
 fn fill_values(e: &mut TestEngine) -> Vec<(f64, f64)> {
-    let Some(frame) = e.take_frame(100.0) else {
+    fill_values_at(e, 100.0)
+}
+fn fill_values_at(e: &mut TestEngine, now: f64) -> Vec<(f64, f64)> {
+    let Some(frame) = e.take_frame(now) else {
         return vec![];
     };
     let Some((_, payload)) = safe_cex_engine::wire::sections(frame)
@@ -1910,7 +1960,7 @@ fn snapshot_token_invalid_placement_ack_does_not_invalidate_but_valid_id_does() 
 
 #[test]
 fn snapshot_token_rejected_algo_join_does_not_poison_later_amend_routing() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     ws(
         &mut e,
@@ -1919,21 +1969,20 @@ fn snapshot_token_rejected_algo_join_does_not_poison_later_amend_routing() {
         r#"{"topic":"algoexecutionreportv2","data":{"symbol":"PERP_BTC_USDT","algoOrderId":92,"rootAlgoOrderId":92,"algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","quantity":0.01,"triggerPrice":58000,"totalExecutedQuantity":0,"reduceOnly":true}}"#,
     );
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let (_, opened_at, mut reads) = reconnect_stream(&mut e, socket, 70.);
     let normal = take(&mut reads, "/v1/orders?");
     let algo = take(&mut reads, "/v3/algo/orders?");
-    response(&mut e, &normal, 80.0, &page(""));
+    response(&mut e, &normal, opened_at + 10., &page(""));
     e.store_mut().invalidate_order_snapshots();
     response(
         &mut e,
         &algo,
-        90.0,
+        opened_at + 20.,
         &algos(&ALGO.replace("\"algoOrderId\":43", "\"algoOrderId\":92")),
     );
     e.drain_actions().for_each(drop);
     e.handle(
-        110.0,
+        opened_at + 40.,
         Event::Command(Command::AmendOrder {
             command: 92,
             id: "92".into(),
@@ -1952,7 +2001,7 @@ fn snapshot_token_rejected_algo_join_does_not_poison_later_amend_routing() {
 #[test]
 fn snapshot_token_discarded_initial_join_cannot_seed_execution_prefix_or_readiness() {
     for fresh_read in [false, true] {
-        let (mut e, socket, mut reads, _) = start();
+        let (mut e, mut socket, mut reads, _) = established_stream();
         let info = take(&mut reads, "accountinfo");
         response(&mut e, &info, 30.0, INFO);
         reads.extend(requests(&mut e));
@@ -1966,28 +2015,34 @@ fn snapshot_token_discarded_initial_join_cannot_seed_execution_prefix_or_readine
         assert!(!e.store().loaded().orders);
         assert!(e.store().orders().is_empty());
         e.drain_actions().for_each(drop);
-        if fresh_read {
-            e.handle(70.0, Event::WsOpened { socket });
-            let mut reads = requests(&mut e);
+        let event_at = if fresh_read {
+            let (replacement, opened_at, mut reads) = reconnect_stream(&mut e, socket, 70.);
+            socket = replacement;
             let normal = take(&mut reads, "/v1/orders?");
             let algo = take(&mut reads, "/v3/algo/orders?");
             response(
                 &mut e,
                 &normal,
-                75.0,
+                opened_at + 5.,
                 &page(&ORDER.replace("0.005", "0.004")),
             );
-            response(&mut e, &algo, 80.0, &algos(""));
+            response(&mut e, &algo, opened_at + 10., &algos(""));
             assert!(e.store().loaded().orders);
-        }
-        e.take_frame(85.0);
+            opened_at + 20.
+        } else {
+            90.
+        };
+        e.take_frame(event_at - 5.);
         ws(
             &mut e,
             socket,
-            90.0,
+            event_at,
             r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedPrice":59000}}"#,
         );
-        let amounts = fill_amounts(&mut e);
+        let amounts: Vec<_> = fill_values_at(&mut e, event_at + 10.)
+            .into_iter()
+            .map(|(_, amount)| amount)
+            .collect();
         assert_eq!(amounts.len(), 1);
         let expected = if fresh_read { 0.002 } else { 0.006 };
         assert!(

@@ -185,3 +185,22 @@ replacement/open/auth where a later refresh is needed, preserving classification
 before snapshot start and every original financial assertion. Exact fixture-only
 repair proposal was sent to the snapshot owner; no such edit is included here.
 These failures and actual #1943 seed handoff adoption remain readiness gates.
+
+The snapshot owner cleared the exact two fixture repairs. Both now establish a
+real authenticated stream before financial ingress. The rejected-algo case
+classifies order92 first, then uses genuine close/backoff/replacement/open/auth
+before admitting the rejected census. The discarded-initial case does not call
+load or seed orders before invalidation: loaded=false and empty remain pinned.
+Its no-refresh arm accepts the live90 event and emits0.006; its refresh arm uses
+a real replacement and accepted0.004 seed before emitting0.002. All response,
+message and frame clocks after reconnect are relative and monotonic. Existing
+fill_values callers retain their100 default; the repaired later-clock case uses
+an explicit frame clock with the identical wire parser.
+
+Only tests/account.rs and this receipt change. A tokenized comparison confirms
+all six original assertion invocations across the two repaired cases are exact;
+IDs, payloads and invalidation boundary remain unchanged. Executed seven token
+controls PASS and all63 account controls PASS, zero ignored; scoped strict
+account Clippy and formatting/whitespace checks PASS. No token/reducer/trading,
+request/socket map or shared source edit. The two seed-ordering REDs remain open
+and separate. Exact commit/log were sent to mxb4mq for bounded causal review.
