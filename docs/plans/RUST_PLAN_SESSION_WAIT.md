@@ -216,6 +216,39 @@ New-contract REDs follow the API review:
 - N7: Preflight. A parked read resumes as a fresh read context under the same
   Preflight generation, with the predecessor equal to the drain delivery.
 
+## Source review notes (m26ps4, 55ao7t)
+
+- **No timer for a parked Slot.** The Plan's root expiry seals first, and the
+  sealed sweep returns the pending with Timeout/NotSent; a Plan the venue
+  sealed returns InvalidInput/NotSent. This removes the equal-deadline race.
+- **One flush, in place.** `flush_plan_session_waits` runs last in
+  `finish_event_scope` and loops until both the sealed sweep and the ended
+  queue are empty, consuming entries in place so the storage reserved at park
+  survives. A callback inside the flush that ends another wait is served in
+  the same flush, and a Plan sealed by one hook returns its sibling parked
+  Slots in that flush too.
+- **Held until disposition (uufub4 P1).** A Slot whose Session ended stays
+  parked until `flush_plan_session_waits` unparks it immediately before its
+  disposition. That way, ordinary readiness in the same flush cannot issue it
+  first.
+- **Outer flush (uufub4 P1, zs5e83).** The flush is called from
+  `flush_http_plans`, so it runs at every outer Plan flush: after delivery
+  exit, on the Plan-root timer path and at the end of the event scope. A login
+  response or a Plan expiry gets its dispositions in that same `handle` call.
+- **Resume without a delivery.** A Session proven from a socket message or a
+  timer drains with no `http_delivery`. The resumed leg then records no
+  predecessor and must be queued in that same callback, which also has no
+  delivery. N1 resumes this way.
+- **After combo-5b (#1896/#1897):**
+  - `session_scope()` stays the first check in session_ready, session_failed,
+    retire_session and session_wait, ahead of the Unit loop.
+  - `plan_session_wait` does not take `session_scope()`, because it is the ready
+    Plan's own operation. Re-park inside `on_plan_session_wait_ended` must target
+    an already-live Session, since opening one there is refused. A control will
+    pin that re-park in the hook succeeds.
+  - Test `SessionPolicy` literals gain `private_egress: None`, with a workspace
+    check and check-bans on that composition.
+
 ## Delivery phases
 
 1. **Slot park (this change).**

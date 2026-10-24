@@ -557,29 +557,15 @@ impl<P> Cx<'_, P> {
             Ok(checked) => checked,
             Err(error) => return Err((pending, error)),
         };
-        let Some(ids) = self.io.reserve_ids(1) else {
-            return Err((pending, Error::Capacity));
-        };
-        let timer = TimerId(ids.start);
-        self.io.timers.insert(timer, ());
-        self.io.actions.push(Action::SetTimer {
-            timer,
-            at_ms: plan.deadline(),
-        });
         self.io
             .request_contexts
             .plan_body_mut(plan)
             .expect("validated parked Plan")
             .entries[index]
             .parked = true;
-        self.io.session_waits.park_slot(
-            generation,
-            plan.clone(),
-            slot.clone(),
-            intent,
-            timer,
-            pending,
-        );
+        self.io
+            .session_waits
+            .park_slot(generation, plan.clone(), slot.clone(), intent, pending);
         Ok(())
     }
 

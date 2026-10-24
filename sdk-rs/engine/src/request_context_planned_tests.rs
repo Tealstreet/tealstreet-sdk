@@ -44,8 +44,14 @@ mod planned_calls {
         park_token: Option<Context>,
         park_result: Option<Result<(), Error>>,
         repark_on: Option<crate::request_context::Session>,
+        /// Park the second parallel Slot on this Session too.
+        park_second: Option<crate::request_context::Session>,
+        retire_in_ended: Option<crate::request_context::Session>,
+        fail_in_ended: bool,
         wait_ended: Vec<(Context, VenueError)>,
         wait_expired: Vec<(Context, VenueError)>,
+        /// Whether the Plan was still registered when a pending came back.
+        expired_while_live: Vec<bool>,
         // A delivered call reports itself as a complete order read.
         #[cfg(feature = "order-locks")]
         reconcile_reads: bool,
@@ -225,6 +231,15 @@ mod planned_calls {
                     cx.plan_session_wait(&plan, &slot, None, &session, token)
                         .map_err(|(_, error)| error),
                 );
+                if let Some(second) = self.park_second.clone() {
+                    let slot = cx.plan_slots(&plan).unwrap().remove(0);
+                    let token = cx
+                        .http_context(crate::request_context::Scope::Background, wait_token_policy())
+                        .unwrap();
+                    cx.plan_session_wait(&plan, &slot, None, &second, token)
+                        .map_err(|(_, error)| error)
+                        .unwrap();
+                }
             }
             if self.issue_only {
                 let plan = self.plan.as_ref().unwrap();
@@ -412,6 +427,13 @@ mod planned_calls {
             error: VenueError,
         ) {
             self.wait_ended.push((pending.clone(), error));
+            if std::mem::take(&mut self.fail_in_ended) {
+                cx.fail_plan(plan, "venue gave up after login failed").unwrap();
+                return;
+            }
+            if let Some(session) = self.retire_in_ended.take() {
+                assert!(cx.retire_session(&session).unwrap().is_empty());
+            }
             if let Some(session) = self.repark_on.take() {
                 let slot = cx.plan_slots(plan).unwrap().remove(0);
                 cx.plan_session_wait(plan, &slot, None, &session, pending)
@@ -419,7 +441,12 @@ mod planned_calls {
                     .unwrap();
             }
         }
-        fn on_session_wait_expired(&mut self, _: &mut Cx<'_, Context>, pending: Context, error: VenueError) {
+        fn on_session_wait_expired(&mut self, cx: &mut Cx<'_, Context>, pending: Context, error: VenueError) {
+            let live = self
+                .plan
+                .as_ref()
+                .is_some_and(|plan| cx.io.request_contexts.plan_registered(plan));
+            self.expired_while_live.push(live);
             self.wait_expired.push((pending, error));
         }
         fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {
@@ -1572,13 +1599,16 @@ mod planned_calls {
         e.drain_actions().for_each(drop);
         let timer = e.io.request_contexts.plan_timer(7).unwrap();
         e.handle(plan.deadline(), Event::TimerFired { timer });
-        let mut actions = e.drain_actions().collect::<Vec<_>>();
-        actions.extend(flush(&mut e, plan.deadline() + 1.));
+        // The Plan timer event alone returns the pending: no follow-up event.
+        let actions = e.drain_actions().collect::<Vec<_>>();
         assert_eq!(prepares(&actions), 0);
         let failed = actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. }))).count();
         assert_eq!(failed, 1, "one Plan terminal");
         assert_eq!(e.venue.wait_expired.len(), 1, "the pending is returned once");
         assert_eq!(e.venue.wait_expired[0].0, token);
+        assert_eq!(e.venue.expired_while_live, [false], "the Plan terminal comes first");
+        let error = &e.venue.wait_expired[0].1;
+        assert_eq!((error.kind, error.outcome), (Some(ErrorKind::Timeout), Some(crate::Outcome::NotSent)));
         assert!(e.venue.wait_ended.is_empty());
     }
 
@@ -1644,5 +1674,101 @@ mod planned_calls {
         assert!(e.venue.wait_ended.is_empty());
         assert_eq!(e.venue.wait_expired.len(), 1);
         assert_eq!(e.venue.wait_expired[0].0, token);
+        let error = &e.venue.wait_expired[0].1;
+        assert_eq!((error.kind, error.outcome), (Some(ErrorKind::InvalidInput), Some(crate::Outcome::NotSent)));
+    }
+
+    /// Storage reserved at park survives a flush: park, retire, flush, re-park,
+    /// retire again, and the ended queue never needs to grow.
+    #[test]
+    fn ended_wait_storage_survives_a_flush() {
+        let (mut e, _, old) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let replacement = open(&mut e, 1.);
+        e.venue.repark_on = Some(replacement.clone());
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&old).unwrap();
+        flush(&mut e, 2.);
+        assert_eq!(e.venue.wait_ended.len(), 1);
+        let reserved = e.io.session_waits.ended_capacity();
+        assert!(reserved >= 1, "the flush kept the reserved buffer");
+        let _ = Cx { now: 3., store: &mut e.store, io: &mut e.io }.retire_session(&replacement).unwrap();
+        assert_eq!(e.io.session_waits.ended_capacity(), reserved, "no growth in the drain path");
+        flush(&mut e, 4.);
+        assert_eq!(e.venue.wait_ended.len(), 2);
+    }
+
+    /// A callback inside the flush that ends another parked wait is served in
+    /// the same flush, not stranded until an unrelated event.
+    #[test]
+    fn a_wait_ended_inside_the_flush_is_delivered_in_the_same_flush() {
+        let mut e = crate::test_support::seeded_engine(Plans { idle: true, parallel: true, ..Default::default() });
+        e.start(0.);
+        let first = open(&mut e, 0.);
+        let second = open(&mut e, 0.);
+        e.venue.park_on = Some(first.clone());
+        e.venue.park_second = Some(second.clone());
+        e.venue.retire_in_ended = Some(second);
+        start(&mut e, 0.);
+        assert_eq!(e.venue.park_result, Some(Ok(())));
+        e.drain_actions().for_each(drop);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&first).unwrap();
+        flush(&mut e, 2.);
+        assert_eq!(e.venue.wait_ended.len(), 2, "both parked Slots ended in one flush");
+    }
+
+    /// A Plan sealed while its Slot is parked is never resumed by a later
+    /// session_ready; the sealed sweep returns the pending once.
+    #[test]
+    fn a_sealed_plan_is_not_resumed_by_a_later_session_ready() {
+        let (mut e, plan, session) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+        cx.fail_plan(&plan, "venue gave up").unwrap();
+        assert!(cx.session_ready(&session).is_empty(), "a sealed Plan issues nothing");
+        let actions = flush(&mut e, 2.);
+        assert_eq!(prepares(&actions), 0);
+        assert_eq!(e.venue.wait_expired.len(), 1, "returned once");
+        assert!(e.venue.wait_ended.is_empty(), "no custody callback for a sealed Plan");
+    }
+
+    /// A Slot whose Session ended stays held until its ended disposition, so
+    /// ordinary readiness in the same flush cannot issue it first.
+    #[test]
+    fn ordinary_readiness_cannot_issue_a_slot_held_for_its_ended_hook() {
+        let mut e = crate::test_support::seeded_engine(Plans::default());
+        e.start(0.);
+        let old = open(&mut e, 0.);
+        e.venue.park_on = Some(old.clone());
+        e.venue.idle = false;
+        start(&mut e, 0.);
+        assert_eq!(e.venue.park_result, Some(Ok(())));
+        assert_eq!(prepares(&e.drain_actions().collect::<Vec<_>>()), 0);
+        let replacement = open(&mut e, 1.);
+        e.venue.repark_on = Some(replacement);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&old).unwrap();
+        let actions = flush(&mut e, 2.);
+        assert_eq!(prepares(&actions), 0, "readiness did not issue the held Slot");
+        assert_eq!(e.venue.wait_ended.len(), 1, "the ended hook decided it, and re-parked");
+    }
+
+    /// The ended hook seals the Plan while a sibling Slot is still parked; the
+    /// sibling's pending comes back in the same flush, with no later event.
+    #[test]
+    fn a_sibling_parked_slot_returns_in_the_same_flush_when_the_hook_seals() {
+        let mut e = crate::test_support::seeded_engine(Plans { idle: true, parallel: true, ..Default::default() });
+        e.start(0.);
+        let session = open(&mut e, 0.);
+        e.venue.park_on = Some(session.clone());
+        e.venue.park_second = Some(session.clone());
+        e.venue.fail_in_ended = true;
+        start(&mut e, 0.);
+        assert_eq!(e.venue.park_result, Some(Ok(())));
+        e.drain_actions().for_each(drop);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&session).unwrap();
+        let actions = flush(&mut e, 2.);
+        assert_eq!(prepares(&actions), 0);
+        assert_eq!(e.venue.wait_ended.len(), 1, "the first ended in ready custody");
+        assert_eq!(e.venue.wait_expired.len(), 1, "the sibling returned in the same flush");
+        assert_eq!(e.venue.expired_while_live, [false]);
     }
 }

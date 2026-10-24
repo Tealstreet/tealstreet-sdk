@@ -200,7 +200,9 @@ impl Unit {
 struct Wait<P> {
     session: u64,
     unit: Unit,
-    timer: TimerId,
+    /// An owner waits on its own deadline timer. A parked Slot has none: its
+    /// Plan's root expiry seals first, and the sealed sweep returns it.
+    timer: Option<TimerId>,
     pending: P,
 }
 
@@ -211,7 +213,12 @@ pub(in crate::engine) struct Waits<P> {
     /// Parked Slots whose Session retired or failed, delivered after the
     /// callback in that Plan's ready custody. Storage is reserved at park.
     #[cfg(feature = "http-plans")]
-    ended: Vec<(crate::request_context::Plan, P, VenueError)>,
+    ended: Vec<(
+        crate::request_context::Plan,
+        crate::request_context::plan::Slot,
+        P,
+        VenueError,
+    )>,
 }
 
 impl<P> Default for Waits<P> {
@@ -236,8 +243,10 @@ impl<P> Waits<P> {
             .iter()
             .filter(|wait| matches!(wait.unit, Unit::Slot { .. }))
             .count();
-        let needed = (parked + 1).saturating_sub(self.ended.len());
-        self.ended.try_reserve(needed).map_err(|_| Error::Capacity)
+        // Additional to the current length: every parked Slot, plus this one.
+        self.ended
+            .try_reserve(parked + 1)
+            .map_err(|_| Error::Capacity)
     }
 
     pub(in crate::engine) fn park_slot(
@@ -246,15 +255,19 @@ impl<P> Waits<P> {
         plan: crate::request_context::Plan,
         slot: crate::request_context::plan::Slot,
         intent: Option<crate::classify::Intent>,
-        timer: TimerId,
         pending: P,
     ) {
         self.entries.push(Wait {
             session,
             unit: Unit::Slot { plan, slot, intent },
-            timer,
+            timer: None,
             pending,
         });
+    }
+
+    #[cfg(test)]
+    pub(in crate::engine) fn ended_capacity(&self) -> usize {
+        self.ended.capacity()
     }
 
     fn has_slot_work(&self) -> bool {
@@ -401,7 +414,7 @@ impl<P> Cx<'_, P> {
         self.io.session_waits.entries.push(Wait {
             session: generation,
             unit: Unit::Owner(owner.clone()),
-            timer,
+            timer: Some(timer),
             pending,
         });
         Ok(())
@@ -435,14 +448,14 @@ impl<P> Cx<'_, P> {
                 Unit::Slot { plan, slot, intent } => {
                     match self.resume_plan_slot(&plan, &slot, intent) {
                         Ok(leg) => waiters.push(Waiter::Ready(leg, wait.pending)),
-                        Err(reason) => {
-                            self.io.request_contexts.unpark_plan_slot(&plan, &slot);
-                            self.io.session_waits.ended.push((
-                                plan,
-                                wait.pending,
-                                owner_error(reason),
-                            ));
-                        }
+                        // The Slot stays reserved until its ended disposition,
+                        // so no ordinary readiness can issue it first.
+                        Err(reason) => self.io.session_waits.ended.push((
+                            plan,
+                            slot,
+                            wait.pending,
+                            owner_error(reason),
+                        )),
                     }
                 }
             }
@@ -473,11 +486,10 @@ impl<P> Cx<'_, P> {
                 // custody, where the venue can re-park it or fail the Plan.
                 #[cfg(feature = "http-plans")]
                 Unit::Slot { plan, slot, .. } => {
-                    self.io.request_contexts.unpark_plan_slot(&plan, &slot);
                     self.io
                         .session_waits
                         .ended
-                        .push((plan, wait.pending, error.clone()));
+                        .push((plan, slot, wait.pending, error.clone()));
                 }
             }
         }
@@ -489,11 +501,9 @@ impl<P> Cx<'_, P> {
             .into_iter()
             .partition::<Vec<_>, _>(|wait| wait.session == generation);
         self.io.session_waits.entries = kept;
-        for wait in &taken {
-            self.io.timers.remove(&wait.timer);
-            self.io
-                .actions
-                .push(Action::ClearTimer { timer: wait.timer });
+        for timer in taken.iter().filter_map(|wait| wait.timer) {
+            self.io.timers.remove(&timer);
+            self.io.actions.push(Action::ClearTimer { timer });
         }
         taken
     }
@@ -508,7 +518,7 @@ impl<V: Venue> Engine<V> {
     /// timer delivery re-arms at the unchanged deadline.
     pub(in crate::engine) fn expire_session_wait(&mut self, now: f64, timer: TimerId) -> bool {
         let entries = &mut self.io.session_waits.entries;
-        let Some(index) = entries.iter().position(|wait| wait.timer == timer) else {
+        let Some(index) = entries.iter().position(|wait| wait.timer == Some(timer)) else {
             return false;
         };
         if now.is_finite() && now < entries[index].unit.deadline() {
@@ -518,10 +528,6 @@ impl<V: Venue> Engine<V> {
         }
         let wait = entries.remove(index);
         self.io.timers.remove(&timer);
-        #[cfg(feature = "http-plans")]
-        if let Unit::Slot { plan, slot, .. } = &wait.unit {
-            self.io.request_contexts.unpark_plan_slot(plan, slot);
-        }
         self.begin_event_scope();
         self.venue.on_session_wait_expired(
             &mut Cx {
@@ -540,75 +546,84 @@ impl<V: Venue> Engine<V> {
 #[cfg(feature = "http-plans")]
 impl<V: Venue> Engine<V> {
     /// After the callback: a parked Slot whose Plan sealed returns its pending
-    /// once with no custody; one whose Session ended runs the ended hook in its
-    /// Plan's ready custody, or returns like a sealed one if the Plan is gone.
+    /// once with no custody (Timeout if the root expired); one whose Session
+    /// ended runs the ended hook in its Plan's ready custody. Callbacks here may
+    /// queue more, so this runs until both queues are empty, in place, keeping
+    /// the storage reserved at park.
     pub(in crate::engine) fn flush_plan_session_waits(&mut self, now: f64) {
-        if !self.io.session_waits.has_slot_work()
-            || !now.is_finite()
-            || self.io.http_delivery.is_some()
-            || self.io.http_plan_ready.is_some()
-            || self.io.http_plan_expiring.is_some()
-            || !self.io.request_contexts.plan_scope_clear()
-        {
-            return;
-        }
-        let registry = &self.io.request_contexts;
-        let (sealed, kept) = std::mem::take(&mut self.io.session_waits.entries)
-            .into_iter()
-            .partition::<Vec<_>, _>(|wait| {
+        loop {
+            if !self.io.session_waits.has_slot_work()
+                || !now.is_finite()
+                || self.io.http_delivery.is_some()
+                || self.io.http_plan_ready.is_some()
+                || self.io.http_plan_expiring.is_some()
+                || !self.io.request_contexts.plan_scope_clear()
+            {
+                return;
+            }
+            let registry = &self.io.request_contexts;
+            let sealed = self.io.session_waits.entries.iter().position(|wait| {
                 matches!(&wait.unit, Unit::Slot { plan, .. } if !registry.plan_registered(plan))
             });
-        self.io.session_waits.entries = kept;
-        for wait in sealed {
-            self.io.timers.remove(&wait.timer);
-            self.io
-                .actions
-                .push(Action::ClearTimer { timer: wait.timer });
-            self.venue.on_session_wait_expired(
-                &mut Cx {
-                    now,
-                    store: &mut self.store,
-                    io: &mut self.io,
-                },
-                wait.pending,
-                owner_error(Error::Revoked),
-            );
-            self.assert_live();
-            self.flush_http_owner_retirements();
-        }
-        for (plan, pending, error) in std::mem::take(&mut self.io.session_waits.ended) {
-            if !self.io.request_contexts.plan_registered(&plan) || now >= plan.deadline() {
+            if let Some(index) = sealed {
+                let wait = self.io.session_waits.entries.remove(index);
+                let Unit::Slot { plan, .. } = &wait.unit else {
+                    unreachable!()
+                };
+                let reason = if now >= plan.deadline() {
+                    Error::TimedOut
+                } else {
+                    Error::Revoked
+                };
                 self.venue.on_session_wait_expired(
                     &mut Cx {
                         now,
                         store: &mut self.store,
                         io: &mut self.io,
                     },
-                    pending,
-                    error,
+                    wait.pending,
+                    owner_error(reason),
                 );
+            } else if self.io.session_waits.ended.is_empty() {
+                return;
             } else {
-                self.io.http_plan_ready = Some(plan.clone());
-                self.io.http_plan_poison = true;
-                #[cfg(feature = "order-locks")]
-                let order_response = self.io.order_response_token.take();
-                self.venue.on_plan_session_wait_ended(
-                    &mut Cx {
-                        now,
-                        store: &mut self.store,
-                        io: &mut self.io,
-                    },
-                    &plan,
-                    pending,
-                    error,
-                );
-                #[cfg(feature = "order-locks")]
-                {
-                    self.io.order_response_token = order_response;
+                let (plan, slot, pending, error) = self.io.session_waits.ended.remove(0);
+                // The Slot was held until now; it is released only for this
+                // disposition, where the venue re-parks it or fails the Plan.
+                self.io.request_contexts.unpark_plan_slot(&plan, &slot);
+                if !self.io.request_contexts.plan_registered(&plan) || now >= plan.deadline() {
+                    self.venue.on_session_wait_expired(
+                        &mut Cx {
+                            now,
+                            store: &mut self.store,
+                            io: &mut self.io,
+                        },
+                        pending,
+                        error,
+                    );
+                } else {
+                    self.io.http_plan_ready = Some(plan.clone());
+                    self.io.http_plan_poison = true;
+                    #[cfg(feature = "order-locks")]
+                    let order_response = self.io.order_response_token.take();
+                    self.venue.on_plan_session_wait_ended(
+                        &mut Cx {
+                            now,
+                            store: &mut self.store,
+                            io: &mut self.io,
+                        },
+                        &plan,
+                        pending,
+                        error,
+                    );
+                    #[cfg(feature = "order-locks")]
+                    {
+                        self.io.order_response_token = order_response;
+                    }
+                    self.io.http_plan_ready = None;
+                    self.io.http_plan_poison = false;
+                    ContextRegistry::rearm_live_plan(&mut self.io, &plan);
                 }
-                self.io.http_plan_ready = None;
-                self.io.http_plan_poison = false;
-                ContextRegistry::rearm_live_plan(&mut self.io, &plan);
             }
             self.assert_live();
             self.flush_http_owner_retirements();

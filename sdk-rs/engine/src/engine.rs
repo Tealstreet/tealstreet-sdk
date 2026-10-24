@@ -3934,8 +3934,6 @@ impl<V: Venue> Engine<V> {
         self.restore_shared_tickers(false, now);
         self.flush_http_owner_retirements();
         self.flush_http_plans(now);
-        #[cfg(feature = "http-plans")]
-        self.flush_plan_session_waits(now);
     }
 
     #[inline(never)]
@@ -4411,6 +4409,9 @@ impl<V: Venue> Engine<V> {
         if self.io.request_contexts.has_plans() {
             self.flush_live_http_plans(now);
         }
+        // Last, at every outer Plan flush, including after the final Plan
+        // sealed: parked Slots whose Session ended or whose Plan sealed.
+        self.flush_plan_session_waits(now);
     }
 
     #[inline(never)]
