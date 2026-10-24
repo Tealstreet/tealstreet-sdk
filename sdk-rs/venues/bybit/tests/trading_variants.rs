@@ -2010,6 +2010,11 @@ fn cancel_orders_with_symbols_is_refused_not_left_open() {
             "{variant:?}: {:?}",
             h.result(130)
         );
+        assert_eq!(
+            h.outcomes,
+            [(130, Some(safe_cex_engine::Outcome::NotSent))],
+            "{variant:?}"
+        );
         assert!(
             !h.paths().iter().any(|p| p.contains("/v5/order/")),
             "{variant:?}"
