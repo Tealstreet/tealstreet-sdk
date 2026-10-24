@@ -60,3 +60,82 @@ pub fn started() -> (TestEngine, SocketId) {
 pub fn ws(e: &mut TestEngine, socket: SocketId, time: f64, text: &str) {
     e.handle(time, Event::WsMessage { socket, text });
 }
+
+/// Fixture account material, installed only in the provider; the venue gets
+/// opaque refs (RUST_APEXOMNI_SIGNER_ADMISSION.md).
+pub struct Material<'a> {
+    pub key: &'a str,
+    pub signing: &'a str,
+    pub passphrase: Option<&'a str>,
+    pub seed: Option<String>,
+}
+impl Default for Material<'_> {
+    fn default() -> Self {
+        Self {
+            key: "key",
+            signing: "secret",
+            passphrase: Some("passphrase"),
+            seed: Some("11".repeat(65)),
+        }
+    }
+}
+pub fn fixture_provider(
+    material: &Material<'_>,
+) -> (
+    safe_cex_engine::signing::Provider,
+    safe_cex_engine::signing::Identities,
+) {
+    use safe_cex_crypto::signer::{LocalExtra, LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::signing::{
+        CredentialSetupPolicy, ExtraFieldPolicy, ExtraKey, ExtraKeyPolicy, IdentitySetupPolicy,
+        KeyEncoding,
+    };
+    let mut identity = LocalIdentity {
+        key: Secret::new(material.key.into()),
+        secret: Secret::new(material.signing.into()),
+        passphrase: material.passphrase.map(|p| Secret::new(p.into())),
+        ..Default::default()
+    };
+    if let Some(seed) = &material.seed {
+        identity.extra.0.insert(
+            ExtraKey::ZklinkSeed,
+            LocalExtra {
+                value: Secret::new(seed.clone()),
+                encoding: KeyEncoding::Hex,
+            },
+        );
+    }
+    let policy = CredentialSetupPolicy {
+        primary: Some(IdentitySetupPolicy {
+            secret_encoding: Some(KeyEncoding::Base64Text),
+            extra: Some(ExtraKeyPolicy {
+                key: ExtraKey::ZklinkSeed,
+                field: ExtraFieldPolicy::Optional,
+                encoding: Some(KeyEncoding::Hex),
+            }),
+            ..Default::default()
+        }),
+        secondary: None,
+    };
+    let (signer, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(identity),
+            secondary: None,
+        },
+        policy,
+    )
+    .unwrap();
+    (std::sync::Arc::new(signer), identities)
+}
+/// A seeded engine for a private account: refs in `Options`, material in the
+/// provider. `options.identity` is replaced by the fixture's.
+pub fn private_engine(options: Options, material: &Material<'_>) -> TestEngine {
+    let (signer, identities) = fixture_provider(material);
+    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
+        identity: identities.primary.clone(),
+        ..options
+    }));
+    e.set_identities(identities).unwrap();
+    e.set_signer(Some(signer)).unwrap();
+    e
+}

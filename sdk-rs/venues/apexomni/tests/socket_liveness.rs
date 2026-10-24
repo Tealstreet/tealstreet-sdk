@@ -6,14 +6,16 @@ const REJECTED: &str = r#"{"op":"login","success":false,"ret_msg":"bad key"}"#;
 const ACCEPTED: &str = r#"{"op":"login","success":true}"#;
 const PONG: &str = r#"{"op":"pong"}"#;
 fn connecting() -> (LivenessEngine, SocketId, f64, bool) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_apexomni::ApexOmni::new(safe_cex_venue_apexomni::Options {
-            key: Some("key".into()),
-            secret: Some("secret".into()),
-            passphrase: Some("passphrase".into()),
-            omni_key_seed: Some("11".repeat(65)),
+    let mut e = support::private_engine(
+        safe_cex_venue_apexomni::Options {
             ..Default::default()
-        }),
+        },
+        &support::Material {
+            key: "key",
+            signing: "secret",
+            passphrase: Some("passphrase"),
+            seed: Some(("11".repeat(65)).to_string()),
+        },
     );
     e.start(0.0);
     let request = support::requests(&mut e).remove(0);
