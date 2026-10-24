@@ -3,6 +3,7 @@ mod account;
 mod depth_query;
 mod history;
 mod identity;
+mod public_trades;
 pub mod sign;
 mod trading;
 mod wire;
@@ -12,7 +13,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Balance, Candle, Interval, Market, Ticker};
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
@@ -57,14 +58,17 @@ pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    PublicTrades(Box<public_trades::Request>),
     Identity(identity::Request),
     Markets {
+        context: Context,
         rows: Vec<Market>,
         indexes: HashMap<String, String>,
         skipped: Skipped,
         malformed: HashSet<String>,
     },
     Tickers {
+        context: Context,
         rows: Vec<Ticker>,
         skipped: Skipped,
     },
@@ -73,6 +77,15 @@ pub enum Pending {
         rows: Vec<Candle>,
         invalid: bool,
     },
+}
+
+impl Pending {
+    fn discovery_context(&self) -> Option<&Context> {
+        match self {
+            Self::Markets { context, .. } | Self::Tickers { context, .. } => Some(context),
+            _ => None,
+        }
+    }
 }
 
 struct Connection {
@@ -120,6 +133,7 @@ pub struct Cryptocom {
     account: account::Account,
     trading: trading::Trading,
     history: history::History,
+    public_trades: public_trades::State,
 }
 
 const TIMEFRAMES: [(Interval, &str); 10] = [
@@ -175,28 +189,46 @@ impl Skipped {
 }
 
 impl Cryptocom {
-    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
-        self.get(
-            cx,
-            if tickers {
-                "/public/get-tickers"
-            } else {
-                "/public/get-instruments"
-            },
-            if tickers {
-                Pending::Tickers {
-                    rows: vec![],
-                    skipped: Skipped::default(),
-                }
-            } else {
-                Pending::Markets {
-                    rows: vec![],
-                    indexes: HashMap::new(),
-                    skipped: Skipped::default(),
-                    malformed: HashSet::new(),
-                }
-            },
-        );
+    fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+        let context = match cx.http_context(Scope::Background, read_policy()) {
+            Ok(context) => context,
+            Err(_) => {
+                self.discovery.failed(cx, tickers);
+                return;
+            }
+        };
+        let path = if tickers {
+            "/public/get-tickers"
+        } else {
+            "/public/get-instruments"
+        };
+        let pending = if tickers {
+            Pending::Tickers {
+                context: context.clone(),
+                rows: vec![],
+                skipped: Skipped::default(),
+            }
+        } else {
+            Pending::Markets {
+                context: context.clone(),
+                rows: vec![],
+                indexes: HashMap::new(),
+                skipped: Skipped::default(),
+                malformed: HashSet::new(),
+            }
+        };
+        match cx.request_managed(
+            context,
+            Method::Get,
+            format!("{}{path}", self.rest),
+            None,
+            pending,
+        ) {
+            Ok(request) => cx.stream_response(request, ArrayAt::Path(&["result", "data"])),
+            Err((pending, error)) => {
+                self.on_request_failed(cx, pending, &error.venue_error().message)
+            }
+        }
     }
     pub fn new(options: Options) -> Self {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
@@ -218,6 +250,7 @@ impl Cryptocom {
             account: Default::default(),
             trading: Default::default(),
             history: Default::default(),
+            public_trades: Default::default(),
             rest: if options.testnet {
                 "https://uat-api.3ona.co/exchange/v1"
             } else {
@@ -258,16 +291,6 @@ impl Cryptocom {
                 },
             ),
         ));
-    }
-
-    fn get(&self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
-        cx.request_streamed(
-            Method::Get,
-            format!("{}{path}", self.rest),
-            vec![],
-            ArrayAt::Path(&["result", "data"]),
-            pending,
-        );
     }
 
     fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, channels: &[String], method: &str) {
@@ -445,6 +468,9 @@ impl Cryptocom {
 }
 
 impl Venue for Cryptocom {
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        &[public_trades::PACING]
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
@@ -564,6 +590,11 @@ impl Venue for Cryptocom {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Some(context) = pending.discovery_context()
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         if let Pending::Candles { context, .. } = &*pending
             && cx.validate_read_http_delivery(context, context).is_err()
         {
@@ -571,6 +602,7 @@ impl Venue for Cryptocom {
         }
         match pending {
             Pending::History(request) => self.history_item(cx, request, item),
+            Pending::PublicTrades(trade) => trade.item(cx, item),
             Pending::Trade(_) | Pending::Identity(_) | Pending::BookQuery { .. } => {}
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets {
@@ -578,6 +610,7 @@ impl Venue for Cryptocom {
                 indexes,
                 skipped,
                 malformed,
+                ..
             } => {
                 // Other instrument types carry fields this venue never reads.
                 let key = serde_json::from_str::<InstrumentKey>(item);
@@ -611,7 +644,7 @@ impl Venue for Cryptocom {
                     }
                 }
             }
-            Pending::Tickers { rows, skipped } => {
+            Pending::Tickers { rows, skipped, .. } => {
                 // Spot rows may contain null prices; they are outside this venue.
                 match serde_json::from_str::<TickerName>(item) {
                     Ok(name) if cx.store.market(name.i).is_none() => {}
@@ -638,6 +671,17 @@ impl Venue for Cryptocom {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::PublicTrades(trade) = &pending
+            && !trade.delivered(cx)
+        {
+            return;
+        }
+        if let Some(context) = pending.discovery_context()
+            && let Err(error) = cx.validate_background_read_http_delivery(context)
+        {
+            self.on_request_failed(cx, pending, &error.venue_error().message);
+            return;
+        }
         if let Pending::Candles { context, .. } = &pending
             && cx.validate_read_http_delivery(context, context).is_err()
         {
@@ -679,6 +723,9 @@ impl Venue for Cryptocom {
             match pending {
                 Pending::Account(request) => self.account_failed(cx, request, &error, false),
                 Pending::History(request) => self.history_failed(cx, request, &error, false),
+                Pending::PublicTrades(trade) => {
+                    self.public_trades_response(cx, *trade, response, Some(error))
+                }
                 pending => self.on_request_failed(cx, pending, &error),
             }
             return;
@@ -686,8 +733,10 @@ impl Venue for Cryptocom {
         match pending {
             Pending::Trade(_) | Pending::Identity(_) | Pending::BookQuery { .. } => unreachable!(),
             Pending::History(request) => self.history_response(cx, request),
+            Pending::PublicTrades(trade) => self.public_trades_response(cx, *trade, response, None),
             Pending::Account(request) => self.account_response(cx, request),
             Pending::Markets {
+                context,
                 rows,
                 indexes,
                 skipped,
@@ -695,6 +744,7 @@ impl Venue for Cryptocom {
             } => {
                 skipped.report(cx, "instrument");
                 if rows.is_empty() {
+                    let _ = cx.finish_http_context(&context);
                     if skipped.any() {
                         cx.retried_failure(
                             "cryptocom.lib:649",
@@ -734,6 +784,7 @@ impl Venue for Cryptocom {
                 } else {
                     self.discovery.succeeded(cx, &false);
                 }
+                let _ = cx.finish_http_context(&context);
                 if refresh {
                     return;
                 }
@@ -746,9 +797,14 @@ impl Venue for Cryptocom {
                     cx.store.set_orders(vec![]);
                 }
             }
-            Pending::Tickers { rows, skipped } => {
+            Pending::Tickers {
+                context,
+                rows,
+                skipped,
+            } => {
                 skipped.report(cx, "ticker");
                 if rows.is_empty() {
+                    let _ = cx.finish_http_context(&context);
                     if skipped.any() {
                         cx.retried_failure(
                             "cryptocom.lib:704",
@@ -760,6 +816,7 @@ impl Venue for Cryptocom {
                 }
                 self.discovery.succeeded(cx, &true);
                 cx.store.set_tickers(rows);
+                let _ = cx.finish_http_context(&context);
                 self.market_channels(cx);
                 self.connect(cx, 0);
             }
@@ -784,6 +841,24 @@ impl Venue for Cryptocom {
             }
         }
     }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        match pending {
+            Pending::PublicTrades(trade) => self.public_trades_stream_failed(cx, *trade, response),
+            pending => self.on_request_failed(
+                cx,
+                pending,
+                &format!(
+                    "response did not contain the expected list: {}",
+                    response.body
+                ),
+            ),
+        }
+    }
     fn on_sign_error(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -791,6 +866,7 @@ impl Venue for Cryptocom {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::PublicTrades(trade) => Self::public_trades_reject(cx, *trade, error),
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
@@ -807,6 +883,7 @@ impl Venue for Cryptocom {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::PublicTrades(trade) => self.public_trades_failed(cx, *trade, error, true),
             Pending::BookQuery { context } | Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
@@ -814,6 +891,11 @@ impl Venue for Cryptocom {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Some(context) = pending.discovery_context() {
+            // An admitted failure keeps native retry even after sibling issue
+            // has pruned expired Context retirement metadata.
+            let _ = cx.finish_http_context(context);
+        }
         match pending {
             Pending::BookQuery { context } => {
                 let _ = cx.fail_context(
@@ -824,6 +906,12 @@ impl Venue for Cryptocom {
             Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error), None),
             Pending::History(request) => self.history_failed(cx, request, error, true),
+            Pending::PublicTrades(trade) => self.public_trades_failed(
+                cx,
+                *trade,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+                true,
+            ),
             Pending::Account(request) => self.account_failed(cx, request, error, true),
             Pending::Candles { context, .. } => {
                 if cx.validate_read_http_delivery(&context, &context).is_ok() {
@@ -834,7 +922,20 @@ impl Venue for Cryptocom {
             Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
     }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.public_trades
+            .waiting
+            .retain(|_, trade| trade.root().owner() != owner);
+    }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(trade) = self.public_trades.waiting.remove(&timer) {
+            self.public_trades_request(cx, trade);
+            return;
+        }
         if let Some(tickers) = self.discovery.on_timer(timer) {
             self.discovery_read(cx, tickers);
             return;

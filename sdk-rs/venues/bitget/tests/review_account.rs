@@ -168,6 +168,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     now: f64,
     endpoint: &str,
 ) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
+    use safe_cex_engine::test_support::prepared_actions;
     use safe_cex_engine::{Action, Event};
     engine.drain_actions().for_each(drop);
     engine.handle(
@@ -176,8 +177,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             scale: 60_000.0 / POLL_MS,
         },
     );
-    let slow: Vec<_> = engine
-        .drain_actions()
+    let slow: Vec<_> = prepared_actions(engine, now)
+        .into_iter()
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             Action::Http(_) => panic!("policy updates must not issue account reads"),
@@ -215,7 +216,11 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
     engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
-    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        !prepared_actions(engine, now + 1_501.0)
+            .iter()
+            .any(|a| matches!(a, Action::Http(_)))
+    );
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
@@ -237,8 +242,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -321,8 +326,8 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
                 },
             );
         }
-        reads = engine
-            .drain_actions()
+        reads = safe_cex_engine::test_support::prepared_actions(engine, now)
+            .into_iter()
             .filter_map(|a| match a {
                 safe_cex_engine::Action::Http(r) => Some(r),
                 _ => None,

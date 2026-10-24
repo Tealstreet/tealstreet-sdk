@@ -5,8 +5,8 @@ import rules from './construction-rules.json';
 import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex/asterdex.types';
 
 export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'requiredWithPrimaryFallback';
-export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
-export type ExtraKeyPolicy = { key: 'zklinkSeed'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
+export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text' | 'base58';
+export type ExtraKeyPolicy = { key: 'zklinkSeed' | 'l1Wallet'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
 /** Asymmetric only: a declared signing ref may answer public operations (P4). */
 export type SigningAlgorithm = 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest';
 export type IdentitySetupPolicy = {
@@ -14,6 +14,8 @@ export type IdentitySetupPolicy = {
   signingAlgorithm?: SigningAlgorithm;
 };
 export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
+/** Trusted setup's view: the slot policy plus the family's declared read-key policy. */
+export type SignerSetupPolicy = CredentialSetupPolicy & { readCredentials?: EngineBridgeConstruction['readCredentials'] };
 export type CredentialPresence = Readonly<{ key: boolean; secret: boolean }>;
 export type RemoteSigningPolicy = Readonly<{
   enabled?: boolean;
@@ -34,13 +36,16 @@ type Rule = {
   signerSetup?: CredentialSetupPolicy;
   remoteSigning?: RemoteSigningPolicy;
   /** Family-specific trusted setup mapping, declared rather than name-matched. */
-  setupMapping?: 'asterdex';
+  setupMapping?: 'asterdex' | 'apexomni';
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
 };
 
 /** Trusted setup policy; unspecified fields retain explicit caller metadata. */
-export const deriveSignerSetupPolicy = (name: ExchangeName): CredentialSetupPolicy =>
-  (rules.venues as Record<string, Rule>)[name]?.signerSetup ?? {};
+export const deriveSignerSetupPolicy = (name: ExchangeName): SignerSetupPolicy => {
+  const rule = (rules.venues as Record<string, Rule>)[name];
+  const readCredentials = rule?.bridge?.readCredentials;
+  return { ...rule?.signerSetup, ...(readCredentials === undefined ? {} : { readCredentials }) };
+};
 
 export const deriveSignerSetupMapping = (name: ExchangeName): Rule['setupMapping'] =>
   (rules.venues as Record<string, Rule>)[name]?.setupMapping;
@@ -59,6 +64,8 @@ export const deriveBridgeConstruction = (name: ExchangeName, options: ExchangeOp
     apiKeyIndexRequired: policy?.apiKeyIndexRequired === true,
     isolatedBookSubscriptions: policy?.isolatedBookSubscriptions === true,
     dispatchSigning:policy?.dispatchSigning===true,
+    // Omitted when undeclared, matching the native record byte for byte.
+    ...(policy?.readCredentials === undefined ? {} : { readCredentials: policy.readCredentials }),
   };
 };
 

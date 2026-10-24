@@ -4,8 +4,10 @@ use crate::{BitgetFutures, Pending, paths};
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Credential, Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
+    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, TimerId,
+    VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
@@ -259,20 +261,43 @@ impl BitgetFutures {
         for id in observed {
             self.trading.acknowledged.remove(&id);
         }
-        let Some(id) = command_id(&command) else {
+        if command_id(&command).is_none() {
             return;
-        };
+        }
         let validation = if !self.private_enabled() {
             Err("Bitget credentials are required".to_owned())
         } else {
             self.preflight(cx, &command)
         };
         if let Err(error) = validation {
-            cx.fail(id, not_sent(error));
+            self.refuse_entry(cx, not_sent(error));
             return;
         }
         self.trading.queue.push_back(command);
         self.resume_trading(cx);
+    }
+
+    /// A write refused before I/O admits a terminal-only Mutation owner, so the
+    /// engine caps it at NotSent. A rejected admission already failed the command.
+    fn refuse_entry(&self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        let credential = self
+            .options
+            .credentials
+            .as_ref()
+            .filter(|identity| identity.validate().is_ok())
+            .map(|identity| Credential {
+                slot: CredentialSlot::Primary,
+                reference: identity.credential.clone(),
+            });
+        if let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Mutation,
+            credential,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) {
+            let _ = cx.fail_context(&context, error);
+        }
     }
 
     fn preflight(&self, cx: &Cx<'_, Pending>, command: &Command) -> Result<(), String> {

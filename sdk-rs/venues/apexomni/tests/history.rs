@@ -1,16 +1,20 @@
 mod support;
 use safe_cex_engine::{Action, Command, Event, Notice, Query};
-use safe_cex_venue_apexomni::{ApexOmni, Options};
+use safe_cex_venue_apexomni::Options;
 use serde::Deserialize;
 use support::*;
 fn seeded_socket() -> (TestEngine, safe_cex_engine::SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("pass".into()),
-        omni_key_seed: Some("11".repeat(65)),
-        ..Default::default()
-    }));
+    let mut e = private_engine(
+        Options {
+            ..Default::default()
+        },
+        &Material {
+            key: "key",
+            signing: "secret",
+            passphrase: Some("pass"),
+            seed: Some(("11".repeat(65)).to_string()),
+        },
+    );
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
