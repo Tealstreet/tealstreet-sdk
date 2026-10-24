@@ -190,7 +190,10 @@ fn fetch_book(
             limit,
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_actions(e, 0.0)
+        .into_iter()
+        .filter(|a| !matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .collect();
     let [Action::Http(request)] = &actions[..] else {
         panic!("unexpected book actions: {actions:?}");
     };
@@ -216,7 +219,10 @@ fn fetch_book(
             },
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_actions(e, 0.0)
+        .into_iter()
+        .filter(|a| !matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .collect();
     match &actions[..] {
         [Action::Notice(Notice::CommandDone { command: 9, result })] => Ok(result.clone()),
         [Action::Notice(Notice::CommandFailed { command: 9, error })] => Err(error.legacy_text()),
