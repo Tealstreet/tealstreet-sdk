@@ -6597,6 +6597,15 @@ This covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`. [Plan](RUST_OKX_ACCOUNT_C
 - URLs, the demo header, row decoding, the balance and positions join, order
   paging, product order and rate-limit backoff are unchanged.
 
+### OKX discovery under Background Context
+
+The instruments catalogue and ticker seed walks (SWAP then FUTURES) are now one
+managed Background read per product: 20 s, no retry. Public reads stay unsigned
+and keep the demo header. The EEA account catalogue is signed with the read key
+when one is configured, otherwise the primary key. An unanswered read ends at
+20 s and startup discovery retries on its native backoff. URLs, row decoding,
+partial-catalogue rules, the seeded ticker count and the 429 pause are unchanged.
+
 ## Lighter synchronous history Read custody
 
 The seven native local history replies (unsupported client ID/income category,
@@ -7259,3 +7268,104 @@ messages remain native. SDK host/outer wait contracts are unchanged.
 A walk needs two registry Context slots: root and current physical page. Initial
 root admission reserves only its own slot; if the first child cannot fit, one
 strict typed Capacity/localNotSent terminal retires the root without HTTP.
+
+
+## Backpack unsupported command candle intervals
+
+Unsupported FetchCandles intervals keep the exact native refusal message and
+absent error kind on a valid keyless Read entry. The shared receipt, clock and
+capacity checks run first; invalid clocks and unavailable capacity report their
+existing typed engine errors without a write outcome. Missing or expired
+receipts refuse without renewing the caller's bound. Duplicate IDs retain the
+prior owner's authority and eventual reply. Refusal creates no HTTP, managed
+preparation, signing, socket, timer or Store update. Supported candle intervals,
+query/stream behavior and unsupported WS subscription diagnostics are unchanged.
+
+
+## CPU runtime environment mismatch evidence
+
+Shared CPU runtime restoration reports every differing identity field, including
+nested Node component versions, with the sealed expected and runner actual
+values in deterministic dotted-field order. Identity rejection still precedes
+all restore writes. The existing image, architecture, Node and component
+bindings remain enforced; provisioner versions are outside that identity.
+
+
+## WEEX history pages retain the caller Read root (#2003)
+
+WEEX fills, normal/algo order history, public trades and income now retain the
+original caller receipt deadline across native windows, pauses and physical
+pages. Each physical call keeps 20 s and no retry; signed pages retain their
+selected identity. GET lists remain secondary-else-primary after the existing
+primary-presence gate; POST income remains primary-only.
+
+The engine now ends the query once with typed Read Timeout at root expiry,
+without rows or an INCOMPLETE marker. Before expiry, a failed page recovers only
+nonempty accepted output and its owned marker; an empty accepted prefix or a
+provider/preparation refusal rejects. The default caller wait is 120 s; callers
+requiring longer native walks must raise rustCommandTimeoutMs. A host listener
+timeout does not cancel transport or grant engine detach authority. NX remains
+on its existing TS path until Rust is selected; no executed NX adoption is
+claimed by this venue change.
+
+
+## Crypto.com unsigned PublicTrades caller-root ownership
+
+PublicTrades is an unsigned one-response Read with one immutable caller receipt
+root across native 10ms queue eligibility, route preparation and retries. Each
+eligible dequeue mints a fresh child capped at 20s and at that original root;
+late or reused-owner DATA cannot parse/stage/complete. Root expiry is strict
+Timeout with no prefix, INCOMPLETE marker or renewed work. Preparation/local
+submission refusal is strict; a released physical-child Timeout under a live
+root keeps the native retry path. Shared Context pacing additionally preserves
+the native 10ms physical send gap when independent preparations are delayed.
+
+Production/testnet URL, escaping, empty headers/body, default count25, wire
+count clamp150, caller truncation, duplicate row order and native financial
+fields remain unchanged. A failed streamed page is reset before retry; no
+unaccepted prefix is published. Missing-array streams keep native transport
+retry, whereas malformed rows in a valid array reject the whole page.
+
+Native retry counts remain exact: three released transport retries with 1000ms
+waits; the legacy 40101 hint caps at one retry, including code40001/message40101
+and transport-message40101 collisions. Native code/message fields are carried
+through the shared classifier. The minimum 40101 compatibility predicate uses
+the original error projection: decoded error fields for a valid envelope, raw
+body text for a missing-list envelope, and the transport message for a host
+failure. It is a known follow-up requiring a separate caller-policy ruling
+before removal. Strict route preparation keeps the shared pre-release NotSent
+attempt fact; released read failures and root expiry have no financial outcome.
+It grants no account-auth evidence or mutation rights. Public 40101 errors
+retain typed/native metadata without changing auth health. Private history,
+signing, account/trading reducers and credential selection are unchanged.
+
+## Breakout immediate local command custody
+
+Local candle validation, leverage results, unsupported commands, fixed-account
+setting refusals and initial trade-planning failures consume their genuine
+command entry through shared Read or keyless Mutation admission. Missing or
+expired receipts, invalid clocks and exhausted capacity use the shared typed
+refusal without renewing the caller's bound. No local result stages HTTP,
+signing or timers, and duplicate IDs retain the earlier owner's delivery.
+
+Native messages, JSON, error kinds and validation order stay intact. The local
+unsupported SetStpMode Mutation now reports NotSent, an explicit added outcome
+field; its native message and absent kind remain. Read failures carry no money
+outcome. Physical login, valid candle/trade scheduling, queues, credentials and
+financial reducers retain their existing behavior. These immediate results
+introduce no successful keyless Mutation or LocalSetting path.
+
+
+### Orderly unsupported order controls
+
+Only the first trading.rs field-presence rejection for PlaceOrders containing
+Bybit BBO or TickSize controls now consumes genuine Mutation entry and finishes
+through fail_context. Finite valid entry preserves the exact native Unsupported
+message and NotSent outcome with no Store/queue/IO effects; unstamped/expired
+entry uses shared rejection, and capacity failure has no numeric fallback.
+Retained PlaceOrders passed this predicate unchanged, and push_front only adds
+CancelSymbolOrders, so this branch cannot borrow a dequeued job's entry. Later
+account, queue-full, planning, supersession and job-terminal paths are outside
+this slice. Signing/selection/nonce and accepted write/reconciliation behavior
+remain unchanged. Inventory shrinks1F/1O: base28F29O to27F28O, or after the
+separate #2051 history landing,25F26O to24F25O.

@@ -16,6 +16,8 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | WEEX public depth-query custody | Original assertions reviewed; production conversion | Before managing command-owned unsigned order-book snapshots and their four numeric terminals. | [RUST_WEEX_DEPTH_QUERY_CONTEXT.md](RUST_WEEX_DEPTH_QUERY_CONTEXT.md) |
 | Polymarket public read custody | Draft adoption; local checks pass | Before adopting public books/candles and local completion or pruning their inventory. | [RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md](RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md) |
 | Kraken public discovery and local custody | Draft adoption; local checks and independent reviews clear | Before managing unsigned discovery reads or local command terminals in Futures/Spot. | [RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md](RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md) |
+
+| WEEX caller-root history paging | Source checkpoint; actual #1983 integrated | Before converting WEEX list/income pages, paced windows or their history completion. | [RUST_WEEX_HISTORY_CONTEXT.md](RUST_WEEX_HISTORY_CONTEXT.md) |
 | Subscription handoff and native read continuation | Shared ordering correction | Before issuing native reads after managed subscription frames or changing final drain/timer custody. | [RUST_SOCKET_INTEREST_HANDOFF.md](RUST_SOCKET_INTEREST_HANDOFF.md) |
 | Hyperliquid whole-family managed sockets | Plan and original-source controls | Before moving the multiplexed perps/spot public and private socket lifecycle or changing subscription-to-refresh ordering. | [RUST_HYPERLIQUID_MANAGED_SOCKETS.md](RUST_HYPERLIQUID_MANAGED_SOCKETS.md) |
 | Caller command wait in the engine | Plan under review (claude-fe7lgm) | Before bounding engine work by the caller's `rustCommandTimeoutMs` or reading `Cx::command_wait()`. | [RUST_COMMAND_TIMEOUT.md](RUST_COMMAND_TIMEOUT.md) |
@@ -341,3 +343,8 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Orderly initial history refusals | Implemented; bounded reviews and CI pending | Before converting the three initial history refusals; excludes combo-5b signer/source work. | [RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md](RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md) |
 
 | Kraken Futures public candle custody | Managed adoption; focused controls pass, source review/CI pending | Before changing caller-root pages or subscription candle polling. | [RUST_KRAKEN_FUTURES_CANDLE_CONTEXT.md](RUST_KRAKEN_FUTURES_CANDLE_CONTEXT.md) |
+| Crypto.com unsigned PublicTrades custody | Plan and original controls | Before replacing the last unsigned PublicTrades history sender independently of private signing. | [RUST_CRYPTOCOM_PUBLIC_TRADES_CONTEXT.md](RUST_CRYPTOCOM_PUBLIC_TRADES_CONTEXT.md) |
+
+| Breakout immediate local command custody | Plan and original-source controls | Before adopting seven initial local terminals or changing pre-venue/selection boundaries. | [RUST_BREAKOUT_LOCAL_COMMAND_CONTEXT.md](RUST_BREAKOUT_LOCAL_COMMAND_CONTEXT.md) |
+
+| Orderly unsupported order controls | Implemented; source reviews and CI pending | Before converting the one initial Bybit BBO/TickSize refusal; no deferred-job or signer changes. | [RUST_ORDERLY_UNSUPPORTED_ORDER_CONTEXT.md](RUST_ORDERLY_UNSUPPORTED_ORDER_CONTEXT.md) |
