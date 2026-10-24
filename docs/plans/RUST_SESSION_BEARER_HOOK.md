@@ -575,3 +575,119 @@ Controls (`session_bearer.rs`). Mutation checks:
 
 Results: 32 default and 38 with barriers; engine lib 870 (1075 with features); clippy
 `-D warnings` in both modes.
+
+## Phase 3: NotReady park and recipe-controlled order (PLAN, 2026-10-25)
+
+Rulings: claude-ddi2il (engine-wide Bind-path wait, native parity; preserve
+native header order through shared assembly). Split agreed with claude-fe7lgm:
+this phase owns the unreleased-call park; fe7lgm's serial resend keys its
+attempt-2 park on the same revision counter. Reviewers: claude-dazzy3 (plan,
+source), claude-fe7lgm and codex-zs5e83 (consumers). No source before the plan
+is CLEAR. It changes existing engine behaviour (R4), so the freeze runs one
+workspace-wide all-targets check.
+
+### Gap
+
+GRVT's `account_refresh` clears the venue's cookie/account cache while the
+engine Session stays Ready, and native calls wait, first calls included. Today:
+- a call reaching Bind while the hook answers NotReady fails NotSent (R4);
+- a call Prepared or Bound before the refresh sees revision None at claim,
+  goes Stale, re-prepares, reads NotReady at Bind and fails NotSent.
+A failure arrives too late for any owner (serial Plan, declared legs,
+Preflight reads, single admitted requests) to reissue the same call, so the
+fix belongs at Bind, once, for every owner kind.
+
+### Contract
+
+1. Park. A managed, unreleased call whose Bind read answers NotReady, at
+   either Bind site (unsigned at route readiness, signed after signing), does
+   not fail. It parks on its own live Session generation, inside its existing
+   call window, and is not handed to the host. It records `seen`: the latest
+   revision it read at Bind (None if it never read Ready). `seen` survives the
+   Stale reprepare that today clears `bearer.revision`.
+2. Claim. A packet whose claim-time revision is None or moved stays on the
+   existing Stale path (no release, reprepare); its next Bind read parks it if
+   NotReady. Nothing claims or releases a parked call.
+3. Wake. The venue announces a bundle with `cx.session_ready(&session)`. That
+   call is valid on an already-Ready Session purely to announce a new revision,
+   and is a no-op when nothing waits on that generation. It queues a wake that
+   the engine drains after the venue callback returns (the `bearer_fenced`
+   pattern). For each parked call of that generation in park (FIFO) order, the
+   engine reads `session_bearer_revision`. It re-prepares the call through the
+   existing `reprepare_http` when that is Some(r) and either `seen` is None or
+   r > `seen`; otherwise the call stays parked. Re-prepare spends no attempt,
+   needs no ResendGrant, touches no auth ledger, opens no login and resets no
+   attempt counter. Parked calls re-prepare before the drain's venue waiters
+   are handed back, so a parked call is never overtaken by one issued later.
+4. Bind side effects. Re-prepare is today's Stale reprepare. The old signing
+   attempt is cancelled and a fresh one is allocated at the next Bind; a nonce
+   reservation is released exactly as a Stale reprepare releases it. No new
+   reservation semantics.
+5. Expiry. The call keeps its window timer. Expiry while parked is the
+   existing unreleased Timeout, NotSent. Health is unchanged and no auth-kind
+   count moves (kind Timeout).
+6. Retire. A retire fences parked calls exactly like other Bearer-bound
+   unreleased calls (`bearer_fenced`): Revoked, NotSent, kind InvalidInput,
+   health unchanged. The park entry is removed with the call.
+7. Groups. With `http-mutation-barriers`, a Bearer-bound request that would
+   join a mutation group is already refused at issue (until R11), so no group
+   member can park. A RED pins that no parked call carries a group.
+8. Capacity. Parked calls stay in the managed-call table, so they need no new
+   capacity. The park list is bounded by it and is reserved before the venue
+   callback, so the drain never allocates.
+9. Typed cause. None is added. NotReady never reaches the venue. Retired and
+   header refusals keep their existing non-auth kinds (InvalidInput). No
+   `VenueError` field and no accessor.
+10. Serial composition (fe7lgm). One counter: a call's `seen` is the latest
+    revision it read at Bind. A serial attempt 2 that parks in this mechanism
+    wakes only on a revision newer than its own `seen`. fe7lgm's attempt-2 park
+    keys on the refused attempt's revision, which is that attempt's `seen`.
+
+Venue obligations (documented, not engine-enforced): the revision moves on
+every change to any bundle value; `session_bearer` and
+`session_bearer_revision` read the same counter; and the venue calls
+`session_ready` after every refresh. A refresh that is never announced leaves
+parked calls to expire at their window.
+
+### Recipe-controlled header order
+
+Native order differs per venue: Paradex sends `Authorization` before
+`Content-Type`, while BreakoutProp and GRVT send `Content-Type` first.
+Today's bundle-first insertion already changes BreakoutProp's order. Proposed
+shape (OPEN for dazzy3/fe7lgm):
+- `SessionPlacement::{First, After(&'static str)}`, declared by the recipe.
+  `After(name)` inserts the bundle immediately after the first recipe header
+  with that name (case-insensitive), or first when the request carries none.
+  It is a shared assembly rule, not a venue insertion.
+- Signed recipes declare it through a defaulted `SignStep` method (default
+  `First`, so no existing recipe changes). Unsigned managed requests take it
+  through an additive `request_managed_with_headers` variant; the existing
+  entry points keep `First`.
+- Collision, limit and wipe rules are unchanged: placement runs inside
+  `attach_session_headers`.
+- Consumers: GRVT `After("Content-Type")`, BreakoutProp `After("Content-Type")`
+  (restoring native), Paradex `First`, each pinned by a native-wire test in its
+  own slice.
+
+### REDs (`session_bearer.rs`, written before source)
+
+- P1 Mutation and P2 Read (zs5e83): bound at revision r, refresh (cache
+  cleared) before claim, then `session_ready` at r+1. Each re-prepares and binds
+  the r+1 bundle; the attempt count is unchanged and no failure is delivered.
+- P3 first call: issued while NotReady, it parks; `session_ready` at r binds it.
+- P4 no wake: `session_ready` with the revision still at `seen` leaves it
+  parked, and a later newer revision wakes it.
+- P5 FIFO: two parked calls re-prepare in park order.
+- P6 expiry: a parked call fails Timeout, NotSent, at its window, with health
+  and auth counts unchanged.
+- P7 retire while parked: Revoked, NotSent, InvalidInput, health unchanged.
+- P8 signed: a call parked after signing re-signs with a fresh signing attempt
+  on wake.
+- P9 barriers: no parked call carries a group (R11 refusal still holds).
+- P10 still-Ready announce: `session_ready` on a Ready Session with no parked
+  calls and no waiters is a no-op.
+- R4 is rewritten: NotReady at Bind parks, then times out (the old immediate
+  failure is gone).
+- Order: O1 `After("Content-Type")` puts the bundle after Content-Type
+  (unsigned and signed); O2 the default stays First; O3 `After` with no anchor
+  is First; O4 collision and limits still apply after placement.
