@@ -3,6 +3,7 @@ mod account;
 mod spot;
 pub use spot::KrakenSpot;
 mod history;
+mod public_context;
 pub mod sign;
 mod trading;
 mod wire;
@@ -11,6 +12,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Context, Operation, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
@@ -42,10 +44,12 @@ pub enum Pending {
     Trade(trading::Request),
     History(Box<history::Request>),
     Markets {
+        context: Context,
         rows: Vec<Market>,
         failed: bool,
     },
     Tickers {
+        context: Context,
         rows: Vec<Ticker>,
         failed: bool,
         revision: u64,
@@ -185,36 +189,62 @@ impl Kraken {
         if self.markets_in_flight {
             return;
         }
+        let context =
+            match cx.http_context(Scope::Background, public_context::policy(Operation::Read)) {
+                Ok(context) => context,
+                Err(reason) => {
+                    self.discovery.failed(cx, false);
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
+                    return;
+                }
+            };
         self.markets_in_flight = true;
         self.skipping_markets.clear();
-        cx.request_streamed(
+        match cx.request_managed(
+            context.clone(),
             Method::Get,
             format!("{}/derivatives/api/v3/instruments", self.host()),
-            vec![],
-            ArrayAt::Field("instruments"),
+            None,
             Pending::Markets {
+                context,
                 rows: vec![],
                 failed: false,
             },
-        );
+        ) {
+            Ok(request) => cx.stream_response(request, ArrayAt::Field("instruments")),
+            Err((pending, reason)) => self.public_failed(cx, pending, &reason.to_string()),
+        }
     }
     fn tickers_request(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.ticker_in_flight {
             return;
         }
+        let context =
+            match cx.http_context(Scope::Background, public_context::policy(Operation::Read)) {
+                Ok(context) => context,
+                Err(reason) => {
+                    self.discovery.failed(cx, true);
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
+                    return;
+                }
+            };
         self.ticker_in_flight = true;
         self.live_tickers.begin();
-        cx.request_streamed(
+        match cx.request_managed(
+            context.clone(),
             Method::Get,
             format!("{}/derivatives/api/v3/tickers", self.host()),
-            vec![],
-            ArrayAt::Field("tickers"),
+            None,
             Pending::Tickers {
+                context,
                 rows: vec![],
                 failed: false,
                 revision: self.ticker_revision,
             },
-        );
+        ) {
+            Ok(request) => cx.stream_response(request, ArrayAt::Field("tickers")),
+            Err((pending, reason)) => self.public_failed(cx, pending, &reason.to_string()),
+        }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
         // Suppressed public feeds never open; supervising them would only churn retries.
@@ -361,14 +391,18 @@ impl Kraken {
         to_ms: Option<f64>,
     ) {
         if cx.store.market(&symbol).is_none() {
-            if let Some(c) = command {
-                cx.fail(c, "Unknown Kraken market");
+            if command.is_some() {
+                public_context::local(cx, Operation::Read, Err("Unknown Kraken market".into()));
             }
             return;
         }
         if resolution(interval).is_none() {
-            if let Some(c) = command {
-                cx.fail(c, interval.unsupported("Kraken"));
+            if command.is_some() {
+                public_context::local(
+                    cx,
+                    Operation::Read,
+                    Err(interval.unsupported("Kraken").into()),
+                );
             }
             return;
         }
@@ -376,8 +410,12 @@ impl Kraken {
         let to = to_ms.unwrap_or(cx.now);
         let from = from_ms.unwrap_or(to - step * f64::from(limit.unwrap_or(500).clamp(1, 5000)));
         if !from.is_finite() || !to.is_finite() || from < 0.0 || from > to {
-            if let Some(c) = command {
-                cx.fail(c, "Invalid Kraken candle range");
+            if command.is_some() {
+                public_context::local(
+                    cx,
+                    Operation::Read,
+                    Err("Invalid Kraken candle range".into()),
+                );
             }
             return;
         }
@@ -438,11 +476,13 @@ impl Kraken {
     }
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Markets { .. } => {
+            Pending::Markets { context, .. } => {
+                let _ = cx.finish_http_context(&context);
                 self.markets_in_flight = false;
                 self.discovery.failed(cx, false);
             }
-            Pending::Tickers { .. } => {
+            Pending::Tickers { context, .. } => {
+                let _ = cx.finish_http_context(&context);
                 self.ticker_in_flight = false;
                 self.discovery.failed(cx, true);
             }
@@ -656,81 +696,82 @@ impl Venue for Kraken {
         self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Pending::Markets { context, .. } | Pending::Tickers { context, .. } = &*pending
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         match pending {
             Pending::Account(r) => self.account_item(cx, r, item),
             Pending::History(r) => self.history_item(cx, r, item),
             Pending::Trade(_) => {}
-            Pending::Markets { rows, failed: _ } => {
-                match serde_json::from_str::<Instrument<'_>>(item) {
-                    Ok(m) => {
-                        if !m.symbol.starts_with("PF_") || m.tradeable == Some(false) {
-                            return;
-                        }
-                        let decimals = m.contract_value_trade_precision.unwrap_or(0.0);
-                        if !(-18.0..=18.0).contains(&decimals) || decimals.fract() != 0.0 {
-                            safe_cex_engine::startup::skipped_row(cx);
-                            self.skipping_markets.insert(m.symbol.into_owned());
-                            return;
-                        }
-                        rows.push(Market {
-                            id: format!(
-                                "{}/{}",
-                                m.base,
-                                if m.quote.is_empty() { "USD" } else { &m.quote }
-                            ),
-                            symbol: m.symbol.to_string(),
-                            pretty_symbol: Some(m.symbol[3..].into()),
-                            base: m.base.to_string(),
-                            quote: if m.quote.is_empty() {
-                                "USD".into()
-                            } else {
-                                m.quote.to_string()
-                            },
-                            active: m.status != "cancel_only",
-                            precision: Precision {
-                                amount: 10f64.powi(-(decimals as i32)),
-                                price: m.tick_size.filter(|n| *n > 0.0).unwrap_or(0.01),
-                            },
-                            limits: Limits {
-                                amount: MinMax {
-                                    min: 0.0,
-                                    max: 9_007_199_254_740_991.0,
-                                },
-                                leverage: MinMax {
-                                    min: 1.0,
-                                    max: m
-                                        .margin_levels
-                                        .first()
-                                        .filter(|m| m.initial_margin > 0.0)
-                                        .map_or(100.0, |m| (1.0 / m.initial_margin).floor()),
-                                },
-                                price: None,
-                            },
-                            contract_size: Some(
-                                m.contract_size.filter(|n| *n > 0.0).unwrap_or(1.0),
-                            ),
-                            is_expiring: Some(m.last_trading_time.is_some()),
-                            is_inverse: Some(m.contract_type == "inverse"),
-                            is_spot: Some(false),
-                            is_perpetual: None,
-                            is_read_only: None,
-                            taker_fee: None,
-                            maker_fee: None,
-                        });
+            Pending::Markets { rows, .. } => match serde_json::from_str::<Instrument<'_>>(item) {
+                Ok(m) => {
+                    if !m.symbol.starts_with("PF_") || m.tradeable == Some(false) {
+                        return;
                     }
-                    Err(error) => {
+                    let decimals = m.contract_value_trade_precision.unwrap_or(0.0);
+                    if !(-18.0..=18.0).contains(&decimals) || decimals.fract() != 0.0 {
                         safe_cex_engine::startup::skipped_row(cx);
-                        cx.notice(
-                            Level::Warn,
-                            code::ROW_SKIPPED,
-                            format!("Kraken invalid public row: {error}"),
-                        );
-                        if let Some(symbol) = malformed_perpetual(item) {
-                            self.skipping_markets.insert(symbol);
-                        }
+                        self.skipping_markets.insert(m.symbol.into_owned());
+                        return;
+                    }
+                    rows.push(Market {
+                        id: format!(
+                            "{}/{}",
+                            m.base,
+                            if m.quote.is_empty() { "USD" } else { &m.quote }
+                        ),
+                        symbol: m.symbol.to_string(),
+                        pretty_symbol: Some(m.symbol[3..].into()),
+                        base: m.base.to_string(),
+                        quote: if m.quote.is_empty() {
+                            "USD".into()
+                        } else {
+                            m.quote.to_string()
+                        },
+                        active: m.status != "cancel_only",
+                        precision: Precision {
+                            amount: 10f64.powi(-(decimals as i32)),
+                            price: m.tick_size.filter(|n| *n > 0.0).unwrap_or(0.01),
+                        },
+                        limits: Limits {
+                            amount: MinMax {
+                                min: 0.0,
+                                max: 9_007_199_254_740_991.0,
+                            },
+                            leverage: MinMax {
+                                min: 1.0,
+                                max: m
+                                    .margin_levels
+                                    .first()
+                                    .filter(|m| m.initial_margin > 0.0)
+                                    .map_or(100.0, |m| (1.0 / m.initial_margin).floor()),
+                            },
+                            price: None,
+                        },
+                        contract_size: Some(m.contract_size.filter(|n| *n > 0.0).unwrap_or(1.0)),
+                        is_expiring: Some(m.last_trading_time.is_some()),
+                        is_inverse: Some(m.contract_type == "inverse"),
+                        is_spot: Some(false),
+                        is_perpetual: None,
+                        is_read_only: None,
+                        taker_fee: None,
+                        maker_fee: None,
+                    });
+                }
+                Err(error) => {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
+                        format!("Kraken invalid public row: {error}"),
+                    );
+                    if let Some(symbol) = malformed_perpetual(item) {
+                        self.skipping_markets.insert(symbol);
                     }
                 }
-            }
+            },
             Pending::Tickers { rows, .. } => match serde_json::from_str::<RestTicker<'_>>(item) {
                 Ok(row) => {
                     if let Some(m) = cx.store.market(&row.symbol) {
@@ -805,6 +846,11 @@ impl Venue for Kraken {
             }
             p => p,
         };
+        if let Pending::Markets { context, .. } | Pending::Tickers { context, .. } = &pending
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         if !(200..300).contains(&response.status)
             || (!matches!(pending, Pending::Candles { .. }) && !success(response))
         {
@@ -812,7 +858,12 @@ impl Venue for Kraken {
             return;
         }
         match pending {
-            Pending::Markets { rows, failed } => {
+            Pending::Markets {
+                context,
+                rows,
+                failed,
+            } => {
+                let _ = cx.finish_http_context(&context);
                 self.markets_in_flight = false;
                 if failed || rows.is_empty() {
                     self.discovery.failed(cx, false);
@@ -856,10 +907,12 @@ impl Venue for Kraken {
                 self.tickers_request(cx);
             }
             Pending::Tickers {
+                context,
                 mut rows,
                 failed,
                 revision,
             } => {
+                let _ = cx.finish_http_context(&context);
                 self.ticker_in_flight = false;
                 if failed || rows.is_empty() {
                     self.discovery.failed(cx, true);
