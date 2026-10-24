@@ -70,3 +70,86 @@ impl<P> Cx<'_, P> {
         )
     }
 }
+
+/// Private metadata from an exact live selected Context; never a send token.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::engine) struct MutationGroupKey {
+    pub owner: Owner,
+    pub anchor: u64,
+    pub ordinal: usize,
+    pub count: usize,
+}
+impl MutationGroupKey {
+    pub(in crate::engine) fn same_group(self, other: Self) -> bool {
+        self.owner == other.owner && self.anchor == other.anchor && self.count == other.count
+    }
+}
+impl ContextRegistry {
+    pub(in crate::engine) fn mutation_group_key(
+        &self,
+        context: &Context,
+    ) -> Result<Option<MutationGroupKey>, Error> {
+        self.validate_handle(context)?;
+        let Some(owner) = self.owner_entry(context.owner()) else {
+            return Ok(None);
+        };
+        let CommandPhase::Planned(state) = &owner.phase else {
+            return Ok(None);
+        };
+        let body = &state.body[0];
+        if body.barriers.is_empty() {
+            return Ok(None);
+        }
+        let index = body
+            .entries
+            .iter()
+            .position(|entry| {
+                entry
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| call.context == *context)
+            })
+            .ok_or(Error::Revoked)?;
+        let Some(range) = body.barriers.iter().find(|range| range.contains(&index)) else {
+            return Ok(None);
+        };
+        Ok(Some(MutationGroupKey {
+            owner: context.owner(),
+            anchor: body.entries[range.start].logical,
+            ordinal: index - range.start,
+            count: range.len(),
+        }))
+    }
+
+    pub(in crate::engine) fn validate_mutation_group_submission(
+        &self,
+        context: &Context,
+    ) -> Result<Option<MutationGroupKey>, Error> {
+        let group = self.mutation_group_key(context)?;
+        let Some(group) = group else {
+            return Ok(None);
+        };
+        let owner = self.owner_entry(context.owner()).ok_or(Error::Revoked)?;
+        let CommandPhase::Planned(state) = &owner.phase else {
+            return Err(Error::Revoked);
+        };
+        let body = &state.body[0];
+        let range = body
+            .barriers
+            .iter()
+            .find(|range| body.entries[range.start].logical == group.anchor)
+            .ok_or(Error::Revoked)?;
+        if body.entries[range.start..range.start + group.ordinal]
+            .iter()
+            .any(|entry| {
+                !entry
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| matches!(call.stage, Stage::Active { .. }))
+            })
+        {
+            return Err(Error::State);
+        }
+        Ok(Some(group))
+    }
+}

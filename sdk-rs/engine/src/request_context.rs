@@ -430,6 +430,10 @@ pub enum HttpAction {
         permit: Permit,
         request: crate::HttpRequest,
     },
+    BindGroup {
+        permit: GroupPermit,
+        members: Vec<GroupPacket>,
+    },
     Cancel {
         preparation: Preparation,
         signing: Option<RequestId>,
@@ -642,6 +646,10 @@ pub enum Claim {
     Released(HttpRelease),
     WaitUntil(f64),
 }
+
+#[path = "request_context_group_protocol.rs"]
+mod group_protocol;
+pub use group_protocol::{GroupClaim, GroupPacket, GroupPermit, GroupRelease};
 
 #[path = "request_context_group_lifecycle.rs"]
 pub(crate) mod group_lifecycle;

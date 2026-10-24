@@ -30,6 +30,10 @@ impl Venue for Consumer {
         }]
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Context>, _: Command) {
+        if self.0 == 14 {
+            custody(cx);
+            return;
+        }
         let read = self.0 == 5;
         let preflight = cx
             .begin_preflight(PreflightPolicy {
@@ -234,4 +238,89 @@ fn existing_three_constructors_keep_empty_barriers() {
     for mode in 11..14 {
         check(mode);
     }
+}
+
+fn custody(cx: &mut Cx<'_, Context>) {
+    let preflight = cx
+        .begin_preflight(PreflightPolicy {
+            purpose: PreflightPurpose::WriteAfterReads,
+            read_credential: None,
+            write_credential: Some(credential()),
+        })
+        .unwrap();
+    let calls = [call(31), call(37)];
+    let steps = [StepBound {
+        wait_ms: 0,
+        calls: &calls,
+    }];
+    let plan = cx
+        .admit_plan_with_barriers(
+            &preflight,
+            &steps,
+            PlanPolicy {
+                independent_calls: false,
+                operation: Operation::Mutation,
+                credential: Some(credential()),
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+            &[MutationBarrierBound { step: 0 }],
+        )
+        .unwrap();
+    let slots = cx.plan_slots(&plan).unwrap();
+    let first = cx.plan_leg_context(&plan, &slots[0]).unwrap();
+    let second = cx.plan_leg_context(&plan, &slots[1]).unwrap();
+    let before = (
+        cx.io.next_id,
+        cx.io.actions.len(),
+        cx.io.request_contexts.plan_context_storage(),
+    );
+    let first_key = cx
+        .io
+        .request_contexts
+        .validate_mutation_group_submission(&first)
+        .unwrap()
+        .unwrap();
+    assert_eq!(first_key.ordinal, 0);
+    assert_eq!(first_key.count, 2);
+    assert!(matches!(
+        cx.io
+            .request_contexts
+            .validate_mutation_group_submission(&second),
+        Err(Error::State)
+    ));
+    let mut foreign = first.clone();
+    foreign.bind_issuer(&std::sync::Arc::new(()));
+    assert!(matches!(
+        cx.io.request_contexts.mutation_group_key(&foreign),
+        Err(Error::Revoked)
+    ));
+    assert_eq!(
+        before,
+        (
+            cx.io.next_id,
+            cx.io.actions.len(),
+            cx.io.request_contexts.plan_context_storage()
+        )
+    );
+    let admission = cx.owned_http_admission(&first).unwrap().unwrap();
+    cx.io.request_contexts.commit_owned_admission(&admission);
+    let second_key = cx
+        .io
+        .request_contexts
+        .validate_mutation_group_submission(&second)
+        .unwrap()
+        .unwrap();
+    assert_eq!(second_key.ordinal, 1);
+    assert!(first_key.same_group(second_key));
+    cx.fail_plan(&plan, "fixture complete").unwrap();
+    assert!(matches!(
+        cx.io.request_contexts.mutation_group_key(&first),
+        Err(Error::Revoked)
+    ));
+}
+
+#[test]
+fn group_custody_refuses_foreign_stale_and_out_of_order_without_effects() {
+    check(14);
 }

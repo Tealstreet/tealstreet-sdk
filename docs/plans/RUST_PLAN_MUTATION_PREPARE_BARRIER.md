@@ -424,3 +424,12 @@ build currently refuses the two unwired staged primitives as dead code
 (Body.barriers and insert_group). No lint exemption is added. Only the focused
 unit results above and the feature-off compile are passing at this intermediate
 checkpoint; complete integration checks resume once orchestration consumes them.
+
+The owner-cleared bounded protocol and private immutable group-custody hooks
+are applied locally after `e9f18dde725`. Token boundary and genuine Plan-custody
+unit controls are added. Their first build stops at the two exhaustive
+BindGroup arms in resource_ids/test_support, which still require the grouped
+handoff; no token/custody execution PASS is claimed at this checkpoint.
+The exact orchestration artifact is under core/signer review before editing
+its parent hooks. Native and WASM host handoff remain separate implementation
+and review gates. These local checkpoints are not pushed or READY.
