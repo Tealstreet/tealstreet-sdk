@@ -10,12 +10,12 @@ use safe_cex_engine::classify::{
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{
-    Context, Credential, HttpOwnerRetirement, Operation, Plan, PlanPolicy, Preflight,
+    Context, Credential, HttpOwnerRetirement, Operation, Plan, PlanPolicy, Policy, Preflight,
     PreflightPolicy, PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
     plan::{CallBound, MutationTerminalBound, RetryWindow, Slot, StepBound},
 };
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, CommandWait, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -419,6 +419,30 @@ impl Backpack {
         }
         Ok(steps)
     }
+    fn reject_fixed_setting(cx: &mut Cx<'_, Pending>, message: &str) {
+        match cx.command_wait() {
+            Some(CommandWait::Remaining(_)) => {}
+            Some(CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Mutation);
+                return;
+            }
+            None => {
+                let _ = cx.reject_unstamped_command(Operation::Mutation);
+                return;
+            }
+        }
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Mutation,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        let _ = cx.fail_context(&context, not_sent(message).kind(ErrorKind::Unsupported));
+    }
+
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         let managed = matches!(
             &command,
@@ -562,14 +586,12 @@ impl Backpack {
                     Err("Backpack leverage must be positive and finite".into())
                 },
             ),
-            Command::SetMarginType { command, .. } => {
-                let error = not_sent("Backpack only supports cross margin");
-                cx.fail(command, error.kind(ErrorKind::Unsupported));
+            Command::SetMarginType { .. } => {
+                Self::reject_fixed_setting(cx, "Backpack only supports cross margin");
                 return;
             }
-            Command::SetPositionMode { command, .. } => {
-                let error = not_sent("Backpack position mode is fixed");
-                cx.fail(command, error.kind(ErrorKind::Unsupported));
+            Command::SetPositionMode { .. } => {
+                Self::reject_fixed_setting(cx, "Backpack position mode is fixed");
                 return;
             }
             _ => return,

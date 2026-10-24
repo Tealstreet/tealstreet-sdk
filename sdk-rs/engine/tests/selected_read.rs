@@ -3,7 +3,7 @@ use safe_cex_engine::book::Book;
 use safe_cex_engine::credential_selection::{PrimaryReason, SlotPolicy, Slots};
 use safe_cex_engine::request_context::{
     CommandEntryError, Context, Error, HttpAction, Owner, Prepared, RetryEvidence, RetryPolicy,
-    RoutingIntent,
+    RoutingIntent, Scope,
 };
 use safe_cex_engine::selected_read::{
     AdmittedRead, BackgroundReadError, CommandReadError, LocalRefusal, ReadPolicy, ReadRequest,
@@ -83,6 +83,7 @@ struct Observed {
     retry: Vec<(Error, u8, Context)>,
     local: Vec<Result<(), Error>>,
     background_missing: usize,
+    scoped_refusals: Vec<BackgroundReadError>,
     response_markers: Vec<u8>,
 }
 struct Config {
@@ -99,6 +100,8 @@ struct Config {
     retry_failure: bool,
     method: Method,
     stream: bool,
+    /// Issue under the delivered command's existing scope, not an entry root.
+    scoped: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -116,6 +119,7 @@ impl Default for Config {
             retry_failure: false,
             method: Method::Get,
             stream: false,
+            scoped: false,
         }
     }
 }
@@ -131,6 +135,9 @@ struct Pending {
 }
 impl Probe {
     fn issue(&mut self, cx: &mut Cx<'_, Pending>, background: bool) {
+        self.issue_for(cx, background, None);
+    }
+    fn issue_for(&mut self, cx: &mut Cx<'_, Pending>, background: bool, command: Option<u32>) {
         let role = if self.config.force_primary {
             ReadRole::Primary {
                 reason: PrimaryReason::DegradedRead,
@@ -147,7 +154,15 @@ impl Probe {
             pacing: None,
             retry: self.config.retry,
         };
-        let read = if background {
+        let read = if let Some(command) = command.filter(|_| self.config.scoped) {
+            match SelectedRead::scoped(cx, selected, Scope::Command(command), policy) {
+                Ok(read) => read,
+                Err(refusal) => {
+                    self.observed.lock().unwrap().scoped_refusals.push(refusal);
+                    return;
+                }
+            }
+        } else if background {
             match SelectedRead::background(cx, selected, policy) {
                 Ok(read) => read,
                 Err(BackgroundReadError::Selection(_)) => {
@@ -242,8 +257,12 @@ impl Venue for Probe {
             self.issue(cx, self.config.background);
         }
     }
-    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, _: Command) {
-        self.issue(cx, false);
+    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let id = match command {
+            Command::FetchAccount { command } => Some(command),
+            _ => None,
+        };
+        self.issue_for(cx, false, id);
     }
     fn on_item(&mut self, _: &mut Cx<'_, Pending>, pending: &mut Pending, _: &str) {
         pending.marker += 1;
@@ -836,4 +855,79 @@ fn streaming_descriptor_registers_rows_on_the_same_native_pending_and_context() 
             .count(),
         1
     );
+}
+
+/// R1 (#1992): a read issued from `on_command` under that command's
+/// `Scope::Command(id)` (not an entry root) carries the Selection's slot,
+/// identity and routing intent. Evidence tagging stays covered by the existing
+/// `queue` controls; this test does not assert it.
+#[test]
+fn scoped_read_issues_under_the_command_with_the_selections_slot_and_evidence() {
+    for (secondary, slot) in [
+        (true, CredentialSlot::Secondary),
+        (false, CredentialSlot::Primary),
+    ] {
+        let (mut e, observed) = engine(Config {
+            scoped: true,
+            secondary,
+            ..Config::default()
+        });
+        let (_, _, intent) = prepare(ask(&mut e, 9));
+        assert_eq!(
+            intent,
+            if secondary {
+                RoutingIntent::Secondary
+            } else {
+                RoutingIntent::Primary
+            }
+        );
+        let observed = observed.lock().unwrap();
+        let [context] = &observed.contexts[..] else {
+            panic!("one scoped context");
+        };
+        assert!(matches!(context.owner(), Owner::Command { id: 9, .. }));
+        assert_eq!(context.credential().map(|c| c.slot), Some(slot));
+        assert_eq!(
+            observed.identities,
+            vec![identity(if secondary { "secondary" } else { "primary" })]
+        );
+        assert!(observed.scoped_refusals.is_empty());
+    }
+}
+
+/// R2 (#1992): a missing selection or a refused admission issues no context,
+/// emits no HTTP and settles nothing; the caller keeps the refusal.
+#[test]
+fn scoped_read_refusals_issue_nothing_and_settle_nothing() {
+    for (primary, secondary, timeout) in [(false, false, 20_000), (true, true, 0)] {
+        let (mut e, observed) = engine(Config {
+            scoped: true,
+            primary,
+            secondary,
+            timeout,
+            ..Config::default()
+        });
+        let actions = ask(&mut e, 9);
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::ManagedHttp(_) | Action::Http(_) | Action::Sign { .. }
+        )));
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
+        )));
+        let observed = observed.lock().unwrap();
+        assert!(observed.contexts.is_empty());
+        let [refusal] = &observed.scoped_refusals[..] else {
+            panic!("one scoped refusal");
+        };
+        if timeout == 0 {
+            assert!(matches!(
+                refusal,
+                BackgroundReadError::Admission(Error::Invalid)
+            ));
+        } else {
+            assert!(matches!(refusal, BackgroundReadError::Selection(_)));
+        }
+    }
 }

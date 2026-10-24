@@ -3,8 +3,8 @@ use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, Socke
 use safe_cex_venue_cryptocom::{Cryptocom, Options};
 
 fn answer(engine: &mut Engine<Cryptocom>, body: &str) {
-    let request = engine
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r.id),
             _ => None,
@@ -263,7 +263,7 @@ fn bad_instrument_and_ticker_rows_are_skipped_at_startup() {
             {"symbol":"XRP_USD","inst_type":"CCY_PAIR","tradable":true}
         ]}}"#,
     );
-    let mut actions: Vec<_> = engine.drain_actions().collect();
+    let mut actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0);
     let tickers = actions
         .iter()
         .find_map(|a| match a {
