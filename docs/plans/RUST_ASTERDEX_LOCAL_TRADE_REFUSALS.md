@@ -58,8 +58,12 @@ For a valid native remote job, leave the existing cleanup/insert/advance path
 without a newly issued managed root. This is a refusal-only cutover, not partial
 remote ownership: no Context may be issued then forgotten for legacy HTTP. A
 pure local-refusal decision may share formatting; it must not wrap the engine
-issuer or add a local journal, timer, retry or numeric fallback. Unrelated
-CancelSymbolOrders and response-side acknowledgement cleanup are outside scope.
+issuer or add a local journal, timer, retry or numeric fallback. CancelSymbolOrders also prunes acknowledged during planning, before start_trade.
+Its planning branch must project the same retained entries immutably, and carry
+native cleanup intent to the admitted local-refusal or accepted native job path.
+A failed entry must not mutate that earlier cleanup either. Preserve Store-first
+then retained-ack cancellation routing without duplicate IDs. Response-side
+acknowledgement cleanup remains outside scope.
 
 ## Caller-visible contract
 
@@ -74,7 +78,8 @@ fallback, extra success or signed capability is introduced.
 
 CALLERS must record those outcome/admission/auth-health changes before runtime
 adoption. Existing SDK STP/settings/order callers and remote payloads remain.
-The existing four async trading terminals are not converted or claimed retired.
+The remaining four trading inventory witnesses (two async numeric terminals
+and two conservative matches macros) are not converted or claimed retired.
 
 ## Original REDs and working controls
 
@@ -176,3 +181,23 @@ a refresh follows that addition. Checker controls pass15/15. Initial provenance
 failed solely because a newer incoming KuCoin prune was missing from the base;
 this is not waived, and a genuine updated-tip merge follows the original RED
 commit before claiming a provenance pass.
+
+A further pre-source audit found the earlier CancelSymbolOrders acknowledged
+retain in job construction, not only start_trade's capacity cleanup. Its pure
+planning and deferred cleanup intent are included in scope, without adding a
+fourth inventory removal. Dedicated invalid/capacity state REDs and a native
+Store-first/no-duplicate cancellation wire positive now pin that earlier boundary.
+The original near-capacity and routing-state controls remain unchanged.
+
+Expanded original target after the CancelSymbolOrders correction executes
+**24 assertion REDs /8 native working controls /0 ignored**. The added four REDs
+cover invalid/full entry through missing-key symbol cancellation and both
+earlier routing-state preservation checks. The added positive pins Store-first
+DELETE orderId routing and exactly one remaining live-ack step at full managed
+capacity. The earlier27 test bodies are retained except fixture setup support
+for the additional case. Existing trading/admission/security targets independently
+pass40 tests across3 targets, with all original assertions unchanged.
+
+The first updated-tip ratchet pass was followed by a full-bans provenance failure
+on another newer Bitrue prune. Keep that failure visible and integrate its actual
+landing before the final provenance pass; no checker override is used.

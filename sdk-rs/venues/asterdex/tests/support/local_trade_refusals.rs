@@ -87,6 +87,7 @@ impl Venue for Probe {
 enum Case {
     PlanWrite,
     KeyWrite,
+    SymbolCancel,
     CapacityWrite,
     PlanRead,
     KeyRead,
@@ -103,6 +104,10 @@ impl Case {
             Self::PlanWrite => Command::SetStpMode {
                 command,
                 mode: StpMode::ExpireTaker,
+            },
+            Self::SymbolCancel => Command::CancelSymbolOrders {
+                command,
+                symbol: "BTCUSDT".into(),
             },
             Self::KeyWrite | Self::FieldsWrite => Command::SetPositionMode {
                 command,
@@ -121,7 +126,7 @@ impl Case {
                 "Aster self-trade prevention requires V3",
                 Some(ErrorKind::InvalidInput),
             ),
-            Self::KeyRead | Self::KeyWrite => (
+            Self::KeyRead | Self::KeyWrite | Self::SymbolCancel => (
                 "Missing required Aster credentials",
                 Some(ErrorKind::AuthInvalid),
             ),
@@ -173,7 +178,11 @@ fn market() -> Market {
     }
 }
 fn engine(case: Case) -> Engine<Probe> {
-    configured(case, false)
+    let mut e = configured(case, false);
+    if matches!(case, Case::SymbolCancel) {
+        e.store_mut().set_orders(vec![stale_order()]);
+    }
+    e
 }
 fn configured(case: Case, seed_ack: bool) -> Engine<Probe> {
     let keyed = matches!(
@@ -310,6 +319,7 @@ macro_rules! pair {
 }
 pair!(invalid_plan_write, capacity_plan_write, PlanWrite);
 pair!(invalid_key_write, capacity_key_write, KeyWrite);
+pair!(invalid_symbol_cancel, capacity_symbol_cancel, SymbolCancel);
 pair!(
     invalid_routing_capacity,
     capacity_routing_capacity,
@@ -621,4 +631,70 @@ fn retired_ack_does_not_consume_native_capacity_for_an_accepted_job() {
     );
     assert_eq!(e.venue().peers.len(), 256);
     assert_eq!(e.venue().after, 256);
+}
+
+fn seeded_symbol_cancel() -> Engine<Probe> {
+    let mut e = configured(Case::SymbolCancel, true);
+    e.store_mut().set_orders(vec![stale_order()]);
+    e
+}
+#[test]
+fn invalid_symbol_cancel_does_not_prune_during_job_construction() {
+    let mut e = seeded_symbol_cancel();
+    let before = e.venue().inner.trading.acknowledged.clone();
+    let out = act(&mut e, f64::NAN, Case::SymbolCancel, OWNER);
+    assert_eq!(e.venue().inner.trading.acknowledged, before);
+    refused(&out, Case::SymbolCancel, ErrorKind::InvalidInput);
+}
+#[test]
+fn full_symbol_cancel_does_not_prune_during_job_construction() {
+    let mut e = seeded_symbol_cancel();
+    fill(&mut e);
+    let before = e.venue().inner.trading.acknowledged.clone();
+    let out = act(&mut e, NOW, Case::SymbolCancel, OWNER);
+    assert_eq!(e.venue().inner.trading.acknowledged, before);
+    refused(&out, Case::SymbolCancel, ErrorKind::Internal);
+}
+#[test]
+fn valid_symbol_cancel_keeps_store_and_live_ack_routing_without_duplicates() {
+    let mut e = seeded_ack();
+    fill(&mut e);
+    e.handle(
+        NOW,
+        Event::Command(Command::CancelSymbolOrders {
+            command: OWNER,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let mut out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    if let Some(id) = out.iter().find_map(|a| match a {
+        Action::Http(h) if h.url.ends_with("/time") => Some(h.id),
+        _ => None,
+    }) {
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"serverTime":1700000000000}"#,
+                },
+            },
+        );
+        out.extend(safe_cex_engine::test_support::prepared_actions(&mut e, NOW));
+    }
+    let http = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(h) if h.method == Method::Delete && h.url.contains("/order?") => Some(h),
+            _ => None,
+        })
+        .expect("native symbol cancellation still dispatches at full managed capacity");
+    assert!(http.url.contains("symbol=BTCUSDT&orderId=retired&"));
+    let inner = &e.venue().inner;
+    assert!(!inner.trading.acknowledged.contains_key("retired"));
+    assert!(inner.trading.acknowledged.contains_key("live"));
+    assert_eq!(inner.trading.jobs.get(&OWNER).unwrap().steps.len(), 1);
+    assert_eq!(e.venue().peers.len(), 256);
 }
