@@ -308,6 +308,16 @@ impl<P> Cx<'_, P> {
         error: impl FnOnce() -> VenueError,
         callback: impl FnOnce(&mut Self),
     ) {
+        self.with_read_plan_failure_origin(None, error, callback);
+    }
+
+    pub(in super::super::super) fn with_read_plan_failure_origin(
+        &mut self,
+        origin: Option<super::super::ReleasedReadFailure>,
+        error: impl FnOnce() -> VenueError,
+        callback: impl FnOnce(&mut Self),
+    ) {
+        self.io.http_history_failure = None;
         let owned =
             self.io.http_delivery.as_ref().is_some_and(|delivery| {
                 self.io.request_contexts.record_owned_read_failure(delivery)
@@ -321,7 +331,22 @@ impl<P> Cx<'_, P> {
             .http_delivery
             .clone()
             .expect("owned failure delivery");
+        if self.io.http_plan_expiring.is_none()
+            && self
+                .io
+                .managed_http
+                .get(&delivery.attempt.request)
+                .is_some_and(|managed| managed.released_delivery(&delivery))
+            && let Some(origin) = origin
+            && self
+                .io
+                .request_contexts
+                .record_read_plan_failure(&delivery, origin)
+        {
+            self.io.http_history_failure = Some(delivery.attempt);
+        }
         callback(self);
+        self.io.http_history_failure = None;
         if self
             .io
             .request_contexts
@@ -366,7 +391,7 @@ impl<P> Cx<'_, P> {
                     .result(&delivery, WriteResult::Failed(error.clone()))
                     .expect("pre-enrolled selected write");
             }
-            self.fail_plan(&plan, error)
+            self.fail_plan_owned(&plan, error)
                 .expect("exact selected plan failure");
             return;
         }
@@ -613,6 +638,7 @@ impl<P> Cx<'_, P> {
                 predecessor: None,
             },
             stage: Stage::Ready,
+            released_failure: None,
         };
         call.select(self.now, predecessor)
             .expect("validated initial physical window");

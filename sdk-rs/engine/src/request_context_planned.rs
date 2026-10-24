@@ -23,6 +23,8 @@ struct Body {
     entries: Vec<Entry>,
     handoff: Option<Delivery>,
     initial_custody: bool,
+    history_bound: bool,
+    history_latest_release: Option<Attempt>,
 }
 
 struct Entry {
@@ -275,6 +277,13 @@ impl ContextRegistry {
             .then(|| state.body[0].handle.clone())
     }
 
+    fn validate_unbound_plan(&self, plan: &Plan) -> Result<(), Error> {
+        if self.plan_body(plan)?.history_bound {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
     fn validate_plan(&self, handle: &Plan, now: f64) -> Result<&Body, Error> {
         if !now.is_finite() {
             return Err(Error::Invalid);
@@ -522,6 +531,8 @@ impl<P> Cx<'_, P> {
             entries,
             handoff: self.io.http_delivery.clone(),
             initial_custody: self.io.http_delivery.is_none() && self.io.http_plan_ready.is_none(),
+            history_bound: false,
+            history_latest_release: None,
         });
         if let Some(context) = old_read {
             self.io.retire_http_leg(&context);
@@ -681,6 +692,7 @@ impl<P> Cx<'_, P> {
                 predecessor: None,
             },
             stage: Stage::Ready,
+            released_failure: None,
         };
         call.select(self.now, self.io.http_delivery.clone())?;
         let owner = self
@@ -749,9 +761,70 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    pub(crate) fn bind_read_plan_history(&mut self, plan: &Plan) -> Result<Plan, Error> {
+        self.validate_preflight_ready_owner(plan.owner())?;
+        let Owner::Command { id, .. } = plan.owner() else {
+            return Err(Error::Invalid);
+        };
+        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Read || body.receipt_cap.is_none() {
+            return Err(Error::Invalid);
+        }
+        if body.history_bound
+            || body
+                .entries
+                .iter()
+                .any(|entry| entry.credit != Credit::Unissued || entry.call.is_some())
+        {
+            return Err(Error::State);
+        }
+        if self.io.http_owner_poison
+            || self.io.http_plan_expiring.is_some()
+            || self
+                .io
+                .http_plan_ready
+                .as_ref()
+                .is_some_and(|ready| !ready.same_plan(plan))
+        {
+            return Err(Error::Revoked);
+        }
+        if self.io.http_delivery.is_some() {
+            self.io.request_contexts.validate_plan_seal_origin(
+                plan,
+                self.now,
+                self.io.http_delivery.as_ref(),
+            )?;
+        } else if !(self.io.entry_bound(id)
+            || self
+                .io
+                .http_preflight_ready
+                .as_ref()
+                .is_some_and(|ready| ready.owner() == plan.owner())
+            || self
+                .io
+                .http_plan_ready
+                .as_ref()
+                .is_some_and(|ready| ready.same_plan(plan)))
+        {
+            return Err(Error::Revoked);
+        }
+        self.io.request_contexts.plan_body_mut(plan)?.history_bound = true;
+        Ok(plan.clone())
+    }
+
     /// Settle a call after validating DATA and recording write facts. Structural
     /// progress grants no effect or successful command outcome by itself.
     pub fn finish_plan_call(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<(), Error> {
+        self.io.request_contexts.validate_unbound_plan(plan)?;
+        self.finish_plan_call_inner(plan, slot, context)
+    }
+
+    fn finish_plan_call_inner(
         &mut self,
         plan: &Plan,
         slot: &Slot,
@@ -869,6 +942,7 @@ impl<P> Cx<'_, P> {
     /// convert known-partial, refused or unresolved writes into terminal failure.
     pub fn done_plan(&mut self, plan: &Plan, result: String) -> Result<(), Error> {
         self.validate_preflight_ready_owner(plan.owner())?;
+        self.io.request_contexts.validate_unbound_plan(plan)?;
         let body = self.io.request_contexts.validate_plan(plan, self.now)?;
         if !body.schedule.is_complete() {
             return Err(Error::State);
@@ -887,6 +961,7 @@ impl<P> Cx<'_, P> {
         context: &Context,
         result: String,
     ) -> Result<(), Error> {
+        self.io.request_contexts.validate_unbound_plan(plan)?;
         let body = self.io.request_contexts.validate_plan(plan, self.now)?;
         if body.policy.operation != Operation::Read {
             return Err(Error::Invalid);
@@ -919,6 +994,23 @@ impl<P> Cx<'_, P> {
             .as_ref()
             .is_some_and(|current| current.same_plan(plan))
         {
+            return self.fail_plan_owned(plan, error.into());
+        }
+        self.io.request_contexts.validate_unbound_plan(plan)?;
+        self.fail_plan_owned(plan, error.into())
+    }
+
+    pub(in crate::engine) fn fail_plan_owned(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+    ) -> Result<(), Error> {
+        if self
+            .io
+            .http_plan_expiring
+            .as_ref()
+            .is_some_and(|current| current.same_plan(plan))
+        {
             self.io.request_contexts.validate_plan_seal_origin(
                 plan,
                 self.now,
@@ -926,7 +1018,7 @@ impl<P> Cx<'_, P> {
             )?;
             return Ok(());
         }
-        self.seal_plan(plan, None, Some(error.into()))
+        self.seal_plan(plan, None, Some(error))
     }
 
     fn seal_plan(
@@ -1105,7 +1197,7 @@ impl<P> Cx<'_, P> {
         if self.now >= call.admission.deadline {
             error.kind = Some(crate::ErrorKind::Timeout)
         }
-        self.fail_plan(&plan, error.clone())
+        self.fail_plan_owned(&plan, error.clone())
             .expect("exact failed plan custody");
         true
     }
@@ -1344,3 +1436,100 @@ impl<P> Cx<'_, P> {
         self.finish_sealed_command(id, Some(result), Seal::Success)
     }
 }
+
+impl ContextRegistry {
+    pub(in crate::engine) fn record_read_plan_release(&mut self, delivery: &Delivery) {
+        let Some(plan) = self.plan_from_context(&delivery.context) else {
+            return;
+        };
+        let Ok(body) = self.plan_body_mut(&plan) else {
+            return;
+        };
+        if !body.history_bound {
+            return;
+        }
+        if body.entries.iter().any(|entry| {
+            entry
+                .call
+                .as_ref()
+                .is_some_and(|call| call.matches(delivery))
+        }) {
+            body.history_latest_release = Some(delivery.attempt);
+        }
+    }
+
+    pub(in crate::engine) fn record_read_plan_failure(
+        &mut self,
+        delivery: &Delivery,
+        origin: super::ReleasedReadFailure,
+    ) -> bool {
+        let Some(plan) = self.plan_from_context(&delivery.context) else {
+            return false;
+        };
+        let Ok(body) = self.plan_body_mut(&plan) else {
+            return false;
+        };
+        if !body.history_bound || body.history_latest_release != Some(delivery.attempt) {
+            return false;
+        }
+        let Some(call) = body
+            .entries
+            .iter_mut()
+            .find_map(|entry| entry.call.as_mut().filter(|call| call.matches(delivery)))
+        else {
+            return false;
+        };
+        if !matches!(call.stage, Stage::Active { failed: true }) {
+            return false;
+        }
+        call.released_failure = Some(origin);
+        true
+    }
+}
+
+impl<P> Cx<'_, P> {
+    pub(crate) fn validate_read_plan_history_failure(
+        &self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<Attempt, Error> {
+        self.validate_preflight_ready_owner(plan.owner())?;
+        if self.io.http_owner_poison
+            || self.io.http_plan_poison
+            || self.io.http_plan_expiring.is_some()
+        {
+            return Err(Error::Revoked);
+        }
+        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        if !body.history_bound
+            || !matches!(plan.owner(), Owner::Command { .. })
+            || body.policy.operation != Operation::Read
+            || body.receipt_cap.is_none()
+        {
+            return Err(Error::Invalid);
+        }
+        let index = body.schedule.ordinal(slot)?;
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let call = body.entries[index]
+            .call
+            .as_ref()
+            .filter(|call| {
+                call.context.same_issuer(context)
+                    && call.context == *context
+                    && call.matches(delivery)
+            })
+            .ok_or(Error::Revoked)?;
+        if !matches!(call.stage, Stage::Active { failed: true })
+            || call.released_failure.is_none()
+            || body.history_latest_release != Some(delivery.attempt)
+            || self.io.http_history_failure != Some(delivery.attempt)
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(delivery.attempt)
+    }
+}
+
+#[path = "request_context_history_plan.rs"]
+mod history;

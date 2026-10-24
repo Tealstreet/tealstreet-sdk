@@ -468,7 +468,11 @@ impl<P> Io<P> {
         }
     }
 
-    fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
+    fn take_managed_with_cancel(
+        &mut self,
+        request: RequestId,
+        cancel: Option<Action>,
+    ) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
         self.request_contexts
             .retire_attempt(managed.lifecycle.context(), request);
@@ -478,16 +482,25 @@ impl<P> Io<P> {
         self.actions.push(Action::ClearTimer {
             timer: managed.timer,
         });
-        self.actions
-            .push(Action::ManagedHttp(Box::new(HttpAction::Cancel {
+        self.actions.push(cancel.unwrap_or_else(|| {
+            Action::ManagedHttp(Box::new(HttpAction::Cancel {
                 preparation: managed.lifecycle.preparation(),
                 signing: managed.signing_attempt,
-            })));
+            }))
+        }));
         Some(managed)
     }
 
     pub(super) fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
-        let managed = self.take_managed(request)?;
+        self.discard_managed_with_cancel(request, None)
+    }
+
+    fn discard_managed_with_cancel(
+        &mut self,
+        request: RequestId,
+        cancel: Option<Action>,
+    ) -> Option<PendingHttp<P>> {
+        let managed = self.take_managed_with_cancel(request, cancel)?;
         if managed.lifecycle.context().operation() == Operation::Mutation
             && managed.lifecycle.release().is_some()
         {
@@ -721,6 +734,10 @@ impl<V: Venue> Engine<V> {
         self.io.request_contexts.enter_delivery(&delivery);
         if let Some(pending) = self.io.discard_managed(request) {
             self.begin_event_scope();
+            #[cfg(feature = "http-plans")]
+            {
+                self.io.http_history_failure = None;
+            }
             let previous = self.io.http_delivery.replace(delivery.clone());
             self.venue.on_http_preparation_failed(
                 &mut Cx {
@@ -829,6 +846,10 @@ impl<V: Venue> Engine<V> {
             if let Some(released) = release_flag {
                 *released = true;
             }
+            #[cfg(feature = "http-plans")]
+            self.io
+                .request_contexts
+                .record_read_plan_release(&managed.delivery());
             self.io
                 .request_contexts
                 .execution_leg_released(managed.lifecycle.context());
@@ -995,12 +1016,13 @@ impl<V: Venue> Engine<V> {
         let managed = &self.io.managed_http[&request];
         if managed.lifecycle.release().is_some() {
             let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Timeout);
-            self.handle_event(
+            self.handle_event_with_read_timeout(
                 now,
                 Event::HttpFailed {
                     request,
                     error: "HTTP request timed out",
                 },
+                true,
             );
             self.io.http_failure_kind = kind;
             self.io.discard_managed(request);
@@ -1154,6 +1176,10 @@ impl<V: Venue> Engine<V> {
                 .expect("active capture has a managed request")
                 .delivery();
             self.io.request_contexts.enter_delivery(&delivery);
+            #[cfg(feature = "http-plans")]
+            {
+                self.io.http_history_failure = None;
+            }
             let previous = self.io.http_delivery.replace(delivery.clone());
             if let Some(error) = proof.error() {
                 let venue = &self.venue;
@@ -1175,7 +1201,7 @@ impl<V: Venue> Engine<V> {
                     };
                     #[cfg(feature = "http-plans")]
                     let sealed = if let Some(plan) = &plan {
-                        cx.fail_plan(plan, error)
+                        cx.fail_plan_owned(plan, error)
                     } else {
                         cx.fail_context(&delivery.context, error)
                     };
@@ -1244,6 +1270,70 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+        }
+    }
+}
+
+#[cfg(feature = "http-plans")]
+pub(in crate::engine) struct PreparedReadCleanup {
+    request: RequestId,
+    preparation: Preparation,
+    cancel: Action,
+}
+
+#[cfg(feature = "http-plans")]
+impl<P> Io<P> {
+    pub(super) fn prepare_read_history_cleanup(
+        &mut self,
+        owner: Owner,
+        leg: Option<u64>,
+        notices: usize,
+    ) -> Result<Vec<PreparedReadCleanup>, Error> {
+        let matches = |managed: &Managed| {
+            managed.lifecycle.context().owner() == owner
+                && leg.is_none_or(|leg| managed.lifecycle.context().leg() == leg)
+        };
+        let count = self
+            .managed_http
+            .values()
+            .filter(|managed| matches(managed))
+            .count();
+        let mut cleanup = Vec::new();
+        cleanup
+            .try_reserve_exact(count)
+            .map_err(|_| Error::Capacity)?;
+        // Four per request cover Cancel, its timer clear, and execution-timer clear/rearm.
+        // Additional notices cover Plan timer actions, the terminal and optional marker.
+        self.actions
+            .try_reserve(
+                count
+                    .checked_mul(4)
+                    .and_then(|n| n.checked_add(notices))
+                    .ok_or(Error::Capacity)?,
+            )
+            .map_err(|_| Error::Capacity)?;
+        for (request, managed) in &self.managed_http {
+            if matches(managed) {
+                cleanup.push(PreparedReadCleanup {
+                    request: *request,
+                    preparation: managed.lifecycle.preparation(),
+                    cancel: Action::ManagedHttp(Box::new(HttpAction::Cancel {
+                        preparation: managed.lifecycle.preparation(),
+                        signing: managed.signing_attempt,
+                    })),
+                });
+            }
+        }
+        Ok(cleanup)
+    }
+    pub(super) fn commit_read_history_cleanup(&mut self, cleanup: Vec<PreparedReadCleanup>) {
+        for item in cleanup {
+            assert!(
+                self.managed_http
+                    .get(&item.request)
+                    .is_some_and(|managed| managed.lifecycle.preparation() == item.preparation)
+            );
+            self.discard_managed_with_cancel(item.request, Some(item.cancel));
         }
     }
 }
