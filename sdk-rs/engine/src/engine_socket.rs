@@ -294,10 +294,12 @@ impl<P> Cx<'_, P> {
         if values.len() > MAX_INTERESTS || required_keys.len() > MAX_INTERESTS {
             return Err(SocketError::Capacity);
         }
-        let values_by_key: std::collections::BTreeMap<_, _> =
-            values.iter().map(|i| (i.key.as_ref(), i)).collect();
-        if values_by_key.len() != values.len() {
-            return Err(SocketError::InvalidInterest);
+        // Inserted one by one: `collect` would add its own sort and bulk build.
+        let mut values_by_key = std::collections::BTreeMap::new();
+        for value in &values {
+            if values_by_key.insert(value.key.as_ref(), value).is_some() {
+                return Err(SocketError::InvalidInterest);
+            }
         }
         let mut seen = std::collections::BTreeSet::new();
         let mut required = Vec::with_capacity(required_keys.len());
