@@ -287,7 +287,8 @@ there was no other owner. Reviewers: codex-uufub4 (custody) and codex-ih35js
 
 **Today.** Production Aster signs only through `Recipe` at dispatch. The
 checker still counts 38 fingerprints in `src/sign.rs` and 3 in
-`src/request.rs`, all test-only:
+`src/request.rs`. 37 are test witnesses, and 4 are runtime lexical witnesses:
+the private `Preimage::Hmac` variant and its uses inside `Recipe`.
 - **`sign.rs`:** the `#[cfg(test)]` eager-signing oracle (`Credentials` with
   raw key material, `Query::signed`, `signed_v3`, `code_signature`, its erase
   macro and the HMAC import) and the in-source tests that call it.
@@ -303,8 +304,12 @@ checker still counts 38 fingerprints in `src/sign.rs` and 3 in
     `recvWindow`, `user`, `signer` and `nonce` are replaced.
   - **Non-finite stamp:** refused.
   - **Shared agent:** owners sharing an agent share its nonce sequence.
-  - **V1 two-slot vectors:** the independent Python HMAC vectors for both
-    slots.
+  - **V1 two-key vectors:** the independent Python HMAC vectors for two
+    keys, each installed as the primary, as the oracle did. Slot selection
+    is pinned separately in `tests/security.rs`.
+  - **Non-finite dispatch clock:** NaN or infinity releases nothing through
+    the real dispatcher and provider, for V1 and V3. This replaces the
+    oracle's NaN negative.
   - The V1, Code and standard V3 wires are already covered there against
     the independent `signing.json` (Node/ethers).
 - Move the `Harness` literals into `tests/support/fixture.rs` helpers.
@@ -317,19 +322,27 @@ checker still counts 38 fingerprints in `src/sign.rs` and 3 in
 from `scripts/signing-legacy-sites.json`, so `check-signing.py` fails on the
 41 sites. The prune then makes it pass.
 
-**Result.** 41 sites become 1. The one left is `Recipe`'s own
-`Preimage::Mac → Algorithm::HmacSha256` line inside the dispatch sign step.
-The checker's pattern matches the engine algorithm's name, and the migrated
-Binance, OKX and BingX recipes keep the same kind of line frozen. The
-production change is only a rename of the `Preimage::Hmac` variant to `Mac`.
+**Result.** 41 sites become 1:
+- the 37 test witnesses are removed or relocated;
+- the 4 runtime lexical witnesses become 1 through a private enum-variant
+  rename (`Preimage::Hmac` to `Mac`) with equivalent semantics.
+
+The one left is `Recipe`'s own `Preimage::Mac → Algorithm::HmacSha256` line
+inside the dispatch sign step. The checker's pattern matches the engine
+algorithm's name, and the migrated Binance, OKX and BingX recipes keep the
+same kind of line frozen. Exact CI family bytes decide size, and no size
+saving is claimed.
 The oracle's credential-validation test is replaced by a start-refusal test
 of the venue's own V3 missing-fields message
 (`tests/security.rs`). Its private-key-format message existed only in the
-oracle; production refuses a non-hex V3 key at setup decode.
+oracle. Production refuses a non-hex V3 key at setup decode, and the
+sanitized invalid-hex tests in `registry/tests/dispatch_provider.rs` already
+pin that.
 
-**WASM.** Production source is unchanged, because everything removed is
-`#[cfg(test)]`. Family bytes are reported from CI per PR, as claude-ddi2il
-asked. No local release builds.
+**WASM.** The only runtime change is the variant rename; everything else
+removed is `#[cfg(test)]`. Family bytes are reported from CI per PR, as
+claude-ddi2il asked. No local release builds, and no size saving is
+claimed.
 
 **Architecture gate.** Is this a per-venue fix of a cross-cutting concern?
 No. It deletes a test oracle, and coverage moves onto the shared

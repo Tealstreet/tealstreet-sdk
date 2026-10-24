@@ -261,9 +261,10 @@ fn interim_nonce_reserves_monotonically_at_each_preparation_and_methods_must_agr
 // provider and `Recipe` at dispatch.
 
 /// Independent Python hashlib/hmac vectors over the exact native V1 payload,
-/// for a primary and a secondary key.
+/// for two keys, each installed as the primary as the old oracle did. Actual
+/// primary/secondary slot selection is pinned in tests/security.rs.
 #[test]
-fn v1_recipe_matches_independent_hmac_vectors_for_both_slots() {
+fn v1_recipe_matches_independent_hmac_vectors_for_two_keys() {
     for (key, material, expected) in [
         (
             "primary-key",
@@ -380,4 +381,63 @@ fn owners_sharing_an_agent_share_its_nonce_sequence() {
         ));
     }
     assert_eq!(nonces, [1_234_000, 1_234_001, 1_234_002]);
+}
+
+/// Replaces the deleted oracle's non-finite-clock negative
+/// (`validation_nonce_freshness_and_unsigned_fields`): a non-finite dispatch
+/// clock releases nothing through the real dispatcher and provider.
+#[test]
+fn non_finite_dispatch_clock_releases_no_signed_request() {
+    let wallet = "94".repeat(32);
+    let agent = safe_cex_crypto::ethereum::private_key_address(&wallet).unwrap();
+    for (auth, encoding, material) in [
+        (
+            Auth::V1,
+            KeyEncoding::Utf8,
+            "fixture-only-v1-material".to_owned(),
+        ),
+        (
+            Auth::V3 {
+                user: "0x0000000000000000000000000000000000000444".into(),
+                signer: agent.clone(),
+                nonce: safe_cex_venue_asterdex::sign::interim_nonce(),
+            },
+            KeyEncoding::Hex,
+            wallet.clone(),
+        ),
+    ] {
+        for now in [f64::NAN, f64::INFINITY] {
+            let (signer, identity) = provider(&agent, &material, encoding);
+            let path = "/fapi/v3/account";
+            let recipe = Recipe::new(
+                identity,
+                match &auth {
+                    Auth::V1 => Auth::V1,
+                    Auth::V3 { user, signer, .. } => Auth::V3 {
+                        user: user.clone(),
+                        signer: signer.clone(),
+                        nonce: safe_cex_venue_asterdex::sign::interim_nonce(),
+                    },
+                },
+                Method::Get,
+                ORIGIN,
+                path,
+                Query::new(),
+                false,
+            )
+            .unwrap();
+            let mut engine = Engine::new(
+                Issue(vec![(Method::Get, path.into(), Box::new(recipe))]),
+                Some(seeded_entropy(5)),
+            )
+            .unwrap();
+            engine.set_signer(Some(signer)).unwrap();
+            engine.start(now);
+            let actions = prepared_actions(&mut engine, now);
+            assert!(
+                !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                "{now}"
+            );
+        }
+    }
 }
