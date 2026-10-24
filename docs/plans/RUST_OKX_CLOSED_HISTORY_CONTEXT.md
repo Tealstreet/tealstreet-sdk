@@ -172,8 +172,10 @@ On exact unchanged `2371f5439a3` production, the new real Engine<Okx> target
 executes **10 behavioral assertion REDs / 6 working controls / zero ignored**.
 The existing closed_positions target separately passes all9 tests unchanged;
 both targets ran together with --no-fail-fast. No compiler/fixture failure is
-counted as a RED. Strict Clippy for the new target, scoped fmt and both
-request-context checks (15 checker controls) pass.
+counted as a RED. Strict Clippy for the new target and scoped fmt pass. The
+provenance check then failed against newer landing inventory prunes in Bitrue,
+GRVT, KuCoin and Lighter; it did not reach the chained checker-unit target.
+The branch needs a genuine current-tip integration before a provenance pass.
 
 The REDs pin missing/invalid receipt, full actual peer-root capacity at local
 completion and paced dequeue, unmanaged dispatch, response at caller equality,
