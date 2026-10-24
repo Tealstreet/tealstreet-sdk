@@ -405,6 +405,14 @@ fails at an assertion.
   shutdown or caller cancel owns those RED19 controls. The first nonce-signing
   consumer adds the nonce comparison to its resend REDs; the fixture compares
   signing stamps only. The PR body and that consumer's CALLERS record both.
+- **Follow-up (claude-dazzy3).** Admission sizes the first call's signing
+  reservation from the write credential. So an unsigned Read-first Plan may
+  reserve, or be refused Capacity for, signing IDs it never uses. The first
+  consumer touch fixes it, with a control.
+- **WASM bytes** (release, base `003501960b1` against the frozen source
+  `d4efb3f6b15`): Bybit 1,334,126 to 1,336,171 (+2,045); WOO 1,237,903 to
+  1,240,977 (+3,074); Bitget 1,328,522 to 1,331,269 (+2,747). Non-adopters
+  pay for the shared journal projection and leg-context paths.
 - **Fixture edits from the frozen REDs** (no assertion weakened):
   - commands are BTCUSD PlaceOrders with the order-lock guards on, since a
     balance read takes no lock;
