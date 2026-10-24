@@ -142,9 +142,17 @@ failed from a loan-free callback today (`validate_plan_seal_origin`).
   timer (no receipt binding), so the bound is its only timer. The serial form
   occupies the Plan's single timer and is refused while a delayed
   continuation is armed. Either way there is exactly one terminal.
-- **Locks.** A parked WriteAfterReads Preflight or serial Plan keeps its order
-  lock, so later commands queue as in native, and releases it only through
-  its terminal. A parked expiry arms no fence, because nothing is live.
+- **Locks.** The order-lock scope is acquired at engine command entry, before
+  `on_command`, so before `begin_preflight` and before any park; it is not
+  taken at ready. Bitget already sets `guard_order_mutations` at
+  `49f7d1857b6`, so this is today's native behaviour, unchanged:
+  - same-symbol placements hold separate scopes that do not conflict;
+  - an overlapping order ID, or a symbol-wide cancel over a held scope, is
+    refused before entry ("already in flight"), or deferred for
+    CancelSymbolOrders behind placements;
+  - the existing 64 active-scope limit applies.
+  A parked owner keeps its scope from entry to its terminal, and its expiry
+  arms no fence, because nothing is live.
 - **Authority.** The Preflight form releases through the issuer-bound
   Preflight handle. The serial form's handle carries the same issuer and
   command generation, so another engine's or generation's handle is Revoked.
@@ -195,8 +203,8 @@ the limit.
     teardown with parked owners leaves no owner, wait or timer.
 12. Detection expiry fan-out: in `on_condition_wait_expired` for the active
     owner, the venue requests readiness for every queued Preflight. All of
-    them wake in the same flush, in order, and each `fail_preflight` there
-    projects NotSent.
+    them wake in the same flush, in queue order. Each owner gets exactly one
+    terminal, NotSent, carrying the native message.
 13. Re-park from ready custody counts as progress, so no "made no progress"
     failure.
 14. With 256 commands parked, the 257th is refused Capacity, NotSent, before
@@ -214,6 +222,10 @@ the limit.
     handle from a reused generation or another engine is Revoked.
 20. `bound_ms: Some(0)` and a bound on a ReadOnly Preflight are Invalid and
     spend nothing.
+22. Under order-locks, two same-symbol placements: the second parks with
+    `None` behind the first. Both scopes are held from entry. The first
+    completes and releases only its own scope; the second wakes, admits and
+    completes. Lock state is asserted at each step, with no fence.
 21. In RED2 and RED6, the native message ("Bitget account detection did not
     complete") passes through unchanged. A stop racing a queued, undelivered
     release gives one terminal and no ready.
