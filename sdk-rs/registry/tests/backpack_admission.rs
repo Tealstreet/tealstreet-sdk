@@ -118,3 +118,100 @@ fn public_and_keyless_accounts_install_nothing() {
         assert!(signer.is_none());
     }
 }
+
+fn assert_read_provider(identities: Identities, signer: Option<Provider>, primary: bool) {
+    assert_eq!(identities.primary.is_some(), primary);
+    let read = identities
+        .secondary
+        .expect("actual secondary identity registered");
+    if let Some(primary) = identities.primary {
+        assert_ne!(primary.credential, read.credential);
+        assert_ne!(primary.signing, read.signing);
+    }
+    let request = SignRequest {
+        receipt: Default::default(),
+        context: Default::default(),
+        operations: vec![
+            Operation::Present {
+                key: read.credential,
+            },
+            Operation::Sign {
+                algorithm: Algorithm::Ed25519,
+                key: read.signing,
+                payload: vec![PayloadPart::Bytes { bytes: vec![] }],
+            },
+        ],
+    };
+    let signer = signer.expect("secondary provider installed");
+    let result = signer.sign_ready(&request).unwrap().unwrap();
+    assert_eq!(result.values[0], b"read-api-key");
+    assert_eq!(result.values[1], hex(RFC_SIGNATURE));
+}
+
+#[test]
+fn registry_installs_the_exact_secondary_identity_and_provider() {
+    let (identities, signer) = construct(json!({
+        "key": "primary-api-key",
+        "secret": base64(&[7; 32]),
+        "readCredentials": {"key": "read-api-key", "secret": base64(&hex(RFC_SEED))},
+    }))
+    .unwrap();
+    assert_read_provider(identities, signer, true);
+}
+
+#[test]
+fn secondary_only_identity_uses_a_real_provider_without_a_primary() {
+    let (identities, signer) = construct(json!({
+        "readCredentials": {"key": "read-api-key", "secret": base64(&hex(RFC_SEED))},
+    }))
+    .unwrap();
+    assert_read_provider(identities, signer, false);
+}
+
+#[test]
+fn public_only_secondary_config_installs_no_signing_authority() {
+    let (identities, signer) = construct(json!({
+        "publicDataOnly": true,
+        "readCredentials": {"key": "read-api-key", "secret": base64(&hex(RFC_SEED))},
+    }))
+    .unwrap();
+    assert!(identities.primary.is_none());
+    assert!(identities.secondary.is_none());
+    assert!(signer.is_none());
+}
+
+#[test]
+fn malformed_secondary_does_not_change_existing_primary_setup() {
+    for secret in [
+        "not base64!".to_string(),
+        base64(&[8; 31]),
+        base64(&[8; 64]),
+    ] {
+        let (identities, signer) = construct(json!({
+            "key": "primary-api-key",
+            "secret": base64(&hex(RFC_SEED)),
+            "readCredentials": {"key": "read-api-key", "secret": secret},
+        }))
+        .unwrap();
+        assert!(identities.secondary.is_none());
+        let primary = identities.primary.expect("primary retained");
+        let request = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![
+                Operation::Present {
+                    key: primary.credential,
+                },
+                Operation::Sign {
+                    algorithm: Algorithm::Ed25519,
+                    key: primary.signing,
+                    payload: vec![PayloadPart::Bytes { bytes: vec![] }],
+                },
+            ],
+        };
+        let signer = signer.expect("primary provider retained");
+        let values = signer.sign_ready(&request).unwrap().unwrap().values.clone();
+        assert_eq!(values[0], b"primary-api-key");
+        assert_eq!(values[1], hex(RFC_SIGNATURE));
+    }
+}
