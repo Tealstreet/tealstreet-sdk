@@ -43,13 +43,21 @@ impl Harness {
         now: f64,
         fill: Option<safe_cex_engine::entropy::Fill>,
     ) -> Self {
+        // Trusted setup registers the same opaque refs the venue holds.
+        let (signer, identities) = safe_cex_crypto::signer::LocalSigner::from_json(
+            r#"{"primary":{"key":"key","secret":"secret","passphrase":"pass"}}"#.into(),
+        )
+        .unwrap();
         let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
             broker_attribution,
             key: Some("key".into()),
             secret: Some("secret".into()),
             passphrase: Some("pass".into()),
+            identities: identities.clone(),
             ..Options::default()
         }));
+        e.set_signer(Some(std::sync::Arc::new(signer))).unwrap();
+        e.set_identities(identities).unwrap();
         if let Some(fill) = fill {
             e.set_signing_entropy(fill).unwrap();
         }

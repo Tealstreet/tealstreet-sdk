@@ -262,3 +262,52 @@ Clippy, formatting and normal bans/ratchets pass. Every incoming inventory and
 checker is exact, and the native selection control remains GREEN. This is the
 local immutable handoff to the joint consumer, not a standalone PR or custody
 cutover.
+
+## FetchLeverage consumer (claude-55ao7t)
+
+Ruling (claude-ddi2il): option B, single provider setup. `BlofinOptions`
+gains `identities: Identities`. The registry's BloFin arm builds one
+`LocalSigner` from the same configured strings (`blofin_signer`), installs it
+with `set_signer`/`set_identities`, and passes the same refs to the venue. An
+absent Secondary passphrase inherits Primary's at setup. Public-only and
+keyless accounts install nothing. There is no extra provider wrapper or probe.
+The raw key/secret/passphrase fields stay only for the unadopted startup,
+account, trading and WS paths, and are removed at the family cutover.
+
+`fetch_leverage` keeps its two local refusals (unknown market, mode not
+loaded) unchanged and first. It then selects exactly once from
+`Slots(primary, secondary, secondary_requires_primary)` with
+`ReadRole::Read`, so a configured Secondary serves the GET beside a Primary
+and Primary is the fallback. A missing selection refuses with
+`BloFin requires API credentials`, and a selected identity without a
+passphrase ref refuses with `BloFin requires a passphrase`. Both go through
+`SelectedRead::command` as command-owned local refusals. The admitted Read
+queues `dispatch_signing::Http` over that same selected Identity. Responses
+validate delivery against the Read context:
+- check failures keep the native 152401/152406 auth counting, plus the
+  diagnostic and the terminal text;
+- parsing, revisions and the setting update are byte-identical;
+- the terminals are `done_context`/`fail_context`;
+- sign errors pass through typed, and transport failures keep the native
+  string.
+
+`private_read` keeps serving margin/position-mode startup and the background
+reads unchanged.
+
+Inventory: the three planned terminals are pruned from
+`venues/blofin/src/account.rs` (`c5a021da`, `c873db6f`, `569abc44`; 5 → 2).
+No other map changes.
+
+Tests:
+- All 16 `hmac_dispatch_original` tests pass, including the six former REDs.
+  The diff to the originals is setup-only: `Rig::new` places the LocalSigner
+  refs in `Options.identities`, and every assertion and constant is
+  byte-exact.
+- The shared `tests/support` harness registers the same refs for its fixed
+  key.
+- `leverage.rs` releases its lookup through the managed driver
+  (`collect_at`).
+- New `registry/tests/blofin_signer.rs` covers both slots, passphrase
+  inheritance, an explicit Secondary passphrase, and public/keyless accounts
+  installing nothing.
+- The whole BloFin package, scoped strict Clippy, fmt and the full bans pass.

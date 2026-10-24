@@ -45,7 +45,7 @@ struct Rig {
 }
 
 impl Rig {
-    fn new(options: Options, parked: bool, filtered: bool) -> Self {
+    fn new(mut options: Options, parked: bool, filtered: bool) -> Self {
         let setup = serde_json::json!({
             "primary": {
                 "key":options.key,
@@ -58,8 +58,13 @@ impl Rig {
                 "passphrase":read.passphrase.as_ref().or(options.passphrase.as_ref()),
             })),
         });
+        // Trusted setup hands the venue the same opaque refs it registers.
+        let local = LocalSigner::from_json(setup.to_string()).ok();
+        if let Some((_, identities)) = &local {
+            options.identities = identities.clone();
+        }
         let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(options));
-        if let Ok((provider, identities)) = LocalSigner::from_json(setup.to_string()) {
+        if let Some((provider, identities)) = local {
             engine.set_signer(Some(Arc::new(provider))).unwrap();
             engine.set_identities(identities).unwrap();
         }

@@ -340,6 +340,47 @@ fn backpack_provider(
     Ok((Some(std::sync::Arc::new(signer)), identities))
 }
 
+/// BloFin's one provider setup from the configured strings. The adopted
+/// FetchLeverage Read signs through it; unadopted paths keep the raw fields
+/// until the family cutover. An absent Secondary passphrase inherits Primary's.
+#[cfg(feature = "blofin")]
+fn blofin_signer(
+    options: &EngineOptions,
+) -> Result<
+    (
+        Option<safe_cex_engine::signing::Provider>,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
+    if options.public_data_only || !present(&options.key) || !present(&options.secret) {
+        return Ok((None, Default::default()));
+    }
+    let setup = LocalSetup {
+        primary: Some(LocalIdentity {
+            key: Secret::new(options.key.clone().unwrap_or_default()),
+            secret: Secret::new(options.secret.clone().unwrap_or_default()),
+            passphrase: options.passphrase.clone().map(Secret::new),
+            ..Default::default()
+        }),
+        secondary: options.read_credentials.as_ref().map(|read| LocalIdentity {
+            key: Secret::new(read.key.clone()),
+            secret: Secret::new(read.secret.clone()),
+            passphrase: read
+                .passphrase
+                .clone()
+                .or_else(|| options.passphrase.clone())
+                .map(Secret::new),
+            ..Default::default()
+        }),
+    };
+    let (signer, identities) =
+        LocalSigner::from_setup(setup).map_err(|_| invalid("Invalid BloFin signer setup"))?;
+    Ok((Some(std::sync::Arc::new(signer)), identities))
+}
+
 /// Whether this build constructs `venue`.
 pub fn supported(venue: &str) -> bool {
     match venue {
@@ -1206,11 +1247,9 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "blofin")]
-        "blofin" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "blofin" => {
+            let (provider, identities) = blofin_signer(&options)?;
+            let mut engine = Engine::new(
                 Blofin::new(BlofinOptions {
                     broker_attribution: options.broker_attribution,
                     read_credentials: options.read_credentials.take(),
@@ -1219,10 +1258,14 @@ pub fn build_with_signer<T: Visit>(
                     key: options.key.take(),
                     secret: options.secret.take(),
                     passphrase: options.passphrase.take(),
+                    identities: identities.clone(),
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(provider)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "mexc")]
         "mexc" => finish(
             visitor,

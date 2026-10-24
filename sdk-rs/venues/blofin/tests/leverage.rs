@@ -19,7 +19,8 @@ fn lookup(h: &mut Harness) {
             symbol: "BTCUSDT".into(),
         }),
     );
-    h.collect();
+    // The managed Read releases through Prepare/Bind/Claim.
+    h.collect_at(1.0);
 }
 
 fn result(h: &Harness) -> Result<serde_json::Value, String> {
