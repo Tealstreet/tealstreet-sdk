@@ -310,3 +310,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Flat-position realized PnL evidence | Shared harness correction | Before projecting unavailable native PnL or pruning inverse flat-position diagnostics. | [RUST_FLAT_POSITION_PNL_EVIDENCE.md](RUST_FLAT_POSITION_PNL_EVIDENCE.md) |
 
 | Paradex public refusals and Lighter catalog | Implementation under review; original REDs recorded | Before converting the last four immediately workable public request sites. | [RUST_PUBLIC_READ_TAIL.md](RUST_PUBLIC_READ_TAIL.md) |
+
+| KuCoin signer and broker-role cutover | Refreshed plan; original REDs next | Before converting the 46-site KuCoin lane through declared broker custody and dispatch signing. | [RUST_KUCOIN_DISPATCH_SIGNER.md](RUST_KUCOIN_DISPATCH_SIGNER.md) |
