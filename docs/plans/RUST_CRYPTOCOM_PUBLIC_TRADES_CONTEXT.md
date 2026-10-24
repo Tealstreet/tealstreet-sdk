@@ -125,3 +125,41 @@ API direction, not source or executed-control clearance. One exclusive public
 Read authority is required; use a distinct PublicTrades request/Pending instead
 of retaining legacy and managed terminals for the same public query. Native
 private authority remains in its existing closed branch.
+
+
+## Original executed checkpoint
+
+The dedicated real-Engine target compiles and runs 17 controls on unchanged
+1e2458b1c98 PublicTrades production: 8 assertion RED / 9 working GREEN / zero
+ignored. REDs are eager route release, root equality DATA, absent root timer,
+live streamed prefix at expiry, expired native queue dequeue, retry root renewal,
+duplicate live owner and shared capacity bypass. Timer-first fails first at the
+missing caller-bound timer; later inertness assertions are adoption gates, not
+independent original evidence. The queued/retry/duplicate/capacity controls fail
+first at actual physical HTTP where none should be allowed. Invalid clock is
+already a working shared boundary control, not a new defect.
+
+Working controls pin both exact hosts/escaped wire/default/count clamp, duplicate
+rows and financial values, zero limit, native 10ms eligibility, four transport
+attempts with exact 1s waits, failed-prefix reset, one unsigned 40101 retry with
+no auth evidence, malformed-row rejection and other API refusal. An initial
+combined positive omitted result.data from its API-refusal envelope; the native
+stream parser correctly treated that as transport failure and retried. Corrected
+the complete-refusal fixture and added a separate working missing-array retry
+control. This fixture mismatch is not counted as a RED or a production defect.
+Malformed envelope/stream retries retain native transport treatment; malformed
+rows within a valid array still reject the unaccepted page without prefix.
+
+No existing source, test, fixture, checker, inventory or Cargo file is changed.
+Only this plan/index and the new dedicated test differ from the base. Original
+assertions remain identifiable for implementation; no ignored tests or test-only
+venue production path is added. Production awaits bounded reviews and the #2052
+stack. Family performance/bytes and broad CI are not claimed by this checkpoint.
+
+
+Scoped strict Clippy on the new target passes. The normal inventory check
+currently fails only on foreign WEEX depth_query.rs/lib.rs because the remote
+landing advanced past this intentionally unchanged original base. The manifest,
+all Crypto production and existing fixtures remain exact 1e2458b1c98; no checker
+override or foreign prune is used. Integrate the actual tip and reviewed #2052
+only after recording this original checkpoint, then rerun normal checks.
