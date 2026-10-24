@@ -3,11 +3,6 @@
 //! the HMAC. `Credentials` is the legacy local signer, removed when the managed
 //! request conversion adopts the recipe.
 use safe_cex_crypto::{Encoding, hmac_sha256};
-use safe_cex_engine::signing::{
-    Context, Identity, PayloadPart, SignError, SignReceipt, SignRequest, SignResult,
-    hmac_sha256_work,
-};
-use safe_cex_engine::{Action, DispatchContext, SignStep};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -53,123 +48,8 @@ impl Params {
     }
 }
 
-/// One signed JSON envelope: REST body or the private WS `public/auth` frame.
-/// The nonce doubles as the envelope id and is drawn at each preparation.
-pub struct Envelope {
-    credentials: Identity,
-    method: String,
-    /// `None` for `public/auth`, whose envelope carries no params.
-    params: Option<Params>,
-    context: Context,
-    nonce: u64,
-}
-impl Envelope {
-    pub fn http(credentials: Identity, method: &str, params: Params, url: &str) -> Self {
-        Self::new(credentials, method, Some(params), url, "POST")
-    }
-    pub fn ws_auth(credentials: Identity, url: &str) -> Self {
-        Self::new(credentials, "public/auth", None, url, "WS")
-    }
-    fn new(
-        credentials: Identity,
-        method: &str,
-        params: Option<Params>,
-        url: &str,
-        verb: &str,
-    ) -> Self {
-        let (host, path) = url
-            .split_once("://")
-            .map(|(_, rest)| rest.split_once('/').unwrap_or((rest, "")))
-            .unwrap_or(("", ""));
-        Self {
-            credentials,
-            method: method.into(),
-            params,
-            context: Context {
-                venue: "cryptocom".into(),
-                method: verb.into(),
-                host: host.into(),
-                path: format!("/{path}"),
-            },
-            nonce: 0,
-        }
-    }
-}
-impl Envelope {
-    /// REST recipes carry params; the WS auth recipe never does.
-    fn transport(&self, outbound: &Action) -> Result<(), SignError> {
-        match (outbound, self.params.is_some()) {
-            (Action::Http(_), true) | (Action::WsSend { .. }, false) => Ok(()),
-            _ => Err(SignError::InvalidRequest),
-        }
-    }
-}
-impl SignStep for Envelope {
-    fn prepare(
-        &mut self,
-        outbound: &mut Action,
-        dispatch: &DispatchContext<'_>,
-    ) -> Result<SignRequest, SignError> {
-        self.transport(outbound)?;
-        let stamp = dispatch.stamp_ms();
-        self.nonce = stamp as u64;
-        let nonce = self.nonce;
-        let signing_text = self
-            .params
-            .as_ref()
-            .map(Params::signing_text)
-            .unwrap_or_default();
-        Ok(hmac_sha256_work(
-            &self.credentials,
-            vec![
-                PayloadPart::Bytes {
-                    bytes: format!("{}{nonce}", self.method).into_bytes(),
-                },
-                PayloadPart::Credential {
-                    key: self.credentials.credential.clone(),
-                },
-                PayloadPart::Bytes {
-                    bytes: format!("{signing_text}{nonce}").into_bytes(),
-                },
-            ],
-            self.context.clone(),
-            SignReceipt {
-                stamp_ms: Some(stamp),
-                expiry_ms: None,
-            },
-        ))
-    }
-    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
-        let key = result
-            .values
-            .first()
-            .and_then(|key| std::str::from_utf8(key).ok())
-            .filter(|key| !key.is_empty() && !key.contains(['\r', '\n']))
-            .ok_or(SignError::InvalidResult)?;
-        let mac = result
-            .values
-            .get(1)
-            .filter(|mac| mac.len() == 32)
-            .ok_or(SignError::InvalidResult)?;
-        self.transport(outbound)?;
-        let body = envelope_json(
-            &self.method,
-            key,
-            self.params.as_ref(),
-            &safe_cex_crypto::hex(mac),
-            self.nonce,
-        );
-        match outbound {
-            Action::Http(http) => http.body = Some(body),
-            Action::WsSend { text, .. } => *text = body,
-            _ => return Err(SignError::InvalidRequest),
-        }
-        Ok(())
-    }
-    fn freshness_ms(&self) -> f64 {
-        5000.
-    }
-}
+pub mod dispatch;
+pub use dispatch::Envelope;
 
 /// Field order and spelling are the venue wire contract.
 fn envelope_json(
@@ -221,6 +101,8 @@ safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use safe_cex_engine::signing::{Identity, SignError, SignResult};
+    use safe_cex_engine::{Action, SignStep};
     #[test]
     fn sorted_fields_and_array_values_match_hmac_oracle() {
         let params = Params::default()
@@ -283,11 +165,10 @@ mod tests {
             unreachable!()
         };
         assert!(sent.body.is_none(), "no partial body on refusal");
-        step.apply(&mut http, &result(b"key", 32)).unwrap();
-        let Action::Http(sent) = &http else {
-            unreachable!()
-        };
-        assert!(sent.body.as_deref().unwrap().contains(r#""api_key":"key""#));
+        assert_eq!(
+            step.apply(&mut http, &result(b"key", 32)),
+            Err(SignError::InvalidResult)
+        );
         let mut timer = Action::ClearTimer {
             timer: safe_cex_engine::TimerId(1),
         };

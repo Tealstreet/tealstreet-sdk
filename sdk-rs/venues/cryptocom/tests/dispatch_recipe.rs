@@ -4,7 +4,7 @@ use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::test_support::{ProbeVenue, prepared_actions};
 use safe_cex_engine::{Action, Engine, Method};
-use safe_cex_venue_cryptocom::sign::{Credentials, Envelope, Params};
+use safe_cex_venue_cryptocom::sign::{Envelope, Params};
 use safe_cex_venue_cryptocom::{Cryptocom, Options};
 use std::sync::Arc;
 
@@ -32,13 +32,6 @@ fn params() -> Params {
         .text("quantity", "0.01")
         .text("instrument_name", "BTCUSD-PERP")
         .strings("exec_inst", vec!["REDUCE_ONLY".into()])
-}
-
-fn legacy() -> Credentials {
-    Credentials {
-        key: "replay-key".into(),
-        secret: "replay-secret".into(),
-    }
 }
 
 #[test]
@@ -107,7 +100,7 @@ fn rest_and_ws_auth_recipes_match_the_legacy_envelope_bytes() {
         .expect("signed REST body released");
     assert_eq!(
         body,
-        legacy().envelope("private/create-order", &params(), NOW, false)
+        r#"{"id":1610000000000,"method":"private/create-order","api_key":"replay-key","params":{"exec_inst":["REDUCE_ONLY"],"instrument_name":"BTCUSD-PERP","quantity":"0.01","side":"SELL","type":"MARKET"},"sig":"e9f8f06c03ce0214c03b5157d0a71fe3407d018fd0d96966a17c250bf93bd8bf","nonce":1610000000000}"#
     );
     assert!(body.contains("e9f8f06c03ce0214c03b5157d0a71fe3407d018fd0d96966a17c250bf93bd8bf"));
     assert!(body.contains(r#""id":1610000000000"#) && body.contains(r#""nonce":1610000000000"#));
@@ -121,7 +114,7 @@ fn rest_and_ws_auth_recipes_match_the_legacy_envelope_bytes() {
         .expect("signed public/auth released");
     assert_eq!(
         text,
-        legacy().envelope("public/auth", &Params::default(), NOW, true)
+        r#"{"id":1610000000000,"method":"public/auth","api_key":"replay-key","sig":"57a5207e795bd876080625ee876fa750cd0134c3916bcdc346d4efe1b6f0218f","nonce":1610000000000}"#
     );
     assert!(!text.contains("params") && !text.contains("replay-secret"));
 }
