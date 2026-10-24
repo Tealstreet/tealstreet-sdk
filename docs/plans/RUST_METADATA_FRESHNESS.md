@@ -984,6 +984,12 @@ and with metadata freshness alone (without HTTP Plans), then run the original
 55 metadata library and 180 engine/BingX/WEEX integration controls with their
 required features. Run a scoped Bitget account control with the feature off;
 workspace feature unification is not evidence for this disabled configuration.
+The existing `test-http-plan-feature-modes.py` resolves every standalone
+family closure automatically. Add two own explicit controls there:
+`metadata-freshness,test-support` and
+`http-plans,metadata-freshness,order-locks,test-support`. These run the
+metadata-only configuration and the original Plan integration fixtures in CI;
+preserve every existing row and the peers' reserved feature controls.
 
 Rebuild only the Bitget family using the identical pinned local command,
 profile, lockfile and optimizer. Aim to recover the baseline's approximate
