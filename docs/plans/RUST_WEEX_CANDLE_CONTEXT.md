@@ -1,0 +1,116 @@
+# WEEX candle query Read custody
+
+Status: plan before original compiling assertions; production held.
+Base: actual `be710b3f2d7692244144b3f8f10810dc52790796`.
+
+## Scope and train separation
+
+Convert only command-owned `FetchCandles` in WEEX. The prospective source file
+is `sdk-rs/venues/weex/src/lib.rs`; new tests live in
+`sdk-rs/venues/weex/tests/candle_context.rs`. This checkpoint changes only this
+standalone plan and the new test, with no shared README index edit.
+
+The local `train/combo-5b` file set was checked against the base. Its only BingX
+or WEEX source path is `bingx/src/account.rs`; WEEX lib and the two new files are
+disjoint. Recheck the auditor's actual frozen file list before implementation.
+Other pending WEEX slices (#2003 and #2035) do touch lib.rs: they remain separate
+dependencies to integrate by ordinary merges when their actual landings exist.
+Neither supplies new engine authority needed by this plan.
+
+Exactly three legacy completion occurrences in `weex/src/lib.rs` are in scope:
+
+| Native location | Fingerprint | Count |
+| --- | --- | --- |
+| Generic failure, `Task::Candles` | `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa` | 1 |
+| Candle response success | `43cf91072f928d61f9f061f65a83f846ce5b37f7a7328105f8f2c390ba4ccf62` | 1 |
+| Unsupported REST interval | `cd66da21afeeef22b98026c1d44238cf77b537c7b5ea67ee5d4fb4464905d893` | 1 |
+
+The first fingerprint also belongs to unrelated native paths. Prune one
+occurrence, not the entire hash. The shared `get` streamed and non-streamed HTTP
+sites still serve other callers and are not counted as removed. No checker,
+STAGING, engine, account, trading, signing or socket-policy edits are proposed.
+
+## Native contract
+
+Public unsigned GET, empty headers and no body. No market lookup or credentials
+are required. Preserve the raw symbol and exact query ordering; do not add
+encoding, range validation, row filtering, deduplication or truncation.
+
+REST supports M1/M5/M15/M30/H1/H4/H12/D1/W1. H2/H6 are streaming-only and remain
+unsupported for FetchCandles. Preserve the existing unsupported message.
+
+If either bound is present, use `/capi/v3/market/historyKlines`, default limit
+100, clamp 1..100, append supplied startTime/endTime and `priceType=LAST`.
+Otherwise use `/capi/v3/market/klines`, default limit 500, clamp 1..1000. These
+are single-response queries, with no pager, retry, signer or re-sign.
+
+Keep Envelope/ArrayAt::Root streaming, variable-length CandleRow decoding,
+timestamp conversion and numeric handling. Keep malformed-row rejection,
+ascending timestamp sort and the exact serialized Candle output. Empty arrays
+succeed. Querying candles does not subscribe or publish candle-cache/WS state.
+Existing native HTTP and malformed-row error messages remain unchanged.
+
+## Landed authority and ordering
+
+Use only landed #1945/#1976 and the original Read completion bridge. In a genuine
+entry, Expired uses `reject_expired_command(Read)`; missing receipt uses
+`reject_unstamped_command(Read)`. Admit one `admit_caller_read_root(None, None)`
+and bind `ReadCompletion::from_context`. Entry refusal precedes a native local
+reply; supported/unsupported precedence is otherwise unchanged for valid entry.
+
+The request owns that original completion and an optional physical Context.
+Retain the root while parked behind the native shared pause, with no child or
+Prepare. At eligible dequeue validate the original root, then mint a 20 s Never
+unsigned child capped by it and queue managed streamed HTTP with empty headers.
+Never renew the receipt deadline or admit Background/Plan work for this command.
+
+Gate exact root, leg and delivered Attempt before row decode, invalid-row flags,
+429 pause learning, envelope handling, sort/encode or completion. Success uses
+the original Read completion once, then retires the child. Failure, preparation
+or local child/queue refusal retires the child before strict root rejection.
+Only proven already-revoked authority drops inertly. No partial rows/marker or
+native numeric terminal remains. A queue refusal must take back its Pending.
+
+The no-Cx `read_root_retired` hook removes only the matching Owner/generation's
+deferred candle query. Its old venue timer cannot be cleared by that hook and
+must later no-op. An old DATA/error/timer must not affect reused IDs or peers.
+
+## Caller-visible changes to record at production
+
+Parked commands were previously unbounded inside the venue; they now end at the
+original configured caller receipt deadline (default 120 s). The physical call
+remains 20 s at most. A shorter receipt caps it; a raised receipt does not extend
+that physical budget. Expiry at equality is strict Timeout with no rows, marker
+or encoder invocation. A fractional live root remains live before equality.
+
+Only exact live deliveries can teach the shared 429 pause. Expired/revoked late
+429s are discarded by the engine and cannot preserve native late-pause learning.
+Keep unrelated discovery/account seed-staleness handling unchanged.
+
+Native string failure paths currently lack an explicit transport kind. Managed
+released transport/physical expiry preserves Network/Timeout and Read outcome
+None; pre-release typed failures retain their exact fields/NotSent where supplied.
+No credential auth evidence, signer call or deactivation is introduced. Host
+listener timeout does not grant engine cancellation or detach authority.
+
+## Original assertion checkpoint
+
+Use genuine handle_command receipts and a local real Prepare/Bind/Claim drain
+that also observes legacy HTTP. Independent tests first prove native wire/output
+positives, then assert the missing contract. No missing-method/compile-error REDs.
+
+Expected REDs: live and historical managed release (two separate cases), short
+receipt timeout on the physical request, DATA exactly at root expiry, expiry
+while paused before dequeue, and a late expired 429 leaving a live peer unpaused.
+Expected GREEN controls: native variable-length rows sorted/serialized unchanged,
+empty live query, native unsupported interval, a fractional live response, and
+effective native 20 s timeout under a raised receipt (None already defaults to
+20 s on the base, so this is explicitly a preservation control).
+
+After cutover separately certify streamed rows cannot stage after revocation,
+held Bind/Claim refusal, physical Timeout, local capacity and queue refusal,
+same-ID generations, unrelated peers and stale pause timer cleanup. Original
+tests stop at their first assertion; do not claim unexecuted suffixes as REDs.
+Run only the changed target with CARGO_BUILD_JOBS=4; broad checks belong in CI.
+
+Production remains held for bounded native/bridge review and a new instruction.
