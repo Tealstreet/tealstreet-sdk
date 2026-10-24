@@ -7748,6 +7748,8 @@ production changes. Plan: RUST_CPU_PRODUCER_STEP_METADATA.md.
 
 
 
+
+
 ## WEEX local leverage refusals use command Read authority
 
 FetchLeverage preserves unknown-market, active shared-pause, then missing-read-
@@ -7910,6 +7912,52 @@ SDK RustExchange callers keep their existing capability behavior: Aster's
 Settings leverage path can return cache/null without a low-level FetchLeverage,
 and clientOrderLookup=false uses the existing open-order fallback. This entry
 describes the low-level command terminals, not additional SDK dispatches.
+
+
+
+
+
+## WEEX leverage initial managed admission preserves shared Read causes
+
+After the existing unknown-market, shared-pause and credential-selection checks,
+FetchLeverage now admits its signed symbolConfig read through the initial
+SelectedRead command transaction. Registry capacity returns the canonical Read
+Capacity error with outcome None, rather than the venue lifecycle Internal/NotSent
+fallback. An unavailable or invalid receipt returns the shared cause; invalid or
+nonadvancing clocks give Revoked / "Request context was revoked", InvalidInput
+and no outcome. An expired own receipt uses the existing Read Timeout helper.
+Admission owns the failure terminal, without a numeric fallback or a new receipt.
+
+Read selection, the selected identity and passphrase, URL/query/signature, native
+settings revision and publication remain unchanged. The physical policy stays
+20 seconds, Never and no pacing, including when the outer host wait is shorter;
+this does not add a tracked caller-wait history root. Queue and provider refusals
+keep their existing typed fields. Duplicate ownership, original-peer completion
+and fresh ID reuse keep shared engine semantics. No auth evidence is added.
+
+## AsterDEX local trading refusal ownership
+
+Synchronous Aster job-construction, credential/auth-shape and acknowledged-routing
+capacity failures now admit the genuine command operation before diagnostics or
+cleanup. FetchStpMode is Read even for V1's unsupported-plan failure; all trading
+writes are Mutation. Valid entries preserve native CommandError then failure,
+message/kind and error precedence. Mutation remains NotSent; local STP Read
+failures now have outcome None instead of legacy NotSent. Credential-free local
+auth failures preserve fields without counting account auth-health evidence.
+
+Invalid clock or full actual owner capacity returns one shared typed refusal
+before any diagnostic, acknowledged cleanup, job insertion, timer, I/O or Store
+effect. Read admission has outcome None; Mutation admission is NotSent. Native
+CancelSymbolOrders planning uses an immutable projection, preserving Store-first
+then live-ack routing without duplicates. After successful local admission its
+native cleanup still runs, including before missing-key refusal. Failed admission
+leaves both earlier planning and placement-capacity cleanup untouched.
+
+Valid native remote jobs acquire no extra managed root and retain their queue,
+reservations, signed role, wire and completion behavior. Existing SDK STP, order,
+cancel and setting dispatch remains; no successful capability is added. The
+exact prune is3 fingerprints/3 occurrences, family43F/67O to40F/64O at this base;
+remaining remote trading/refusal/history/session consumers stay inventoried.
 
 ## ApeX managed reads (#2066)
 
