@@ -482,3 +482,29 @@ engine custody review, then rerun original nonce/selected-read/native/JS control
 strict checks and exact combined measurement. Retain the real WASM recipe proof
 as a required gate for any adopted correction. Keep this work local with no
 push, retry or dispatch under the overseer's current instruction.
+
+
+The optimized accounting above groups named queue functions only. The engine
+review also identifies nonce checks inlined into request wrappers; those must
+be included when evaluating actual savings. The complete paired release-size
+measurement decides whether the extraction fits, rather than summed symbols.
+
+The ordinary/OFF preservation claim is relative to the reviewed nonce parent
+`9d44163e682`, which already includes exclusive release registration and the
+OFF declaration guards. It does not assert byte identity with pre-nonce tip.
+The nonce path retains admit before SigningRelease construction; the ordinary
+path retains its prior order. Missing/invented reservation pairs remain State,
+and Mutable registration remains Invalid for a declared nonce.
+
+If sharing cannot leave adequate combined headroom, keep the branch unpublished
+and pursue a separately reviewed immutable per-venue capability gate so ordinary
+venue instantiations cannot link nonce orchestration. A mutable per-call getter
+or a feature-only assumption is insufficient. Kraken support and fail-closed
+admission must stay coherent; the combined ceiling cannot move.
+
+Before landing, compose the then-actual rewrite tip and measure it independently
+from the exact-941 attribution above. Coordinate Bearer landing order with its
+owner and the auditor. The generation/Bearer fence must precede the nonce helper;
+whoever integrates second must retain the joint stale/supersession control and
+measure the combined artifact with both features. No joint-fit claim is made by
+this extraction alone.
