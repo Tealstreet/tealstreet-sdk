@@ -544,3 +544,39 @@ future host/WASM acceptance inputs. They are computation-only references, not
 claims that these boundary nonces traversed this recipe, engine reservation or
 WASM. Real Kraken-family WASM/EngineHost/HMAC and repaired-nonce recomputation
 remain OPEN with the nonce/host owner. No private caller is activated here.
+
+### Retained selected-read recipe composition
+
+Plain-merged exact local core641b5ab50be8316d52cb7d02745e838a9f25e6b8 at
+444a8a98d58; runtime source auto-merged and the nonce/selected-read blobs are
+byte-exact to that reviewed dependency. CALLERS keeps actual incoming content
+and adds the prerequisite's sections/updated nonce contract once. No core edit.
+
+Http::futures(&Identity, NonceClaim, method, path, form, testnet, freshness_ms)
+and Http::spot(&Identity, NonceClaim, path, form, freshness_ms) consume the exact
+claim supplied by AdmittedRead/ReadLeg::queue_with_nonce. They do not mint or
+reselect. NonceClaim::slot metadata enforces Secondary GET/non-history and
+primary-only Spot, without a caller-supplied slot. The direct Selected wrappers
+delegate to the same constructors; their product guard remains. Wire hashing,
+receipt, attestation and header insertion are unchanged. Identity validation
+refuses malformed refs; shared admission/provider validation still binds refs
+and installed identity to the exact minted claim, not to caller assertions.
+
+New constructor controls at d129e5429ff initially fail only on missing methods
+(NEW-CONTRACT compile RED). The incoming BindGroup enum fixture arm was added
+before that receipt; a subsequently unhandled cleanup Result was corrected
+before GREEN. Neither is asserted as a native or runtime RED. Two appended
+controls use the real dispatcher and LocalSigner for both products and both
+retained wrappers. After selection they empty venue slots; the provider still
+sees the original identity/nonce, physical release and root-only completion.
+The slot guard also refuses an externally selected Secondary claim for Spot or
+primary-only Futures history. Original14 recipe bodies remain unchanged except
+the required BindGroup panic arm (these fixtures declare no mutation groups).
+All16 controls and scoped lib/target strict Clippy pass, jobs4 sequential.
+
+Per Dazzy's sequencing ruling, the nonce review proof may use a real WASM engine
+plus these actual Kraken recipes, labelled engine+recipe. Actual Kraken-family
+adoption proof is a later consumer gate. This fixture is not native Kraken
+account plumbing, a wasm module or EngineHost proof. No native funnel, registry,
+socket, read-key capsule or inventory changes; no push/CI. The exact retained
+constructor checkpoint is supplied for bounded review before proof use.

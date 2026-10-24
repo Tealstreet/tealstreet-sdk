@@ -846,7 +846,7 @@ impl Venue for RetainedProbe {
             RetainedPending::Leg(leg) => {
                 let root = self.root.as_ref().unwrap();
                 root.validate_delivery(cx, &leg).unwrap();
-                cx.finish_http_context(leg.context());
+                cx.finish_http_context(leg.context()).unwrap();
                 cx.done_context(root.context(), "ok".into()).unwrap();
             }
         }

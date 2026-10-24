@@ -58,14 +58,52 @@ impl Selected {
         if self.spot {
             return Err(SignError::InvalidRequest);
         }
+        Http::futures(
+            &self.identity,
+            self.claim,
+            method,
+            path,
+            form,
+            testnet,
+            freshness_ms,
+        )
+    }
+    pub fn spot_http(self, path: &str, form: &str, freshness_ms: f64) -> Result<Http, SignError> {
+        if !self.spot {
+            return Err(SignError::InvalidRequest);
+        }
+        Http::spot(&self.identity, self.claim, path, form, freshness_ms)
+    }
+}
+
+pub struct Http {
+    identity: Identity,
+    claim: NonceClaim,
+    method: Method,
+    url: String,
+    body: Option<String>,
+    path: String,
+    form: String,
+    spot: bool,
+    freshness_ms: f64,
+    prepared: Option<(SignReceipt, Option<String>)>,
+}
+impl Http {
+    /// Consume the claim minted by a retained read queue or a selected direct request.
+    pub fn futures(
+        identity: &Identity,
+        claim: NonceClaim,
+        method: Method,
+        path: &str,
+        form: &str,
+        testnet: bool,
+        freshness_ms: f64,
+    ) -> Result<Self, SignError> {
         let canonical = path.strip_prefix("/derivatives").unwrap_or(path);
         if !(canonical.starts_with("/api/v3/") || canonical.starts_with("/api/history/"))
             || path.contains('?')
-        {
-            return Err(SignError::InvalidRequest);
-        }
-        if self.selection.slot() == CredentialSlot::Secondary
-            && (method != Method::Get || canonical.starts_with("/api/history/"))
+            || (claim.slot() == CredentialSlot::Secondary
+                && (method != Method::Get || canonical.starts_with("/api/history/")))
         {
             return Err(SignError::InvalidRequest);
         }
@@ -81,8 +119,9 @@ impl Selected {
         };
         let url = format!("{origin}{path}{query}");
         let body = (method != Method::Get).then(|| form.to_owned());
-        Http::new(
-            self,
+        Self::new(
+            identity,
+            claim,
             method,
             url,
             body,
@@ -92,12 +131,23 @@ impl Selected {
             freshness_ms,
         )
     }
-    pub fn spot_http(self, path: &str, form: &str, freshness_ms: f64) -> Result<Http, SignError> {
-        if !self.spot || !path.starts_with("/0/private/") || path.contains('?') {
+    /// Spot never accepts a Secondary claim, including one minted outside its factory.
+    pub fn spot(
+        identity: &Identity,
+        claim: NonceClaim,
+        path: &str,
+        form: &str,
+        freshness_ms: f64,
+    ) -> Result<Self, SignError> {
+        if claim.slot() != CredentialSlot::Primary
+            || !path.starts_with("/0/private/")
+            || path.contains('?')
+        {
             return Err(SignError::InvalidRequest);
         }
-        Http::new(
-            self,
+        Self::new(
+            identity,
+            claim,
             Method::Post,
             format!("https://api.kraken.com{path}"),
             Some(form.into()),
@@ -107,23 +157,11 @@ impl Selected {
             freshness_ms,
         )
     }
-}
 
-pub struct Http {
-    selected: Selected,
-    method: Method,
-    url: String,
-    body: Option<String>,
-    path: String,
-    form: String,
-    spot: bool,
-    freshness_ms: f64,
-    prepared: Option<(SignReceipt, Option<String>)>,
-}
-impl Http {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        selected: Selected,
+        identity: &Identity,
+        claim: NonceClaim,
         method: Method,
         url: String,
         body: Option<String>,
@@ -132,11 +170,13 @@ impl Http {
         spot: bool,
         freshness_ms: f64,
     ) -> Result<Self, SignError> {
+        identity.validate().map_err(|_| SignError::InvalidRequest)?;
         if !freshness_ms.is_finite() || freshness_ms <= 0. {
             return Err(SignError::InvalidRequest);
         }
         Ok(Self {
-            selected,
+            identity: identity.clone(),
+            claim,
             method,
             url,
             body,
@@ -171,7 +211,7 @@ impl Http {
 }
 impl SignStep for Http {
     fn nonce_claim(&self) -> Option<&NonceClaim> {
-        Some(&self.selected.claim)
+        Some(&self.claim)
     }
     fn unsigned_http_headers(&self) -> &'static [(&'static str, &'static str)] {
         if self.spot {
@@ -191,7 +231,7 @@ impl SignStep for Http {
         };
         self.attest(request, self.body.as_deref())?;
         let nonce = dispatch
-            .reserve_nonce(&self.selected.claim)
+            .reserve_nonce(&self.claim)
             .map_err(|error| match error {
                 NonceError::InvalidTime | NonceError::InvalidClaim => SignError::InvalidRequest,
                 _ => SignError::Unavailable,
@@ -217,7 +257,7 @@ impl SignStep for Http {
             ..Default::default()
         };
         let mut work = hash_work(
-            &self.selected.identity,
+            &self.identity,
             hash_input.into_bytes(),
             self.spot.then_some(self.path.as_bytes()),
             receipt,
