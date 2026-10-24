@@ -153,8 +153,8 @@ impl ContextRegistry {
             Owner::Command { id, .. } => {
                 self.commands.remove(&id);
             }
-            Owner::Execution { generation } => {
-                self.physical.remove(&generation);
+            Owner::Execution { .. } | Owner::Background { .. } => {
+                self.physical.remove(&owner);
             }
             _ => return false,
         }

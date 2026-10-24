@@ -479,3 +479,31 @@ constructor/activation/retirement and Session hook patch back to fe7lgm,
 uufub4 and claude-55ao7t before source freeze. Their review must also cover
 explicit refusal/decline disposition without spinning or stranded demand, and
 the original two RED assertions must be active after fixture conversion.
+
+Follow-up API review identified a separate admission gate: task storage bounds
+do not bound pressure on the shared Context pool. Before wiring Background
+admission, review an aggregate share of at most 150 active plus unissued
+Background Plan Context slots within the existing 256-slot pool. This is the
+minimum that retains BloFin's native 150-call traversal and leaves 106 slots
+available to other owners. It is a proposed quota, not yet a source-clearance
+claim. Pin the boundary child, second-child refusal before activation/ID
+consumption, and genuine command admission while that child remains active.
+No traversal split, native limit reduction or credit recycling is allowed.
+
+The scheduler change is opt-in per task registration. Its active token has
+Live/Retiring states, with pending pause/retry/removal effects retained until
+private exact-token `ack_retired` after physical cleanup. That acknowledgement
+is valid after the original deadline and applies effects once. All invalidation
+paths, including pause/cancel/supersede/expiry/removal, honor this barrier;
+`finish`, `admit`, `next_deadline` and `take_ready` cannot revive a Retiring token.
+Existing ordinary registrations keep their current behavior.
+
+The first runtime foundation changes the existing physical table's key to full
+Owner, preserving the Owner variant even for equal numeric generations. It
+also counts a retained Background attempt on registration just as retirement
+already does. Two new unit controls pass for non-aliasing and balanced pending
+counts; 123 existing execution-filter tests pass. Independent bounded source
+review is CLEAR. The first helper run caught a duplicate fixture Context ID;
+the helper now removes its previous test root before creating the second
+table entry. No Background task admission, retry, publication or native venue
+conversion is available from this foundation alone.

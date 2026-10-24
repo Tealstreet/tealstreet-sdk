@@ -46,6 +46,10 @@ mod execution;
 #[path = "request_context_background_delivery_tests.rs"]
 mod background_delivery_tests;
 
+#[cfg(all(test, feature = "http-plans"))]
+#[path = "request_context_background_plan_tests.rs"]
+mod background_plan_tests;
+
 struct CommandOwner {
     generation: u64,
     /// Exact logical completion authority survives expired-handle cleanup.
@@ -212,10 +216,10 @@ pub(super) struct ContextRegistry {
     // Only admitted Plan owners; capacity is reserved before ID commitment.
     #[cfg(feature = "http-plans")]
     plan_index: Vec<Owner>,
-    /// Plan-backed executions' physical owners, keyed by execution identity.
-    /// They hold the Plan, its slots and journal; no command observes them.
+    /// Physical Plans keyed by full owner identity, including owner variant.
+    /// These entries hold the Plan, its slots and journal.
     #[cfg(feature = "http-plans")]
-    physical: HashMap<u64, CommandOwner>,
+    physical: HashMap<Owner, CommandOwner>,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
     /// Order-read epoch at each live owner's first released Read: one logical
@@ -713,7 +717,7 @@ impl ContextRegistry {
     }
 
     /// The phase/journal entry of an issued owner: a command generation, or a
-    /// Plan-backed execution's physical owner. Other owners have none.
+    /// registered non-command physical Plan. Other owners have none.
     fn owner_entry(&self, owner: Owner) -> Option<&CommandOwner> {
         match owner {
             Owner::Command { id, generation } => self
@@ -721,7 +725,7 @@ impl ContextRegistry {
                 .get(&id)
                 .filter(|owner| owner.generation == generation),
             #[cfg(feature = "http-plans")]
-            Owner::Execution { generation } => self.physical.get(&generation),
+            Owner::Execution { .. } | Owner::Background { .. } => self.physical.get(&owner),
             _ => None,
         }
     }
@@ -733,16 +737,16 @@ impl ContextRegistry {
                 .get_mut(&id)
                 .filter(|owner| owner.generation == generation),
             #[cfg(feature = "http-plans")]
-            Owner::Execution { generation } => self.physical.get_mut(&generation),
+            Owner::Execution { .. } | Owner::Background { .. } => self.physical.get_mut(&owner),
             _ => None,
         }
     }
 
-    /// Whether `owner` is a Plan-backed execution's physical owner.
+    /// Full owner identity, including its variant, for a physical Plan.
     fn physical_owner(&self, owner: Owner) -> bool {
         #[cfg(feature = "http-plans")]
-        if let Owner::Execution { generation } = owner {
-            return self.physical.contains_key(&generation);
+        if matches!(owner, Owner::Execution { .. } | Owner::Background { .. }) {
+            return self.physical.contains_key(&owner);
         }
         let _ = owner;
         false
@@ -774,6 +778,7 @@ impl ContextRegistry {
         }
         if matches!(context.owner(), Owner::Background { .. })
             && context.operation() == Operation::Read
+            && !self.physical_owner(context.owner())
         {
             return Ok(());
         }
@@ -1237,13 +1242,10 @@ impl ContextRegistry {
     /// Retire a physical Plan owner after its seal: no command completes here.
     #[cfg(feature = "http-plans")]
     pub(super) fn finish_physical(&mut self, owner: Owner) -> bool {
-        let Owner::Execution {
-            generation: identity,
-        } = owner
-        else {
+        if !self.physical_owner(owner) {
             return false;
-        };
-        let Some(entry) = self.physical.get(&identity) else {
+        }
+        let Some(entry) = self.physical.get(&owner) else {
             return false;
         };
         let CommandPhase::Planned(state) = &entry.phase else {
@@ -1258,10 +1260,8 @@ impl ContextRegistry {
         self.plan_index.remove(index);
         self.reserved_contexts -= state.unissued();
         let token = HttpOwnerRetirement::new(Preflight::for_owner(&self.issuer, owner));
-        self.physical
-            .get_mut(&identity)
-            .expect("checked above")
-            .phase = CommandPhase::Retiring(token.clone());
+        self.physical.get_mut(&owner).expect("checked above").phase =
+            CommandPhase::Retiring(token.clone());
         self.contexts.retain(|_, context| context.owner() != owner);
         self.retirements.push_back(token);
         true
