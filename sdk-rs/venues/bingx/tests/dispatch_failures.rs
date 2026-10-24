@@ -100,6 +100,9 @@ impl Harness {
                             self.http.push(request);
                         }
                     }
+                    HttpAction::BindGroup { .. } => {
+                        panic!("BingX fixture declares no Mutation barriers")
+                    }
                     HttpAction::Cancel { preparation, .. } => {
                         let request = preparation.attempt().request;
                         if self.routes.get(&request) == Some(&preparation) {

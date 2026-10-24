@@ -130,6 +130,7 @@ impl Account {
             &preflight,
             &STEPS,
             PlanPolicy {
+                independent_calls: false,
                 operation: Operation::Read,
                 credential: Some(credential(credentials)),
                 pacing: None,

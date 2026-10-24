@@ -15,6 +15,8 @@ pub mod execution;
 pub mod execution_group;
 pub mod fence;
 pub mod history;
+mod id_map;
+pub(crate) use id_map::IdMap;
 pub mod json;
 pub mod log;
 pub mod metadata;

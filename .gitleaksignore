@@ -96,3 +96,6 @@ a44fd8ea8eb80f4e805280933728c0642d35cf2f:packages/safe-cex/src/exchanges/coinbas
 # Maintainer-approved historical Bitrue plan attribution prose; no credential.
 # Current wording changed; only this original commit/file/rule/line is ignored.
 48f8b6cbe5788fabdc417e507b6cded77b23aa7a:docs/plans/RUST_BITRUE_DISPATCH_SIGNER.md:generic-api-key:271
+
+# Derived BloFin test MAC from fixture-secondary-secret; exact historical fingerprint only.
+ea5ec84ee69b5a6e4f7f90322f9afd285a718a0f:sdk-rs/venues/blofin/tests/hmac_dispatch_original.rs:generic-api-key:341
