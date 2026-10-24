@@ -1,24 +1,4 @@
 {
-  "venues/apexomni/src/account.rs": {
-    "3c8a19b43e51b252b2b04ce8eaee46e7c8fb5bb810af59f31edb2195107e5d46": 2
-  },
-  "venues/apexomni/src/history.rs": {
-    "551bb8d4a8290f3bd2229e176a30959a052f2db030dc776b771efcfb155e5ac9": 1
-  },
-  "venues/apexomni/src/lib.rs": {
-    "0219bc24bc618541b8bf84b12a617687f15c479a2a90d9a765b85c28878bfd7c": 1,
-    "239d8bb1b21eae866af31bbf63a30b5b06ab0bea27aa256fe4a260fd801ac53f": 1,
-    "31c4a378f691bfb9a36c5bfab06eefdbc87243936860af8d8bc1ff86e6060e84": 1,
-    "3d0b1da9613f86f2f90197fe3d09161f9b775bbcd3eb7d61c0bbf4caf0f10573": 1,
-    "56b2f68f6e9d2a7e8d8d9c12697428fa0218289b90f6689ffb620baf490041e4": 1,
-    "84a58c8cf37ba0b1dc8a11fa97c888c268fabc018cc0cc0213e8ad689a5a14df": 1,
-    "998051a7b82dfb9002576f90c080a63ad097bd78ea4f1b21f8ef67b3e1d30152": 1,
-    "ad18ead076a7b3dc79f3adfcd55400b0b3cf8b8df1405200b86dd2f3e1744733": 1,
-    "b385287b7903b95152ecb2025d782dbe45d7ac64448fef388e9ac6056188ed13": 1
-  },
-  "venues/apexomni/src/trading.rs": {
-    "551bb8d4a8290f3bd2229e176a30959a052f2db030dc776b771efcfb155e5ac9": 1
-  },
   "venues/backpack/src/account.rs": {
     "0767d02100ef0cf456ff990bbade7e315a036257e4474033392945b7e058b741": 1,
     "adc044e8f3038318155c7cad2490351fd9ec6c181579d37fd41082022f124701": 1,
