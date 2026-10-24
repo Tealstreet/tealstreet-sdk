@@ -11,6 +11,7 @@ import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { isRustVenue, RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 const NOW = 1_800_000_000_000;
 const TOKEN = '123456789012345678901234567890123456789012345678901234567890123456789';
@@ -32,6 +33,7 @@ const recorded = (handle?: RequestHandler) => {
   const sockets: RecordedSocket[] = [];
   const transport: Transport = {
     now: () => NOW,
+    prepareHttp: prepareRecordedHttp,
     connect: (url, handlers) => {
       const sent: string[] = [];
       sockets.push({ url, sent, message: handlers.onMessage });
