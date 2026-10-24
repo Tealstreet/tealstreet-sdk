@@ -35,8 +35,11 @@ Declare an explicit new20-second admission-to-expiry bound per batch, starting
 before host Prepare. This is a caller-visible timeout policy change, not native
 equivalence; record it in CALLERS at adoption. No renewal on Prepare, Bind,
 transport release or response. A host that never prepares must still time out.
-A late response must not decode its envelope/body, publish ticker state, clear a
-newer attempt's inflight marker or start another batch. No unbounded native
+Expired DATA must not decode its envelope/body, publish ticker state or clear a
+newer attempt's inflight marker. The typed timeout failure may perform exact
+cleanup (including Cancel), advance the next native batch and independently
+back off the failed offset; that is failure-owned progress, never expired-DATA
+success. No unbounded native
 poll/traversal is packed into an immortal Context.
 
 ## Existing API and exact cleanup
@@ -101,3 +104,13 @@ backoff all pass. The corrected receipt is
 `/tmp/codex-hcmq3f-polymarket-midpoint-original-corrected.log`.
 Only this plan, README index and new test differ from the exact557de base;
 production, every inventory, selection/nonce sites and5b source remain unchanged.
+
+## Core review correction before source
+
+Core review at722a found the expiry test's no-actions suffix contradicted native
+102-token failure progress: failed offset0 schedules its retry and immediately
+starts offset100. The original early no-publication failure remains genuine,
+but the later blanket prohibition is withdrawn. The corrected suffix permits
+shared cancellation and requires the exact next batch plus the original
+failed-offset backoff/retry. A separate native102-token transport-failure
+working control pins that sequence. Production and all maps remain unchanged.

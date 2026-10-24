@@ -118,12 +118,29 @@ fn midpoint_at_deadline_cannot_publish_or_advance() {
         "expired midpoint published native quotes"
     );
     assert!(!engine.store().loaded().tickers);
-    assert!(
-        !a.iter()
-            .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_))),
-        "expired batch advanced work without backoff"
+    let retry_timer = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (750.0..=1000.).contains(&(*at_ms - DEADLINE)) => {
+                Some(*timer)
+            }
+            _ => None,
+        })
+        .expect("typed timeout retains the failed offset's native backoff");
+    let next = midpoint(a);
+    assert_eq!(
+        body_ids(&next),
+        vec!["101", "102"],
+        "failure-owned next batch may advance"
     );
-    no_command_or_signing(&a);
+    answer(&mut engine, &next, DEADLINE + 1., "{}");
+    assert!(!engine.store().loaded().tickers);
+    engine.handle(DEADLINE + 1000., Event::TimerFired { timer: retry_timer });
+    let retry = midpoint(actions(&mut engine, DEADLINE + 1000.));
+    assert_eq!(body_ids(&retry), body_ids(&request));
+    assert_ne!(retry.id, request.id);
+    answer(&mut engine, &retry, DEADLINE + 1001., r#"{"1":"0.4"}"#);
+    assert!(engine.store().loaded().tickers);
 }
 #[test]
 fn unprepared_midpoint_times_out_and_late_bind_is_inert() {
@@ -270,4 +287,39 @@ fn malformed_response_uses_native_retry_and_keeps_tickers_unloaded() {
     ));
     assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
     no_command_or_signing(&a);
+}
+
+#[test]
+fn native_failed_offset_backs_off_while_next_batch_advances() {
+    let mut engine = catalogue(102);
+    let first = midpoint(actions(&mut engine, ADMITTED));
+    engine.handle(
+        11.,
+        Event::HttpFailed {
+            request: first.id,
+            error: "native midpoint failure",
+        },
+    );
+    let a = actions(&mut engine, 11.);
+    let timer = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (750.0..=1000.).contains(&(*at_ms - 11.)) => {
+                Some(*timer)
+            }
+            _ => None,
+        })
+        .expect("failed offset retains its native backoff");
+    let next = midpoint(a);
+    assert_eq!(body_ids(&next), vec!["101", "102"]);
+    assert!(engine.store().tickers().is_empty());
+    answer(&mut engine, &next, 12., "{}");
+    assert!(!engine.store().loaded().tickers);
+    engine.handle(1011., Event::TimerFired { timer });
+    let retry = midpoint(actions(&mut engine, 1011.));
+    assert_eq!(body_ids(&retry), body_ids(&first));
+    assert_ne!(retry.id, first.id);
+    answer(&mut engine, &retry, 1012., r#"{"1":"0.4"}"#);
+    assert!(engine.store().loaded().tickers);
+    assert_eq!(engine.store().tickers().len(), 1);
 }
