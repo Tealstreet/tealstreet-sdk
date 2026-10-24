@@ -171,3 +171,22 @@ control, not an invented RED. Scoped Clippy, formatting and explicit-file ESLint
 pass. Default ESLint ignored the WASM target, so the explicit check uses
 --no-ignore. Broader native/runtime evidence remains attached to unchanged source.
 Fresh composed CI and exact test-delta review remain gates before READY.
+
+### Actual candle composition
+
+Plain-merged actual #2071 (304d72cc9ee) through landing 2caa80214f06.
+Both 55ao7t and 5c57jl cleared source-resolution patch
+`e5105fc40d046e01784e8c6c0c2e5d5dd38c67fd617f35f97b309156f062de99`
+and entire lib blob `c0d351167d535c2da54ee635402e01f3666e935b` before application.
+The ticker DATA guard precedes the candle root/leg guard, both before common
+status/codec work. The incoming preparation and released failure handlers keep
+typed candle errors; the ticker fallback still reaches exact Context retirement
+and native failure progression through the existing default sign-error delegate.
+
+New `ticker_candle_failures` controls drive a ticker seed and candle command in
+the same genuine Engine, first with both preparations refused, then with both
+released requests failing. They pin one typed candle terminal, no candle retry,
+one ticker Backoff plus one 25 ms continuation, inert duplicate failures and
+successful retry of the ticker's original asset. Both unchanged original targets
+and the scoped native crate pass; strict Clippy, formatting and bans/ratchets
+pass. Composed CI and auditor slot clearance remain separate gates.
