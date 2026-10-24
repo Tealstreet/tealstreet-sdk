@@ -892,3 +892,6 @@ keeps incoming sections and the own readiness/metadata sections; the existing
 Read-capacity outcome wording correction is retained. A local merge commit
 accidentally included unresolved doc markers; the next commit removes them without
 rewriting history. No source conflict or local core resolution was introduced.
+The as_mut-only cleanup makes the untouched-Store Read terminal control pass
+(one GREEN). It changes no existing pending-write invalidation behavior; the
+three genuine Plan terminal controls remain the regression gate for that path.

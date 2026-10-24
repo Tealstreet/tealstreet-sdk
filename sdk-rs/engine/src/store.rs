@@ -789,7 +789,9 @@ impl Store {
         self.metadata_state().write_started(command, symbol)
     }
     pub fn metadata_write_finished(&mut self, command: crate::CommandId) {
-        self.metadata_state().write_finished(command);
+        if let Some(metadata) = self.metadata.as_mut() {
+            metadata.write_finished(command);
+        }
     }
     pub fn metadata_write_pending(&self, symbol: &str) -> bool {
         self.metadata
