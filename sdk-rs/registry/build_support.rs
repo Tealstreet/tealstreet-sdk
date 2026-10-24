@@ -129,6 +129,7 @@ enum KeyEncoding {
     Hex,
     Pem,
     Base64Text,
+    Base58,
 }
 
 #[derive(Debug, Deserialize)]
@@ -437,8 +438,10 @@ mod tests {
         }}"#).unwrap();
         assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
         assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None })"));
+        let base58 = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"secretEncoding":"base58"}}}}}"#;
+        assert!(generate(base58).unwrap().contains("KeyEncoding::Base58"));
         for field in [
-            r#"{"secretEncoding":"base58"}"#,
+            r#"{"secretEncoding":"base32"}"#,
             r#"{"extra":{"key":"unknownRole"}}"#,
             r#"{"extra":{"key":"zklinkSeed","name":"x"}}"#,
             r#"{"extra":{"key":"zklinkSeed","field":"requiredWithPrimaryFallback"}}"#,
