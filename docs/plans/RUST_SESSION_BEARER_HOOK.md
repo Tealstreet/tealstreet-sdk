@@ -462,9 +462,18 @@ private requests carry a session token can use it.
   routing it binds nothing. Without the `flush_http_plans` tail drain the gate
   fails in both feature variants.
 - R14 refusal half: inside a Plan-ready scope, `open_session`,
-  `session_context` and `retire_session` each refuse `State`. The Session stays
+  `session_context`, `session_scoped_context` and `retire_session` each refuse
+  `State`. The Session stays
   live, and a later bound request still prepares Primary with the current
   token.
+- R14 refusal half, Preflight (independent-review P3): the Preflight-ready
+  callback gets the same refusals, and `session_scoped_context` is probed in
+  both scopes. Narrowing `session_scope` to Plan-ready only fails this test.
 - `Egress::Session` control: a bound request whose root comes from
   `session_scoped_context` on a private-egress Session binds and prepares
   Primary with the token. Only explicit public egress refuses.
+  `Context::egress` is crate-private, so an integration test cannot assert
+  the egress directly; `session_scoped_context` refuses `Invalid` for a
+  Session without private egress, so the setup forces it.
+- Independent review CLEAR at `a24df874c8f` (not a per-venue fix of a
+  cross-cutting concern); its Preflight-scope P3 is folded above.

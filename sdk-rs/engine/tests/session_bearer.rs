@@ -106,9 +106,11 @@ struct Shared {
     plan_wait_ms: u32,
     #[cfg(feature = "http-plans")]
     plan: Option<safe_cex_engine::request_context::Plan>,
-    /// The Plan-ready callback tries to open, retire and use a Session.
+    /// Plan- and Preflight-ready callbacks try to open, retire and use a Session.
     #[cfg(feature = "http-plans")]
-    lifetimes_on_plan_ready: bool,
+    lifetimes_in_ready: bool,
+    #[cfg(feature = "http-plans")]
+    preflight_ready_calls: usize,
     #[cfg(feature = "http-plans")]
     scoped_refusals: Vec<Error>,
     #[cfg(feature = "http-plans")]
@@ -164,7 +166,9 @@ impl Shared {
             #[cfg(feature = "http-plans")]
             plan: None,
             #[cfg(feature = "http-plans")]
-            lifetimes_on_plan_ready: false,
+            lifetimes_in_ready: false,
+            #[cfg(feature = "http-plans")]
+            preflight_ready_calls: 0,
             #[cfg(feature = "http-plans")]
             scoped_refusals: Vec::new(),
             #[cfg(feature = "http-plans")]
@@ -437,6 +441,36 @@ impl Probe {
             shared.revision = 1;
         }
     }
+    /// Every Session lifetime call a readiness scope must refuse.
+    #[cfg(feature = "http-plans")]
+    fn try_session_lifetimes(&self, cx: &mut Cx<'_, Pending>) {
+        let session = {
+            let shared = self.shared.borrow();
+            shared
+                .lifetimes_in_ready
+                .then(|| shared.session.clone())
+                .flatten()
+        };
+        let Some(session) = session else {
+            return;
+        };
+        let keyless = SessionPolicy {
+            credential: None,
+            repeat_safe: true,
+            private_egress: None,
+        };
+        let refusals = [
+            cx.open_session(keyless).err(),
+            cx.session_context(&session, policy(false, false)).err(),
+            cx.session_scoped_context(&session, Scope::Background, policy(false, false))
+                .err(),
+            cx.retire_session(&session).err(),
+        ];
+        self.shared
+            .borrow_mut()
+            .scoped_refusals
+            .extend(refusals.into_iter().flatten());
+    }
     #[cfg(feature = "http-plans")]
     fn preflight(&self, cx: &mut Cx<'_, Pending>) {
         use safe_cex_engine::request_context::plan::{CallTerms, RetryWindow};
@@ -448,6 +482,11 @@ impl Probe {
                 write_credential: None,
             })
             .unwrap();
+        if self.shared.borrow().lifetimes_in_ready {
+            cx.park_preflight(&preflight).unwrap();
+            cx.request_preflight_ready(&preflight).unwrap();
+            return;
+        }
         let context = cx
             .preflight_read_context(
                 &preflight,
@@ -542,30 +581,18 @@ impl Venue for Probe {
         _: &safe_cex_engine::request_context::Plan,
     ) {
         let _depth = self.enter();
-        let session = {
-            let mut shared = self.shared.borrow_mut();
-            shared.plan_ready_calls += 1;
-            shared
-                .lifetimes_on_plan_ready
-                .then(|| shared.session.clone())
-                .flatten()
-        };
-        if let Some(session) = session {
-            let keyless = SessionPolicy {
-                credential: None,
-                repeat_safe: true,
-                private_egress: None,
-            };
-            let refusals = [
-                cx.open_session(keyless).err(),
-                cx.session_context(&session, policy(false, false)).err(),
-                cx.retire_session(&session).err(),
-            ];
-            self.shared
-                .borrow_mut()
-                .scoped_refusals
-                .extend(refusals.into_iter().flatten());
-        }
+        self.shared.borrow_mut().plan_ready_calls += 1;
+        self.try_session_lifetimes(cx);
+    }
+    #[cfg(feature = "http-plans")]
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        _: &safe_cex_engine::request_context::Preflight,
+    ) {
+        let _depth = self.enter();
+        self.shared.borrow_mut().preflight_ready_calls += 1;
+        self.try_session_lifetimes(cx);
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         let _depth = self.enter();
@@ -1578,8 +1605,9 @@ fn r10_retire_fails_each_owner_once_without_http_or_reentry() {
     );
 }
 
-/// R14, refusal half: inside a Plan-ready scope, opening, using or retiring a
-/// Session refuses `State`; the Session stays live and later work still binds.
+/// R14, refusal half: inside a Plan-ready scope, opening, using, routing on or
+/// retiring a Session refuses `State`; the Session stays live and later work
+/// still binds.
 #[cfg(feature = "http-plans")]
 #[test]
 fn r14_plan_ready_scope_refuses_session_lifetimes_and_keeps_the_session() {
@@ -1587,7 +1615,7 @@ fn r14_plan_ready_scope_refuses_session_lifetimes_and_keeps_the_session() {
         shared.plan_command = Some(1);
         shared.plan_legs = 1;
         shared.plan_wait_ms = 1_000;
-        shared.lifetimes_on_plan_ready = true;
+        shared.lifetimes_in_ready = true;
     });
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 1 }));
     let admitted = e.drain_actions().collect::<Vec<_>>();
@@ -1602,7 +1630,7 @@ fn r14_plan_ready_scope_refuses_session_lifetimes_and_keeps_the_session() {
     {
         let shared = shared.borrow();
         assert_eq!(shared.plan_ready_calls, 1);
-        assert_eq!(shared.scoped_refusals, [Error::State; 3]);
+        assert_eq!(shared.scoped_refusals, [Error::State; 4]);
         assert!(shared.retired.is_none() && shared.session.is_some());
         assert_eq!(shared.issue_errors, []);
     }
@@ -1610,6 +1638,24 @@ fn r14_plan_ready_scope_refuses_session_lifetimes_and_keeps_the_session() {
     assert_eq!(issued[0].2, RoutingIntent::Primary);
     let (_, request) = prepared(&mut e, NOW + 1_001., issued[0].0).expect("bound packet");
     assert_eq!(authorization(&request), Some("Bearer A"));
+}
+
+/// R14, refusal half, Preflight: the retained Preflight's ready callback gets
+/// the same `State` refusals.
+#[cfg(feature = "http-plans")]
+#[test]
+fn r14_preflight_ready_scope_refuses_session_lifetimes() {
+    let (mut e, shared) = engine(|shared| {
+        shared.preflight = true;
+        shared.lifetimes_in_ready = true;
+    });
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 1 }));
+    e.prepare_dispatch(NOW + 1.);
+    e.drain_actions().for_each(drop);
+    let shared = shared.borrow();
+    assert_eq!(shared.preflight_ready_calls, 1);
+    assert_eq!(shared.scoped_refusals, [Error::State; 4]);
+    assert!(shared.retired.is_none() && shared.session.is_some());
 }
 
 /// Source gate: `start` runs no `finish_event_scope`, so a retire there is
