@@ -227,6 +227,9 @@ probe uses a caller-stamped capped Read Preflight, a real two-call Read Plan,
 and managed Prepare/Bind/Claim. Its numeric HistoryRows construction is an
 explicit unsafe negative adapter, adapted from the closed #1928 fixture; it is
 not a migrated venue or evidence that numeric history owns Plan completion.
+At cutover, replace that adapter with the bound Plan history handle and its
+admission operations while preserving the outcome assertions; the legacy numeric
+Completion/cx.done/cx.fail API itself remains unchanged.
 
 Executed with all features and without defaults with http-plans/test-support:
 4 assertion REDs, 2 working controls, 0 ignored in each mode. Released Network
