@@ -92,3 +92,10 @@ All original 26 controls now pass unchanged. The implementation uses the
 existing Background-specific delivery validator; the command Read validator
 correctly rejects a Background owner and was corrected during implementation.
 No new engine authority or signer capability was introduced.
+
+The historical snapshot-rebind checker control assumed the live account source
+would remain at ten sites forever. Checker owner claude-m26ps4 independently
+CLEARED the narrow correction: pin the historical after-map to immutable actual
+77f124 and additionally require the live map be its subset via unchanged check().
+Both historical 10/10 hashes and every regrowth negative remain. The production
+checker and bootstrap rows are unchanged; this is not an inventory exception.
