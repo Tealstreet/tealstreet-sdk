@@ -439,3 +439,9 @@ controls, formatting, strict checks, workspace all-target check and normal ratch
 Re-run the existing engine+actual-recipe WASM proof with the explicit feature.
 Only after these gates and bounded source review: one freeze push and one
 PR-triggered run. The stacked recipe draft waits for that exact immutable head.
+
+The feature-off receipt validator is emitted out of line to share its unchanged
+strict checks across ordinary dispatch paths. This is a function-level outlining
+choice, with no compiler-profile or feature-on behavior change; pinned Bitget
+measurement recovers another 478 bytes. Final receipts report residual public
+API compatibility cost against the pre-nonce baseline rather than byte equality.

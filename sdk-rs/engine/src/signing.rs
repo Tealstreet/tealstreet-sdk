@@ -372,6 +372,7 @@ pub struct SignReceipt {
 mod nonce_decimal;
 
 impl SignReceipt {
+    #[cfg_attr(not(feature = "dispatch-nonce"), inline(never))]
     pub fn validate(&self) -> Result<(), SignError> {
         if [self.stamp_ms, self.expiry_ms]
             .into_iter()
