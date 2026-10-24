@@ -12,7 +12,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::request_context::{Context, Operation, Scope};
+use safe_cex_engine::request_context::{CommandEntryError, Context, Operation, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
@@ -55,7 +55,8 @@ pub enum Pending {
         revision: u64,
     },
     Candles {
-        command: Option<CommandId>,
+        root: Option<Context>,
+        context: Option<Context>,
         symbol: String,
         interval: Interval,
         generation: Option<u64>,
@@ -419,6 +420,18 @@ impl Kraken {
             }
             return;
         }
+        let root = if command.is_some() {
+            match cx.admit_caller_read_root(None, None) {
+                Ok(root) => Some(root),
+                Err(CommandEntryError::Revoked) => {
+                    let _ = cx.reject_expired_command(Operation::Read);
+                    return;
+                }
+                Err(CommandEntryError::Rejected(_)) => return,
+            }
+        } else {
+            None
+        };
         let generation = if command.is_none() {
             let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) else {
                 return;
@@ -440,7 +453,8 @@ impl Kraken {
         self.candles_page(
             cx,
             Pending::Candles {
-                command,
+                root,
+                context: None,
                 symbol,
                 interval,
                 generation,
@@ -450,29 +464,97 @@ impl Kraken {
             },
         );
     }
-    fn candles_page(&self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+    fn candles_page(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending) {
         let Pending::Candles {
+            root,
+            context,
             symbol,
             interval,
             page,
             ..
-        } = &pending
+        } = &mut pending
         else {
             return;
         };
-        let resolution = interval.as_str();
-        cx.request_streamed(
-            Method::Get,
-            format!(
-                "{}/api/charts/v1/trade/{symbol}/{resolution}?from={:.0}&to={:.0}",
-                self.host(),
-                (page.from / 1000.0).floor(),
-                (page.to / 1000.0).floor()
-            ),
-            vec![],
-            ArrayAt::Field("candles"),
-            pending,
+        let policy = public_context::policy(Operation::Read);
+        let issued = match root {
+            Some(root) => cx.http_leg_context(root, policy),
+            None => cx.http_context(Scope::Background, policy),
+        };
+        let leg = match issued {
+            Ok(leg) => leg,
+            Err(reason) => {
+                self.candles_failed(cx, pending, reason.venue_error());
+                return;
+            }
+        };
+        let url = format!(
+            "{}/api/charts/v1/trade/{symbol}/{}?from={:.0}&to={:.0}",
+            self.host(),
+            interval.as_str(),
+            (page.from / 1000.0).floor(),
+            (page.to / 1000.0).floor()
         );
+        *context = Some(leg.clone());
+        match cx.request_managed(leg, Method::Get, url, None, pending) {
+            Ok(request) => cx.stream_response(request, ArrayAt::Field("candles")),
+            Err((pending, reason)) => self.candles_failed(cx, pending, reason.venue_error()),
+        }
+    }
+    fn candles_delivery(&self, cx: &Cx<'_, Pending>, pending: &Pending) -> bool {
+        let Pending::Candles {
+            root,
+            context: Some(context),
+            symbol,
+            interval,
+            generation,
+            ..
+        } = pending
+        else {
+            return false;
+        };
+        match root {
+            Some(root) => cx.validate_read_http_delivery(root, context).is_ok(),
+            None => {
+                cx.validate_background_read_http_delivery(context).is_ok()
+                    && self
+                        .candles
+                        .get(&(symbol.clone(), *interval))
+                        .is_some_and(|state| Some(state.generation) == *generation)
+            }
+        }
+    }
+    fn candles_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        let Pending::Candles {
+            root,
+            context,
+            symbol,
+            interval,
+            generation,
+            ..
+        } = pending
+        else {
+            return;
+        };
+        if let Some(context) = context {
+            let _ = cx.finish_http_context(&context);
+        }
+        if let Some(root) = root {
+            let _ = cx.fail_context(&root, error.clone());
+        } else if let Some(state) = self
+            .candles
+            .get_mut(&(symbol, interval))
+            .filter(|state| Some(state.generation) == generation)
+        {
+            state.in_flight = false;
+            state.next_poll = cx.now + 5_000.0;
+        }
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error.message);
     }
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
@@ -486,23 +568,9 @@ impl Kraken {
                 self.ticker_in_flight = false;
                 self.discovery.failed(cx, true);
             }
-            Pending::Candles {
-                command,
-                symbol,
-                interval,
-                generation,
-                ..
-            } => {
-                if let Some(c) = command {
-                    cx.fail(c, error);
-                } else if let Some(s) = self
-                    .candles
-                    .get_mut(&(symbol, interval))
-                    .filter(|s| Some(s.generation) == generation)
-                {
-                    s.in_flight = false;
-                    s.next_poll = cx.now + 5_000.0;
-                }
+            pending @ Pending::Candles { .. } => {
+                self.candles_failed(cx, pending, error.into());
+                return;
             }
             _ => {}
         }
@@ -696,6 +764,9 @@ impl Venue for Kraken {
         self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if matches!(pending, Pending::Candles { .. }) && !self.candles_delivery(cx, pending) {
+            return;
+        }
         if let Pending::Markets { context, .. } | Pending::Tickers { context, .. } = &*pending
             && cx.validate_background_read_http_delivery(context).is_err()
         {
@@ -846,6 +917,16 @@ impl Venue for Kraken {
             }
             p => p,
         };
+        if matches!(pending, Pending::Candles { .. }) && !self.candles_delivery(cx, &pending) {
+            if let Pending::Candles {
+                context: Some(context),
+                ..
+            } = pending
+            {
+                let _ = cx.finish_http_context(&context);
+            }
+            return;
+        }
         if let Pending::Markets { context, .. } | Pending::Tickers { context, .. } = &pending
             && cx.validate_background_read_http_delivery(context).is_err()
         {
@@ -937,7 +1018,8 @@ impl Venue for Kraken {
                 }
             }
             Pending::Candles {
-                command,
+                root,
+                context,
                 symbol,
                 interval,
                 generation,
@@ -954,7 +1036,8 @@ impl Venue for Kraken {
                     self.public_failed(
                         cx,
                         Pending::Candles {
-                            command,
+                            root,
+                            context,
                             symbol,
                             interval,
                             generation,
@@ -966,7 +1049,7 @@ impl Venue for Kraken {
                     );
                     return;
                 }
-                if command.is_none()
+                if root.is_none()
                     && !self
                         .candles
                         .get(&(symbol.clone(), interval))
@@ -978,7 +1061,8 @@ impl Venue for Kraken {
                     self.public_failed(
                         cx,
                         Pending::Candles {
-                            command,
+                            root,
+                            context,
                             symbol,
                             interval,
                             generation,
@@ -999,7 +1083,8 @@ impl Venue for Kraken {
                         self.public_failed(
                             cx,
                             Pending::Candles {
-                                command,
+                                root,
+                                context,
                                 symbol,
                                 interval,
                                 generation,
@@ -1011,10 +1096,14 @@ impl Venue for Kraken {
                         );
                         return;
                     };
+                    if let Some(context) = &context {
+                        let _ = cx.finish_http_context(context);
+                    }
                     self.candles_page(
                         cx,
                         Pending::Candles {
-                            command,
+                            root,
+                            context: None,
                             symbol,
                             interval,
                             generation,
@@ -1031,13 +1120,20 @@ impl Venue for Kraken {
                 }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 rows.dedup_by(|a, b| a.timestamp == b.timestamp);
-                if let Some(c) = command {
+                if let Some(root) = &root {
+                    if let Some(context) = &context {
+                        let _ = cx.finish_http_context(context);
+                    }
                     {
                         let result: Result<String, String> =
                             serde_json::to_string(&rows).map_err(|e| e.to_string());
                         match result {
-                            Ok(data) => cx.done(c, data),
-                            Err(error) => cx.fail(c, error),
+                            Ok(data) => {
+                                let _ = cx.done_context(root, data);
+                            }
+                            Err(error) => {
+                                let _ = cx.fail_context(root, error);
+                            }
                         }
                     };
                 } else if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) {
@@ -1051,8 +1147,38 @@ impl Venue for Kraken {
                         s.last = Some(latest);
                     }
                 }
+                if root.is_none()
+                    && let Some(context) = context
+                {
+                    let _ = cx.finish_http_context(&context);
+                }
             }
             _ => unreachable!(),
+        }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if matches!(pending, Pending::Candles { .. }) {
+            self.candles_failed(cx, pending, error);
+        } else {
+            self.on_sign_error(cx, pending, error);
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if matches!(pending, Pending::Candles { .. }) {
+            self.candles_failed(cx, pending, error);
+        } else {
+            self.on_request_failed(cx, pending, &error.message);
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
