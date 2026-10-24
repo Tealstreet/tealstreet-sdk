@@ -700,6 +700,11 @@ impl Venue for TxFlow {
     }
     fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(request) = &pending
+            && !self.account_delivery_live(cx, request)
+        {
+            return;
+        }
         if !(200..300).contains(&response.status) {
             self.on_request_failed(cx, pending, &format!("TxFlow HTTP {}", response.status));
             return;
@@ -914,6 +919,23 @@ impl Venue for TxFlow {
             Pending::History(request) => self.history_item(cx, request, item),
             _ => {}
         }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        self.on_http_failed(cx, pending, error);
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        self.on_request_failed(cx, pending, &error.message);
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
