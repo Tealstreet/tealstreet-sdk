@@ -169,3 +169,10 @@ for both empty inventories and nonterminal steps (10min scheduled delay).
 All other identity/attempt/strict provenance checks remain unchanged. Pin
 the spacing and20-refresh cap for both shapes before applying production.
 No alternative artifact-API authority is included in this change.
+
+The same ruling extends every job that can bind producers by12min:
+`cpu-plan`20→32, `cpu-second`30→42 and `cpu-certify`30→42.
+`cpu-final` remains5min because its status-only command never waits. A
+workflow control pins those minima. Historical successful planner40111065296
+(job120925982479) ran16:34:15–16:40:33Z (6min18s); the timeout change is
+explicitly ruled rather than inferred from that one observation.

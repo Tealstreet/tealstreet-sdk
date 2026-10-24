@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { setImmediate } from 'node:timers/promises';
 import { test } from 'node:test';
 import { authenticatedBundle, evidenceEndCheck } from './cpu-ci.mjs';
@@ -71,9 +72,9 @@ function fixture(observations, { corruptDigest = false, refuseJobs = false,
 async function settle(t, read) {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const outcome = read().then(value => ({ value }), error => ({ error }));
-  for (let round = 0; round < 12; round++) {
+  for (let round = 0; round < 24; round++) {
     await setImmediate();
-    t.mock.timers.tick(5_000);
+    t.mock.timers.tick(30_000);
   }
   return outcome;
 }
@@ -101,11 +102,11 @@ test('original: never-terminal producer exhausts the bounded metadata wait witho
   const value = fixture([job => { job.steps[1] = pending(job.steps[1].name); }]);
   const result = await settle(t, value.read);
   assert.ok(result.error, 'must reject a producer whose steps never become terminal');
-  assert.match(result.error.message, /producer steps.*terminal.*6.*refresh/i);
+  assert.match(result.error.message, /producer steps.*terminal.*20.*refresh/i);
   assert.match(result.error.message, /run 1000/);
   assert.match(result.error.message, /job 100 Rust \/ replay measurement \(bitget\)/);
   assert.match(result.error.message, /Public steady replay \[pending\/null\]/);
-  assert.equal(value.calls.jobs, 7, 'initial inventory plus at most six shared refreshes');
+  assert.equal(value.calls.jobs, 21, 'initial inventory plus at most twenty shared refreshes');
   assert.equal(value.context.bindings.length, 0);
   assert.equal(value.context.bundles.size, 0);
 });
@@ -142,11 +143,11 @@ test('empty-inventory original: empty then pending steps cannot bind an intermed
 test('empty-inventory original: an empty list exhausts the same bounded refresh budget', async t => {
   const value = fixture([job => { job.steps = []; }]);
   const result = await settle(t, value.read);
-  assert.match(result.error?.message ?? '', /empty inventory after 6 refreshes/);
+  assert.match(result.error?.message ?? '', /empty inventory after 20 refreshes/);
   assert.match(result.error.message, /run 1000, job 100 Rust \/ replay measurement \(bitget\)/);
   assert.match(result.error.message, /empty step inventory/);
-  assert.equal(value.calls.jobs, 7);
-  assert.equal(value.context.producerStepRefreshes, 6);
+  assert.equal(value.calls.jobs, 21);
+  assert.equal(value.context.producerStepRefreshes, 20);
   assert.equal(value.context.bindings.length, 0);
   assert.equal(value.context.bundles.size, 0);
 });
@@ -236,31 +237,31 @@ for (const [name, change] of [
   assert.equal(value.context.bundles.size, 0);
 });
 
-test('refresh control: two lagging producers share six refreshes rather than twelve', async t => {
+test('refresh control: two lagging producers share twenty refreshes rather than forty', async t => {
   const value = fixture([() => {}], { extraProducers: ['bybit'], mutateJobs: (rows, read) => {
     if (read < 3) rows[0].steps[2] = pending(CPU_COHORT_STEPS.strict);
     rows[1].steps[2] = pending(CPU_COHORT_STEPS.strict);
   } });
   const result = await settle(t, async () => { await value.read(); return value.readSuite('bybit'); });
-  assert.match(result.error?.message ?? '', /producer steps not terminal after 6 refreshes: run 1000, job 101/);
+  assert.match(result.error?.message ?? '', /producer steps not terminal after 20 refreshes: run 1000, job 101/);
   assert.match(result.error.message, /Retain strict gate reports and artifact budgets/);
-  assert.equal(value.calls.jobs, 7);
-  assert.equal(value.context.producerStepRefreshes, 6);
+  assert.equal(value.calls.jobs, 21);
+  assert.equal(value.context.producerStepRefreshes, 20);
   assert.equal(value.context.bindings.length, 1, 'only the first terminal producer was bound');
   assert.equal(value.context.bundles.size, 1);
 });
 
 test('refresh control: concurrent bindings cannot overspend the shared refresh budget', async t => {
-  const suites = ['bitget', 'bybit', 'binance', 'woo', 'okx', 'backpack', 'weex'];
+  const suites = ['bitget', ...CPU_REMEASURE_SUITES.filter(suite => suite !== 'bitget')].slice(0, 21);
   const value = fixture([() => {}], { extraProducers: suites.slice(1), mutateJobs: (rows, read) => {
     if (read === 0) for (const row of rows) row.steps[2] = pending(CPU_COHORT_STEPS.strict);
   } });
   const result = await settle(t, () => Promise.allSettled(suites.map(value.readSuite)));
   assert.ifError(result.error);
-  assert.equal(result.value.filter(row => row.status === 'fulfilled').length, 6);
+  assert.equal(result.value.filter(row => row.status === 'fulfilled').length, 20);
   assert.equal(result.value.filter(row => row.status === 'rejected').length, 1);
-  assert.equal(value.context.producerStepRefreshes, 6);
-  assert.equal(value.calls.jobs, 7);
+  assert.equal(value.context.producerStepRefreshes, 20);
+  assert.equal(value.calls.jobs, 21);
 });
 
 test('refresh control: descriptive fields may settle without changing physical identity', async t => {
@@ -334,4 +335,35 @@ test('refresh control: all distinct raw API observations remain retained', async
   assert.notEqual(observations[0].sha256, observations[1].sha256);
   assert.equal(JSON.parse(observations[0].raw).jobs[0].steps[2].status, 'pending');
   assert.equal(JSON.parse(observations[1].raw).jobs[0].steps[2].conclusion, 'success');
+});
+
+for (const [shape, mutate] of [
+  ['empty inventory', job => { job.steps = []; }],
+  ['pending step', job => { job.steps[2] = pending(CPU_COHORT_STEPS.strict); }],
+]) test(`ruled budget original: ${shape} waits thirty seconds before the first complete refresh`, async t => {
+  const value = fixture([mutate, () => {}]);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const outcome = value.read().then(value => ({ value }), error => ({ error }));
+  await setImmediate();
+  assert.equal(value.calls.jobs, 1);
+  t.mock.timers.tick(29_999);
+  await setImmediate();
+  assert.equal(value.calls.jobs, 1, 'no refresh before thirty seconds');
+  t.mock.timers.tick(1);
+  const result = await outcome;
+  assert.ifError(result.error);
+  assert.equal(value.calls.jobs, 2);
+  assert.equal(value.context.producerStepRefreshes, 1);
+});
+
+test('ruled workflow budget: every producer-binding job retains twelve extra minutes', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+  for (const [job, minimum] of [['cpu-plan', 32], ['cpu-second', 42], ['cpu-certify', 42], ['cpu-final', 5]]) {
+    const block = workflow.split(`\n  ${job}:\n`)[1]?.split(/\n  [a-z][\w-]*:\n/)[0];
+    assert.ok(block, `missing job ${job}`);
+    const timeout = /^    timeout-minutes: (\d+)$/m.exec(block);
+    assert.ok(timeout, `missing bounded timeout ${job}`);
+    assert.ok(Number(timeout[1]) >= minimum, `${job} needs at least ${minimum} minutes`);
+    if (job === 'cpu-final') assert.equal(Number(timeout[1]), 5, 'status-only job timeout stays unchanged');
+  }
 });
