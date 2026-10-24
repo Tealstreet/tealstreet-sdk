@@ -116,9 +116,11 @@ impl Polymarket {
                 cx.done(command, r#"{"buyLeverage":1,"sellLeverage":1}"#.into())
             }
             Command::FetchMaxLeverage { command, .. } => cx.done(command, "1".into()),
-            Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. } => cx.done(command, "[]".into()),
+            Command::SetLeverage { .. }
+            | Command::SetMarginType { .. }
+            | Command::SetPositionMode { .. } => {
+                let _ = cx.done_local_setting("[]".into(), |_| {});
+            }
             Command::Query { command, query } => {
                 let result: Result<String, String> = match query {
                     Query::OrderByClientId { .. } => {

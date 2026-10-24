@@ -34,3 +34,12 @@ Results and Store behavior are unchanged. These two success branches now obey
 the genuine command receipt, including expired/duplicate entry refusal, and
 have no numeric callback completion authority. No signing or account-readiness
 claim follows from this fixed-setting slice.
+
+## Executed evidence
+
+At plan/test head `5d74fe10618`, each real venue has one passing native
+keyless/public-only compatibility control and one failing NEW-CONTRACT
+invalid-clock assertion. The cutover changes only the two success calls;
+all assertions are unchanged. Both dedicated controls and the existing
+trading/history targets pass after cutover. Inventory removes exactly one
+occurrence from Polymarket history and one from Kraken Futures trading.

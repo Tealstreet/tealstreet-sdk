@@ -187,7 +187,7 @@ impl Kraken {
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.done(*command, "null".into());
+                    let _ = cx.done_local_setting("null".into(), |_| {});
                 }
                 return true;
             }
