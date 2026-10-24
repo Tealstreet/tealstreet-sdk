@@ -6346,7 +6346,10 @@ Caller-visible changes:
     for Lighter.
   - Callers who build a `LocalSigner` directly for an asymmetric family must
     pass a policy declaring it (`from_setup_with_policy`), or use
-    `LocalSigner::insert_declared`.
+    `LocalSigner::insert_declared`. That call is atomic and refuses MAC
+    algorithms and role refs. It never retypes a ref an aliased secondary
+    shares with the primary (rotating within the same algorithm is fine);
+    unshared refs may be retyped.
 - **`local_signer_from_json_for_mode(venue, input, &EngineOptions)`.** The
   third argument is now the parsed account options, not a bool. Public intent
   derives from them (`signer_setup_public_data_only`), and so do resolved

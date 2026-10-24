@@ -6,7 +6,7 @@ use safe_cex_engine::signing::{
     Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
 use sha2::{Digest, Sha256, Sha512};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use zeroize::Zeroizing;
 mod key_material;
 mod primitives;
@@ -196,6 +196,8 @@ pub struct LocalSigner {
     /// Trusted setup policy's asymmetric declarations; only these refs answer
     /// public operations, so a MAC secret is never fingerprinted.
     algorithms: HashMap<KeyRef, Algorithm>,
+    /// Refs an aliased secondary shares with the primary; never retyped.
+    shared: HashSet<KeyRef>,
 }
 impl LocalSigner {
     pub fn new() -> Self {
@@ -334,6 +336,9 @@ impl LocalSigner {
         if let Some(secondary) = secondary {
             secondary.install(&mut signer, "secondary");
         }
+        if alias && let Some(primary) = identities.primary.as_ref() {
+            signer.shared.insert(primary.signing.clone());
+        }
         for (identity, rule) in [
             (identities.primary.as_ref(), policy.primary),
             (identities.secondary.as_ref(), policy.secondary),
@@ -379,6 +384,7 @@ impl LocalSigner {
         self.keys.remove(reference);
         self.roles.remove(reference);
         self.algorithms.remove(reference);
+        self.shared.remove(reference);
     }
     /// Ordinary material declared for exactly this asymmetric algorithm.
     fn declared_key(&self, reference: &KeyRef, algorithm: Algorithm) -> Result<&[u8], SignError> {
@@ -411,15 +417,23 @@ impl LocalSigner {
         }
         self.key(reference)
     }
-    /// Trusted installation of asymmetric material with its declaration,
-    /// replacing any earlier key and declaration at once. Role refs refuse.
+    /// Trusted installation of asymmetric material with its declaration, in one
+    /// step. A ref an aliased slot shares is never retyped, because both slots
+    /// rely on its declaration; it may rotate within it. Role refs refuse.
     pub fn insert_declared(
         &mut self,
         reference: KeyRef,
         bytes: Vec<u8>,
         algorithm: Algorithm,
     ) -> Result<(), SignError> {
-        if !asymmetric(algorithm) || self.roles.contains_key(&reference) {
+        if !asymmetric(algorithm)
+            || self.roles.contains_key(&reference)
+            || self.shared.contains(&reference)
+                && self
+                    .algorithms
+                    .get(&reference)
+                    .is_some_and(|declared| *declared != algorithm)
+        {
             return Err(SignError::InvalidRequest);
         }
         self.keys.insert(reference.clone(), Zeroizing::new(bytes));
@@ -1915,7 +1929,21 @@ mod tests {
                 .sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32]))
                 .is_ok()
         );
-        // Redeclaring replaces key and declaration in one step.
+        let before = signer
+            .sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32]))
+            .unwrap()
+            .values
+            .clone();
+        signer
+            .insert_declared(key.clone(), vec![0x22; 32], Algorithm::Secp256k1Digest)
+            .unwrap();
+        let rotated = signer
+            .sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32]))
+            .unwrap()
+            .values
+            .clone();
+        assert_ne!(before, rotated);
+        // An unaliased raw ref may be retyped, replacing key and declaration.
         signer
             .insert_declared(key.clone(), scalar(), Algorithm::Ed25519)
             .unwrap();
@@ -1923,6 +1951,33 @@ mod tests {
             signer.sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32])),
             Err(SignError::InvalidRequest)
         );
+        // Permanent control (codex-uufub4's repro): an aliased read agent shares
+        // the primary's ref, so neither slot's ref can be retyped; rotation can.
+        let (mut aliased, ids) = try_public_setup(
+            serde_json::json!({
+                "primary": {"secretEncoding": "hex", "signingAlgorithm": "secp256k1Digest"},
+                "secondary": {"secretEncoding": "hex", "signingAlgorithm": "secp256k1Digest"}
+            }),
+            serde_json::json!({
+                "primary": {"key": "account", "secret": SCALAR},
+                "secondary": {"key": "read", "signingFromPrimary": true}
+            }),
+        )
+        .unwrap();
+        let shared = ids.secondary.unwrap().signing;
+        assert_eq!(shared, ids.primary.unwrap().signing);
+        assert_eq!(
+            aliased.insert_declared(shared.clone(), vec![0x33; 32], Algorithm::Ed25519),
+            Err(SignError::InvalidRequest)
+        );
+        assert!(
+            aliased
+                .sign_now(&sign_request("secp256k1Digest", &shared, vec![7; 32]))
+                .is_ok()
+        );
+        aliased
+            .insert_declared(shared.clone(), vec![0x33; 32], Algorithm::Secp256k1Digest)
+            .unwrap();
         // A role ref is its own declaration and refuses another.
         let (seed, _, _) = zklink_case();
         let (mut zklink, ids) =
