@@ -6,6 +6,8 @@ use crate::{Action, TimerId};
 #[path = "request_context_conditional.rs"]
 mod conditional;
 use conditional::{AdmissionDeclaration, terminal_ordinals};
+#[path = "request_context_group_plan.rs"]
+mod mutation_group;
 use std::ops::Range;
 
 pub(super) struct State {
@@ -20,6 +22,7 @@ struct Body {
     timer: TimerId,
     schedule: Schedule,
     terminals: Vec<usize>,
+    barriers: Vec<Range<usize>>,
     entries: Vec<Entry>,
     handoff: Option<Delivery>,
     initial_custody: bool,
@@ -302,6 +305,7 @@ impl<P> Cx<'_, P> {
                 steps,
                 policy,
                 terminals: &[],
+                barriers: &[],
             },
         )
     }
@@ -329,6 +333,7 @@ impl<P> Cx<'_, P> {
                 steps,
                 policy,
                 terminals: &[],
+                barriers: &[],
             },
             true,
         )
@@ -349,7 +354,11 @@ impl<P> Cx<'_, P> {
             steps,
             policy,
             terminals,
+            barriers,
         } = declaration;
+        if physical && !barriers.is_empty() {
+            return Err(Error::Invalid);
+        }
         let (intent, old_read) = self.preflight_plan_origin(preflight)?;
         let (operation, credential) = match intent.purpose {
             PreflightPurpose::ReadOnly => (Operation::Read, intent.read_credential),
@@ -367,6 +376,7 @@ impl<P> Cx<'_, P> {
         }
         let schedule = Schedule::from_steps(steps)?;
         let terminals = terminal_ordinals(steps, &policy, terminals)?;
+        let barriers = mutation_group::normalize(steps, &policy, barriers, &self.io.http_pacing)?;
         let bound = schedule.bound();
         let native_deadline = bound.deadline(self.now)?;
         let deadline = receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap));
@@ -519,6 +529,7 @@ impl<P> Cx<'_, P> {
             timer,
             schedule,
             terminals,
+            barriers,
             entries,
             handoff: self.io.http_delivery.clone(),
             initial_custody: self.io.http_delivery.is_none() && self.io.http_plan_ready.is_none(),

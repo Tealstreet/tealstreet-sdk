@@ -872,6 +872,24 @@ impl SendPacing {
             groups: groups.iter().map(|group| (*group, None)).collect(),
         })
     }
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn validate_mutation_group(&self, pacing: Option<Pacing>) -> Result<(), Error> {
+        let Some(pacing) = pacing else {
+            return Ok(());
+        };
+        let (floor, _) = self
+            .groups
+            .iter()
+            .find(|(p, _)| p.group == pacing.group)
+            .ok_or(Error::Invalid)?;
+        if !pacing.minimum_gap_ms.is_finite()
+            || pacing.minimum_gap_ms < 0.
+            || floor.minimum_gap_ms.max(pacing.minimum_gap_ms) > 0.
+        {
+            return Err(Error::Invalid);
+        }
+        Ok(())
+    }
     fn check(&self, pacing: Option<Pacing>, now: f64) -> Result<Option<f64>, Error> {
         let Some(pacing) = pacing else {
             return Ok(None);

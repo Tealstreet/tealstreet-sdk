@@ -408,3 +408,12 @@ duplicate rejection, expiry rejection, and slot/byte capacity including a record
 currently delivering its response. Failure preserves prior bytes and records.
 The pure group hook defaults to Invalid; single admission is unchanged. Neither
 hook is wired to group release yet, so the original barrier REDs remain open.
+
+The exact frozen #1919 pin 2f4a08b449c is integrated at a8a7347711a. Core and
+the execution owner cleared the additive admission artifact before application.
+Five focused controls now pass: invalid geometry/Read policy, duplicate members,
+resolved shared/member pacing and physical-owner refusal spend no resources;
+root membership remains exact after an earlier fallback; all three existing
+constructors retain empty barriers. The first run stopped at fixture setup
+because entropy was omitted; using the existing seeded helper reaches all
+assertions. Execution-owned barrier Plans remain explicitly unsupported.
