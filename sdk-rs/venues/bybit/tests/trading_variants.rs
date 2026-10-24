@@ -166,6 +166,22 @@ fn lookup_row(link: &str, status: &str) -> String {
     )
 }
 
+/// H2: a Hyro link read (realtime then history, filtered by orderLinkId)
+/// answered as a complete absence on both axes.
+fn answer_link_absent(h: &mut Harness, link: &str) {
+    let filter = format!("orderLinkId={link}");
+    assert!(h.has_request(&filter), "a link-filtered read");
+    while h.has_request(&filter) {
+        h.respond(&filter, 200, EMPTY);
+    }
+}
+fn outcome(h: &Harness, command: u32) -> Option<safe_cex_engine::Outcome> {
+    h.outcomes
+        .iter()
+        .find(|(id, _)| *id == command)
+        .and_then(|(_, outcome)| *outcome)
+}
+
 #[test]
 fn inverse_create_keeps_native_integer_quantity_and_exact_split_total() {
     let mut h = ready(Variant::Inverse);
@@ -460,17 +476,20 @@ fn hyro_unknown_lookup_keeps_original_identity_and_accepted_siblings() {
         request: create.id,
         error: "lost",
     });
+    // H2: the lost create seals Unknown, keeping its link and the accepted sibling.
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+    assert!(h.result(1).unwrap().as_ref().unwrap_err().contains(&id));
+    // Its reconcile read is incomplete, so the identity stays unresolved.
     h.respond(
-        "/v5/order/realtime",
+        &format!("orderLinkId={id}"),
         500,
         r#"{"retCode":10016,"retMsg":"unavailable"}"#,
     );
-    assert!(h.result(1).unwrap().as_ref().unwrap_err().contains(&id));
-    assert!(h.requests.is_empty());
+    assert!(!h.has_request("/v5/order/create"));
+    // The caller's retry re-reads first; proven absent, it sends the same link.
     place(&mut h, 2, orders);
     assert!(!h.has_request("/v5/order/create"));
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
+    answer_link_absent(&mut h, &id);
     let retry = h.take("/v5/order/create");
     assert_eq!(link(&retry), id);
     assert!(body(&retry).contains("ETHUSDT"));
@@ -555,13 +574,11 @@ fn hyro_ack_crossing_snapshot_is_reconciled_without_optimistic_resurrection() {
         200,
         r#"{"retCode":0,"result":{"orderId":"accepted"}}"#,
     );
-    assert!(h.result(1).is_none());
-    assert!(h.engine.store().order("accepted").is_none());
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
+    // H2 (Q6): the ACK proves acceptance; no confirmation lookup and no
+    // optimistic row across the moved snapshot.
     assert_eq!(h.result(1), Some(&Ok("[\"accepted\"]".into())));
     assert!(h.engine.store().order("accepted").is_none());
-    assert!(h.requests.is_empty());
+    assert!(!h.paths().iter().any(|path| path.contains("orderLinkId=")));
 }
 
 #[test]
@@ -609,7 +626,7 @@ fn hyro_private_terminal_observation_blocks_stale_recovered_open_row() {
 }
 
 #[test]
-fn hyro_two_complete_absences_reuse_original_id_but_never_loop_writes() {
+fn hyro_complete_absence_never_resends_in_the_same_call() {
     let mut h = ready(Variant::Hyrotrader);
     place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
     let create = h.take("/v5/order/create");
@@ -618,18 +635,11 @@ fn hyro_two_complete_absences_reuse_original_id_but_never_loop_writes() {
         request: create.id,
         error: "lost",
     });
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
-    let retry = h.take("/v5/order/create");
-    assert_eq!(link(&retry), id);
-    h.event(Event::HttpFailed {
-        request: retry.id,
-        error: "lost again",
-    });
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
+    answer_link_absent(&mut h, &id);
+    // R1(a): no automatic same-link resend; the call stays Unknown with its link.
+    assert!(!h.has_request("/v5/order/create"));
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
     assert!(h.result(1).unwrap().as_ref().unwrap_err().contains(&id));
-    assert!(h.requests.is_empty());
 }
 
 #[test]
@@ -2019,51 +2029,40 @@ fn spot_tpsl_streamed_before_the_seed_and_committed_after_it_is_relabelled() {
 
 /// Two same-ID sends per leg is a bound on the retained intent, not per
 /// caller: a resumed identical call must not send the uncertain create again.
+/// Two same-ID sends per leg is a bound on the retained intent, not per
+/// caller: a resumed identical call must not send the uncertain create again.
+/// Amended (ruling Q4, R1(a)): one send per call, re-read before each resume.
 #[test]
 fn hyro_resumed_call_cannot_exceed_two_same_id_creates() {
     let mut h = ready(Variant::Hyrotrader);
-    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
     let mut sends = 0;
-    let mut id = None;
-    for _ in 0..2 {
-        let create = h.take("/v5/order/create");
-        sends += 1;
-        id.get_or_insert_with(|| link(&create));
-        assert_eq!(Some(link(&create)), id);
-        h.event(Event::HttpFailed {
-            request: create.id,
-            error: "lost",
-        });
-        h.respond("/v5/order/realtime", 200, EMPTY);
-        h.respond("/v5/order/history", 200, EMPTY);
-    }
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    sends += 1;
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    answer_link_absent(&mut h, &id);
     assert!(h.result(1).unwrap().is_err());
-    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
-    let mut reads = 0;
-    while h.has_request("/v5/order/realtime") || h.has_request("/v5/order/history") {
-        reads += 1;
-        let path = if h.has_request("/v5/order/realtime") {
-            "/v5/order/realtime"
-        } else {
-            "/v5/order/history"
-        };
-        h.respond(path, 200, EMPTY);
-    }
-    while h.has_request("/v5/order/create") {
-        let create = h.take("/v5/order/create");
-        sends += 1;
-        h.event(Event::HttpFailed {
-            request: create.id,
-            error: "lost",
-        });
-        h.respond("/v5/order/realtime", 200, EMPTY);
-        h.respond("/v5/order/history", 200, EMPTY);
+    for command in [2, 3] {
+        place(&mut h, command, vec![order("BTCUSDT", 1.0)]);
+        answer_link_absent(&mut h, &id);
+        while h.has_request("/v5/order/create") {
+            let create = h.take("/v5/order/create");
+            sends += 1;
+            assert_eq!(link(&create), id);
+            h.event(Event::HttpFailed {
+                request: create.id,
+                error: "lost",
+            });
+            answer_link_absent(&mut h, &id);
+        }
+        assert!(h.result(command).unwrap().is_err());
+        assert!(h.unknown.contains(&command));
     }
     assert_eq!(sends, 2, "same orderLinkId physically sent more than twice");
-    assert!(reads > 0, "the resumed call must reconcile before answering");
-    let error = h.result(2).unwrap().as_ref().unwrap_err();
-    assert!(error.contains(id.as_deref().unwrap()), "identity retained: {error}");
-    assert!(h.unknown.contains(&2));
 }
 
 #[test]
@@ -3303,4 +3302,83 @@ fn duplicate_link_codes_are_unknown_for_place_only() {
             "{code} on cancel"
         );
     }
+}
+
+/// H2: a lost ACK is Unknown at once; one link-filtered reconcile read finds
+/// the order, and the caller's retry returns it with no create.
+#[test]
+fn hyro_lost_ack_is_unknown_and_one_link_read_recovers_for_the_retry() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost acknowledgement",
+    });
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+    let filter = format!("orderLinkId={id}");
+    let realtime = h.take(&filter);
+    assert!(realtime.url.contains("/v5/order/realtime"));
+    h.reply(realtime.id, 200, EMPTY);
+    let history = h.take(&filter);
+    assert!(history.url.contains("/v5/order/history"));
+    h.reply(history.id, 200, &lookup_row(&id, "Filled"));
+    assert!(!h.has_request(&filter), "one reconcile read per lost ACK");
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(!h.has_request("/v5/order/create"));
+    assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+}
+
+/// H2 (Q5): an identical intent arriving while a resume is still re-reading
+/// is refused before any I/O, not joined or sent in parallel.
+#[test]
+fn hyro_identical_intent_during_a_resume_read_is_refused_not_sent() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    answer_link_absent(&mut h, &id);
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(
+        h.has_request(&format!("orderLinkId={id}")),
+        "the resume re-reads"
+    );
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::NotSent));
+    // The retryable kind follows G1 (#1955); the text is pinned here.
+    assert!(
+        h.result(3)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("being reconciled")
+    );
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+/// H2 (#1939): an ACK that arrives after its create's window sealed Unknown is
+/// reconciled into the retained intent; a retry returns it without a resend.
+#[test]
+fn hyro_late_ack_after_unknown_is_reconciled_without_a_resend() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    h.advance(20_001.0);
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+    h.reply(
+        create.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"late"}}"#,
+    );
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    while h.has_request("orderLinkId=") {
+        h.respond("orderLinkId=", 200, EMPTY);
+    }
+    assert!(!h.has_request("/v5/order/create"), "never a second create");
+    assert_eq!(h.result(2), Some(&Ok("[\"late\"]".into())));
 }
