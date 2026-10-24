@@ -63,8 +63,10 @@ through the provider at dispatch.
      The registry arm runs a probe `ZkLinkContract` sign on the role, as
      Backpack's Ed25519 probe does, and refuses setup with the legacy message
      "Invalid OmniKey seed: expected 65-byte Ethereum signature".
-     `Cx::can_sign` (#1899) on the role then gates start: a missing or
-     unsupported role is typed not-ready before any I/O. (claude-m26ps4 F1.)
+     `Cx::can_sign` (#1899) on the role then gates private start: a missing
+     or unsupported role is typed not-ready before any private I/O. The
+     capability check is not input validation: the width is enforced only by
+     the setup probe. (claude-m26ps4 F1, codex-uufub4.)
    - **Presence checks** in account, history and start: each becomes "a
      complete `identity` is present" (credential, signing, passphrase and the
      zklinkSeed role). Trading keeps #1891's own gates. This plan adds no
@@ -87,7 +89,9 @@ that. (claude-m26ps4 F2.)
 ## Typed not-ready gate
 
 Until a family path is admitted, a private request with no identity or no
-provider refuses typed (`NotReady`/`unsupported`, `notSent`) before any I/O.
+provider refuses typed (`NotReady`/`unsupported`, `notSent`) before any
+private I/O. Public discovery, including symbols, markets and public sockets,
+is still permitted.
 This covers keyless and remote accounts until P8 #1926. Public data is
 unaffected. There is no raw-material fallback and no dual custody.
 
@@ -127,7 +131,9 @@ Remote signing of zkLink (P8) stays out of scope.
   belong in signer setup, not engine options". Today every one of these
   reports "Injected signing is not supported for this venue yet".
 - **R5 (seed width, F1):** a 64-byte seed must be refused at setup with the
-  legacy message. Today setup accepts it.
+  legacy message. Today setup accepts it. Controls at setup: a valid 65-byte
+  seed is accepted; 64- and 66-byte seeds and invalid hex are each refused
+  with the legacy message.
 - **Venue REDs**, on the #1891 base, because they need `Options.identity`:
   - **R3:** a refs-only `/v3/account` read releases headers equal to an
     independent Node-computed HMAC literal over the legacy canonical text,
