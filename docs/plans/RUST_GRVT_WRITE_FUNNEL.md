@@ -141,13 +141,13 @@ this five-site plan does not claim its account inventory removal.
 | Cached Session header bundle | claude-m26ps4 | #2069 generalized source dd7fd51d03a is consumer-reviewed CLEAR locally, unlanded. Needs actual #2037/G2b and final pin. Bundle generation/revision, aggregate packet budgets, collision refusal and cleanup must compose with serial waits. |
 | GRVT EIP712 provider-payload HTTP recipe | codex-zs5e83, reviewed by m26ps4 and core/custody owner | OPEN consumer recipe/constructor work. Existing provider Secp256k1Digest/PublicAddress primitives suffice; no new crypto algorithm or legacy SignPayload bypass. Exact recipe API and construction witness reviewed before source. |
 | Login completion / credential and header lifetime | codex-zs5e83 with claude-55ao7t login ownership and m26ps4 core review | OPEN consumer composition: native login_session is a login-operation engine Session, distinct from cached cookie/account state. Connect honest Session-ready/failed transitions and provider installation; never mint a substitute Session or treat a native counter as engine provenance. |
-| Parsed auth-refusal grant and header ordering | claude-fe7lgm (grant) and claude-m26ps4 (ordering), ruled by claude-ddi2il | OPEN shared source: parsed code 1000 grants the one resend regardless of status; other 408/5xx do not. Preserve Content-Type-first through a recipe-controlled ordering seam in #2069, not a venue header insertion bypass. GRVT 20 s per-call value is ruled; disclose the new bound in CALLERS. |
+| Parsed auth-refusal grant and header ordering | claude-fe7lgm (grant) and claude-m26ps4 (ordering), ruled by claude-ddi2il | OPEN shared source: parsed code 1000 grants the one resend regardless of status; other 408/5xx do not. Preserve Content-Type-first through a venue-declared placement seam in #2069, not a venue header insertion bypass. GRVT 20 s per-call value is ruled; disclose the new bound in CALLERS. |
 
 The amended serial API at 92f1ff3dcd9 consumes the exact current call's
 DATA and, for a Mutation, its classify_write RefusedResend grant. It returns
 attempt 2 immediately as a new Context of the SAME logical call, seeded with
 the refused attempt's bundle revision. Queue that Context with the identical
-Step body and Session binding. #2069 phase 3 (e04cf305e87) parks its Bind if the
+Step body and Session binding. #2069 phase 3 (865118e81f6) parks its Bind if the
 bundle is NotReady or Ready at a revision no newer than that seed. A newer
 revision announced by session_ready re-prepares the same attempt within its
 existing window; the park/reprepare spends no further attempt or grant.
@@ -199,9 +199,12 @@ count and bytes, not separate lists. Host-owned copies follow existing signer
 header disposal; do not claim JavaScript string zeroization.
 
 #2069 currently inserts the bundle first. The overseer ruled that GRVT must
-retain native Content-Type-first order, so a recipe-controlled ordering seam in
-#2069 is OPEN with m26ps4. A native-wire original pins this order. Do not reorder
-outside shared packet assembly or claim the current hook already fits.
+retain native Content-Type-first order. The reviewed phase 3 plan 865118e81f6
+uses SessionHeaders::placed(SessionPlacement::After("Content-Type")), declared
+by session_bearer for the whole bundle and applied by shared assembly. The
+recipe declares neither placement nor bundle headers. Source remains OPEN with
+m26ps4. A native-wire original pins this order. The five-site funnel uses POST
+with Content-Type; any future no-body GET adoption pins that native order too.
 
 Minimum hosted signing inputs are the existing login API credential and the
 secp256k1 scalar needed for GRVT order signing, plus public account/chain/order
@@ -344,3 +347,7 @@ The corrected target runs 69 controls: 13 intended assertion REDs / 56 GREENs /
 Strict scoped Clippy, rustfmt and diff-check pass. The same Prepare/capacity
 suffixes remain gated; no added control claims the missing provider or shared
 Session hooks execute at this base.
+
+Plan and originals at bf61d06542a are CLEAR from fe7lgm (core), 9czdjh
+(native) and m26ps4 (bundle/recipe fit), read-only reviews. The placement wording
+above follows the newer reviewed #2069 plan; it adds no runtime or test change.
