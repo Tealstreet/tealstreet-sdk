@@ -1061,6 +1061,11 @@ impl Signer for AlterProvider {
                     5 => {
                         result.values[1].pop();
                     }
+                    6 => {
+                        if request.receipt.stamp_ms.is_some_and(|stamp| stamp > 1234.) {
+                            return Err(SignError::Refused);
+                        }
+                    }
                     _ => unreachable!(),
                 }
                 Ok(result)
@@ -1157,4 +1162,237 @@ fn staged_catalogue_waits_for_atomic_async_provider_and_never_replays_partial_he
             assert_eq!(request.headers.len(), 6);
         }
     }
+}
+
+#[test]
+fn setting_provider_failure_is_not_sent_only_before_any_attempt_release() {
+    for (alter, expected) in [
+        (0, safe_cex_engine::Outcome::NotSent),
+        (6, safe_cex_engine::Outcome::Unknown),
+    ] {
+        let mut h = fixture(options());
+        h.engine
+            .set_signer(Some(Arc::new(AlterProvider {
+                inner: h.provider.clone(),
+                alter,
+            })))
+            .unwrap();
+        seed_market(&mut h);
+        h.engine
+            .handle_command(
+                NOW,
+                Command::SetLeverage {
+                    command: 82,
+                    symbol: SYMBOL.into(),
+                    leverage: 10.,
+                    side: None,
+                },
+                Some(120_000),
+            )
+            .unwrap();
+        let mut result = actions(&mut h, NOW);
+        if alter == 6 {
+            let first = take_http(&result, Method::Post, "/fapi/v2/level_edit");
+            result = response(
+                &mut h,
+                NOW,
+                &first,
+                400,
+                r#"{"code":-1022,"msg":"signature"}"#,
+            );
+        }
+        assert!(
+            !result
+                .iter()
+                .any(|a| matches!(a,Action::Http(r) if r.method==Method::Post))
+        );
+        let failures: Vec<_> = result
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 82, error }) => {
+                    Some(error)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1, "{result:?}");
+        assert_eq!(failures[0].outcome, Some(expected));
+    }
+}
+
+#[test]
+fn malformed_signature_code_cannot_replay_a_mutating_post() {
+    for token in [
+        r#""-01022""#,
+        r#""-001022""#,
+        r#"" -1022""#,
+        r#""-1022 ""#,
+        r#""-1022.0""#,
+        r#""-1.022e3""#,
+        "-1022.0",
+        "-1.022e3",
+    ] {
+        let mut h = fixture(options());
+        let first = setting(&mut h);
+        let result = response(
+            &mut h,
+            NOW,
+            &first,
+            400,
+            &format!(r#"{{"code":{token},"msg":"malformed native code"}}"#),
+        );
+        assert!(
+            !result
+                .iter()
+                .any(|a| matches!(a,Action::Http(r) if r.method==Method::Post)),
+            "noncanonical {token} replayed a write: {result:?}"
+        );
+        assert_eq!(provider_setting_posts(&h), 1);
+        assert_eq!(
+            result
+                .iter()
+                .filter(|a| matches!(
+                    a,
+                    Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 82, .. })
+                ))
+                .count(),
+            1
+        );
+    }
+}
+#[test]
+fn malformed_signature_code_cannot_reissue_a_streamed_read() {
+    for token in [
+        r#""-01022""#,
+        r#""-001022""#,
+        r#""-1022.0""#,
+        "-1022.0",
+        "-1.022e3",
+    ] {
+        let mut h = fixture(options());
+        let first = fills(&mut h);
+        let result = response(
+            &mut h,
+            NOW,
+            &first,
+            400,
+            &format!(r#"{{"code":{token},"msg":"malformed native code"}}"#),
+        );
+        assert!(
+            !result.iter().any(|a| matches!(a, Action::Http(_))),
+            "{token}: {result:?}"
+        );
+        assert_eq!(
+            result
+                .iter()
+                .filter(|a| matches!(
+                    a,
+                    Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 83, .. })
+                ))
+                .count(),
+            1
+        );
+    }
+}
+#[test]
+fn canonical_numeric_and_string_signature_codes_reprepare_once() {
+    for token in ["-1022", r#""-1022""#] {
+        let mut h = fixture(options());
+        let first = setting(&mut h);
+        let result = response(
+            &mut h,
+            NOW,
+            &first,
+            400,
+            &format!(r#"{{"code":{token},"msg":"signature"}}"#),
+        );
+        let second = take_http(&result, Method::Post, "/fapi/v2/level_edit");
+        assert_eq!(header(&second, "X-CH-TS"), "1235");
+        assert_eq!(provider_setting_posts(&h), 2);
+    }
+}
+#[test]
+fn refused_inspect_resign_does_not_invent_an_unknown_write() {
+    use safe_cex_engine::model::{
+        Order, OrderExtra, OrderSide, OrderStatus, OrderType, TimeInForce,
+    };
+    let mut h = fixture(options());
+    h.engine
+        .set_signer(Some(Arc::new(AlterProvider {
+            inner: h.provider.clone(),
+            alter: 6,
+        })))
+        .unwrap();
+    seed_market(&mut h);
+    let order = Order {
+        id: "2334151155877155281".into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: SYMBOL.into(),
+        kind: OrderType::Limit,
+        side: OrderSide::Buy,
+        price: 2000.,
+        amount: 0.01,
+        filled: 0.,
+        remaining: 0.01,
+        reduce_only: false,
+        close: None,
+        client_order_id: Some("callerOld".into()),
+        time_in_force: Some(TimeInForce::GoodTillCancel),
+        last_update: 0.,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: Some(OrderExtra {
+            remaining_native: Some(0.01),
+            filled_in_placement_units: Some(0.),
+            ..Default::default()
+        }),
+    };
+    h.engine.store_mut().upsert_order(order.clone());
+    h.engine
+        .handle_command(
+            NOW,
+            Command::AmendOrder {
+                command: 84,
+                id: order.id.clone(),
+                price: Some(1990.),
+                amount: None,
+            },
+            Some(120_000),
+        )
+        .unwrap();
+    let first = actions(&mut h, NOW)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.method == Method::Get && r.url.contains("/fapi/v2/order?") => {
+                Some(r)
+            }
+            _ => None,
+        })
+        .expect("genuine pre-write Inspect");
+    let result = response(
+        &mut h,
+        NOW,
+        &first,
+        400,
+        r#"{"code":-1022,"msg":"signature"}"#,
+    );
+    assert!(
+        !result
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.method==Method::Post))
+    );
+    let failures: Vec<_> = result
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 84, error }) => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "{result:?}");
+    assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(h.engine.store().orders(), [order]);
 }
