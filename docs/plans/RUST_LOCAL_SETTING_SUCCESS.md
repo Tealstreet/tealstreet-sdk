@@ -159,3 +159,11 @@ target passes. The existing released-write journal control
 `write_success_seals_once_including_a_recovered_native_refusal` independently
 passes (1 test); no empty-journal or physical write rule was weakened.
 Shared engine runtime and all consumer files remain unchanged at this checkpoint.
+
+The subsequent panic control is GREEN on the unchanged original adapter: a
+projection panic leaves the command entry active, which already fail-stops the
+engine. The control asserts the Store really changed and both frame extraction
+and action drain are fenced. It is a preservation control, not another RED;
+the expanded original target has 3 assertion REDs / 6 GREEN / 0 ignored. The
+control also passes independently with all features. The proposed local commit
+will additionally retain its explicit poison through projection and cleanup.

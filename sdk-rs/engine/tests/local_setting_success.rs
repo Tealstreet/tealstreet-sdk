@@ -78,6 +78,14 @@ impl Venue for Probe {
                 Some("timer") => {
                     cx.set_timer(10.);
                 }
+                Some("panic") => {
+                    let observed = self.observed.clone();
+                    let _ = local_success(cx, |store| {
+                        observed.lock().unwrap().projections += 1;
+                        store.set_hedged(false);
+                        panic!("native local projection failed");
+                    });
+                }
                 _ if self.legacy_success => {
                     self.observed.lock().unwrap().projections += 1;
                     cx.store.set_hedged(false);
@@ -267,4 +275,31 @@ fn timer_callback_cannot_project_or_finish_a_local_setting() {
     assert!(e.store().hedged());
     assert_eq!(observed.lock().unwrap().projections, 0);
     assert_eq!(successes(&actions, 7), 0);
+}
+
+#[test]
+fn a_panicking_local_projection_poison_fences_partial_store_publication() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let (mut e, observed) = engine(false);
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            e.handle(1., Event::Command(setting(7, "panic")));
+        }))
+        .is_err()
+    );
+    assert!(!e.store().hedged(), "the projection really mutated Store");
+    let frame_denied = catch_unwind(AssertUnwindSafe(|| {
+        let _ = e.take_frame(2.);
+    }))
+    .is_err();
+    let drain_denied = catch_unwind(AssertUnwindSafe(|| {
+        e.drain_actions().for_each(drop);
+    }))
+    .is_err();
+    let failed = e.failed();
+    assert!(
+        failed && frame_denied && drain_denied,
+        "failed={failed}, frame_denied={frame_denied}, drain_denied={drain_denied}"
+    );
+    assert_eq!(observed.lock().unwrap().projections, 1);
 }
