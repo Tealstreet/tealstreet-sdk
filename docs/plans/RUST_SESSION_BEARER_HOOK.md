@@ -829,9 +829,15 @@ Items, each a test written before any source change:
   - the parked pending comes back once through `on_session_wait_expired`
     (NotSent, no custody, no grant).
 
-  Exactly one terminal, zero HTTP, no re-entry.
+  Exactly one terminal, zero HTTP, no re-entry. Order is asserted: the bound
+  packet's failure is the Plan's single terminal, and `on_session_wait_expired`
+  runs after it, with the Plan already sealed (dazzy3).
+  Inverse control: retire while only the parked unit exists (no bound leg).
+  That gives exactly one `on_plan_session_wait_ended` (or that hook's
+  terminal) and no expired callback.
 - **R10b'.** A Preflight parked on Session S, S retired, and the ended hook
-  binds S: exactly one terminal. A control re-parks on a live Session.
+  binds S: exactly one terminal. A control re-parks on a live Session, and a
+  hook that does neither seals once with the ended error (dazzy3).
 - **P3 (restack review):**
   - a Bearer-bound group member is refused at issue before any effect, with
     its reservation dropped;
@@ -850,9 +856,23 @@ Items, each a test written before any source change:
 
   Recommendation: keep the issue-time refusal as the contract, pinned by the
   P3 test, and implement R11 with the first consumer that needs a bound
-  group. The alternative is to implement R11 now: the group claim checks each
+  group. dazzy3 agrees (CLEAR), on conditions:
+  - The refusal is typed: synchronous `Err((pending, Error::Invalid))` at
+    issue, before any effect. The bearer index reservation is dropped
+    (`drop_empty_bearer_bound`), and an owning Plan fails through
+    `fail_owned_admission`. `Error` carries no message, and a dedicated
+    variant would be a breaking public enum change, so the reason is stated
+    in the issue doc and in CALLERS instead.
+  - CALLERS states it for any venue that adopts `session_bearer` and declares
+    barriers.
+  - The P3 test asserts the returned pending, the dropped reservation (a
+    following bound issue on the same Session succeeds and indexes cleanly)
+    and that nothing reaches the host. The alternative is to implement R11 now: the group claim checks each
   member's `Bearer::current` and fails the group precommit on any moved or
   cleared revision. Reviewers rule; nothing changes until they do.
+
+At the source review, the 26 `None` hunks are listed with file:line so the
+auditor can confirm that every non-doc manual merge hunk is exactly that.
 
 Gates before freeze: the workspace check after the final tip merge, the
 CALLERS note for R4 (a venue without the hook now waits out the window), and
