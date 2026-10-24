@@ -219,3 +219,27 @@ no accepted rows, INCOMPLETE marker or successful encoding/finalization.
    runtime source with fe7lgm/cxxyqr before caller adoption. Run scoped feature-on
    and feature-off controls plus strict checks; fresh CI owns complete suites
    and family size/replay gates. No venue inventory is pruned by this engine PR.
+
+## Original compiling checkpoint
+
+On the genuine #1919 composition `6bcbfbc929a`, the new isolated integration
+probe uses a caller-stamped capped Read Preflight, a real two-call Read Plan,
+and managed Prepare/Bind/Claim. Its numeric HistoryRows construction is an
+explicit unsafe negative adapter, adapted from the closed #1928 fixture; it is
+not a migrated venue or evidence that numeric history owns Plan completion.
+
+Executed with all features and without defaults with http-plans/test-support:
+4 assertion REDs, 2 working controls, 0 ignored in each mode. Released Network
+and the exact second managed leg's physical timer each emit no accepted DATA
+terminal. Logical Plan expiry emits an unauthorized incomplete marker. A stale
+numeric completion emits a second terminal and marker after Plan sealing while
+an unrelated genuine Read completes successfully. The controls pin strict empty
+history failure and genuine 150ms receipt capping plus Plan-to-Context-history
+refusal. Each variant is a separate test; there are no aborting variant loops.
+
+These are original semantic evidence only. Cloned-handle binding denials,
+atomic page/Slot preparation, exact failure-origin custody and the rest of the
+new-contract controls still require the reviewed implementation. No shared
+runtime or venue inventory is changed in this checkpoint. Scoped strict Clippy
+and workspace formatting pass; these deliberately failing assertions are not
+claimed as green CI or adoption readiness.
