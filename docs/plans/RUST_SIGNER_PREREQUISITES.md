@@ -599,7 +599,8 @@ still has the gap.
   plain `insert`, which keeps a shared ref's algorithm the way a role keeps
   its role, and only `remove` ends it. Unshared raw refs may be retyped.
 
-Plain `insert` stays undeclared (P4).
+Plain `insert` on an unshared ref stays undeclared (P4); on a shared alias
+ref it keeps the slots' algorithm (above).
 
 **Version parity.** The refinement reads the same explicit
 `asterdex.api_version` field the venue reads, so setup and the venue never

@@ -197,8 +197,8 @@ pub struct LocalSigner {
     /// public operations, so a MAC secret is never fingerprinted.
     algorithms: HashMap<KeyRef, Algorithm>,
     /// Refs an aliased secondary shares with the primary, with the algorithm
-    /// setup declared for both slots (if any). It outlives a plain `insert`
-    /// that undeclares the material; only `remove` ends it.
+    /// setup declared for both slots (if any). A plain `insert` keeps that
+    /// algorithm on the new material; only `remove` ends the binding.
     shared: HashMap<KeyRef, Option<Algorithm>>,
 }
 impl LocalSigner {
