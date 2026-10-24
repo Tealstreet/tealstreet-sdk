@@ -6,7 +6,7 @@ use safe_cex_engine::classify::WriteFact;
 use safe_cex_engine::request_context::{
     Context, Credential, Operation, Plan, PlanPolicy, PreflightPolicy, PreflightPurpose,
     RetryPolicy,
-    plan::{CallBound, RetryWindow, Slot, StepBound},
+    plan::{CallBound, MutationBarrierBound, RetryWindow, Slot, StepBound},
 };
 use safe_cex_engine::signing::{
     KeyRef, Operation as SignOperation, SignError, SignFuture, SignReceipt, SignRequest,
@@ -216,7 +216,7 @@ impl Venue for Consumer {
                 .collect()
         };
         self.plan = Some(
-            cx.admit_plan(
+            cx.admit_plan_with_barriers(
                 &preflight,
                 &steps,
                 PlanPolicy {
@@ -224,6 +224,11 @@ impl Venue for Consumer {
                     credential: Some(credential(CredentialSlot::Primary)),
                     pacing: None,
                     retry: RetryPolicy::Never,
+                },
+                if self.pair {
+                    &[MutationBarrierBound { step: 0 }]
+                } else {
+                    &[]
                 },
             )
             .unwrap(),

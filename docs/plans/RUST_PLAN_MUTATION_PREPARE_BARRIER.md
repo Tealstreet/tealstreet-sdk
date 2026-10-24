@@ -417,3 +417,10 @@ root membership remains exact after an earlier fallback; all three existing
 constructors retain empty barriers. The first run stopped at fixture setup
 because entropy was omitted; using the existing seeded helper reaches all
 assertions. Execution-owned barrier Plans remain explicitly unsupported.
+
+The original async consumer now opts into the explicit barrier declaration;
+its wire and terminal assertions are unchanged. The feature-on integration
+build currently refuses the two unwired staged primitives as dead code
+(Body.barriers and insert_group). No lint exemption is added. Only the focused
+unit results above and the feature-off compile are passing at this intermediate
+checkpoint; complete integration checks resume once orchestration consumes them.
