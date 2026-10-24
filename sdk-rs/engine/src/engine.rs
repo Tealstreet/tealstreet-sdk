@@ -1504,6 +1504,11 @@ struct Io<P> {
     pending: HashMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
     session_waits: request_context_registry::session::Waits<P>,
+    /// Attempts a Session resume selected with no delivery in this event: the
+    /// resume is their issue custody until the outer Plan flush. Reserved at
+    /// park, so a resume never allocates.
+    #[cfg(feature = "http-plans")]
+    session_resumed: Vec<RequestId>,
     signing: crate::signing_dispatch::Dispatch,
     protocol_clock: crate::protocol_clock::ProtocolClock,
     signer: Option<crate::signing::Provider>,
@@ -1601,6 +1606,8 @@ impl<P> Default for Io<P> {
             pending: HashMap::new(),
             signatures: Vec::new(),
             session_waits: Default::default(),
+            #[cfg(feature = "http-plans")]
+            session_resumed: Vec::new(),
             signing: Default::default(),
             protocol_clock: Default::default(),
             signer: None,
@@ -2683,6 +2690,21 @@ pub trait Venue {
         _cx: &mut Cx<'_, Self::Pending>,
         _symbols: Option<&[String]>,
     ) {
+    }
+
+    /// A Plan Slot parked on a Session ended unissued because the Session was
+    /// retired or failed. This runs in that Plan's ready custody: re-park the Slot
+    /// on another live Session, or fail the Plan. Nothing was sent for it.
+    #[cfg(feature = "http-plans")]
+    fn on_plan_session_wait_ended(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        plan: &crate::request_context::Plan,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        let _ = plan;
+        self.on_session_wait_expired(cx, pending, error);
     }
 
     /// A session waiter reached its owner's original deadline before the venue
@@ -4482,6 +4504,12 @@ impl<V: Venue> Engine<V> {
         if self.io.request_contexts.has_plans() {
             self.flush_live_http_plans(now);
         }
+        // Last, at every outer Plan flush, including after the final Plan
+        // sealed: parked Slots whose Session ended or whose Plan sealed.
+        self.flush_plan_session_waits(now);
+        // A no-delivery resume's custody ends with its event; every outer
+        // path ends here, after any callback in this flush could resume.
+        self.io.session_resumed.clear();
     }
 
     #[inline(never)]

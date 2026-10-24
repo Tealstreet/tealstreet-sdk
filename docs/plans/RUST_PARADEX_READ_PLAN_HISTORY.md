@@ -6,9 +6,10 @@ fresh branch `feat/rust-paradex-read-plan-history` stacks exact #2011
 `9486269b6361a4c06ee1059b90b4df65a5cfe070`. The target Session-wait draft
 composition is #2037 `13c42408eb6a7d6bbbce9287e0f92cd706da0bb4`; its
 post-5b integration and freeze will replace that draft dependency. This phase
-changes only this plan, its index row and a new test target. No production, Cargo
-feature, checker, inventory, signing, credential, host or existing-test change is
-authorized here.
+changes only this plan, its index row and a new Paradex test target, plus the
+owner-reviewed engine dependency composition below. No Paradex production, Cargo
+feature, checker, inventory, signing, credential, host or existing Paradex test
+change is authorized here.
 
 ## Scope and existing evidence
 
@@ -73,6 +74,32 @@ review. Public methods cannot simulate those missing seams. Native, local and
 hosted signing remain supported; hosted setup supplies only minimum required
 Stark material through its existing provider path. Legacy non-Rust AWS is
 unchanged. No Sam-only B/C hold is assumed.
+
+## Draft Session wait composition
+
+Stack exact #2037 `13c42408eb6` with #2011. The sole source conflict is the
+Plan-leg issue predicate: use the shared `plan_issue_custody`/parked-resume path
+and preserve the initial ready-founder guard inside that helper. fe7lgm confirmed
+both resolved edits; the founder/Session/readiness checks remain in force.
+
+The first combined run compiled but gave 37 PASS / 5 FAIL in `planned_calls`:
+no-delivery Session resumes met the later predecessor/readiness guard, and a
+nested Session retirement was attempted inside Plan-ready custody. fe7lgm's
+reviewed adaptation `4d201e2f7342a45749a205d32b43adf084baa974564f5d2f54eff11a3ddff27a`
+records only the exact resumed attempt for no-delivery issue custody. Storage is
+reserved before park effects; the outer Plan flush clears it after callbacks.
+Normal owner, attempt, predecessor, activation and Session-scope validation stays.
+The long-wait control now probes the expired leg directly, and the nested
+retirement control uses the no-custody sealed-wait callback permitted by the
+existing Session rules. No native history assertion changes.
+
+This is a reviewed draft dependency composition, not completed N7/N8b or private
+adoption. Re-pin after the post-5b Session-wait freeze. The original Paradex test
+blob stays unchanged and its expected 17 RED / 9 GREEN result is checked again
+on this composition, independently from the original checkpoint below.
+Scoped composition execution: 43 Plan controls, 21 history and four binding
+controls PASS, zero ignored. Feature-off engine check, scoped engine lib Clippy
+with Plans/locks, runtime rustfmt and diff check pass; no broad local sweep.
 
 ## Native walk and wire contract
 
