@@ -439,7 +439,7 @@ jobs:
         run: corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
       - name: Check the wasm size budget
         if: inputs.replay_artifact != 'combined'
-        run: corepack yarn -s rust:wasm-budget
+        run: corepack yarn -s rust:wasm-budget --venue '${{ matrix.venue }}'
       - name: Replay request normalization
         run: corepack yarn rust:test-harness
       - name: Credentialed lifecycle runner (scripted transport only)

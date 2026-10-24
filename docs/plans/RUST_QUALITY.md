@@ -1760,6 +1760,80 @@ one exposed the candidate's narrower decoded-field retry projection. The fix
 retains the exact approved minimum compatibility input, not a new retry policy.
 Source/caller closure is CLEARf0ecc; full-map carryover is pending for that delta.
 
+### Paradex config and initial local entry
+
+Original e743120ab7b compiles with 22 intended REDs/four controls on actual77f124;
+all26 pass unchanged after implementation. Exact request inventory shrinks seven
+occurrences (account10->9/trading21->15/family48->41), with no bootstrap/shared
+engine/signing edit. Config expiry now includes host preparation; typed entry
+refusals and LocalSetting receipt enforcement are caller-visible boundaries.
+
+
+## Lighter identity Read controls
+
+The21 compiling originals at445754db356 executed15 assertion REDs and6 working
+controls on unchangedbe710 production, with no ignored tests. All21 are retained
+byte-for-byte and pass after adoption; three added controls cover strict
+preparation/unclaimed-permit failures and stale candidate replies. Eight existing
+identity tests retain their assertions through a real shared preparation driver.
+The32 focused tests pass, including all four deployment wires, four-candidate
+order, first-row/first-present-field precedence, retained capacity recovery,
+clock refusal, caller expiry and released physical-timeout continuation. Local
+checks are scoped with four jobs; broader builds and performance remain in CI.
+
+
+## Hyperliquid local settings and schedule controls
+
+Original25 controls execute12 assertion REDs/13 GREEN on unchanged9d344 source.
+The exact target, strengthened before production to validate all255 retained
+peers after capacity recovery, now passes25/25 without ignored controls. Ten
+capacity cases cover nine lexical sites, including both commands sharing the
+merged-spot success line. Native result/error/Store, duplicate-owner, invalid
+clock, zero-wait and schedule4999/5000/None boundary assertions are retained.
+The existing trading, spot and schedule targets pass unchanged. No broad local
+workspace/all-feature or WASM/performance build substitutes for exact-head CI.
+
+### Kraken Futures PublicTrades custody controls
+
+Plan/original checkpoint f24c1588e45 was independently CLEAR (16 assertion REDs,
+13 native GREENs). Source composition uses actual #2058 883c5c8deb8. Controls
+cover exact caller/child bounds, held Prepare/Bind, strict typed preparation,
+capacity with two-slot/no-leak recovery, duplicate/clock/late work fences and
+accepted-only later transport/503/codec/physical-timeout recovery. The external
+NaN fixture adaptation and narrow first PublicTrades Network expectation are
+disclosed in the plan; private failure assertions remain unchanged. Full Rust,
+WASM and workspace checks belong to the one PR-triggered CI run.
+
+## StampFloor clock-boundary controls
+
+Original four new-API compile controls are retained from m26's handoff. Four
+additional frozen controls pin unsafe/non-finite current clocks, the maximum
+safe current stamp, and unchanged stamp_ms behavior; two fail at runtime on the
+inherited draft before correction. The opaque type has both a nameable positive
+doctest and a constructor-privacy compile-fail control. Shared release tests
+retain genuine prepare/bind/claim and no-release-on-denial behavior separately.
+No venue inventory prune or native migration receipt is claimed by this core PR.
+
+### Bitrue dispatch custody and physical Read legs
+
+Options retain only opaque Identity refs. Provider preparation/apply attest exact
+transport intent, ordered unsigned headers and atomic receipt/results before release.
+Original 25 assertions pass; additional caller-deadline, delayed provider and
+malformed-result controls execute through genuine Engine callbacks. The scanner
+changes 29/17 to21/14, distinguishing three genuine bracket completion removals
+from five conservative obsolete request-field matches. No bootstrap growth.
+Legacy execution/group/session/history ownership remains a separate blocker.
+
+Verification checkpoint: source/caller/full-map independent reviews are CLEAR at
+2024ec88acc after all fixes; no remaining High/Medium. The map reviewer explicitly
+confirmed typed-role reuse is semantic deduplication, with no hidden/renamed sites,
+21/14 exact source/manifest and original25assertions unchanged. All 5,621 unowned
+entries from the 5,653-entry incoming tree were preserved. Executed220Bitrue native
+controls plus1compile-fail doc, registry3, TS construction4, and earlier305Binance
+controls on identical engine source PASS.
+Focused strict/checker/fmt gates pass; full fresh CI and HMAC-owner source review
+are still pending. No WASM/replay/size result is inferred from native tests.
+
 
 ## GRVT unsigned candle Read Plan controls
 
