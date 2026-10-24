@@ -157,3 +157,55 @@ test('default fetch validates before handoff and invokes fetch synchronously exa
   assert.equal((await response).status, 200);
   assert.equal(typeof nativeTransport().prepareHttp, 'function');
 });
+
+test('a nonce-stale final Claim sends nothing and drains cancel before fresh preparation', async () => {
+  const repairedToken = 'p1:7:18446744073709551615:2';
+  const repairedPermit = 'r1:7:18446744073709551615:2:2';
+  const repairedPrepare = { ...prepare, preparation: repairedToken };
+  const repairedBind = { ...bind, preparation: repairedToken, permit: repairedPermit };
+  const events = [];
+  let needsRepair = false;
+  const engine = {
+    httpPreparationPending: () => true,
+    httpPrepared(value) {
+      events.push(['prepared', value]);
+      return JSON.stringify([value === token ? bind : repairedBind]);
+    },
+    httpPreparationFailed() { assert.fail('Stale Claim is settled only by the engine repair'); },
+    httpClaim(value) {
+      events.push(['claim', value]);
+      if (value === permit) { needsRepair = true; return JSON.stringify({ status: 'denied' }); }
+      assert.equal(value, repairedPermit);
+      return JSON.stringify({ status: 'released' });
+    },
+    prepareDispatch() {
+      events.push(['drain']);
+      if (!needsRepair) return '';
+      needsRepair = false;
+      return JSON.stringify([cancel, repairedPrepare]);
+    },
+  };
+  const host = new EngineHost(engine, {
+    now: () => 1000,
+    request() { assert.fail('no raw fallback'); },
+    prepareHttp() {
+      events.push(['prepare']);
+      return { bind() {
+        return { ready: () => true, dispatch() {
+          events.push(['send']);
+          return new Promise(() => {});
+        } };
+      } };
+    },
+    setTimeout() { assert.fail('nonce repair has no transport retry timer'); },
+    clearTimeout() {},
+  });
+  host.execute(prepare); await tick();
+  assert.deepEqual(events, [
+    ['prepare'], ['prepared', token], ['claim', permit], ['drain'],
+    ['prepare'], ['prepared', repairedToken], ['claim', repairedPermit], ['send'], ['drain'],
+  ]);
+  assert.equal(host.managedHttp.resources.size, 1);
+  host.dispose();
+  assert.equal(host.managedHttp.resources.size, 0);
+});
