@@ -49,7 +49,7 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             if let Action::Http(request) = action {
                 self.requests.push(request);
             } else {
@@ -1308,7 +1308,11 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             },
         );
         let actions: Vec<_> = e.drain_actions().collect();
-        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+        );
         let timers: Vec<_> = actions
             .iter()
             .filter_map(|a| match a {
@@ -1324,7 +1328,10 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     for timer in obsolete {
         e.handle(now, Event::TimerFired { timer });
-        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+        );
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
