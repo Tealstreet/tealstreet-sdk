@@ -9,6 +9,8 @@ publish.workspace = true
 http-plans = []
 # Adopters explicitly include parallel Mutation prepare/sign/release custody.
 http-mutation-barriers = ["http-plans"]
+# Streamed serial Plans are linked only by adopting families.
+serial-plans = ["http-plans"]
 # Temporary migration boundary; remove after all legacy socket families adopt.
 managed-sockets = []
 order-locks = []

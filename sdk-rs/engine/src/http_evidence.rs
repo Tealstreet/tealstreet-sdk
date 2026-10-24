@@ -8,7 +8,7 @@ const ID_COUNT: usize = 4_096;
 const ID_BYTES: usize = 256 * 1024;
 const ID_FIELD: usize = 1_024;
 const TEXT_BYTES: usize = 64 * 1024;
-#[cfg(feature = "http-plans")]
+#[cfg(feature = "serial-plans")]
 pub(super) const RETAINED_TEXT_BYTES: usize = TEXT_BYTES;
 const TEXT_FIELD: usize = 4_096;
 const TRUNCATED: &str = "[truncated]";
@@ -188,7 +188,7 @@ impl EvidenceBudget {
 
     /// A settled serial attempt's identities move to the command's streamed
     /// list, so they stop counting against the per-attempt identity budget.
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "serial-plans")]
     pub(super) fn release_identities(&mut self, ids: &[String]) {
         for id in ids {
             self.ids = self

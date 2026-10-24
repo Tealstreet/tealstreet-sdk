@@ -282,6 +282,7 @@ mod tests;
 
 /// One call of a streamed serial Plan. It is admitted only from the previous
 /// call's exact DATA custody, or its delayed-continuation callback.
+#[cfg(feature = "serial-plans")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SerialCall {
     /// Read or Mutation, under the Plan's admitted credential.
@@ -293,6 +294,7 @@ pub struct SerialCall {
 }
 
 /// Admission terms of a streamed serial Plan; there is no declared length.
+#[cfg(feature = "serial-plans")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SerialPolicy {
     pub credential: super::Credential,
