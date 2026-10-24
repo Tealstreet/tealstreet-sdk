@@ -250,3 +250,55 @@ fn public_only_passphrase_less_primary_never_signs_bullet_depth_or_candles() {
             .any(|request| request.url.ends_with("/bullet-private"))
     );
 }
+
+#[test]
+fn host_supplied_read_identity_acquires_the_primary_broker_alias_and_native_mac() {
+    for venue in ["kucoin", "kucoinspot"] {
+        let mut options = input();
+        let (provider, mut refs) = prepare_local_signer_for(venue, &mut options).unwrap();
+        let primary_broker = refs.primary.as_ref().unwrap().extra[&ExtraKey::KucoinBroker].clone();
+        refs.secondary.as_mut().unwrap().extra.clear();
+        options.signing = Some(refs);
+        let (registered, actions) =
+            build_with_signer(venue, options, entropy(), Some(provider), Identity).unwrap();
+        assert_eq!(
+            registered
+                .secondary
+                .as_ref()
+                .unwrap()
+                .extra
+                .get(&ExtraKey::KucoinBroker),
+            Some(&primary_broker),
+        );
+        assert_eq!(
+            registered.primary.as_ref().unwrap().extra[&ExtraKey::KucoinBroker],
+            primary_broker
+        );
+        let request = http(&actions);
+        assert_eq!(
+            request.headers[0],
+            ("KC-API-KEY", "fixture-read-key".into())
+        );
+        assert_eq!(request.headers.len(), 11);
+        assert_eq!(
+            request.headers[7],
+            ("KC-API-PARTNER", "fixture-partner".into())
+        );
+        // Python hmac/sha256/base64: broker secret, "1234fixture-partnerfixture-read-key".
+        assert_eq!(
+            request.headers[8],
+            (
+                "KC-API-PARTNER-SIGN",
+                "E9VO/x0oG8e8e6XpbCv03ouisGZKFD/WeWtGaH10zGI=".into()
+            )
+        );
+        assert_eq!(
+            request.headers[9],
+            ("KC-BROKER-NAME", "fixture-name".into())
+        );
+        assert_eq!(
+            request.headers[10],
+            ("KC-API-PARTNER-VERIFY", "false".into())
+        );
+    }
+}
