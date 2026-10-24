@@ -6577,3 +6577,14 @@ Invalid authentication, subscriptions sent before the ACK and unanswered final
 heartbeats still appear as protocol failures. The remaining execution, hedge
 mode and caller-identity differences retain strict FAIL; this reporting change
 establishes no native financial parity.
+
+### Binance Spot replay acknowledgement diagnostics
+
+Replay checkpoints do not finalize Binance Spot's acknowledgement coverage.
+A signed subscription can therefore be observed before its ACK without creating
+false final missing-subscription or missing-request errors after the actual
+lifecycle completes. Genuine signature, typed-ID correlation and pre-ACK event
+violations remain failures, as do incomplete live replacement generations and
+unanswered final requests. The remaining fill-price, time-in-force, client-ID
+and order-lifecycle differences retain strict FAIL; financial parity is not
+established by protocol reporting.

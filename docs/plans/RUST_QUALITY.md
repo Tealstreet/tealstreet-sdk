@@ -1503,3 +1503,14 @@ twelve. Full raw comparison excludes only top-level metrics and protocol errors,
 retaining all other receiver fields and the sixty ordered financial/identity
 failures. The nine removed protocol declarations each require exact current-tape
 absence; every other manifest byte is preserved.
+
+### Binance Spot acknowledgement coverage controls
+
+Sixteen actual-audit controls preserve independently signed subscription bytes,
+exact typed ACK correlation, pre-ACK event rejection, explicit closed/connected
+generations and final unanswered requests captured before memory settling.
+The original capture has two final-assertion REDs and fourteen GREEN controls;
+terminal-only capture passes all sixteen. Full raw comparison omits only
+metrics and protocolErrors, retains every financial field and ordered fixer,
+and proves each of the four removed current-tape protocol keys absent. Other
+public/private Binance cases keep their exact declarations and verifier status.

@@ -292,3 +292,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Lighter synchronous history Read terminals | Plan; original REDs next | Before changing local history validation/empty completion custody or pruning its seven sites. | [RUST_LIGHTER_LOCAL_HISTORY_CONTEXT.md](RUST_LIGHTER_LOCAL_HISTORY_CONTEXT.md) |
 | GRVT replay diagnostics | Plan and local controls | Before narrowing exact tape-bound protocol declarations; preserve genuine final errors and all other diagnostics. | [RUST_GRVT_REPLAY_DIAGNOSTICS.md](RUST_GRVT_REPLAY_DIAGNOSTICS.md) |
 | Crypto.com replay diagnostics | Plan and local controls | Before narrowing exact private-stream declarations; preserve receiver-specific channels and genuine final errors. | [RUST_CRYPTOCOM_REPLAY_DIAGNOSTICS.md](RUST_CRYPTOCOM_REPLAY_DIAGNOSTICS.md) |
+
+- [Binance Spot replay protocol diagnostics](RUST_BINANCESPOT_REPLAY_DIAGNOSTICS.md) — source-bound audit controls and exact declaration pruning, preserving native failures.
