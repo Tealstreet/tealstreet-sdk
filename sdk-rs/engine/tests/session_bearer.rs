@@ -73,6 +73,10 @@ struct Shared {
     /// A fenced failure callback retires the second Session.
     retire_second_on_failure: bool,
     retire_timer: Option<TimerId>,
+    /// Fires the venue's `session_ready` announce of a refreshed bundle.
+    announce_timer: Option<TimerId>,
+    /// The announcing callback also issues a new bound Background read.
+    issue_on_announce: bool,
     /// Token the venue caches for the generation it opens on retire.
     next_generation_token: Option<&'static str>,
     bearer: bool,
@@ -150,6 +154,8 @@ impl Shared {
             bind_second: false,
             retire_second_on_failure: false,
             retire_timer: None,
+            announce_timer: None,
+            issue_on_announce: false,
             next_generation_token: None,
             bearer: true,
             bind_retired: false,
@@ -608,7 +614,9 @@ impl Venue for Probe {
             })
             .unwrap();
         let timer = cx.set_timer(60_000.);
+        let announce = cx.set_timer(60_000.);
         let mut shared = self.shared.borrow_mut();
+        shared.announce_timer = Some(announce);
         if shared.two_sessions {
             shared.second = Some(
                 cx.open_session(SessionPolicy {
@@ -724,6 +732,17 @@ impl Venue for Probe {
         let _depth = self.enter();
         if self.shared.borrow().retire_timer == Some(timer) {
             self.retire_now(cx);
+        }
+        if self.shared.borrow().announce_timer == Some(timer) {
+            let session = self.shared.borrow().session.clone().expect("live Session");
+            let waiters = cx.session_ready(&session);
+            assert!(waiters.is_empty(), "no venue waiters in these probes");
+            if self.shared.borrow().issue_on_announce {
+                let context = cx
+                    .http_context(Scope::Background, policy(false, false))
+                    .unwrap();
+                self.issue(cx, context, false);
+            }
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: Response<'_>) {
@@ -1158,24 +1177,8 @@ fn r3_retire_inside_a_fenced_failure_callback_is_drained_in_the_same_flush() {
     }
 }
 
-/// R4: a venue that is NotReady at prepare gets no HTTP; the Read owner gets
-/// one typed NotSent failure.
-#[test]
-fn r4_venue_not_ready_at_prepare_sends_nothing_and_fails_typed() {
-    for signed in [false, true] {
-        let (mut e, shared) = engine(|shared| shared.signed = signed);
-        let issued = ask(&mut e, 1);
-        shared.borrow_mut().refresh(None);
-        let health = e.health().clone();
-        let actions = route(&mut e, NOW + 1., issued[0].0);
-        assert!(
-            sign_work(&actions).is_none() && bind(actions).is_none(),
-            "provider work or a packet started while the venue's Bearer was NotReady"
-        );
-        assert!(one_typed_read_failure(&shared, ErrorKind::Internal));
-        assert_eq!(e.health(), &health);
-    }
-}
+// R4 (phase 3): NotReady at Bind no longer fails at once. The call parks and
+// either binds on a newer announce (P3) or times out NotSent (P6).
 
 /// R5: a retry context inherits the binding and reads the current header.
 #[test]
@@ -1980,4 +1983,256 @@ fn session_header_sets_are_bounded_and_redacted() {
     .unwrap();
     let debug = format!("{set:?}");
     assert!(!debug.contains("session-secret") && !debug.contains("cookie-secret"));
+}
+
+// Phase 3 (docs/plans/RUST_SESSION_BEARER_HOOK.md): an unreleased call whose
+// bundle is NotReady parks within its own window and re-prepares when the
+// venue announces a newer revision through `session_ready`.
+
+/// The venue announces its current bundle from inside a venue callback.
+fn announce(e: &mut Engine<Probe>, shared: &Rc<RefCell<Shared>>, now: f64) -> Vec<Action> {
+    let timer = shared.borrow().announce_timer.unwrap();
+    e.handle(now, Event::TimerFired { timer });
+    e.drain_actions().collect()
+}
+fn prepare_actions(actions: Vec<Action>) -> Vec<(Preparation, HttpRequest)> {
+    actions
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => Some((preparation, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+/// Route a preparation; a NotReady bundle must park it: no packet, no
+/// provider work, no failure.
+fn parks(e: &mut Engine<Probe>, shared: &Rc<RefCell<Shared>>, now: f64, p: Preparation) {
+    let actions = route(e, now, p);
+    assert!(
+        sign_work(&actions).is_none() && bind(actions).is_none(),
+        "a NotReady bundle bound a packet or started provider work"
+    );
+    assert!(
+        shared.borrow().failures.is_empty(),
+        "NotReady failed the call instead of parking it: {:?}",
+        shared.borrow().failures
+    );
+}
+
+/// P1/P2: bound at revision 1, the venue clears its cache before claim, then
+/// announces revision 3. The same call re-prepares and binds the new bundle:
+/// no failure, no venue reissue, the same RequestId.
+fn refreshed_between_prepare_and_claim(write: bool, signed: bool) {
+    let (mut e, shared) = engine(|shared| {
+        shared.signed = signed;
+        shared.write_legs = 1;
+    });
+    let issued = if write {
+        amend(&mut e, 1)
+    } else {
+        ask(&mut e, 1)
+    };
+    assert_eq!(issued.len(), 1);
+    let request = issued[0].0.attempt().request;
+    let (permit, packet) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound packet");
+    assert_eq!(authorization(&packet), Some("Bearer A"));
+    let venue_issues = shared.borrow().issued.len();
+    shared.borrow_mut().refresh(None);
+    let health = e.health().clone();
+    assert!(!matches!(
+        e.claim_http(NOW + 2., permit),
+        Ok(Claim::Released(_))
+    ));
+    let reprepared = prepares(&mut e);
+    assert_eq!(reprepared.len(), 1);
+    parks(&mut e, &shared, NOW + 3., reprepared[0].0);
+    shared.borrow_mut().refresh(Some("B"));
+    let woken = prepare_actions(announce(&mut e, &shared, NOW + 4.));
+    assert_eq!(
+        woken.len(),
+        1,
+        "the parked call re-prepares on the announce"
+    );
+    assert_eq!(woken[0].0.attempt().request, request, "the same call");
+    let (permit, packet) = prepared(&mut e, NOW + 5., woken[0].0).expect("rebound packet");
+    assert_eq!(authorization(&packet), Some("Bearer B"));
+    assert!(matches!(
+        e.claim_http(NOW + 6., permit),
+        Ok(Claim::Released(_))
+    ));
+    let shared = shared.borrow();
+    assert!(shared.failures.is_empty(), "{:?}", shared.failures);
+    assert_eq!(shared.issued.len(), venue_issues, "no venue reissue");
+    assert_eq!(e.health(), &health);
+}
+#[test]
+fn p1_mutation_refreshed_between_prepare_and_claim_waits_for_the_newer_revision() {
+    refreshed_between_prepare_and_claim(true, false);
+}
+#[test]
+fn p2_read_refreshed_between_prepare_and_claim_waits_for_the_newer_revision() {
+    refreshed_between_prepare_and_claim(false, false);
+}
+/// P8: a signed call parked across a refresh re-signs with a fresh attempt.
+#[test]
+fn p8_signed_read_refreshed_between_prepare_and_claim_re_signs_on_wake() {
+    refreshed_between_prepare_and_claim(false, true);
+}
+
+/// P3 (R4 rewritten): a first call issued while NotReady parks, then binds
+/// once the venue announces a Ready bundle.
+#[test]
+fn p3_first_call_issued_while_not_ready_parks_until_announced() {
+    for signed in [false, true] {
+        let (mut e, shared) = engine(|shared| {
+            shared.signed = signed;
+            shared.token = None;
+        });
+        let issued = ask(&mut e, 1);
+        parks(&mut e, &shared, NOW + 1., issued[0].0);
+        shared.borrow_mut().refresh(Some("A"));
+        let woken = prepare_actions(announce(&mut e, &shared, NOW + 2.));
+        assert_eq!(woken.len(), 1, "signed={signed}");
+        let (_, packet) = prepared(&mut e, NOW + 3., woken[0].0).expect("bound packet");
+        assert_eq!(authorization(&packet), Some("Bearer A"));
+        assert!(shared.borrow().failures.is_empty());
+    }
+}
+
+/// P4: an announce at the revision the call already saw wakes nothing; a
+/// woken call that reads NotReady again re-parks with `seen` unchanged and
+/// needs a newer announce.
+#[test]
+fn p4_no_wake_without_a_newer_revision_and_re_park_keeps_seen() {
+    let (mut e, shared) = engine(|shared| shared.token = None);
+    let issued = ask(&mut e, 1);
+    parks(&mut e, &shared, NOW + 1., issued[0].0);
+    assert!(
+        prepare_actions(announce(&mut e, &shared, NOW + 2.)).is_empty(),
+        "an announce while still NotReady re-prepared"
+    );
+    shared.borrow_mut().refresh(Some("A"));
+    let woken = prepare_actions(announce(&mut e, &shared, NOW + 3.));
+    assert_eq!(woken.len(), 1);
+    // The venue clears again before the woken call binds: it re-parks.
+    shared.borrow_mut().refresh(None);
+    parks(&mut e, &shared, NOW + 4., woken[0].0);
+    assert!(prepare_actions(announce(&mut e, &shared, NOW + 5.)).is_empty());
+    shared.borrow_mut().refresh(Some("B"));
+    let woken = prepare_actions(announce(&mut e, &shared, NOW + 6.));
+    assert_eq!(woken.len(), 1);
+    let (_, packet) = prepared(&mut e, NOW + 7., woken[0].0).expect("bound packet");
+    assert_eq!(authorization(&packet), Some("Bearer B"));
+    assert!(shared.borrow().failures.is_empty());
+}
+
+/// P5: parked calls re-prepare in park order.
+#[test]
+fn p5_parked_calls_wake_in_fifo_order() {
+    let (mut e, shared) = engine(|shared| shared.token = None);
+    let first = ask(&mut e, 1);
+    let second = ask(&mut e, 2);
+    parks(&mut e, &shared, NOW + 1., first[0].0);
+    parks(&mut e, &shared, NOW + 1., second[0].0);
+    shared.borrow_mut().refresh(Some("A"));
+    let woken = prepare_actions(announce(&mut e, &shared, NOW + 2.));
+    let order: Vec<_> = woken.iter().map(|(p, _)| p.attempt().request).collect();
+    assert_eq!(
+        order,
+        [first[0].0.attempt().request, second[0].0.attempt().request]
+    );
+}
+
+/// P6: expiry while parked is the existing unreleased Timeout, NotSent,
+/// health unchanged and no auth kind.
+#[test]
+fn p6_parked_call_expires_at_its_window_not_sent_with_health_unchanged() {
+    let (mut e, shared) = engine(|shared| shared.token = None);
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 1 }));
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let timers: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    let issued = prepare_actions(actions);
+    let health = e.health().clone();
+    parks(&mut e, &shared, NOW + 1., issued[0].0);
+    let (timer, at) = timers
+        .into_iter()
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("the call window timer");
+    e.handle(at, Event::TimerFired { timer });
+    e.drain_actions().for_each(drop);
+    let shared = shared.borrow();
+    assert_eq!(shared.failures.len(), 1, "{:?}", shared.failures);
+    assert_eq!(shared.failures[0].outcome, Some(Outcome::NotSent));
+    assert_eq!(shared.failures[0].kind, Some(ErrorKind::Timeout));
+    assert_eq!(e.health(), &health);
+}
+
+/// P7: retire while parked fails the call Revoked, NotSent, non-auth.
+#[test]
+fn p7_retire_while_parked_is_revoked_not_sent() {
+    let (mut e, shared) = engine(|shared| shared.token = None);
+    let issued = ask(&mut e, 1);
+    parks(&mut e, &shared, NOW + 1., issued[0].0);
+    let health = e.health().clone();
+    retire(&mut e, &shared, NOW + 2.);
+    e.drain_actions().for_each(drop);
+    let shared = shared.borrow();
+    assert_eq!(shared.failures.len(), 1, "{:?}", shared.failures);
+    assert_eq!(shared.failures[0].outcome, Some(Outcome::NotSent));
+    assert_eq!(shared.failures[0].kind, Some(ErrorKind::InvalidInput));
+    assert_eq!(e.health(), &health);
+}
+
+/// P10: an announce with nothing parked, or at an unchanged revision, is a
+/// no-op.
+#[test]
+fn p10_announce_with_nothing_parked_or_same_revision_is_a_no_op() {
+    let (mut e, shared) = engine(|_| {});
+    assert!(prepare_actions(announce(&mut e, &shared, NOW + 1.)).is_empty());
+    let issued = ask(&mut e, 1);
+    let (_, packet) = prepared(&mut e, NOW + 2., issued[0].0).expect("bound packet");
+    assert_eq!(authorization(&packet), Some("Bearer A"));
+    assert!(
+        prepare_actions(announce(&mut e, &shared, NOW + 3.)).is_empty(),
+        "a same-revision announce re-prepared a bound call"
+    );
+}
+
+/// P13: a call issued inside the announcing callback and the woken call both
+/// bind after their own Prepare on the new revision; neither binds in the
+/// callback.
+#[test]
+fn p13_a_call_issued_in_the_announcing_callback_binds_after_its_prepare() {
+    let (mut e, shared) = engine(|shared| shared.token = None);
+    let issued = ask(&mut e, 1);
+    parks(&mut e, &shared, NOW + 1., issued[0].0);
+    shared.borrow_mut().refresh(Some("A"));
+    shared.borrow_mut().issue_on_announce = true;
+    let actions = announce(&mut e, &shared, NOW + 2.);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::ManagedHttp(a) if matches!(**a, HttpAction::Bind { .. }))),
+        "a packet bound inside the announcing callback"
+    );
+    let prepared_now = prepare_actions(actions);
+    assert_eq!(prepared_now.len(), 2, "the woken call and the new one");
+    for (preparation, _) in prepared_now {
+        let (_, packet) = prepared(&mut e, NOW + 3., preparation).expect("bound packet");
+        assert_eq!(authorization(&packet), Some("Bearer A"));
+    }
+    assert!(shared.borrow().failures.is_empty());
 }
