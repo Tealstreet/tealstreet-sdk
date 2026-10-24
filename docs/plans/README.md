@@ -340,3 +340,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Orderly initial history refusals | Implemented; bounded reviews and CI pending | Before converting the three initial history refusals; excludes combo-5b signer/source work. | [RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md](RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md) |
 
 | Kraken Futures public candle custody | Managed adoption; focused controls pass, source review/CI pending | Before changing caller-root pages or subscription candle polling. | [RUST_KRAKEN_FUTURES_CANDLE_CONTEXT.md](RUST_KRAKEN_FUTURES_CANDLE_CONTEXT.md) |
+
+| TxFlow unsigned ticker seed custody | Local plan and original-control checkpoint | Before managing the activeAssetCtx seed sender; preserve native seed cadence, keyed retry and CPU cache. | [RUST_TXFLOW_TICKER_SEED_CONTEXT.md](RUST_TXFLOW_TICKER_SEED_CONTEXT.md) |
