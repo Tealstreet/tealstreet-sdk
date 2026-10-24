@@ -313,3 +313,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Paradex public refusals and Lighter catalog | Implementation under review; original REDs recorded | Before converting the last four immediately workable public request sites. | [RUST_PUBLIC_READ_TAIL.md](RUST_PUBLIC_READ_TAIL.md) |
 
 | Command-owned Read-Plan history authority | Implemented; source reviews and focused checks clear, CI pending | Before accepting Plan pages, settling Slots with accepted rows or recovering a released transport failure through the same Plan terminal. | [RUST_READ_PLAN_HISTORY_AUTHORITY.md](RUST_READ_PLAN_HISTORY_AUTHORITY.md) |
+
+| Paradex private history Read-Plan adoption | Plan and original assertions; production held | Before the nine-occurrence private history owner consumes actual #2011, Session wait and JIT Bearer composition. | [RUST_PARADEX_READ_PLAN_HISTORY.md](RUST_PARADEX_READ_PLAN_HISTORY.md) |
