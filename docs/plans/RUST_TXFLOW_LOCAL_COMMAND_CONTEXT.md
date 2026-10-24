@@ -97,3 +97,16 @@ unsupported reply as a GREEN. The finite-clock control now expects that exact
 public behavior. The other 16 cases still target genuine entry (two STP
 operations share one lexical occurrence). Do not claim the first run as
 17 genuine REDs or an all-GREEN native control receipt.
+
+## Executed original-source receipt
+
+At `7ca41b076e2` on unchanged `9330c11bdea` production, the corrected target
+executes 16 assertion REDs and 3 GREENs, zero ignored. Sixteen cases cover 15
+lexical sites because Fetch/Set STP share one source occurrence. Invalid-clock
+cached leverage and filtered income still succeed; the other selected branches
+emit native errors rather than shared typed InvalidInput. Finite-clock messages,
+confirmed leverage JSON, empty history, native typed outcomes and no-I/O actions
+all pass across the case table; settled same-ID reuse and the shared pre-venue
+FetchAccount refusal also pass. Earlier fixture failures are retained in local
+logs and are not counted as contract REDs. Production and the checker inventory
+remain byte-identical to the base. The overseer accepted 15 sites / 25 -> 10.
