@@ -1370,6 +1370,67 @@ metadata/log/ordinary bounds, 4 GiB overflow, empty response recovery/exhaustion
 mixed socket/empty budgets and CDN credential stripping remain explicit controls.
 Routing tests cover every registered suite and reject unknown runtime names.
 
+## Selected multi-page Read contract controls
+
+New-contract Engine controls cover exact receipt bounds, distinct page legs,
+immutable selection, wrong-root/foreign-engine delivery, queue/provider refusal,
+discard/requeue, streamed order, stale staged rows, typed root retirement and
+physical-timeout recovery. Existing single-leg controls remain unchanged. API
+privacy doctests distinguish original roots from children without claiming that
+borrowed Contexts lose generic core authority. Native consumers remain separate.
+
+
+### Replay audit finalization controls
+
+The behavior-preserving extraction has four working controls and two assertion
+REDs matching the historical WOO false protocol diagnostics. After final-only
+aggregation, all 31 focused audit/finalization/checkpoint/WOO protocol controls
+pass. Genuine late private violations remain visible; audit exceptions propagate.
+Both real replay callers and forgotten-final-flag mutations are checked.
+
+Native accepted-write snapshot races are separately reproduced by four REDs
+and two working controls; the identical six controls pass against queued #1788.
+Those venue changes and their tests are outside this standalone harness scope.
+
+## Hyperliquid perps history custody regressions
+
+Original test-only04e6ee356ad ran16 real-engine controls on unchanged venue
+production:11 assertion REDs,5 working native positives,0 ignored. All16 now
+pass. Four adoption controls add real root/page timer ordering, strict forced
+dequeue-capacity refusal with zero reservation charge, exact-owner cleanup with
+Account/History FIFO in both orders, and typed public Auth* metadata without
+private health evidence. Existing22 native history and11 cached-lookup fixtures
+retain financial assertions through shared managed preparation; long page-cap
+fixtures request the maximum caller wait and drive the actual native budget wake.
+Focused Hyperliquid+Binance suites pass568 tests/45 targets; the request-context
+checker unit suite passes15. Full inventory provenance awaits the replacement
+#1976 composition carrying current incoming Aster/OKX prunes. Independent source, caller
+and full-map reviews and fresh CI remain required before freezing this consumer.
+
+## OKX history caller-root controls
+
+Revised test-only916a3e65f5a runs15 controls on unchanged OKX production:9 genuine
+assertion REDs and6 native positives, zero ignored. This retains the original
+fourteen-control checkpoint and updates two whole-root expiry expectations to
+the newer strict engine contract; the added parked-root timer assertion pins
+the missing shared tracked-root behavior. Subsequent review counts all correlated
+terminals and forbids owned incompleteness on expiry. The implementation target
+now passes20 controls, adding Primary preparation intent, pre-release versus
+released20s child expiry, typed preparation metadata (query/lookup/public), real
+registry-capacity refusal at paced dequeue with peer preservation, and retired
+pacing/late-data isolation after command-ID reuse.
+
+Existing17 history,8 lookup and5 dispatch-signer controls pass with financial,
+identity, signature and absence assertions retained. Fixtures perform actual
+managed preparation; deferred-provider refusal drives the route-then-sign seam
+explicitly, since the immediate fixture deliberately rejects parked signing.
+History response clocks use their original relative offsets on the command's
+absolute epoch instead of running backward. Primary physical routeNone is checked
+as the host's default primary route, and the dedicated intent control proves the
+same primary egress before signing. Fresh complete native, strict/fmt and inventory
+provenance results are recorded in the plan checkpoint; CI and replacement#1976
+composition remain separate readiness gates.
+
 ## Crypto.com managed candles and local history controls
 
 Original regression commit cc2916a8037 precedes source edits. Fixture correction
