@@ -362,3 +362,15 @@ above follows the newer reviewed #2069 plan; it adds no runtime or test change.
 The later source rows now name fe7lgm's 7fd52ecee33 status-exempt parsed-refusal
 hook and m26ps4's 3900639fcf4 successful-refresh revision obligation. These are
 shared owner plans, not installed APIs or new GRVT source in this checkpoint.
+
+## Provider prerequisite planning after the local cuts
+
+RUST_GRVT_PROVIDER_RECIPE.md now specifies the EIP712 and login recipes and
+installed constructor, with exactly the API login key and order-signing scalar
+as the hosted/local secret inputs. Reviewers are 9czdjh for native recipe and
+construction, and fe7lgm for same-call resend. This is plan-only authorization;
+bf61 originals remain byte-exact and no builds are permitted during size builds.
+GRVT will explicitly enable the non-default serial-plans (#2092),
+condition-waits (#2094) and session-bearer (#2069) engine features at adoption.
+Exact feature/source pins, credential-only construction fit and deterministic
+provider same-body resend remain named source gates in the recipe plan.
