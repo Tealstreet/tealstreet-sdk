@@ -6761,3 +6761,16 @@ can expire before outbound. Each native orderBookDetails/orderBooks attempt has
 its own budget. Native endpoint fallback and shared startup backoff are retained,
 with the old attempt retired before follow-up. No command result is introduced.
 All four deployments keep their headers/body, route, catalog codec and metadata.
+
+### Coinbase immediate local command custody
+
+Ten initial-entry completion sites now use shared Read ownership or keyless
+Mutation refusal: portfolio lookup, cached/unavailable leverage, initial
+history validation, startup queue capacity and trading validation/refusals.
+Native messages, JSON, Unsupported/NotSent metadata, validation order and the
+256-entry warning remain intact. Invalid or expired caller entry is rejected
+before local completion through the cause-aware shared API. No physical I/O,
+signed/private custody, FIFO pacing or deferred callback is adopted. The three
+candle validation sites, Instruments discovery and Daily seed remain held for
+retained command ownership and coordinated native REST release. Coinbase's
+legacy inventory decreases from 34 to 24 occurrences.

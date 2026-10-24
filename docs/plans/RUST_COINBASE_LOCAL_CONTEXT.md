@@ -106,3 +106,15 @@ cached leverage emits a success instead of the expected InvalidInput refusal.
 The two finite-clock controls preserve exact native JSON/error metadata,
 settled command-ID reuse, and the real 256-entry startup warning/capacity path.
 This is an executed assertion failure, not a missing API or build failure.
+
+## Local adoption verification
+
+The ten selected sites now use one local projection through genuine initial
+Read admission or keyless Mutation refusal. None/Expired caller waits use the
+cause-aware shared rejection functions; there is no numeric fallback. The
+original seven controls are unchanged and all pass. The scoped Coinbase native
+suite passes 209 tests, zero ignored, preserving public/private discovery,
+queued REST, history, account and trading controls. The exact inventory removes
+1 history, 2 lib, 1 public and 6 trading occurrences; all 24 remaining Coinbase
+occurrences and every other-family entry are preserved. Full CI and family
+WASM size/headroom remain gates before READY.
