@@ -458,3 +458,36 @@ found a valid negative-zero formatting edge and an untyped result-index compile
 error. The recipe now uses native validated u64 decimal conversion and an
 explicit usize index. The appended native zero/negative-zero broker/header MAC
 vector control passes; integrated recipe execution still follows wiring.
+
+
+## Local production composition checkpoint
+
+The approved #1990/combo-5b composition now carries opaque KuCoin venue Options,
+the reviewed atomic recipe and real provider setup for both aliases. Broker
+material is consumed once by trusted setup; its secondary identity aliases the
+primary's role ref. Native Options retain partner/name/verify metadata only.
+The public bullet keeps its Primary route, and Spot public requests stay unsigned.
+Identity uses shared SelectedRead; other aggregate/session owners retain their
+explicit staging scope pending their own lifecycle conversions.
+
+Original provider/compatibility controls execute green with the real provider:
+18 with Spot and 16 without (each includes the same two native-oracle controls).
+Additional typed identity provider/network/physical-timeout controls preserve no
+financial Read outcome; the current Spot target executes 21 controls total,
+including separate opaque-native-Options custody. The four registry construction
+controls pass. SDK broker retention had two original assertion REDs before the
+capsule mapping; those plus existing local-signer setup controls now pass 64.
+
+Bounded independent source review is CLEAR for failure disposition and trusted
+broker wiring: provider refusal is strict for history/funding, never transport
+retry evidence or accepted-prefix recovery. Native account refusal releases its
+existing owner without spending transport retries. Spot write diagnostics precede
+terminal; Futures retains typed unsent errors through native aggregate handling.
+The existing private, funding and broker-attribution targets pass with genuine
+provider preparation (62 executed, including six repeated native-oracle controls).
+Scoped original-target Clippy and registry compilation pass.
+
+This is an implementation checkpoint, not a freeze or complete migration receipt.
+Remaining native fixtures, negative recipe/provider coverage, actual prerequisite
+integration, exact inventories, final reviews and full CI remain required. No
+checker bootstrap allowance has been changed or claimed.

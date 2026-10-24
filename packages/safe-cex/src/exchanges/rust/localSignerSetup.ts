@@ -7,6 +7,7 @@ type LocalIdentity = LocalIdentityMetadata & {
   key?: string;
   secret?: string;
   passphrase?: string;
+  extra?: { kucoinBroker?: { value: string; encoding: 'utf8' } };
   /** Secondary only, set by a family setup mapping: sign with the primary's ref. */
   signingFromPrimary?: true;
 };
@@ -105,9 +106,13 @@ export class LocalSignerSetup {
     this.primaryComplete = this.credentialPresence.key && this.credentialPresence.secret;
     resolveSetupPassphrase('primary', this.primaryComplete, options.passphrase, options.passphrase, policy.primary, options.publicDataOnly === true);
     resolveSetupPassphrase('secondary', secondary, options.secondary_passphrase, options.passphrase, policy.secondary, options.publicDataOnly === true);
+    const broker = policy.primary?.extra?.key === 'kucoinBroker' ? options.extra?.kucoinBroker : undefined;
+    const brokerMaterial = typeof broker?.brokerKey === 'string'
+      ? { extra: { kucoinBroker: { value: broker.brokerKey, encoding: 'utf8' as const } } }
+      : {};
     this.#credentials = {
       ...(options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined
-        ? { primary: { ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase } }
+        ? { primary: { ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase, ...brokerMaterial } }
         : {}),
       ...(secondary
         ? { secondary: secondarySigningFromPrimary
@@ -128,6 +133,7 @@ export class LocalSignerSetup {
         credentials.primary.key = undefined;
         credentials.primary.secret = undefined;
         credentials.primary.passphrase = undefined;
+        credentials.primary.extra = undefined;
       }
       if (credentials.secondary) {
         credentials.secondary.key = undefined;
@@ -155,12 +161,15 @@ export const withoutSigningCredentials = (options: ExchangeOptions): ExchangeOpt
     auth,
     ...routing
   } = options;
-  // AsterDEX's wallet key is signing material; its public addresses stay.
+  const broker = routing.extra?.kucoinBroker;
+  const safeRouting = broker ? (() => {
+    const { brokerKey: _brokerKey, ...metadata } = broker;
+    return { ...routing, extra: { ...routing.extra, kucoinBroker: metadata } };
+  })() : routing;
+  // Wallet material and broker material stay in their trusted setup capsule.
   if (auth) {
     const { privateKey: _privateKey, ...addresses } = auth;
-    return { ...routing, auth: addresses } as ExchangeOptions;
+    return { ...safeRouting, auth: addresses } as ExchangeOptions;
   }
-  // BaseExchange's legacy type requires key/secret; Rust uses the cached
-  // construction record and provider refs instead of reading those fields.
-  return routing as ExchangeOptions;
+  return safeRouting as ExchangeOptions;
 };

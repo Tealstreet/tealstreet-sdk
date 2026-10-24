@@ -44,6 +44,15 @@ pub struct Request {
     position_open: bool,
     position_invalid: bool,
 }
+impl Request {
+    pub(crate) fn credential_role(&self) -> safe_cex_engine::credential_selection::CredentialRole {
+        use safe_cex_engine::credential_selection::CredentialRole;
+        match self.step.call {
+            Call::ConfirmCancel(_) | Call::CheckMode { .. } => CredentialRole::Read { scope: None },
+            _ => CredentialRole::Mutation,
+        }
+    }
+}
 struct Job {
     input: Option<Command>,
     steps: VecDeque<Step>,
@@ -788,6 +797,25 @@ impl Kucoin {
                 }
             }
         }
+    }
+
+    pub(crate) fn trading_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        let Some(job) = self.trading.jobs.get_mut(&request.command) else {
+            return;
+        };
+        cx.command_error(request.command, &error.message);
+        job.record(error);
+        if !job.keep_going {
+            job.steps.clear();
+        }
+        self.trading.active = false;
+        self.trading.queue.push_front(request.command);
+        self.trading.timer = Some(cx.set_timer(20.0));
     }
 
     pub(crate) fn trading_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

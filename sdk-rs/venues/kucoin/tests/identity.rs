@@ -1,11 +1,13 @@
 //! Actual native identity requests: exact routes/signers, failure ownership, no Store commits.
+mod support;
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
-use safe_cex_venue_kucoin::{Kucoin, Options, sign::BrokerOptions};
+use safe_cex_venue_kucoin::Kucoin;
+use support::credentials::{BrokerOptions, Options};
 const NOW: f64 = 1000.;
 type TestEngine = Engine<Kucoin>;
 fn seeded(options: Options) -> TestEngine {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(options));
+    let mut engine = support::credentials::engine(options, Kucoin::new);
     engine
         .store_mut()
         .set_balance(safe_cex_engine::model::Balance {

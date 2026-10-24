@@ -1,9 +1,11 @@
 //! Oracles: Classic Futures Get Private Funding History, including its
 //! recommendation to page by time rather than unstable offsets.
+mod support;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Query};
-use safe_cex_venue_kucoin::{Kucoin, Options};
+use safe_cex_venue_kucoin::Kucoin;
 use serde::Deserialize;
+use support::credentials::Options;
 
 struct Harness {
     engine: Engine<Kucoin>,
@@ -12,12 +14,15 @@ struct Harness {
 }
 impl Harness {
     fn new() -> Self {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-            key: Some("fixture-key".into()),
-            secret: Some("fixture-secret".into()),
-            passphrase: Some("fixture-passphrase".into()),
-            ..Default::default()
-        }));
+        let mut engine = support::credentials::engine(
+            Options {
+                key: Some("fixture-key".into()),
+                secret: Some("fixture-secret".into()),
+                passphrase: Some("fixture-passphrase".into()),
+                ..Default::default()
+            },
+            Kucoin::new,
+        );
         engine.store_mut().set_markets(vec![Market {
             id: "XBTUSDTM".into(),
             symbol: "BTCUSDT".into(),
@@ -57,7 +62,9 @@ impl Harness {
     }
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);
-        self.actions.extend(self.engine.drain_actions());
+        self.actions.extend(
+            safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now).into_iter(),
+        );
     }
     fn query(&mut self, from: f64, to: f64, limit: Option<u32>) {
         self.event(Event::Command(Command::Query {

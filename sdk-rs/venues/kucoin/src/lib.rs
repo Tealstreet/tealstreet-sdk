@@ -11,9 +11,12 @@ mod wire;
 
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Balance, Candle, Interval, Market, Ticker};
+use safe_cex_engine::selected_read::AdmittedRead;
+use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
@@ -48,31 +51,42 @@ fn local_read_command_policy() -> safe_cex_engine::request_context::Policy {
 
 #[derive(Clone, Default)]
 pub struct Options {
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    pub credentials: Option<Identity>,
+    pub read_credentials: Option<Identity>,
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-    pub passphrase: Option<String>,
     pub broker: Option<sign::BrokerOptions>,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        safe_cex_crypto::secrets::erase(&mut self.passphrase);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
+impl Options {
+    fn read_error(&self) -> Option<&'static str> {
+        let read = self.read_credentials.as_ref()?;
+        if let Err(error) = read.validate() {
+            return Some(error);
         }
-        if let Some(broker) = self.broker.as_mut() {
-            safe_cex_crypto::secrets::EraseSecrets::erase_secrets(broker);
-        }
+        read.passphrase
+            .as_ref()
+            .is_none_or(|key| key.0.is_empty())
+            .then_some("Secondary read credentials require a passphrase")
+    }
+    fn primary(&self) -> Option<Identity> {
+        self.credentials
+            .as_ref()
+            .filter(|identity| {
+                !self.public_data_only
+                    && !identity.credential.0.is_empty()
+                    && !identity.signing.0.is_empty()
+                    && identity
+                        .passphrase
+                        .as_ref()
+                        .is_some_and(|key| !key.0.is_empty())
+            })
+            .cloned()
     }
 }
 
 pub enum Pending {
-    Identity(CommandId),
+    Identity(AdmittedRead),
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
@@ -160,8 +174,8 @@ struct BookState {
 }
 
 pub struct Kucoin {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
-    credentials: Option<sign::Credentials>,
+    options: Options,
+    credentials: Option<Identity>,
     account: account::Account,
     trading: trading::Trading,
     history: history::History,
@@ -237,23 +251,7 @@ fn success(status: u16, body: &str) -> Result<Envelope<'_>, String> {
 
 impl Kucoin {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
-        let credentials = if options.public_data_only {
-            None
-        } else {
-            options
-                .key
-                .as_ref()
-                .filter(|v| !v.is_empty())
-                .zip(options.secret.as_ref().filter(|v| !v.is_empty()))
-                .zip(options.passphrase.as_ref().filter(|v| !v.is_empty()))
-                .map(|((key, secret), passphrase)| sign::Credentials {
-                    key: key.clone(),
-                    secret: secret.clone(),
-                    passphrase: passphrase.clone(),
-                    broker: options.broker.clone(),
-                })
-        };
+        let credentials = options.primary();
         Self {
             options,
             credentials,
@@ -272,6 +270,65 @@ impl Kucoin {
             reread_stalls: 0,
         }
     }
+    fn slots(&self) -> Slots<Identity> {
+        Slots::new(
+            self.credentials.clone(),
+            self.options.read_credentials.clone(),
+            SlotPolicy {
+                secondary_requires_primary: true,
+            },
+        )
+    }
+    fn issue(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        method: Method,
+        path: &str,
+        body: Option<String>,
+        pending: Pending,
+        role: CredentialRole,
+    ) -> safe_cex_engine::RequestId {
+        let selected = self.slots().select(role).ok().map(|(selection, identity)| {
+            (
+                selection,
+                sign::dispatch::Http::new(
+                    identity.clone(),
+                    method,
+                    REST,
+                    path.into(),
+                    body.clone(),
+                    self.options
+                        .broker
+                        .as_ref()
+                        .map(sign::BrokerOptions::descriptor),
+                ),
+            )
+        });
+        let headers = sign::public_headers();
+        let request = cx.request(
+            method,
+            format!("{REST}{}", encoded_path(path)),
+            headers,
+            body,
+            pending,
+        );
+        if let Some((selection, recipe)) = selected {
+            selection.sign(cx, request, Box::new(recipe));
+        } else if matches!(
+            role,
+            CredentialRole::PrimaryRead { .. } | CredentialRole::SessionAuth
+        ) {
+            cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
+        }
+        request
+    }
+    fn pending_role(pending: &Pending) -> CredentialRole {
+        match pending {
+            Pending::Trade(request) => request.credential_role(),
+            Pending::Bullet { .. } => CredentialRole::SessionAuth,
+            _ => CredentialRole::Read { scope: None },
+        }
+    }
     pub(crate) fn signed(
         &self,
         cx: &mut Cx<'_, Pending>,
@@ -280,34 +337,8 @@ impl Kucoin {
         body: Option<String>,
         pending: Pending,
     ) {
-        let read_credentials = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get && self.credentials.is_some())
-            .map(|read| sign::Credentials {
-                key: read.key.clone(),
-                secret: read.secret.clone(),
-                passphrase: read
-                    .passphrase
-                    .clone()
-                    .or_else(|| self.options.passphrase.clone())
-                    .unwrap_or_default(),
-                broker: self.options.broker.clone(),
-            });
-        let headers = read_credentials
-            .as_ref()
-            .or(self.credentials.as_ref())
-            .map_or_else(sign::public_headers, |c| {
-                sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
-            });
-        cx.request(
-            method,
-            format!("{REST}{}", encoded_path(path)),
-            headers,
-            body,
-            pending,
-        );
+        let role = Self::pending_role(&pending);
+        self.issue(cx, method, path, body, pending, role);
     }
     pub(crate) fn signed_streamed(
         &self,
@@ -318,43 +349,21 @@ impl Kucoin {
         at: ArrayAt,
         pending: Pending,
     ) {
-        let read_credentials = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get && self.credentials.is_some())
-            .map(|read| sign::Credentials {
-                key: read.key.clone(),
-                secret: read.secret.clone(),
-                passphrase: read
-                    .passphrase
-                    .clone()
-                    .or_else(|| self.options.passphrase.clone())
-                    .unwrap_or_default(),
-                broker: self.options.broker.clone(),
-            });
-        let headers = read_credentials
-            .as_ref()
-            .or(self.credentials.as_ref())
-            .map_or_else(sign::public_headers, |c| {
-                sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
-            });
-        let request = cx.request(
-            method,
-            format!("{REST}{}", encoded_path(path)),
-            headers,
-            body,
-            pending,
-        );
+        let role = Self::pending_role(&pending);
+        let request = self.issue(cx, method, path, body, pending, role);
         cx.stream_response(request, at);
     }
     fn public(&self, cx: &mut Cx<'_, Pending>, path: &str, at: Option<ArrayAt>, pending: Pending) {
-        let request = cx.request(
+        let request = self.issue(
+            cx,
             Method::Get,
-            format!("{REST}{}", encoded_path(path)),
-            sign::public_request_headers(self.credentials.as_ref(), Method::Get, path, cx.now),
+            path,
             None,
             pending,
+            CredentialRole::PrimaryRead {
+                reason: PrimaryReason::Catalog,
+                scope: None,
+            },
         );
         if let Some(at) = at {
             cx.stream_response(request, at);
@@ -378,17 +387,13 @@ impl Kucoin {
         if matches!(self.connections[channel].role, Role::Private) {
             self.signed(cx, Method::Post, "/api/v1/bullet-private", None, pending);
         } else {
-            cx.request(
+            self.issue(
+                cx,
                 Method::Post,
-                format!("{REST}/api/v1/bullet-public"),
-                sign::public_request_headers(
-                    self.credentials.as_ref(),
-                    Method::Post,
-                    "/api/v1/bullet-public",
-                    cx.now,
-                ),
+                "/api/v1/bullet-public",
                 None,
                 pending,
+                CredentialRole::SessionAuth,
             );
         }
     }
@@ -822,11 +827,7 @@ impl Venue for Kucoin {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read
-                .validate()
-                .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
-        {
+        if let Some(error) = self.options.read_error() {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
@@ -1149,9 +1150,35 @@ impl Venue for Kucoin {
             }
         }
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Identity(read) => self.identity_failed(cx, read, error),
+            Pending::Trade(request) => self.trading_sign_failed(cx, request, error),
+            Pending::History(request) => self.history_sign_failed(cx, request, error),
+            Pending::Funding(request) => self.funding_sign_failed(cx, request, error),
+            Pending::Account(request) => self.account_sign_failed(cx, request, error),
+            _ => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Identity(read) => self.identity_failed(cx, read, error),
+            other => self.on_request_failed(cx, other, &error.message),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Identity(command) = pending {
-            self.identity_failed(cx, command, error);
+            self.identity_failed(cx, command, error.into());
             return;
         }
         match pending {

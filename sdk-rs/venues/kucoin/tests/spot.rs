@@ -1,11 +1,13 @@
 #![cfg(feature = "spot")]
 //! KuCoin Spot documented HF/public payloads and current TS adapter contracts.
+mod support;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, Query, Response, SocketChannel,
     SocketId, Venue,
 };
-use safe_cex_venue_kucoin::{Options, spot::KucoinSpot};
+use safe_cex_venue_kucoin::spot::KucoinSpot;
 use serde_json::{Value, json};
+use support::credentials::Options;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 5_000.0;
 
@@ -1284,7 +1286,7 @@ fn secondary_credentials(passphrase: Option<&str>) -> safe_cex_engine::ReadCrede
     }
 }
 fn assert_identity(request: &HttpRequest, secondary: bool, passphrase: &str, now: f64) {
-    let credentials = safe_cex_venue_kucoin::sign::Credentials {
+    let credentials = support::native_sign::Credentials {
         key: if secondary {
             "read-only-key"
         } else {
@@ -1302,7 +1304,7 @@ fn assert_identity(request: &HttpRequest, secondary: bool, passphrase: &str, now
     };
     assert_eq!(
         request.headers,
-        safe_cex_venue_kucoin::sign::headers(
+        support::native_sign::headers(
             &credentials,
             request.method,
             request.url.strip_prefix("https://api.kucoin.com").unwrap(),
@@ -1412,13 +1414,16 @@ fn invalid_secondary_identity_rejects_before_any_startup_io() {
             "missing-passphrase" => read.passphrase = None,
             _ => unreachable!(),
         }
-        let mut e = safe_cex_engine::test_support::seeded_engine(KucoinSpot::new(Options {
-            key: Some("replay-key".into()),
-            secret: Some("replay-secret".into()),
-            passphrase: (invalid != "missing-passphrase").then(|| "replay-passphrase".into()),
-            read_credentials: Some(read),
-            ..Options::default()
-        }));
+        let mut e = support::credentials::engine(
+            Options {
+                key: Some("replay-key".into()),
+                secret: Some("replay-secret".into()),
+                passphrase: (invalid != "missing-passphrase").then(|| "replay-passphrase".into()),
+                read_credentials: Some(read),
+                ..Options::default()
+            },
+            KucoinSpot::new,
+        );
         e.start(1700000000000.0);
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Secondary read credentials"))));

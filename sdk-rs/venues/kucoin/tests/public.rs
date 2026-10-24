@@ -1,8 +1,10 @@
 //! Official Classic Futures public examples: docs-new/3470082w0 and /3470086w0.
+mod support;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
 };
-use safe_cex_venue_kucoin::{Kucoin, Options};
+use safe_cex_venue_kucoin::Kucoin;
+use support::credentials::Options;
 
 const MARKET: &str = r#"{"symbol":"XBTUSDTM","baseCurrency":"XBT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"maxOrderQty":1000000,"maxLeverage":125,"multiplier":0.001,"expireDate":null,"isInverse":false}"#;
 fn requests(e: &mut Engine<Kucoin>) -> Vec<HttpRequest> {
@@ -42,10 +44,13 @@ fn answer(e: &mut Engine<Kucoin>, request: &HttpRequest, body: &str) {
     );
 }
 fn seeded(count: usize) -> (Engine<Kucoin>, Vec<HttpRequest>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        public_data_only: true,
-        ..Default::default()
-    }));
+    let mut e = support::credentials::engine(
+        Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+        Kucoin::new,
+    );
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     let markets = (0..count)
@@ -374,20 +379,26 @@ fn fetched_candles_use_minutes_and_milliseconds_on_wire() {
 }
 #[test]
 fn rejects_sandbox_before_any_request() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        testnet: true,
-        public_data_only: true,
-        ..Default::default()
-    }));
+    let mut e = support::credentials::engine(
+        Options {
+            testnet: true,
+            public_data_only: true,
+            ..Default::default()
+        },
+        Kucoin::new,
+    );
     e.start(0.0);
     assert!(requests(&mut e).is_empty());
 }
 #[test]
 fn api_rejection_never_commits_a_seed() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        public_data_only: true,
-        ..Default::default()
-    }));
+    let mut e = support::credentials::engine(
+        Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+        Kucoin::new,
+    );
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     e.handle(
@@ -438,11 +449,14 @@ fn disconnected_generation_cannot_collide_with_recreated_book() {
 
 #[test]
 fn missing_private_passphrase_rejects_before_public_or_private_reads() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        ..Default::default()
-    }));
+    let mut e = support::credentials::engine(
+        Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            ..Default::default()
+        },
+        Kucoin::new,
+    );
     e.start(0.0);
     assert!(requests(&mut e).is_empty());
     assert!(!e.store().loaded().balance);
@@ -451,10 +465,13 @@ fn missing_private_passphrase_rejects_before_public_or_private_reads() {
 
 #[test]
 fn book_subscription_before_market_seed_is_retained_and_cancelled_by_reference_count() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        public_data_only: true,
-        ..Default::default()
-    }));
+    let mut e = support::credentials::engine(
+        Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+        Kucoin::new,
+    );
     e.start(0.0);
     e.handle(
         0.0,
@@ -540,10 +557,13 @@ fn book_subscription_before_market_seed_is_retained_and_cancelled_by_reference_c
 
 #[test]
 fn ticker_interest_hints_are_safe_before_and_after_startup() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        public_data_only: true,
-        ..Default::default()
-    }));
+    let mut e = support::credentials::engine(
+        Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+        Kucoin::new,
+    );
     e.handle(
         0.0,
         Event::Command(Command::SetTickerSymbols {
@@ -804,12 +824,15 @@ fn missing_welcome_reconnects_even_if_an_early_pong_arrives() {
 
 #[test]
 fn private_snapshot_starts_once_before_ticker_and_launch_independent_of_welcome() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("passphrase".into()),
-        ..Default::default()
-    }));
+    let mut e = support::credentials::engine(
+        Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("passphrase".into()),
+            ..Default::default()
+        },
+        Kucoin::new,
+    );
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     answer(
@@ -881,10 +904,13 @@ fn private_snapshot_starts_once_before_ticker_and_launch_independent_of_welcome(
 
 #[test]
 fn direct_leverage_query_rejects_without_requests_before_and_after_start() {
-    let unstarted = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        public_data_only: true,
-        ..Default::default()
-    }));
+    let unstarted = support::credentials::engine(
+        Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+        Kucoin::new,
+    );
     for (mut e, command) in [(unstarted, 41), (ready().0, 42)] {
         e.handle(
             0.0,
@@ -962,10 +988,13 @@ fn bullet_failures_back_off_and_timed_out_token_responses_cannot_connect() {
 
 #[test]
 fn spot_symbol_amend_rejects_once_without_io_or_state_changes_on_futures() {
-    let unstarted = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        public_data_only: true,
-        ..Default::default()
-    }));
+    let unstarted = support::credentials::engine(
+        Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+        Kucoin::new,
+    );
     for (mut engine, command) in [(unstarted, 71), (ready().0, 72)] {
         engine.drain_actions().for_each(drop);
         let before = engine.snapshot_frame(0.0).to_vec();

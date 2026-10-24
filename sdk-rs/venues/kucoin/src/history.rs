@@ -666,6 +666,15 @@ impl Kucoin {
             r.invalid = true;
         }
     }
+    pub(crate) fn history_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+    ) {
+        error.outcome = None;
+        request.owner.reject(cx, error);
+    }
     pub(crate) fn history_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,

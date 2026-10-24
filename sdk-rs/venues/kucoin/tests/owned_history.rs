@@ -1,11 +1,13 @@
 //! Shared-owner contracts: original failures discard already validated pages.
+mod support;
 use safe_cex_engine::log::code;
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Level, Notice, Query, Value, Venue,
 };
-use safe_cex_venue_kucoin::{Kucoin, Options};
+use safe_cex_venue_kucoin::Kucoin;
 use serde_json::{Value as Json, json};
 use std::collections::HashSet;
+use support::credentials::Options;
 
 struct H<V: Venue> {
     engine: Engine<V>,
@@ -571,7 +573,7 @@ fn owned_history_funding_failed_page_retry_keeps_raw_cursor_and_reused_identity(
 #[test]
 fn owned_history_public_trades_failure_is_typed_without_private_credentials() {
     let mut h = funding();
-    h.engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options::default()));
+    h.engine = support::credentials::engine(Options::default(), Kucoin::new);
     let market = funding().engine.store().markets().to_vec();
     h.engine.store_mut().set_markets(market);
     h.query(

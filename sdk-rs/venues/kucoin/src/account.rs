@@ -769,6 +769,18 @@ impl Kucoin {
             cx.notice(level, code::ROW_SKIPPED, message);
         }
     }
+    pub(crate) fn account_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        cx.retried_failure("kucoin.account.sign", &error.message);
+        if let Read::Margin(symbol) | Read::Leverage(symbol) = &request.read {
+            self.account.metadata.remove(symbol);
+        }
+        self.account_finished(cx);
+    }
     pub(crate) fn account_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,

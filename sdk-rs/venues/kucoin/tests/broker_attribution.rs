@@ -1,12 +1,17 @@
+mod support;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Venue};
-use safe_cex_venue_kucoin::{Kucoin, Options};
+use safe_cex_venue_kucoin::Kucoin;
+use support::credentials::Options;
 
 #[test]
 fn public_catalogue_preserves_factory_broker_attribution_without_credentials() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        public_data_only: true,
-        ..Options::default()
-    }));
+    let mut engine = support::credentials::engine(
+        Options {
+            public_data_only: true,
+            ..Options::default()
+        },
+        Kucoin::new,
+    );
     engine.start(0.0);
     let requests: Vec<_> = engine
         .drain_actions()
@@ -31,11 +36,12 @@ fn public_catalogue_preserves_factory_broker_attribution_without_credentials() {
 #[cfg(feature = "spot")]
 #[test]
 fn spot_public_catalogue_preserves_the_same_broker_header() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_kucoin::spot::KucoinSpot::new(Options {
+    let mut engine = support::credentials::engine(
+        Options {
             public_data_only: true,
             ..Options::default()
-        }),
+        },
+        safe_cex_venue_kucoin::spot::KucoinSpot::new,
     );
     engine.start(0.0);
     let requests: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
@@ -63,7 +69,7 @@ fn partner_options() -> Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
         passphrase: Some("replay-passphrase".into()),
-        broker: Some(safe_cex_venue_kucoin::sign::BrokerOptions {
+        broker: Some(support::native_sign::BrokerOptions {
             partner: " partner-test ".into(),
             broker_key: " broker-test-key ".into(),
             broker_name: " Broker Name ".into(),
@@ -196,7 +202,7 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
 #[test]
 fn authenticated_futures_public_reads_keep_configured_partner_signatures() {
     verify_partner_catalogue_and_followup(
-        safe_cex_engine::test_support::seeded_engine(Kucoin::new(partner_options())),
+        support::credentials::engine(partner_options(), Kucoin::new),
         r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","baseCurrency":"XBT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"maxOrderQty":1000000,"maxLeverage":125,"multiplier":0.001,"expireDate":null,"isInverse":false}]}"#,
         assert_partner,
     );
@@ -205,9 +211,10 @@ fn authenticated_futures_public_reads_keep_configured_partner_signatures() {
 #[test]
 fn authenticated_spot_public_reads_stay_channel_only_with_configured_partner() {
     verify_partner_catalogue_and_followup(
-        safe_cex_engine::test_support::seeded_engine(safe_cex_venue_kucoin::spot::KucoinSpot::new(
+        support::credentials::engine(
             partner_options(),
-        )),
+            safe_cex_venue_kucoin::spot::KucoinSpot::new,
+        ),
         r#"{"code":"200000","data":[{"symbol":"BTC-USDT","baseCurrency":"BTC","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.0001","priceIncrement":"0.1","baseMinSize":"0.001","baseMaxSize":"10"}]}"#,
         |request| {
             if ["/api/v2/symbols", "/market/allTickers", "/bullet-public"]

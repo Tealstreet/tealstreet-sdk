@@ -400,26 +400,8 @@ impl KucoinSpot {
                 let _ = cx.done_local_setting("[]".into(), |_| {});
                 return;
             }
-            Command::FetchAccount { command } => {
-                if self.credentials.is_none() {
-                    let Ok(context) = cx.admit_http_command(crate::local_read_command_policy())
-                    else {
-                        return;
-                    };
-                    let _ = cx.fail_context(
-                        &context,
-                        not_sent("KuCoin Spot requires credentials").kind(ErrorKind::InvalidInput),
-                    );
-                } else {
-                    self.request(
-                        cx,
-                        Method::Get,
-                        "/api/v2/user-info",
-                        None,
-                        true,
-                        Pending::Account(command),
-                    );
-                }
+            Command::FetchAccount { .. } => {
+                self.fetch_identity(cx);
                 return;
             }
             unsupported @ (Command::FetchStpMode { .. }
