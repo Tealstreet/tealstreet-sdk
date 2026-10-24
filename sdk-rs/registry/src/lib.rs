@@ -325,7 +325,16 @@ fn backpack_provider(
         }),
         secondary: None,
     };
-    let (signer, identities) = LocalSigner::from_setup(setup).map_err(|_| undecodable())?;
+    // The seed is an Ed25519 key, declared so the provider signs only Ed25519.
+    let policy = safe_cex_engine::signing::CredentialSetupPolicy {
+        primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+            signing_algorithm: Some(Algorithm::Ed25519),
+            ..Default::default()
+        }),
+        secondary: None,
+    };
+    let (signer, identities) =
+        LocalSigner::from_setup_with_policy(setup, policy).map_err(|_| undecodable())?;
     let primary = identities.primary.as_ref().ok_or_else(undecodable)?;
     let probe = safe_cex_engine::signing::SignRequest {
         receipt: Default::default(),
@@ -551,19 +560,45 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
-    let policy = construction::signer_setup_policy(venue);
     #[cfg(feature = "asterdex")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Asterdex) {
+        // Setup resolves the version first; the policy then reads it.
         let setup = asterdex_setup::local_setup(options, public_data_only)?;
+        let policy = signer_setup_policy_for(venue, options);
         return local_signer_from_setup(setup, policy, public_data_only);
     }
     #[cfg(feature = "apexomni")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::ApexOmni) {
         let setup = apexomni_local_setup(options)?;
+        let policy = signer_setup_policy_for(venue, options);
         let (provider, identities) = local_signer_from_setup(setup, policy, public_data_only)?;
         return apexomni_admit(provider, identities);
     }
+    let policy = signer_setup_policy_for(venue, options);
     prepare_local_signer_with_policy(options, policy, public_data_only)
+}
+
+/// Trusted family policy plus the declarations only resolved setup facts can
+/// make: AsterDEX V3 wallets are secp256k1 keys, while V1 secrets are MACs.
+/// It reads only the explicit resolved version, never the material's shape.
+#[cfg(feature = "dispatch-signing")]
+fn signer_setup_policy_for(
+    venue: &str,
+    options: &EngineOptions,
+) -> safe_cex_engine::signing::CredentialSetupPolicy {
+    #[cfg_attr(not(feature = "asterdex"), allow(unused_mut))]
+    let mut policy = construction::signer_setup_policy(venue);
+    #[cfg(feature = "asterdex")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Asterdex)
+        && options.asterdex.api_version == Some(safe_cex_venue_asterdex::sign::Version::V3)
+    {
+        for slot in [&mut policy.primary, &mut policy.secondary] {
+            slot.get_or_insert_with(Default::default).signing_algorithm =
+                Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest);
+        }
+    }
+    let _ = options;
+    policy
 }
 
 /// ApeX has no read credentials; refused at setup rather than ignored.
@@ -732,15 +767,41 @@ pub fn local_signer_from_json_for(
     ),
     VenueError,
 > {
-    local_signer_from_json_for_mode(venue, input, false)
+    // No options means no resolved setup facts, so nothing is refined.
+    let (provider, identities) =
+        local_signer_from_json_with_policy(input, construction::signer_setup_policy(venue), false)?;
+    admit_json_setup(venue, provider, identities)
 }
 
-/// Separate setup with explicit public/private intent, before option stripping.
+/// Venue admission of a parsed JSON setup: ApeX probes its OmniKey seed.
+#[cfg(feature = "dispatch-signing")]
+fn admit_json_setup(
+    venue: &str,
+    provider: safe_cex_engine::signing::Provider,
+    identities: safe_cex_engine::signing::Identities,
+) -> Result<
+    (
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    #[cfg(feature = "apexomni")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::ApexOmni) {
+        return apexomni_admit(provider, identities);
+    }
+    let _ = venue;
+    Ok((provider, identities))
+}
+
+/// Separate setup with the parsed account options: their public/private
+/// intent, before option stripping, and resolved setup facts such as AsterDEX's
+/// explicit API version.
 #[cfg(feature = "dispatch-signing")]
 pub fn local_signer_from_json_for_mode(
     venue: &str,
     input: String,
-    public_data_only: bool,
+    options: &EngineOptions,
 ) -> Result<
     (
         safe_cex_engine::signing::Provider,
@@ -750,14 +811,10 @@ pub fn local_signer_from_json_for_mode(
 > {
     let (provider, identities) = local_signer_from_json_with_policy(
         input,
-        construction::signer_setup_policy(venue),
-        public_data_only,
+        signer_setup_policy_for(venue, options),
+        construction::signer_setup_public_data_only(options),
     )?;
-    #[cfg(feature = "apexomni")]
-    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::ApexOmni) {
-        return apexomni_admit(provider, identities);
-    }
-    Ok((provider, identities))
+    admit_json_setup(venue, provider, identities)
 }
 
 #[cfg(feature = "dispatch-signing")]
