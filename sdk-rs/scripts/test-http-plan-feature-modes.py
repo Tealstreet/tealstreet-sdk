@@ -20,12 +20,20 @@ def modes():
     if not families:
         raise RuntimeError('expected at least one venue family')
     closures = {}
-    grouped = {(): ['engine baseline'], ('order-locks', 'test-support'): ['explicit CI control'],
-               # Seeded serial-plans OFF control: never add serial-plans here. Once a family
-               # adopts, workspace tests unify it on, so this row alone proves the off build.
-               ('http-plans', 'order-locks', 'test-support'): ['serial plans OFF control'],
-               # No family enables serial Plans before adoption; keep them compiled and tested.
-               ('http-plans', 'order-locks', 'serial-plans', 'test-support'): ['serial Plan control']}
+    grouped = {
+        (): ['engine baseline'],
+        ('order-locks', 'test-support'): ['explicit CI control'],
+        # metadata-freshness OFF control: standalone Bitget with test support.
+        ('order-locks', 'polling-control', 'test-support'): ['metadata freshness OFF control'],
+    }
+    grouped[('metadata-freshness', 'test-support')] = ['metadata-only CI control']
+    grouped[('http-plans', 'metadata-freshness', 'order-locks', 'test-support')] = [
+        'metadata Plan CI control']
+    # Seeded serial-plans OFF control: never add serial-plans here. Once a family
+    # adopts, workspace tests unify it on, so this row alone proves the off build.
+    grouped[('http-plans', 'order-locks', 'test-support')] = ['serial plans OFF control']
+    # No family enables serial Plans before adoption; keep them compiled and tested.
+    grouped[('http-plans', 'order-locks', 'serial-plans', 'test-support')] = ['serial Plan control']
     for family in families:
         tree = subprocess.check_output([
             'cargo', 'tree', '--locked', '--target', 'wasm32-unknown-unknown',

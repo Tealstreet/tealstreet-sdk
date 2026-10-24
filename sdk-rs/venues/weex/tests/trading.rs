@@ -2134,3 +2134,61 @@ fn a_read_only_account_still_fetches_leverage_with_its_secondary_identity() {
     let actions = raw_response(&mut e, &r, ISOLATED_CONFIG);
     assert!(done(&actions).is_ok());
 }
+
+#[test]
+fn a_late_settings_failure_cannot_clear_a_reused_commands_write_fence() {
+    let mut e = engine();
+    let setting = || Command::SetLeverage {
+        command: 71,
+        symbol: "BTCUSDT".into(),
+        leverage: 30.,
+        side: None,
+    };
+    let actions = command(&mut e, setting());
+    let old = writes(&actions).pop().unwrap();
+    assert!(e.store().metadata_write_pending("BTCUSDT"));
+    let completed = response(&mut e, &old, json!({"code":"200"}));
+    assert_eq!(done(&completed).unwrap(), "[]");
+    assert!(!e.store().metadata_write_pending("BTCUSDT"));
+
+    e.handle(2001., Event::Command(setting()));
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 2001.);
+    let current = writes(&actions).pop().unwrap();
+    assert_ne!(old.id, current.id);
+    assert!(e.store().metadata_write_pending("BTCUSDT"));
+    e.handle(
+        2002.,
+        Event::HttpFailed {
+            request: old.id,
+            error: "late old failure",
+        },
+    );
+    let stale = safe_cex_engine::test_support::prepared_actions(&mut e, 2002.);
+    assert!(!stale.iter().any(|action| matches!(
+        action,
+        Action::Notice(
+            Notice::CommandDone { command: 71, .. } | Notice::CommandFailed { command: 71, .. }
+        )
+    )));
+    assert!(e.store().metadata_write_pending("BTCUSDT"));
+
+    e.handle(
+        2003.,
+        Event::HttpFailed {
+            request: current.id,
+            error: "current failure",
+        },
+    );
+    let current = safe_cex_engine::test_support::prepared_actions(&mut e, 2003.);
+    assert_eq!(
+        current
+            .iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 71, .. })
+            ))
+            .count(),
+        1
+    );
+    assert!(!e.store().metadata_write_pending("BTCUSDT"));
+}
