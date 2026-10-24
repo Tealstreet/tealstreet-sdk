@@ -100,7 +100,9 @@ impl SignStep for Recipe {
         10_000.
     }
 }
-struct NonceProbe<const SUPPORTED: bool> {
+static NONCE_SELECTOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+struct NonceProbe<const SUPPORTED: bool, const CAPABILITY: u8 = 0> {
     subject: &'static str,
     count: u8,
     trace: Arc<Mutex<Trace>>,
@@ -108,7 +110,17 @@ struct NonceProbe<const SUPPORTED: bool> {
     pacing: Option<safe_cex_engine::request_context::Pacing>,
 }
 type Probe = NonceProbe<true>;
-impl<const SUPPORTED: bool> Venue for NonceProbe<SUPPORTED> {
+impl<const SUPPORTED: bool, const CAPABILITY: u8> Venue for NonceProbe<SUPPORTED, CAPABILITY> {
+    #[inline]
+    fn dispatch_nonce() -> bool {
+        match CAPABILITY {
+            0 => true,
+            1 => false,
+            2 => NONCE_SELECTOR.load(std::sync::atomic::Ordering::SeqCst),
+            _ => unreachable!(),
+        }
+    }
+
     type Pending = u8;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -294,7 +306,7 @@ struct Batch {
     failed: Vec<(u32, VenueError)>,
     done: Vec<u32>,
 }
-fn drain(engine: &mut Engine<Probe>) -> Batch {
+fn drain<const CAPABILITY: u8>(engine: &mut Engine<NonceProbe<true, CAPABILITY>>) -> Batch {
     let mut batch = Batch::default();
     for action in engine.drain_actions() {
         match action {
@@ -342,7 +354,14 @@ fn fixture_with_pacing(
     count: u8,
     pacing: Option<safe_cex_engine::request_context::Pacing>,
 ) -> (Engine<Probe>, Vec<Route>) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
+    fixture_with_capability::<0>(subject, count, pacing)
+}
+fn fixture_with_capability<const CAPABILITY: u8>(
+    subject: &'static str,
+    count: u8,
+    pacing: Option<safe_cex_engine::request_context::Pacing>,
+) -> (Engine<NonceProbe<true, CAPABILITY>>, Vec<Route>) {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(NonceProbe::<true, CAPABILITY> {
         subject,
         count,
         trace: Arc::default(),
@@ -363,12 +382,23 @@ fn fixture_with_pacing(
         .unwrap();
     engine.start(START);
     let mut batch = drain(&mut engine);
-    assert_eq!(batch.routes.len(), usize::from(count));
+    assert_eq!(
+        batch.routes.len(),
+        if CAPABILITY == 1 {
+            0
+        } else {
+            usize::from(count)
+        }
+    );
     assert!(batch.work.is_empty() && batch.bound.is_empty());
     batch.routes.sort_by_key(|r| r.owner);
     (engine, batch.routes)
 }
-fn ready(engine: &mut Engine<Probe>, route: &Route, now: f64) -> Work {
+fn ready<const CAPABILITY: u8>(
+    engine: &mut Engine<NonceProbe<true, CAPABILITY>>,
+    route: &Route,
+    now: f64,
+) -> Work {
     engine.http_prepared(
         now,
         route.token,
@@ -386,7 +416,11 @@ fn ready(engine: &mut Engine<Probe>, route: &Route, now: f64) -> Work {
     );
     batch.work.remove(0)
 }
-fn reply(engine: &mut Engine<Probe>, work: Work, now: f64) -> Batch {
+fn reply<const CAPABILITY: u8>(
+    engine: &mut Engine<NonceProbe<true, CAPABILITY>>,
+    work: Work,
+    now: f64,
+) -> Batch {
     engine.handle(
         now,
         Event::Signed {
@@ -396,13 +430,21 @@ fn reply(engine: &mut Engine<Probe>, work: Work, now: f64) -> Batch {
     );
     drain(engine)
 }
-fn bind(engine: &mut Engine<Probe>, work: Work, now: f64) -> Bound {
+fn bind<const CAPABILITY: u8>(
+    engine: &mut Engine<NonceProbe<true, CAPABILITY>>,
+    work: Work,
+    now: f64,
+) -> Bound {
     let mut batch = reply(engine, work, now);
     assert!(batch.routes.is_empty() && batch.work.is_empty());
     assert_eq!(batch.bound.len(), 1);
     batch.bound.remove(0)
 }
-fn send(engine: &mut Engine<Probe>, packet: &Bound, now: f64) -> u64 {
+fn send<const CAPABILITY: u8>(
+    engine: &mut Engine<NonceProbe<true, CAPABILITY>>,
+    packet: &Bound,
+    now: f64,
+) -> u64 {
     assert!(
         packet
             .request
@@ -1014,4 +1056,55 @@ fn actual_stamp_floor_and_nonce_counter_remain_independent_at_dispatch() {
         "nonce release never creates a StampFloor"
     );
     assert_eq!(third.work.receipt.nonce, Some(1000002));
+}
+
+#[test]
+fn disabled_nonce_capability_refuses_before_preparation_or_provider_work() {
+    let (mut engine, routes) = fixture_with_capability::<1>("nonce-capability/disabled", 1, None);
+    assert!(routes.is_empty());
+    assert!(engine.venue().trace.lock().unwrap().prepared.is_empty());
+    assert!(engine.venue().trace.lock().unwrap().releases.is_empty());
+    assert_eq!(engine.venue().errors.len(), 1);
+    assert_eq!(
+        engine.venue().errors[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        engine.venue().errors[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    assert!(drain(&mut engine).work.is_empty());
+}
+#[test]
+fn a_changed_nonce_selector_refuses_before_release_without_advancing_the_floor() {
+    use std::sync::atomic::Ordering;
+    NONCE_SELECTOR.store(true, Ordering::SeqCst);
+    let subject = "nonce-capability/changed-selector";
+    let (mut earlier, routes) = fixture(subject, Allocation::PrepareProbe, 1);
+    let work = ready(&mut earlier, &routes[0], START);
+    let earlier_packet = bind(&mut earlier, work, START);
+    let (mut changed, routes) = fixture_with_capability::<2>(subject, 1, None);
+    let work = ready(&mut changed, &routes[0], START);
+    let later_packet = bind(&mut changed, work, START);
+    assert!(later_packet.nonce() > earlier_packet.nonce());
+    NONCE_SELECTOR.store(false, Ordering::SeqCst);
+    assert_eq!(
+        changed.claim_http(START, later_packet.permit),
+        Err(Error::State)
+    );
+    assert!(changed.venue().trace.lock().unwrap().releases.is_empty());
+    assert_eq!(changed.venue().errors.len(), 1);
+    assert_eq!(
+        changed.venue().errors[0].message,
+        "HTTP nonce capability is unavailable"
+    );
+    assert_eq!(
+        changed.venue().errors[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    assert_eq!(
+        send(&mut earlier, &earlier_packet, START),
+        earlier_packet.nonce()
+    );
+    NONCE_SELECTOR.store(true, Ordering::SeqCst);
 }

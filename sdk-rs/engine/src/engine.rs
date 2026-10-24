@@ -1451,6 +1451,8 @@ mod managed_sockets;
 
 struct Io<P> {
     nonce_unscheduled: bool,
+    #[cfg(feature = "dispatch-nonce")]
+    nonce_enabled: bool,
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
     #[cfg(feature = "http-plans")]
@@ -1566,6 +1568,8 @@ impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
             nonce_unscheduled: false,
+            #[cfg(feature = "dispatch-nonce")]
+            nonce_enabled: false,
             request_contexts: Default::default(),
             http_delivery: None,
             #[cfg(feature = "http-plans")]
@@ -2715,6 +2719,16 @@ pub trait Venue {
         &[]
     }
 
+    /// Immutable nonce capability; the engine captures its permission at construction.
+    /// This selector grants no claim or release authority.
+    #[inline]
+    fn dispatch_nonce() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+
     /// Captured once at engine construction; the two admission modes are exclusive.
     fn http_release() -> HttpRelease<Self>
     where
@@ -3106,6 +3120,8 @@ impl<V: Venue> Engine<V> {
                 entropy: Some(entropy),
                 http_pacing,
                 nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
+                #[cfg(feature = "dispatch-nonce")]
+                nonce_enabled: V::dispatch_nonce(),
                 ..Io::default()
             },
             started: false,

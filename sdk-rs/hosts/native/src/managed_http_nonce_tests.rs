@@ -42,6 +42,11 @@ fn identity() -> Identity {
     }
 }
 impl Venue for NonceVenue {
+    #[inline]
+    fn dispatch_nonce() -> bool {
+        true
+    }
+
     type Pending = Context;
     fn http_release() -> safe_cex_engine::HttpRelease<Self> {
         safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))

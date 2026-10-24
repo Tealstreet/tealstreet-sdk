@@ -489,6 +489,11 @@ impl KrakenSpot {
     }
 }
 impl Venue for KrakenSpot {
+    #[inline]
+    fn dispatch_nonce() -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities::NO_HISTORY

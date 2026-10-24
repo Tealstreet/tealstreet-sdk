@@ -82,6 +82,13 @@ impl Managed {
     }
 
     #[cfg(feature = "dispatch-nonce")]
+    fn has_nonce_state(&self) -> bool {
+        self.recipe
+            .as_ref()
+            .is_some_and(|recipe| recipe.has_nonce_claim() || recipe.nonce.is_some())
+    }
+
+    #[cfg(feature = "dispatch-nonce")]
     #[inline(never)]
     fn claim(
         &mut self,
@@ -371,7 +378,7 @@ impl<P> Cx<'_, P> {
         let nonce_claim = match validate_nonce_recipe(
             step.as_deref(),
             &selected_claim,
-            self.io.nonce_unscheduled,
+            self.io.nonce_unscheduled && self.io.nonce_enabled,
             &self.io.identities,
             &context,
         ) {
@@ -1197,27 +1204,50 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "dispatch-nonce")]
         let mut nonce_stale = false;
         #[cfg(feature = "dispatch-nonce")]
-        let result = match self.http_release {
-            super::HttpRelease::Mutable(admit) => managed.claim(
-                permit,
-                time,
-                &mut self.io.http_pacing,
-                ClaimAdmission::Mutable(&mut |release| {
-                    admit(&mut self.venue, &mut pending.value, release)
-                }),
-                &mut signing_release,
-                &mut nonce_stale,
-            ),
-            super::HttpRelease::NonceUnscheduled(admit) => managed.claim(
-                permit,
-                time,
-                &mut self.io.http_pacing,
-                ClaimAdmission::NonceUnscheduled(&mut |release| {
-                    admit(&self.venue, &pending.value, release)
-                }),
-                &mut signing_release,
-                &mut nonce_stale,
-            ),
+        let mut nonce_capability_failure = false;
+        #[cfg(feature = "dispatch-nonce")]
+        let result = if V::dispatch_nonce() {
+            match self.http_release {
+                super::HttpRelease::Mutable(admit) => managed.claim(
+                    permit,
+                    time,
+                    &mut self.io.http_pacing,
+                    ClaimAdmission::Mutable(&mut |release| {
+                        admit(&mut self.venue, &mut pending.value, release)
+                    }),
+                    &mut signing_release,
+                    &mut nonce_stale,
+                ),
+                super::HttpRelease::NonceUnscheduled(admit) => managed.claim(
+                    permit,
+                    time,
+                    &mut self.io.http_pacing,
+                    ClaimAdmission::NonceUnscheduled(&mut |release| {
+                        admit(&self.venue, &pending.value, release)
+                    }),
+                    &mut signing_release,
+                    &mut nonce_stale,
+                ),
+            }
+        } else if managed.has_nonce_state() {
+            nonce_capability_failure = true;
+            Err(Error::State)
+        } else {
+            managed
+                .lifecycle
+                .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
+                    signing_release =
+                        Some(crate::SigningRelease::new(release.signature, release.time)?);
+                    match self.http_release {
+                        super::HttpRelease::Mutable(admit) => {
+                            admit(&mut self.venue, &mut pending.value, release)
+                        }
+                        super::HttpRelease::NonceUnscheduled(admit) => {
+                            admit(&self.venue, &pending.value, release)?;
+                            Ok(crate::request_context::Admission::Unscheduled)
+                        }
+                    }
+                })
         };
         #[cfg(not(feature = "dispatch-nonce"))]
         let result = {
@@ -1320,12 +1350,15 @@ impl<V: Venue> Engine<V> {
             recipe.nonce_repairs += 1;
         }
         if let Err(error) = result {
-            self.http_preparation_failed(
-                now,
-                preparation,
-                error,
-                VenueError::new("HTTP request was not released"),
-            );
+            #[cfg(feature = "dispatch-nonce")]
+            let message = if nonce_capability_failure {
+                "HTTP nonce capability is unavailable"
+            } else {
+                "HTTP request was not released"
+            };
+            #[cfg(not(feature = "dispatch-nonce"))]
+            let message = "HTTP request was not released";
+            self.http_preparation_failed(now, preparation, error, VenueError::new(message));
         }
         result
     }
