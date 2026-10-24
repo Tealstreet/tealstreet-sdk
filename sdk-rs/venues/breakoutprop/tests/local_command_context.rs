@@ -1,4 +1,5 @@
 //! Genuine local command entries; the original production remains unchanged.
+mod support;
 use safe_cex_engine::model::{Interval, StpMode};
 use safe_cex_engine::{Action, Command, Engine, ErrorKind, Event, Notice, Outcome};
 use safe_cex_venue_breakoutprop::{BreakoutProp, Options};
@@ -275,4 +276,56 @@ fn native_negative_candle_time_keeps_the_physical_login_path() {
         action,
         Action::Notice(Notice::CommandFailed { .. }) | Action::Notice(Notice::CommandDone { .. })
     )));
+}
+
+#[test]
+fn ordinary_duplicate_write_guard_preserves_the_original_native_delivery() {
+    let mut rig = support::Rig::new(Options {
+        key: "example-user".into(),
+        secret: "example-password".into(),
+        tick_interval: 1_000_000.,
+        ..Options::default()
+    });
+    rig.boot();
+    for _ in 0..2 {
+        let portfolio = rig.next_request();
+        assert!(portfolio.url.ends_with("/portfolio"));
+        rig.reply(&portfolio, 200, r#"{"portfolios":[{"account":"default:00002","version":1,"balances":[],"positions":[],"orders":[]}]}"#);
+    }
+    let quotes = rig.next_request();
+    assert!(quotes.url.ends_with("/marketdata"));
+    rig.reply(&quotes, 200, support::QUOTES);
+    let place = || Command::PlaceOrders {
+        command: 91,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol":"ETHUSD", "type":"limit", "side":"buy", "amount":1., "price":3656.
+            }))
+            .unwrap(),
+        ],
+    };
+    rig.command(place());
+    let request = rig.next_request();
+    assert_eq!(request.method, safe_cex_engine::Method::Post);
+    assert!(request.url.contains("/orders"));
+    let before = rig.notices.len();
+    rig.command(place());
+    assert!(rig.notices[before..].iter().any(|n| matches!(n, Notice::Event(event) if event.message == "Order command ID is already in flight")));
+    assert!(!rig.notices[before..].iter().any(|n| matches!(
+        n,
+        Notice::CommandFailed { command: 91, .. } | Notice::CommandDone { command: 91, .. }
+    )));
+    assert!(rig.requests.is_empty());
+    rig.reply(&request, 200, r#"{"orderId":42}"#);
+    assert_eq!(rig.result(91), Ok(r#"["42"]"#.into()));
+    assert_eq!(
+        rig.notices
+            .iter()
+            .filter(|n| matches!(
+                n,
+                Notice::CommandFailed { command: 91, .. } | Notice::CommandDone { command: 91, .. }
+            ))
+            .count(),
+        1
+    );
 }
