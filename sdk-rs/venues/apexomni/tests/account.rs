@@ -16,11 +16,11 @@ const BALANCE: &str = r#"{"code":0,"data":{"totalEquityValue":"1000","availableB
 fn seeded() -> (TestEngine, SocketId, Vec<HttpRequest>) {
     let mut e = private_engine(Options::default(), &Material::default());
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 0.0).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
     let mut socket = None;
     let mut http = vec![];
-    for action in e.drain_actions() {
+    for action in e.prepared(10.0) {
         match action {
             Action::WsConnect {
                 socket: s,
@@ -39,7 +39,7 @@ fn ready() -> (TestEngine, SocketId) {
 fn ready_with_account(account: &str) -> (TestEngine, SocketId) {
     let (mut e, socket, http) = seeded();
     e.handle(20.0, Event::WsOpened { socket });
-    e.drain_actions().for_each(drop);
+    e.prepared(20.0).for_each(drop);
     for r in http {
         let body = if r.url.ends_with("/v3/account") {
             account
@@ -48,7 +48,7 @@ fn ready_with_account(account: &str) -> (TestEngine, SocketId) {
         };
         response(&mut e, &r, 30.0, body);
     }
-    let balance = requests(&mut e)
+    let balance = requests(&mut e, 30.0)
         .into_iter()
         .find(|r| r.url.ends_with("/v3/account-balance"))
         .unwrap();
@@ -93,14 +93,14 @@ fn position_update(e: &mut TestEngine, socket: SocketId, at: f64, side: &str, si
 fn begin_position_heal(e: &mut TestEngine, socket: SocketId, at: f64) -> HttpRequest {
     ws(e, socket, at, &frame("delta", r#"{"positions":[]}"#));
     let timer = e
-        .drain_actions()
+        .prepared(at)
         .find_map(|action| match action {
             Action::SetTimer { timer, at_ms } if at_ms == at + 1000.0 => Some(timer),
             _ => None,
         })
         .unwrap();
     e.handle(at + 1000.0, Event::TimerFired { timer });
-    requests(e)
+    requests(e, at + 1000.0)
         .into_iter()
         .find(|request| request.url.ends_with("/v3/account"))
         .unwrap()
@@ -149,7 +149,7 @@ fn login_precedes_immediate_subscription_and_ping_with_private_role() {
     let (mut e, socket, _) = seeded();
     e.handle(20.0, Event::WsOpened { socket });
     let messages: Vec<_> = e
-        .drain_actions()
+        .prepared(20.0)
         .filter_map(|a| match a {
             Action::WsSend { socket: s, text } if s == socket => Some(text),
             _ => None,
@@ -233,7 +233,7 @@ fn invalid_second_snapshot_surface_does_not_commit_first_surface() {
     assert!(e.store().orders().is_empty());
     assert!(!e.store().loaded().positions);
     assert!(
-        !e.drain_actions()
+        !e.prepared(20.0)
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("account-balance")))
     );
 }
@@ -252,7 +252,7 @@ fn balance_uses_last_price_and_keeps_previous_value_on_missing_payload() {
         };
         response(&mut e, &r, 20.0, body);
     }
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 20.0).remove(0);
     e.store_mut().set_balance(safe_cex_engine::model::Balance {
         total: 996.0,
         upnl: 4.0,
@@ -404,7 +404,7 @@ fn canceled_parent_removes_virtual_siblings_and_delayed_rest_cannot_reopen() {
     // Order heal begins before the terminal event.
     ws(&mut e, socket, 100.0, &frame("delta", r#"{"orders":[]}"#));
     let timer = e
-        .drain_actions()
+        .prepared(100.0)
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
@@ -414,7 +414,7 @@ fn canceled_parent_removes_virtual_siblings_and_delayed_rest_cannot_reopen() {
         })
         .unwrap();
     e.handle(1100.0, Event::TimerFired { timer });
-    let stale = requests(&mut e).remove(0);
+    let stale = requests(&mut e, 1100.0).remove(0);
     ws(
         &mut e,
         socket,
@@ -539,7 +539,7 @@ fn a_late_rest_snapshot_cannot_reopen_a_position_removed_by_websocket_zero() {
         &frame("delta", r#"{"positions":[]}"#),
     );
     let timer = e
-        .drain_actions()
+        .prepared(100.0)
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
@@ -549,7 +549,7 @@ fn a_late_rest_snapshot_cannot_reopen_a_position_removed_by_websocket_zero() {
         })
         .unwrap();
     e.handle(1100.0, Event::TimerFired { timer });
-    let stale = requests(&mut e).remove(0);
+    let stale = requests(&mut e, 1100.0).remove(0);
     ws(
         &mut e,
         socket,
@@ -699,10 +699,10 @@ fn server_ping_echoes_args_and_reconnect_fences_old_socket() {
         100.0,
         r#"{"op":"ping","args":["server-token",7]}"#,
     );
-    assert!(e.drain_actions().any(|a| matches!(a,Action::WsSend{text,..} if text == r#"{"op":"pong","args":["server-token",7]}"#)));
+    assert!(e.prepared(100.0).any(|a| matches!(a,Action::WsSend{text,..} if text == r#"{"op":"pong","args":["server-token",7]}"#)));
     e.handle(200.0, Event::WsClosed { socket, code: 1006 });
     let timer = e
-        .drain_actions()
+        .prepared(200.0)
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if (950.0..=1200.0).contains(&at_ms) => Some(timer),
             _ => None,
@@ -710,7 +710,7 @@ fn server_ping_echoes_args_and_reconnect_fences_old_socket() {
         .unwrap();
     e.handle(1200.0, Event::TimerFired { timer });
     let replacement = e
-        .drain_actions()
+        .prepared(1200.0)
         .find_map(|a| match a {
             Action::WsConnect {
                 socket,
@@ -758,9 +758,9 @@ fn missing_passphrase_does_not_open_a_permanently_unauthenticated_socket() {
         },
     );
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 0.0).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(10.0).collect();
     assert!(!actions.iter().any(|a| matches!(
         a,
         Action::WsConnect {
@@ -787,9 +787,9 @@ fn silent_private_handshake_is_closed_and_reconnected_without_open_event() {
         },
     );
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 0.0).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(10.0).collect();
     let socket = actions
         .iter()
         .find_map(|a| match a {
@@ -814,7 +814,7 @@ fn silent_private_handshake_is_closed_and_reconnected_without_open_event() {
         })
         .unwrap();
     e.handle(30_010.0, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(30_010.0).collect();
     assert!(
         actions
             .iter()
@@ -831,7 +831,7 @@ fn silent_private_handshake_is_closed_and_reconnected_without_open_event() {
 fn account_identity_uses_documented_id_and_does_not_replace_account_store() {
     let (mut e, _) = ready();
     e.handle(100.0, Event::Command(Command::FetchAccount { command: 91 }));
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 100.0).remove(0);
     assert!(r.url.ends_with("/v3/account"));
     response(
         &mut e,
@@ -840,7 +840,7 @@ fn account_identity_uses_documented_id_and_does_not_replace_account_store() {
         r#"{"code":0,"data":{"id":"611779989544632629"}}"#,
     );
     let result = e
-        .drain_actions()
+        .prepared(110.0)
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone {
                 command: 91,
@@ -867,7 +867,7 @@ fn acknowledged_leverage_survives_older_snapshot_and_cached_position_heal() {
         &frame("delta", r#"{"positions":[]}"#),
     );
     let timer = e
-        .drain_actions()
+        .prepared(100.0)
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
@@ -877,7 +877,7 @@ fn acknowledged_leverage_survives_older_snapshot_and_cached_position_heal() {
         })
         .unwrap();
     e.handle(1100.0, Event::TimerFired { timer });
-    let old_positions = requests(&mut e).remove(0);
+    let old_positions = requests(&mut e, 1100.0).remove(0);
     e.handle(
         1200.0,
         Event::Command(Command::SetLeverage {
@@ -923,7 +923,7 @@ fn missing_or_blank_order_identifiers_reject_rest_heal_without_clearing_state() 
         let (mut e, socket) = ready();
         ws(&mut e, socket, 100.0, &frame("delta", r#"{"orders":[]}"#));
         let timer = e
-            .drain_actions()
+            .prepared(100.0)
             .find_map(|a| match a {
                 Action::SetTimer {
                     timer,
@@ -933,7 +933,7 @@ fn missing_or_blank_order_identifiers_reject_rest_heal_without_clearing_state() 
             })
             .unwrap();
         e.handle(1100.0, Event::TimerFired { timer });
-        let request = requests(&mut e).remove(0);
+        let request = requests(&mut e, 1100.0).remove(0);
         let original = if field == "symbol" {
             r#""symbol":"BTC-USDT","#
         } else {
@@ -991,7 +991,15 @@ fn account_identity_can_be_read_before_start_without_an_omni_seed() {
         1700000000123.0,
         Event::Command(Command::FetchAccount { command: 77 }),
     );
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let mut actions = engine.prepared(1700000000123.0).collect::<Vec<_>>();
+    // The managed read's own deadline is the only timer; no venue sockets or timers start.
+    let deadline = actions.iter().find_map(|action| match action {
+        Action::SetTimer { timer, at_ms } if *at_ms == 1700000000123.0 + 20_000.0 => Some(*timer),
+        _ => None,
+    });
+    actions.retain(
+        |action| !matches!(action, Action::SetTimer { timer, .. } if Some(*timer) == deadline),
+    );
     assert_eq!(
         actions.len(),
         1,
@@ -1020,7 +1028,10 @@ fn account_identity_can_be_read_before_start_without_an_omni_seed() {
         1700000000130.0,
         r#"{"code":0,"data":{"id":"611779989544632629"}}"#,
     );
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let mut actions = engine.prepared(1700000000130.0).collect::<Vec<_>>();
+    actions.retain(
+        |action| !matches!(action, Action::ClearTimer { timer } if Some(*timer) == deadline),
+    );
     assert_eq!(actions.len(), 1);
     assert!(
         matches!(&actions[0], Action::Notice(Notice::CommandDone { command: 77, result: body }) if body == r#"{"userId":"611779989544632629","affiliateId":null}"#)
@@ -1049,7 +1060,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
         },
     );
     let stale: Vec<_> = e
-        .drain_actions()
+        .prepared(now)
         .filter_map(|a| match a {
             Action::ClearTimer { timer } => Some(timer),
             _ => None,
@@ -1065,7 +1076,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                 scale: interval / POLL_MS,
             },
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = e.prepared(now).collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         let timers: Vec<_> = actions
             .iter()
@@ -1082,12 +1093,12 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     for timer in obsolete {
         e.handle(now, Event::TimerFired { timer });
-        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+        assert!(!e.prepared(now).any(|a| matches!(a, Action::Http(_))));
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
     let mut pending: Vec<_> = e
-        .drain_actions()
+        .prepared(due)
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -1105,7 +1116,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: f64::INFINITY,
         },
     );
-    e.drain_actions().for_each(drop);
+    e.prepared(due).for_each(drop);
     for _ in 0..12 {
         if pending.is_empty() {
             break;
@@ -1129,7 +1140,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                     },
                 },
             );
-            pending.extend(e.drain_actions().filter_map(|a| match a {
+            pending.extend(e.prepared(due + 1.).filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
             }));
@@ -1143,7 +1154,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
         },
     );
     let resumed: Vec<_> = e
-        .drain_actions()
+        .prepared(due + 2.)
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
