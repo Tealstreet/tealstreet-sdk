@@ -570,3 +570,14 @@ the old numeric branch reports Unsupported instead of shared InvalidInput or
 Internal capacity; zero skipped. The earlier nonexistent-enum compile failure
 is excluded from this count. Runtime source is unchanged. The exact reviewed
 helper proposal is prepared separately before applying it.
+
+
+The overseer confirmed no combo-5b overlap and authorized production after the
+plan-fit review, with push/CI parallel to exact source review. The applied
+helper includes the full None/Expired/Remaining receipt gate and existing shared
+Mutation admission; no rejected admission is finalized again. The unchanged
+seven controls now all PASS, zero failures or skips. In particular, both
+original invalid-clock and capacity failures become typed engine refusals,
+while native messages, keyless operation, Store/no-I/O, prior-owner delivery and
+immediate reuse stay GREEN. The only manifest change removes the one planned
+count-two fingerprint. #1870 remains frozen and unaffected on its own branch.

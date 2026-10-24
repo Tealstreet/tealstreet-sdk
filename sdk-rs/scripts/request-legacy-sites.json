@@ -120,8 +120,7 @@
     "b248430824b5c2fbbc2f727d0c081665b367a7847b5d1ef04aa51186b26ee862": 1
   },
   "venues/backpack/src/trading.rs": {
-    "9ecfe514716e00b34e5c7703e920e8dc9024caab0837bbf2949a3a78d4eb842b": 1,
-    "bcd45e2e77893c71604dfc34d2a327ce254b90adc4e9178be8643e022a6f4219": 2
+    "9ecfe514716e00b34e5c7703e920e8dc9024caab0837bbf2949a3a78d4eb842b": 1
   },
   "venues/binance/src/history.rs": {
     "5d6691e305370ef1b5e22426e494d28b28936de80d5d5af079e9deae52eb33f2": 1,

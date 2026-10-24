@@ -6808,3 +6808,17 @@ success. No Context, credential, physical attempt or signer readiness is
 created. Kraken true-mode refusal is unchanged. Inventory shrinks by two
 occurrences. See RUST_FIXED_SETTING_ADOPTION.md for the native compatibility
 and NEW-CONTRACT refusal controls.
+
+
+## Backpack fixed-setting refusals
+
+SetMarginType and SetPositionMode keep their native keyless Unsupported/NotSent
+refusals ("Backpack only supports cross margin" and "Backpack position mode is
+fixed") for either requested value. The genuine shared Mutation entry checks
+the caller's receipt, clock and capacity before reporting the native refusal.
+An invalid or unavailable receipt reports the shared typed refusal; an expired
+receipt times out without renewing its bound. Duplicate commands retain their
+existing owner's rights and eventual reply. No credential, signing, HTTP, socket,
+timer or Store update is created by these refusals, and the command ID is
+reusable after completion. No fixed-setting success or new venue capability is
+added.
