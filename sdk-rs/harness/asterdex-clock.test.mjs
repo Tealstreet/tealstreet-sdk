@@ -12,7 +12,7 @@ const moduleUrl = (path) => new URL(path, import.meta.url).href;
 
 // Isolate controlled signing time per child. Keep loader/deadline clocks real;
 // no signer, sync method or request validator is replaced with a stub.
-const runClockProfile = (profile, mutation = 'none') => {
+const runClockProfile = (profile, mutation = 'none', startupTimer = false) => {
   const dir = mkdtempSync(join(tmpdir(), 'asterdex-replay-clock-'));
   try {
     const tape = join(dir, 'clock.jsonl'),
@@ -41,7 +41,7 @@ import {writeFileSync} from 'node:fs';
 import {asterDEXVirtualClock} from ${JSON.stringify(moduleUrl('../../packages/safe-cex/src/exchanges/asterdex/asterdex.virtualClock.ts'))};
 import {VENUES} from ${JSON.stringify(moduleUrl('./venues.mjs'))};
 import {Tape,ReplayClock,withTimeout} from ${JSON.stringify(moduleUrl('./tape.mjs'))};
-const profile=${JSON.stringify(profile)}, mutation=${JSON.stringify(mutation)};
+const profile=${JSON.stringify(profile)}, mutation=${JSON.stringify(mutation)}, startupTimer=${JSON.stringify(startupTimer)};
 const epoch=${epoch};
 let elapsed=0, setup=0, startup=0, replayClock, baseline;
 const timings={profile,mutation,requests:[]};
@@ -89,6 +89,11 @@ asterDEXVirtualClock.start=async(...args)=>{
  if(profile==='virtual'){assert.ok(replayClock);replayClock.time+=1500;}else elapsed+=1500;
  timings.after={oracle:Date.now(),signer:asterDEXVirtualClock.getCurrentTimeMs()};
  timings.setupCount=setup;timings.startupCount=startup;save();
+ if(startupTimer){
+  assert.equal(profile,'virtual');
+  await new Promise(resolve=>setTimeout(resolve,1000));
+  timings.startupTimerBoundary=Date.now();save();
+ }
 };
 const play=Tape.prototype.play;
 Tape.prototype.play=function(onTick,ready,runCommand,clock,begin,checkpoint){
@@ -168,7 +173,12 @@ VENUES.asterdex.createRequestValidator=function(...args){
     assert.deepEqual(orders[0], { path: '/fapi/v1/order', timestamp, now: timestamp, valid: true });
     assert.ok(timings.requests.every((request) => request.valid && request.timestamp === request.now));
     if (profile === 'virtual') {
-      assert.equal(timings.readyBefore, epoch + 1500);
+      if (startupTimer) {
+        assert.ok(Number.isSafeInteger(timings.startupTimerBoundary));
+        assert.ok(timings.startupTimerBoundary >= timings.after.oracle + 1000);
+      }
+      assert.ok(Number.isSafeInteger(timings.readyBefore));
+      assert.ok(timings.readyBefore >= (startupTimer ? timings.startupTimerBoundary : timings.after.oracle));
       assert.equal(timings.readyAfter, epoch);
     } else assert.equal(timings.baseline, 22500);
     const replay = JSON.parse(readFileSync(out, 'utf8'));
@@ -186,6 +196,9 @@ test('Aster signing advances exactly through controlled module setup and slow st
 );
 test('Aster tape-clock signing follows frozen startup and readiness rewind', { timeout: 30000 }, () =>
   runClockProfile('virtual'),
+);
+test('Aster frozen startup permits a legitimate startup timer before readiness', { timeout: 30000 }, () =>
+  runClockProfile('virtual', 'none', true),
 );
 for (const mutation of ['no-reset', 'rebase']) {
   test(`Aster clock regression ${mutation} is rejected by the real timestamp validator`, { timeout: 30000 }, () =>

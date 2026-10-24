@@ -2938,6 +2938,7 @@ remain unchanged. No venue-local admission, owner or completion algorithm.
 Bitrue inventory 30 -> 29 occurrences, 18 -> 17 fingerprints; all private
 signing/read/write migrations remain separate.
 
+<<<<<<< HEAD
 ## Receipt-bound StampFloor shared primitive
 
 Opaque release-derived stamp metadata and one opt-in dispatch helper replace no
@@ -2947,3 +2948,119 @@ Inherited new-API compile REDs are distinct from two executed assertion REDs
 against the inherited implementation's unsafe-current/NaN boundaries. Existing
 stamp_ms and other families' recipes are unchanged. Bitrue adoption remains a
 separate consumer migration after actual shared landing.
+=======
+## Finite flat-position PnL evidence
+
+Plan-first `1fadf14a790` and original-control commit `bae23010581` isolate a
+shared evidence bug: unavailable native NaN passed the flat-row admission test
+and became a null-valued PnL row. Original controls report five PASS/two assertion
+FAIL; the finite-conversion predicate makes all seven PASS. The scoped financial,
+comparison and declaration-policy checks pass 28 controls. Zero, negative and
+numeric-string PnL remain evidence, genuine PnL changes still fail, and inputs
+remain immutable. Native state and all other comparison fields are untouched.
+The fourteen inverse declaration keys require fresh raw CI proof before pruning.
+
+### Remaining immediately workable public Read sites
+
+Paradex removes two local candle terminals and its numeric book issuance-refusal
+fallback. Lighter's final public lib request becomes a managed Background catalog
+read with exact delivery validation and retirement before fallback/retry. No
+signer, private authority, session or engine policy is changed. Original new
+targets execute seven native controls PASS and15 intended assertion REDs, zero
+ignored. Exact own prune is four singleton occurrences across three keys.
+
+## WOO and Crypto.com shared snapshot-token fan-out
+
+~~Their joined order censuses publish native cache state and Store rows without
+using the engine's explicit financial write fence.~~ Both now capture one Store
+token per logical join, preserve it across pages/bounded retries and admit native
+cache updates plus rows at one commit boundary. Existing per-ID WS clocks remain
+protocol-owned; no venue epoch copy, universal WS invalidation or new engine API.
+
+Two native original-code controls expose the accepted-write crossing: WOO's
+older empty join removes retained orders after a validated cancel ACK, and
+Crypto.com's older nonempty join inserts an absent order after a validated
+cancel-all ACK. The shared boundary keeps the previous accepted rows until a
+fresh read. This is a snapshot authority correction; it does not invent a new
+native ACK payload, optimistic terminal row, execution or command outcome.
+Explicit Store invalidation/exhaustion and startup-cache controls are adoption
+controls, not additional original financial-defect claims. WS-peer compatibility
+controls pass on the original code and after adoption.
+
+BloFin remains a separate design item: startup execution-prefix seeding can be
+valid even when newer WS order-state revisions reject row replacement, and the
+seed path releases queued executions. Preserve that dual evidence policy before
+moving it to a shared admission boundary; this pair changes no BloFin source.
+
+## BloFin local leverage refusal custody
+
+Two account.rs numeric failures now use shared genuine Read admission followed
+by fail_context on that exact root. BloFin 23->21 occurrences / 19->17 fingerprints;
+only the two singleton rows are removed. No signer, trading, history, closed
+position or successful private read is converted. The coherent custody cutover
+remains with codex-zs5e83. No per-venue admission/completion implementation.
+
+## OKX closed-position request ownership
+
+Closed pages now consume shared SelectedRead command roots/legs and the original
+ReadCompletion/ReadCursorHistory authority. Delivery admission precedes raw row
+count, oldest timestamp, staging and cursor changes. The engine owns whole-call
+expiry; exact-Owner retirement removes native delayed pages, with no local root
+timer or numeric terminal fallback. Native accepted-prefix provider/physical
+recovery remains separate from strict root/local refusal. Shared list/sign
+consumer deletion is deferred to the remaining account/discovery/write owners;
+this conversion does not remove or relax any staging/checker inventory row.
+
+### Phemex dispatch-signing custody candidate
+
+Full native funnel and WS auth now use opaque provider recipes, removing14
+legacy lib credential/material fingerprints. Typed signer refusal preserves
+accepted-prefix IDs and native rollback revisions; actual-release raw expiry
+is accumulated as a maximum before the native5s reconciliation skew. Production
+wire/financial controls pass. Independent source/caller reviews are CLEAR;
+full-map/HMAC review, final CI and the combined #1970/#1974 landing remain gates.
+
+## MEXC unsigned discovery and depth Context adoption
+
+The public catalogue/ticker streamed sender and subscription-depth GET sender
+now use existing Background Read issuance and managed HTTP. Exact delivery is
+validated before row decoding, metadata edits and publication; native generation,
+response and financial checks remain. Failure-only retirement permits expired
+current cleanup without DATA or newer-owner authority. The exact removal-only
+manifest delta is two MEXC lib fingerprints/occurrences,18 to16 in the venue.
+No private signer, account/history/trading reducer, scheduler or engine code
+changes in this slice. Family performance/size evidence remains a CI gate.
+
+
+### Hyperliquid spot candle tail
+
+The six spot candle terminals now reuse the existing perps managed Read path.
+The obsolete pending owner and its numeric completions are removed; generic info,
+Builder, History and socket paths remain unchanged. The original checkpoint ran
+two working controls plus nine compiling assertion REDs on unchanged production.
+All eleven now pass alongside ten existing candle and43 spot controls. Two gated
+new-test metadata expectations were corrected to the existing perps NotSent
+contract; primary RED boundaries and native wire/result assertions are retained.
+
+
+## Crypto.com local trading admission
+
+Immediate cancel/amend validation, leverage validation, unsupported margin,
+missing primary key and placement-plan errors now consume actual Mutation entry
+authority before their existing NotSent projection. Fixed position mode uses
+shared LocalSetting with no financial Store change. Rejected admission supplies
+the only failure; revoked custody adds no fallback. Credential-free local errors
+do not count as remote auth evidence. Remote jobs/signing/classification and all
+other venue files remain unchanged; no engine or key-selection algorithm added.
+
+
+## Crypto.com public discovery delivery ownership
+
+Markets/Tickers now carry their original Background Read Context through
+streaming and publication. Actual shared delivery validation precedes row
+parsing/staging and response handling; expiry equality cannot commit a live
+prefix. Shared Context cleanup is separate from DATA admission: already-admitted
+failure keeps its native retry even after sibling issuance prunes expired
+retirement metadata. Completed catalogue retires before successor admission so
+capacity cannot strand ticker startup. No local issuer/timer/selection algorithm.
+>>>>>>> 219d4bc6725b03afbab5411096d60fe38f6a3350
