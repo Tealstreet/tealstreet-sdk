@@ -32,6 +32,7 @@ struct Body {
     initial_custody: bool,
     history_bound: bool,
     history_latest_release: Option<Attempt>,
+    serial: Option<Box<serial::Serial>>,
 }
 
 struct Entry {
@@ -382,6 +383,18 @@ impl<P> Cx<'_, P> {
         declaration: AdmissionDeclaration<'_, '_, '_>,
         physical: bool,
     ) -> Result<(Plan, Option<(u64, Context)>), Error> {
+        self.admit_plan_root(preflight, declaration, physical, None)
+    }
+
+    /// A serial Plan shares the whole declared admission transaction, with its
+    /// own unbounded root and streamed journal.
+    fn admit_plan_root(
+        &mut self,
+        preflight: &Preflight,
+        declaration: AdmissionDeclaration<'_, '_, '_>,
+        physical: bool,
+        serial: Option<serial::Serial>,
+    ) -> Result<(Plan, Option<(u64, Context)>), Error> {
         let extra = if physical { 2 } else { 0 };
         let AdmissionDeclaration {
             steps,
@@ -416,7 +429,11 @@ impl<P> Cx<'_, P> {
         let barriers = mutation_group::normalize(steps, &policy, barriers, &self.io.http_pacing)?;
         let bound = schedule.bound();
         let native_deadline = bound.deadline(self.now)?;
-        let deadline = receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap));
+        let deadline = if serial.is_some() {
+            serial::ROOT
+        } else {
+            receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap))
+        };
         Context::new(
             preflight.owner(),
             1,
@@ -457,10 +474,15 @@ impl<P> Cx<'_, P> {
             entries[index].eligible_at = Some(at);
             entries[index].notified = false;
         }
-        let writes = if operation == Operation::Mutation {
-            Some(CommandWrites::new_reserved(attempts, count)?)
-        } else {
-            None
+        let writes = match &serial {
+            Some(serial) => Some(
+                CommandWrites::new_reserved(serial::JOURNAL_ATTEMPTS, count)?
+                    .streamed_with(serial.refusals_complete),
+            ),
+            None if operation == Operation::Mutation => {
+                Some(CommandWrites::new_reserved(attempts, count)?)
+            }
+            None => None,
         };
         let mut leg_intents = Vec::new();
         if operation == Operation::Mutation {
@@ -574,6 +596,7 @@ impl<P> Cx<'_, P> {
             initial_custody: self.io.http_delivery.is_none() && self.io.http_plan_ready.is_none(),
             history_bound: false,
             history_latest_release: None,
+            serial: serial.map(Box::new),
         });
         if let Some(context) = old_read {
             self.io.retire_http_leg(&context);
@@ -671,6 +694,9 @@ impl<P> Cx<'_, P> {
                 return Err(Error::State);
             }
             let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+            if body.serial.is_some() {
+                return Err(Error::State);
+            }
             let index = body.schedule.ordinal(slot)?;
             let entry = &body.entries[index];
             if entry.parked
@@ -736,6 +762,9 @@ impl<P> Cx<'_, P> {
             }
             context.retry(evidence, self.now)?;
             let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+            if body.serial.is_some() {
+                return Err(Error::State);
+            }
             self.io.request_contexts.validate(context, self.now)?;
             let index = body.schedule.ordinal(slot)?;
             let entry = &body.entries[index];
@@ -926,16 +955,26 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         let window = entry.terms.window(self.now, plan.deadline())?;
+        let (operation, retry, credential) = body.serial.as_ref().map_or_else(
+            || {
+                (
+                    body.policy.operation,
+                    body.policy.retry,
+                    body.policy.credential.clone(),
+                )
+            },
+            |serial| serial.terms(&body.policy.credential),
+        );
         let mut context = Context::new(
             plan.owner(),
             entry.logical,
-            body.policy.operation,
-            body.policy.credential.clone(),
+            operation,
+            credential,
             self.now,
             window.deadline(),
             body.policy.pacing,
         )?
-        .with_retry(body.policy.retry)?;
+        .with_retry(retry)?;
         context.bind_issuer(&self.io.request_contexts.issuer);
         let mut call = Call {
             context: context.clone(),
@@ -1388,7 +1427,7 @@ impl<P> Cx<'_, P> {
         let timer = body.timer;
         let at_ms = body.next_wake();
         self.io.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
-        self.io.actions.push(Action::SetTimer { timer, at_ms });
+        self.io.actions.push(serial::wake(timer, at_ms));
     }
 }
 
@@ -1609,7 +1648,7 @@ impl ContextRegistry {
         if let Ok(body) = io.request_contexts.plan_body(plan) {
             let (timer, at_ms) = (body.timer, body.next_wake());
             io.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
-            io.actions.push(Action::SetTimer { timer, at_ms });
+            io.actions.push(serial::wake(timer, at_ms));
         }
     }
 }
@@ -1646,6 +1685,10 @@ impl ContextRegistry {
                     })
                 })
             })
+    }
+    #[cfg(test)]
+    pub(in super::super) fn command_writes(&self, command: CommandId) -> Option<&CommandWrites> {
+        self.commands.get(&command)?.writes.as_ref()
     }
     #[cfg(test)]
     pub(in super::super) fn plan_context_storage(&self) -> (usize, usize, usize) {
@@ -1823,6 +1866,9 @@ impl<P> Cx<'_, P> {
 
 #[path = "request_context_history_plan.rs"]
 mod history;
+
+#[path = "request_context_serial_plan.rs"]
+mod serial;
 
 #[cfg(all(test, not(feature = "http-mutation-barriers")))]
 #[path = "request_context_group_disabled_tests.rs"]
