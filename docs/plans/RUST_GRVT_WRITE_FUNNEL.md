@@ -74,7 +74,11 @@ successful-empty substitution may bypass it. Native trade_finish strips a
 Rejected/NotSent outcome to None after effective work, created IDs or cancellation
 attempts. The shared journal owns the future terminal instead; CALLERS must
 disclose this difference, with original controls preserving the native evidence,
-rather than claiming outcome parity.
+rather than claiming outcome parity. Another explicit difference: native parsed
+408 + non-1000 is Rejected (as is 401 + code); 503 + non-1000 is Unknown.
+Originals pin those native outcomes. The future shared codec keeps 408 without
+parsed 1000 as Unknown, as required by the shared write rule, with CALLERS
+disclosure. Only the parsed-1000 exception grants the single auth resend.
 
 ## Queue custody and existing shared pieces
 
@@ -131,24 +135,31 @@ this five-site plan does not claim its account inventory removal.
 | Gap / dependency | Owner proposal | Exact status / required proof |
 | --- | --- | --- |
 | Serial Plan and condition wait actual composition | claude-fe7lgm | Source pins above CLEAR but unlanded. Actual #2012/#2037 plus refrozen pins required; one owner, one reserved Context, no positive pacing floor. |
-| Same-call serial Session resend and immediate failed-Read continuation | claude-fe7lgm | RUST_SERIAL_SESSION_RESEND.md at 30703266220 (earlier 606488cba17 / 239c705f2b6) is a PLAN, OPEN before source. Same call attempt 2 after parsed code 1000, Mutation ResendGrant or validated Read DATA, Session park with no third send; immediate Read failure continuation carries no fabricated DATA or 1 ms delay. |
-| Revision-gated new call and same-call auth resend | claude-fe7lgm with claude-m26ps4 for the revision signal | OPEN source under amended plan 30703266220: native first calls and resends both wait during refresh even if the engine Session is still Ready. Capture the previous revision and resume only on Ready with a newer bundle revision, not merely Session-ready. |
+| Same-call serial Session resend and immediate failed-Read continuation | claude-fe7lgm | RUST_SERIAL_SESSION_RESEND.md at 92f1ff3dcd9 (earlier 30703266220 / 606488cba17) is a PLAN, OPEN before source. Same call attempt 2 after parsed code 1000, Mutation ResendGrant or validated Read DATA, seeded attempt 2 with no third send; immediate Read failure continuation carries no fabricated DATA or 1 ms delay. |
+| Revision-gated new call and same-call auth resend | claude-fe7lgm with claude-m26ps4 for the revision signal | OPEN source under amended plan 92f1ff3dcd9: native first calls and resends both wait during refresh even if the engine Session is still Ready. Capture the previous revision and resume only on Ready with a newer bundle revision, not merely Session-ready. |
 | Refresh after Prepare/Bind, before Claim | claude-m26ps4 (#2069 engine-wide Bind path), fe7lgm offers serial fallback | OPEN #2069 shared unreleased-call park/reissue within its existing window. Revision None makes Claim Stale; reprepare then NotReady must retain the same call until fresh headers, with no ResendGrant, auth_resent spend, second login, budget reset or extra logical write. Require Mutation and Read ingress REDs. |
 | Cached Session header bundle | claude-m26ps4 | #2069 generalized source dd7fd51d03a is consumer-reviewed CLEAR locally, unlanded. Needs actual #2037/G2b and final pin. Bundle generation/revision, aggregate packet budgets, collision refusal and cleanup must compose with serial waits. |
 | GRVT EIP712 provider-payload HTTP recipe | codex-zs5e83, reviewed by m26ps4 and core/custody owner | OPEN consumer recipe/constructor work. Existing provider Secp256k1Digest/PublicAddress primitives suffice; no new crypto algorithm or legacy SignPayload bypass. Exact recipe API and construction witness reviewed before source. |
 | Login completion / credential and header lifetime | codex-zs5e83 with claude-55ao7t login ownership and m26ps4 core review | OPEN consumer composition: native login_session is a login-operation engine Session, distinct from cached cookie/account state. Connect honest Session-ready/failed transitions and provider installation; never mint a substitute Session or treat a native counter as engine provenance. |
 | Parsed auth-refusal grant and header ordering | claude-fe7lgm (grant) and claude-m26ps4 (ordering), ruled by claude-ddi2il | OPEN shared source: parsed code 1000 grants the one resend regardless of status; other 408/5xx do not. Preserve Content-Type-first through a recipe-controlled ordering seam in #2069, not a venue header insertion bypass. GRVT 20 s per-call value is ruled; disclose the new bound in CALLERS. |
 
-The Session resend proposal consumes the exact current call's DATA and, for a
-Mutation, its classify_write RefusedResend grant. It parks the reserved remaining
-attempt, not a new logical write or fake Read. On Session ready, the same call
-resumes through on_http_plan_ready with a new Context/window and provider work.
-Session failure/retire delivers on_plan_session_wait_ended in failure custody:
-fail with native error/outcome, with no re-park and never a second resend. A
-hook that declines to finish seals once. The venue retains auth_resent across the
-six immediate network Read attempts; there is no extra login after the flag is
-spent. The 30703266220 amended proposal owns these gaps; today's
-serial implementation does not.
+The amended serial API at 92f1ff3dcd9 consumes the exact current call's
+DATA and, for a Mutation, its classify_write RefusedResend grant. It returns
+attempt 2 immediately as a new Context of the SAME logical call, seeded with
+the refused attempt's bundle revision. Queue that Context with the identical
+Step body and Session binding. #2069 phase 3 (e04cf305e87) parks its Bind if the
+bundle is NotReady or Ready at a revision no newer than that seed. A newer
+revision announced by session_ready re-prepares the same attempt within its
+existing window; the park/reprepare spends no further attempt or grant.
+
+There is no separate serial Session park, waiter entry, Pending hand-back or
+on_plan_session_wait_ended path. Expiry while parked is unreleased Timeout /
+NotSent; retirement is Revoked / NotSent, and the common Plan projection owns
+the whole command terminal. Attempt 2 receiving code 1000 again fails, with no
+third attempt. No re-park/new-login loophole resets that budget. The venue keeps
+auth_resent across all six immediate Read network attempts; a network retry is
+a new serial Read call but cannot refresh the per-Step auth ledger. These are
+OPEN source dependencies, not today's serial implementation.
 
 ## Session header audit and hosted material
 
@@ -256,7 +267,7 @@ Local Cargo is scoped to GRVT/new target with CARGO_BUILD_JOBS=4 and no concurre
 own build. No local workspace/all-feature/performance sweep, WIP push or new CI
 run is part of this plan-and-originals-only assignment.
 
-## Original checkpoint
+## Original checkpoint at 6944495298b
 
 Plan-first 89c9448b92b and corrected plan/index 10fa03e4bf3 precede the new
 request_context_write_funnel target. The target includes the existing trading.rs
@@ -296,3 +307,40 @@ inferred from plan/original review.
 
 Scoped strict Clippy for the new target passes with -D warnings; rustfmt and
 diff-check pass. No workspace/all-feature build, WIP push or CI dispatch was run.
+
+### Source-gate ownership and later controls
+
+The following GRVT ingress controls land with the provider recipe and actual
+shared dependencies, before any production claim; they are deferred, not tests
+that compiled/executed in this original target:
+
+| Named later control | Owner / dependency |
+| --- | --- |
+| refresh_between_prepare_and_claim_mutation_preserves_the_same_call | zs5e83 recipe integration; #2069 P1 owned by m26ps4 |
+| refresh_between_prepare_and_claim_read_preserves_the_same_call | zs5e83 recipe integration; #2069 P2 owned by m26ps4 |
+| account_id_only_rotation_moves_the_shared_revision | zs5e83 Session cache / #2069 revision signal |
+| recipe_emits_none_of_the_session_bundle_headers | zs5e83 actual recipe and installed constructor |
+| stale_reprepare_keeps_nonce_expiration_client_ids_and_payload | zs5e83 actual SignStep plus #2069 reprepare |
+
+The engine-side refresh REDs are #2069 phase 3 P1/P2. GRVT ingress versions use
+those reviewed semantics after the hook and typed recipe exist; no no-op stub
+or missing-method test is offered as evidence.
+
+### Corrected original receipt
+
+The review correction keeps the unclaimed DATA assertion but removes the
+included prepared_actions driver from that probe. It takes either native raw
+HTTP (explicit reply ingress) or Prepare.request directly from raw wf_command,
+without http_prepared, Bind or Claim; after adoption it still sends DATA against
+an unclaimed request. The delegate now forwards cancel_needs_stored_order and
+on_public_feed. Native status controls explicitly assert 401/408 Rejected and
+503 Unknown for coded non-1000 and second-1000 terminals. Unparsed 408/503 are
+Unknown with no resend. The reverse-ledger positive spends five Read network
+retries before auth refresh, then proves the one auth resend does not reset the
+remaining network budget.
+
+The corrected target runs 69 controls: 13 intended assertion REDs / 56 GREENs /
+0 ignored (27 new = 13 RED / 14 GREEN, plus the unchanged 42 native positives).
+Strict scoped Clippy, rustfmt and diff-check pass. The same Prepare/capacity
+suffixes remain gated; no added control claims the missing provider or shared
+Session hooks execute at this base.

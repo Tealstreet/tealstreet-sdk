@@ -21,6 +21,12 @@ impl Venue for WfProbe {
     fn capabilities(&self) -> Capabilities {
         self.venue.capabilities()
     }
+    fn cancel_needs_stored_order(&self) -> bool {
+        self.venue.cancel_needs_stored_order()
+    }
+    fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.venue.on_public_feed(cx)
+    }
     fn guard_pending_placements(&self) -> bool {
         self.venue.guard_pending_placements()
     }
@@ -407,13 +413,29 @@ fn wf_fifo_wake_from_another_commands_data_prepares_the_new_owner() {
 #[test]
 fn wf_unclaimed_create_data_cannot_finish_the_command() {
     let mut e = boot();
-    let raw = http(command(&mut e, wf_place(WF_OWNER)), "create_order");
-    let a = wf_reply_at(&mut e, NOW + 5., &raw, 200, r#"{"r":{"oi":"0x00"}}"#);
+    let actions = wf_command(&mut e, wf_place(WF_OWNER));
+    // Native raw compatibility is only reply ingress; a managed request is
+    // inspected directly without preparing, binding or claiming it.
+    let request = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("create_order") => Some(r.clone()),
+            Action::ManagedHttp(a) => match &**a {
+                HttpAction::Prepare { request, .. } if request.url.ends_with("create_order") => {
+                    Some(request.clone())
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("native raw or genuinely unclaimed managed request");
+    let a = wf_reply_at(&mut e, NOW + 5., &request, 200, r#"{"r":{"oi":"0x00"}}"#);
     assert!(
         wf_results(&a, WF_OWNER).is_empty(),
-        "a raw reply without managed claim grants no command completion"
+        "unclaimed DATA grants no command completion"
     );
 }
+
 #[test]
 fn wf_new_call_bound_is_twenty_seconds_from_admission() {
     let mut e = boot();
@@ -537,7 +559,14 @@ fn wf_status_case(status: u16, code: u32) {
     let a = reply(&mut e, &original, status, &text);
     if code != 1000 {
         assert_eq!(wf_results(&a, WF_OWNER).len(), 1);
-        assert!(wf_results(&a, WF_OWNER)[0].is_err());
+        assert_eq!(
+            wf_results(&a, WF_OWNER)[0].as_ref().unwrap_err().outcome,
+            Some(if status < 500 {
+                Outcome::Rejected
+            } else {
+                Outcome::Unknown
+            })
+        );
         assert!(!a.iter().any(|a| matches!(a,Action::Http(r) if r.url.ends_with("auth/api_key/login") || r.url.ends_with("create_order"))));
         return;
     }
@@ -566,7 +595,14 @@ fn wf_status_case(status: u16, code: u32) {
     );
     let a = reply(&mut e, &resent, status, &text);
     assert_eq!(wf_results(&a, WF_OWNER).len(), 1);
-    assert!(wf_results(&a, WF_OWNER)[0].is_err());
+    assert_eq!(
+        wf_results(&a, WF_OWNER)[0].as_ref().unwrap_err().outcome,
+        Some(if status < 500 {
+            Outcome::Rejected
+        } else {
+            Outcome::Unknown
+        })
+    );
     assert!(!a.iter().any(|a| matches!(a,Action::Http(r) if r.url.ends_with("auth/api_key/login") || r.url.ends_with("create_order"))));
 }
 macro_rules! wf_status_control {
@@ -750,4 +786,97 @@ fn wf_native_unanswered_mutation_is_unknown_and_never_resent() {
         Some(Outcome::Unknown)
     );
     assert!(!a.iter().any(|a| matches!(a,Action::Http(r) if r.url.ends_with("auth/api_key/login") || r.url.ends_with("create_order"))));
+}
+
+fn wf_unparsed_status(status: u16) {
+    let mut e = boot();
+    let r = http(command(&mut e, wf_place(WF_OWNER)), "create_order");
+    let a = reply(&mut e, &r, status, "unparsed upstream response");
+    let outcomes = wf_results(&a, WF_OWNER);
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(
+        outcomes[0].as_ref().unwrap_err().outcome,
+        Some(Outcome::Unknown)
+    );
+    assert!(!a.iter().any(|a| matches!(a,Action::Http(r) if r.url.ends_with("auth/api_key/login") || r.url.ends_with("create_order"))));
+}
+#[test]
+fn wf_unparsed_408_is_unknown_without_resend() {
+    wf_unparsed_status(408);
+}
+#[test]
+fn wf_unparsed_503_is_unknown_without_resend() {
+    wf_unparsed_status(503);
+}
+#[test]
+fn wf_native_auth_resend_does_not_reset_spent_network_budget() {
+    let mut e = boot();
+    seed(&mut e);
+    let mut request = http(
+        command(
+            &mut e,
+            Command::AmendOrder {
+                command: WF_OWNER,
+                id: "42".into(),
+                price: Some(110.),
+                amount: None,
+            },
+        ),
+        "/order",
+    );
+    for n in 0..5 {
+        let now = NOW + 5. + f64::from(n);
+        e.handle(
+            now,
+            Event::HttpFailed {
+                request: request.id,
+                error: "network unavailable",
+            },
+        );
+        let a = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+        assert!(wf_results(&a, WF_OWNER).is_empty());
+        request = http(a, "/order");
+    }
+    e.handle(
+        NOW + 10.,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 408,
+                headers: "",
+                body: r#"{"c":1000,"m":"session expired"}"#,
+            },
+        },
+    );
+    let login = http(
+        safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 10.),
+        "auth/api_key/login",
+    );
+    e.handle(
+        NOW + 11.,
+        Event::HttpResponse {
+            request: login.id,
+            response: Response {
+                status: 200,
+                headers: "Set-Cookie: gravity=renewed; Path=/\nX-Grvt-Account-Id: rotated",
+                body: r#"{"sub_account_id":"9007199254740993"}"#,
+            },
+        },
+    );
+    let resent = http(
+        safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 11.),
+        "/order",
+    );
+    assert_eq!(resent.body, request.body);
+    e.handle(
+        NOW + 12.,
+        Event::HttpFailed {
+            request: resent.id,
+            error: "network unavailable",
+        },
+    );
+    let a = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(wf_results(&a, WF_OWNER).len(), 1);
+    assert!(wf_results(&a, WF_OWNER)[0].is_err());
+    assert!(!a.iter().any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/order") || r.url.ends_with("auth/api_key/login"))));
 }
