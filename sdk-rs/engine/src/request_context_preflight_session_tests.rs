@@ -600,3 +600,82 @@ fn parking_in_preflight_ready_custody_is_progress() {
     };
     assert_eq!(pending, 4);
 }
+
+/// N7 cap (codex-zs5e83 review): a read resumed before the caller's receipt
+/// cap keeps that cap. Its window ends at the cap, so a claim after it cannot
+/// release, and the original receipt still bounds the command.
+#[test]
+fn a_resumed_capped_read_cannot_release_after_the_receipt_cap() {
+    let (mut e, session, _) = parked(
+        Reads {
+            capped: true,
+            ..Default::default()
+        },
+        1_000,
+    );
+    let handle = e.venue.preflight.clone().unwrap();
+    let cap =
+        e.io.request_contexts
+            .preflight_receipt_cap(&handle)
+            .unwrap()
+            .unwrap()
+            .1;
+    let mut cx = cx(&mut e, cap - 1.);
+    let Some(Waiter::Ready(read, _)) = cx.session_ready(&session).into_iter().next() else {
+        panic!("resume while the original cap is live");
+    };
+    assert!(
+        read.deadline() <= cap,
+        "the resumed read keeps the receipt cap"
+    );
+    queue(&mut cx, read).unwrap();
+    let issued = prepares(&e.drain_actions().collect::<Vec<_>>());
+    assert_eq!(issued.len(), 1);
+    e.http_prepared(
+        cap + 1.,
+        issued[0],
+        Prepared {
+            id: issued[0].attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let permit = e.drain_actions().find_map(|a| match a {
+        Action::ManagedHttp(a) => match *a {
+            HttpAction::Bind { permit, .. } => Some(permit),
+            _ => None,
+        },
+        _ => None,
+    });
+    if let Some(permit) = permit {
+        assert!(
+            !matches!(e.claim_http(cap + 1., permit), Ok(Claim::Released(_))),
+            "no release after the original caller receipt"
+        );
+    }
+}
+
+/// N7 cap, without a park: a capped Preflight's ordinary read is bounded by
+/// the same receipt. An uncapped Preflight keeps its declared window.
+#[test]
+fn a_capped_preflight_read_window_ends_at_the_receipt_cap() {
+    for capped in [true, false] {
+        let mut e = engine(Reads {
+            capped,
+            ..Default::default()
+        });
+        command(&mut e, 0., 1_000);
+        let read = e.venue.read.clone().unwrap();
+        if capped {
+            let handle = e.venue.preflight.clone().unwrap();
+            let cap =
+                e.io.request_contexts
+                    .preflight_receipt_cap(&handle)
+                    .unwrap()
+                    .unwrap()
+                    .1;
+            assert!(read.deadline() <= cap);
+        } else {
+            assert!(read.deadline() > 1_000., "the declared 2 x 20 s window");
+        }
+    }
+}

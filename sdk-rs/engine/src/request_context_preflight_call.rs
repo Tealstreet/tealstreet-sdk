@@ -64,6 +64,12 @@ impl State {
         Ok(())
     }
 
+    /// A read never outlives the caller's original receipt, however late it
+    /// is issued (including at a Session resume).
+    pub(super) fn read_bound(&self) -> f64 {
+        self.receipt_cap.map_or(f64::MAX, |(_, cap)| cap)
+    }
+
     pub(super) fn admits_handoff(&self, delivery: Option<&Delivery>) -> bool {
         delivery == self.handoff.as_ref()
     }
@@ -612,7 +618,7 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Invalid);
         }
-        let window = terms.window(self.now, f64::MAX)?;
+        let window = terms.window(self.now, state.read_bound())?;
         Context::new(
             handle.owner(),
             1,
@@ -634,7 +640,12 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         terms: CallTerms,
     ) -> Result<Context, Error> {
-        let window = terms.window(self.now, f64::MAX)?;
+        let bound = self
+            .io
+            .request_contexts
+            .preflight_state(handle)?
+            .read_bound();
+        let window = terms.window(self.now, bound)?;
         self.io.request_contexts.prune(self.now);
         if self.io.request_contexts.contexts.len() + self.io.request_contexts.reserved_contexts
             >= CAPACITY
