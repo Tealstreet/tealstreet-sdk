@@ -857,9 +857,10 @@ fn streaming_descriptor_registers_rows_on_the_same_native_pending_and_context() 
     );
 }
 
-/// R1 (#1992): a read issued under the delivered command's own scope (not an
-/// entry root) carries the Selection's slot, identity and egress, and its
-/// queued request is tagged with the Selection's account evidence.
+/// R1 (#1992): a read issued from `on_command` under that command's
+/// `Scope::Command(id)` (not an entry root) carries the Selection's slot,
+/// identity and routing intent. Evidence tagging stays covered by the existing
+/// `queue` controls; this test does not assert it.
 #[test]
 fn scoped_read_issues_under_the_command_with_the_selections_slot_and_evidence() {
     for (secondary, slot) in [
