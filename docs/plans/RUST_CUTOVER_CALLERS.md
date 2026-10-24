@@ -7322,3 +7322,18 @@ field; its native message and absent kind remain. Read failures carry no money
 outcome. Physical login, valid candle/trade scheduling, queues, credentials and
 financial reducers retain their existing behavior. These immediate results
 introduce no successful keyless Mutation or LocalSetting path.
+
+
+### Orderly unsupported order controls
+
+Only the first trading.rs field-presence rejection for PlaceOrders containing
+Bybit BBO or TickSize controls now consumes genuine Mutation entry and finishes
+through fail_context. Finite valid entry preserves the exact native Unsupported
+message and NotSent outcome with no Store/queue/IO effects; unstamped/expired
+entry uses shared rejection, and capacity failure has no numeric fallback.
+Retained PlaceOrders passed this predicate unchanged, and push_front only adds
+CancelSymbolOrders, so this branch cannot borrow a dequeued job's entry. Later
+account, queue-full, planning, supersession and job-terminal paths are outside
+this slice. Signing/selection/nonce and accepted write/reconciliation behavior
+remain unchanged. Inventory shrinks1F/1O: base28F29O to27F28O, or after the
+separate #2051 history landing,25F26O to24F25O.
