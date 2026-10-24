@@ -314,7 +314,12 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     let read_status = options.read_credentials.as_ref().map(|read| {
         safe_cex_venue_backpack::sign::validate_read_credentials(read.validate(), &read.secret)
     });
-    if options.public_data_only {
+    // Declared PublicRead keeps a valid read key signing in public-only mode,
+    // with no primary ever built or probed (docs/plans/RUST_BACKPACK_PUBLIC_READ_PROVIDER.md).
+    // Backpack's own provider (dual custody) applies the one shared rule.
+    let read_policy = construction::read_credentials_policy("backpack");
+    let primary_allowed = !public_read_excludes_primary(read_policy, options.public_data_only);
+    if options.public_data_only && read_policy != construction::ReadCredentialsPolicy::PublicRead {
         return Ok(BackpackSignerSetup {
             provider: None,
             identities: Identities::default(),
@@ -323,12 +328,15 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     }
     let undecodable = || invalid("Invalid Backpack base64 seed");
     let wrong_width = || invalid("Backpack Ed25519 seed must be 32 bytes");
-    let primary = (present(&options.key) && present(&options.secret)).then(|| LocalIdentity {
-        key: Secret::new(options.key.clone().unwrap_or_default()),
-        secret: Secret::new(options.secret.clone().unwrap_or_default()),
-        secret_encoding: KeyEncoding::Base64,
-        ..Default::default()
-    });
+    let primary =
+        (primary_allowed && present(&options.key) && present(&options.secret)).then(|| {
+            LocalIdentity {
+                key: Secret::new(options.key.clone().unwrap_or_default()),
+                secret: Secret::new(options.secret.clone().unwrap_or_default()),
+                secret_encoding: KeyEncoding::Base64,
+                ..Default::default()
+            }
+        });
     let secondary = options
         .read_credentials
         .as_ref()
@@ -757,8 +765,7 @@ fn prepare_local_signer_with_policy(
         };
     use construction::ReadCredentialsPolicy;
     // A public-only PublicRead provider holds no primary, so only Read roles select.
-    let primary =
-        primary.filter(|_| !(public_data_only && read_policy == ReadCredentialsPolicy::PublicRead));
+    let primary = primary.filter(|_| !public_read_excludes_primary(read_policy, public_data_only));
     // Trusted setup computes the result; a caller-supplied one is refused, with
     // any read material wiped first.
     if read_policy == ReadCredentialsPolicy::ValidateOnly
@@ -985,6 +992,16 @@ pub fn build<T: Visit>(
 
 /// The validation result travels only for a ValidateOnly family, never with
 /// the material, and a false result keeps the native construction refusal.
+/// The one PublicRead rule for every provider builder: a public-only provider
+/// for such a family never holds, builds or probes a primary.
+#[cfg(any(feature = "dispatch-signing", feature = "backpack"))]
+fn public_read_excludes_primary(
+    policy: construction::ReadCredentialsPolicy,
+    public_data_only: bool,
+) -> bool {
+    public_data_only && policy == construction::ReadCredentialsPolicy::PublicRead
+}
+
 /// Host-side setup (the WASM constructor's JSON provider setup) runs this before
 /// building a provider, so a false read-key result keeps native precedence over
 /// any primary decode failure.
@@ -2435,3 +2452,7 @@ mod tests {
 #[cfg(test)]
 #[path = "read_key_policy_tests.rs"]
 mod read_key_policy_tests;
+
+#[cfg(all(test, feature = "backpack"))]
+#[path = "backpack_public_read_tests.rs"]
+mod backpack_public_read_tests;
