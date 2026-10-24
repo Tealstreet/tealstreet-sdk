@@ -1,6 +1,8 @@
 //! BloFin linear perpetuals on the sans-I/O engine.
 mod account;
 mod closed;
+#[path = "sign/dispatch.rs"]
+pub mod dispatch_signing;
 mod history;
 mod sign;
 mod trading;

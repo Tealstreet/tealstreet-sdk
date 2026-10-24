@@ -209,3 +209,47 @@ Logs: `/tmp/codex-blofin-hmac-reviewed-original.log` and
 `/tmp/codex-blofin-hmac-reviewed-strict.log`. Production and every prior fixture,
 Cargo, map and checker remain exact the base; this is still local plan/original
 evidence, not a recipe implementation or a consumer source approval.
+
+## Reviewed recipe component and joint consumer composition
+
+After the corrected originals received recipe, custody and native CLEARs, the
+HTTP component reuses the handed-off `2d1cb21ea0b` implementation at its original
+`src/sign/dispatch.rs` path. The private WS Login prototype remains outside this
+component; no socket consumer is changed. The public module export is the sole
+change to the existing lib; every native sender/reducer/signing primitive and
+all sixteen original controls remain byte-exact.
+
+The consumer API is `dispatch_signing::Http::new(identity, testnet, method,
+path_query, body)` with `unsigned()` returning URL/headers/body. The recipe pins
+the native selected live/demo origin and exact unsigned method/path/query/body,
+Content-Type and absence of signer headers at both prepare and apply. It rejects
+provider callback headers, invalid presented header text and wrong receipt/count
+or MAC length. Prepared nonce/stamp state is consumed once by apply and has no
+Debug implementation. Identity and passphrase selection remain exclusively the
+caller's existing canonical selection; no provider arm or raw bridge is added.
+
+The new managed component target drives actual Prepare, route resources, external
+Sign, Bind and final Claim; its thirteen controls pass. Both selected slots and
+both native origins preserve exact preimage operations, wire headers and
+independent HMAC literals. An installed counting parked provider proves no work
+before route readiness or after entropy failure. The target covers missing
+refs, prepare/apply intent mutation, invalid provider output, typed refusal,
+late preparation, delayed provider/Claim, route expiry and protocol-clock
+re-preparation. Re-preparation retains the physical attempt and original 20s
+bound while renewing nonce/stamp. The initial clock control assumed immediate
+Sign rather than the required Cancel/Prepare; the route-expiry control initially
+expected re-preparation before final Claim. Both controls now explicitly drive
+the actual shared handshake without changing runtime or weakening release
+assertions. Scoped strict Clippy passes after fixing clone-on-Copy in the new
+fixture. Normal bans initially detect newer incoming Backpack/WEEX removals;
+carry the actual landing and rerun before handoff, without a ratchet override.
+
+Overseer ruling: one joint PR. The reviewed recipe checkpoint is the base;
+claude-55ao7t appends the three-site FetchLeverage consumer split on this branch,
+preserving exact Secondary-or-Primary GET/passphrase selection and native gate
+precedence. The six original consumer REDs stay unignored until that caller
+adopts the recipe; they are not claimed green by this component. The branch/PR
+owner is codex-5c57jl, and 55ao7t may push its consumer commits here. Final signer
+review is claude-4yjlw0 and selection review is claude-m26ps4. No recipe-only PR
+or CI push with knowingly failing native originals is made.
+
