@@ -8162,3 +8162,35 @@ failed call is never resent. Coupled jobs, including leverage, remain strict.
 This declaration does not grant DATA or erase failure evidence: all-failed jobs
 fail, partial jobs retain accepted IDs, and the original Plan root still wins
 at expiry before the native final20ms timer. Read Plans do not opt in.
+
+
+
+
+
+## Shared metadata/settings owner: WEEX and BingX
+
+BingX same-symbol metadata calls at the same eligible settings revision share
+one leverage read followed by one margin read, retaining each command's native
+result or typed failure. Later sequential calls remain fresh. Settings writes,
+changed eligibility and background settings proposals invalidate stale Store
+publication independently of native financial position fences. A read admitted
+during a pending write cannot become publishing merely because that write ends.
+
+WEEX background settings proposals use the shared Store observation and write
+fences, including last-valid duplicate configuration handling. Explicit WEEX
+leverage reads retain the incoming managed Context path and native
+`settings_revision` fence: each command issues its own symbol configuration
+read. They do not join the shared metadata query owner. Their native codec,
+credential selection, retry policy, typed completion and cache update order stay
+with that managed adapter.
+
+Store metadata tokens and background observations bind to the Store issuer;
+foreign, default or exhausted authority cannot publish. These settings fences
+provide no HTTP delivery, observer or command completion authority. BingX's
+joined commands now receive the shared Plan's uniform result or typed failure,
+once per surviving observer. Each observer can expire or detach independently;
+a live peer retains the physical work, while the last observer leaving revokes
+its unsent work and publication authority. Store contains no numeric command
+waiter list or terminal fan-out. Callers retain native fallback and error
+handling; no numeric fallback stands in for managed completion.
+See [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md).
