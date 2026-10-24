@@ -6729,3 +6729,9 @@ stale cycle/seed deliveries have no snapshot or credential-auth side effects;
 No command completion, metadata group, history or trading policy is changed.
 The remaining legacy shared signing helper and STAGING entry stay for their
 other callers; this semantic caller conversion has zero lexical inventory delta.
+
+### Bybit cancel by symbol-qualified refs
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| `cancelOrdersWithSymbols` on any Bybit variant | Typed `NotSent` `unsupported` before any request (was accepted and never finished) | Use `cancelOrders` with order ids. |
