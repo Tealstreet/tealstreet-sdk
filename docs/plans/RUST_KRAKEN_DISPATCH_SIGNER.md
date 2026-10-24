@@ -1,0 +1,174 @@
+# Kraken Futures and Spot dispatch-signer custody
+
+Plan-first base: actual9a757d406b8, branch
+feat/rust-kraken-dispatch-signer-plan. Claude-ddi2il approved ONE combined
+Futures+Spot plan/original slice; production waits actual combo5b and reviewed
+nonce/session fit. HMAC reviewer: claude-4yjlw0. Credential/selection reviewer:
+claude-m26ps4. Preserve1876 write-plan/tests and1798 Spot book/CRC32. No source,
+checker, inventory, key-selection or5b composition in this checkpoint.
+
+## Scope, counts and source-order holds
+
+Three actual REST send funnels are relevant: Futures account.rs signed_request
+cx.request and signed_streamed cx.request_streamed_body (two occurrences), plus
+Spot account.rs send_private cx.request (one). Full custody cutover must include
+both product constructions, Futures private WS challenge/subscription signing,
+and Spot's signed token acquisition. One family signing-ratchet flip cannot
+leave a second raw product behind. Do not hide raw callers with a renamed funnel.
+
+The request checker freezes family27 occurrences: account2, history6, lib4,
+secondary_tests4, spot/account4, spot/trading2, trading5. Pending2058 owns four
+lib candle sites, and PublicTrades owns one history send. There are three actual
+private send sites, NOT every lexical macro in these files. Eventual removal of
+all three raw funnels would mean27->24 in this baseline, or22->19 after the two
+public slices, but no prune is claimed or guaranteed by plan/recipe tests. A
+staged issuer row or any other bootstrap needs the exact source-derived before/
+after map and explicit claude-ddi2il grant BEFORE editing that row. No inventory
+growth or local credential fallback is implied by this scope approval.
+
+Separate signing inventory is29 occurrences: Futures lib13, secondary_tests10,
+Spot account1, Spot mod5. Migrating the family also exposes sign.rs (currently
+excluded): nine additional lines/eight fingerprints. All material-owning
+production sites must move to provider/opaque Identity; test oracles stay outside
+production and keep every native assertion. No signing/credential ratchet edit
+until the actual source and exact native/ref inventory are reviewed.
+
+Open source collisions checked from the fleet map:1876 owns only
+RUST_KRAKEN_REQUEST_CONTEXT.md, spot_write_adoption_red.rs and trading.rs tests;
+1798 owns Spot book.rs/spot_book_crc32.rs. Keep those untouched.2058 owns Futures
+lib candle hooks and the secondary probe carry; PublicTrades owns unsigned
+history. Later signer work genuinely integrates those actual landings, preserving
+both public paths. Old ownership text naming19pt8s is stale:19 confirmed no
+Kraken source/nonce claim and routes HMAC to the assigned reviewer.5c57jl legacy
+claim check remains to be reconciled before production; the overseer owns scope.
+
+## Native Futures bytes and slot policy
+
+Decode signing secrets as native nonempty base64 only in trusted setup. No
+ambient/venue secret holder, material getter, Debug leak or signing fallback.
+Ordinary GET selects Secondary when read_signer exists, except /api/history/
+reads select Primary. Mutations use Primary. Streaming /api/history/ also pins
+Primary egress. Preserve the actual path exception independently from method;
+selection is declared once with trusted Identity and egress, not reselected by a
+recipe or response. Missing/read-invalid/public-only precedence remains native.
+
+Futures form() sorts keys and uses its existing RFC1738-style codec: spaces '+',
+literal parentheses, UTF-8 percent bytes. For a GET append exactly that form to
+wire path, with no body; non-GET body is the exact form. Strip /derivatives only
+from the canonical signing path; accept native /api/v3/ and /api/history/ paths,
+reject query-bearing/unsupported signing paths. Preimage is
+encodedForm + nonceDigits + canonicalPath. SHA256 that exact byte sequence, then
+HMAC-SHA512 under the selected decoded secret and base64 the MAC. No API key is
+part of this MAC preimage.
+
+One atomic batch presents the selected API key, computes the public digest and
+signs the raw digest (chained Result/Raw), with receipt/header attestation. Preserve
+header order APIKey, Authent, Nonce, Content-Type(form-urlencoded). Reject foreign
+receipt/headers/value-count/shape, bad MAC length, non-UTF8 or CR/LF presentation.
+No signed header/body can be replayed through a new release/owner/generation.
+
+## Native Spot bytes and slots
+
+Spot is PRIMARY-only, including Balance/OpenOrders/GetWebSocketsToken and writes.
+The native Spot options may contain a read key but its private path never selects
+it. Preserve form input order and RFC3986 escaping; append nonce LAST before
+encoding. Body is the exact form, including that same nonce. Digest is
+SHA256(nonceDigits + exactFormBody); MAC is HMAC-SHA512(secret, pathBytes + rawDigest).
+Only /0/private/ paths without '?' are accepted. Preserve API-Key, API-Sign,
+Content-Type(form-urlencoded), Accept(application/json) header order and20s
+request timeout. Do not substitute the sorted Futures form codec.
+
+The same opaque-key/atomic result/attestation/error controls apply, with no raw
+Spot fallback left beneath the family gate. Hosted mode must use the shared
+minimum-material setup for both products; the server receives only the declared
+signing material required by that path. Exact capsule/Present support and lifetime
+need shared owner review; no per-venue server storage or hosted bypass.
+
+## Native nonce contract and OPEN shared prerequisites
+
+Native nonce is max(floor(now_ms)*1000, previous+1), checked u64 arithmetic, decimal
+wire string. The process/WASM-memory shared allocator survives signer recreation,
+fixed/backward clocks and more than1000 sends per millisecond. Separate processes
+or WASM memories require caller deployment coordination; this slice adds no
+network nonce coordinator. Public calls do not allocate a nonce.
+
+Current legacy Signer stores SHA256(decoded secret) as its shared domain key.
+Within one Futures instance, if primary/read API-key strings are equal but
+secrets differ, nonce selection deliberately uses the PRIMARY allocator while
+the read MAC still uses its READ secret. That special case must become trusted
+opaque setup aliasing, not venue material comparison or a secret/key hash. Spot
+uses Primary. Shared fit must explicitly decide cross-product and cross-engine
+same-key identities; do not infer nonce subject from slot/ref spelling or route.
+
+19 verified no dispatch-time nonce API exists on actual1a341: Cx::reserve_nonce
+can run only at queue time, whereas DispatchContext has only stamp/clock/entropy.
+Queue-time reservation cannot claim send-time monotonicity after reversed park/
+resume or re-preparation. Required shared design: a declaration-bound dispatch
+reservation from the trusted selected subject/NonceKey, using the native floor,
+without venue counters, clock allocators or raw material-derived identity. Owner/
+API/immutable review pin is OPEN. This is a shared prerequisite, not venue code.
+
+Trusted setup must supply the reviewed per-API-key stable namespace and alias
+same primary/read keys even with distinct signing secrets; no guessed stable_id,
+secret digest, key hash, runtime fallback or forged issuer/subject proof. G2c
+provenance/retirement, C3 setup and provider boundary owners review the exact
+shape. A key change/engine replacement must not reset a still-valid domain.
+
+Boundary fit also remains OPEN: native nonce accepts finite nonnegative clocks
+up to checked u64/1000, while dispatch receipt stamp validation uses safe integer
+milliseconds. Preserve valid native bytes; any tighter external clock contract
+requires an explicit behavior ruling, never silent clamping. NaN/infinite/
+negative/overflow must refuse before I/O, with no partial raw fallback.
+
+## WS/session contract and held authority work
+
+Futures private open sends a PRIMARY key-only challenge request, then signs
+SHA256(challenge) with HMAC-SHA512 for each private feed subscription. Keep the
+same native challenge field/feed order,15s challenge/auth deadline, native socket
+supervision and ACK behavior. Current cached signed_challenge material must not
+become a credential-bearing replay carrier. Exact engine/session recipe fit is
+OPEN: each re-sign binds the active socket/session generation and current
+challenge; a late result for retired challenge/socket cannot subscribe or publish.
+Do not mint fake command/Read/Session authority to make a WS recipe compile.
+
+Spot authenticates via signed GetWebSocketsToken, then uses that token in
+execution/balance subscription frames; it has no extra WS HMAC login. Preserve
+its token/socket retirement and all native restart/supervision semantics. No
+account refresh, group, queue, snapshot or write-owner conversion is inferred
+from signer custody. Managed signed reads use existing SelectedRead; aggregates,
+backgrounds, writes and sessions require their genuine reviewed issuers and
+original native lifetimes, not a guessed20s logical owner.
+
+Native retries retain budgets and counters; every actual resend is re-prepared
+with a fresh provider batch and dispatch nonce. Provider refusal is pre-send and
+strict, with typed fields preserved. Write outcome remains owner/evidence based:
+no blanketNotSent over earlier effects/IDs and no automatic resend after an
+unknown write.1817 selection and all5b declaration changes are consumed only by
+actual integration after5b, never copied into this plan/test branch.
+
+## Plan/original sequence
+
+Plan commits first. Add a new isolated dispatch_signer_adoption.rs on unchanged
+9a757 without touching1876/1798/2058/PublicTrades files, source or maps. Thin
+recording local/deferred/refusing provider plus real engines: assert signed native
+GET/write/token/challenge work routes through the injected provider before HTTP
+or credential-bearing WS release. Such assertions fail at provider-batch0 on the
+original native signer, not at missing APIs or fixture setup. Keep exact native
+wire/HMAC vectors as independent working controls, not fake provider results.
+
+Pin Futures Primary/Secondary/primary-history and Spot PRIMARY-only selection;
+base64 decoding/refusal, sorted versus ordered forms/Unicode, header order,
+method/body/path attestation, independent HMAC vectors, keyless public unchanged,
+provider refusal/deferred/late generation, and native nonce monotonicity. Include
+same-key/different-secret per-engine and cross-engine cases, signer recreation,
+fixed/backward clock, >1000 sends/ms, and reversed dispatch/reprepare controls.
+If the first genuine Prepare/provider assertion fails, disclose deeper suffixes
+as gated rather than executed. Shared API-only new-contract specs remain distinct
+from compiling native REDs. Do not invent a nonce seam inside the fixture.
+
+No production until actual5b, scope/ownership reconciliation, reviewed nonce/
+session/selection fit, original CLEAR and exact bootstrap grants if needed.
+Then direct custody cutover, independent HMAC+credential/source reviews, scoped
+native/strict checks, draft PR/full CI and actual landing window. Freeze does not
+stop plan/tests. Local cargo is scoped changed crate/target only, jobs4 and one
+build at a time; no workspace/all-feature sweep, WASM/timing or remote changes.
