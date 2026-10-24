@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 mod support;
 use crate::support::FixtureOptions as Options;
-use crate::support::{MARKET, TICKER, actions, envelope, prepared};
+use crate::support::{MARKET, TICKER, envelope, prepared};
 use safe_cex_engine::{Action, Command, Engine, Event, Method, Notice, Query, Response};
 use safe_cex_venue_okx::Okx;
 use serde::Deserialize;
@@ -133,7 +133,7 @@ fn complete(
             },
         },
     );
-    done(actions(e))
+    done(prepared(e, 1_710_000_000_101.0))
 }
 fn done(out: Vec<Action>) -> Result<Lookup, String> {
     assert!(
@@ -337,7 +337,7 @@ fn transport_failure_is_never_a_definitive_miss() {
             error: "OKX 51603: spoofed transport text",
         },
     );
-    assert!(done(actions(&mut e)).is_err());
+    assert!(done(prepared(&mut e, 1_710_000_000_101.0)).is_err());
     assert_eq!(before, e.snapshot_frame(42.0));
 }
 
@@ -472,7 +472,7 @@ fn secondary_account_cache_never_answers_primary_lookup() {
                         error: "network unavailable",
                     },
                 );
-                done(actions(&mut e))
+                done(prepared(&mut e, 1_710_000_000_101.0))
             }
         };
         match outcome {

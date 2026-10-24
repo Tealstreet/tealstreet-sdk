@@ -8,6 +8,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
+use safe_cex_engine::request_context::{Operation as HttpOperation, Policy, RetryPolicy};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, OrderIdentityKind, OrderIdentityReceipt, Outcome,
@@ -463,6 +464,18 @@ fn place_operations(
     Ok(operations)
 }
 
+fn local_refusal(cx: &mut Cx<'_, Pending>, operation: HttpOperation, error: VenueError) {
+    if let Ok(context) = cx.admit_http_command(Policy {
+        operation,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }) {
+        let _ = cx.fail_context(&context, error);
+    }
+}
+
 impl Trading {
     pub fn command(
         &mut self,
@@ -471,14 +484,22 @@ impl Trading {
         command: Command,
         price_bands: &HashMap<String, f64>,
     ) -> bool {
-        if let Command::CancelOrdersWithSymbols { command, .. }
-        | Command::FetchStpMode { command }
-        | Command::SetStpMode { command, .. }
-        | Command::FetchAccount { command }
-        | Command::FetchOrderBook { command, .. } = &command
+        let local_operation = match &command {
+            Command::FetchStpMode { .. }
+            | Command::FetchAccount { .. }
+            | Command::FetchOrderBook { .. }
+            | Command::FetchLeverage { .. } => HttpOperation::Read,
+            _ => HttpOperation::Mutation,
+        };
+        if let Command::CancelOrdersWithSymbols { .. }
+        | Command::FetchStpMode { .. }
+        | Command::SetStpMode { .. }
+        | Command::FetchAccount { .. }
+        | Command::FetchOrderBook { .. } = &command
         {
-            cx.fail(
-                *command,
+            local_refusal(
+                cx,
+                local_operation,
                 not_sent("This query or control is not supported by Paradex")
                     .kind(ErrorKind::Unsupported),
             );
@@ -643,32 +664,28 @@ impl Trading {
                 })();
                 (command, result, false, false)
             }
-            Command::SetMarginType {
-                command, isolated, ..
-            } => {
+            Command::SetMarginType { isolated, .. } => {
                 if isolated {
-                    cx.fail(
-                        command,
+                    local_refusal(
+                        cx,
+                        HttpOperation::Mutation,
                         not_sent("Paradex isolated account routing is unsupported")
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.done(command, "[]".into());
+                    let _ = cx.done_local_setting("[]".into(), |_| {});
                 }
                 return true;
             }
-            Command::SetPositionMode {
-                command,
-                hedged,
-                symbol: _,
-            } => {
+            Command::SetPositionMode { hedged, .. } => {
                 if hedged {
-                    cx.fail(
-                        command,
+                    local_refusal(
+                        cx,
+                        HttpOperation::Mutation,
                         not_sent("Paradex supports one-way mode only").kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.done(command, "[]".into());
+                    let _ = cx.done_local_setting("[]".into(), |_| {});
                 }
                 return true;
             }
@@ -686,8 +703,9 @@ impl Trading {
             _ => return false,
         };
         if account.credentials().is_none() {
-            cx.fail(
-                command,
+            local_refusal(
+                cx,
+                local_operation,
                 not_sent("Paradex private account is not initialized"),
             );
             return true;
