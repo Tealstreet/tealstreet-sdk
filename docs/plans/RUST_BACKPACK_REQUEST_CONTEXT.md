@@ -824,3 +824,21 @@ These tests target absent provider composition, not an absent API compile
 failure. Review the exact registry hunk with m26ps4 and the full identity
 composition with hcmq3f before applying runtime changes. No provider/runtime
 change or selection/inventory prune belongs to this plan checkpoint.
+
+Registry original checkpoint50f6f5a550b executes7 controls:5GREEN and two
+assertion REDs at the missing secondary Identity, zero ignored. The exact
+provider Present/signature assertions after that first failure remain gated.
+Plan c2ab precedes these tests; runtime is unchanged. Existing primary RFC
+signature/setup refusal/public/keyless cases pass, along with public-only read
+configuration and malformed-secondary primary preservation controls.
+
+Registry owner m26ps4 accepted the direction with exact-source gates: validate
+secondary base64/32-byte width standalone before adding it to LocalSetup (one
+bad slot otherwise refuses the whole signer); defer malformed-secondary native
+errors as stored Option<Result<(), &'static str>>, without dropping/refusing
+primary. Install only complete non-public secondary material, allow a genuine
+secondary-only provider, and use SlotPolicy::default(). Add an empty-read-key
+working control and pin Primary write selection/provider output in dual setup.
+No stable_id or nonce domain is introduced. LocalIdentity Secret copies remain
+zeroizing; no third durable raw credential copy. Review the precise registry
+hunk before apply; if1990/2033 land first, recompose their signer setup policy.
