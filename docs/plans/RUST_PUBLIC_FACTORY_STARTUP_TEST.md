@@ -53,3 +53,28 @@ The only changed assertion is the diagnostic's configured numeric duration.
 5. Send the exact small test delta and immutable preservation receipt to the
    same reviewer; push only a frozen candidate as a separate draft PR, with
    its one PR-triggered Rust run. Follow the auditor's landing slot ordering.
+
+## Implemented checkpoint
+
+uufub4 cleared plan 209c6cfa595 and independently reconstructed exact preview
+SHA256 e640befcfcd24ad4c567b4a74c2ab18f8479a62d7ca0cfbab65ca18e50baa8b5.
+The applied test is byte-exact to that preview, SHA256
+78667013803656fe162ef62ed75f6a3ae4562619bd8557392141fca9228c9244.
+Formatting leaves exactly the three approved line changes. Every held-request,
+abort, engine and metadata assertion is retained; only the diagnostic's configured
+numeric duration changes. Production, other tests, workflows and profiles are
+untouched.
+
+The unchanged original native file passed 11/11 locally: a working control,
+not a deterministic reproduction of the CI flake. After the correction, the same
+retained CI artifact passes 11/11 native tests and the ordinary factory unit
+file passes 18/18. Explicit changed-file ESLint and Prettier checks pass, as does
+the scoped safe-cex-server TypeScript check. No Cargo or WASM build was run.
+
+The retained artifact is ci-wasm-binance ID 12571423778 from Rust run 40121997239;
+its build.json pins producer source 70bf19ff47e3788b5eab85994f84f70dabc3ff2f
+and WASM SHA256 ceb24d803b28cc26575dcbed4fbde3997498560106f47b54d1dab6d72bcf3f6f.
+This is fixture verification against that exact producer, not a new current-head
+compiled-artifact claim. The temporary overlay restored this lane's generated
+Node package byte-exact afterward. Fresh PR CI owns the final composed build.
+Final committed-source review and the auditor's landing order remain gates.
