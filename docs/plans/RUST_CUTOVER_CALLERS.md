@@ -7028,8 +7028,12 @@ retry, whereas malformed rows in a valid array reject the whole page.
 Native retry counts remain exact: three released transport retries with 1000ms
 waits; the legacy 40101 hint caps at one retry, including code40001/message40101
 and transport-message40101 collisions. Native code/message fields are carried
-through the shared classifier; the minimum 40101 compatibility predicate is a
-known follow-up requiring a separate caller-policy ruling before removal.
+through the shared classifier. The minimum 40101 compatibility predicate uses
+the original error projection: decoded error fields for a valid envelope, raw
+body text for a missing-list envelope, and the transport message for a host
+failure. It is a known follow-up requiring a separate caller-policy ruling
+before removal. Strict route preparation keeps the shared pre-release NotSent
+attempt fact; released read failures and root expiry have no financial outcome.
 It grants no account-auth evidence or mutation rights. Public 40101 errors
 retain typed/native metadata without changing auth health. Private history,
 signing, account/trading reducers and credential selection are unchanged.

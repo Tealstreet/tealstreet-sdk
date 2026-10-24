@@ -611,6 +611,7 @@ fn public_trades_preparation_refusal_is_strict_and_does_not_retry() {
     assert_eq!(results.len(), 1);
     let error = results[0].as_ref().unwrap_err();
     assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
     assert_eq!(error.message, "fixture route refusal");
     assert!(!actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
     no_send(&actions);
@@ -770,5 +771,38 @@ fn managed_public_trades_auth_metadata_stays_public_without_health_evidence() {
         !actions
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::AccountAuth { .. })))
+    );
+}
+
+fn missing_array_retry_count(response: &str, retries: u32) {
+    let mut e = engine(false);
+    start(&mut e, NOW, 45, None, Some(1));
+    let mut r = packet(&prepared(&mut e, NOW));
+    for attempt in 0..=retries {
+        let now = NOW + f64::from(attempt) * 1001.;
+        reply(&mut e, &r, now + 1., 200, response);
+        let actions: Vec<_> = e.drain_actions().collect();
+        if attempt < retries {
+            assert!(terminals(&actions, 45).is_empty());
+            let due = timer(&actions, now + 1001.);
+            e.handle(now + 1001., Event::TimerFired { timer: due });
+            r = packet(&prepared(&mut e, now + 1001.));
+        } else {
+            let results = terminals(&actions, 45);
+            assert_eq!(results.len(), 1);
+            assert!(results[0].is_err());
+            assert!(!actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+        }
+    }
+}
+#[test]
+fn native_public_trades_raw_missing_array_id_40101_caps_one_retry() {
+    missing_array_retry_count(r#"{"code":40001,"message":"no array","id":40101}"#, 1);
+}
+#[test]
+fn native_public_trades_escaped_missing_array_hint_keeps_three_retries() {
+    missing_array_retry_count(
+        r#"{"code":40001,"message":"\u0034\u0030\u0031\u0030\u0031"}"#,
+        3,
     );
 }

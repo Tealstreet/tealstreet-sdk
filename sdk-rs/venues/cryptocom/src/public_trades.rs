@@ -296,15 +296,9 @@ impl Cryptocom {
         if let Some(leg) = trade.leg.take() {
             let _ = cx.finish_http_context(&leg);
         }
-        // Native compatibility: 40101 text historically caps even transport at
-        // one retry. Remove this minimum check only with a caller policy change.
-        let legacy_session = error
-            .venue_code
-            .as_deref()
-            .into_iter()
-            .chain(error.venue_message.as_deref())
-            .chain(error.venue_code.is_none().then_some(error.message.as_str()))
-            .any(|part| part.contains("40101"));
+        // Keep the legacy projection: missing-list errors include raw JSON,
+        // while valid envelopes render decoded fields. CALLERS tracks removal.
+        let legacy_session = error.message.contains("40101");
         let retry = if legacy_session {
             trade.retries < 1
         } else {

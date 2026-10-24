@@ -248,3 +248,20 @@ before inspecting HTTP; its no-managed-actions assertion remains after actual
 host preparation, and every wire/result assertion is retained. No financial
 assertion was weakened. The extra four managed controls are not original RED
 evidence. Original21 assertion bodies remain exact to the original checkpoint.
+
+
+### Runtime review corrections
+
+Caller review found that selecting only decoded native fields loses a native
+missing-array hint in an unrelated raw field and can alter escaped-message
+behavior. Two added controls pin the exact raw-body/escaped-message retry counts
+on archived unchanged1e245 source; candidate failure evidence and working
+controls are kept separate. The approved minimum compatibility predicate now
+uses the original rendered error input, before classification changes any
+metadata, with typed code/message still preserved by the shared classifier.
+No auth inference or new status/text ladder is introduced.
+
+The preparation-refusal control now asserts the engine's pre-release NotSent
+attempt fact, matching the existing managed candle/depth route controls. This
+is documented in CALLERS; no adapter projection or shared engine change is
+made. Released public read failures/root expiry still have no financial outcome.
