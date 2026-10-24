@@ -1406,3 +1406,27 @@ Focused Hyperliquid+Binance suites pass568 tests/45 targets; the request-context
 checker unit suite passes15. Full inventory provenance awaits the replacement
 #1976 composition carrying current incoming Aster/OKX prunes. Independent source, caller
 and full-map reviews and fresh CI remain required before freezing this consumer.
+
+## OKX history caller-root controls
+
+Revised test-only916a3e65f5a runs15 controls on unchanged OKX production:9 genuine
+assertion REDs and6 native positives, zero ignored. This retains the original
+fourteen-control checkpoint and updates two whole-root expiry expectations to
+the newer strict engine contract; the added parked-root timer assertion pins
+the missing shared tracked-root behavior. Subsequent review counts all correlated
+terminals and forbids owned incompleteness on expiry. The implementation target
+now passes20 controls, adding Primary preparation intent, pre-release versus
+released20s child expiry, typed preparation metadata (query/lookup/public), real
+registry-capacity refusal at paced dequeue with peer preservation, and retired
+pacing/late-data isolation after command-ID reuse.
+
+Existing17 history,8 lookup and5 dispatch-signer controls pass with financial,
+identity, signature and absence assertions retained. Fixtures perform actual
+managed preparation; deferred-provider refusal drives the route-then-sign seam
+explicitly, since the immediate fixture deliberately rejects parked signing.
+History response clocks use their original relative offsets on the command's
+absolute epoch instead of running backward. Primary physical routeNone is checked
+as the host's default primary route, and the dedicated intent control proves the
+same primary egress before signing. Fresh complete native, strict/fmt and inventory
+provenance results are recorded in the plan checkpoint; CI and replacement#1976
+composition remain separate readiness gates.
