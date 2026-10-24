@@ -267,3 +267,188 @@ fn interim_nonce_reserves_monotonically_at_each_preparation_and_methods_must_agr
         "a POST recipe never signs a DELETE"
     );
 }
+
+// Ported from the deleted in-source eager oracle: each runs through the
+// provider and `Recipe` at dispatch.
+
+/// Independent Python hashlib/hmac vectors over the exact native V1 payload,
+/// for two keys, each installed as the primary as the old oracle did. Actual
+/// primary/secondary slot selection is pinned in tests/security.rs.
+#[test]
+fn v1_recipe_matches_independent_hmac_vectors_for_two_keys() {
+    for (key, material, expected) in [
+        (
+            "primary-key",
+            "primary-raw-secret",
+            "29306ee689ad7468724aa8f72aed3a3bb507291d3c577faa91fda70fcf7cb3c0",
+        ),
+        (
+            "secondary-key",
+            "secondary-raw-secret",
+            "cd0441e53172012534659d4a39a53bd924f19b2c4f35e4f01ca7be577ea7372d",
+        ),
+    ] {
+        let (signer, identity) = provider(key, material, KeyEncoding::Utf8);
+        let path = "/fapi/v1/account";
+        let recipe = Recipe::new(
+            identity,
+            Auth::V1,
+            Method::Get,
+            ORIGIN,
+            path,
+            Query::new().str("symbol", "BTCUSDT"),
+            false,
+        )
+        .unwrap();
+        let http = send(signer, 1_700_000_000_000.0, (Method::Get, path, recipe));
+        assert_eq!(
+            http.url,
+            format!(
+                "{ORIGIN}{path}?symbol=BTCUSDT&recvWindow=20000&timestamp=1700000000000&signature={expected}"
+            ),
+            "{key}"
+        );
+    }
+}
+
+/// Caller-supplied signing fields never reach the wire: the recipe owns them.
+#[test]
+fn recipe_replaces_stale_unsigned_fields() {
+    // A dedicated agent keeps this nonce sequence apart from other tests.
+    let wallet = "91".repeat(32);
+    let agent = safe_cex_crypto::ethereum::private_key_address(&wallet).unwrap();
+    let (signer, identity) = provider(&agent, &wallet, KeyEncoding::Hex);
+    let path = "/fapi/v3/order";
+    let query = Query::new()
+        .str("symbol", "BTCUSDT")
+        .str("signature", "stale")
+        .str("timestamp", "1")
+        .str("recvWindow", "1")
+        .str("user", "stale")
+        .str("signer", "stale")
+        .str("nonce", "1");
+    let recipe = Recipe::new(
+        identity,
+        Auth::V3 {
+            user: "0x0000000000000000000000000000000000000333".into(),
+            signer: agent,
+            nonce: safe_cex_venue_asterdex::sign::interim_nonce(),
+        },
+        Method::Post,
+        ORIGIN,
+        path,
+        query,
+        false,
+    )
+    .unwrap();
+    let http = send(signer, 200.0, (Method::Post, path, recipe));
+    assert!(!http.url.contains("stale"), "{}", http.url);
+    assert!(!http.url.contains("timestamp"), "{}", http.url);
+    assert!(!http.url.contains("recvWindow"), "{}", http.url);
+    assert_eq!(http.url.matches("&signature=").count(), 1);
+    assert_eq!(http.url.matches("nonce=").count(), 1);
+}
+
+/// The nonce scope is the agent, not the owner: two owners sharing one agent
+/// draw one strictly increasing sequence.
+#[test]
+fn owners_sharing_an_agent_share_its_nonce_sequence() {
+    let wallet = "92".repeat(32);
+    let agent = safe_cex_crypto::ethereum::private_key_address(&wallet).unwrap();
+    let nonce_of = |url: &str| -> u64 {
+        url.split("nonce=")
+            .nth(1)
+            .unwrap()
+            .split('&')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let path = "/fapi/v3/account";
+    let mut nonces = vec![];
+    for (owner, now) in [
+        ("0x0000000000000000000000000000000000000111", 1234.0),
+        ("0x0000000000000000000000000000000000000222", 1234.0),
+        ("0x0000000000000000000000000000000000000111", 1233.0),
+    ] {
+        let (signer, identity) = provider(&agent, &wallet, KeyEncoding::Hex);
+        let recipe = Recipe::new(
+            identity,
+            Auth::V3 {
+                user: owner.into(),
+                signer: agent.clone(),
+                nonce: safe_cex_venue_asterdex::sign::interim_nonce(),
+            },
+            Method::Get,
+            ORIGIN,
+            path,
+            Query::new(),
+            false,
+        )
+        .unwrap();
+        nonces.push(nonce_of(
+            &send(signer, now, (Method::Get, path, recipe)).url,
+        ));
+    }
+    assert_eq!(nonces, [1_234_000, 1_234_001, 1_234_002]);
+}
+
+/// Replaces the deleted oracle's non-finite-clock negative
+/// (`validation_nonce_freshness_and_unsigned_fields`): a non-finite dispatch
+/// clock releases nothing through the real dispatcher and provider.
+#[test]
+fn non_finite_dispatch_clock_releases_no_signed_request() {
+    let wallet = "94".repeat(32);
+    let agent = safe_cex_crypto::ethereum::private_key_address(&wallet).unwrap();
+    for (auth, encoding, material) in [
+        (
+            Auth::V1,
+            KeyEncoding::Utf8,
+            "fixture-only-v1-material".to_owned(),
+        ),
+        (
+            Auth::V3 {
+                user: "0x0000000000000000000000000000000000000444".into(),
+                signer: agent.clone(),
+                nonce: safe_cex_venue_asterdex::sign::interim_nonce(),
+            },
+            KeyEncoding::Hex,
+            wallet.clone(),
+        ),
+    ] {
+        for now in [f64::NAN, f64::INFINITY] {
+            let (signer, identity) = provider(&agent, &material, encoding);
+            let path = "/fapi/v3/account";
+            let recipe = Recipe::new(
+                identity,
+                match &auth {
+                    Auth::V1 => Auth::V1,
+                    Auth::V3 { user, signer, .. } => Auth::V3 {
+                        user: user.clone(),
+                        signer: signer.clone(),
+                        nonce: safe_cex_venue_asterdex::sign::interim_nonce(),
+                    },
+                },
+                Method::Get,
+                ORIGIN,
+                path,
+                Query::new(),
+                false,
+            )
+            .unwrap();
+            let mut engine = Engine::new(
+                Issue(vec![(Method::Get, path.into(), Box::new(recipe))]),
+                Some(seeded_entropy(5)),
+            )
+            .unwrap();
+            engine.set_signer(Some(signer)).unwrap();
+            engine.start(now);
+            let actions = prepared_actions(&mut engine, now);
+            assert!(
+                !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                "{now}"
+            );
+        }
+    }
+}

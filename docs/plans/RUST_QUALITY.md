@@ -1722,6 +1722,22 @@ reviews are CLEAR at a9282a7e787. Refreshed scoped suite: 165 tests/16 targets,
 zero ignored; strict all-target Clippy passes. Actual landing integration retains
 all incoming foreign changes and only the discovery singleton inventory prune.
 
+### Kraken Futures candle custody controls
+
+Twenty-eight isolated controls pin command/background Prepare before HTTP, exact
+fractional caller deadline, original-root and live-root child expiry, stuck
+Prepare/Bind under a longer live root, typed metadata and inert late completion,
+second-page strict failure with no prefix/third page, duplicate/clock/capacity
+refusal and exact surviving-peer recovery. Native working controls cover wire,
+codec/default bounds, sorting/duplicates, ten-page/no-progress limits, empty
+success, five-second polling, stale subscription generations and validation
+precedence. All28 and47 unchanged native controls pass; strict/fmt and inventory
+checks are scoped locally, with full workspace/WASM/replay proof delegated to CI.
+
+The CI unit-fixture correction changes only the secondary probe's pending
+constructor fields, preserving every original assertion. Scoped unit tests and
+all-target Clippy now cover this constructor as well as integration targets.
+
 ## KuCoin opaque signer controls
 
 Original native provider assertions failed5/15 with Spot and4/13 without;

@@ -161,3 +161,26 @@ fn signing_refs_without_a_resolved_version_are_refused_not_guessed() {
                 && event.message.contains("resolved API version"))));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
+
+/// Replaces the deleted oracle's validation test: V3 refs with no main
+/// wallet are refused at start with the legacy message, before any I/O.
+#[test]
+fn v3_refs_without_the_main_wallet_are_refused_before_any_request() {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(AsterDex::new(Options {
+        credentials: Some(identity("primary")),
+        api_version: Some(safe_cex_venue_asterdex::sign::Version::V3),
+        signer_address: Some("0x0000000000000000000000000000000000000111".into()),
+        ..Options::default()
+    }));
+    engine
+        .set_signer(Some(Arc::new(Recording::default())))
+        .unwrap();
+    engine.start(0.0);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::CONFIG_INVALID
+                && event.message.starts_with("Missing required Aster v3 auth fields"))));
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+}
