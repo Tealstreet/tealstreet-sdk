@@ -144,7 +144,10 @@ That could send them through public/CORS egress, the leak #1897 closes.
 - **Decision (i):** a Bearer binding implies **Primary egress** on the bound
   context. The binding is itself the proof of privacy, so no fake credential is
   needed.
-  - The bound context's routing intent is Primary from issue onward.
+  - The Context is immutable, and its `routing_intent` is fixed when
+    `http_context` issues it. So Primary is the bound **packet's** prepare
+    intent, never a mutation of the Context. Every derived leg, retry and
+    resend of a bound request inherits the binding (R5).
   - It never resolves to Public or PublicCors.
   - It conflicts with an explicit `PublicCors`/`Direct` egress, which refuses
     `Invalid`.
@@ -223,7 +226,8 @@ Notes:
   reprepared.
 - **R12 (blocker, egress).** A bound keyless request prepares with intent
   Primary, never Public or PublicCors, and an explicit public egress on a bound
-  request refuses `Invalid`.
+  request refuses `Invalid`. An unbound sibling leg of the same root still
+  prepares Public, so the binding never leaks Primary to unbound work.
 - **R13 (released before retire).** A packet released before retire still
   delivers its response to its owner.
 - **R14 (binding scope).** A retained Preflight or Plan owner can bind its own
