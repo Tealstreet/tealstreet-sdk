@@ -30,7 +30,8 @@ pub fn reply_at(e: &mut Engine<TxFlow>, r: &HttpRequest, now: f64, status: u16, 
     );
 }
 pub fn requests(e: &mut Engine<TxFlow>) -> Vec<HttpRequest> {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -64,7 +65,7 @@ pub fn bootstrap_with_meta(
     e.start(NOW);
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, meta);
-    let mut actions = e.drain_actions().collect::<Vec<_>>();
+    let mut actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
     let index = actions
         .iter()
         .position(|a| matches!(a, Action::Http(r) if kind(r) == "activeAssetCtx"))
