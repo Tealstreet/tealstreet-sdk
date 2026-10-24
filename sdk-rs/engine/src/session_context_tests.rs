@@ -34,6 +34,7 @@ struct Probe {
     responses: Vec<(Owner, String)>,
     failures: Vec<Owner>,
     preparation_failures: Vec<(Error, Option<crate::Outcome>)>,
+    grants: Vec<bool>,
     reconciles: usize,
 }
 
@@ -56,6 +57,7 @@ impl Default for Probe {
             responses: vec![],
             failures: vec![],
             preparation_failures: vec![],
+            grants: vec![],
             reconciles: 0,
         }
     }
@@ -140,10 +142,11 @@ impl Venue for Probe {
                 code: crate::classify::NativeCode::Int(-2015),
                 message: "invalid API key",
             };
-            self.facts.push(
-                cx.http_write_failure(&pending.0, table, Some(&native), "refused", None)
-                    .map(drop),
-            );
+            let failure = cx.http_write_failure(&pending.0, table, Some(&native), "refused", None);
+            if let Ok((_, grant)) = &failure {
+                self.grants.push(grant.is_some());
+            }
+            self.facts.push(failure.map(drop));
         } else if pending.0.operation() == Operation::Mutation && session && self.classified {
             self.facts.push(
                 cx.http_write_fact(
@@ -1291,6 +1294,11 @@ fn a_classified_session_refusal_resolves_the_operation_without_a_resend_grant() 
         );
         engine.drain_actions().for_each(drop);
         assert_eq!(engine.venue.facts, [Ok(())]);
+        assert_eq!(
+            engine.venue.grants,
+            [false],
+            "a session write is never resent"
+        );
         assert!(
             with(&mut engine, 4., |cx| cx
                 .session_context(&session, policy(Operation::Mutation)))
