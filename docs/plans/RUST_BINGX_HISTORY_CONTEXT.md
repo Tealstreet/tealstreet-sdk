@@ -1,6 +1,6 @@
 # BingX history paging on the original caller Read root
 
-Status: plan and original compiling assertions; no production conversion.
+Status: production checkpoint under native/bridge review; no landing.
 Source pin: actual `b3688e4c04d`. Owner: codex-cxxyqr, transferred from
 codex-uufub4 by the overseer. Native reviewer: claude-4yjlw0; bridge/API reviewer:
 codex-uufub4. This is a Context-root consumer, independent of #2011 Read Plans.
@@ -191,3 +191,38 @@ ReadHistoryRows owner because BingX must reject truncation only at Finished,
 whereas ReadRangeHistory owns partial-success coverage. A RowsAdmission borrow
 guards native range page/progress and accepted output together. No new shared
 getter, callback or coverage policy is introduced.
+
+## Production checkpoint on actual 90ed853c6cd
+
+The actual landing is plain-merged at `f3767846984` before runtime edits. Remote
+reads now retain one SelectedRead/public original caller root and one
+ReadHistoryRows authority. Request owns its physical ReadLeg/Context and native
+page intent. Delivery gates precede codecs, native pager progress and guarded
+row acceptance; root validation precedes dequeue. Strict reject replaces all
+four numeric terminals. Native one-time signature resend gets a fresh child
+from the same root/selection and drops rejected-attempt staging. The no-Cx hook
+removes exact-owner state. No shared engine or signing-recipe code changes.
+
+All ten original custody assertions pass unchanged. Thirteen added readiness
+controls pass, including Primary fallback, managed page-2/resend counters,
+default/raised receipt walks through page 7, a >120 s completion, fractional
+liveness, physical timer and late-DATA Timeout, reused ID plus live peer,
+provider/route refusal after accepted output, delayed Bind refusal, and genuine
+child-capacity saturation plus peer release/fresh admission. The capacity test
+compares the exact error with the same-harness genuine admission control. This
+is a child-mint capacity test, not a separately injected synchronous queue error.
+
+The native history fixture now drains managed preparation and tracks cleared
+timers/deadlines, firing the earliest live timer. The existing provider-failure
+fixture similarly distinguishes the native 200 ms delay from the root timer
+and keeps later events at that clock. Financial/message expectations remain;
+all twenty original history test bodies and all ten original custody bodies
+are verbatim. Financial codec functions and the local-result helper are
+byte-identical to actual landing.
+
+BingX all-targets: 258 pass, 0 fail, 2 pre-existing ignored paired-metadata
+original REDs (outside this slice, still waiting for #1747/#1919 in this base).
+Strict all-target/all-feature Clippy, fmt and current-base bans/ratchets pass.
+The inventory is exactly four removed history terminal hashes/occurrences;
+all other keys/order and checker/STAGING are unchanged. Source/preservation
+review, fresh CI and BingX CPU/WASM size remain separate readiness gates.
