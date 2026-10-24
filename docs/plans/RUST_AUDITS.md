@@ -2782,3 +2782,15 @@ unchanged. Controls retain genuine pre-auth violations and genuine late private
 errors, propagate final audit exceptions, and reject either caller forgetting
 its final flag. Existing capture-before-memory and performance ordering remain
 covered. No known declaration is removed by this change.
+
+## Hyperliquid perps history managed custody
+
+The perps history adapter now consumes the shared caller-root expiry/refusal
+funnel, ReadCursorHistory admission and exact Context terminals. Children are
+minted only at the native Account FIFO dequeue; reservation weight is charged
+only after managed submission. Root retirement drops exactly the owner's queued
+History continuations, preserving unrelated Account and History work. The engine
+owns deadlines, typed causes and strict root expiry; no venue custody algorithm
+is added. Standalone spot and already-managed cached local lookup stay outside
+this conversion. Exact own shrink:history.rs9F/11O, including five conservative
+macro occurrences; shared Account physical send sites remain counted.
