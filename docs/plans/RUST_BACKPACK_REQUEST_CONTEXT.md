@@ -891,3 +891,20 @@ Store mutation. Combined identity controls execute18:11GREEN/7originalRED,
 installs the real local provider and uses shared Prepare/Bind/Claim; original
 wire assertions stay exact, including request.route None. Managed route choice
 is sealed as RoutingIntent::Secondary, not a fabricated explicit route override.
+
+## Exact shorter caller receipt custody
+
+Full-fit source review of3fa0 identified that CommandWait::Remaining was consumed
+but SelectedRead::command used a fresh fixed20000ms Context; it does not clip
+to the caller receipt. Pin a genuine Engine::handle_command FetchAccount with
+wait37ms, a working response before that bound, rejection after it, and a
+physical timeout no longer than37ms. Do not recreate the receipt, infer a
+remaining/default timeout or label a missing API/compile failure as RED.
+
+Revised direction: SelectedRead::command_root retains the exact issued caller
+root; one ReadLegPolicy20s/Never leg derives from it and clips to its original
+bound without rounding. Keep that actual ReadRoot and ReadLeg together through
+Pending, validate root.validate_delivery on the exact pair before parsing, and
+settle only the retained root. Local refusals remain synchronous/keyless with
+no physical leg. Root/leg source and revised controls require hcmq3f review
+before apply; the prior fixed-context proposal is superseded, not CLEAR.
