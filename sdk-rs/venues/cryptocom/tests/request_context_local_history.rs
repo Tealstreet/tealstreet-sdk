@@ -1,20 +1,22 @@
 //! Synchronous history results still require genuine command-entry custody.
+mod support;
 use safe_cex_engine::request_context::{Error, HttpAction, Preparation};
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, Notice, Query, Response, VenueError,
 };
-use safe_cex_venue_cryptocom::{Cryptocom, Options};
+use safe_cex_venue_cryptocom::Cryptocom;
+use support::fixture::Options;
 
 type TestEngine = Engine<Cryptocom>;
 const NOW: f64 = 1_710_000_000_000.;
 const CREDS: &str = "Crypto.com credentials are required";
 const UNSUPPORTED: &str = "Crypto.com client order lookup is not supported by the Rust engine";
 fn engine(private: bool) -> TestEngine {
-    safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    support::fixture::engine(Options {
         key: private.then(|| "fixture-identity".into()),
         secret: private.then(|| "fixture-material".into()),
         ..Options::default()
-    }))
+    })
 }
 fn lookup() -> Query {
     Query::OrderByClientId {

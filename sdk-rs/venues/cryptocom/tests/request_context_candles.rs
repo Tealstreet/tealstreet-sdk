@@ -1,4 +1,5 @@
 //! Public candles preserve their native wire contract under shared Read custody.
+mod support;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{
     Claim, Error, HttpAction, Preparation, Prepared, RoutingIntent,
@@ -7,12 +8,13 @@ use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Notice, Outcome, Response, TimerId,
     VenueError,
 };
-use safe_cex_venue_cryptocom::{Cryptocom, Options};
+use safe_cex_venue_cryptocom::Cryptocom;
+use support::fixture::Options;
 type TestEngine = Engine<Cryptocom>;
 const NOW: f64 = 1_710_000_000_000.;
 const ROWS: &str = r#"{"code":0,"result":{"data":[{"t":120001,"o":"1","h":"2","l":"0.5","c":"1.5","v":"3"},{"t":60001,"o":"bad","h":"2","l":"0.5","c":"1.5","v":"3"}]}}"#;
 fn engine(options: Options) -> TestEngine {
-    safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options))
+    support::fixture::engine(options)
 }
 fn command(e: &mut TestEngine, now: f64, owner: u32, interval: Interval) {
     e.handle(

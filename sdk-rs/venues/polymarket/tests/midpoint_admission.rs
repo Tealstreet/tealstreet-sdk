@@ -172,59 +172,114 @@ fn full_admission_backs_off_unissued_batch_then_recovers_and_releases_all_credit
         peers: vec![],
     });
     let gamma = start(&mut e);
+    catalogue(&mut e, gamma, 102);
+    let first = token(&mut e);
+    e.http_preparation_failed(
+        10.,
+        first,
+        Error::Invalid,
+        Error::Invalid.read_venue_error(),
+    );
+    let refused: Vec<_> = e.drain_actions().collect();
+    let first_retry = retry(&refused, 10.);
+    let second = refused
+        .into_iter()
+        .find_map(|a| match a {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("native failure advances to the last midpoint offset");
+    e.http_preparation_failed(
+        10.,
+        second,
+        Error::Invalid,
+        Error::Invalid.read_venue_error(),
+    );
+    let second_retry = retry(&actions(&mut e, 10.), 10.);
     e.handle(
-        5.,
+        11.,
         Event::Command(Command::SetTickerSymbols {
             symbols: vec!["saturate".into()],
         }),
     );
-    assert!(actions(&mut e, 5.).is_empty());
-    catalogue(&mut e, gamma, 102);
-    let a = actions(&mut e, 10.);
+    assert!(actions(&mut e, 11.).is_empty());
+    e.handle(1010., Event::TimerFired { timer: first_retry });
+    let a = actions(&mut e, 1010.);
     assert!(
         !a.iter()
             .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
     );
-    let timer = retry(&a, 10.);
+    let timer = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (1500.0..=2000.).contains(&(*at_ms - 1010.)) => {
+                Some(*timer)
+            }
+            _ => None,
+        })
+        .expect("capacity refusal retains the failed key's second native backoff");
     assert_eq!(e.venue().peers.len(), 256);
+    assert!(
+        a.iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == second_retry))
+    );
+    let second_retry = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1010. => Some(*timer),
+            _ => None,
+        })
+        .expect("native Backoff replaces the overdue sibling key's timer");
     e.handle(
-        11.,
+        1011.,
         Event::Command(Command::SetTickerSymbols {
             symbols: vec!["release".into()],
         }),
     );
-    assert!(actions(&mut e, 11.).is_empty());
-    e.handle(1010., Event::TimerFired { timer });
-    let first = request(actions(&mut e, 1010.));
+    assert!(actions(&mut e, 1011.).is_empty());
+    e.handle(3010., Event::TimerFired { timer });
+    let first = request(actions(&mut e, 3010.));
     let first_body = first.body.as_deref().unwrap();
     assert!(first_body.starts_with(r#"[{"token_id":"1"},"#));
     assert!(first_body.ends_with(r#"{"token_id":"100"}]"#));
-    let next = request(answer(&mut e, &first, 1011., r#"{"1":"0.4"}"#));
+    answer(&mut e, &first, 3011., r#"{"1":"0.4"}"#);
+    assert_eq!(e.store().tickers().len(), 1);
+    assert_eq!(e.store().tickers()[0].id, "1");
+    e.handle(
+        3012.,
+        Event::TimerFired {
+            timer: second_retry,
+        },
+    );
+    let next = request(actions(&mut e, 3012.));
     assert_eq!(
         next.body.as_deref(),
         Some(r#"[{"token_id":"101"},{"token_id":"102"}]"#)
     );
-    answer(&mut e, &next, 1012., "{}");
+    answer(&mut e, &next, 3013., "{}");
     assert!(e.store().loaded().tickers);
     e.handle(
-        1013.,
+        3014.,
         Event::Command(Command::SetTickerSymbols {
             symbols: vec!["saturate".into()],
         }),
     );
-    assert!(actions(&mut e, 1013.).is_empty());
+    assert!(actions(&mut e, 3014.).is_empty());
     assert_eq!(
         e.venue().peers.len(),
         256,
         "every completed batch released its credit"
     );
     e.handle(
-        1014.,
+        3015.,
         Event::Command(Command::SetTickerSymbols {
             symbols: vec!["release".into()],
         }),
     );
-    assert!(actions(&mut e, 1014.).is_empty());
+    assert!(actions(&mut e, 3015.).is_empty());
 }
 #[test]
 fn stale_preparation_and_response_cannot_clear_the_retried_offsets_owner() {
