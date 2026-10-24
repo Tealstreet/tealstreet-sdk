@@ -131,12 +131,21 @@ impl SelectedRead {
         selected: Result<Self, CredentialUnavailable>,
         policy: ReadPolicy,
     ) -> Result<AdmittedRead, BackgroundReadError> {
+        Self::scoped(cx, selected, Scope::Background, policy)
+    }
+
+    /// Issue under an existing scope, such as a delivered command's own
+    /// `Scope::Command(id)`, rather than a new entry root. A refusal issues no
+    /// context and settles nothing; the caller keeps its pending work.
+    pub fn scoped<P>(
+        cx: &mut Cx<'_, P>,
+        selected: Result<Self, CredentialUnavailable>,
+        scope: Scope,
+        policy: ReadPolicy,
+    ) -> Result<AdmittedRead, BackgroundReadError> {
         let selected = selected.map_err(BackgroundReadError::Selection)?;
         let context = cx
-            .http_context(
-                Scope::Background,
-                policy.policy(Some(selected.credential())),
-            )
+            .http_context(scope, policy.policy(Some(selected.credential())))
             .map_err(BackgroundReadError::Admission)?;
         Ok(AdmittedRead { selected, context })
     }
