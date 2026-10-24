@@ -2938,17 +2938,6 @@ remain unchanged. No venue-local admission, owner or completion algorithm.
 Bitrue inventory 30 -> 29 occurrences, 18 -> 17 fingerprints; all private
 signing/read/write migrations remain separate.
 
-<<<<<<< HEAD
-## Receipt-bound StampFloor shared primitive
-
-Opaque release-derived stamp metadata and one opt-in dispatch helper replace no
-venue source in this slice. Only SigningRelease mints the floor from its validated
-receipt; it grants no retry, owner, account, credential or transport authority.
-Inherited new-API compile REDs are distinct from two executed assertion REDs
-against the inherited implementation's unsafe-current/NaN boundaries. Existing
-stamp_ms and other families' recipes are unchanged. Bitrue adoption remains a
-separate consumer migration after actual shared landing.
-=======
 ## Finite flat-position PnL evidence
 
 Plan-first `1fadf14a790` and original-control commit `bae23010581` isolate a
@@ -3063,4 +3052,13 @@ prefix. Shared Context cleanup is separate from DATA admission: already-admitted
 failure keeps its native retry even after sibling issuance prunes expired
 retirement metadata. Completed catalogue retires before successor admission so
 capacity cannot strand ticker startup. No local issuer/timer/selection algorithm.
->>>>>>> 219d4bc6725b03afbab5411096d60fe38f6a3350
+
+## Receipt-bound StampFloor shared primitive
+
+Opaque release-derived stamp metadata and one opt-in dispatch helper replace no
+venue source in this slice. Only SigningRelease mints the floor from its validated
+receipt; it grants no retry, owner, account, credential or transport authority.
+Inherited new-API compile REDs are distinct from two executed assertion REDs
+against the inherited implementation's unsafe-current/NaN boundaries. Existing
+stamp_ms and other families' recipes are unchanged. Bitrue adoption remains a
+separate consumer migration after actual shared landing.

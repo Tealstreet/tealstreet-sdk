@@ -6753,23 +6753,6 @@ other callers; this semantic caller conversion has zero lexical inventory delta.
 | --- | --- | --- |
 | `cancelOrdersWithSymbols` on any Bybit variant | Typed `NotSent` `unsupported` before any request (was accepted and never finished) | Use `cancelOrders` with order ids. |
 
-<<<<<<< HEAD
-### Receipt-bound stamp floor (dispatch signing)
-
-Plan: [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md). This is an additive engine API.
-No family's stamps change until a recipe opts in.
-
-| Change | tealstreet-next file:line | Old usage | New usage | Impact |
-| --- | --- | --- | --- | --- |
-| `StampFloor` (opaque), `SigningRelease::stamp_floor()` | none | n/a | minted only from a genuine released receipt stamp | none |
-| `DispatchContext::stamp_after(floor)` = `max(0, stamp_ms(), floor + 1)`, refusing past the safe-integer range | Rust venue recipes only | `stamp_ms()` | resend recipes keep stamps monotonic on fixed or backward clocks; `stamp_ms()` is unchanged | none |
-
-StampFloor's opt-in helper also refuses a non-finite current clock before
-clamping and any final stamp beyond the safe-integer range, even without a
-floor. This does not change stamp_ms or opt any venue into the helper. A reused
-floor is metadata only; each consumer must retain its real original owner and
-released-attempt association, and separately obtain genuine resend authority.
-=======
 ## Flat-position realized PnL evidence
 
 Replay comparison includes flat-position realized PnL only when the producer
@@ -7207,4 +7190,19 @@ Capacity refusal produces one shared failure, with no numeric fallback or
 physical action. The local helper must never be called from a delayed funding
 callback, accepted page delivery or queued trading work. Inventory: Orderly
 28F/29O to 25F/26O, solely the three documented initial failure fingerprints.
->>>>>>> 219d4bc6725b03afbab5411096d60fe38f6a3350
+
+### Receipt-bound stamp floor (dispatch signing)
+
+Plan: [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md). This is an additive engine API.
+No family's stamps change until a recipe opts in.
+
+| Change | tealstreet-next file:line | Old usage | New usage | Impact |
+| --- | --- | --- | --- | --- |
+| `StampFloor` (opaque), `SigningRelease::stamp_floor()` | none | n/a | minted only from a genuine released receipt stamp | none |
+| `DispatchContext::stamp_after(floor)` = `max(0, stamp_ms(), floor + 1)`, refusing past the safe-integer range | Rust venue recipes only | `stamp_ms()` | resend recipes keep stamps monotonic on fixed or backward clocks; `stamp_ms()` is unchanged | none |
+
+StampFloor's opt-in helper also refuses a non-finite current clock before
+clamping and any final stamp beyond the safe-integer range, even without a
+floor. This does not change stamp_ms or opt any venue into the helper. A reused
+floor is metadata only; each consumer must retain its real original owner and
+released-attempt association, and separately obtain genuine resend authority.
