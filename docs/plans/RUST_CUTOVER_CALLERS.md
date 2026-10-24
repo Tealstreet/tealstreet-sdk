@@ -7190,3 +7190,22 @@ Capacity refusal produces one shared failure, with no numeric fallback or
 physical action. The local helper must never be called from a delayed funding
 callback, accepted page delivery or queued trading work. Inventory: Orderly
 28F/29O to 25F/26O, solely the three documented initial failure fingerprints.
+
+## OKX history selected identity retention
+
+History captures the engine-selected opaque identity on its original caller
+Read root. Every signed page queues through ReadLeg with that retained selection;
+it no longer maps a Context slot back into current venue credential options.
+Closed positions consume the existing read_slots declaration with their native
+primary-required policy. Ordinary private history remains Secondary else Primary,
+primary client-order lookup remains Primary, and public trades remain unsigned.
+
+Local empty/refusal/cached results are decided without effects before genuine
+entry admission, preserving keyless precedence and the secondary-presence cache
+guard. They cannot be preempted by a missing-selection auto-refusal. Page100,
+native100ms dequeue, immutable caller deadline,20s children, exact delivery,
+strict root/provider failures, native physical-failure shaping and demo headers
+remain unchanged. No new runtime policy or key-selection path is introduced.
+The credential inventory removes closed1 and reduces history2 to1; the remaining
+history mention is the protected snapshot-presence gate. lib/account/discovery,
+signer/host/engine code and existing fixtures are unchanged.

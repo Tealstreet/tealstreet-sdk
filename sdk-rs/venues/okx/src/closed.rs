@@ -2,7 +2,7 @@
 //! rows, which the host maps with the TS mappers. `begin`/`end` are ignored by
 //! this endpoint; `before`/`after` are close-time bounds, paged by oldest `uTime`.
 use crate::{Okx, Pending, sign};
-use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
+use safe_cex_engine::credential_selection::SlotPolicy;
 use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
@@ -71,13 +71,9 @@ impl Okx {
             }
             return;
         }
-        let slots = Slots::new(
-            self.credentials.clone(),
-            self.options.read_credentials.clone(),
-            SlotPolicy {
-                secondary_requires_primary: true,
-            },
-        );
+        let slots = self.read_slots(SlotPolicy {
+            secondary_requires_primary: true,
+        });
         let selected = SelectedRead::select(&slots, ReadRole::Read { scope: None });
         let root = match SelectedRead::command_root(
             cx,

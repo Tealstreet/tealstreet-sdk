@@ -149,3 +149,14 @@ Review closure adds the missing cached-order edge: with neither key/no secondary
 the same cache returns FOUND; adding only a secondary disables it and yields the
 native missing-primary failure, no HTTP and no financial Store mutation. The
 new target now passes9 controls; existing lookup8 remain GREEN. Strict passes.
+
+## Managed selection implementation
+
+Closed now uses the existing read_slots(policytrue) declaration; history retains
+SelectedRead/ReadRoot and queues signed ReadLegs with the helper-provided identity.
+Local native results are computed before admission without effects; missing
+selection cannot override them. Public history keeps its plain unsigned root.
+All17 original positives and the broader scoped89 controls pass; strict all-target
+Clippy passes. Regenerated credential inventory matches exactly the removal RED.
+No lib/account/engine/host/signing source or existing fixture edits. Reviews and
+CI remain pending; no push until this is a freeze candidate under saturation rules.

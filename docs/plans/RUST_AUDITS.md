@@ -3052,3 +3052,12 @@ prefix. Shared Context cleanup is separate from DATA admission: already-admitted
 failure keeps its native retry even after sibling issuance prunes expired
 retirement metadata. Completed catalogue retires before successor admission so
 capacity cannot strand ticker startup. No local issuer/timer/selection algorithm.
+
+## OKX history selected identity follow-up
+
+The closed-position local Slots construction and history's send-time
+slot-to-identity remap now use the shared declaration and SelectedRead root/legs.
+No selection witness is moved into lib.rs. Original actual credential-checker
+removal RED is green after adoption: closed1 to0, history2 to1, all foreign keys
+unchanged. Local cache/empty/error precedence and existing history authority are
+preserved; no shared checker exemption or source change.
