@@ -1,6 +1,6 @@
 # BingX local candle refusal custody
 
-Status: plan before compiling original assertions; production held.
+Status: plan and compiling original assertion evidence; production held.
 Base: actual `db6fa45bbb7cbbfdfeb0aa40d3dd93caac9c9e0b`.
 
 ## Scope and ownership
@@ -99,3 +99,38 @@ bounded native/core review, and regenerate only the actual own inventory prune.
 Build only this changed target with CARGO_BUILD_JOBS=4, serially; CI owns broad
 feature/workspace/CPU/WASM checks. No production code or PR is authorized by this
 plan checkpoint alone.
+
+## Original evidence receipt
+
+The plan was committed first at `152dc3191e5`. The original target executes the
+actual BingX venue on the unchanged `db6fa45bbb7` engine and production source:
+
+```sh
+CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=2 cargo test --manifest-path sdk-rs/Cargo.toml \
+  -p safe-cex-venue-bingx --test local_candle_context
+CARGO_BUILD_JOBS=4 cargo clippy --manifest-path sdk-rs/Cargo.toml \
+  -p safe-cex-venue-bingx --test local_candle_context -- -D warnings
+```
+
+Executed result: six independent assertion REDs and five GREEN controls, with
+zero ignored tests. The three capacity REDs first release 256 genuine managed
+FetchAccount requests and capture the full error of a real overflow account
+command. Each local branch then incorrectly emits its native untyped error
+instead of that canonical capacity error. The three invalid-clock REDs likewise
+emit the native error instead of the canonical Revoked Read error with
+InvalidInput and no outcome. All REDs reach exact full-error comparisons;
+there is no compile, setup, missing-method or missing-request failure.
+
+The five GREEN controls preserve each native full error and validation order,
+keyless/private parity, immediate repeated ID reuse, real overflow refusal plus
+original-owner completion and freed-slot reuse, and duplicate live-ID ownership.
+Each local failure helper permits exactly the correlated failure notice, so
+transport, timer, signer, auth and other notices cannot hide behind it.
+
+The original capacity REDs stop at their expected error mismatch. Their suffix
+that completes the original owner and retries the local command remains an
+explicit post-cutover gate; the separate genuine-capacity GREEN executes peer
+preservation and slot reuse today. No expiry/deferred-entry execution, native
+remote candle adoption, production conversion, inventory prune or readiness is
+claimed by this evidence. Scoped target Clippy and rustfmt pass; no broad local
+build or CI dispatch was run for this checkpoint.
