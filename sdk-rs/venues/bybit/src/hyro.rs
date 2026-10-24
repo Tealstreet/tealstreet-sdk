@@ -59,6 +59,11 @@ pub(crate) struct Lot {
     pub(crate) state: LotState,
     /// Sent and not yet resolved: reconcile it once its call seals.
     pub(crate) reconcile: bool,
+    /// The latest send of this link has no definitive answer yet.
+    pub(crate) pending: bool,
+    /// An earlier send of this link was never definitively answered, so it may
+    /// still land: the link keeps its identity for good (never re-minted).
+    pub(crate) doubted: bool,
     /// The private stream reported this link.
     observed: bool,
 }
@@ -68,6 +73,12 @@ impl Lot {
         self.base
             .clone()
             .map(|base| base.str("orderLinkId", &self.link).finish())
+    }
+
+    /// The current send's outcome is proven (accepted, refused or never sent).
+    pub(crate) fn answered(&mut self) {
+        self.pending = false;
+        self.reconcile = false;
     }
 
     /// A create or stop that may have reached the venue without a resolution.
@@ -167,7 +178,7 @@ pub(crate) fn link_query(link: &str) -> Query {
 
 /// A definitively refused lot is placed under a new identity next time.
 pub(crate) fn remint(cx: &Cx<'_, Pending>, lot: &mut Lot) -> Result<(), String> {
-    if lot.state != LotState::Rejected {
+    if lot.state != LotState::Rejected || lot.pending || lot.doubted {
         return Ok(());
     }
     lot.link = safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?;
@@ -204,7 +215,7 @@ impl BybitLinear {
                 && !matches!(lot.state, LotState::Accepted(_))
             {
                 lot.state = LotState::Accepted(row.order_id.to_string());
-                lot.reconcile = false;
+                lot.answered();
             }
         }
     }
@@ -237,7 +248,7 @@ impl BybitLinear {
                 .filter(|lot| lot.link == link && !matches!(lot.state, LotState::Accepted(_)))
             {
                 lot.state = LotState::Accepted(id.clone());
-                lot.reconcile = false;
+                lot.answered();
             }
         }
     }
@@ -304,6 +315,8 @@ impl BybitLinear {
                     sends: 0,
                     state: LotState::Absent,
                     reconcile: false,
+                    pending: false,
+                    doubted: false,
                     observed: false,
                 })
             })
@@ -452,7 +465,7 @@ impl BybitLinear {
                 if !matches!(lot.state, LotState::Accepted(_)) {
                     lot.state = LotState::Accepted(id.clone());
                 }
-                lot.reconcile = false;
+                lot.answered();
                 if lot.observed || boundary != current {
                     return;
                 }
@@ -469,9 +482,10 @@ impl BybitLinear {
                     }
                 }
             }
+            // A rejected row proves the sent link's outcome.
             Found::Rejected if !matches!(lot.state, LotState::Accepted(_)) => {
                 lot.state = LotState::Rejected;
-                lot.reconcile = false;
+                lot.answered();
             }
             Found::Absent if lot.state == LotState::Unknown => lot.state = LotState::Absent,
             _ => {}

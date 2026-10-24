@@ -616,15 +616,16 @@ fn hyro_private_terminal_observation_blocks_stale_recovered_open_row() {
     place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
     let create = h.take("/v5/order/create");
     let id = link(&create);
-    h.message("/v5/private", &format!(r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"recovered","orderLinkId":"{id}","orderStatus":"Filled","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"1","leavesQty":"0"}}]}}"#));
     h.event(Event::HttpFailed {
         request: create.id,
         error: "lost",
     });
-    // H2 (Q3): Unknown at once; the observation already resolved the link,
-    // so no link read can bring back a stale open row.
+    // H2 (Q3): Unknown at once. The terminal observation lands while the link
+    // read is out; that read's stale open row must not resurrect the order.
     assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
-    assert!(!h.has_request(&format!("orderLinkId={id}")));
+    let read = h.take(&format!("orderLinkId={id}"));
+    h.message("/v5/private", &format!(r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"recovered","orderLinkId":"{id}","orderStatus":"Filled","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"1","leavesQty":"0"}}]}}"#));
+    h.reply(read.id, 200, &lookup_row(&id, "New"));
     assert_eq!(
         h.engine.store().order("recovered").unwrap().status,
         safe_cex_engine::model::OrderStatus::Closed
@@ -3395,4 +3396,122 @@ fn hyro_late_ack_after_unknown_is_reconciled_without_a_resend() {
     }
     assert!(!h.has_request("/v5/order/create"), "never a second create");
     assert_eq!(h.result(2), Some(&Ok("[\"late\"]".into())));
+}
+
+fn answer_link_reads(h: &mut Harness, link: &str) {
+    let filter = format!("orderLinkId={link}");
+    while h.has_request(&filter) {
+        h.respond(&filter, 200, EMPTY);
+    }
+}
+
+/// Review A: a retry's definitive refusal cannot rule out the earlier lost
+/// create landing later, so the lot keeps its link (never re-minted) and the
+/// call is Unknown; later retries only re-read.
+#[test]
+fn hyro_refused_retry_after_a_lost_ack_never_mints_a_new_link() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    answer_link_reads(&mut h, &id);
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    answer_link_reads(&mut h, &id);
+    let retry = h.take("/v5/order/create");
+    assert_eq!(link(&retry), id);
+    h.reply(
+        retry.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+    answer_link_reads(&mut h, &id);
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    answer_link_reads(&mut h, &id);
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "no new link is ever sent"
+    );
+    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::Unknown));
+}
+
+/// Review 1: an acceptance the private stream observed is never downgraded
+/// by a contradictory refusal of the same create.
+#[test]
+fn hyro_observed_acceptance_outranks_a_later_refusal() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.message("/v5/private", &format!(r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"seen","orderLinkId":"{id}","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}}]}}"#));
+    h.reply(
+        create.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(h.result(2), Some(&Ok("[\"seen\"]".into())));
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+/// Review 3: on a lost ACK every observer gets one error report, then one
+/// Unknown terminal naming the link.
+#[test]
+fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 91, vec![order("BTCUSDT", 1.0)]);
+    place(&mut h, 92, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    for command in [91, 92] {
+        let notices: Vec<_> = h
+            .command_notices
+            .iter()
+            .filter(|(c, _)| *c == command)
+            .map(|(_, notice)| *notice)
+            .collect();
+        assert_eq!(notices, ["error", "done"], "command {command}");
+        let errors: Vec<_> = h
+            .command_errors
+            .iter()
+            .filter(|(c, _)| *c == command)
+            .collect();
+        assert!(errors[0].1.contains(&id));
+        assert_eq!(
+            outcome(&h, command),
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
+        assert!(
+            h.result(command)
+                .unwrap()
+                .as_ref()
+                .unwrap_err()
+                .contains(&id)
+        );
+    }
+}
+
+/// Review B: with no resend granted (an execution-owned Hyro create), Bybit's
+/// clock in the 10002 refusal still corrects the next attempt's signature.
+#[test]
+fn hyro_recv_window_refusal_corrects_the_next_attempt_clock() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    h.reply(create.id, 200, &recv_window_refusal(h.now));
+    assert!(!h.has_request("/v5/order/create"));
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    let next = h.take("/v5/order/create");
+    assert_eq!(
+        Harness::header(&next, "X-BAPI-TIMESTAMP"),
+        Some((h.now + 600_000.).floor().to_string())
+    );
 }

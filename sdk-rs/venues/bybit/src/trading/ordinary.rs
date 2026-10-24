@@ -1169,15 +1169,17 @@ impl BybitLinear {
         if weaken {
             return Decision::Failed(error);
         }
+        // Bybit's clock corrects ours for the next attempt, even when this
+        // write gets no resend (an execution-owned Hyro create).
+        if let (Verdict::RefusedResend(_), Some(server)) = (verdict, server) {
+            cx.observe_protocol_time(server);
+        }
         match (verdict, &planned.call) {
             (Verdict::Satisfied(_), call) => {
                 self.satisfied_effects(cx, call);
                 Decision::Next(Vec::new())
             }
             (Verdict::RefusedResend(_), _) if grant.is_some() => {
-                if let Some(server) = server {
-                    cx.observe_protocol_time(server);
-                }
                 Decision::Resend(grant.expect("checked above"))
             }
             (Verdict::Refused(_), Call::PlaceBatch { fallback })

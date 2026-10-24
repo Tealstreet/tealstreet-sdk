@@ -126,20 +126,20 @@ impl BybitLinear {
 
     /// An identical caller observes the running execution; nothing is sent for it.
     fn join_hyro(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId, key: &str) {
-        let Some(intent) = self.trading.hyro.intents.get(key) else {
-            return;
-        };
-        let Phase::Live(entry) = &intent.phase else {
-            return;
-        };
-        let Some(execution) = entry.hyro.as_ref().and_then(|call| call.execution.clone()) else {
-            return;
-        };
-        let (digest, receipts) = (intent.digest.clone(), intent.receipts());
-        let lots = u32::try_from(intent.lots.len()).unwrap_or(u32::MAX);
+        // Only called once `hyro_live` saw this intent's running execution.
+        let live = self.trading.hyro.intents.get(key).and_then(|intent| {
+            let Phase::Live(entry) = &intent.phase else {
+                return None;
+            };
+            let execution = entry.hyro.as_ref()?.execution.clone()?;
+            let lots = u32::try_from(intent.lots.len()).unwrap_or(u32::MAX);
+            Some((execution, intent.digest.clone(), intent.receipts(), lots))
+        });
+        let (_, _, write_credential) = self.ordinary_preflight();
+        let lots = live.as_ref().map_or(1, |(.., lots)| *lots);
         let policy = Policy {
             operation: Operation::Mutation,
-            credential: entry.write_credential.clone(),
+            credential: write_credential,
             timeout_ms: CALL_TIMEOUT_MS
                 .saturating_mul(u32::from(CALL_ATTEMPTS))
                 .saturating_mul(lots),
@@ -148,6 +148,12 @@ impl BybitLinear {
         };
         // A refused admission already sealed the command.
         let Ok(root) = cx.admit_http_command(policy) else {
+            return;
+        };
+        let Some((execution, digest, receipts, _)) = live else {
+            debug_assert!(false, "a Hyro join without a live execution");
+            let error = internal("Hyro execution was lost").outcome(Outcome::NotSent);
+            let _ = cx.fail_context(&root, error);
             return;
         };
         match cx.join_execution(&execution, &root, &digest) {
@@ -201,10 +207,12 @@ impl BybitLinear {
             return;
         };
         let Some(call) = &entry.hyro else {
+            debug_assert!(false, "a Hyro resume without its intent");
+            let _ = cx.fail_preflight(&entry.preflight, lost_intent());
             return;
         };
         let Some(intent) = self.trading.hyro.intents.get(&call.key) else {
-            let _ = cx.fail_preflight(&entry.preflight, internal("Hyro intent was lost"));
+            let _ = cx.fail_preflight(&entry.preflight, lost_intent());
             return;
         };
         let next = intent
@@ -353,6 +361,8 @@ impl BybitLinear {
             return;
         }
         let Some(key) = entry.hyro.as_ref().map(|call| call.key.clone()) else {
+            debug_assert!(false, "a Hyro read without its intent");
+            let _ = cx.fail_preflight(&entry.preflight, lost_intent());
             return;
         };
         let Some((link, symbol)) = self
@@ -363,7 +373,7 @@ impl BybitLinear {
             .and_then(|intent| intent.lots.get(lot))
             .map(|lot| (lot.link.clone(), lot.symbol.clone()))
         else {
-            let _ = cx.fail_preflight(&entry.preflight, internal("Hyro intent was lost"));
+            let _ = cx.fail_preflight(&entry.preflight, lost_intent());
             return;
         };
         let found = self.hyro_found(cx, &symbol, &link, Ok(response));
@@ -429,6 +439,8 @@ impl BybitLinear {
             .and_then(|call| self.trading.hyro.intents.get(&call.key))
             .map(|intent| intent.digest.clone())
         else {
+            debug_assert!(false, "a Hyro admission without its intent");
+            let _ = cx.fail_preflight(&entry.preflight, lost_intent());
             return;
         };
         let calls = [call_bound(&[])];
@@ -496,6 +508,8 @@ impl BybitLinear {
         lot.sends = lot.sends.saturating_add(1);
         lot.state = LotState::Unknown;
         lot.reconcile = true;
+        lot.doubted |= lot.pending;
+        lot.pending = true;
         if !first || receipts.is_empty() {
             return;
         }
@@ -520,7 +534,7 @@ impl BybitLinear {
         }) {
             lot.sends = lot.sends.saturating_sub(1);
             lot.state = LotState::Absent;
-            lot.reconcile = false;
+            lot.answered();
         }
     }
 
@@ -537,11 +551,20 @@ impl BybitLinear {
         match decision {
             Decision::Next(ids) => {
                 lot.state = LotState::Accepted(ids.first().cloned().unwrap_or_default());
-                lot.reconcile = false;
+                lot.answered();
             }
+            // An observed acceptance outranks a contradictory later answer.
+            _ if matches!(lot.state, LotState::Accepted(_)) => {}
+            // A refusal of this send cannot rule out an earlier unanswered one
+            // landing later: the lot stays Unknown on its link.
             Decision::Failed(error) if error.outcome == Some(Outcome::Rejected) => {
-                lot.state = LotState::Rejected;
-                lot.reconcile = false;
+                lot.pending = false;
+                lot.state = if lot.doubted {
+                    LotState::Unknown
+                } else {
+                    LotState::Rejected
+                };
+                lot.reconcile = lot.doubted;
             }
             // A signature refusal proves the create was not placed; its resend replaces it.
             Decision::Resend(_) => {}
@@ -562,30 +585,46 @@ impl BybitLinear {
             self.park(request.command, entry);
             return;
         };
-        let link = run
-            .active
-            .as_ref()
-            .filter(|active| active.context == request.context)
-            .and_then(|active| active.leg.lot)
-            .zip(entry.hyro.as_ref())
-            .and_then(|(lot, call)| {
-                let lot = self.trading.hyro.intents.get(&call.key)?.lots.get(lot)?;
-                lot.stop.is_none().then(|| lot.link.clone())
-            });
-        match link {
-            Some(link) if error.outcome != Some(Outcome::NotSent) => {
-                // The journal keeps the transport text; each observer keeps this
-                // reason, naming the link, with the journal's outcome and IDs.
-                let error = hyro::unknown(&link, &error.message);
-                for root in entry.hyro.iter().flat_map(|call| &call.observers) {
-                    let _ = cx.detach_execution_observer(root, error.clone());
-                }
-                let plan = run.plan.clone();
-                let _ = cx.fail_plan(&plan, error);
-            }
-            // A pre-release refusal: the engine seals the plan with its journal.
-            _ => self.park(request.command, entry),
+        let (Some(call), Some(lot)) = (
+            entry.hyro.as_ref(),
+            run.active
+                .as_ref()
+                .filter(|active| active.context == request.context)
+                .and_then(|active| active.leg.lot),
+        ) else {
+            self.park(request.command, entry);
+            return;
+        };
+        let key = call.key.clone();
+        if error.outcome == Some(Outcome::NotSent) {
+            // Refused before release: this send never happened (legacy sign failure).
+            self.hyro_leg_unsent(&key, Some(lot));
+            self.park(request.command, entry);
+            return;
         }
+        let link = self
+            .trading
+            .hyro
+            .intents
+            .get(&key)
+            .and_then(|intent| intent.lots.get(lot))
+            .filter(|lot| lot.stop.is_none())
+            .map(|lot| lot.link.clone());
+        let Some(link) = link else {
+            self.park(request.command, entry);
+            return;
+        };
+        // The journal keeps the transport text; each observer gets this report,
+        // then its own terminal naming the link, with the journal's outcome.
+        let error = hyro::unknown(&link, &error.message);
+        for root in &call.observers {
+            if let Owner::Command { id, .. } = root.owner() {
+                cx.command_error(id, error.message.clone());
+            }
+            let _ = cx.detach_execution_observer(root, error.clone());
+        }
+        let plan = run.plan.clone();
+        let _ = cx.fail_plan(&plan, error);
     }
 
     /// After a Hyro callback: an entry neither parked nor reading has sealed.
@@ -675,6 +714,12 @@ impl BybitLinear {
             self.settle_hyro(&key, false);
         }
     }
+}
+
+/// The retained intent vanished mid-call; the inherited fact still projects
+/// Unknown when an earlier call may have sent.
+fn lost_intent() -> VenueError {
+    internal("Hyro intent was lost").outcome(Outcome::NotSent)
 }
 
 fn intent_ids(venue: &BybitLinear, key: &str) -> String {

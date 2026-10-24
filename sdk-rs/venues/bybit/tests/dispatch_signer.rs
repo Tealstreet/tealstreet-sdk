@@ -1081,3 +1081,42 @@ fn hyro_retry_refused_after_a_released_create_stays_unknown() {
         [&(42, Some(Outcome::Unknown))]
     );
 }
+
+/// Review 2: a create the signer refuses before release never happened, so
+/// its send is restored and a later retry can still send that link once.
+#[test]
+fn hyro_signer_refused_retry_restores_its_send() {
+    let (mut h, gate) = ready(Variant::Hyrotrader);
+    let answer = |h: &mut Harness, link: &str| {
+        let filter = format!("orderLinkId={link}");
+        while h.has_request(&filter) {
+            h.respond(&filter, 200, EMPTY_PAGE);
+        }
+    };
+    h.command(Command::PlaceOrders {
+        command: 42,
+        orders: vec![order()],
+    });
+    let create = h.take("/v5/order/create");
+    let link = sent_link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost after dispatch",
+    });
+    answer(&mut h, &link);
+    gate.mode.store(2, Ordering::SeqCst);
+    h.command(Command::PlaceOrders {
+        command: 43,
+        orders: vec![order()],
+    });
+    answer(&mut h, &link);
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(h.unknown.contains(&43));
+    gate.mode.store(0, Ordering::SeqCst);
+    h.command(Command::PlaceOrders {
+        command: 44,
+        orders: vec![order()],
+    });
+    answer(&mut h, &link);
+    assert_eq!(sent_link(&h.take("/v5/order/create")), link);
+}
