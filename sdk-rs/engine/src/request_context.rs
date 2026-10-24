@@ -249,6 +249,9 @@ pub enum Error {
     /// Foreground pool pressure caused only by active Background Plans.
     #[cfg(feature = "http-plans")]
     CapacityDeferred,
+    /// A declared Background traversal cannot fit the shared Background cap.
+    #[cfg(feature = "http-plans")]
+    BackgroundShareBusy,
     Duplicate,
     State,
     TimedOut,

@@ -6404,3 +6404,14 @@ The Background task's cap counts successful Plan admissions, including a
 traversal later interrupted by pause/supersession. Interruption at admission three
 returns typed InvalidInput budget exhaustion with no financial outcome; it
 creates neither a fourth admission nor an automatic fresh cycle.
+
+
+### Background share saturation requires caller retry
+
+When another Background traversal occupies the aggregate 150-slot cap, the
+refused task receives RateLimited (`BackgroundShareBusy`) with advisory 1000ms
+and no financial outcome. Its demand is cancelled after exact unissued-token
+cleanup; freeing the share does not reactivate it. The caller must explicitly
+request again, with no availability guarantee at 1000ms. No hidden queue, deferred
+admission or new per-refusal timer is installed. IO/signing namespace and task
+storage exhaustion remain hard Internal Capacity without a retry hint.

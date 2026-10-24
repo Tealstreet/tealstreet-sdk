@@ -206,7 +206,7 @@ impl crate::request_context::Error {
         match self {
             Self::TimedOut => ErrorKind::Timeout,
             #[cfg(feature = "http-plans")]
-            Self::CapacityDeferred => ErrorKind::RateLimited,
+            Self::CapacityDeferred | Self::BackgroundShareBusy => ErrorKind::RateLimited,
             Self::Invalid | Self::Revoked | Self::Duplicate | Self::RetryForbidden => {
                 ErrorKind::InvalidInput
             }
@@ -222,7 +222,7 @@ impl crate::request_context::Error {
     pub fn read_venue_error(self) -> VenueError {
         let error = VenueError::new(self.to_string()).kind(self.kind());
         #[cfg(feature = "http-plans")]
-        if self == Self::CapacityDeferred {
+        if matches!(self, Self::CapacityDeferred | Self::BackgroundShareBusy) {
             return error.retry_after_ms(1000.);
         }
         error
@@ -239,6 +239,8 @@ impl fmt::Display for crate::request_context::Error {
             Error::CapacityDeferred => {
                 "Engine request capacity temporarily occupied by background reads"
             }
+            #[cfg(feature = "http-plans")]
+            Error::BackgroundShareBusy => "Background Read share is temporarily full",
             Error::Duplicate => "Request is already in flight",
             Error::State => "Request is not in a sendable state",
             Error::TimedOut => "Request context timed out",

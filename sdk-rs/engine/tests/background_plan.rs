@@ -658,7 +658,10 @@ fn second_child_cannot_exceed_the_single_aggregate_background_share() {
     });
     engine.start(0.);
     assert_eq!(requests(&mut engine, 0.).len(), 1);
-    assert_eq!(engine.venue().admission_errors, [Error::Capacity]);
+    assert_eq!(
+        engine.venue().admission_errors,
+        [Error::BackgroundShareBusy]
+    );
     assert_eq!(engine.venue().contexts.len(), 1);
     assert_eq!(engine.venue().failures, 1);
     assert_eq!(engine.venue().activations, 2);

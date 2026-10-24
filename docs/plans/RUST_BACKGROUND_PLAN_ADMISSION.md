@@ -648,3 +648,31 @@ execution124; strict scoped Clippy passes with http-plans/test-support/order-loc
 Fixture generic-connect/import and failure-observation setup errors were fixed
 before this receipt and supply no original-RED evidence. Share saturation still
 uses hard Capacity pending the API owner's demand-disposition ruling.
+
+
+## Share-busy disposition ruling
+
+The newer overseer ruling supersedes retained-demand/backoff proposals. An
+admission blocked specifically by the aggregate 150 Background share returns
+`BackgroundShareBusy`: RateLimited with advisory retry_after_ms = 1000 and no Read
+outcome. Generic Capacity, namespace/storage failures and foreground
+CapacityDeferred retain their existing meanings. Checked arithmetic overflow
+remains hard Capacity. The exact three-file runtime delta was sent unapplied and
+received uufub4's bounded source/API CLEAR before application.
+
+The unissued activation is declined and cancelled, then its exact private
+cleanup acknowledgement releases the scheduler token. No Plan ID, credit or
+successful traversal admission is consumed, and no deferred admission or
+per-refusal retry timer is installed. The caller must request again. A150/Bbusy
+control completes A, observes no automatic B, then explicitly requests B and
+observes its admission. The current hard IO/signing namespace variants keep
+Internal Capacity, no hint and no pending retry even while the share is full.
+Task-registration storage exhaustion keeps its no-IDs/no-credits/no-timers
+control. The compiling test-only checkpoint 3a7379c9003 fails at the original
+Internal versus required RateLimited assertion; no missing API is counted RED.
+
+After application, the runtime target passes16 (all originals active), the
+background unit target passes30 including unspent share refusal and IO/signing
+namespace precedence/cancelled demand, request-context296 and feature-off
+scheduler25 pass, and strict scoped Clippy passes. No full CI or frozen
+actual-prerequisite composition is claimed by this receipt.

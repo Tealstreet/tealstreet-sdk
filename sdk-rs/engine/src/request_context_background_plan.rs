@@ -283,12 +283,10 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         let registry = &mut self.io.request_contexts;
-        if registry
-            .background_context_count(None)?
-            .checked_add(calls)
-            .is_none_or(|total| total > BACKGROUND_CONTEXT_CAP)
-        {
-            return Err(Error::Capacity);
+        let occupied = registry.background_context_count(None)?;
+        let total = occupied.checked_add(calls).ok_or(Error::Capacity)?;
+        if total > BACKGROUND_CONTEXT_CAP {
+            return Err(Error::BackgroundShareBusy);
         }
         registry
             .physical
@@ -1277,102 +1275,160 @@ mod tests {
     }
     #[test]
     fn share_refusal_preserves_activation_and_all_resource_namespaces() {
-        let mut io = crate::engine::Io::<()>::default();
-        let mut store = crate::Store::default();
-        let mut cx = Cx {
-            now: 0.,
-            store: &mut store,
-            io: &mut io,
-        };
-        let session = cx
-            .open_session(crate::request_context::SessionPolicy {
-                credential: None,
-                repeat_safe: true,
-            })
-            .unwrap();
-        let policy = BackgroundTaskPolicy {
-            calls: 150,
-            debounce_ms: 0.,
-            refresh_debounce_ms: 0.,
-        };
-        for number in 0..2 {
-            let task = cx
-                .register_background_task(&session, selected(), policy)
-                .unwrap();
-            cx.request_background_task(&task, read_scheduler::Demand::Refresh)
-                .unwrap();
-            let index = cx
-                .io
-                .request_contexts
-                .background
-                .task(&task)
-                .unwrap()
-                .parent;
-            let attempt = cx.io.request_contexts.background.parents[index]
-                .as_mut()
-                .unwrap()
-                .scheduler
-                .take_ready(0., |delay| delay)
-                .unwrap()
-                .unwrap()
-                .1;
-            let entry = cx.io.request_contexts.background.tasks[task.slot]
-                .as_mut()
-                .unwrap();
-            entry.activation = Some(attempt);
-            entry.attempt = Some(attempt);
-            let activation = BackgroundActivation {
-                task: task.clone(),
-                attempt,
+        for exhausted in 0..3 {
+            let mut io = crate::engine::Io::<()>::default();
+            let mut store = crate::Store::default();
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut store,
+                io: &mut io,
             };
-            cx.io.http_background_activation = Some(ActivationKey::of(&activation));
-            let before = (
-                cx.io.next_id,
-                cx.io.signing.available_ids(1),
-                cx.io
-                    .signing
-                    .available_ids(crate::resource_ids::MAX_RESOURCE_ID),
-                cx.io.request_contexts.reserved_contexts,
-                cx.io.request_contexts.contexts.len(),
-                cx.io.request_contexts.physical.len(),
-                cx.io.actions.len(),
-            );
-            if number == 0 {
-                assert!(cx.admit_background_plan(&activation).is_ok());
-                assert!(
-                    cx.io
-                        .request_contexts
-                        .background_context_count(None)
-                        .unwrap()
-                        == 150
-                );
-            } else {
-                assert!(cx.admit_background_plan(&activation).err() == Some(Error::Capacity));
-                assert!(
-                    (
-                        cx.io.next_id,
-                        cx.io.signing.available_ids(1),
-                        cx.io
-                            .signing
-                            .available_ids(crate::resource_ids::MAX_RESOURCE_ID),
-                        cx.io.request_contexts.reserved_contexts,
-                        cx.io.request_contexts.contexts.len(),
-                        cx.io.request_contexts.physical.len(),
-                        cx.io.actions.len()
-                    ) == before
-                );
-                assert!(
-                    cx.io.request_contexts.background.tasks[task.slot]
-                        .as_ref()
-                        .unwrap()
-                        .admissions
-                        == 0
-                );
-                cx.decline_background_task(&activation, Error::Capacity)
+            let session = cx
+                .open_session(crate::request_context::SessionPolicy {
+                    credential: None,
+                    repeat_safe: true,
+                })
+                .unwrap();
+            let policy = BackgroundTaskPolicy {
+                calls: 150,
+                debounce_ms: 0.,
+                refresh_debounce_ms: 0.,
+            };
+            let mut first_deadline = None;
+            for number in 0..2 {
+                let task = cx
+                    .register_background_task(&session, selected(), policy)
                     .unwrap();
+                cx.request_background_task(&task, read_scheduler::Demand::Refresh)
+                    .unwrap();
+                let index = cx
+                    .io
+                    .request_contexts
+                    .background
+                    .task(&task)
+                    .unwrap()
+                    .parent;
+                let attempt = cx.io.request_contexts.background.parents[index]
+                    .as_mut()
+                    .unwrap()
+                    .scheduler
+                    .take_ready(0., |delay| delay)
+                    .unwrap()
+                    .unwrap()
+                    .1;
+                let entry = cx.io.request_contexts.background.tasks[task.slot]
+                    .as_mut()
+                    .unwrap();
+                entry.activation = Some(attempt);
+                entry.attempt = Some(attempt);
+                let activation = BackgroundActivation {
+                    task: task.clone(),
+                    attempt,
+                };
+                cx.io.http_background_activation = Some(ActivationKey::of(&activation));
+                if number == 1 {
+                    let exhausted_ids = crate::resource_ids::ResourceIds::starting_at(
+                        crate::resource_ids::MAX_RESOURCE_ID + 1,
+                    );
+                    match exhausted {
+                        1 => cx.io.next_id = exhausted_ids,
+                        2 => cx.io.signing.set_test_ids(exhausted_ids),
+                        _ => {}
+                    }
+                }
+                let before = (
+                    cx.io.next_id,
+                    cx.io.signing.available_ids(1),
+                    cx.io
+                        .signing
+                        .available_ids(crate::resource_ids::MAX_RESOURCE_ID),
+                    cx.io.request_contexts.reserved_contexts,
+                    cx.io.request_contexts.contexts.len(),
+                    cx.io.request_contexts.physical.len(),
+                    cx.io.actions.len(),
+                );
+                if number == 0 {
+                    first_deadline =
+                        Some(cx.admit_background_plan(&activation).unwrap().deadline());
+                    assert!(
+                        cx.io
+                            .request_contexts
+                            .background_context_count(None)
+                            .unwrap()
+                            == 150
+                    );
+                } else {
+                    let expected = if exhausted == 0 {
+                        Error::BackgroundShareBusy
+                    } else {
+                        Error::Capacity
+                    };
+                    assert!(cx.admit_background_plan(&activation).err() == Some(expected));
+                    assert!(
+                        (
+                            cx.io.next_id,
+                            cx.io.signing.available_ids(1),
+                            cx.io
+                                .signing
+                                .available_ids(crate::resource_ids::MAX_RESOURCE_ID),
+                            cx.io.request_contexts.reserved_contexts,
+                            cx.io.request_contexts.contexts.len(),
+                            cx.io.request_contexts.physical.len(),
+                            cx.io.actions.len()
+                        ) == before
+                    );
+                    assert!(
+                        cx.io.request_contexts.background.tasks[task.slot]
+                            .as_ref()
+                            .unwrap()
+                            .admissions
+                            == 0
+                    );
+                    cx.decline_background_task(&activation, expected).unwrap();
+                }
+                cx.io.request_contexts.end_plan_admission();
+                cx.io.http_background_activation = None;
+                if number == 1 {
+                    cx.flush_background_cleanup();
+                    let entry = cx.io.request_contexts.background.tasks[task.slot]
+                        .as_ref()
+                        .unwrap();
+                    assert!(
+                        entry.attempt.is_none()
+                            && entry.activation.is_none()
+                            && entry.child.is_none()
+                    );
+                    assert!(entry.admissions == 0);
+                    assert!(
+                        cx.io.request_contexts.background.parents[index]
+                            .as_ref()
+                            .unwrap()
+                            .scheduler
+                            .next_deadline()
+                            == first_deadline
+                    );
+                    let error = &cx
+                        .io
+                        .request_contexts
+                        .background
+                        .notifications
+                        .last()
+                        .unwrap()
+                        .1;
+                    assert!(
+                        error.kind
+                            == Some(if exhausted == 0 {
+                                crate::ErrorKind::RateLimited
+                            } else {
+                                crate::ErrorKind::Internal
+                            })
+                    );
+                    assert!(
+                        error.retry_after_ms == if exhausted == 0 { Some(1000.) } else { None }
+                    );
+                    assert!(error.outcome.is_none());
+                }
             }
-            cx.io.request_contexts.end_plan_admission();
-            cx.io.http_background_activation = None;
         }
     }
 
