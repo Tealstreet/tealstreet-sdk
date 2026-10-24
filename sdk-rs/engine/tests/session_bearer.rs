@@ -81,6 +81,8 @@ struct Shared {
     retire_on_response: bool,
     /// `start` issues one bound Background read, then retires its Session.
     retire_in_start: bool,
+    /// A same-leg retry names the current Session instead of inheriting.
+    retry_rebinds: bool,
     /// The Session is granted private egress, and commands issue their root
     /// on it through `session_scoped_context`.
     session_egress: bool,
@@ -145,6 +147,7 @@ impl Shared {
             bind_retired: false,
             retire_on_response: false,
             retire_in_start: false,
+            retry_rebinds: false,
             session_egress: false,
             recipe_authorization: false,
             crowded: false,
@@ -373,6 +376,7 @@ impl Probe {
     fn issue(&self, cx: &mut Cx<'_, Pending>, context: Context, retried: bool) {
         let mut shared = self.shared.borrow_mut();
         let session = match (shared.bearer && !retried, shared.bind_retired) {
+            _ if retried && shared.retry_rebinds => shared.session.clone(),
             (false, _) => None,
             (true, _) if shared.bind_second => shared.second.clone(),
             (true, false) => shared.session.clone(),
@@ -1148,6 +1152,52 @@ fn r5_retry_reads_the_current_token_and_keeps_lineage() {
         Some("Bearer B"),
         "the retry carries the token cached when the retry was issued"
     );
+}
+
+/// Re-login control (DXtrade-style): the token timed out, so the venue
+/// retired Session A and opened B. A same-leg retry that names B rebinds the
+/// leg and prepares with B's token. A retry that inherits A is refused
+/// `Revoked` before any ID or action.
+#[test]
+fn retry_naming_the_replacement_session_rebinds_and_inheriting_is_revoked() {
+    for rebind in [true, false] {
+        let (mut e, shared) = engine(|shared| {
+            shared.retry = true;
+            shared.retry_rebinds = rebind;
+            shared.next_generation_token = Some("B");
+        });
+        let issued = ask(&mut e, 1);
+        let (permit, request) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound packet");
+        assert!(matches!(
+            e.claim_http(NOW + 2., permit),
+            Ok(Claim::Released(_))
+        ));
+        retire(&mut e, &shared, NOW + 3.);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            NOW + 4.,
+            Event::HttpFailed {
+                request: request.id,
+                error: "401",
+            },
+        );
+        let retried = prepares(&mut e);
+        if rebind {
+            assert_eq!(shared.borrow().issue_errors, []);
+            assert_eq!(retried.len(), 1);
+            assert_eq!(retried[0].2, RoutingIntent::Primary);
+            let (permit, request) =
+                prepared(&mut e, NOW + 5., retried[0].0).expect("rebound retry packet");
+            assert_eq!(authorization(&request), Some("Bearer B"));
+            assert!(matches!(
+                e.claim_http(NOW + 6., permit),
+                Ok(Claim::Released(_))
+            ));
+        } else {
+            assert_eq!(shared.borrow().issue_errors, [Error::Revoked]);
+            assert!(retried.is_empty(), "an inherited dead binding prepared");
+        }
+    }
 }
 
 /// R6: a recipe-supplied `Authorization` header is refused, and the value
