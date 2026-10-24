@@ -29,7 +29,7 @@ contains `2e921890` and the already-retired `b1761cde`.
 
 This section is the interim shared consumer pattern for OKX and Bitget. The
 canonical streamed engine contract will be fe7lgm's plan on
-`feat/rust-plan-serial-stream`; proposed API plan pin is `5eab0dc0b3a`, with
+`feat/rust-plan-serial-stream`; proposed API plan pin is `34b0eb6233c`, with
 the reviewed source pin still pending.
 Earlier bounded `admit_plan(&preflight, &steps, ...)` clearance does not grant
 clearance for that new primitive. The current direction is:
