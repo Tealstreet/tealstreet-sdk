@@ -285,7 +285,7 @@ impl<P> Io<P> {
 impl<P> Cx<'_, P> {
     /// An engine refusal before the venue's entry ends under this receipt's
     /// own entry, so a duplicate id never clears the live command's wait.
-    pub(super) fn refuse_before_entry(&mut self, command: CommandId, error: &str) {
+    pub(super) fn refuse_before_entry(&mut self, command: CommandId, error: impl Into<VenueError>) {
         self.io.begin_command_entry(Some(command));
         self.fail(command, error);
         self.io.end_command_entry();

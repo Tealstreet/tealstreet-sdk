@@ -401,8 +401,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e
-        .drain_actions()
+    let mut pending: Vec<_> = support::fixture::actions(&mut e, due)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -442,10 +442,14 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                     },
                 },
             );
-            pending.extend(e.drain_actions().filter_map(|a| match a {
-                Action::Http(r) => Some(r),
-                _ => None,
-            }));
+            pending.extend(
+                support::fixture::actions(&mut e, due + 1.)
+                    .into_iter()
+                    .filter_map(|a| match a {
+                        Action::Http(r) => Some(r),
+                        _ => None,
+                    }),
+            );
         }
     }
     assert!(pending.is_empty(), "all fixture account reads complete");
