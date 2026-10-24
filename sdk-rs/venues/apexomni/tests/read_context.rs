@@ -65,6 +65,9 @@ fn drain(engine: &mut TestEngine, now: f64) -> Output {
                     output.claimed += 1;
                     output.requests.push(request);
                 }
+                HttpAction::BindGroup { .. } => {
+                    panic!("ApeX reads declare no Mutation barriers")
+                }
                 HttpAction::Cancel { .. } => {}
             },
             action => output.actions.push(action),
