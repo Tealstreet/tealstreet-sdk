@@ -1912,3 +1912,15 @@ Depth-query startup also required the same genuine prepared_actions collector;
 only that bootstrap changes, with every assertion retained. The source-stage
 Shared-feed control now checks no socket actions at startup, timeout and retry.
 Production source remains byte-exact to0e0393051d5.
+
+## AsterDEX synchronous Read controls
+
+The committed original actual-Engine target executes20 behavioral assertion
+REDs plus six native working controls on unchanged production, with zero ignored.
+Each of ten terminals is tested at invalid clocks and full genuine-root capacity.
+Mainnet/testnet, V1/V3 precedence, exact native errors/JSON, finite positive cached
+leverage, missing/nonfinite cache, duplicate-owner isolation,300 synchronous ID
+reuses and keyless PublicTrades remote exemption remain covered. The managed
+target passes all26 without changing the original assertions. Existing financial
+and signature controls are retained. CI certifies WASM/replay/CPU/size/memory;
+local success makes no performance or merge-readiness claim.
