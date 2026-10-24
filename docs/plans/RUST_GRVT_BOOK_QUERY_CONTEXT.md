@@ -129,3 +129,39 @@ and capacity precede unknown-market empty success, so a full pool now refuses
 where the native path succeeded without I/O. The 256 retained peer-root local
 empty control pins that new contract and exact recovery, alongside the remote
 capacity control. No projection or synthetic request can bypass it.
+
+
+## Compiling original-control checkpoint
+
+The dedicated target runs 24 controls against unchanged BookQuery production
+on stack 5e7e0c528ad: 16 intended assertion REDs / 8 GREEN / zero ignored.
+No runtime, Cargo, map or existing fixture is changed by this checkpoint.
+
+RED first failures: main/testnet and unclaimed/preparation/physical-timeout/short
+cap/stale-reply/stale-failure cases assert managed Prepare and instead see raw
+HTTP. Remote capacity and remote NaN see raw HTTP; local capacity and local NaN
+see the native empty success. Late claimed DATA succeeds beyond the caller cap;
+the original caller timer is absent. Non-UTF8 actual ingress selects a raw retry
+where shared typed integrity failure must be strict. No missing-method errors
+or compile failures count as RED evidence.
+
+The original recovery and strict-preparation cleanup suffixes remain unexecuted
+after their first RED: no claim yet for exact Cancel, retry-hint preservation,
+255-peer survival, fresh/short windows, final cap expiry or stale replacement
+settlement. They are required source-stage gates. Physical 20 s expiry and the
+120 s derived ceiling are NEW contracts, not a native timer-bug claim.
+
+Eight GREEN controls pin both exact deployment wires/level order/duplicates/
+cumulative totals/no Store book publication, empty/alias/ignored-limit behavior,
+strict malformed/overflow rows, six immediate attempts and no seventh, strict
+HTTP 408/504 Timeout DATA, 429/1006 RateLimited metadata and clamped hint with
+no Prepare or deferral timer, duplicate ownership and zero-wait refusal. The
+rate control retains venue_code/message and native Read NotSent.
+
+An initial fixture compile used SetTimer.at instead of at_ms; corrected before
+this receipt. The NaN-local check now explicitly asserts refusal before reading
+its error metadata, so its RED is the contract assertion, not unwrap_err on a
+native success. Neither setup experiment is included in the reported counts.
+
+Scoped strict Clippy on the new target, rustfmt and diff checks pass. Cargo used
+four jobs serially; no workspace, all-feature or WASM build was run locally.
