@@ -417,8 +417,9 @@ IDs/provider/I/O and cannot acquire a nonce claim; a declared or invented nonce
 at prepare/Claim still fails closed. Compile-time guards at mint, prepare and
 Claim remove reservation, global released-floor access and nonce repair machinery
 from unrelated families. The legacy queue-time nonce allocator used by other
-venues remains independent and unchanged. The canonical receipt schema remains
-compatible; any retained schema-only size difference must be reported explicitly.
+venues remains independent and unchanged. Nonce-free receipts keep their exact
+schema; only feature-on builds admit the canonical decimal nonce field. The Rust
+field remains source-compatible, while feature-off wire nonce fields refuse.
 
 Feature-on behavior retains the exact trusted snapshot, receipt binding, atomic
 release ordering, independent StampFloor and eight-repair contract. It introduces

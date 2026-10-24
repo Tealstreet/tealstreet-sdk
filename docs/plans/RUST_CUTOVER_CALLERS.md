@@ -7954,3 +7954,12 @@ subject claims return the pending wrapper with typed InvalidInput for contextual
 settlement. Nonce-free selected queues and direct managed Slots-claim requests
 keep their existing paths. Each physical retry/queue mints afresh; no reselection
 or reservation occurs while the read snapshot is held.
+
+
+The non-default engine feature `dispatch-nonce` includes reservation, canonical
+wire nonce receipts and the atomic release/repair fence together. Only the Kraken
+crate enables it; Kraken Spot and Futures share that family. Other standalone
+families retain stamp-only signing and reject a present wire nonce or a manually
+supplied nonce receipt. Public Rust opaque types/fields remain nameable, but
+feature-off minting refuses before recipe construction and physical IDs. Native
+host nonce controls require its explicit `dispatch-nonce` forwarding feature.

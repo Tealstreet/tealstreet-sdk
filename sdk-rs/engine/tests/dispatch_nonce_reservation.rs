@@ -1,6 +1,6 @@
 //! Original ordering assertions ported to trusted selected send-time claims.
 //! Queue reservation and arithmetic probe ports are disclosed in the plan.
-#![cfg(feature = "test-support")]
+#![cfg(all(feature = "test-support", feature = "dispatch-nonce"))]
 
 use safe_cex_engine::book::Book;
 use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};

@@ -21,6 +21,7 @@ def modes():
         raise RuntimeError('expected at least one venue family')
     closures = {}
     grouped = {(): ['engine baseline'], ('order-locks', 'test-support'): ['explicit CI control']}
+    grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'order-locks', 'test-support')] = ['explicit nonce control']
     for family in families:
         tree = subprocess.check_output([
             'cargo', 'tree', '--locked', '--target', 'wasm32-unknown-unknown',

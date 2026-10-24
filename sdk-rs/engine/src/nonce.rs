@@ -10,6 +10,7 @@ use std::{
 #[derive(Default)]
 struct NonceState {
     reserved: u64,
+    #[cfg(feature = "dispatch-nonce")]
     released: Option<u64>,
 }
 type NonceMap = HashMap<(&'static str, [u8; 32]), NonceState>;
@@ -22,6 +23,7 @@ pub struct NonceKey([u8; 32]);
 
 impl NonceKey {
     /// Trusted, caller-assigned `Identity.stable_id`; tagged apart from public ids.
+    #[cfg(any(test, feature = "dispatch-nonce"))]
     pub(crate) fn stable_id(id: &str) -> Self {
         let mut hash = Sha256::new();
         hash.update(b"safe-cex stable id\0");
@@ -65,8 +67,14 @@ pub const KRAKEN: NonceDomain = NonceDomain {
 };
 
 #[path = "nonce_claim.rs"]
+#[cfg(feature = "dispatch-nonce")]
 mod claim;
-pub(crate) use claim::{ClaimAuthority, NonceReservation};
+#[path = "nonce_disabled.rs"]
+#[cfg(not(feature = "dispatch-nonce"))]
+mod claim;
+pub(crate) use claim::ClaimAuthority;
+#[cfg(feature = "dispatch-nonce")]
+pub(crate) use claim::NonceReservation;
 pub use claim::{NonceClaim, NonceSelectionError, NonceSubject};
 
 /// Clock floor for a reservation, in the family's wire unit.
