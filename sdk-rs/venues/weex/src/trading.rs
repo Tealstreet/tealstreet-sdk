@@ -1298,6 +1298,8 @@ impl WeexFutures {
         request: Request,
         error: VenueError,
     ) {
+        // Engine failure routing consumes this request's Pending exactly once;
+        // a late failure has no Pending and cannot reach a reused command here.
         cx.store.metadata_write_finished(request.command);
         rollback(
             cx,
