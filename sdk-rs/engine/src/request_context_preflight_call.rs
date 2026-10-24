@@ -11,6 +11,9 @@ pub(in super::super) struct State {
     pub(super) call: Vec<Call>,
     pub(super) handoff: Option<Delivery>,
     pub(super) activation: super::ready::Activation,
+    /// The next read waits on a login Session: nothing may issue, complete or
+    /// re-park it until that Session's drain or ended disposition.
+    pub(super) session_parked: bool,
 }
 
 impl State {
@@ -21,6 +24,7 @@ impl State {
             call: Vec::new(),
             handoff: None,
             activation: super::ready::Activation::Initial,
+            session_parked: false,
         }
     }
 
@@ -60,7 +64,7 @@ impl State {
         Ok(())
     }
 
-    fn admits_handoff(&self, delivery: Option<&Delivery>) -> bool {
+    pub(super) fn admits_handoff(&self, delivery: Option<&Delivery>) -> bool {
         delivery == self.handoff.as_ref()
     }
 }
@@ -94,7 +98,7 @@ impl ContextRegistry {
         Ok(handle)
     }
 
-    fn read_call(&self, handle: &Preflight, context: &Context) -> Result<&Call, Error> {
+    pub(super) fn read_call(&self, handle: &Preflight, context: &Context) -> Result<&Call, Error> {
         self.preflight_state(handle)?
             .call
             .first()
@@ -527,6 +531,18 @@ impl<P> Cx<'_, P> {
         if !state.call.is_empty() || !state.admits_handoff(self.io.http_delivery.as_ref()) {
             return Err(Error::Revoked);
         }
+        self.validate_preflight_read(handle, &policy, terms)?;
+        self.issue_preflight_read(handle, policy, terms)
+    }
+
+    /// The declared read's own terms, checked before any custody is spent.
+    pub(super) fn validate_preflight_read(
+        &self,
+        handle: &Preflight,
+        policy: &Policy,
+        terms: CallTerms,
+    ) -> Result<(), Error> {
+        let state = self.io.request_contexts.preflight_state(handle)?;
         if policy.operation != Operation::Read
             || policy.credential != state.policy.read_credential
             || terms.wait_ms != 0
@@ -546,6 +562,18 @@ impl<P> Cx<'_, P> {
             policy.pacing,
         )?
         .with_retry(policy.retry)?;
+        Ok(())
+    }
+
+    /// Issue a validated read in the caller's custody, with the current
+    /// delivery (if any) as its predecessor.
+    pub(super) fn issue_preflight_read(
+        &mut self,
+        handle: &Preflight,
+        policy: Policy,
+        terms: CallTerms,
+    ) -> Result<Context, Error> {
+        let window = terms.window(self.now, f64::MAX)?;
         self.io.request_contexts.prune(self.now);
         if self.io.request_contexts.contexts.len() + self.io.request_contexts.reserved_contexts
             >= CAPACITY

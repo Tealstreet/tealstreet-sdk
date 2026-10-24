@@ -61,10 +61,12 @@ impl ContextRegistry {
             // A terminal or a Plan transition consumed this preflight.
             return true;
         };
-        if state
-            .call
-            .first()
-            .is_some_and(|call| matches!(call.stage, Stage::Active { .. }))
+        // A read parked on a login Session is progress: its drain issues it.
+        if state.session_parked
+            || state
+                .call
+                .first()
+                .is_some_and(|call| matches!(call.stage, Stage::Active { .. }))
         {
             state.activation = Activation::Consumed;
             true
@@ -97,9 +99,12 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         let state = self.io.request_contexts.preflight_state(handle)?;
-        if self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
-            !ready.issued_by(&self.io.request_contexts.issuer) || ready.owner() != handle.owner()
-        }) || self.io.http_plan_ready.is_some()
+        if state.session_parked
+            || self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
+                !ready.issued_by(&self.io.request_contexts.issuer)
+                    || ready.owner() != handle.owner()
+            })
+            || self.io.http_plan_ready.is_some()
             || self.io.http_plan_expiring.is_some()
         {
             return Err(Error::Revoked);
@@ -202,8 +207,9 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Revoked);
         }
-        if admission.as_ref().is_some_and(|a| a.predecessor.is_none())
-            && let Ok(handle) = self.io.request_contexts.owner_from_context(context)
+        if admission.as_ref().is_some_and(|a| {
+            a.predecessor.is_none() && !self.io.session_resumed.contains(&a.attempt.request)
+        }) && let Ok(handle) = self.io.request_contexts.owner_from_context(context)
         {
             self.validate_preflight_activation(&handle)?;
         }
