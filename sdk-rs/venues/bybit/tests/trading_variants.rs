@@ -3200,3 +3200,58 @@ fn hyro_cancel_is_never_resent_on_text_alone() {
     });
     assert!(!h.has_request("/v5/order/cancel"), "no write resend");
 }
+
+/// R2: a duplicate-link refusal on create may mean the order exists, so it is
+/// Unknown for Place; on cancel the same code stays a refusal.
+#[test]
+fn duplicate_link_codes_are_unknown_for_place_only() {
+    for code in [10014, 110072] {
+        let mut h = ready(Variant::Linear);
+        place(&mut h, 120, vec![order("BTCUSDT", 1.0)]);
+        while h.has_request("/v5/position/list") {
+            h.respond(
+                "/v5/position/list",
+                200,
+                r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
+            );
+        }
+        let create = h.take("/v5/order/create");
+        h.reply(
+            create.id,
+            200,
+            &format!(r#"{{"retCode":{code},"retMsg":"duplicate"}}"#),
+        );
+        assert_eq!(
+            h.outcomes,
+            [(120, Some(safe_cex_engine::Outcome::Unknown))],
+            "{code} on create"
+        );
+
+        let mut h = ready(Variant::Linear);
+        place(&mut h, 121, vec![order("BTCUSDT", 1.0)]);
+        while h.has_request("/v5/position/list") {
+            h.respond(
+                "/v5/position/list",
+                200,
+                r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
+            );
+        }
+        created(&mut h, "dup-cancel");
+        h.outcomes.clear();
+        h.command(Command::CancelOrders {
+            command: 122,
+            ids: vec!["dup-cancel".into()],
+        });
+        let cancel = h.take("/v5/order/cancel");
+        h.reply(
+            cancel.id,
+            200,
+            &format!(r#"{{"retCode":{code},"retMsg":"duplicate"}}"#),
+        );
+        assert_eq!(
+            h.outcomes,
+            [(122, Some(safe_cex_engine::Outcome::Rejected))],
+            "{code} on cancel"
+        );
+    }
+}
