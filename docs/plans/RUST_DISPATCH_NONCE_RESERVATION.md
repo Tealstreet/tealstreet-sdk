@@ -207,7 +207,8 @@ Required controls before runtime readiness:
    cancel/expiry/reprepare, eight-repair exhaustion and no late provider action.
    Add compile-fail/API-shape coverage for unforgeable/non-Clone claims only once
    the API exists; missing symbols never count as original runtime evidence.
-8. Retain all original assertion bodies through adoption. Certify native and
+8. Retain all original outcome/order assertions through adoption, with the
+   explicit legacy GREEN ports below. Certify native and
    WASM host exact receipt matching, immutable deadline and no extra credits,
    selected-credential checker, scoped strict checks and fresh CI after source.
 
@@ -253,22 +254,30 @@ workspace/all-feature sweep, runtime certification or CI readiness is claimed.
 
 ## Adapter porting and source certification precision
 
-The queue-store continuity and distinct-subject GREENs use the fixture's
-QueueTime helper; source adoption ports that helper to a trusted selected
-KRAKEN claim and records its reservations, without changing either outcome
-assertion. The exact independent-domain control currently expects 1000/1001:
-its adapter normalizes only the observed fixed raw floor for that test, or the
-control remains an unchanged Cx public-agent compatibility check. It must not
-pretend the production KRAKEN domain has scale1. Choose and review that explicit
-adapter delta before source; no production compatibility allocator is kept.
+Three legacy-calling GREEN bodies are explicitly ported at source time:
 
-The 2002-step/regression/u64 exhaustion GREEN calls the legacy allocator
-directly. Keep that historical baseline in this checkpoint; port its allocation
-helper to engine-private KRAKEN-domain testing with an injected initial counter
-near exhaustion. The adapter invocation changes, while exact increment, decimal
-value and Err assertions remain. It is not evidence that the new KRAKEN domain
-exists today. reserve_kraken_legacy stays until the venue cutover, as stated
-above, and is then removed rather than retained for this test.
+- queue_store_continues_across_engines_and_recreation: construct a trusted
+  selected KRAKEN claim in each engine, drive genuine route/prepare, then
+  compare the three recorded reservations in the same strict-increase order.
+  Observation moves from queued to prepared; the continuity assertion stays.
+- distinct_subjects_have_independent_sequences: prepare the two trusted
+  subjects at the same raw1000ms, then assert exact [1000000,1000001] and
+  [1000000]. These numeric expectations change from the original public-agent
+  domain's [1000,1001]/[1000] solely because KRAKEN scale is1000. There is no
+  normalization of observed wire values and no independent-subject weakening.
+- existing_counter_is_exact_for_regression_more_than_one_thousand_and_exhaustion:
+  move the counter probe to engine-private KRAKEN-domain tests with an injected
+  initial counter near exhaustion. Port the allocation calls, retaining the
+  2002 exact-increment, decimal9007199254740993, u64::MAX and final Err checks.
+  Add independent real-dispatch exhaustion coverage below.
+
+These are declared adapter/body ports rather than a promise that all original
+source bytes remain unchanged. Review those exact diffs before adoption; retain
+all original outcome/order assertions and existing checkpoint in Git. The four
+ordering REDs switch only their fixture construction/probe to the reviewed
+DispatchContext claim. The legacy allocator is never kept as a test-only
+production escape after Kraken's consumer cutover. Its current GREEN is evidence
+for the old allocator, not evidence that the KRAKEN domain already exists.
 
 A separate dispatch-level exhaustion control must show Internal/NotSent, no
 provider invocation and no handoff. Add genuine same-ms dispatcher pairs,
