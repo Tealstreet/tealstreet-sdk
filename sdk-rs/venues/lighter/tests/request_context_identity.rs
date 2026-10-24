@@ -574,3 +574,37 @@ fn native_first_row_and_field_presence_precede_index_validation() {
         assert_eq!((failure.kind, failure.outcome), (None, None));
     }
 }
+
+fn invalid_clock(options: Options) {
+    let mut e = engine(options);
+    // The external Event entry stamps the invalid default receipt. The checked
+    // handle_command API rejects such a clock before invoking any venue.
+    e.handle(
+        f64::NAN,
+        Event::Command(Command::FetchAccount { command: OWNER }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    no_io(&actions);
+    assert_eq!(
+        diagnostics(&actions),
+        0,
+        "shared clock refusal precedes native selector diagnostics"
+    );
+    let results = outcomes(&actions);
+    assert_eq!(results.len(), 1);
+    let failure = results[0].as_ref().unwrap_err();
+    assert_eq!(
+        (failure.kind, failure.outcome),
+        (Some(ErrorKind::InvalidInput), None)
+    );
+}
+
+#[test]
+fn invalid_clock_precedes_the_missing_selector_terminal() {
+    invalid_clock(Options::default());
+}
+
+#[test]
+fn invalid_clock_precedes_remote_identity_issue() {
+    invalid_clock(options());
+}

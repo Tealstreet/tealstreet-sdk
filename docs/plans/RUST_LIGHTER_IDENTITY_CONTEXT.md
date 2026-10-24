@@ -99,8 +99,10 @@ Report actual first assertion failures and gated suffix limits. No missing API,
 compile error, ignored assertion, fake Context or synthetic signing success is
 RED evidence. Use CARGO_BUILD_JOBS=4 and one scoped local build at a time; CI owns
 workspace/all-feature/WASM/performance checks. Independent plan/native/API review
-and unchanged original controls precede any production authorization. This task
-stops at committed plan and original REDs, with no production cutover or PR claim.
+and unchanged original controls precede any production authorization. The initial checkpoint stops at committed plan and original REDs. The overseer
+clarified that production may follow once9cz/uuf CLEAR the original controls,
+then a draft PR and CI run in parallel with source review. No source cutover
+is included in this checkpoint.
 
 
 ## Original execution checkpoint
@@ -131,3 +133,25 @@ source-certification work. No production adoption is included or authorized.
 Scoped strict Clippy on this new test target and scoped rustfmt/diff checks pass.
 Only this plan and the dedicated target differ from the assigned base; both are
 new paths absent from combo5b. Local tests used four jobs, sequentially.
+
+
+## Clock coverage refinement before source
+
+9cz's bounded original-control review atc97e88c9e561 is CLEAR, with an explicit
+invalid-clock coverage ask. Two additional original controls now independently
+execute missing-selector and remote-entry NaN cases through Engine::handle, whose
+external event path stamps the invalid default receipt. Both are compiling
+assertion REDs: the native path emits its diagnostic or raw HTTP first. The
+checked handle_command API's early clock rejection is not misreported as a venue
+admission RED. Typed suffix checks remain behind these first assertions.
+
+All19 exact current controls execute13 intended assertion REDs and6 GREEN,
+zero ignored. Production, existing fixtures, Cargo and maps remain exactbe710.
+The scope includes ordinary Read refusal None, and retained shared preparation
+failure NotSent (the existing engine contract), without changing either policy.
+
+API review detail still pending: validate_read_http_delivery rejects an expired
+physical child even while the caller root lives. The exact physical-timeout
+callback's authority for advancing a DIFFERENT native candidate must be confirmed
+by the core owner before source. Do not convert that rejection into publication
+rights, infer release from text, renew the root or invent a failure validator.
