@@ -33,7 +33,8 @@ pub fn message(e: &mut Engine<Kraken>, socket: SocketId, now: f64, text: &str) {
     e.handle(now, Event::WsMessage { socket, text });
 }
 pub fn requests(e: &mut Engine<Kraken>) -> Vec<HttpRequest> {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -66,7 +67,7 @@ pub fn ready_with_catalogue(
     let mut public = None;
     let mut timers = vec![];
     for _ in 0..30 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
         if actions.is_empty() {
             break;
         }

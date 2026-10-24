@@ -14,15 +14,15 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         public_data_only: true,
         ..Options::default()
     }));
-    engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut now = 0.0;
+    engine.start(now);
+    let mut request = safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
         })
         .unwrap();
-    let mut now = 0.0;
     for delay in [1000.0, 2000.0] {
         let original_url = request.url.clone();
         engine.handle(
@@ -32,7 +32,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
                 error: "scripted public failure",
             },
         );
-        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, now);
         assert!(
             !actions.iter().any(|action| matches!(
                 action,
@@ -56,8 +56,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
             .expect("bounded public discovery backoff");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -68,6 +68,6 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
     engine.handle(now, Event::HttpResponse { request: request.id, response: Response { status: 200, headers: "", body: r###"{"error":[],"result":{"XXBTZUSD":{"altname":"XBTUSD","wsname":"XBT/USD","pair_decimals":1,"lot_decimals":4,"ordermin":"0.0001","status":"online"},"XETHZUSD":{"altname":"ETHUSD","wsname":"ETH/USD","pair_decimals":2,"lot_decimals":3,"ordermin":"0.001","status":"online"},"XXBTZEUR":{"wsname":"XBT/EUR","status":"online"},"XXBTZUSD.d":{"wsname":"XBT/USD","status":"online"},"malformed":{"pair_decimals":"bad"}}}"### } });
     assert!(engine.store().loaded().markets);
     assert_eq!(engine.store().markets().len(), 2);
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, now);
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
