@@ -75,6 +75,9 @@ impl Cycle {
                         }
                     }
                     HttpAction::Cancel { .. } => {}
+                    HttpAction::BindGroup { .. } => {
+                        panic!("Bitget fixture declares no Mutation barriers")
+                    }
                 },
                 Action::Http(request) => self.requests.push(request),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
