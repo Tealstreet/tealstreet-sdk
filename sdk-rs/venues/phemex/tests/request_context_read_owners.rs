@@ -53,6 +53,9 @@ fn release<V: safe_cex_engine::Venue>(
                     }
                 }
                 HttpAction::Cancel { .. } => {}
+                HttpAction::BindGroup { .. } => {
+                    panic!("single-request fixture cannot release a request group")
+                }
             },
             other => out.push(other),
         }
