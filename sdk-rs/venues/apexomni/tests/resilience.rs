@@ -57,10 +57,6 @@ fn engine(seed: &str) -> TestEngine {
     )
     .unwrap();
     let mut engine = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("passphrase".into()),
-        omni_key_seed: Some(seed.into()),
         identity: identities.primary.clone(),
         ..Default::default()
     }));

@@ -557,7 +557,96 @@ pub fn prepare_local_signer_for(
         let setup = asterdex_setup::local_setup(options, public_data_only)?;
         return local_signer_from_setup(setup, policy, public_data_only);
     }
+    #[cfg(feature = "apexomni")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::ApexOmni) {
+        let setup = apexomni_local_setup(options)?;
+        let (provider, identities) = local_signer_from_setup(setup, policy, public_data_only)?;
+        return apexomni_admit(provider, identities);
+    }
     prepare_local_signer_with_policy(options, policy, public_data_only)
+}
+
+/// ApeX has no read credentials; refused at setup rather than ignored.
+#[cfg(feature = "apexomni")]
+const APEXOMNI_NO_SECONDARY: &str =
+    "ApeX has no read credentials; a secondary key is not supported";
+/// The legacy start refusal, now at trusted setup before any order exists.
+#[cfg(feature = "apexomni")]
+const APEXOMNI_SEED_INVALID: &str = "Invalid OmniKey seed: expected 65-byte Ethereum signature";
+
+/// Trusted ApeX setup: the API fields plus the OmniKey seed as the primary's
+/// `zklinkSeed` role. Consumes every raw field; none reaches the venue.
+#[cfg(feature = "apexomni")]
+fn apexomni_local_setup(
+    options: &mut EngineOptions,
+) -> Result<safe_cex_crypto::signer::LocalSetup, VenueError> {
+    use safe_cex_crypto::signer::{LocalExtra, LocalIdentity, LocalSetup, Secret};
+    use safe_cex_engine::signing::{ExtraKey, KeyEncoding};
+    if options.read_credentials.take().is_some() {
+        return Err(invalid(APEXOMNI_NO_SECONDARY));
+    }
+    let seed = options.omni_key_seed.take().filter(|seed| !seed.is_empty());
+    let any = options.key.is_some() || options.secret.is_some() || options.passphrase.is_some();
+    let primary = (any || seed.is_some()).then(|| {
+        let mut identity = LocalIdentity {
+            key: Secret::new(options.key.take().unwrap_or_default()),
+            secret: Secret::new(options.secret.take().unwrap_or_default()),
+            passphrase: options.passphrase.take().map(Secret::new),
+            ..Default::default()
+        };
+        if let Some(seed) = seed {
+            identity.extra.0.insert(
+                ExtraKey::ZklinkSeed,
+                LocalExtra {
+                    value: Secret::new(seed),
+                    encoding: KeyEncoding::Hex,
+                },
+            );
+        }
+        identity
+    });
+    Ok(LocalSetup {
+        primary,
+        secondary: None,
+    })
+}
+
+/// Shared by native and JSON setup: no secondary, and an installed zkLink
+/// role must sign, checked by one synchronous provider probe with no I/O.
+#[cfg(feature = "apexomni")]
+fn apexomni_admit(
+    provider: safe_cex_engine::signing::Provider,
+    identities: safe_cex_engine::signing::Identities,
+) -> Result<
+    (
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    use safe_cex_engine::signing::{Algorithm, ExtraKey, Operation, PayloadPart, SignRequest};
+    if identities.secondary.is_some() {
+        return Err(invalid(APEXOMNI_NO_SECONDARY));
+    }
+    if let Some(role) = identities
+        .primary
+        .as_ref()
+        .and_then(|identity| identity.extra.get(&ExtraKey::ZklinkSeed))
+    {
+        let probe = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::ZkLinkContract,
+                key: role.clone(),
+                payload: vec![PayloadPart::Bytes { bytes: vec![0; 36] }],
+            }],
+        };
+        if !matches!(provider.sign_ready(&probe), Some(Ok(_))) {
+            return Err(invalid(APEXOMNI_SEED_INVALID));
+        }
+    }
+    Ok((provider, identities))
 }
 
 #[cfg(feature = "dispatch-signing")]
@@ -659,11 +748,16 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
-    local_signer_from_json_with_policy(
+    let (provider, identities) = local_signer_from_json_with_policy(
         input,
         construction::signer_setup_policy(venue),
         public_data_only,
-    )
+    )?;
+    #[cfg(feature = "apexomni")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::ApexOmni) {
+        return apexomni_admit(provider, identities);
+    }
+    Ok((provider, identities))
 }
 
 #[cfg(feature = "dispatch-signing")]
@@ -957,24 +1051,46 @@ pub fn build_with_signer<T: Visit>(
             )?,
         ),
         #[cfg(feature = "apexomni")]
-        "apexomni" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "apexomni" => {
+            // Injected refs need their provider and never travel beside raw
+            // material; raw native input goes through trusted setup here.
+            let present = |value: &Option<String>| value.as_ref().is_some_and(|s| !s.is_empty());
+            let raw = present(&options.key)
+                || present(&options.secret)
+                || present(&options.passphrase)
+                || present(&options.omni_key_seed)
+                || options.read_credentials.is_some();
+            let (signer, identities) = match options.signing.take() {
+                Some(identities) => {
+                    if raw {
+                        return Err(invalid(
+                            "ApeX credentials belong in signer setup, not engine options",
+                        ));
+                    }
+                    if signer.is_none() {
+                        return Err(invalid("Engine signing provider is required"));
+                    }
+                    (signer, identities)
+                }
+                None if raw => {
+                    let (provider, identities) = prepare_local_signer_for(venue, &mut options)?;
+                    (Some(provider), identities)
+                }
+                None => (signer, Default::default()),
+            };
+            let mut engine = Engine::new(
                 ApexOmni::new(ApexOmniOptions {
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    passphrase: options.passphrase.take(),
-                    omni_key_seed: options.omni_key_seed.take(),
-                    identity: None,
+                    identity: identities.primary.clone(),
                     tick_interval_ms: None,
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "txflow")]
         "txflow" => {
             let mut options = safe_cex_venue_txflow::Options {
@@ -1128,25 +1244,47 @@ pub fn build_with_signer<T: Visit>(
             )?,
         ),
         #[cfg(feature = "bitrue")]
-        "bitrue" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "bitrue" => {
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Bitrue credentials belong in signer setup, not engine options",
+                ));
+            }
+            let mut identities = options.signing.take().unwrap_or_default();
+            identities.primary = identities.primary.filter(|identity| {
+                !identity.credential.0.is_empty() && !identity.signing.0.is_empty()
+            });
+            if let Some(read) = &identities.secondary {
+                read.validate().map_err(invalid)?;
+            }
+            if let Some(primary) = &identities.primary {
+                primary.validate().map_err(invalid)?;
+            }
+            let registered = identities.clone();
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
                 Bitrue::new(BitrueOptions {
-                    read_credentials: options.read_credentials.take(),
+                    read_credentials: identities.secondary,
+                    credentials: identities.primary,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                     recv_window: options
                         .recv_window
                         .take()
-                        .unwrap_or(20_000.0)
-                        .clamp(1.0, 60_000.0) as u32,
+                        .unwrap_or(20_000.)
+                        .clamp(1., 60_000.) as u32,
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "bitunix")]
         "bitunix" => finish(
             visitor,
@@ -1219,21 +1357,37 @@ pub fn build_with_signer<T: Visit>(
             )?,
         ),
         #[cfg(feature = "phemex")]
-        "phemex" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "phemex" => {
+            if options.key.as_ref().is_some_and(|s| !s.is_empty())
+                || options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Phemex credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            let registered = identities.clone();
+            if let Some(read) = &identities.secondary {
+                read.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
                 PhemexPerpetuals::new(PhemexOptions {
-                    read_credentials: options.read_credentials.take(),
+                    read_credentials: identities.secondary,
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
+                    credentials: identities.primary,
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "binance")]
         "binance" | "binancepm" | "binancespot" | "binanceinverse" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())

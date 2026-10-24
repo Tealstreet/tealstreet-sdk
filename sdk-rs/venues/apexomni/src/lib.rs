@@ -17,23 +17,12 @@ use std::collections::HashMap;
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-    pub passphrase: Option<String>,
-    pub omni_key_seed: Option<String>,
-    /// Host-provider identity for managed signed requests. Opaque refs only.
+    /// The provider identity for every signed request: opaque refs only. The
+    /// venue holds no key material; the zkLink seed is its `zklinkSeed` role.
     pub identity: Option<safe_cex_engine::signing::Identity>,
     pub tick_interval_ms: Option<f64>,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        safe_cex_crypto::secrets::erase(&mut self.passphrase);
-        safe_cex_crypto::secrets::erase(&mut self.omni_key_seed);
-    }
-}
 
 pub enum Pending {
     Candles(public::Candles),
@@ -51,7 +40,7 @@ pub enum Pending {
 }
 
 pub struct ApexOmni {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     rest: &'static str,
     contracts: HashMap<String, public::ContractConfig>,
     public: public::Public,
@@ -129,7 +118,6 @@ fn api_response(response: Response<'_>) -> ApiResponse {
 
 impl ApexOmni {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             rest: if options.testnet {
                 "https://testnet.omni.apex.exchange/api"
@@ -164,14 +152,29 @@ impl ApexOmni {
         legacy: bool,
         retries: u8,
     ) -> Result<RequestId, (String, Box<Pending>)> {
-        // A signing failure hands the pending request back so its caller can complete it.
-        let signed = match sign::request(&self.options, cx.now, &request, legacy) {
-            Ok(signed) => signed,
-            Err(error) => return Err((error, Box::new(pending))),
+        // Klines carry no authentication. Symbols is signed, as legacy did, when
+        // the identity has a passphrase ref; otherwise it stays public discovery.
+        let symbols = request.path == "/v3/symbols";
+        let identity = if sign::is_unsigned(&request) {
+            None
+        } else {
+            match self.options.identity.clone() {
+                Some(identity) if symbols && identity.passphrase.is_none() => None,
+                Some(identity) => Some(identity),
+                None if symbols => None,
+                // A signing failure hands the pending request back so its caller can complete it.
+                None => {
+                    return Err((
+                        "ApeX API key, signing key and passphrase are required".into(),
+                        Box::new(pending),
+                    ));
+                }
+            }
         };
-        let url = format!("{}{}", self.rest, signed.path);
+        let url = format!("{}{}", self.rest, sign::request_path(&request));
         let stream = at;
         let method = request.method;
+        let step = identity.map(|identity| sign::Http::new(identity, request.clone(), legacy));
         let pending = Pending::SignedAuth {
             request,
             pending: Box::new(pending),
@@ -179,11 +182,16 @@ impl ApexOmni {
             retries,
             at,
         };
-        Ok(if let Some(at) = stream {
-            cx.request_streamed_body(method, url, signed.headers, signed.body, at, pending)
+        let id = if let Some(at) = stream {
+            cx.request_streamed_body(method, url, vec![], None, at, pending)
         } else {
-            cx.request(method, url, signed.headers, signed.body, pending)
-        })
+            cx.request(method, url, vec![], None, pending)
+        };
+        // The provider signs at dispatch; the recipe owns headers and body.
+        if let Some(step) = step {
+            cx.sign_http(id, Box::new(step));
+        }
+        Ok(id)
     }
 
     fn response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {

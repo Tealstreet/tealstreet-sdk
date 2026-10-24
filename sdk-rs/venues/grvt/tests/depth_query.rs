@@ -34,7 +34,10 @@ fn ask(e: &mut Engine<Grvt>, command: u32, symbol: &str, limit: Option<u32>) -> 
             limit,
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(e, 1000.)
+        .into_iter()
+        .filter(|action| !matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .collect::<Vec<_>>();
     assert_eq!(
         actions.len(),
         1,
@@ -276,7 +279,13 @@ fn concurrent_queries_keep_owners_and_read_network_retries_are_bounded_without_a
                 error: "network read failure",
             },
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions =
+            safe_cex_engine::test_support::prepared_actions(&mut e, 1001. + f64::from(attempt))
+                .into_iter()
+                .filter(|action| {
+                    !matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. })
+                })
+                .collect::<Vec<_>>();
         if attempt == 5 {
             failed(&actions, 9, ErrorKind::Network);
         } else {

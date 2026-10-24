@@ -182,7 +182,7 @@ fn boot(options: Options) -> Engine<Okx> {
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
     while !pending.is_empty() {
-        let a = pending.remove(0);
+        let a = take_http(&mut pending);
         let Action::Http(r) = &a else { unreachable!() };
         let body = if r.url.contains("instruments?instType=SWAP") {
             envelope(MARKET)

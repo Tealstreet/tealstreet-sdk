@@ -5,7 +5,8 @@ use safe_cex_crypto::signer::{
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::signing::{
     Algorithm, Capability, CredentialSetupPolicy, ExtraFieldPolicy, ExtraKey, ExtraKeyPolicy,
-    Identities, IdentitySetupPolicy, KeyEncoding, KeyRef, SignFuture, SignRequest, Signer,
+    Identities, IdentitySetupPolicy, KeyEncoding, KeyRef, SignError, SignFuture, SignRequest,
+    SignResult, Signer,
 };
 use safe_cex_engine::{
     Action, Command, Event, HttpRequest, Notice, Response, SocketChannel, SocketId,
@@ -73,15 +74,11 @@ fn ready_with_provider(hmac_only: bool) -> (TestEngine, SocketId) {
 fn ready_with_provider_mode(hmac_only: bool, remote: bool) -> (TestEngine, SocketId) {
     let (provider, identities) = write_provider(hmac_only);
     let provider: Arc<dyn Signer> = if remote {
-        Arc::new(DelegatedHmac)
+        Arc::new(DelegatedHmac(provider))
     } else {
         provider
     };
     let inner = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
-        key: Some("api-key".into()),
-        secret: Some("mysecret".into()),
-        passphrase: Some("pass".into()),
-        omni_key_seed: Some(format!("{}1b", "01".repeat(64))),
         identity: identities.primary.clone(),
         ..Options::default()
     }));
@@ -1114,6 +1111,12 @@ fn managed_hmac_setting_unlisted_code_is_unknown_with_native_evidence() {
 
 struct HmacOnly(Arc<LocalSigner>);
 impl Signer for HmacOnly {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        self.0.sign_ready(work)
+    }
     fn sign(&self, work: SignRequest) -> SignFuture {
         self.0.sign(work)
     }
@@ -1369,10 +1372,18 @@ fn late_cancel_ack_preserves_uncertainty_without_bypassing_native_read_fences() 
     }
 }
 
-struct DelegatedHmac;
+/// A remote HMAC signer for writes. Account reads (GET), which the venue now
+/// signs through the provider too, answer inline from the local fixture so
+/// startup completes; writes wait for the remote reply.
+struct DelegatedHmac(Arc<dyn Signer>);
 impl Signer for DelegatedHmac {
     fn sign(&self, _: SignRequest) -> SignFuture {
         Box::pin(std::future::pending())
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        (work.context.method == "GET")
+            .then(|| self.0.sign_ready(work))
+            .flatten()
     }
     fn can_sign(&self, _: &KeyRef, algorithm: Algorithm) -> Capability {
         if algorithm == Algorithm::HmacSha256 {

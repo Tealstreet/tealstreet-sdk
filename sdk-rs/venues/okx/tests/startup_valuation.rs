@@ -20,7 +20,7 @@ fn startup(market: &str, shared: bool) -> (Engine<Okx>, Action, SocketId, Vec<Ac
             .unwrap();
     }
     engine.start(0.0);
-    let catalogue = prepared(&mut engine, 0.0).remove(0);
+    let catalogue = take_http(&mut prepared(&mut engine, 0.0));
     reply(&mut engine, &catalogue, &envelope(market), 1.0);
     let out = prepared(&mut engine, 1.0);
     let ticker = out
@@ -88,7 +88,7 @@ fn account_equity(
         };
         reply(engine, &request, &body, 5.0);
         pending.extend(
-            actions(engine)
+            prepared(engine, 5.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );

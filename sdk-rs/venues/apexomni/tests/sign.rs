@@ -1,12 +1,12 @@
 use safe_cex_engine::Method;
-use safe_cex_venue_apexomni::{Options, sign};
+use safe_cex_venue_apexomni::sign::{self, LegacyCredentials};
 
-fn options() -> Options {
-    Options {
+/// The legacy canonicalization oracle's credentials; never venue options.
+fn options() -> LegacyCredentials {
+    LegacyCredentials {
         key: Some("api-key".into()),
         secret: Some("mysecret".into()),
         passphrase: Some("pass".into()),
-        ..Options::default()
     }
 }
 fn fields(values: &[(&str, &str)]) -> Vec<(String, String)> {
@@ -177,7 +177,7 @@ fn ws_login_keeps_nested_json_string_and_millisecond_timestamp() {
 #[test]
 fn public_klines_strip_all_headers_and_symbols_allow_empty_credentials() {
     let unsigned = sign::request(
-        &Options::default(),
+        &LegacyCredentials::default(),
         1700000000123.0,
         &sign::Request::get("/v3/klines", vec![]),
         false,
@@ -186,7 +186,7 @@ fn public_klines_strip_all_headers_and_symbols_allow_empty_credentials() {
     assert!(unsigned.headers.is_empty());
     assert!(
         sign::request(
-            &Options::default(),
+            &LegacyCredentials::default(),
             1700000000123.0,
             &sign::Request::get("/v3/symbols", vec![]),
             false
@@ -195,7 +195,7 @@ fn public_klines_strip_all_headers_and_symbols_allow_empty_credentials() {
     );
     assert!(
         sign::request(
-            &Options::default(),
+            &LegacyCredentials::default(),
             1700000000123.0,
             &sign::Request::get("/v3/account", vec![]),
             false

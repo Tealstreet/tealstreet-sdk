@@ -15,7 +15,23 @@ fn engine(options: Options) -> Engine<Lighter> {
 }
 fn ask(e: &mut Engine<Lighter>) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    e.drain_actions().collect()
+    native_actions(e)
+}
+fn native_actions(e: &mut Engine<Lighter>) -> Vec<Action> {
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
+        .filter(|action| match action {
+            Action::SetTimer { at_ms, .. } => {
+                assert!(
+                    *at_ms == NOW + 20_000.
+                        || *at_ms == NOW + f64::from(safe_cex_engine::DEFAULT_COMMAND_WAIT_MS)
+                );
+                false
+            }
+            Action::ClearTimer { .. } => false,
+            _ => true,
+        })
+        .collect()
 }
 fn take(actions: Vec<Action>) -> HttpRequest {
     let mut iter = actions.into_iter();
@@ -40,7 +56,7 @@ fn respond(e: &mut Engine<Lighter>, r: &HttpRequest, status: u16, body: &str) ->
             },
         },
     );
-    e.drain_actions().collect()
+    native_actions(e)
 }
 
 fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
@@ -240,7 +256,7 @@ fn identity_network_failure_exhausts_only_its_own_candidates_and_duplicate_settl
             error: "connection lost",
         },
     );
-    result(e.drain_actions().collect(), true).unwrap_err();
+    result(native_actions(&mut e), true).unwrap_err();
     e.handle(
         NOW,
         Event::HttpFailed {
