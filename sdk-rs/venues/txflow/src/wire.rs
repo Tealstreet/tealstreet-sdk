@@ -103,6 +103,8 @@ impl<'a> PublicFrame<'a> {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Instrument {
+    #[serde(skip)]
+    pub ticker_index: Option<u32>,
     pub index: u32,
     pub name: String,
     pub base_currency: String,

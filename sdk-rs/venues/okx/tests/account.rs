@@ -42,7 +42,7 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
             _ => None,
         })
         .unwrap();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let expected = e.store().balance().clone();
     for scale in [f64::INFINITY, 15., 0.25] {
         e.handle(100., Event::PollScaleChanged { scale });
@@ -146,7 +146,7 @@ fn handoff_actions(engine: &mut Engine<Okx>, now: f64) -> Vec<Action> {
     output
 }
 
-fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str) {
+fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str, at: f64) {
     while let Some(a) = requests.pop() {
         let Action::Http(r) = &a else {
             continue;
@@ -160,9 +160,9 @@ fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str) {
         } else {
             envelope("")
         };
-        reply(e, &a, &body, 5.0);
+        reply(e, &a, &body, at);
         requests.extend(
-            actions(e)
+            prepared(e, at)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -172,7 +172,7 @@ fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str) {
 #[test]
 fn authenticates_two_sockets_and_maps_contract_units_and_balance() {
     let (mut e, _, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     assert!(
         e.store().loaded().balance && e.store().loaded().positions && e.store().loaded().orders
     );
@@ -202,7 +202,7 @@ fn terminal_push_wins_over_delayed_snapshot_and_fills_dedupe() {
     let frame = format!(r#"{{"arg":{{"channel":"orders"}},"data":[{filled}]}}"#);
     ws(&mut e, private, &frame);
     ws(&mut e, private, &frame);
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     assert_eq!(e.store().orders().len(), 1);
     assert_eq!(
         e.store().orders()[0].status,
@@ -237,7 +237,7 @@ fn position_tombstone_and_new_equity_win_over_inflight_rest() {
         private,
         r#"{"arg":{"channel":"account"},"data":[{"totalEq":"6000"}]}"#,
     );
-    complete(&mut e, pending, "");
+    complete(&mut e, pending, "", 5.0);
     assert!(e.store().positions().is_empty());
     assert_eq!(e.store().balance().total, 6000.0);
 }
@@ -263,7 +263,7 @@ fn failed_account_snapshot_preserves_existing_state() {
 #[test]
 fn stale_live_push_cannot_reopen_terminal_order() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let canceled = ORDER.replace("\"live\"", "\"canceled\"");
     ws(
         &mut e,
@@ -284,7 +284,7 @@ fn stale_live_push_cannot_reopen_terminal_order() {
 #[test]
 fn empty_and_unknown_position_pushes_preserve_balance() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, "");
+    complete(&mut e, pending, "", 5.0);
     let before = e.store().balance().clone();
     ws(
         &mut e,
@@ -308,7 +308,7 @@ fn rejected_login_closes_and_reconnects() {
         private,
         r#"{"event":"login","code":"60009","msg":"Login failed"}"#,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 4.0);
     assert!(
         out.iter()
             .any(|a| matches!(a, Action::WsClose { socket } if *socket == private))
@@ -325,7 +325,7 @@ fn rejected_login_closes_and_reconnects() {
         .unwrap();
     e.handle(20_000.0, Event::TimerFired { timer });
     assert!(
-        actions(&mut e)
+        prepared(&mut e, 20_000.0)
             .iter()
             .any(|a| matches!(a, Action::WsConnect { url, .. } if url.ends_with("/private")))
     );
@@ -353,7 +353,7 @@ fn malformed_known_position_row_without_a_stored_copy_commits_flat() {
     }
     assert!(e.store().loaded().positions && e.store().loaded().balance);
     assert!(e.store().positions().is_empty());
-    let errors: Vec<_> = actions(&mut e)
+    let errors: Vec<_> = prepared(&mut e, 5.0)
         .into_iter()
         .filter_map(|a| match a {
             Action::Notice(Notice::Event(event)) if event.level == Level::Error => {
@@ -383,7 +383,7 @@ fn resweep(
             code: 1006,
         },
     );
-    let out = actions(e);
+    let out = prepared(e, now);
     let (timer, at) = out
         .iter()
         .find_map(|a| match a {
@@ -396,7 +396,7 @@ fn resweep(
         })
         .expect("private reconnect backoff");
     e.handle(at, Event::TimerFired { timer });
-    let private = actions(e)
+    let private = prepared(e, at)
         .into_iter()
         .find_map(|a| match a {
             Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(socket),
@@ -404,7 +404,7 @@ fn resweep(
         })
         .expect("replacement private epoch");
     e.handle(at, Event::WsOpened { socket: private });
-    actions(e);
+    prepared(e, at);
     e.handle(
         at,
         Event::WsMessage {
@@ -429,7 +429,7 @@ fn resweep(
         };
         reply(e, &a, &body, at + 1.0);
         requests.extend(
-            actions(e)
+            prepared(e, at + 1.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -440,7 +440,7 @@ fn resweep(
 #[test]
 fn bad_position_row_keeps_its_stored_copy_while_the_balance_commits() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let bad = POSITION.replace("\"pos\":\"5\"", "\"pos\":\"bad\"");
     resweep(
         &mut e,
@@ -462,7 +462,7 @@ fn bad_balance_currency_row_keeps_its_equity_while_positions_commit() {
         r#"{"balData":[{"ccy":"","eq":"6000"}]}"#,
     ] {
         let (mut e, private, _, pending) = startup();
-        complete(&mut e, pending, ORDER);
+        complete(&mut e, pending, ORDER, 5.0);
         let grown = POSITION.replace("\"pos\":\"5\"", "\"pos\":\"6\"");
         resweep(&mut e, private, risk, &grown, ORDER, 10.0);
         assert_eq!(e.store().positions()[0].contracts, 0.06, "{risk}");
@@ -481,7 +481,7 @@ fn bad_order_row_keeps_its_stored_copy_and_new_orders_commit() {
         r#"{"ordId":123}"#.to_string(),
     ] {
         let (mut e, private, _, pending) = startup();
-        complete(&mut e, pending, ORDER);
+        complete(&mut e, pending, ORDER, 5.0);
         let balance = r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#;
         resweep(
             &mut e,
@@ -508,9 +508,10 @@ fn complete_fresh(e: &mut Engine<Okx>, mut requests: Vec<Action>, position: &str
         } else {
             envelope("")
         };
-        reply(e, &a, &body, 30_000.0);
+        // Inside the shared 20 s read deadline of a page issued after reconnect.
+        reply(e, &a, &body, 10_000.0);
         requests.extend(
-            actions(e)
+            prepared(e, 10_000.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -527,7 +528,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
             code: 1006,
         },
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 100.0);
     let timer = out
         .iter()
         .find_map(|a| match a {
@@ -536,7 +537,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
         })
         .unwrap();
     e.handle(2_000.0, Event::TimerFired { timer });
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 2_000.0);
     let socket = out
         .iter()
         .find_map(|a| match a {
@@ -545,7 +546,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
         })
         .unwrap();
     e.handle(2_001.0, Event::WsOpened { socket });
-    actions(&mut e);
+    prepared(&mut e, 2_001.0);
     e.handle(
         2_002.,
         Event::WsMessage {
@@ -563,7 +564,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
     assert!(e.store().orders().is_empty() && e.store().positions().is_empty());
     assert_eq!(e.store().balance().total, 6000.0);
     // The old page must not restart paging or replace the post-reconnect view.
-    complete(&mut e, stale, ORDER);
+    complete(&mut e, stale, ORDER, 10_001.0);
     assert!(e.store().orders().is_empty() && e.store().positions().is_empty());
     assert_eq!(e.store().balance().total, 6000.0);
 }
@@ -572,11 +573,11 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
 fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
     use safe_cex_engine::Command;
     let (mut e, private, _, initial) = startup();
-    complete(&mut e, initial, ORDER);
+    complete(&mut e, initial, ORDER, 5.0);
     // The SDK completes startup before commands; repeat authentication starts
     // another read sweep whose replies race the acknowledged settings write.
     ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-    let stale = actions(&mut e)
+    let stale = prepared(&mut e, 4.0)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
@@ -589,7 +590,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
             side: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
     reply(
         &mut e,
@@ -597,7 +598,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
         &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"20","mgnMode":"cross"}"#),
         6.0,
     );
-    let fresh: Vec<_> = actions(&mut e)
+    let fresh: Vec<_> = prepared(&mut e, 6.0)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
@@ -608,7 +609,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("orders")))
     );
     // Retired position reads cannot overwrite the acknowledged leverage.
-    complete(&mut e, stale, ORDER);
+    complete(&mut e, stale, ORDER, 7.0);
     assert_eq!(e.store().orders().len(), 1);
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
     complete_fresh(
@@ -637,7 +638,7 @@ fn fill_count(frame: &[u8]) -> u32 {
 #[test]
 fn distinct_earlier_fill_survives_terminal_order_guard_and_deduplicates() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let filled = ORDER.replace("\"live\"", "\"filled\"").replace(
         "\"accFillSz\":\"1\"",
         "\"accFillSz\":\"4\",\"fillSz\":\"2\",\"fillPx\":\"38000\",\"tradeId\":\"last\"",
@@ -663,7 +664,7 @@ fn distinct_earlier_fill_survives_terminal_order_guard_and_deduplicates() {
 #[test]
 fn invalid_execution_does_not_emit_or_consume_the_execution_identity() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let valid = ORDER.replace("\"live\"", "\"filled\"").replace(
         "\"accFillSz\":\"1\"",
         "\"accFillSz\":\"4\",\"fillSz\":\"3\",\"fillPx\":\"38000\",\"tradeId\":\"987\"",
@@ -692,7 +693,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
         envelope(r#"{"balData":[]},{"balData":[]}"#),
     ] {
         let (mut e, _, _, pending) = startup();
-        complete(&mut e, pending, ORDER);
+        complete(&mut e, pending, ORDER, 5.0);
         let balance = e.store().balance().clone();
         let positions = e.store().positions().to_vec();
         e.handle(
@@ -704,7 +705,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
                 side: None,
             }),
         );
-        let request = actions(&mut e)
+        let request = prepared(&mut e, 6.0)
             .into_iter()
             .find(|a| matches!(a, Action::Http(_)))
             .unwrap();
@@ -714,7 +715,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
             &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"12","mgnMode":"cross"}"#),
             7.0,
         );
-        let requests = actions(&mut e);
+        let requests = prepared(&mut e, 7.0);
         for a in requests
             .iter()
             .filter(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
@@ -773,7 +774,7 @@ fn filtered_market_rows_are_skipped_and_the_rest_of_the_snapshot_commits() {
                     envelope("")
                 };
                 reply(&mut e, &action, &body, 5.0);
-                pending.extend(actions(&mut e));
+                pending.extend(prepared(&mut e, 5.0));
             }
             Action::Notice(safe_cex_engine::Notice::Event(event)) => {
                 logs.push(event.message.clone())
@@ -798,7 +799,7 @@ fn filtered_market_rows_are_skipped_and_the_rest_of_the_snapshot_commits() {
 #[test]
 fn partially_effective_algo_remains_visible_and_accepts_later_live_updates() {
     let (mut e, _, business, pending) = startup();
-    complete(&mut e, pending, "");
+    complete(&mut e, pending, "", 5.0);
     let algo = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo123","ordType":"conditional","state":"partially_effective","side":"sell","sz":"4","accFillSz":"0","slTriggerPx":"36000","slOrdPx":"-1","tpTriggerPx":"42000","tpOrdPx":"-1","reduceOnly":"true"}"#;
     ws(
         &mut e,
@@ -948,7 +949,7 @@ fn rejected_currency_row_holds_the_usd_balance_instead_of_double_counting() {
         };
         reply(&mut e, &a, &body, 5.0);
         pending.extend(
-            actions(&mut e)
+            prepared(&mut e, 5.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -1061,6 +1062,7 @@ fn undecodable_out_of_scope_order_row_fails_the_order_read() {
         &mut e,
         pending,
         r#"{"instId":"BTC-USDT-SWAP","instType":"FUTURES","ordId":"9","sz":4}"#,
+        5.0,
     );
     assert!(e.store().loaded().positions);
     assert!(!e.store().loaded().orders);
@@ -1089,6 +1091,7 @@ fn market_maker_and_liquidity_program_orders_keep_their_ord_id() {
             &mut e,
             pending,
             &ORDER.replace(r#""ordType":"limit""#, &format!(r#""ordType":"{kind}""#)),
+            5.0,
         );
         let o = &e.store().orders()[0];
         assert_eq!(o.id, "123", "{kind}");
