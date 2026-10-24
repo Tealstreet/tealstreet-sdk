@@ -351,4 +351,8 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 - [Paradex config/local entry](RUST_PARADEX_LOCAL_ENTRY.md) and [remaining engine seams](RUST_PARADEX_ENGINE_GAPS.md): seven-site managed/local slice after the hosted signing decision.
 
+| Lighter unsigned identity Read | Managed implementation under review | Before changing FetchAccount candidate custody, original caller expiry or the exact three-site identity prune. | [RUST_LIGHTER_IDENTITY_CONTEXT.md](RUST_LIGHTER_IDENTITY_CONTEXT.md) |
+
+| Hyperliquid local settings and schedule refusals | Shared local terminal adoption under review | Before changing the nine synchronous pre-signing local terminals or their exact inventory prune. | [RUST_HYPERLIQUID_LOCAL_SETTINGS_CONTEXT.md](RUST_HYPERLIQUID_LOCAL_SETTINGS_CONTEXT.md) |
+
 - [Polymarket midpoint seed custody](RUST_POLYMARKET_MIDPOINT_READ_CONTEXT.md): one unsigned Background Read site; plan and original controls before production.

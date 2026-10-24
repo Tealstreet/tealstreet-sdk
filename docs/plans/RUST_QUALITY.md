@@ -1767,3 +1767,28 @@ all26 pass unchanged after implementation. Exact request inventory shrinks seven
 occurrences (account10->9/trading21->15/family48->41), with no bootstrap/shared
 engine/signing edit. Config expiry now includes host preparation; typed entry
 refusals and LocalSetting receipt enforcement are caller-visible boundaries.
+
+
+## Lighter identity Read controls
+
+The21 compiling originals at445754db356 executed15 assertion REDs and6 working
+controls on unchangedbe710 production, with no ignored tests. All21 are retained
+byte-for-byte and pass after adoption; three added controls cover strict
+preparation/unclaimed-permit failures and stale candidate replies. Eight existing
+identity tests retain their assertions through a real shared preparation driver.
+The32 focused tests pass, including all four deployment wires, four-candidate
+order, first-row/first-present-field precedence, retained capacity recovery,
+clock refusal, caller expiry and released physical-timeout continuation. Local
+checks are scoped with four jobs; broader builds and performance remain in CI.
+
+
+## Hyperliquid local settings and schedule controls
+
+Original25 controls execute12 assertion REDs/13 GREEN on unchanged9d344 source.
+The exact target, strengthened before production to validate all255 retained
+peers after capacity recovery, now passes25/25 without ignored controls. Ten
+capacity cases cover nine lexical sites, including both commands sharing the
+merged-spot success line. Native result/error/Store, duplicate-owner, invalid
+clock, zero-wait and schedule4999/5000/None boundary assertions are retained.
+The existing trading, spot and schedule targets pass unchanged. No broad local
+workspace/all-feature or WASM/performance build substitutes for exact-head CI.
