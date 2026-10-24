@@ -97,6 +97,10 @@ fn admit(floor: Option<u64>, answer: SessionBearer) -> Option<(SessionHeaders, u
     }
 }
 
+/// The issue-time refusal of a Session-bound Mutation group member.
+#[cfg(feature = "http-mutation-barriers")]
+const SESSION_GROUP_REFUSAL: &str = "Session-bound requests cannot join a Mutation group";
+
 fn bearer_refused(reason: Error) -> VenueError {
     VenueError::new(match reason {
         Error::Revoked => "Session retired",
@@ -285,7 +289,21 @@ impl<P> Cx<'_, P> {
         // other issue refusal.
         let resolved = self.resolve_bearer(&context, bearer);
         let generation = resolved.as_ref().ok().copied().flatten();
+        // A group claims its members together, and that claim checks no
+        // member's Bearer (R11, deferred to its first consumer), so a
+        // Session-bound request cannot join a Mutation group.
+        #[cfg(feature = "http-mutation-barriers")]
+        let refusal = (generation.is_some()
+            && self
+                .io
+                .request_contexts
+                .validate_mutation_group_submission(&context)
+                .is_ok_and(|group| group.is_some()))
+        .then_some(SESSION_GROUP_REFUSAL);
+        #[cfg(not(feature = "http-mutation-barriers"))]
+        let refusal: Option<&'static str> = None;
         let result = match resolved {
+            Ok(_) if refusal.is_some() => Err((pending, Error::Invalid)),
             Ok(bearer) => self.queue_managed_admitted(
                 context,
                 bearer,
@@ -301,7 +319,7 @@ impl<P> Cx<'_, P> {
         };
         #[cfg(feature = "http-plans")]
         if let (Some(admission), Err((_, error))) = (admission.as_ref(), &result) {
-            self.fail_owned_admission(admission, *error);
+            self.fail_owned_admission(admission, *error, refusal);
         }
         match (generation, &result) {
             (Some(generation), Ok(_)) => self.io.request_contexts.bind_leg_bearer(leg, generation),
@@ -364,12 +382,6 @@ impl<P> Cx<'_, P> {
             Ok(key) => key.map(|key| Box::new(mutation_group::Member::new(key))),
             Err(error) => return Err((pending, error)),
         };
-        // A group claims its members together; until that claim checks every
-        // member's Bearer (R11), a Bearer-bound group member is refused.
-        #[cfg(feature = "http-mutation-barriers")]
-        if bearer.is_some() && group.is_some() {
-            return Err((pending, Error::Invalid));
-        }
         if let Err(error) = self.io.http_pacing.check(context.pacing(), self.now) {
             return Err((pending, error));
         }
