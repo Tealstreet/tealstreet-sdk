@@ -210,3 +210,31 @@ it grants no managed fallback to Candles. The control passes with four build job
 Fixture compilation omissions and initial assumptions about command terminals
 were corrected against both real paths before this receipt; neither is RED proof.
 55 accepted the conditional login-specific gate: the second integrator runs it.
+
+
+## Production checkpoint
+
+After plan/original review CLEAR and the native timeout correction closure,
+Candles now carries exact Plan/Slot/Context custody in Job::Candles, with one
+ReadFailure declaration (one call with six FreshAttempt attempts of 20 s) under the retained
+caller receipt. Each DATA item/final/stream error validates exact delivery before
+codec or terminal. Only released failure dispatch selects a retry; preparation
+failures seal strictly with shared typed fields. No Session, signing or key
+selection is involved. Non-Candles callback delegation is unchanged and tested.
+
+The scanner confirms eight actual removals: the seven numeric terminals plus
+the physical raw self.request candle call that the initial estimate omitted.
+Thus lib 19 to 11 and family 49 to 41, with no new fingerprint or other manifest
+key change. This is source-proven elimination of the owned candle funnel, not
+renaming or a claim about any other Job. Original assertion bodies are unchanged.
+
+All 23 original controls and six library controls pass after adoption. The
+existing product fixture initially could not find kline because it drained only
+raw HTTP; it now uses prepared_actions to drive genuine release. The existing
+public candle fixture does likewise, preserving every original assertion.
+
+The complete changed-crate test run passes 232 controls, zero ignored, after
+fixture adaptation. The first ratchet run passed all 24 checker controls but
+reported foreign Backpack/BingX/Crypto.com/WEEX inventory drift against the
+new landing. Integrate actual before publishing; this is not a candle failure
+or permission to overwrite foreign manifests. Source review and CI follow.

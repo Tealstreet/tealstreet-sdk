@@ -1665,3 +1665,15 @@ original deadline, preparation failure, clock/capacity recovery and duplicate
 owner/delivery. All pass with zero ignored. Existing candle and spot fixtures
 retain native assertions while driving managed preparation. The new probe opens
 no socket, so it makes no standalone socket-composition claim.
+
+
+## GRVT unsigned candle Read Plan controls
+
+The original 23 candle controls now pass, including all formerly Prepare-gated
+suffixes: unclaimed DATA, typed preparation cleanup, six immediate transport
+attempts, physical timeout, original caller cap, stale delivery and full-pool
+recovery with all 255 retained peer Contexts validated. Six library controls
+include the login-independent preparation callback delegation guard. Native
+product/public fixtures use real managed release without changing assertions.
+Scoped cargo checks use four jobs serially; workspace, feature and WASM/size/
+replay checks belong to CI. No execution or budget claim is made for those gates.
