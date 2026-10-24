@@ -387,6 +387,53 @@ impl<P> Io<P> {
         }
     }
 
+    /// A sealed physical Plan owner: clear its timer and unsent work.
+    #[cfg(feature = "http-plans")]
+    /// The physical owner's live requests, listed and their cleanup actions
+    /// reserved before its seal (each: clear, cancel, timer rearm), in one
+    /// reservation together with `notices` further actions.
+    pub(super) fn prepare_owner_retirement(
+        &mut self,
+        owner: Owner,
+        notices: usize,
+    ) -> Result<Vec<RequestId>, crate::request_context::Error> {
+        let capacity = crate::request_context::Error::Capacity;
+        let count = self
+            .managed_http
+            .values()
+            .filter(|managed| managed.lifecycle.context().owner() == owner)
+            .count();
+        let mut requests = Vec::new();
+        requests.try_reserve_exact(count).map_err(|_| capacity)?;
+        requests.extend(
+            self.managed_http
+                .iter()
+                .filter(|(_, managed)| managed.lifecycle.context().owner() == owner)
+                .map(|(request, _)| *request),
+        );
+        let actions = count
+            .checked_mul(4)
+            .and_then(|n| n.checked_add(1))
+            .and_then(|n| n.checked_add(notices))
+            .ok_or(capacity)?;
+        self.actions.try_reserve(actions).map_err(|_| capacity)?;
+        Ok(requests)
+    }
+
+    #[cfg(feature = "http-plans")]
+    /// A sealed physical Plan owner: clear its timer and the requests listed
+    /// before the seal (one already settled since then is simply skipped).
+    pub(super) fn retire_physical_owner(&mut self, owner: Owner, requests: Vec<RequestId>) {
+        if let Some(timer) = self.request_contexts.physical_plan_timer(owner) {
+            self.timers.remove(&timer);
+            self.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            self.actions.push(Action::ClearTimer { timer });
+        }
+        for request in requests {
+            self.discard_managed(request);
+        }
+    }
+
     pub(super) fn retire_http_owner(&mut self, owner: Owner) {
         let requests = self
             .managed_http
@@ -439,7 +486,7 @@ impl<P> Io<P> {
         Some(managed)
     }
 
-    fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
+    pub(super) fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
         let managed = self.take_managed(request)?;
         if managed.lifecycle.context().operation() == Operation::Mutation
             && managed.lifecycle.release().is_some()
@@ -473,6 +520,7 @@ impl<V: Venue> Engine<V> {
     pub fn http_prepared(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
         let request = token.attempt().request;
         let Some(managed) = self.io.managed_http.get_mut(&request) else {
             return;
@@ -634,6 +682,7 @@ impl<V: Venue> Engine<V> {
     ) {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
         let request = token.attempt().request;
         #[cfg(feature = "http-plans")]
         if self
@@ -705,6 +754,7 @@ impl<V: Venue> Engine<V> {
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
         let request = permit.attempt().request;
         let managed = self
             .io
@@ -800,10 +850,18 @@ impl<V: Venue> Engine<V> {
             }
             #[cfg(feature = "order-locks")]
             {
-                if managed.lifecycle.context().operation() == Operation::Mutation
-                    && let Owner::Command { id, .. } = managed.lifecycle.context().owner()
-                {
-                    self.io.order_locks.note_command_write(id);
+                if managed.lifecycle.context().operation() == Operation::Mutation {
+                    match managed.lifecycle.context().owner() {
+                        Owner::Command { id, .. } => self.io.order_locks.note_command_write(id),
+                        // A physical Plan write is sent for every observer.
+                        #[cfg(feature = "http-plans")]
+                        owner @ Owner::Execution { .. } => {
+                            for id in self.io.request_contexts.physical_observers(owner) {
+                                self.io.order_locks.note_command_write(id);
+                            }
+                        }
+                        _ => {}
+                    }
                 }
                 if managed.lifecycle.context().operation() == Operation::Read {
                     let owner = managed.lifecycle.context().owner();
@@ -1198,6 +1256,10 @@ mod tests {
     include!("request_context_preflight_call_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_planned_tests.rs");
+    #[cfg(feature = "http-plans")]
+    include!("execution_planned_tests.rs");
+    #[cfg(feature = "http-plans")]
+    include!("request_context_reconciliation_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_plan_expiry_tests.rs");
 
