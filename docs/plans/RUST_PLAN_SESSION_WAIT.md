@@ -216,6 +216,22 @@ New-contract REDs follow the API review:
 - N7: Preflight. A parked read resumes as a fresh read context under the same
   Preflight generation, with the predecessor equal to the drain delivery.
 
+## Delivery phases
+
+1. **Slot park (this change).**
+   - `Cx::plan_session_wait(plan, slot, intent, session, pending)`.
+   - Resume through `session_ready`, which issues the leg at drain time via
+     `make_plan_leg_context(.., resumed)`.
+   - Expiry through the wait timer and the sealed-Plan sweep.
+   - Retire/failed are queued, and `flush_plan_session_waits` runs at the end of
+     the event scope. It routes the ended hook in ready custody, or the
+     expiry hook when the Plan is sealed.
+   - Covered by N1, N3, N4b, N6 and N8, plus controls C1-C4.
+2. **Retry park.** `plan_retry_session_wait` (N2), next.
+3. **Preflight park.** `preflight_session_wait` and its retry twin (N7).
+4. **Bearer composition.** N8b and R10b' land with or after the Bearer hook's
+   packet fence.
+
 ## Gates
 
 Engine focused tests in every feature mode; clippy `-D warnings`; fmt. Review by

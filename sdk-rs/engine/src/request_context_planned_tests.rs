@@ -1619,7 +1619,7 @@ mod planned_calls {
         let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
         let retired = cx.open_session(crate::request_context::SessionPolicy { credential: None, repeat_safe: true }).unwrap();
         let _ = cx.retire_session(&retired).unwrap();
-        let before = (cx.io.next_id.clone(), cx.io.timers.len());
+        let before = (cx.io.next_id, cx.io.timers.len());
         let again = cx.plan_session_wait(&plan, &slot, None, &session, token.clone());
         assert_eq!(again.map_err(|(_, error)| error), Err(Error::Revoked), "already parked, and no custody");
         let stale = cx.plan_session_wait(&plan, &slot, None, &retired, token);

@@ -34,6 +34,8 @@ struct Entry {
     call: Option<Call>,
     eligible_at: Option<f64>,
     notified: bool,
+    /// Reserved behind a login Session; issued only at its resume.
+    parked: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -373,6 +375,7 @@ impl<P> Cx<'_, P> {
                 call: None,
                 eligible_at: None,
                 notified: false,
+                parked: false,
             });
         }
         for slot in schedule.available() {
@@ -503,10 +506,8 @@ impl<P> Cx<'_, P> {
             .map_err(|_| Error::Capacity)?;
         for slot in body.schedule.available() {
             let index = body.schedule.ordinal(&slot)?;
-            if body.entries[index]
-                .eligible_at
-                .is_some_and(|at| at <= self.now)
-            {
+            let entry = &body.entries[index];
+            if !entry.parked && entry.eligible_at.is_some_and(|at| at <= self.now) {
                 slots.push(slot);
             }
         }
@@ -527,12 +528,74 @@ impl<P> Cx<'_, P> {
         session: &crate::request_context::Session,
         pending: P,
     ) -> Result<(), (P, Error)> {
-        let _ = (plan, slot, intent, session);
-        Err((pending, Error::State))
+        let checked = (|| {
+            let generation = self.io.request_contexts.validate_session(session)?;
+            if !matches!(plan.owner(), Owner::Command { .. }) {
+                return Err(Error::State);
+            }
+            let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+            let index = body.schedule.ordinal(slot)?;
+            let entry = &body.entries[index];
+            if entry.parked
+                || entry.credit != Credit::Unissued
+                || !body
+                    .schedule
+                    .available()
+                    .any(|candidate| body.schedule.ordinal(&candidate) == Ok(index))
+                || !entry.eligible_at.is_some_and(|at| at <= self.now)
+                || !self.plan_issue_custody(plan, body)
+            {
+                return Err(Error::Revoked);
+            }
+            if self.io.session_waits.len() >= super::CAPACITY {
+                return Err(Error::Capacity);
+            }
+            self.io.session_waits.reserve_ended()?;
+            Ok((generation, index))
+        })();
+        let (generation, index) = match checked {
+            Ok(checked) => checked,
+            Err(error) => return Err((pending, error)),
+        };
+        let Some(ids) = self.io.reserve_ids(1) else {
+            return Err((pending, Error::Capacity));
+        };
+        let timer = TimerId(ids.start);
+        self.io.timers.insert(timer, ());
+        self.io.actions.push(Action::SetTimer {
+            timer,
+            at_ms: plan.deadline(),
+        });
+        self.io
+            .request_contexts
+            .plan_body_mut(plan)
+            .expect("validated parked Plan")
+            .entries[index]
+            .parked = true;
+        self.io.session_waits.park_slot(
+            generation,
+            plan.clone(),
+            slot.clone(),
+            intent,
+            timer,
+            pending,
+        );
+        Ok(())
+    }
+
+    /// Issue a parked Slot's leg at its Session's resume, under the drain's
+    /// delivery, with a window that starts now.
+    pub(in crate::engine) fn resume_plan_slot(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        intent: Option<crate::classify::Intent>,
+    ) -> Result<Context, Error> {
+        self.make_plan_leg_context(plan, slot, intent, true)
     }
 
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, None)
+        self.make_plan_leg_context(plan, slot, None, false)
     }
 
     /// Narrow a write leg using the common engine intent rules before its first
@@ -543,38 +606,46 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: crate::classify::Intent,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, Some(intent))
+        self.make_plan_leg_context(plan, slot, Some(intent), false)
     }
 
+    /// Handoff, initial or ready custody over this Plan's next issue.
+    fn plan_issue_custody(&self, plan: &Plan, body: &Body) -> bool {
+        self.io
+            .http_delivery
+            .as_ref()
+            .is_some_and(|delivery| body.handoff.as_ref() == Some(delivery))
+            || (body.initial_custody
+                && self.io.http_delivery.is_none()
+                && self.io.http_plan_ready.is_none())
+            || (self.io.http_delivery.is_none()
+                && self
+                    .io
+                    .http_plan_ready
+                    .as_ref()
+                    .is_some_and(|ready| ready.same_plan(plan)))
+    }
+
+    /// A parked Slot's resume stands in for Plan custody; nothing else may
+    /// issue a parked Slot.
     fn make_plan_leg_context(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
+        resumed: bool,
     ) -> Result<Context, Error> {
         let body = self.io.request_contexts.validate_plan(plan, self.now)?;
         let index = body.schedule.ordinal(slot)?;
         let entry = &body.entries[index];
         if entry.credit != Credit::Unissued
+            || entry.parked != resumed
             || !body
                 .schedule
                 .available()
                 .any(|candidate| body.schedule.ordinal(&candidate) == Ok(index))
             || !entry.eligible_at.is_some_and(|at| at <= self.now)
-            || !(self
-                .io
-                .http_delivery
-                .as_ref()
-                .is_some_and(|delivery| body.handoff.as_ref() == Some(delivery))
-                || (body.initial_custody
-                    && self.io.http_delivery.is_none()
-                    && self.io.http_plan_ready.is_none())
-                || (self.io.http_delivery.is_none()
-                    && self
-                        .io
-                        .http_plan_ready
-                        .as_ref()
-                        .is_some_and(|ready| ready.same_plan(plan))))
+            || !(resumed || self.plan_issue_custody(plan, body))
         {
             return Err(Error::Revoked);
         }
@@ -639,6 +710,7 @@ impl<P> Cx<'_, P> {
         let body = self.io.request_contexts.plan_body_mut(plan).unwrap();
         body.schedule.start(slot).expect("available plan slot");
         body.entries[index].notified = true;
+        body.entries[index].parked = false;
         body.entries[index].credit = Credit::Issued;
         body.entries[index].call = Some(call);
         self.io.request_contexts.reserved_contexts -= 1;
@@ -925,13 +997,26 @@ impl Body {
     fn next_wake(&self) -> f64 {
         self.entries
             .iter()
-            .filter(|entry| entry.credit == Credit::Unissued && !entry.notified)
+            .filter(|entry| entry.credit == Credit::Unissued && !entry.notified && !entry.parked)
             .filter_map(|entry| entry.eligible_at)
             .fold(self.handle.deadline(), f64::min)
     }
 }
 
 impl ContextRegistry {
+    pub(in super::super) fn plan_registered(&self, plan: &Plan) -> bool {
+        self.plan_body(plan).is_ok()
+    }
+
+    /// Return a parked Slot to ordinary availability; a sealed Plan is a no-op.
+    pub(in super::super) fn unpark_plan_slot(&mut self, plan: &Plan, slot: &Slot) {
+        if let Ok(body) = self.plan_body_mut(plan)
+            && let Ok(index) = body.schedule.ordinal(slot)
+        {
+            body.entries[index].parked = false;
+        }
+    }
+
     pub(in super::super) fn plan_timer(&self, command: CommandId) -> Option<TimerId> {
         let CommandPhase::Planned(state) = &self.commands.get(&command)?.phase else {
             return None;
@@ -1055,6 +1140,7 @@ impl ContextRegistry {
             for entry in &mut body.entries {
                 if entry.credit == Credit::Unissued
                     && !entry.notified
+                    && !entry.parked
                     && entry.eligible_at.is_some_and(|at| at <= now)
                 {
                     entry.notified = true;

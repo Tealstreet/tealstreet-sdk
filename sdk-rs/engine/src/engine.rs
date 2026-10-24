@@ -3934,6 +3934,8 @@ impl<V: Venue> Engine<V> {
         self.restore_shared_tickers(false, now);
         self.flush_http_owner_retirements();
         self.flush_http_plans(now);
+        #[cfg(feature = "http-plans")]
+        self.flush_plan_session_waits(now);
     }
 
     #[inline(never)]
