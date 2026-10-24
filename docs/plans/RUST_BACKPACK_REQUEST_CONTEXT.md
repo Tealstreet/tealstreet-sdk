@@ -549,3 +549,16 @@ native or ownership assertions to manufacture a result.
 Run the single new test file with CARGO_BUILD_JOBS=4 and no concurrent local
 Cargo build. Record the evidence and send plan/control review to hcmq3f; no
 runtime application, manifest pruning or new PR/CI is part of this checkpoint.
+
+Original-source checkpoint: plan `e1e5d7a15e3` precedes separate controls
+`3800df0f25a`. On unchanged production from actual `db6fa45bbb7`, the single
+scoped test file compiles and executes six controls: four GREEN, two assertion
+RED, zero ignored. Invalid clock still yields absent kind instead of shared
+InvalidInput, and capacity still yields absent kind instead of shared Internal.
+Native message/fields across all thirteen unsupported intervals, keyless modes,
+Store/no work, genuine duplicate prior-owner delivery, immediate reuse and WS
+diagnostics pass. Capacity's prior-owner postcondition remains after the failing
+kind assertion and is a mandatory post-cutover check, not claimed as executed
+in that RED; the separate duplicate working control does execute real delivery.
+Only this plan and the new test file differ from the base. Production, manifest,
+key-selection sites/maps and all combo-5b source remain byte-identical.
