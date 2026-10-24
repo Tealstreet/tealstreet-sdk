@@ -2,8 +2,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
-#[cfg(test)]
-use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_crypto::{eip712, ethereum};
 use safe_cex_engine::signing::{
     Algorithm, Context, Identity, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
@@ -60,49 +58,6 @@ pub fn is_private_key(value: &str) -> bool {
     body.len() == 64 && body.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// Legacy eager-signing oracle for the wire vectors; production signs only
-/// through `Recipe` at dispatch.
-#[cfg(test)]
-#[derive(Clone)]
-pub struct Credentials {
-    pub version: Version,
-    pub key: String,
-    pub secret: String,
-    pub user: Option<String>,
-    pub signer: Option<String>,
-}
-
-#[cfg(test)]
-impl Credentials {
-    pub fn validate(&self) -> Result<(), String> {
-        if self.key.is_empty() {
-            return Err("Missing required credentials: API key".into());
-        }
-        if self.version == Version::V1 {
-            if is_address(&self.key) && is_private_key(&self.secret) && self.user.is_none() {
-                return Err("Aster API Wallet/vault keys require the Main Wallet Address. Fill Main Wallet Address with your login wallet — do not replace the main wallet with the API/vault wallet.".into());
-            }
-            if self.secret.is_empty() {
-                return Err("Missing required credentials: API secret".into());
-            }
-            return Ok(());
-        }
-        let user = self.user.as_deref().filter(|s| !s.is_empty());
-        let signer = self.signer.as_deref().filter(|s| !s.is_empty());
-        if user.is_none() || signer.is_none() || self.secret.is_empty() {
-            return Err("Missing required Aster v3 auth fields: Main Wallet Address, API Wallet Address, and Generated Private Key".into());
-        }
-        if !is_private_key(&self.secret) {
-            return Err(
-                "Invalid Aster API Wallet private key format (expected 64-byte hex)".into(),
-            );
-        }
-        ethereum::get_address(user.unwrap())?;
-        ethereum::get_address(signer.unwrap())?;
-        Ok(())
-    }
-}
-
 /// Keep the original ordered values until the signing mode is known. Binance's
 /// encoded Query cannot be shared: Aster signs raw values, in a different order.
 #[derive(Clone, Debug, Default)]
@@ -148,52 +103,6 @@ impl Query {
         join(&self.0, false)
     }
 
-    #[cfg(test)]
-    pub fn signed(
-        self,
-        credentials: &Credentials,
-        method: Method,
-        path: &str,
-        now_ms: f64,
-        testnet: bool,
-    ) -> Result<String, String> {
-        credentials.validate()?;
-        if !now_ms.is_finite() || now_ms < 0.0 || now_ms > (u64::MAX / 1000) as f64 {
-            return Err("Invalid Aster signing clock".into());
-        }
-        let stamp = safe_cex_engine::time::wire_stamp_ms(now_ms);
-        let mode = if credentials.version == Version::V1 {
-            Mode::V1
-        } else {
-            let user = ethereum::get_address(credentials.user.as_deref().unwrap())?;
-            let signer = ethereum::get_address(credentials.signer.as_deref().unwrap())?;
-            // Aster's replay protection belongs to the agent address, across users.
-            let nonce = next_nonce(&signer, stamp as u64)?;
-            Mode::V3 {
-                user,
-                signer,
-                nonce,
-            }
-        };
-        let prepared = self.prepared(&mode, method, path, stamp, testnet)?;
-        let signature = match &prepared.preimage {
-            Preimage::Hmac(message) => hmac_sha256(
-                credentials.secret.as_bytes(),
-                message.as_bytes(),
-                Encoding::Hex,
-            ),
-            Preimage::Digest(digest) => {
-                let secret = if credentials.secret.starts_with("0x") {
-                    credentials.secret.clone()
-                } else {
-                    format!("0x{}", credentials.secret)
-                };
-                ethereum::sign_digest(digest, &secret)?
-            }
-        };
-        Ok(prepared.finish(&signature))
-    }
-
     /// Canonical signing input for one attempt. Every mode first removes the
     /// fields a retry regenerates from its unsigned business params.
     fn prepared(
@@ -218,7 +127,7 @@ impl Query {
         else {
             self = self.num("recvWindow", 20_000.0).num("timestamp", stamp_ms);
             return Ok(Prepared {
-                preimage: Preimage::Hmac(self.as_str()),
+                preimage: Preimage::Mac(self.as_str()),
                 query: self,
                 encoded: true,
             });
@@ -255,44 +164,6 @@ impl Query {
     }
 }
 
-/// Fixed-nonce V3 signing for the independent wire vectors.
-#[cfg(test)]
-impl Query {
-    fn signed_v3(
-        self,
-        credentials: &Credentials,
-        method: Method,
-        path: &str,
-        now_ms: f64,
-        testnet: bool,
-        nonce: u64,
-    ) -> Result<String, String> {
-        let mode = Mode::V3 {
-            user: ethereum::get_address(credentials.user.as_deref().unwrap())?,
-            signer: ethereum::get_address(credentials.signer.as_deref().unwrap())?,
-            nonce,
-        };
-        let stamp = safe_cex_engine::time::wire_stamp_ms(now_ms);
-        let prepared = self.prepared(&mode, method, path, stamp, testnet)?;
-        let Preimage::Digest(digest) = &prepared.preimage else {
-            unreachable!("V3 always signs a digest")
-        };
-        let secret = format!(
-            "0x{}",
-            credentials
-                .secret
-                .strip_prefix("0x")
-                .unwrap_or(&credentials.secret)
-        );
-        let signature = ethereum::sign_digest(digest, &secret)?;
-        Ok(prepared.finish(&signature))
-    }
-}
-#[cfg(test)]
-fn code_signature(query: &str, secret: &str, testnet: bool) -> Result<String, String> {
-    ethereum::sign_digest(&code_digest(query, testnet), secret)
-}
-
 /// Signing mode for one attempt. V3 addresses are checksummed public config.
 enum Mode {
     V1,
@@ -305,7 +176,7 @@ enum Mode {
 
 enum Preimage {
     /// HMAC-SHA256 over the raw (unencoded) query; hex signature.
-    Hmac(String),
+    Mac(String),
     /// secp256k1 over an EIP-191 or Code EIP-712 digest; 0x r||s||v(27/28).
     Digest([u8; 32]),
 }
@@ -525,7 +396,7 @@ impl SignStep for Recipe {
             .prepared(&mode, self.method, &self.path, stamp, self.testnet)
             .map_err(|_| SignError::InvalidRequest)?;
         let (algorithm, message) = match &prepared.preimage {
-            Preimage::Hmac(message) => (Algorithm::HmacSha256, message.as_bytes().to_vec()),
+            Preimage::Mac(message) => (Algorithm::HmacSha256, message.as_bytes().to_vec()),
             Preimage::Digest(digest) => (Algorithm::Secp256k1Digest, digest.to_vec()),
         };
         self.prepared = Some(prepared);
@@ -571,7 +442,7 @@ impl SignStep for Recipe {
         let raw = result.values.get(1).ok_or(SignError::InvalidResult)?;
         let prepared = self.prepared.take().ok_or(SignError::InvalidRequest)?;
         let signature = match prepared.preimage {
-            Preimage::Hmac(_) if raw.len() == 32 => safe_cex_crypto::hex(raw),
+            Preimage::Mac(_) if raw.len() == 32 => safe_cex_crypto::hex(raw),
             // Wire form is ethers' 0x r||s||v with v as 27/28.
             Preimage::Digest(_) if raw.len() == 65 && raw[64] <= 1 => {
                 format!("0x{}{:02x}", safe_cex_crypto::hex(&raw[..64]), raw[64] + 27)
@@ -603,9 +474,6 @@ mod tests {
         private_key: String,
         user: String,
         signer: String,
-        // Preserve the generator's business insertion order explicitly below.
-        params: BTreeMap<String, String>,
-        now_ms: f64,
         nonce: String,
         payload: String,
         abi: String,
@@ -615,7 +483,6 @@ mod tests {
         code_hash: String,
         code_signature: String,
         testnet: bool,
-        v1_query: String,
     }
 
     #[derive(Deserialize)]
@@ -627,30 +494,6 @@ mod tests {
         serde_json::from_str::<Corpus>(include_str!("../tests/fixtures/signing.json"))
             .unwrap()
             .cases
-    }
-
-    fn credentials(case: &Case) -> Credentials {
-        Credentials {
-            version: Version::V3,
-            key: case.signer.clone(),
-            secret: case.private_key.clone(),
-            user: Some(case.user.clone()),
-            signer: Some(case.signer.clone()),
-        }
-    }
-
-    fn ordered_query(case: &Case) -> Query {
-        let keys: &[&str] = if case.name.starts_with("documented") {
-            &["symbol", "type", "side", "timeInForce", "quantity", "price"]
-        } else if case.name.starts_with("decimal") {
-            &["symbol", "quantity", "price", "reduceOnly", "note"]
-        } else if case.name.starts_with("query") {
-            &["symbol", "note"]
-        } else {
-            &[]
-        };
-        keys.iter()
-            .fold(Query::new(), |q, key| q.str(key, &case.params[*key]))
     }
 
     #[test]
@@ -683,63 +526,18 @@ mod tests {
                 case.name
             );
             assert_eq!(
-                code_signature(&case.code_query, &case.private_key, case.testnet).unwrap(),
+                ethereum::sign_digest(
+                    &code_digest(&case.code_query, case.testnet),
+                    &case.private_key
+                )
+                .unwrap(),
                 case.code_signature,
                 "Code {}",
                 case.name
             );
             assert_ne!(case.code_hash, case.hash);
-            let mut v1 = credentials(&case);
-            v1.version = Version::V1;
-            v1.secret = "documentation-secret".into();
-            assert_eq!(
-                ordered_query(&case)
-                    .signed(
-                        &v1,
-                        Method::Post,
-                        "/fapi/v1/order",
-                        case.now_ms,
-                        case.testnet
-                    )
-                    .unwrap(),
-                case.v1_query,
-                "HMAC wire {}",
-                case.name
-            );
-            let creds = credentials(&case);
-            let signed = ordered_query(&case)
-                .signed_v3(
-                    &creds,
-                    Method::Post,
-                    "/fapi/v3/order",
-                    case.now_ms,
-                    case.testnet,
-                    case.nonce.parse().unwrap(),
-                )
-                .unwrap();
-            assert_eq!(
-                signed,
-                format!("{}&signature={}", case.code_query, case.code_signature),
-                "Code exact wire {}",
-                case.name
-            );
-            // Standard V3 sorts the JSON but leaves transport fields in caller order.
-            let signed = ordered_query(&case)
-                .signed_v3(
-                    &creds,
-                    Method::Delete,
-                    "/fapi/v3/order",
-                    case.now_ms,
-                    case.testnet,
-                    case.nonce.parse().unwrap(),
-                )
-                .unwrap();
-            assert!(
-                signed.ends_with(&format!("&signature={}", case.signature)),
-                "standard V3 {}",
-                case.name
-            );
-            assert!(signed.contains("recvWindow=20000&timestamp=1748310859508&user="));
+            // The provider-signed V1, Code and standard V3 wires are pinned
+            // against these vectors in tests/dispatch_recipe.rs.
         }
     }
 
@@ -782,50 +580,7 @@ mod tests {
     }
 
     #[test]
-    fn validation_nonce_freshness_and_unsigned_fields() {
-        let case = corpus().remove(0);
-        let mut creds = credentials(&case);
-        // Isolate this agent from concurrently running lifecycle tests.
-        creds.secret = format!("0x{}", "91".repeat(32));
-        let signer = ethereum::private_key_address(&creds.secret).unwrap();
-        creds.key = signer.clone();
-        creds.signer = Some(signer);
-        let first = Query::new()
-            .str("symbol", "BTCUSDT")
-            .signed(&creds, Method::Post, "/fapi/v3/order", 200.0, false)
-            .unwrap();
-        creds.secret = creds.secret.strip_prefix("0x").unwrap().into();
-        let next = Query::new()
-            .str("symbol", "BTCUSDT")
-            .str("signature", "stale")
-            .str("timestamp", "1")
-            .str("recvWindow", "1")
-            .str("user", "stale")
-            .str("signer", "stale")
-            .str("nonce", "1")
-            .signed(&creds, Method::Post, "/fapi/v3/order", 100.0, false)
-            .unwrap();
-        assert!(first.contains("nonce=200000&signature="));
-        assert!(next.contains("nonce=200001&signature="));
-        assert!(!next.contains("stale"));
-        assert!(!next.contains("timestamp"));
-        assert!(!next.contains("recvWindow"));
-        assert_ne!(first, next);
-        assert!(
-            Query::new()
-                .signed(&creds, Method::Get, "/fapi/v3/account", f64::NAN, false)
-                .is_err()
-        );
-        creds.user = None;
-        assert!(
-            creds
-                .validate()
-                .unwrap_err()
-                .contains("Main Wallet Address")
-        );
-        creds.user = Some(case.user);
-        creds.secret = "bad".into();
-        assert!(creds.validate().unwrap_err().contains("private key format"));
+    fn address_and_private_key_shapes() {
         assert!(is_address("0x0000000000000000000000000000000000000000"));
         assert!(!is_address("0000000000000000000000000000000000000000"));
         assert!(is_private_key(&"01".repeat(32)));
@@ -847,69 +602,4 @@ mod tests {
         );
         assert_eq!(Query::new().str("a", "1").str("a", "").as_str(), "");
     }
-
-    #[test]
-    fn v1_hmac_oracle_matches_independent_vectors_for_both_slots() {
-        let v1 = |key: &str, secret: &str| Credentials {
-            version: Version::V1,
-            key: key.into(),
-            secret: secret.into(),
-            user: None,
-            signer: None,
-        };
-        // Independent Python hashlib/hmac vectors, using the exact native payload.
-        for (credentials, expected) in [
-            (
-                v1("primary-key", "primary-raw-secret"),
-                "29306ee689ad7468724aa8f72aed3a3bb507291d3c577faa91fda70fcf7cb3c0",
-            ),
-            (
-                v1("secondary-key", "secondary-raw-secret"),
-                "cd0441e53172012534659d4a39a53bd924f19b2c4f35e4f01ca7be577ea7372d",
-            ),
-        ] {
-            let query = Query::new()
-                .str("symbol", "BTCUSDT")
-                .signed(
-                    &credentials,
-                    Method::Get,
-                    "/fapi/v1/account",
-                    1_700_000_000_000.0,
-                    false,
-                )
-                .unwrap();
-            assert_eq!(
-                query,
-                format!(
-                    "symbol=BTCUSDT&recvWindow=20000&timestamp=1700000000000&signature={expected}"
-                )
-            );
-        }
-    }
-
-    #[test]
-    fn owners_sharing_an_agent_share_its_nonce_sequence() {
-        let secret = format!("0x{}", "92".repeat(32));
-        let signer = ethereum::private_key_address(&secret).unwrap();
-        let credentials = |owner: &str| Credentials {
-            version: Version::V3,
-            key: signer.clone(),
-            secret: secret.clone(),
-            user: Some(owner.into()),
-            signer: Some(signer.clone()),
-        };
-        let first = credentials("0x0000000000000000000000000000000000000111");
-        let second = credentials("0x0000000000000000000000000000000000000222");
-        let query = |credentials: &Credentials, now| {
-            Query::new()
-                .signed(credentials, Method::Get, "/fapi/v3/account", now, false)
-                .unwrap()
-        };
-        assert!(query(&first, 1234.0).contains("nonce=1234000&signature="));
-        assert!(query(&second, 1234.0).contains("nonce=1234001&signature="));
-        assert!(query(&first, 1233.0).contains("nonce=1234002&signature="));
-    }
 }
-
-#[cfg(test)]
-safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);
