@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Request-context inventory precision | Implementation and rebaseline; review pending | Before changing `check-request-context.py`, its manifests, or what counts as a legacy `Cx` call. | [RUST_REQUEST_CONTEXT_PRECISION.md](RUST_REQUEST_CONTEXT_PRECISION.md) |
 | BreakoutProp options refusal (unreachable arm deleted) | One-site prune; engine pre-entry refusal pinned by a control | Before changing BreakoutProp options handling or its capability flags. | [RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md) |
 | BingX local candle refusal custody | Draft conversion; source review/CI pending | Before replacing the three synchronous candle refusals; remote/key-selection paths excluded. | [RUST_BINGX_LOCAL_CANDLE_CONTEXT.md](RUST_BINGX_LOCAL_CANDLE_CONTEXT.md) |
 | WEEX candle query Read custody | Draft source; scoped controls pass | Before managing candle HTTP/completions or interpreting caller deadline and streamed failure changes. | [RUST_WEEX_CANDLE_CONTEXT.md](RUST_WEEX_CANDLE_CONTEXT.md) |
@@ -398,5 +399,17 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | AsterDEX local Read custody and lane remainder | Implementation under review | Before converting Aster synchronous history/leverage/candle refusals or selecting the next lane legacy-site slice. | [RUST_ASTERDEX_LOCAL_READ_CONTEXT.md](RUST_ASTERDEX_LOCAL_READ_CONTEXT.md) |
 | AsterDEX local trading refusal custody | Implemented; native/strict/reviews clear, CI pending | Before converting the three shared Read/Mutation refusals or moving acknowledged cleanup behind admission. | [RUST_ASTERDEX_LOCAL_TRADE_REFUSALS.md](RUST_ASTERDEX_LOCAL_TRADE_REFUSALS.md) |
 | Phemex identity and recurring account read owners | Implemented on actual combo-5b; source review and CI pending | Before SelectedRead identity, Background currency cycles or Primary order reconciliation. | [RUST_PHEMEX_READ_OWNERS.md](RUST_PHEMEX_READ_OWNERS.md) |
+
+| Managed socket authentication progress | Plan before original REDs; runtime pending review | Before Kraken challenge progress renews auth without granting readiness; whole-family consumer remains held. | [RUST_SOCKET_AUTH_PROGRESS.md](RUST_SOCKET_AUTH_PROGRESS.md) |
+
+| TxFlow unsigned ticker seed custody | Local plan and original-control checkpoint | Before managing the activeAssetCtx seed sender; preserve native seed cadence, keyed retry and CPU cache. | [RUST_TXFLOW_TICKER_SEED_CONTEXT.md](RUST_TXFLOW_TICKER_SEED_CONTEXT.md) |
+
+
+| GRVT remaining local command terminals | Managed local refusal and dead dispatch deletion; review/CI pending | Before changing generic Unsupported custody, Mutation outcome metadata or dead private-phase coverage. | [RUST_GRVT_LOCAL_COMMAND_TAIL.md](RUST_GRVT_LOCAL_COMMAND_TAIL.md) |
+
+| PublicExchangeFactory native startup fixture | Fixture corrected; scoped native/unit checks pass, review pending | Before changing the native server-adapter timeout fixture or its preservation assertions. | [RUST_PUBLIC_FACTORY_STARTUP_TEST.md](RUST_PUBLIC_FACTORY_STARTUP_TEST.md) |
+
+| CPU evidence transport retrieval retry | Plan and originals | Before changing GitHub evidence retrieval retries; provenance and CPU verdicts stay exact. | [RUST_CPU_EVIDENCE_TRANSPORT_RETRY.md](RUST_CPU_EVIDENCE_TRANSPORT_RETRY.md) |
+| Coinbase local command custody | Draft adoption; ten sites and original controls pass | Before adopting immediate local completions or distinguishing deferred/queued public-read gates. | [RUST_COINBASE_LOCAL_CONTEXT.md](RUST_COINBASE_LOCAL_CONTEXT.md) |
 
 | Polymarket Gamma catalogue custody | Managed adoption; original and pressure controls pass, review/CI pending | Before adopting unsigned streamed catalogue pages; retain atomic cursor walk and native retry. | [RUST_POLYMARKET_CATALOGUE_CONTEXT.md](RUST_POLYMARKET_CATALOGUE_CONTEXT.md) |
