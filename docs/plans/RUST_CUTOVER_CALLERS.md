@@ -7748,6 +7748,8 @@ production changes. Plan: RUST_CPU_PRODUCER_STEP_METADATA.md.
 
 
 
+
+
 ## WEEX local leverage refusals use command Read authority
 
 FetchLeverage preserves unknown-market, active shared-pause, then missing-read-
@@ -7910,6 +7912,28 @@ SDK RustExchange callers keep their existing capability behavior: Aster's
 Settings leverage path can return cache/null without a low-level FetchLeverage,
 and clientOrderLookup=false uses the existing open-order fallback. This entry
 describes the low-level command terminals, not additional SDK dispatches.
+
+
+
+
+
+## WEEX leverage initial managed admission preserves shared Read causes
+
+After the existing unknown-market, shared-pause and credential-selection checks,
+FetchLeverage now admits its signed symbolConfig read through the initial
+SelectedRead command transaction. Registry capacity returns the canonical Read
+Capacity error with outcome None, rather than the venue lifecycle Internal/NotSent
+fallback. An unavailable or invalid receipt returns the shared cause; invalid or
+nonadvancing clocks give Revoked / "Request context was revoked", InvalidInput
+and no outcome. An expired own receipt uses the existing Read Timeout helper.
+Admission owns the failure terminal, without a numeric fallback or a new receipt.
+
+Read selection, the selected identity and passphrase, URL/query/signature, native
+settings revision and publication remain unchanged. The physical policy stays
+20 seconds, Never and no pacing, including when the outer host wait is shorter;
+this does not add a tracked caller-wait history root. Queue and provider refusals
+keep their existing typed fields. Duplicate ownership, original-peer completion
+and fresh ID reuse keep shared engine semantics. No auth evidence is added.
 
 ## AsterDEX local trading refusal ownership
 
