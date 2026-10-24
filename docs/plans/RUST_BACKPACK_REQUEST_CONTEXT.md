@@ -500,6 +500,169 @@ SDK/native acceptance. No new raw-material consumer or permanent fallback is
 allowed under this transition. The remaining inventory and owned repair RED
 continue to track that obligation.
 
+
+## Phase two plan: unsigned command candle stream
+
+Base: actual `8d57199e884`, including landed public depth #1860 and command-entry follow-ups. Fresh PR file lists leave lib.rs and tests/public.rs clear; private account/trading source/tests remain occupied by #1787. The signer lane owns a future sign.rs recipe; this unsigned /api/v1/klines path does not use it or edit sign.rs.
+
+For supported FetchCandles, admit genuine Read/no credential/20 seconds/no pacing/Never retry. Carry Context in Pending::Candles, declare the same GET /api/v1/klines native sign::query and exact static X-Broker-Id:1200 through request_managed_with_headers, then register ArrayAt::Root through existing stream_response. No engine API, fake identity or streamed-header workaround is needed. Exact read delivery must precede both item parsing/malformed diagnostics and response/status handling. Finish through done_context/fail_context. Typed preparation errors preserve the engine kind and local NotSent fact; released HTTP failures retain kind with no outcome; native non-2xx/string/malformed-row messages retain their existing fields. Book-query NotSent compatibility is untouched.
+
+Preserve native symbol/interval encoding and lexical parameter order, floor startTime/endTime to seconds, ignored limit, no local range validation, server row order/duplicates, existing millisecond ISO/numeric response timestamps (no extra conversion), finite JSON numbers, negative/zero values and empty-list success. Preserve native whole-list failure after a malformed row and its STREAM_MALFORMED diagnostic; no valid prefix may complete after failure. Unsupported interval stays before admission. Do not change public WS candles, startup get(), depth recovery or private/account/history behavior.
+
+Commit original-source regression tests before production edits. Thirteen controls cover exact header/query through prepare/bind/reprepare, typed refusal, parked/released root expiry, zero read retries on network/integrity failure, duplicate/concurrent/reused owners, initial invalid-clock/capacity rejection, unchanged native rows/order/no local bound filtering and ignored limit, malformed-row prefix exclusion, late malformed stream exclusion and non-2xx prefix failure. Keep assertions unchanged after RED. Update only the existing public candle fixture to shared prepared_actions at its original 0ms declaration clock; keep response clocks and every business assertion.
+
+Five planned paths: this appendix, CALLERS, manifest, lib.rs and tests/public.rs, plus new tests/request_context_candles.rs (six total). Remove only lib.rs fingerprints 9eb2532ffa305903307527ed26561752ae2716a465c7347f6bb03d38987efb3d, d0f067540be6f5b7aa8c5b2d02f4a4ace669920eb11cabb79b1d5bb8b18db63e and c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa, each count one. Generic get senders and unsupported preflight stay. Family six paths/26 entries/27 occurrences becomes six/23/24; no other map changes.
+
+Run focused lifecycle tests, full Backpack/Binance native suites, strict all-target Clippy, scoped fmt, bans and both request checks. Three independent plan/implementation reviews must verify architecture gate No (shared admission/header/stream/lifecycle APIs, native codec facts only). Fresh CI, separate guard and overseer parallel window are required. This slice claims no write-classification, signer, session, group, background or local-tail closure.
+
+
+Phase-two blocked checkpoint: plan a26b317e68f precedes separate test commit ea55c2e03b8; all thirteen controls compile and assert RED on the original opaque candle path. Plan audit clarification 8b7c29b344b changes one test name but no assertion, preserving millisecond response timestamps versus floor-second request bounds. Actual MEXC #1858 (`0d3f1dfa9bf`) was genuinely integrated before source adoption.
+
+The narrow candidate passes ten controls. Three controls remain RED because shared preparation failures unconditionally add NotSent to Reads (`http_lifecycle::http_preparation_failed`, affecting parked expiry and typed route refusal), and an unfinished non-UTF-8 ArrayAt::Root stream takes the untyped on_stream_malformed callback before the typed envelope check. Exact evidence is reported to the error-core owner and overseer. No venue outcome clearing, error-string classifier, engine edit, assertion weakening or readiness claim is added. The candidate needs a shared contract decision/fix; the final CALLERS contract follows that decision before any merge.
+
+Strict all-target Backpack/Binance Clippy, scoped formatting, bans and both request checks pass. Scanner matches the exact three-entry/three-occurrence prune. Caller and full-map audits found no additional issue; source audit is recorded separately. No full native-suite or CI pass is claimed for this blocked candidate. Original BookQuery presentation, private/account/trading/history/signing, startup/recovery and all fixture business assertions remain intact.
+
+
+Core adjudication supersedes the first checkpoint's preparation interpretation: pre-release NotSent is a true local attempt fact for Reads too, not a classification of a released Read or a whole-command money claim. The error-core owner explicitly requires preserving it. Two assertions are corrected to that pinned engine contract; no adapter outcome clearing is introduced. The unfinished non-UTF-8 stream is a real shared gap, fixed on the owner's reviewed/frozen #1857 head 1947e6b2064 through the default on_stream_malformed→typed on_http_failed path. Exact reviewed stacking is authorized by the owner; actual #1857 remains mandatory before any final venue proof/merge after the current venue phase. No engine source will be edited by this lane.
+
+
+Corrected-contract proof at 52077fd6268: the revised assertions were rerun against original actual 0d3f1dfa9bf source and all thirteen still assert RED. The restored candidate passes twelve with only the genuine streamed-integrity gap failing. The reviewed exact #1857 1947e6b2064 head is then genuinely merged, touching only its four shared files and leaving the entire owned Backpack tree byte-identical. The owner later announced 289f1c02887 as a comment-only successor and explicitly confirmed 1947 runtime equivalence. This does not claim actual #1857 availability; final integration/CI and a six-own-path guard remain required after the seam lands.
+
+
+Reviewed-seam verification checkpoint: all thirteen corrected lifecycle/native controls and the full Backpack/Binance suites pass (447 tests, zero failed/ignored), together with strict all-target Clippy and scoped formatting. New train inventory prunes were genuinely integrated; own Backpack, engine seam, crypto and Binance trees stayed byte-identical to the tested ff8d6c11a70 head. The first inventory retry passed its scanner controls but stopped correctly at a newer incoming Lighter prune; the initial pass wording was premature. A final ratchet receipt follows genuine integration of that incoming prune. Source/adversarial and caller audits are clean; the pinned full-map audit confirms six own plus four inherited seam files, unchanged original assertions except the explicit contract correction, and architecture gate No. This is reviewed-stack evidence only, not an actual-#1857 or final CI/merge claim.
+
+
+Final reviewed-stack ratchet receipt: actual Lighter #1807 (`8e0726f7675`) is genuinely integrated at 11bf92f61ef. Bans and both request checks exit zero there, including all fourteen scanner controls; only the intended three Backpack fingerprints are removed. The entire owned Backpack, reviewed engine, crypto and Binance trees remain byte-identical to the 447-test/strict-Clippy/fmt verified source. The earlier premature gate statement was corrected before this receipt. Actual #1857 and fresh final CI/guard remain mandatory; no merge readiness is claimed.
+
+
+## Candle slice adoption and actual-seam integration, 2026-10-24
+
+The overseer transferred #1870 from hcmq3f to mxb4mq; hcmq3f confirmed the
+handoff and stopped edits. `4a82e0e1ee0` plain-merges actual `be710b3f2d7` into
+`0399ba95a3b`. Actual #1857 `867896f3e25` is an ancestor of that landing, so
+the earlier reviewed-stack blocker is historical and is now satisfied. All
+incoming engine/registry/private trading changes are retained. The only source
+conflict kept the incoming Trade failure arm first and the original Candles
+Context failure arm verbatim, as source-cleared by the previous owner. Shared
+plan/CALLERS conflicts retain incoming first plus the exact candle suffix once.
+
+The six own paths and exact three one-count lib.rs removals remain the scope;
+all other manifest maps and unowned paths equal the incoming landing. Corrected
+regression controls are byte-identical to `52077fd6268` (SHA-256
+`ebd8db948d29c1256f3160a931ef8527f47e86dbf9b1686a9f3e46d82d179505`).
+The preserved original-source receipt records all 13 assertion REDs on
+`0d3f1dfa9bf`; the current integrated source passes those same 13 controls.
+No assertion or native candle behavior is changed during adoption.
+
+Local verification is scoped to Backpack with CARGO_BUILD_JOBS=4 under the
+overloaded-machine instruction, superseding the earlier broad two-crate local
+suite. The Backpack suite passes 173 tests with zero failures; one pre-existing
+trading repair control remains ignored under its separate Plan migration gate.
+Formatting and bans (including inventory scanner/ratchet controls) pass. Fresh
+full CI and exact committed preservation review remain readiness gates; no
+merge window or source-equivalent CI claim is inferred from old evidence.
+
+## Next slice: fixed-setting refusal ownership, 2026-10-24
+
+Owner mxb4mq, fresh branch `fix/rust-backpack-fixed-setting-refusals`, exact
+landing base `a73afa6a27dc57b53bded8d7b790f93203a550b9`. #1870 remains frozen
+and watched on its separate candle branch. The open-PR file map and the actual
+`be710b3f2d7..train/combo-5b-be71` diff show no Backpack runtime path in combo-5b;
+its shared engine/registry files remain untouched. Auditor confirmation of that
+map is requested before source application. No engine or registry edit is part
+of this slice, and no reviewed seam stack is required.
+
+The only production sites are the unconditional native SetMarginType and
+SetPositionMode refusal arms in `backpack/src/trading.rs`. They are two lexical
+occurrences of fingerprint
+`bcd45e2e77893c71604dfc34d2a327ce254b90adc4e9178be8643e022a6f4219`.
+After genuine Context adoption, remove that one map entry with count two; retain
+its other trading entry and every other map byte-for-byte. Base Backpack totals
+are six paths, 19 fingerprints and 20 occurrences; this slice alone yields six
+paths, 18 fingerprints and 18 occurrences. The three candle removals in #1870
+are separate, not copied into this branch.
+
+Preserve the exact messages "Backpack only supports cross margin" and "Backpack
+position mode is fixed", ErrorKind::Unsupported and Outcome::NotSent on valid
+entry, for either requested value and without requiring credentials. No success,
+Store update, signing job, HTTP, socket, retry, venue capability or native wire
+behavior is added. Existing raw/managed signing custody is out of scope.
+
+Proposed implementation is one thin native refusal helper called by those two
+arms. It admits the genuine command through existing admit_http_command with
+Operation::Mutation, no credential, timeout 20,000ms, no pacing and Never retry;
+then calls fail_context with the original not_sent(message).kind(Unsupported).
+Before admission, use the complete shared receipt gate: command_wait None calls
+reject_unstamped_command(Mutation), Expired calls reject_expired_command(Mutation),
+and only Remaining reaches admission. No missing/expired receipt mints a fresh
+20-second root. Rejected already emitted its refusal; Revoked grants no terminal
+or numeric fallback. This corrects the initial helper proposal per owner review.
+This is the existing shared local-refusal pattern, with no venue issuer, numeric
+completion fallback, owner table, scheduler or local classification policy.
+Only CommandEntryError::Rejected is already terminal; no admission error permits a second finalizer.
+Production waits for independent plan/exact-hook review.
+
+Commit this plan first, then separate assertion RED controls on unchanged native
+source. Working controls pin both messages/fields for public and private keyless
+setup, both setting values, one terminal, unchanged financial/settings Store and
+no physical work; immediate command reuse must remain possible. Hostile controls
+pin InvalidInput/NotSent for invalid command clocks and the shared Internal/NotSent capacity error at the
+shared 256-owner bound. Duplicate IDs must preserve the parked prior owner and
+its later successful delivery; this may already be a working engine guard and
+must not be labeled an original failure unless reproduced. No missing-API or
+compile-error RED, fixture change or relaxed assertion is allowed.
+
+After reviewed implementation, execute only the new focused test and scoped
+Backpack tests/strict Clippy with CARGO_BUILD_JOBS=4, one build at a time; fmt,
+bans and both inventory checks follow. Update CALLERS with resulting behavior,
+not proof status. Obtain source/caller/map review, push a draft and run fresh
+Rust CI with one watcher at least 120 seconds apart. No merge without its window.
+
+
+Test compile correction before any original RED claim: the initial control used
+nonexistent ErrorKind::Capacity. Capacity is a Context admission cause projected
+as existing ErrorKind::Internal; the test now pins that actual shared contract.
+The failed compile is not assertion-RED evidence and no production changed.
+
+Original-source execution on `26deb9e7477` compiles and runs seven controls:
+three GREEN (native messages/fields and no work/Store change, duplicate prior
+owner delivery, immediate reuse), four assertion RED (both settings at an
+invalid clock and at the 256-owner capacity bound). All four fail only because
+the old numeric branch reports Unsupported instead of shared InvalidInput or
+Internal capacity; zero skipped. The earlier nonexistent-enum compile failure
+is excluded from this count. Runtime source is unchanged. The exact reviewed
+helper proposal is prepared separately before applying it.
+
+
+The overseer confirmed no combo-5b overlap and authorized production after the
+plan-fit review, with push/CI parallel to exact source review. The applied
+helper includes the full None/Expired/Remaining receipt gate and existing shared
+Mutation admission; no rejected admission is finalized again. The unchanged
+seven controls now all PASS, zero failures or skips. In particular, both
+original invalid-clock and capacity failures become typed engine refusals,
+while native messages, keyless operation, Store/no-I/O, prior-owner delivery and
+immediate reuse stay GREEN. The only manifest change removes the one planned
+count-two fingerprint. #1870 remains frozen and unaffected on its own branch.
+
+Exact source proposal SHA-256
+`c6ca2e3b60fb34b5af0c40ca99de1119edd3da46ee8417c00b8dab20002dc3ad`
+is SOURCE/API CLEAR from hcmq3f. `618518256e0` applies that source; local scoped
+Backpack verification passes 167 tests with zero failures and one pre-existing
+ignored account/background repair test. All-target strict Clippy and scoped fmt
+pass. Original seven control bodies are unchanged.
+
+The first bans run correctly stopped on stale-base MEXC inventory growth after
+an unrelated prune landed. `0e9161a1479` plain-merges actual `db6fa45bbb7` (MEXC
+and OKX venue changes/docs only; no shared engine change), retaining incoming
+CALLERS first plus the own suffix exactly once. Both Backpack source/control
+blobs remain byte-identical to the tested implementation. Bans, including both
+inventory scanner/ratchet controls, now pass. Relative to that incoming tip,
+exactly five own paths remain and the only map change is the planned count-two
+Backpack trading fingerprint removal. Key-selection maps are unchanged.
+Fresh CI and exact committed preservation review are in flight; no merge or
+full-package proof is claimed. Architecture gate: No shared policy copy, only
+native refusal messages composed through existing shared custody APIs.
+
 ## Next plan/RED slice: unsupported command candle interval, 2026-10-24
 
 Fresh branch `fix/rust-backpack-candle-interval-refusal` starts exactly at actual
@@ -587,3 +750,13 @@ relative to actual db6fa, exactly five own paths differ and the complete manifes
 equals incoming minus only the planned one-count fingerprint. Production still
 changes no key-selection or combo-5b source. Exact committed source/caller/map
 review and fresh Rust CI run in parallel; #1870/#2044 retain their frozen heads.
+
+
+Interval refusal post-candle integration: genuinely include actual #2044
+9a757d406b8 (which contains #1870). The lib merge is automatic; both docs
+append conflicts retain incoming first plus the original interval suffix once.
+The first scoped compile detected that #1870 removed the final use of the
+FetchCandles command binding after this refusal conversion; remove that unused
+binding only. This compile failure is not an original RED. Original six
+controls remain unchanged. Fresh CI is required for this source composition;
+the older163a CI stays historical.
