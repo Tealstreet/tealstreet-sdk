@@ -193,10 +193,17 @@ These deviate from the plan text above:
 - **Messages.** "ApeX API key, signing key and passphrase are required"
   replaces the legacy wording, which named the secret.
 
-**Open: request-provenance ratchet.** Signed reads stage
-`cx.request`/`request_streamed_body` unsigned plus `cx.sign_http`. In
-`venues/apexomni/src/lib.rs` that rehashes the 2 legacy staging calls and adds
-1 `sign_http` site. The ratchet refuses any new site without an
-owner-authorized bootstrap, as with `SIGNER_POLICY_BOOTSTRAPS`. This needs a
-decision: an authorized rehash, or moving the reads onto managed Read contexts
-first.
+**Request-provenance ratchet: staging bootstrap.** Signed reads stage
+`cx.request`/`request_streamed_body` unsigned, then call `cx.sign_http`. In
+`venues/apexomni/src/lib.rs` the request-site inventory goes from 3 to 4:
+3 legacy calls are rehashed and 1 call-site shape is new. None of the four
+is the canonical `sign_http` digest. claude-ddi2il approved those 4 exact
+digests as one `STAGING_BOOTSTRAPS` row, reviewed by claude-m26ps4. Old and
+new are disjoint, so the row cannot alias.
+
+Across the venue, the request inventory goes from 20 to 21 while the
+signing-site inventory falls from 13 to 0. The extra site is what puts
+signing at dispatch.
+
+The row is removed when ApeX managed writes (#1891) own these sends, and
+before master. Recompute its old map if the landing moves the file.
