@@ -184,6 +184,11 @@ impl ContextRegistry {
         }
     }
 
+    fn inherited_uncertain(&self, handle: &Preflight) -> bool {
+        self.preflight_owner(handle)
+            .is_ok_and(|owner| owner.inherited_uncertain)
+    }
+
     fn preflight_state(&self, handle: &Preflight) -> Result<&State, Error> {
         let owner = self.preflight_owner(handle)?;
         let CommandPhase::Preflight(state) = &owner.phase else {
@@ -367,6 +372,7 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .preflight_state(&handle)
             .expect("owned admission");
+        let inherited = self.io.request_contexts.inherited_uncertain(&handle);
         let mut error = VenueError::new("HTTP read admission failed")
             .kind(match reason {
                 Error::TimedOut => crate::ErrorKind::Timeout,
@@ -379,6 +385,7 @@ impl<P> Cx<'_, P> {
         let seal = if state.policy.purpose == PreflightPurpose::WriteAfterReads {
             error = CommandWrites::new(CAPACITY)
                 .expect("fixed journal bound")
+                .inheriting(inherited)
                 .fail(error)
                 .expect("empty projection");
             Seal::Failure(error, Vec::new())

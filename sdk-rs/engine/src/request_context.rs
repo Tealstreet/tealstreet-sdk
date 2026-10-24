@@ -1038,6 +1038,8 @@ pub struct CommandWrites {
     report_bytes: usize,
     report_messages: usize,
     evidence: evidence::EvidenceBudget,
+    // An earlier attempt of this intent may have reached the venue.
+    inherited_uncertain: bool,
 }
 // Private synchronous terminal preparation. Never exposed as a venue grant.
 #[cfg(feature = "http-plans")]
@@ -1087,6 +1089,7 @@ impl CommandWrites {
             report_bytes: 0,
             report_messages: 0,
             evidence: evidence::EvidenceBudget::default(),
+            inherited_uncertain: false,
         })
     }
     pub fn register(&mut self, id: RequestId, leg: u64) -> Result<(), Error> {
@@ -1594,6 +1597,13 @@ impl CommandWrites {
     /// Seal exactly once. A caller's fallback text never chooses the outcome;
     /// sent-leg errors have priority over pre-send siblings. Earlier release
     /// evidence survives a signer/transport failure on a newer physical retry.
+    /// Carry an owner's inherited maybe-sent fact; it can only raise a failure
+    /// projection to Unknown and never clears.
+    pub(crate) fn inheriting(mut self, uncertain: bool) -> Self {
+        self.inherited_uncertain |= uncertain;
+        self
+    }
+
     pub fn fail(&mut self, fallback: VenueError) -> Result<VenueError, Error> {
         let (error, budget) = self.failure_projection(fallback)?;
         self.evidence = budget;
@@ -1680,7 +1690,9 @@ impl CommandWrites {
                 error
             }
         };
-        error.outcome = if !any_released {
+        error.outcome = if self.inherited_uncertain {
+            Some(Outcome::Unknown)
+        } else if !any_released {
             Some(Outcome::NotSent)
         } else if uncertain || overflow {
             Some(Outcome::Unknown)

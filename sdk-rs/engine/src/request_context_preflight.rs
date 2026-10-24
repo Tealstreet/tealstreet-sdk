@@ -62,6 +62,7 @@ impl ContextRegistry {
                     .map(|(_, intent)| intent),
                 leg_intents: Vec::new(),
                 credentialed,
+                inherited_uncertain: false,
             },
         );
         Preflight::new(&self.issuer, command, generation)
@@ -101,7 +102,9 @@ impl ContextRegistry {
             (PreflightPurpose::WriteAfterReads, Some(error)) => {
                 // The same empty-journal projection as a Context mutation
                 // refused before registration bounds text/IDs and proves NotSent.
-                let error = CommandWrites::new(CAPACITY)?.fail(error)?;
+                let error = CommandWrites::new(CAPACITY)?
+                    .inheriting(owner.inherited_uncertain)
+                    .fail(error)?;
                 Ok(Seal::Failure(error, Vec::new()))
             }
             (PreflightPurpose::WriteAfterReads, None) => Err(Error::State),
@@ -116,6 +119,13 @@ impl ContextRegistry {
         if state.policy.purpose != PreflightPurpose::WriteAfterReads {
             return Err(Error::Invalid);
         }
+        let Owner::Command { id, .. } = preflight.owner() else {
+            unreachable!()
+        };
+        self.commands
+            .get_mut(&id)
+            .expect("validated preflight owner")
+            .inherited_uncertain = true;
         Ok(())
     }
 

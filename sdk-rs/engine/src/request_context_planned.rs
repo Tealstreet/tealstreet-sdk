@@ -483,7 +483,7 @@ impl<P> Cx<'_, P> {
             .expect("validated preflight");
         assert_eq!(owner.generation, generation);
         owner.phase = CommandPhase::Planned(State { body });
-        owner.writes = writes;
+        owner.writes = writes.map(|writes| writes.inheriting(owner.inherited_uncertain));
         owner.leg_intents = leg_intents;
         owner.last_deadline = deadline;
         self.io.request_contexts.reserved_contexts = future;
