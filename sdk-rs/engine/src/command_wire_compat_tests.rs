@@ -657,7 +657,7 @@ fn render(fields: &[(&str, String)]) -> String {
 /// Every mutation the derive-based decoder distinguishes: placement of the
 /// tag, absent, null, mistyped, duplicate and unknown fields, and tag errors.
 fn corpus() -> Vec<String> {
-    const VALUES: [&str; 11] = [
+    const VALUES: [&str; 19] = [
         "null",
         r#""x""#,
         "1",
@@ -669,6 +669,16 @@ fn corpus() -> Vec<String> {
         "{}",
         r#""1e3""#,
         "1e3",
+        // Reader-level faults: number range, surrogate pairing, signed zero,
+        // integral floats and 64-bit overflow.
+        "1e999",
+        "-1e999",
+        r#""\ud800""#,
+        r#""\udc00x""#,
+        "-0",
+        "1.0",
+        "18446744073709551616",
+        "-9223372036854775809",
     ];
     let mut out = vec![
         String::new(),
@@ -684,8 +694,32 @@ fn corpus() -> Vec<String> {
         r#"{"op":"fetchAccount","command":1,}"#.into(),
         r#"{"command":1}"#.into(),
         r#"{"nested":{"op":"fetchAccount"},"command":1}"#.into(),
-        r#"{"op":"fetchAccount","command":1}"#.into(),
-        r#"{"op":"fetchAccount","command":1}"#.into(),
+        r#"{"op":"\u0066etchAccount","command":1}"#.into(),
+        r#"{"op":"fetch\u0041ccount","command":1}"#.into(),
+        // Escaped keys: the tag itself and a payload field.
+        r#"{"\u006fp":"fetchAccount","command":1}"#.into(),
+        r#"{"op":"fetchAccount","\u0063ommand":1}"#.into(),
+        // Nesting at and over the reader's recursion limit, in an ignored field.
+        format!(
+            r#"{{"op":"fetchAccount","command":1,"zz":{}{}}}"#,
+            "[".repeat(126),
+            "]".repeat(126)
+        ),
+        format!(
+            r#"{{"op":"fetchAccount","command":1,"zz":{}{}}}"#,
+            "[".repeat(127),
+            "]".repeat(127)
+        ),
+        format!(
+            r#"{{"op":"fetchAccount","command":1,"zz":{}{}}}"#,
+            "[".repeat(128),
+            "]".repeat(128)
+        ),
+        format!(
+            r#"{{"op":"fetchAccount","command":1,"zz":{}{}}}"#,
+            "[".repeat(200),
+            "]".repeat(200)
+        ),
         "{\n  \"op\" : \"fetchAccount\" ,\n  \"command\" : 1\n}".into(),
         r#"{"op":"fetchAccount","command":1,"timeoutMs":5000}"#.into(),
     ];
@@ -703,11 +737,23 @@ fn corpus() -> Vec<String> {
             middle.insert(1, tag.clone());
             out.push(render(&middle));
         }
-        // Unknown fields, including one shaped like a tag.
+        // Unknown fields, including one shaped like a tag, and every value an
+        // ignored field must still validate.
         let mut extra = owned.clone();
         extra.push(("zz", "1".into()));
         extra.push(("nested", r#"{"op":"refreshMarkets"}"#.into()));
         out.push(render(&extra));
+        for value in VALUES {
+            let mut ignored = owned.clone();
+            ignored.insert(1, ("zz", value.into()));
+            out.push(render(&ignored));
+            let mut nested = owned.clone();
+            nested.push(("zz", format!(r#"{{"a":[{value}]}}"#)));
+            out.push(render(&nested));
+        }
+        let mut envelope = owned.clone();
+        envelope.push(("timeoutMs", "5000".into()));
+        out.push(render(&envelope));
         // Tag errors.
         for op in [r#""nope""#, r#""FetchAccount""#, "1", "null", r#""""#] {
             let mut bad = owned.clone();
@@ -728,6 +774,79 @@ fn corpus() -> Vec<String> {
                 let mut typed = owned.clone();
                 typed[index].1 = value.into();
                 out.push(render(&typed));
+            }
+        }
+    }
+    out.extend(nested_corpus(&VALUES));
+    out
+}
+
+/// The same per-field mutations one level down: inside the first element of a
+/// payload array, or inside a payload object.
+fn nested_corpus(values: &[&str]) -> Vec<String> {
+    let order: Vec<(&str, &str)> = vec![
+        ("symbol", r#""BTCUSDT""#),
+        ("type", r#""limit""#),
+        ("side", r#""buy""#),
+        ("amount", "1"),
+        ("price", "100"),
+        ("reduceOnly", "false"),
+        ("timeInForce", r#""GoodTillCancel""#),
+    ];
+    #[allow(unused_mut)]
+    let mut nests: Vec<(Vec<(&str, &str)>, &str, Vec<(&str, &str)>, bool)> = vec![(
+        vec![("op", r#""placeOrders""#), ("command", "2")],
+        "orders",
+        order,
+        true,
+    )];
+    #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
+    nests.push((
+        vec![("op", r#""cancelOrdersWithSymbols""#), ("command", "25")],
+        "orders",
+        vec![("id", r#""7""#), ("symbol", r#""BTCUSDT""#)],
+        true,
+    ));
+    #[cfg(feature = "command-options")]
+    nests.push((
+        vec![("op", r#""fetchOptionChain""#), ("command", "22")],
+        "query",
+        vec![
+            ("underlying", r#""BTC""#),
+            ("expiry", "1800000000000"),
+            ("right", r#""put""#),
+            ("strikeMin", "90000"),
+        ],
+        false,
+    ));
+    let mut out = Vec::new();
+    for (outer, key, inner, array) in nests {
+        let inner: Vec<(&str, String)> = inner.iter().map(|(k, v)| (*k, (*v).to_owned())).collect();
+        let wrap = |fields: &[(&str, String)]| {
+            let object = render(fields);
+            let value = if array { format!("[{object}]") } else { object };
+            let mut whole: Vec<(&str, String)> =
+                outer.iter().map(|(k, v)| (*k, (*v).to_owned())).collect();
+            whole.push((key, value));
+            render(&whole)
+        };
+        out.push(wrap(&inner));
+        for value in values {
+            let mut unknown = inner.clone();
+            unknown.push(("zz", (*value).to_owned()));
+            out.push(wrap(&unknown));
+        }
+        for index in 0..inner.len() {
+            let mut missing = inner.clone();
+            missing.remove(index);
+            out.push(wrap(&missing));
+            let mut duplicate = inner.clone();
+            duplicate.push(inner[index].clone());
+            out.push(wrap(&duplicate));
+            for value in values.iter().chain(&[r#""BUY""#, r#""LIMIT""#, r#""PUT""#]) {
+                let mut typed = inner.clone();
+                typed[index].1 = (*value).to_owned();
+                out.push(wrap(&typed));
             }
         }
     }
@@ -785,4 +904,29 @@ fn the_command_decoder_matches_the_derive_based_wire_exactly() {
         mismatches.len(),
         mismatches.join("\n")
     );
+}
+
+/// F1 (claude-dazzy3): the derive decoder buffers every value, so the reader
+/// validates fields it then ignores. A skim with `IgnoredAny` would accept these.
+/// The decoder keeps today's behaviour: each is a positioned Syntax error.
+#[test]
+fn ignored_values_are_validated_like_every_other_value() {
+    for value in ["1e999", "-1e999", r#""\ud800""#, r#""\udc00x""#] {
+        for json in [
+            format!(r#"{{"op":"fetchAccount","zz":{value},"command":1}}"#),
+            format!(r#"{{"op":"fetchAccount","command":1,"zz":{{"a":[{value}]}}}}"#),
+        ] {
+            let error = decode_command(&json).expect_err(&json);
+            assert_eq!(
+                error.classify(),
+                serde_json::error::Category::Syntax,
+                "{json}"
+            );
+            assert!(error.line() > 0, "{json}");
+            assert!(
+                serde_json::from_str::<serde::de::IgnoredAny>(&json).is_ok(),
+                "a skim alone accepts {json}"
+            );
+        }
+    }
 }

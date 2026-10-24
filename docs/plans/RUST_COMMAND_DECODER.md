@@ -23,22 +23,28 @@ whether or not it serves the command.
 Read `op` with one borrowed scan of the top-level object. Then deserialize only
 the chosen variant's payload directly from the same text, with no `Content`.
 
-1. **Tag.** A `Header<'a> { op: Op }` struct where `Op` is a fieldless enum
-   with the same variant names, `rename_all = "camelCase"`, the `getAccount`
-   alias and the same feature gates. Every other key is ignored. This
-   reproduces `missing field \`op\``, `duplicate field \`op\`` and
-   `unknown variant ..., expected one of ...` (same list, same order) from
-   serde's own field-identifier code.
+1. **Tag and validation.** One pass over the top-level object, driven by a
+   hand-written `Header` visitor. `op` deserializes a fieldless `Op` enum with
+   the same variant names, `rename_all = "camelCase"`, the `getAccount` alias
+   and the same feature gates. Every other value goes through a small
+   validating visitor (`deserialize_any`, recursing into arrays and maps). It
+   is not `IgnoredAny`. serde_json's `IgnoredAny` skims, without range-checking
+   numbers or validating `\u` surrogates, but today's `Content` buffering
+   parses every value. So `{"op":..,"zz":1e999}` and an unpaired `"\ud800"`,
+   at any depth, must stay positioned Syntax errors (claude-dazzy3, F1). This
+   pass also reproduces `missing field \`op\``, `duplicate field \`op\`` and
+   `unknown variant ..., expected one of ...` from serde's own
+   field-identifier code.
 2. **Payload.** One plain struct per variant, with the same fields, defaults,
    renames and gates, parsed with `serde_json::from_str` from the same text.
-   Unknown keys, including `op` itself, stay ignored, as today.
-3. **Errors.** `Content` replays raise payload errors through
-   `de::Error::custom`, so they carry no position (`line() == 0`). Direct
-   payload parsing would add one. The decoder rebuilds such an error as the
-   same message without the position, and the category stays `Data`.
-   Syntax and EOF errors come from the reader in both paths, at the same
-   offsets. The harness below decides which errors keep positions; source
-   must match it, not this paragraph.
+   Unknown keys, including `op`, are skipped with `IgnoredAny`. That is safe
+   only because pass 1 has already validated them.
+3. **Errors (F2).** Pass 1 has read every token, so any Syntax or EOF error
+   (including `1e999` in a known field) surfaces there, with the same position
+   as `Content` building. A pass-2 error can only be a `Data` visitor error.
+   `Content` replay raises those through `de::Error::custom` without a
+   position, so the decoder rebuilds them as the same message without a
+   position. Syntax and EOF errors keep theirs.
 
 `decode_subscription` and `decode_host_input` keep their contracts.
 `decode_host_input` still calls `decode_command`. `Command`, `CommandIn` →
@@ -65,6 +71,17 @@ The corpus covers every `Command` variant in the build's feature set:
   string, truncated, trailing characters, a trailing comma, a missing `op`, an
   `op` only in a nested object, `\u` escapes inside `op`, pretty printing and
   the host envelope's `timeoutMs`.
+
+One level down, the same per-field mutations apply inside the first
+`PlaceOrderOpts` of `orders`, the `CancelOrderRef` array and the option-chain
+`query`: absent, duplicate, every value form, unknown inner keys and invalid
+enum variants (`"BUY"`, `"LIMIT"`, `"PUT"`). The value forms include reader
+faults (`1e999`, `-1e999`, `"\ud800"`, `"\udc00x"`), `-0`, `1.0`, and u64/i64
+overflow, in known, unknown and nested-unknown fields. The corpus also covers
+escaped keys (`\u006fp` and a payload key), ignored nesting at and over the
+reader's 128-level limit, and `timeoutMs` on every command.
+`ignored_values_are_validated_like_every_other_value` pins F1 directly: each
+input is a positioned Syntax error, while an `IgnoredAny` skim accepts it.
 
 It runs in the default feature set and with every command feature
 (`command-asterdex`, `-apexomni`, `-polymarket`, `-kucoinspot`, `-options`,
