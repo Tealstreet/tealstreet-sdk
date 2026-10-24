@@ -8,8 +8,10 @@ use safe_cex_engine::signing::{
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, ReadCredentials, Response,
 };
-use safe_cex_venue_bitrue::{Bitrue, Options};
+use safe_cex_venue_bitrue::Bitrue;
+mod support;
 use std::sync::{Arc, Mutex};
+use support::Options;
 
 const NOW: f64 = 1234.9;
 const SYMBOL: &str = "E-BTC-USDT";
@@ -76,7 +78,8 @@ fn fixture(options: Options) -> Harness {
         inner,
         requests: requests.clone(),
     });
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Bitrue::new(options));
+    let mut engine =
+        safe_cex_engine::test_support::seeded_engine(Bitrue::new(options.native(&identities)));
     engine.set_signer(Some(provider.clone())).unwrap();
     engine.set_identities(identities.clone()).unwrap();
     Harness {
@@ -576,7 +579,7 @@ fn native_invalid_read_key_refuses_before_public_only_startup_io() {
     let mut opts = options();
     opts.public_data_only = true;
     opts.read_credentials.as_mut().unwrap().secret.clear();
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Bitrue::new(opts));
+    let mut engine = support::engine(opts);
     engine.start(NOW);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(
@@ -955,4 +958,203 @@ fn native_transport_retry_cannot_renew_a_spent_signature_resend() {
         r#"{"code":"-1022","msg":"Invalid signature"}"#,
     );
     assert_failed_bracket_without_retry(&result);
+}
+
+#[test]
+fn bracket_fresh_leg_near_physical_deadline_keeps_original_caller_wait() {
+    let mut h = fixture(options());
+    let first = bracket(&mut h);
+    let later = NOW + 19_999.;
+    let second = take_http(
+        &response(
+            &mut h,
+            later,
+            &first,
+            400,
+            r#"{"code":-1022,"msg":"signature"}"#,
+        ),
+        Method::Get,
+        BRACKET,
+    );
+    let result = response(
+        &mut h,
+        later + 19_999.,
+        &second,
+        200,
+        r#"{"code":0,"data":{"contractName":"E-BTC-USDT","brackets":[{"initialLeverage":50}]}}"#,
+    );
+    assert!(result.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { command:81, result }) if result=="50")));
+    assert_eq!(
+        h.engine.store().market(SYMBOL).unwrap().limits.leverage.max,
+        50.
+    );
+    assert_eq!(h.requests.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn bracket_caller_expiry_discards_late_result_without_store_projection() {
+    let mut h = fixture(options());
+    let first = bracket(&mut h);
+    let result = response(
+        &mut h,
+        NOW + 120_000.,
+        &first,
+        200,
+        r#"{"code":0,"data":{"contractName":"E-BTC-USDT","brackets":[{"initialLeverage":50}]}}"#,
+    );
+    let failures: Vec<_> = result
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 81, error }) => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].kind, Some(safe_cex_engine::ErrorKind::Timeout));
+    assert_eq!(failures[0].outcome, None);
+    assert_eq!(
+        h.engine.store().market(SYMBOL).unwrap().limits.leverage.max,
+        100.
+    );
+    assert!(!result.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::Notice(safe_cex_engine::Notice::CommandDone { command: 81, .. })
+    )));
+}
+
+struct AlterProvider {
+    inner: Arc<RecordingSigner>,
+    alter: u8,
+}
+impl Signer for AlterProvider {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.inner.can_sign(key, algorithm)
+    }
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        Box::pin(std::future::ready(self.sign_ready(&request).unwrap()))
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        let result = self
+            .inner
+            .sign_ready(request)
+            .unwrap()
+            .and_then(|mut result| {
+                match self.alter {
+                    0 => return Err(SignError::Refused),
+                    1 => {
+                        result.values.pop();
+                    }
+                    2 => {
+                        result.receipt.stamp_ms = Some(77.);
+                    }
+                    3 => {
+                        result.headers.push(("X-CH-SIGN".into(), "injected".into()));
+                    }
+                    4 => {
+                        result.values[0] = b"key\r\nInjected: value".to_vec();
+                    }
+                    5 => {
+                        result.values[1].pop();
+                    }
+                    _ => unreachable!(),
+                }
+                Ok(result)
+            });
+        Some(result)
+    }
+}
+#[test]
+fn bracket_provider_refusal_and_invalid_atomic_results_release_nothing() {
+    for alter in 0..6 {
+        let mut h = fixture(options());
+        h.engine
+            .set_signer(Some(Arc::new(AlterProvider {
+                inner: h.provider.clone(),
+                alter,
+            })))
+            .unwrap();
+        seed_market(&mut h);
+        h.engine
+            .handle_command(
+                NOW,
+                Command::FetchMaxLeverage {
+                    command: 81,
+                    symbol: SYMBOL.into(),
+                },
+                Some(120_000),
+            )
+            .unwrap();
+        let result = actions(&mut h, NOW);
+        assert!(!result.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::Notice(safe_cex_engine::Notice::CommandDone { .. })
+        )));
+        let failures: Vec<_> = result
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 81, error }) => {
+                    Some(error)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1, "{result:?}");
+        assert_eq!(failures[0].outcome, None);
+        assert_eq!(h.requests.lock().unwrap().len(), 1);
+        assert_eq!(
+            h.engine.store().market(SYMBOL).unwrap().limits.leverage.max,
+            100.
+        );
+    }
+}
+
+struct ParkedProvider(Arc<RecordingSigner>);
+impl Signer for ParkedProvider {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.0.sign(request)
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.0.can_sign(key, algorithm)
+    }
+}
+#[test]
+fn staged_catalogue_waits_for_atomic_async_provider_and_never_replays_partial_headers() {
+    for refuse in [false, true] {
+        let mut h = fixture(options());
+        h.engine
+            .set_signer(Some(Arc::new(ParkedProvider(h.provider.clone()))))
+            .unwrap();
+        h.engine.start(NOW);
+        let staged = actions(&mut h, NOW);
+        assert!(!staged.iter().any(|a| matches!(a, Action::Http(_))));
+        let work: Vec<_> = staged
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Sign { attempt, work, .. } => Some((attempt, work)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(work.len(), 1);
+        let (attempt, work) = work.into_iter().next().unwrap();
+        let result = if refuse {
+            Err(SignError::Refused)
+        } else {
+            h.provider.sign_ready(&work).unwrap()
+        };
+        h.engine.handle(NOW, Event::Signed { attempt, result });
+        let released = actions(&mut h, NOW);
+        if refuse {
+            assert!(!released.iter().any(|a| matches!(a, Action::Http(_))));
+        } else {
+            let request = take_http(&released, Method::Get, "/fapi/v1/contracts");
+            assert_eq!(header(&request, "X-CH-APIKEY"), "fixture-primary-key");
+            assert_eq!(header(&request, "X-CH-TS"), "1234");
+            assert_eq!(request.headers.len(), 6);
+        }
+    }
 }

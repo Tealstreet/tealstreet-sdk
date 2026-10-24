@@ -1,15 +1,21 @@
 //! Bitrue stablecoin perpetuals, driven entirely by host events.
 mod account;
+mod codes;
 mod history;
-mod sign;
+pub mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::credential_selection::{
+    CredentialRole, PrimaryReason, Selection, SlotPolicy, Slots,
+};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::selected_read::{ReadLeg, ReadLegPolicy, ReadRequest};
+use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
@@ -20,32 +26,22 @@ use std::collections::{HashMap, HashSet};
 use wire::{CandleWire, Contract, ContractKey, Message, Payload};
 const REST: &str = "https://fapi.bitrue.com";
 const PUBLIC: &str = "wss://fmarket-ws.bitrue.com/kline-api/ws";
-#[derive(Clone)]
+/// ```compile_fail
+/// let _ = safe_cex_venue_bitrue::Options { key: None, ..Default::default() };
+/// ```
+#[derive(Clone, Debug)]
 pub struct Options {
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    pub read_credentials: Option<Identity>,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
+    pub credentials: Option<Identity>,
     pub recv_window: u32,
 }
-safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
-}
-
 impl Default for Options {
     fn default() -> Self {
         Self {
             read_credentials: None,
             public_data_only: false,
-            key: None,
-            secret: None,
+            credentials: None,
             recv_window: 20_000,
         }
     }
@@ -55,6 +51,8 @@ pub struct Pending {
     pub job: Job,
     pub signature_resent: bool,
     pub attempts: u8,
+    selected: Option<(Selection, Identity)>,
+    leg: Option<ReadLeg>,
 }
 pub enum Job {
     Markets {
@@ -121,7 +119,7 @@ struct SocketRead {
     timer: TimerId,
 }
 pub struct Bitrue {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     account: account::Account,
     trading: trading::Trading,
     contracts: HashMap<String, ContractInfo>,
@@ -223,7 +221,6 @@ fn candle(row: &CandleWire<'_>, multiplier: f64) -> Option<Candle> {
 }
 impl Bitrue {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::default(),
@@ -241,9 +238,7 @@ impl Bitrue {
         }
     }
     fn authenticated(&self) -> bool {
-        !self.options.public_data_only
-            && self.options.key.as_ref().is_some_and(|s| !s.is_empty())
-            && self.options.secret.as_ref().is_some_and(|s| !s.is_empty())
+        !self.options.public_data_only && self.options.credentials.is_some()
     }
     fn resolve_symbol(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Option<String> {
         if cx.store.market(symbol).is_some() {
@@ -272,70 +267,139 @@ impl Bitrue {
         at: Option<ArrayAt>,
         job: Job,
     ) {
+        let role = match &job {
+            Job::Markets { .. } => CredentialRole::PrimaryRead {
+                reason: PrimaryReason::Catalog,
+                scope: None,
+            },
+            Job::Account(account::Request::Listen { .. } | account::Request::Keepalive { .. }) => {
+                CredentialRole::SessionAuth
+            }
+            Job::Account(_) | Job::History(_) => CredentialRole::Read { scope: None },
+            Job::Trade(request) => request.credential_role(),
+        };
+        let selected = self
+            .slots()
+            .select(role)
+            .ok()
+            .map(|(selection, identity)| (selection, identity.clone()));
         let pending = Pending {
             request: sign::Request {
                 method,
                 path: path.to_owned(),
                 body,
                 at,
-                timestamp: cx.now.max(0.0) as u64,
+                floor: None,
             },
             job,
             signature_resent: false,
             attempts: 0,
+            selected,
+            leg: None,
         };
         self.issue(cx, pending);
     }
-    fn issue(&self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+    fn slots(&self) -> Slots<Identity> {
+        Slots::new(
+            self.options.credentials.clone(),
+            self.options.read_credentials.clone(),
+            SlotPolicy {
+                secondary_requires_primary: true,
+            },
+        )
+    }
+    fn issue(&self, cx: &mut Cx<'_, Pending>, mut pending: Pending) {
         let r = &pending.request;
-        let primary_read = r.method == Method::Get && matches!(&pending.job, Job::Markets { .. });
-        let path = if r.path.starts_with("https://") {
-            r.path
-                .split_once(".com")
-                .map_or(r.path.as_str(), |(_, p)| p)
-        } else {
-            r.path.as_str()
-        };
+        let primary_read = matches!(&pending.job, Job::Markets { .. });
         let url = if r.path.starts_with("https://") {
             r.path.clone()
         } else {
             format!("{REST}{}", r.path)
         };
-        let mut headers = vec![
-            ("Content-Type", "application/json".to_owned()),
-            ("X-Referer", "Tealstreet".to_owned()),
-        ];
-        if let (Some(key), Some(secret)) = (&self.options.key, &self.options.secret) {
-            let read = self
-                .options
-                .read_credentials
-                .as_ref()
-                .filter(|_| r.method == Method::Get && !primary_read);
-            let key = read.map_or(key.as_str(), |r| r.key.as_str());
-            let secret = read.map_or(secret.as_str(), |r| r.secret.as_str());
-            headers.extend([
-                ("X-CH-APIKEY", key.to_owned()),
-                ("X-CH-TS", r.timestamp.to_string()),
-                ("recvWindow", self.options.recv_window.to_string()),
-                (
-                    "X-CH-SIGN",
-                    sign::signature(
-                        secret,
-                        r.timestamp,
-                        r.method,
-                        path,
-                        r.body.as_deref().unwrap_or(""),
-                    ),
-                ),
-            ]);
+        if let Job::Account(account::Request::Brackets { root, .. }) = &pending.job {
+            let leg = match root.leg(
+                cx,
+                ReadLegPolicy {
+                    timeout_ms: 20_000,
+                    pacing: None,
+                },
+            ) {
+                Ok(leg) => leg,
+                Err(error) => {
+                    let _ = cx.fail_context(root.context(), error.read_venue_error());
+                    return;
+                }
+            };
+            let (method, body, stream, floor, window) = (
+                r.method,
+                r.body.clone(),
+                r.at,
+                r.floor,
+                self.options.recv_window,
+            );
+            let recipe_url = url.clone();
+            let recipe_body = body.clone();
+            let result = leg.queue(
+                cx,
+                ReadRequest {
+                    method,
+                    url,
+                    body,
+                    stream,
+                },
+                |identity| {
+                    Box::new(sign::dispatch::Http::new(
+                        identity.clone(),
+                        method,
+                        recipe_url,
+                        recipe_body,
+                        window,
+                        floor,
+                    ))
+                },
+                |leg| {
+                    pending.leg = Some(leg);
+                    pending
+                },
+            );
+            if let Err((pending, error)) = result
+                && let Job::Account(account::Request::Brackets { root, .. }) = pending.job
+            {
+                let _ = cx.fail_context(root.context(), error.read_venue_error());
+            }
+            return;
         }
+        let headers = sign::dispatch::HEADERS
+            .iter()
+            .map(|(n, v)| (*n, (*v).to_owned()))
+            .collect();
+        let recipe = pending.selected.as_ref().map(|(selection, identity)| {
+            (
+                *selection,
+                sign::dispatch::Http::new(
+                    identity.clone(),
+                    r.method,
+                    url.clone(),
+                    r.body.clone(),
+                    self.options.recv_window,
+                    r.floor,
+                ),
+            )
+        });
         let (method, body, at) = (r.method, r.body.clone(), r.at);
         let id = cx.request(method, url, headers, body, pending);
-        if primary_read {
+        if let Some((selection, recipe)) = recipe {
+            selection.sign(cx, id, Box::new(recipe));
+        } else if primary_read {
             cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
         }
         if let Some(at) = at {
             cx.stream_response(id, at);
+        }
+    }
+    fn retire_leg(cx: &mut Cx<'_, Pending>, pending: &mut Pending) {
+        if let Some(leg) = pending.leg.take() {
+            let _ = cx.finish_http_context(leg.context());
         }
     }
     fn reset_job(job: &mut Job) {
@@ -594,9 +658,13 @@ impl Venue for Bitrue {
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read.validate()
+            && read.validate().is_err()
         {
-            cx.notice(Level::Error, code::CONFIG_INVALID, error);
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                "Secondary read credentials require a nonempty key and secret",
+            );
             return;
         }
         self.markets(cx);
@@ -842,13 +910,18 @@ impl Venue for Bitrue {
         mut pending: Pending,
         response: Response<'_>,
     ) {
-        if !pending.signature_resent
-            && serde_json::from_str::<wire::Envelope<'_>>(response.body)
-                .is_ok_and(|e| &*e.code == "-1022")
-        {
+        if let Job::Account(account::Request::Brackets { root, .. }) = &pending.job {
+            let Some(leg) = &pending.leg else {
+                return;
+            };
+            if root.validate_delivery(cx, leg).is_err() {
+                return;
+            }
+        }
+        Self::retire_leg(cx, &mut pending);
+        if !pending.signature_resent && codes::resend(&response) {
             pending.signature_resent = true;
             Self::reset_job(&mut pending.job);
-            pending.request.timestamp = (cx.now.max(0.0) as u64).max(pending.request.timestamp + 1);
             self.issue(cx, pending);
             return;
         }
@@ -917,34 +990,84 @@ impl Venue for Bitrue {
             Job::History(r) => self.history_response(cx, r, response),
         }
     }
-    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
-        let rejection = error
-            .strip_prefix("response did not contain the expected list: ")
-            .is_some_and(|body| {
-                serde_json::from_str::<wire::Envelope<'_>>(body).is_ok_and(|e| &*e.code == "-1022")
-            });
-        if rejection && !pending.signature_resent {
-            pending.signature_resent = true;
-            Self::reset_job(&mut pending.job);
-            pending.request.timestamp = (cx.now.max(0.0) as u64).max(pending.request.timestamp + 1);
-            self.issue(cx, pending);
-            return;
+    fn on_signing_release(
+        &mut self,
+        target: safe_cex_engine::SigningTarget<'_, Pending>,
+        release: safe_cex_engine::SigningRelease,
+    ) {
+        if let safe_cex_engine::SigningTarget::Http { pending, .. } = target {
+            pending.request.floor = release.stamp_floor();
         }
+    }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        if !pending.signature_resent && codes::resend(&response) {
+            self.on_response(cx, pending, response);
+        } else {
+            self.on_request_failed(
+                cx,
+                pending,
+                &format!(
+                    "response did not contain the expected list: {}",
+                    response.body
+                ),
+            );
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        Self::retire_leg(cx, &mut pending);
         let safe = pending.request.method == Method::Get
             || (pending.request.method == Method::Post
                 && pending.request.path
                     == "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey");
-        if !rejection
-            && !matches!(pending.job, Job::Markets { .. })
+        if matches!(
+            error.kind,
+            Some(safe_cex_engine::ErrorKind::Network | safe_cex_engine::ErrorKind::Timeout)
+        ) && !matches!(pending.job, Job::Markets { .. })
             && safe
             && pending.attempts < 3
-            && !error.starts_with("response did not contain")
-            && !error.contains("UTF-8")
         {
             pending.attempts += 1;
             Self::reset_job(&mut pending.job);
-            pending.request.timestamp = (cx.now.max(0.0) as u64).max(pending.request.timestamp + 1);
             self.issue(cx, pending);
+            return;
+        }
+        self.on_request_failed(cx, pending, &error.message);
+    }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut pending: Pending,
+        mut error: safe_cex_engine::VenueError,
+    ) {
+        Self::retire_leg(cx, &mut pending);
+        if let Job::Account(account::Request::Brackets { root, .. }) = &pending.job {
+            error.outcome = None;
+            let _ = cx.fail_context(root.context(), error);
+            return;
+        }
+        match pending.job {
+            Job::Trade(request) => {
+                self.trade_sign_failed(cx, request, error, pending.request.floor.is_some())
+            }
+            Job::History(request) => request.sign_failed(cx, error),
+            _ => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
+        Self::retire_leg(cx, &mut pending);
+        if let Job::Account(account::Request::Brackets { root, .. }) = &pending.job
+            && cx.validate_read_root_context(root.context()).is_err()
+        {
             return;
         }
         match pending.job {

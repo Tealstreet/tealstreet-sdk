@@ -1585,3 +1585,13 @@ inherited draft before correction. The opaque type has both a nameable positive
 doctest and a constructor-privacy compile-fail control. Shared release tests
 retain genuine prepare/bind/claim and no-release-on-denial behavior separately.
 No venue inventory prune or native migration receipt is claimed by this core PR.
+
+### Bitrue dispatch custody and physical Read legs
+
+Options retain only opaque Identity refs. Provider preparation/apply attest exact
+transport intent, ordered unsigned headers and atomic receipt/results before release.
+Original 25 assertions pass; additional caller-deadline, delayed provider and
+malformed-result controls execute through genuine Engine callbacks. The scanner
+changes 29/17 to21/14, distinguishing three genuine bracket completion removals
+from five conservative obsolete request-field matches. No bootstrap growth.
+Legacy execution/group/session/history ownership remains a separate blocker.

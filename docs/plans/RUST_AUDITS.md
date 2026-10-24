@@ -2947,3 +2947,12 @@ Inherited new-API compile REDs are distinct from two executed assertion REDs
 against the inherited implementation's unsafe-current/NaN boundaries. Existing
 stamp_ms and other families' recipes are unchanged. Bitrue adoption remains a
 separate consumer migration after actual shared landing.
+
+### Bitrue opaque signer cutover
+
+The integrated original provider/retry oracles reproduced 8 assertion REDs plus
+17 working controls before source. Candidate closes those eight, preserves native
+bytes and independent retry budgets, and withholds uncertain 500/408 signature
+replay through the shared classifier. Physical bracket legs keep one caller root.
+No managed write journal, accepted-ID Partial or zero-legacy claim; staged native
+owner lifetimes remain explicit. Independent source/caller/full-map review follows.

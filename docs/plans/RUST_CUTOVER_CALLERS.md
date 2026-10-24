@@ -6725,3 +6725,24 @@ clamping and any final stamp beyond the safe-integer range, even without a
 floor. This does not change stamp_ms or opt any venue into the helper. A reused
 floor is metadata only; each consumer must retain its real original owner and
 released-attempt association, and separately obtain genuine resend authority.
+
+## Bitrue dispatch signer and managed bracket Read
+
+Bitrue REST signing now consumes trusted opaque Identity refs through one atomic
+provider recipe. API key bytes, exact body/query bytes, six-header order and native
+recvWindow remain. Selected identity, slot, egress and evidence stay coupled across
+signature and transport reissues; each uses the exact previous release's StampFloor.
+Keyless catalogue remains unsigned on Primary; keyed public-only catalogue remains
+primary-signed. Hosted signing compatibility is not enabled. Provider refusal emits
+no partially signed request and cannot trigger a raw fallback or transport resend.
+
+FetchMaxLeverage captures the genuine caller wait once and derives a fresh 20s/Never
+physical leg per native eligible reissue. Near-20s retries keep the original root,
+selection and deadline; strict caller expiry publishes one Timeout without changing
+limits. Only the original root completes. HTTP500/408 signature errors no longer
+replay an uncertain write. Native one-signature/three-transport budgets remain
+independent. Catalogue/account/coalesced reads, sessions, history and trade-owned
+work retain explicit legacy ownership until their shared owner adoptions; signing
+does not provide Mutation journal/ResendGrant or Plan/history authority. The stable
+legacy request funnel remains a remove-before-master obligation. SDK/NX history
+outer-wait behavior is unchanged by this single command-read adoption.

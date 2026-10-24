@@ -309,3 +309,52 @@ fixture-only trusted setup changes are permitted for opaque Options. Add a
 near-20s bracket failure/reissue witness, provider rejection and immutable selection
 controls. Independently review source/custody, caller behavior and exact maps;
 run scoped Bitrue/Binance, strict/fmt/checker gates, then full CI on the PR head.
+
+## Production candidate and exact accounting
+
+Source follows the reviewed production composition, on inherited #2024 plus
+actual e4059dc9738. Bitrue Options now contains only opaque primary/read Identity
+refs and public configuration. Registry trusted setup consumes raw compatibility
+input; supplying raw material to build_with_signer refuses. One dispatch recipe
+presents the selected API key and signs the exact native preimage atomically.
+Hosted family compatibility stays disabled. The native socket implementation,
+listen-token lifecycle, Store projections, native callback ordering and budgets
+remain; signed transport uses explicit shared Selection egress/evidence.
+
+The original integrated checkpoint reproduced 17 GREEN / 8 assertion REDs. All
+25 original assertions now pass with only trusted fixture construction changed.
+Additional controls cover a second physical page finishing after 39,998ms under
+the original caller root, strict caller expiry before Store projection, six
+closed provider-result/refusal variants, and delayed atomic catalogue signing.
+An old history test that fabricated engine error strings is replaced by genuine
+invalid-byte/missing-list HTTP stream controls; native assertions remain strict.
+Legacy test raw Options exist only in test trusted setup. Their erasure test is
+fixture evidence, while native Options absence is pinned by a compile-fail doc.
+
+Exact request inventory on actual e405: 29 occurrences / 17 fingerprints becomes
+21 / 14. No STAGING_BOOTSTRAPS or SIGNER_POLICY_BOOTSTRAPS row is added or edited:
+the original cx.request(method,url,headers,body,pending) expression remains exact
+34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc x1.
+Selection::sign is the existing shared coupling for that explicitly staged send;
+it is not a new local signing wrapper or a claim that legacy ownership is managed.
+
+The genuine completion conversion removes only these account.rs fingerprints:
+187ae7a49b233001f96c827642f4839ad9e3ea4fd81b9b62848d3900055afced x1,
+1b3029882eb1af7175e494797938adedfb4b3c6cbd38573c98c2e4940415d89b x1,
+985d5251ce2c2f3e0d27d6c46def63a68db127135e27d9e2917a1923e354a48f x1.
+Five conservative pending.request accesses disappear with the obsolete timestamp
+allocator/resend string ladder: 8d7195dd58da632e34e4dc75d236e49b6d1b89cc10c243ec7e670ec59b511d26
+x10 becomes x5. These five are accounting cleanup, not five additional migrated
+commands. All other Bitrue request fingerprints remain exact. Other families'
+manifest maps and ordering are preserved.
+
+The signing ratchet now scans Bitrue sign modules; production key/secret holders
+and the inline MAC are gone. Remaining Bitrue matches are the provider work
+constructor, the unchanged diagnostic text, and explicit test-only vectors/setup.
+No source rename is credited as authority adoption. The shared CodeTable gates
+signature resend with native parsed numeric evidence and shared status precedence;
+500/408 never replay the uncertain POST. Typed transport and stream callbacks
+choose native continuation without parsing engine-formatted diagnostic strings.
+Existing legacy terminal error/Partial ladders remain debt for the later genuine
+Mutation owner/journal conversion; rows #21/#22 and accepted-ID aggregation are
+not claimed closed by this signer cutover.

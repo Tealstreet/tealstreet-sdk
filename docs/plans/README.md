@@ -307,4 +307,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Bitrue local one-way setting | Shared LocalSetting adoption under review | Before replacing the pre-credential SetPositionMode(false) success with shared LocalSetting authority. | [RUST_BITRUE_LOCAL_POSITION_MODE.md](RUST_BITRUE_LOCAL_POSITION_MODE.md) |
 
 | Receipt-bound stamp floor | Focused gates/reviews clear; full CI pending | Before monotonic per-request signature or transport reissues; floor grants no resend authority. | [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md) |
-| Bitrue dispatch signing | Plan and original REDs; production held | Before replacing inline Bitrue HMAC, selection or native signature resend. | [RUST_BITRUE_DISPATCH_SIGNER.md](RUST_BITRUE_DISPATCH_SIGNER.md) |
+| Bitrue dispatch signing | Production candidate; original REDs green, review and CI pending | Before replacing inline Bitrue HMAC, selection or native signature resend. | [RUST_BITRUE_DISPATCH_SIGNER.md](RUST_BITRUE_DISPATCH_SIGNER.md) |
