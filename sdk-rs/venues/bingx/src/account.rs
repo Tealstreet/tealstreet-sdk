@@ -399,6 +399,8 @@ impl Account {
             match cx.open_session(SessionPolicy {
                 credential: Some(crate::managed::session_credential(credentials, method)),
                 repeat_safe: true,
+                // Signed: routed by its credential, never a session egress.
+                private_egress: None,
             }) {
                 Ok(session) => self.session = Some(session),
                 Err(_) => {
