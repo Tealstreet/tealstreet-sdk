@@ -3076,6 +3076,7 @@ mod tests {
 
     /// The Bind packet's Bearer copy is wiped with the packet: on a signed
     /// refusal, and for any action the host never drained when the engine drops.
+    #[cfg(feature = "session-bearer")]
     #[test]
     fn bind_wipe_zeroizes_the_bearer_copy() {
         let (mut engine, tokens) = start(Probe {
