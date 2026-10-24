@@ -496,15 +496,6 @@ impl BitgetFutures {
             _ => call.path.to_owned(),
         };
         let body = (!read).then(|| serde_json::to_string(&call.payload).expect("Bitget payload"));
-        let headers =
-            match self.signed_headers(cx.now, method, &path, body.as_deref().unwrap_or("")) {
-                Ok(headers) => headers,
-                Err(error) => {
-                    self.trade_fail(cx, &job, not_sent(error));
-                    self.resume_trading(cx);
-                    return;
-                }
-            };
         if let Effect::Cancel { orders, .. } = &call.effect {
             for order in orders {
                 cx.store.set_order_status(&order.id, OrderStatus::Canceling);
@@ -514,19 +505,14 @@ impl BitgetFutures {
         let command = job.id;
         self.trading.active = Some(job);
         cx.command_progress(command, call.identities());
-        cx.request(
-            method,
-            format!("{}{path}", paths::REST),
-            headers,
-            body,
-            Pending::Trade(Box::new(Request {
-                command,
-                call,
-                stream_revision: self.order_revision_clock(),
-                signature_retry,
-                read_retries,
-            })),
-        );
+        let pending = Pending::Trade(Box::new(Request {
+            command,
+            call,
+            stream_revision: self.order_revision_clock(),
+            signature_retry,
+            read_retries,
+        }));
+        self.send(cx, method, &path, crate::Payload::Body(body), true, pending);
     }
 
     fn plan_job(&self, cx: &Cx<'_, Pending>, job: &mut Job) -> Result<(), String> {
@@ -2132,6 +2118,52 @@ impl BitgetFutures {
             job.effective = true;
         }
         self.trading.active = Some(job);
+        self.resume_trading(cx);
+    }
+
+    pub(crate) fn trade_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+    ) {
+        let Some(mut job) = self.trading.active.take() else {
+            return;
+        };
+        if job.id != request.command {
+            self.trading.active = Some(job);
+            return;
+        }
+        job.outstanding = false;
+        if let Effect::Cancel { orders, .. } = &request.call.effect {
+            for order in orders {
+                cx.store.update_order(&order.id, |current| {
+                    if current.status == OrderStatus::Canceling {
+                        current.status = order.status;
+                    }
+                });
+            }
+        }
+        if request.signature_retry {
+            // Earlier native attempt reached the venue; never call the command wholly unsent.
+            error.outcome = Some(Outcome::Unknown);
+        }
+        if let Some(original) = job.error.take() {
+            error = VenueError {
+                message: format!(
+                    "{}; protection rollback failed: {}",
+                    original.message, error.message
+                ),
+                kind: if error.outcome == Some(Outcome::Unknown) {
+                    error.kind
+                } else {
+                    original.kind
+                },
+                outcome: error.outcome.filter(|outcome| *outcome == Outcome::Unknown),
+                ..original
+            };
+        }
+        self.trade_fail(cx, &job, error);
         self.resume_trading(cx);
     }
 

@@ -389,6 +389,17 @@ pub fn hmac_sha256_work(
     }
 }
 
+/// Login preimage `seconds + method + path` as three typed byte parts. The shape
+/// keeps it distinct from an HTTP capture of identical bytes; the remote wire
+/// decodes it only against the family's declared `secondsSuffix`.
+pub fn seconds_suffix_payload(seconds: &str, method: &str, path: &str) -> Vec<PayloadPart> {
+    [seconds, method, path]
+        .map(|part| PayloadPart::Bytes {
+            bytes: part.as_bytes().to_vec(),
+        })
+        .into()
+}
+
 impl SignRequest {
     /// Validate provider output against this exact atomic request. Dispatch and
     /// signing-only capture share receipt, result-count and byte-shape policy.
@@ -919,5 +930,21 @@ mod setup_field_policy_tests {
         assert!(
             serde_json::from_str::<IdentitySetupPolicy>(r#"{"secretEncoding":"base58"}"#).is_err()
         );
+    }
+
+    #[test]
+    fn seconds_suffix_payload_keeps_three_exact_parts_for_each_family() {
+        for (method, path) in [("GET", "/users/self/verify"), ("GET", "/user/verify")] {
+            let parts = seconds_suffix_payload("1700000000", method, path);
+            assert!(
+                parts
+                    == [
+                        b"1700000000".to_vec(),
+                        method.as_bytes().to_vec(),
+                        path.as_bytes().to_vec()
+                    ]
+                    .map(|bytes| PayloadPart::Bytes { bytes })
+            );
+        }
     }
 }

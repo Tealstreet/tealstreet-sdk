@@ -2735,3 +2735,130 @@ and admission-error fallback. Its two identity terminal fingerprints are removed
 family inventory is 32F/35O at actual 9f405e55403. Original capacity/clock and
 typed Network/Timeout assertions pass alongside native wire/config/codec controls.
 The generic managed helper and all other family callers remain with their owners.
+
+
+## Shared CPU certification owner
+
+CPU remeasurement and aggregation belong to one harness policy, parameterized
+by the existing exact suite registry. Every CPU-gated suite adopts the same
+planner, eligible-only second-run matrix and unconditional final checker; venue
+code owns no bypass or local copy. Existing strict gate validators rederive both
+retained reports before arithmetic. Original report bytes and declared results
+stay immutable. A sealed runtime capsule transports the original measured
+inputs to a separate physical job without rebuilding or installing dependencies.
+Current run, source, physical producer, upload, case and cache identities bind
+the evidence; missing or ambiguous authority rejects before certification.
+No fixture/tape/profile/threshold change forms part of this policy.
+
+Only a validated cpu-runtime suite name selects the 4 GiB artifact response type.
+Metadata, logs and ordinary archives retain 512 MiB; cached bytes are rechecked
+under the requested type. An empty immutable-artifact HTTP 200 shares the existing
+two-attempt retrieval budget with socket recovery. Exact artifact size/digest,
+producer/source, archive and restored-runtime ownership are unchanged. The failed
+Bybit attempt remains failed and supplies no timing or mean; transport recovery
+creates no physical retry or third sample.
+
+## Selected root and physical page custody
+
+The shared selected-read module now couples one original caller-receipt Read
+root with immutable selected page children. Snapshot mismatch is rejected before
+shared root/leg delivery validation. Child construction cannot select a new key
+or renew the original root, and no per-venue expiry/finalizer is introduced.
+No venue inventory or Plan authority finding is closed by these engine controls.
+
+
+### Replay terminal audit observation
+
+The original WOO exported-audit probe reproduced four sticky false coverage
+diagnostics per receiver after a discarded checkpoint query. Four working
+controls passed and two assertion controls failed before the fix. The
+behavior-preserving shared extraction and original REDs are committed at
+`d59643b0b16`; the independent causal review binds the exact eight historical
+keys without claiming full-tape lifecycle completeness.
+
+One shared capture helper now attaches terminal protocol diagnostics only at
+the explicit final boundary in both receivers. The audit implementations stay
+unchanged. Controls retain genuine pre-auth violations and genuine late private
+errors, propagate final audit exceptions, and reject either caller forgetting
+its final flag. Existing capture-before-memory and performance ordering remain
+covered. No known declaration is removed by this change.
+
+## Hyperliquid perps history managed custody
+
+The perps history adapter now consumes the shared caller-root expiry/refusal
+funnel, ReadCursorHistory admission and exact Context terminals. Children are
+minted only at the native Account FIFO dequeue; reservation weight is charged
+only after managed submission. Root retirement drops exactly the owner's queued
+History continuations, preserving unrelated Account and History work. The engine
+owns deadlines, typed causes and strict root expiry; no venue custody algorithm
+is added. Standalone spot and already-managed cached local lookup stay outside
+this conversion. Exact own shrink:history.rs9F/11O, including five conservative
+macro occurrences; shared Account physical send sites remain counted.
+
+## OKX history managed caller-root custody
+
+History now consumes shared caller-root expiry/refusal and ReadCompletion with
+exact page delivery validation before native DATA/progress mutation. Native
+pacing derives every20s page from the same original root; retirement drops only
+that Owner's delayed history entries. Engine-owned whole-root expiry is strict;
+ordinary live-root released failures retain the native discard-prefix soft[]
+query shape. Provider/preparation and synchronous issuance refusal remain hard
+failures; no release inference, root timer, retry loop or error table is added.
+The exact prune is history.rs14F/18O plus History's lib signing-failure1F/1O.
+Discovery's two list/sign sites and the OKX staging entry remain because actual
+Markets/Tickers consumers still use them, confirmed with the signer owner.
+
+## Crypto.com read-command Context adoption
+
+~~Public candle commands publish numeric terminals after direct HTTP, without
+shared preparation/root-deadline custody; five local history terminals bypass
+Context admission.~~ Candle Pending carries its issued Read root through managed
+release and shared delivery validation, then uses Context finalizers. Local
+history branches alone borrow genuine entry without a numeric fallback; valid
+native history remains untouched. Exactly nine occurrences/seven entries are
+removed,30/27 becomes21/20. No background discovery, private signer, account,
+trading or shared-policy migration is implied. Architecture gate No: all
+release, lifetime, root-validation and finalization authority stays in the engine.
+
+### Crypto.com Read adoption on actual shared seams
+
+The five local history branches now invoke genuine entry directly; the historical
+finish_local_history issuer/finalizer wrapper is removed. One pure policy serves
+local terminals and unsigned candles. The shared public-auth-health fix is actual:
+the original public_typed_route_auth_errors_keep_metadata_without_auth_health_evidence
+control preserves AuthInvalid/Expired/Permission metadata while health stays0,
+without any venue workaround. Exact seven-fingerprint/nine-occurrence prune is
+unchanged; discovery's shared get sender and every private/retrying site remain.
+
+### Lighter local history command authority
+
+Seven synchronous legacy history terminals now consume genuine shared Read roots.
+Original test-only5a0303:4GREEN/15assertionRED/0ignored; all19 nowPASS. Native
+validation and credential-presence precedence remain unchanged; shared entry
+refusal owns capacity/clock failure without numeric fallback. Exact inventory
+history10->3, Lighter41->34occurrences; remote paging/auth/source untouched.
+
+### GRVT local history command authority
+
+Seven immediate history failures now consume shared Read admission and fail their
+exact original root. Original test-only checkpoint7b2fa480691 gives four native
+controls PASS and15 assertion REDs; all19 pass after adoption. Genuine retained
+owners pin capacity, reuse and duplicate custody; real login fixtures preserve
+native session/validation precedence without private-state mutation. History
+inventory11F/11O becomes4F/4O; family53F/56O becomes46F/49O. Remote source is exact.
+
+## KuCoin local command refusal ownership
+
+Eight numeric local failure sites now use shared genuine command admission and
+Context failure, reducing KuCoin from 56 to 48 lexical occurrences (51 to 43
+fingerprints). No signer, private request helper, successful no-I/O setting or
+remote completion is converted. Source and inventory reviews found no venue-local
+retry, classifier, owner registry or completion algorithm.
+
+## Bitrue initial local refusal ownership
+
+Three initial synchronous numeric failure occurrences now use shared Mutation
+entry and Context failure. Bitrue shrinks 33 to 30 occurrences and 20 to 18
+fingerprints. The repeated planning-error fingerprint decreases only 2 to 1;
+the queued remote-flow error remains. Signing and successful local settings are
+held for their separately owned migrations/seam.

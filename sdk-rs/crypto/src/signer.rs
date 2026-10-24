@@ -5,7 +5,7 @@ use safe_cex_engine::signing::{
     Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef,
     Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
-use sha2::{Digest, Sha256, Sha512};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use zeroize::Zeroizing;
 mod key_material;
@@ -527,12 +527,15 @@ impl LocalSigner {
                             mac.update(&message);
                             mac.finalize().into_bytes().to_vec()
                         }
+                        #[cfg(any(test, feature = "hmac-sha512"))]
                         Algorithm::HmacSha512 => {
-                            let mut mac = Hmac::<Sha512>::new_from_slice(key)
+                            let mut mac = Hmac::<sha2::Sha512>::new_from_slice(key)
                                 .map_err(|_| SignError::InvalidRequest)?;
                             mac.update(&message);
                             mac.finalize().into_bytes().to_vec()
                         }
+                        #[cfg(not(any(test, feature = "hmac-sha512")))]
+                        Algorithm::HmacSha512 => return Err(SignError::Unsupported),
                         Algorithm::Sha256SecretSuffix => {
                             let mut hash = Sha256::new();
                             hash.update(&message);
@@ -605,7 +608,8 @@ fn asymmetric(algorithm: Algorithm) -> bool {
 /// Mirrors the `sign_now` arms; keep the two in step.
 fn implemented(algorithm: Algorithm) -> bool {
     match algorithm {
-        Algorithm::HmacSha256 | Algorithm::HmacSha512 | Algorithm::Sha256SecretSuffix => true,
+        Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => true,
+        Algorithm::HmacSha512 => cfg!(any(test, feature = "hmac-sha512")),
         Algorithm::ZkLinkContract => cfg!(feature = "zklink"),
         Algorithm::Ed25519
         | Algorithm::Es256
