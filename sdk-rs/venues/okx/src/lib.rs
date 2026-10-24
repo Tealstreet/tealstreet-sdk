@@ -166,6 +166,17 @@ fn discovery_context(pending: &Pending) -> Option<Context> {
     }
 }
 
+/// A discovery read decodes and publishes only its own exact Background
+/// delivery; without an admitted Context it has no authority (fail closed).
+fn discovery_delivered(cx: &Cx<'_, Pending>, pending: &Pending) -> bool {
+    match pending {
+        Pending::Markets { context, .. } | Pending::Tickers { context, .. } => context
+            .as_ref()
+            .is_some_and(|context| cx.validate_background_read_http_delivery(context).is_ok()),
+        _ => true,
+    }
+}
+
 fn with_discovery_context(mut pending: Pending, admitted: Context) -> Pending {
     if let Pending::Markets { context, .. } | Pending::Tickers { context, .. } = &mut pending {
         *context = Some(admitted);
@@ -388,7 +399,7 @@ impl Okx {
             };
             let pending = with_discovery_context(pending, read.context().clone());
             let demo = self.options.testnet;
-            if let Err((_, error)) = read.queue(
+            let queued = read.queue(
                 cx,
                 ReadRequest {
                     method: Method::Get,
@@ -400,8 +411,11 @@ impl Okx {
                     Box::new(sign::Http::new(Some(identity.clone()), path.into()).demo(demo))
                 },
                 |_| pending,
-            ) {
-                self.public_failed(cx, markets, error.venue_error());
+            );
+            // The refused page's Context retires before the native failure path.
+            if let Err((pending, error)) = queued {
+                Self::retire_discovery(cx, &pending);
+                self.public_failed(cx, markets, error.read_venue_error());
             }
             return;
         }
@@ -999,9 +1013,7 @@ impl Venue for Okx {
     fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         // A discovery row decodes only for its own exact Background delivery.
-        if let Some(context) = discovery_context(pending)
-            && cx.validate_background_read_http_delivery(&context).is_err()
-        {
+        if !discovery_delivered(cx, pending) {
             return;
         }
         match pending {
@@ -1302,10 +1314,8 @@ impl Venue for Okx {
         }
         // Gate before the envelope; the Context retires after publication below.
         let discovery = discovery_context(&pending);
-        if let Some(context) = &discovery
-            && cx.validate_background_read_http_delivery(context).is_err()
-        {
-            let _ = cx.finish_http_context(context);
+        if !discovery_delivered(cx, &pending) {
+            Self::retire_discovery(cx, &pending);
             return;
         }
         if let Pending::Account(account::Request::Config { .. }) = &pending {
