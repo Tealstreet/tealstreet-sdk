@@ -86,3 +86,52 @@ signer-owner composition review. Prune only actually retired own inventory sites
 with an exact whole-map preservation check after actual integration; no bootstrap
 or predicate edit. Architecture: adoption of shared SelectedRead/lifecycle, not
 venue ownership of credentials, transport, deadlines or completion authority.
+
+## Exact inventory boundary and original evidence
+
+At native 17e93, identity.rs has three one-occurrence legacy fingerprints:
+`0d4f7749bb0b24c084131b4f15d0e612c9b03378700f1ea465dfa856113e17e9`
+(issuance), `c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548`
+(done), `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa`
+(fail). Account issuance is
+`35203e2192556d58fa9706bd22bddc7b92206b18106905b5af0b39aefd365d1c`
+(currency cycle) and
+`db7b6dc88f90361d5d57c041003af076c94d051c673d00cec046198eb9441f98`
+(order reconciliation), one occurrence each. The third account fingerprint
+`ee694d9fd31f8bcf8dd1202488b242081189214dd143f90fc6bb10d6fd6fe886`
+is a retained native diagnostic, not a transport cutover. No map is edited now.
+Recompute against actual #1974; generic lib request/failure paths stay while
+foreign pending variants still consume them, including ih35js history/income.
+
+Plan-first commit: `bd6eb09149a`. New dedicated target:
+`request_context_read_owners.rs`, using only native public Engine ingress.
+
+| Original assertion REDs (8) | Working native controls (8) |
+| --- | --- |
+| Identity managed Prepare, expiry at 20s without timer | Exact large UID with Secondary/no Store mutation/duplicate inert; Primary fallback plus malformed identity terminal; missing/public-only pre-I/O refusal |
+| Two Background currency Prepares; response at 20s; live streamed rows ending at 20s; retired 429 must not pause next cycle | Secondary selection and normal route; both currency arrival orders/partial publication; actual native deadline retires late currency and next poll issues both reads |
+| Primary reconciliation Prepare; expired reply cannot reveal an order | Actual uncertain write -> native 65s fence -> Primary activeList -> live revealed order; 10002 empty and network retry with no invented orders |
+
+Executed target result: 8 assertion failures / 8 passes / 0 ignored. Each case is
+individually executable; compile/setup failures do not count. Initial fixture
+compile lacked a SocketId import; fixed before this receipt. The stale-429 RED
+has a working timer-retirement/next-poll control, and every expired financial
+payload has an identical live financial positive. The native account 20s timer
+is deliberately absent from equality REDs; expiry must be a delivery predicate.
+No assertion claims an actual managed provider/Claim happened on legacy source.
+
+Commands from sdk-rs (bounded build jobs 4):
+`cargo test -p safe-cex-venue-phemex --test request_context_read_owners`
+(expected assertion failure), and
+`cargo clippy -p safe-cex-venue-phemex --test request_context_read_owners -- -D warnings`
+(pass). Scoped rustfmt passes. Independent review and production/CI certification
+remain separate; these original REDs are intentionally not a green PR.
+
+Scope preservation check passes: only plan/index/new dedicated test differ from
+17e93. Secret scan of the new fixture and check-signing.py pass. The regular
+check-request-context.py exits 1 against the advanced shared remote base
+59f50e4f37b (11 foreign Bitrue/Kraken/KuCoin/Polymarket provenance failures).
+An independent scan of current production sites equals the exact requested
+17e93 manifest, and all production/map/checker bytes are unchanged. This is a
+base-drift limitation, not a regular ratchet PASS; no override was used. Recheck
+normally after actual #1974/current-tip integration before any production PR.
