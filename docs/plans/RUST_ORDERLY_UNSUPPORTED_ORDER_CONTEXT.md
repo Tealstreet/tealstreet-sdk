@@ -134,3 +134,24 @@ No fabricated accepted-write fact is needed. The initial fixture tried to
 complete that unconfirmed Mutation root successfully; the engine correctly
 projected failure, so the control now asserts the owner's real failure path.
 Production was unchanged by that fixture correction.
+
+## Integrated production receipt
+
+Production e315425e29c was plain-merged with actual46cb0941346, then actual
+9a757d406b8 at97a1852b4ec after the Backpack landing advanced the foreign ratchet.
+Only docs conflicted: full incoming README/CALLERS plus exact own suffix once,
+under the train owner's standing authorization. All non-doc changes merged
+mechanically. All Orderly/engine/host/crypto source and tests remain byte-exact
+to tested e315. Every other incoming tracked path and foreign manifest entry
+is preserved, including Backpack's actual shrink; exactly seven own paths.
+
+Executed: original unsupported_order_context11 PASS, new admission3 PASS and
+native trading39 PASS, zero ignored. Strict scoped Clippy and fmt PASS. First
+full-ban run encountered only foreign Backpack regrowth because its landing
+arrived during checks; after the actual merge full bans PASS, including1
+signing/15request/8socket negative controls. No predicate or inventory exemption.
+Removing the helper/imports and reversing the single call reconstructs native
+trading.rs byte for byte. Original11 test source is byte-exact d965. Source and
+manifest agree at27F/28O, with only the planned1F/1O removed. #2051 is not claimed
+landed or included here. Draft/CI publication proceeds in parallel with source
+reviews; these local receipts do not certify broad CI, READY or merging.
