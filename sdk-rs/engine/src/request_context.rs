@@ -240,6 +240,9 @@ pub struct Context {
 pub enum Error {
     Invalid,
     Capacity,
+    /// Foreground pool pressure caused only by active Background Plans.
+    #[cfg(feature = "http-plans")]
+    CapacityDeferred,
     Duplicate,
     State,
     TimedOut,

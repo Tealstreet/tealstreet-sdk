@@ -15,6 +15,10 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 
 const CAPACITY: usize = 256;
+#[cfg(feature = "http-plans")]
+const BACKGROUND_CONTEXT_CAP: usize = 150;
+#[cfg(feature = "http-plans")]
+const _: () = assert!(BACKGROUND_CONTEXT_CAP < CAPACITY);
 
 #[path = "session_context.rs"]
 pub(super) mod session;
@@ -522,12 +526,18 @@ impl ContextRegistry {
         )?
         .with_retry(policy.retry)?
         .with_egress(egress)?;
-        if self.contexts.len() + self.reserved_context_count() >= CAPACITY
-            || matches!(owner, Owner::Command { id, .. }
+        if matches!(owner, Owner::Command { id, .. }
                 if !self.commands.contains_key(&id) && self.commands.len() >= CAPACITY)
         {
             return Err(Error::Capacity);
         }
+        self.check_context_capacity(
+            self.contexts
+                .len()
+                .checked_add(self.reserved_context_count())
+                .and_then(|n| n.checked_add(1)),
+            None,
+        )?;
         if self.contexts.contains_key(&identity) {
             return Err(Error::Duplicate);
         }
@@ -601,17 +611,18 @@ impl ContextRegistry {
             || first
                 .checked_add(policies.len() as u64)
                 .is_none_or(|end| end > crate::resource_ids::MAX_RESOURCE_ID + 1)
-            || self
-                .contexts
-                .values()
-                .filter(|context| context.deadline() > now)
-                .count()
-                + policies.len()
-                + self.reserved_context_count()
-                > CAPACITY
         {
             return Err(Error::Capacity);
         }
+        self.check_context_capacity(
+            self.contexts
+                .values()
+                .filter(|context| context.deadline() > now)
+                .count()
+                .checked_add(policies.len())
+                .and_then(|n| n.checked_add(self.reserved_context_count())),
+            Some(now),
+        )?;
         let owner = self.commands.get(&id).ok_or(Error::Revoked)?;
         let writes = owner.writes.as_ref().ok_or(Error::State)?;
         if owner.generation != generation
@@ -718,6 +729,50 @@ impl ContextRegistry {
         }
         self.validate_owned_context(context)?;
         Ok(())
+    }
+
+    /// All issuers classify the same shared-pool pressure. Overflow and any
+    /// non-pool resource refusal remain hard Capacity.
+    fn check_context_capacity(&self, total: Option<usize>, now: Option<f64>) -> Result<(), Error> {
+        let total = total.ok_or(Error::Capacity)?;
+        if total <= CAPACITY {
+            return Ok(());
+        }
+        #[cfg(feature = "http-plans")]
+        if total
+            .checked_sub(self.background_context_count(now)?)
+            .is_some_and(|foreground| foreground <= CAPACITY)
+        {
+            return Err(Error::CapacityDeferred);
+        }
+        let _ = now;
+        Err(Error::Capacity)
+    }
+
+    #[cfg(feature = "http-plans")]
+    fn background_context_count(&self, now: Option<f64>) -> Result<usize, Error> {
+        let mut occupied = 0usize;
+        for entry in self.physical.values() {
+            let Some(owner @ Owner::Background { .. }) = entry.physical else {
+                continue;
+            };
+            let active = self
+                .contexts
+                .values()
+                .filter(|context| {
+                    context.owner() == owner && now.is_none_or(|now| context.deadline() > now)
+                })
+                .count();
+            let unissued = match &entry.phase {
+                CommandPhase::Planned(state) => state.unissued(),
+                _ => 0,
+            };
+            occupied = occupied
+                .checked_add(active)
+                .and_then(|n| n.checked_add(unissued))
+                .ok_or(Error::Capacity)?;
+        }
+        Ok(occupied)
     }
 
     /// The phase/journal entry of an issued owner: a command generation, or a
@@ -1282,11 +1337,16 @@ impl ContextRegistry {
     /// its storage is reserved, so issuance after the ID spend cannot fail.
     pub(super) fn reserve_command_root(&mut self, command: CommandId) -> Result<(), Error> {
         let new_owner = !self.commands.contains_key(&command);
-        if self.contexts.len() + self.reserved_context_count() >= CAPACITY
-            || (new_owner && self.commands.len() >= CAPACITY)
-        {
+        if new_owner && self.commands.len() >= CAPACITY {
             return Err(Error::Capacity);
         }
+        self.check_context_capacity(
+            self.contexts
+                .len()
+                .checked_add(self.reserved_context_count())
+                .and_then(|n| n.checked_add(1)),
+            None,
+        )?;
         self.contexts
             .try_reserve(1 + self.reserved_context_count())
             .map_err(|_| Error::Capacity)?;

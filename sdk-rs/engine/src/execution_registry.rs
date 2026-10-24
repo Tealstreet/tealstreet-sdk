@@ -144,14 +144,13 @@ impl ContextRegistry {
     ) -> Result<Context, Error> {
         self.contexts.retain(|_, old| old.deadline() > now);
         // Plan-reserved identities are promised; a root may not take them.
-        if self
-            .contexts
-            .len()
-            .checked_add(self.reserved_context_count())
-            .is_none_or(|total| total >= CAPACITY)
-        {
-            return Err(Error::Capacity);
-        }
+        self.check_context_capacity(
+            self.contexts
+                .len()
+                .checked_add(self.reserved_context_count())
+                .and_then(|n| n.checked_add(1)),
+            None,
+        )?;
         if self.contexts.contains_key(&identity) {
             return Err(Error::Duplicate);
         }

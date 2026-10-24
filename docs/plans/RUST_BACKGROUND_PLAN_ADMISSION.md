@@ -541,3 +541,20 @@ variant. This avoids a new `HashMap<Owner, CommandOwner>` instantiation without
 relying on cross-variant numeric uniqueness. The same-generation adversarial
 control covers both directions, including denied mutable access and retirement.
 No family WASM size result is claimed before CI.
+
+### Shared-pool refusal foundation
+
+All existing Context-pool issuers now use one checked capacity classifier,
+including ordinary roots/legs, preflight calls, execution roots, Plan admission
+and refusal replacement. Only a pool refusal that fits after subtracting exact
+registered physical Background contexts and unissued credits becomes
+`CapacityDeferred`: `RateLimited`, advisory `retry_after_ms = 1000`, Read outcome
+absent and initial Mutation `NotSent` through the existing entry funnel. The hint
+creates no timer, retry right or availability promise. Foreground-only, numeric
+namespace, owner/storage and Background-share exhaustion remain `Capacity`.
+
+Foundation controls cover exact variant isolation, pending balance, checked pool
+arithmetic and typed projection. Scoped request-context 287 and execution 123
+controls pass. These are not the full G1 activation/saturation proof: public task
+admission, 150-share enforcement, original assertion conversion, parent cascade
+and cleanup-before-scheduler-ack controls still follow in this draft.

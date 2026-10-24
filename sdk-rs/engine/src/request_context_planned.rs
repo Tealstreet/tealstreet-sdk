@@ -435,18 +435,16 @@ impl<P> Cx<'_, P> {
             .reserved_contexts
             .checked_add(count)
             .ok_or(Error::Capacity)?;
-        if self
-            .io
-            .request_contexts
-            .contexts
-            .len()
-            .checked_sub(old_slot)
-            .and_then(|len| len.checked_add(future))
-            .and_then(|len| len.checked_add(extra))
-            .is_none_or(|total| total > CAPACITY)
-        {
-            return Err(Error::Capacity);
-        }
+        self.io.request_contexts.check_context_capacity(
+            self.io
+                .request_contexts
+                .contexts
+                .len()
+                .checked_sub(old_slot)
+                .and_then(|len| len.checked_add(future))
+                .and_then(|len| len.checked_add(extra)),
+            None,
+        )?;
         self.io
             .request_contexts
             .contexts

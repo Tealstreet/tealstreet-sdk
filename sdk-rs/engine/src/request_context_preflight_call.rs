@@ -547,11 +547,15 @@ impl<P> Cx<'_, P> {
         )?
         .with_retry(policy.retry)?;
         self.io.request_contexts.prune(self.now);
-        if self.io.request_contexts.contexts.len() + self.io.request_contexts.reserved_contexts
-            >= CAPACITY
-        {
-            return Err(Error::Capacity);
-        }
+        self.io.request_contexts.check_context_capacity(
+            self.io
+                .request_contexts
+                .contexts
+                .len()
+                .checked_add(self.io.request_contexts.reserved_contexts)
+                .and_then(|n| n.checked_add(1)),
+            None,
+        )?;
         self.io
             .request_contexts
             .contexts

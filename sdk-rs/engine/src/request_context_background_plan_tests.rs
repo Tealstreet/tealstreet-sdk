@@ -64,3 +64,57 @@ fn retained_background_registration_and_retirement_balance_pending() {
     registry.retire_attempt(&context, RequestId(9));
     assert!(registry.owner_entry(owner).unwrap().pending == 0);
 }
+
+#[test]
+fn pool_pressure_is_deferred_only_when_registered_background_slots_cause_it() {
+    let mut registry = ContextRegistry::default();
+    assert!(registry.background_context_count(None).unwrap() == 0);
+    assert!(
+        registry
+            .check_context_capacity(Some(CAPACITY), None)
+            .is_ok()
+    );
+    assert!(registry.check_context_capacity(Some(CAPACITY + 1), None) == Err(Error::Capacity));
+    assert!(registry.check_context_capacity(None, None) == Err(Error::Capacity));
+    let owner = Owner::Background { generation: 7 };
+    let entry = owner_entry(&mut registry, owner, 100.);
+    registry.physical.insert(7, entry);
+    for leg in 2..=BACKGROUND_CONTEXT_CAP as u64 {
+        let mut context = Context::new(owner, leg, Operation::Read, None, 0., 100., None).unwrap();
+        context.bind_issuer(&registry.issuer);
+        registry.contexts.insert(leg, context);
+    }
+    assert!(registry.background_context_count(None).unwrap() == BACKGROUND_CONTEXT_CAP);
+    assert!(
+        registry
+            .check_context_capacity(Some(CAPACITY), None)
+            .is_ok()
+    );
+    assert!(
+        registry.check_context_capacity(Some(CAPACITY + 1), None) == Err(Error::CapacityDeferred)
+    );
+    assert!(
+        registry.check_context_capacity(Some(CAPACITY + BACKGROUND_CONTEXT_CAP + 1), None)
+            == Err(Error::Capacity)
+    );
+    assert!(
+        registry.check_context_capacity(Some(CAPACITY + 1), Some(100.)) == Err(Error::Capacity)
+    );
+    registry.contexts.clear();
+    assert!(registry.background_context_count(None).unwrap() == 0);
+    assert!(registry.check_context_capacity(Some(CAPACITY + 1), None) == Err(Error::Capacity));
+}
+
+#[test]
+fn deferred_capacity_uses_typed_advisory_retry_without_read_outcome() {
+    let read = Error::CapacityDeferred.read_venue_error();
+    assert!(read.kind == Some(crate::ErrorKind::RateLimited));
+    assert!(read.retry_after_ms == Some(1000.));
+    assert!(read.outcome.is_none());
+    let mutation = Error::CapacityDeferred.venue_error();
+    assert!(mutation.kind == Some(crate::ErrorKind::RateLimited));
+    assert!(mutation.retry_after_ms == Some(1000.));
+    assert!(mutation.outcome == Some(crate::Outcome::NotSent));
+    assert!(Error::Capacity.read_venue_error().kind == Some(crate::ErrorKind::Internal));
+    assert!(Error::Capacity.read_venue_error().retry_after_ms.is_none());
+}
