@@ -499,3 +499,54 @@ ref-only trusted setup and enables the construction declaration only with actual
 SDK/native acceptance. No new raw-material consumer or permanent fallback is
 allowed under this transition. The remaining inventory and owned repair RED
 continue to track that obligation.
+
+## Next slice: fixed-setting refusal ownership, 2026-10-24
+
+Owner mxb4mq, fresh branch `fix/rust-backpack-fixed-setting-refusals`, exact
+landing base `a73afa6a27dc57b53bded8d7b790f93203a550b9`. #1870 remains frozen
+and watched on its separate candle branch. The open-PR file map and the actual
+`be710b3f2d7..train/combo-5b-be71` diff show no Backpack runtime path in combo-5b;
+its shared engine/registry files remain untouched. Auditor confirmation of that
+map is requested before source application. No engine or registry edit is part
+of this slice, and no reviewed seam stack is required.
+
+The only production sites are the unconditional native SetMarginType and
+SetPositionMode refusal arms in `backpack/src/trading.rs`. They are two lexical
+occurrences of fingerprint
+`bcd45e2e77893c71604dfc34d2a327ce254b90adc4e9178be8643e022a6f4219`.
+After genuine Context adoption, remove that one map entry with count two; retain
+its other trading entry and every other map byte-for-byte. Base Backpack totals
+are six paths, 19 fingerprints and 20 occurrences; this slice alone yields six
+paths, 18 fingerprints and 18 occurrences. The three candle removals in #1870
+are separate, not copied into this branch.
+
+Preserve the exact messages "Backpack only supports cross margin" and "Backpack
+position mode is fixed", ErrorKind::Unsupported and Outcome::NotSent on valid
+entry, for either requested value and without requiring credentials. No success,
+Store update, signing job, HTTP, socket, retry, venue capability or native wire
+behavior is added. Existing raw/managed signing custody is out of scope.
+
+Proposed implementation is one thin native refusal helper called by those two
+arms. It admits the genuine command through existing admit_http_command with
+Operation::Mutation, no credential, timeout 20,000ms, no pacing and Never retry;
+then calls fail_context with the original not_sent(message).kind(Unsupported).
+This is the existing shared local-refusal pattern, with no venue issuer, numeric
+completion fallback, owner table, scheduler or local classification policy.
+Admission failure is already terminal and must never be finalized again.
+Production waits for independent plan/exact-hook review.
+
+Commit this plan first, then separate assertion RED controls on unchanged native
+source. Working controls pin both messages/fields for public and private keyless
+setup, both setting values, one terminal, unchanged financial/settings Store and
+no physical work; immediate command reuse must remain possible. Hostile controls
+pin InvalidInput/NotSent for invalid command clocks and Capacity/NotSent at the
+shared 256-owner bound. Duplicate IDs must preserve the parked prior owner and
+its later successful delivery; this may already be a working engine guard and
+must not be labeled an original failure unless reproduced. No missing-API or
+compile-error RED, fixture change or relaxed assertion is allowed.
+
+After reviewed implementation, execute only the new focused test and scoped
+Backpack tests/strict Clippy with CARGO_BUILD_JOBS=4, one build at a time; fmt,
+bans and both inventory checks follow. Update CALLERS with resulting behavior,
+not proof status. Obtain source/caller/map review, push a draft and run fresh
+Rust CI with one watcher at least 120 seconds apart. No merge without its window.
