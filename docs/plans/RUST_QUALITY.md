@@ -1473,6 +1473,15 @@ is declared in CALLERS rather than hidden by stripping the engine's typed cause.
 HTTP500 still returns its native string-only error. Existing financial assertions
 remain; tests/public.rs only drives the genuine prepared executor at its old clocks.
 
+## Flat-position unavailable PnL projection
+
+Original financial-evidence controls reproduce two assertion failures: native
+NaN creates a null-PnL row, and native/TS unavailable evidence differs. Five
+working controls retain real finite PnL, numeric strings, non-flat positions and
+genuine PnL mismatches. Admission now uses the same finite conversion as the
+projection, preserving zero and losses while excluding unavailable sentinels.
+Declaration pruning requires fresh inverse replay evidence for each removed key.
+
 ### Lighter local history Read evidence
 
 Genuine256peer roots exercise seven local terminal capacity refusals, slot/ID
