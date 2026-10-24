@@ -657,7 +657,7 @@ fn render(fields: &[(&str, String)]) -> String {
 /// Every mutation the derive-based decoder distinguishes: placement of the
 /// tag, absent, null, mistyped, duplicate and unknown fields, and tag errors.
 fn corpus() -> Vec<String> {
-    const VALUES: [&str; 19] = [
+    const VALUES: [&str; 23] = [
         "null",
         r#""x""#,
         "1",
@@ -679,6 +679,11 @@ fn corpus() -> Vec<String> {
         "1.0",
         "18446744073709551616",
         "-9223372036854775809",
+        // Map forms an enum field accepts or refuses.
+        r#"{"buy":null}"#,
+        r#"{"buy":1}"#,
+        r#"{"BUY":null}"#,
+        r#"{"buy":null,"sell":null}"#,
     ];
     let mut out = vec![
         String::new(),

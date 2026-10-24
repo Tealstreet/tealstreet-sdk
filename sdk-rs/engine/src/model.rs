@@ -384,6 +384,7 @@ pub struct PositionGreeks {
 pub struct OptionChainQuery {
     pub underlying: String,
     pub expiry: Option<f64>,
+    #[serde(default, deserialize_with = "replayed_enum::optional")]
     pub right: Option<OptionRight>,
     pub strike_min: Option<f64>,
     pub strike_max: Option<f64>,
@@ -616,8 +617,9 @@ pub struct BybitBbo {
 #[serde(rename_all = "camelCase")]
 pub struct PlaceOrderOpts {
     pub symbol: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", deserialize_with = "replayed_enum::required")]
     pub kind: OrderType,
+    #[serde(deserialize_with = "replayed_enum::required")]
     pub side: OrderSide,
     pub amount: f64,
     #[serde(default)]
@@ -633,13 +635,13 @@ pub struct PlaceOrderOpts {
     pub take_profit: Option<f64>,
     #[serde(default)]
     pub reduce_only: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "replayed_enum::optional")]
     pub time_in_force: Option<TimeInForce>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "replayed_enum::optional")]
     pub trigger_type: Option<StopTriggerType>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "replayed_enum::optional")]
     pub tp_trigger_type: Option<StopTriggerType>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "replayed_enum::optional")]
     pub sl_trigger_type: Option<StopTriggerType>,
     #[serde(
         default,
@@ -649,7 +651,7 @@ pub struct PlaceOrderOpts {
     pub client_order_id: Option<String>,
     #[serde(default)]
     pub close: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "replayed_enum::optional")]
     pub stp_mode: Option<StpMode>,
     #[serde(default)]
     pub bybit_bbo: Option<BybitBbo>,
@@ -730,5 +732,172 @@ mod tests {
         assert!(!parse("stop_market", r#","price":95"#));
         assert!(!parse("limit", app));
         assert!(!parse("conditional", app));
+    }
+}
+
+/// Command wire enums decode as serde's buffered internally tagged command
+/// enum did: a string names the variant, a single-key map with a null value
+/// is the variant's map form, and anything else is `invalid type: X, expected
+/// string or map`. Only command payload fields use this; the enums' own
+/// `Deserialize` stays unchanged for every other caller.
+pub(crate) mod replayed_enum {
+    use serde::de::{self, Deserialize, Deserializer, IntoDeserializer, Unexpected, Visitor};
+    use std::fmt;
+    use std::marker::PhantomData;
+
+    pub(crate) fn required<'de, D, E>(deserializer: D) -> Result<E, D::Error>
+    where
+        D: Deserializer<'de>,
+        E: Deserialize<'de>,
+    {
+        deserializer.deserialize_any(Replayed(PhantomData))
+    }
+
+    pub(crate) fn optional<'de, D, E>(deserializer: D) -> Result<Option<E>, D::Error>
+    where
+        D: Deserializer<'de>,
+        E: Deserialize<'de>,
+    {
+        struct Optional<E>(PhantomData<E>);
+        impl<'de, E: Deserialize<'de>> Visitor<'de> for Optional<E> {
+            type Value = Option<E>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("option")
+            }
+            fn visit_none<X: de::Error>(self) -> Result<Option<E>, X> {
+                Ok(None)
+            }
+            fn visit_unit<X: de::Error>(self) -> Result<Option<E>, X> {
+                Ok(None)
+            }
+            fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<Option<E>, D::Error> {
+                required(d).map(Some)
+            }
+        }
+        deserializer.deserialize_option(Optional(PhantomData))
+    }
+
+    struct Replayed<E>(PhantomData<E>);
+
+    /// Just enough of a value to name it in a type error.
+    enum Shape {
+        Unit,
+        Bool(bool),
+        Signed(i64),
+        Unsigned(u64),
+        Float(f64),
+        Str(String),
+        Seq,
+        Map,
+    }
+
+    impl Shape {
+        fn unexpected(&self) -> Option<Unexpected<'_>> {
+            Some(match self {
+                Shape::Unit => return None,
+                Shape::Bool(v) => Unexpected::Bool(*v),
+                Shape::Signed(v) => Unexpected::Signed(*v),
+                Shape::Unsigned(v) => Unexpected::Unsigned(*v),
+                Shape::Float(v) => Unexpected::Float(*v),
+                Shape::Str(v) => Unexpected::Str(v),
+                Shape::Seq => Unexpected::Seq,
+                Shape::Map => Unexpected::Map,
+            })
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Shape {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Shape, D::Error> {
+            struct ShapeVisitor;
+            impl<'de> Visitor<'de> for ShapeVisitor {
+                type Value = Shape;
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str("any value")
+                }
+                fn visit_unit<X>(self) -> Result<Shape, X> {
+                    Ok(Shape::Unit)
+                }
+                fn visit_bool<X>(self, v: bool) -> Result<Shape, X> {
+                    Ok(Shape::Bool(v))
+                }
+                fn visit_i64<X>(self, v: i64) -> Result<Shape, X> {
+                    Ok(Shape::Signed(v))
+                }
+                fn visit_u64<X>(self, v: u64) -> Result<Shape, X> {
+                    Ok(Shape::Unsigned(v))
+                }
+                fn visit_f64<X>(self, v: f64) -> Result<Shape, X> {
+                    Ok(Shape::Float(v))
+                }
+                fn visit_str<X>(self, v: &str) -> Result<Shape, X> {
+                    Ok(Shape::Str(v.to_owned()))
+                }
+                fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Shape, A::Error> {
+                    while seq.next_element::<de::IgnoredAny>()?.is_some() {}
+                    Ok(Shape::Seq)
+                }
+                fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Shape, A::Error> {
+                    while map
+                        .next_entry::<de::IgnoredAny, de::IgnoredAny>()?
+                        .is_some()
+                    {}
+                    Ok(Shape::Map)
+                }
+            }
+            deserializer.deserialize_any(ShapeVisitor)
+        }
+    }
+
+    impl<'de, E: Deserialize<'de>> Visitor<'de> for Replayed<E> {
+        type Value = E;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("string or map")
+        }
+        fn visit_str<X: de::Error>(self, v: &str) -> Result<E, X> {
+            E::deserialize(v.to_owned().into_deserializer())
+        }
+        fn visit_bool<X: de::Error>(self, v: bool) -> Result<E, X> {
+            Err(X::invalid_type(Unexpected::Bool(v), &self))
+        }
+        fn visit_i64<X: de::Error>(self, v: i64) -> Result<E, X> {
+            Err(X::invalid_type(Unexpected::Signed(v), &self))
+        }
+        fn visit_u64<X: de::Error>(self, v: u64) -> Result<E, X> {
+            Err(X::invalid_type(Unexpected::Unsigned(v), &self))
+        }
+        fn visit_f64<X: de::Error>(self, v: f64) -> Result<E, X> {
+            Err(X::invalid_type(Unexpected::Float(v), &self))
+        }
+        fn visit_unit<X: de::Error>(self) -> Result<E, X> {
+            Err(X::invalid_type(Unexpected::Unit, &self))
+        }
+        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<E, A::Error> {
+            while seq.next_element::<de::IgnoredAny>()?.is_some() {}
+            Err(de::Error::invalid_type(Unexpected::Seq, &self))
+        }
+        fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<E, A::Error> {
+            // The buffer checked the entry count, then the variant name, then
+            // that the variant's value was unit.
+            let mut first: Option<(String, Shape)> = None;
+            let mut entries = 0usize;
+            while let Some(key) = map.next_key::<String>()? {
+                let shape = map.next_value::<Shape>()?;
+                entries += 1;
+                first.get_or_insert((key, shape));
+            }
+            match first {
+                Some((variant, shape)) if entries == 1 => {
+                    let value = E::deserialize(variant.into_deserializer())?;
+                    match shape.unexpected() {
+                        None => Ok(value),
+                        Some(unexpected) => Err(de::Error::invalid_type(unexpected, &"unit")),
+                    }
+                }
+                _ => Err(de::Error::invalid_value(
+                    Unexpected::Map,
+                    &"map with a single key",
+                )),
+            }
+        }
     }
 }
