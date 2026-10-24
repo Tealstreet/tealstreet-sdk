@@ -2094,3 +2094,62 @@ fn alias_primary_secondary_takes_the_primary_ref_when_omitted() {
         Some(&KeyRef("other.broker".into()))
     );
 }
+
+#[test]
+fn malformed_optional_primary_extra_ref_is_refused_before_any_alias() {
+    use crate::signing::{
+        CredentialSetupPolicy, ExtraFieldPolicy, ExtraKey, ExtraKeyPolicy, Identities, Identity,
+        IdentitySetupPolicy,
+    };
+    let extra = |field| {
+        Some(IdentitySetupPolicy {
+            extra: Some(ExtraKeyPolicy {
+                key: ExtraKey::KucoinBroker,
+                field,
+                encoding: None,
+                trim: false,
+            }),
+            ..Default::default()
+        })
+    };
+    let policy = CredentialSetupPolicy {
+        primary: extra(ExtraFieldPolicy::Optional),
+        secondary: extra(ExtraFieldPolicy::AliasPrimary),
+    };
+    let identity = |name: &str, broker: Option<String>| Identity {
+        credential: KeyRef(format!("{name}.key")),
+        signing: KeyRef(format!("{name}.secret")),
+        passphrase: None,
+        stable_id: None,
+        extra: broker
+            .map(|broker| (ExtraKey::KucoinBroker, KeyRef(broker)))
+            .into_iter()
+            .collect(),
+    };
+    // Supplied-but-malformed authority (empty or oversized) is refused, never
+    // copied to the alias; validation precedes the alias fill.
+    for malformed in [String::new(), "x".repeat(257)] {
+        let mut ids = Identities {
+            primary: Some(identity("primary", Some(malformed))),
+            secondary: Some(identity("secondary", None)),
+        };
+        assert_eq!(
+            policy.apply_to_identities(&mut ids, false),
+            Err(SignError::InvalidRequest)
+        );
+        assert!(
+            ids.secondary.unwrap().extra.is_empty(),
+            "nothing was aliased"
+        );
+    }
+    // Control: a well-formed optional primary ref is accepted and aliased.
+    let mut ok = Identities {
+        primary: Some(identity("primary", Some("primary.broker".into()))),
+        secondary: Some(identity("secondary", None)),
+    };
+    assert_eq!(policy.apply_to_identities(&mut ok, false), Ok(()));
+    assert_eq!(
+        ok.secondary.unwrap().extra.get(&ExtraKey::KucoinBroker),
+        Some(&KeyRef("primary.broker".into()))
+    );
+}
