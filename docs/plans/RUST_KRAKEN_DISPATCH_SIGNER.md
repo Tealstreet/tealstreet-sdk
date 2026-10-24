@@ -393,3 +393,63 @@ This update changes only the plan. No original control, production, Cargo,
 manifest or provider code changes; no new local build or execution claim. Full
 nonce release-fence/repair source, hosted forwarding, namespace continuity and
 Futures socket progress fit remain gates before the combined production cutover.
+
+## Authorized local recipe phase before account adoption
+
+Overseer now authorizes Futures+Spot HMAC recipes, Base64 setup declarations and
+opaque role/selection wiring locally. Account-read caller migration follows the
+recipes; size that by physical funnel, not lexical matches. Actual12da/dcb9 has
+23 inventoried occurrences, with pending2072 accounting for one (effective22).
+Account Futures2+Spot4 are six lexical occurrences but three shared physical
+funnels; Spot's other three are macro matches. No prune is claimed in this phase.
+
+Branch feat/rust-kraken-dispatch-recipes starts from reviewed0ebbe and actual
+landing dcb9e6de01e. The nonce owner supplies ff6c2e127c0 plus corrected immutable
+patch e64954dec0e981a02d5934b89ad39c0e8339b29c583b618632a71efc580f093b,
+superseding57763. Its runtime hunks are consumed verbatim; only the append-only
+CALLERS hunk composes after incoming docs. This is explicitly local composition,
+not a nonce-core freeze or landing. No firm owner ETA: correction review,6b
+barrier guard and host/Bearer/StampFloor composition remain open. Do not edit the
+dispatcher, copy its allocator, or infer readiness from this recipe phase.
+
+Recipe interface: a private selected wrapper is minted only by the shared
+Slots::select_with_nonce(role,&KRAKEN). It retains the exact Identity, Selection
+and non-Clone NonceClaim; every physical request needs a fresh wrapper. Futures
+Slots use secondary_requires_primary:true, while Spot drops the ignored read
+identity. Missing/malformed stable subject uses existing InvalidRequest before
+queue IDs. Explicit role is supplied by the declared call site, never by method.
+Base64 secret decoding is a trusted setup declaration, never venue decoding.
+Native key bytes stay untrimmed; no secret hashing or inferred subject alias.
+
+HTTP prepare reserves once through DispatchContext, then returns one atomic
+Present + SHA256 + HmacSha512 batch. Futures hashes form+nonce+stripped path;
+Spot appends nonce last to the ordered body, hashes nonce+body, then MACs path
+plus that digest. The exact u64 is in SignReceipt.nonce; stamps stay independent.
+Prepare/apply attest method/origin/path/body/static headers. Provider receipt,
+value counts/digest/MAC sizes and API-key header safety must pass before any
+signed header publication. Stale preparation recomputes from immutable unsigned
+inputs. Recipe freshness is an explicit caller argument, not a guessed logical
+account/session timeout. The caller still supplies genuine managed authority.
+
+The Futures challenge primitive can build the same atomic Present/SHA256/HMAC
+program without nonce allocation or transport authority; managed socket epoch,
+progress timing and final send wiring remain entirely in5c's separate adoption.
+No raw key or MAC is cached as a replay recipe. Hosted canonical nonce forwarding
+belongs to tealstreet-next: preserve it as a hosted-mode certification gate,
+not SDK implementation scope. No server-side second allocation is permitted.
+
+Use an isolated recipe control target. New APIs initially produce compile REDs
+labelled NEW-CONTRACT, distinct from the existing23 native-original controls.
+Then drive real managed Prepare/Bind/Claim and installed LocalSigner identities
+for HTTP vectors, per-role selection, shared-subject monotonic reservation,
+provider refusal/defer/tamper, attestation and header order. Challenge primitive
+vectors prove only provider bytes, never socket adoption. Native provider-bypass
+originals remain RED until their later caller cutover; do not rewrite them green.
+
+No native account/trading/history/Spot/socket caller, registry constructor,
+construction-rules admission, migrated-family checker or manifest changes in the
+recipe phase. In particular generic SelectedRead currently has no coupled nonce
+mint seam from its retained snapshot: report that composition gap before later
+account adoption rather than reselecting by method or copying a read helper.
+Raw legacy callers are not a fallback for the new recipes; the recipes have no
+raw path. Local only, no PR/push/CI until reviews authorize the intended head.
