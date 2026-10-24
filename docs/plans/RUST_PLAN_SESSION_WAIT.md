@@ -24,6 +24,22 @@ must wait. Today it cannot:
   custody (request_context_planned.rs:543-561). Queueing requires
   `delivery == call.admission.predecessor` (`state.admission`).
 
+## Scope
+
+This API covers command-owned Plan legs and retained Preflight reads, which
+are Paradex's history and trading sites. It is not, on its own, clearance for
+all 36 gated sites (account 9, history 9, identity 3, trading 15):
+
+- identity can use the existing plain-Context `session_wait`;
+- account config, auth and background snapshot lifecycle use Session or plain
+  Background paths, and need their own native geometry audit;
+- G1 Background Plans stay excluded.
+
+No Paradex site needs to park an already-released call. Already-bound,
+unreleased packets use the Bearer generation/revision fence and reprepare, not
+this wait. The cached-JWT gate that precedes dispatch today maps to
+wait-before-issue/select.
+
 ## Design
 
 Park the unit of work **before** it consumes an attempt, and do the issue or
@@ -66,8 +82,15 @@ Preflight waiter, the engine does the deferred work at drain time, with the
   Journal registration, the leg intent (if one was declared at park) and the
   first attempt happen only now.
 - **Retry:** it runs `select_plan_retry`, consuming exactly one attempt within
-  `terms.attempts` and the declared `RetryWindow`. For FreshAttempt that means
-  a fresh physical deadline; Shared keeps the original window.
+  `terms.attempts` and the declared `RetryWindow`, under existing declaration
+  and evidence only, with no new grant.
+  - FreshAttempt gets a fresh physical deadline.
+  - Shared keeps the original call window and is never renewed to 20 s. A
+    Shared call whose window lapsed while parked comes back `Failed`.
+- Every resumed deadline stays capped by the Plan deadline. That is already
+  `min(native, #1949 receipt cap)` for a command root, so a wait can never
+  extend the caller's receipt. The Slot reservation is exact, and no credit is
+  consumed while parked.
 - It returns `Waiter::Ready(context, pending)`, exactly as for a plain waiter.
   The venue queues the leg in the same callback, because custody is bound to
   that delivery.
