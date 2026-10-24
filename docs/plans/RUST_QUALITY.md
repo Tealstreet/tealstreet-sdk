@@ -1391,3 +1391,14 @@ Both real replay callers and forgotten-final-flag mutations are checked.
 Native accepted-write snapshot races are separately reproduced by four REDs
 and two working controls; the identical six controls pass against queued #1788.
 Those venue changes and their tests are outside this standalone harness scope.
+
+### Binance Spot acknowledgement coverage controls
+
+Sixteen actual-audit controls preserve independently signed subscription bytes,
+exact typed ACK correlation, pre-ACK event rejection, explicit closed/connected
+generations and final unanswered requests captured before memory settling.
+The original capture has two final-assertion REDs and fourteen GREEN controls;
+terminal-only capture passes all sixteen. Full raw comparison omits only
+metrics and protocolErrors, retains every financial field and ordered fixer,
+and proves each of the four removed current-tape protocol keys absent. Other
+public/private Binance cases keep their exact declarations and verifier status.
