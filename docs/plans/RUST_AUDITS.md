@@ -3000,6 +3000,15 @@ recovery remains separate from strict root/local refusal. Shared list/sign
 consumer deletion is deferred to the remaining account/discovery/write owners;
 this conversion does not remove or relax any staging/checker inventory row.
 
+### Phemex dispatch-signing custody candidate
+
+Full native funnel and WS auth now use opaque provider recipes, removing14
+legacy lib credential/material fingerprints. Typed signer refusal preserves
+accepted-prefix IDs and native rollback revisions; actual-release raw expiry
+is accumulated as a maximum before the native5s reconciliation skew. Production
+wire/financial controls pass. Independent source/caller reviews are CLEAR;
+full-map/HMAC review, final CI and the combined #1970/#1974 landing remain gates.
+
 ## MEXC unsigned discovery and depth Context adoption
 
 The public catalogue/ticker streamed sender and subscription-depth GET sender
@@ -3043,3 +3052,17 @@ prefix. Shared Context cleanup is separate from DATA admission: already-admitted
 failure keeps its native retry even after sibling issuance prunes expired
 retirement metadata. Completed catalogue retires before successor admission so
 capacity cannot strand ticker startup. No local issuer/timer/selection algorithm.
+
+### Kraken Futures public candle custody
+
+Four lib.rs legacy request occurrences are adopted: the chart send, numeric
+failure, and final numeric done/fail. Family27->23, lib4->0; only that exact
+manifest block is removed. No Spot, signing/key-selection, account, history,
+trading or shared engine changes. Existing fixture assertions remain intact;
+the secondary probe constructor receives only the root/context field carry.
+Plan and original assertion
+checkpoints precede source; the28 controls began17 assertionRED/11GREEN.
+Source-stage recovery suffix correction records the required root+child two-slot
+geometry without altering the original initial-capacity assertions. The28 now
+pass, plus47 existing public/startup/socket/local-context controls. Architecture
+gate No; bounded source review and full family CI remain pending.
