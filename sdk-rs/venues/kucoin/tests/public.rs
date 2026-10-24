@@ -453,9 +453,13 @@ fn missing_private_passphrase_rejects_before_public_or_private_reads() {
         Options {
             key: Some("key".into()),
             secret: Some("secret".into()),
+            passphrase: Some("fixture-passphrase".into()),
             ..Default::default()
         },
-        Kucoin::new,
+        |mut options| {
+            options.credentials.as_mut().unwrap().passphrase = None;
+            Kucoin::new(options)
+        },
     );
     e.start(0.0);
     assert!(requests(&mut e).is_empty());

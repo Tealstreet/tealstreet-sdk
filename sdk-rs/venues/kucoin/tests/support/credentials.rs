@@ -18,6 +18,19 @@ pub struct Options {
     pub broker: Option<BrokerOptions>,
 }
 safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = &mut self.read_credentials {
+            read.erase_secrets();
+        }
+        if let Some(broker) = &mut self.broker {
+            broker.erase_secrets();
+        }
+    }
+}
 impl Options {
     pub fn prepare(self) -> (safe_cex_venue_kucoin::Options, LocalSigner, Identities) {
         let mut primary = self
@@ -93,8 +106,20 @@ pub fn engine<V: safe_cex_engine::Venue>(
     options: Options,
     constructor: impl FnOnce(safe_cex_venue_kucoin::Options) -> V,
 ) -> safe_cex_engine::Engine<V> {
+    with_seed(options, constructor, 17)
+}
+
+pub fn with_seed<V: safe_cex_engine::Venue>(
+    options: Options,
+    constructor: impl FnOnce(safe_cex_venue_kucoin::Options) -> V,
+    seed: u64,
+) -> safe_cex_engine::Engine<V> {
     let (options, provider, identities) = options.prepare();
-    let mut engine = safe_cex_engine::test_support::seeded_engine(constructor(options));
+    let mut engine = safe_cex_engine::Engine::new(
+        constructor(options),
+        Some(safe_cex_engine::test_support::seeded_entropy(seed)),
+    )
+    .unwrap();
     engine
         .set_signer(Some(std::sync::Arc::new(provider)))
         .unwrap();

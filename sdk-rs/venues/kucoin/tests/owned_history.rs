@@ -16,9 +16,9 @@ struct H<V: Venue> {
     commands: HashSet<u32>,
 }
 impl<V: Venue> H<V> {
-    fn new(venue: V) -> Self {
+    fn new(engine: Engine<V>) -> Self {
         Self {
-            engine: safe_cex_engine::test_support::seeded_engine(venue),
+            engine,
             actions: vec![],
             now: 2000.0,
             commands: HashSet::new(),
@@ -26,7 +26,11 @@ impl<V: Venue> H<V> {
     }
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);
-        self.actions.extend(self.engine.drain_actions());
+        self.actions
+            .extend(safe_cex_engine::test_support::prepared_actions(
+                &mut self.engine,
+                self.now,
+            ));
     }
     fn query(&mut self, command: u32, query: Query) {
         self.commands.insert(command);
@@ -186,7 +190,7 @@ fn options() -> Options {
     }
 }
 fn futures() -> H<Kucoin> {
-    H::new(Kucoin::new(options()))
+    H::new(support::credentials::engine(options(), Kucoin::new))
 }
 fn income(funding: bool, symbol: Option<String>) -> Query {
     Query::Income {
@@ -372,7 +376,10 @@ fn owned_history_spot_fills_initial_failures_are_typed_without_partial_output() 
         r#"{"code":"400100","msg":"refused","data":{"dataList":[]}}"#,
         r#"{"code":"200000","data":{"items":[{"symbol":"BTC-USDT","orderId":"o","side":"buy","price":"100","size":"1","createdAt":1500},{}]}}"#,
     ] {
-        let mut h = H::new(safe_cex_venue_kucoin::spot::KucoinSpot::new(options()));
+        let mut h = H::new(support::credentials::engine(
+            options(),
+            safe_cex_venue_kucoin::spot::KucoinSpot::new,
+        ));
         h.query(
             10,
             Query::Fills {
@@ -591,7 +598,10 @@ fn owned_history_public_trades_failure_is_typed_without_private_credentials() {
 #[cfg(feature = "spot")]
 #[test]
 fn owned_history_spot_transport_failure_is_typed_with_the_existing_diagnostic() {
-    let mut h = H::new(safe_cex_venue_kucoin::spot::KucoinSpot::new(options()));
+    let mut h = H::new(support::credentials::engine(
+        options(),
+        safe_cex_venue_kucoin::spot::KucoinSpot::new,
+    ));
     h.query(
         10,
         Query::Fills {

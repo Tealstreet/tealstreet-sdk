@@ -466,16 +466,22 @@ The approved #1990/combo-5b composition now carries opaque KuCoin venue Options,
 the reviewed atomic recipe and real provider setup for both aliases. Broker
 material is consumed once by trusted setup; its secondary identity aliases the
 primary's role ref. Native Options retain partner/name/verify metadata only.
-The public bullet keeps its Primary route, and Spot public requests stay unsigned.
+Unsigned Futures calls retain their native route field; Spot public stays unsigned.
 Identity uses shared SelectedRead; other aggregate/session owners retain their
 explicit staging scope pending their own lifecycle conversions.
 
-Original provider/compatibility controls execute green with the real provider:
-18 with Spot and 16 without (each includes the same two native-oracle controls).
-Additional typed identity provider/network/physical-timeout controls preserve no
-financial Read outcome; the current Spot target executes 21 controls total,
-including separate opaque-native-Options custody. The four registry construction
-controls pass. SDK broker retention had two original assertion REDs before the
+The scoped KuCoin + Spot native suite executes **392 PASS, zero failed/ignored**.
+These are test executions, including repeated native-oracle controls mounted in
+multiple integration targets, rather than 392 distinct custody proofs. The
+adoption target has 23 controls, including seven provider-result tampering cases
+inside one control and deferred atomic-batch success/refusal/late-result cases
+inside another. Deferred signing traverses genuine route Prepare, provider Sign,
+Bind and release Claim; no Context, provider success or receipt is fabricated.
+Feature-off unit/adoption targets execute another 40 PASS, zero failed/ignored;
+scoped strict Clippy passes for KuCoin with/without Spot and for the registry
+target, and both packages pass formatting.
+The four registry construction controls pass after shared constructor validation
+was deduplicated. SDK broker retention had two original assertion REDs before the
 capsule mapping; those plus existing local-signer setup controls now pass 64.
 
 Bounded independent source review is CLEAR for failure disposition and trusted
@@ -483,11 +489,26 @@ broker wiring: provider refusal is strict for history/funding, never transport
 retry evidence or accepted-prefix recovery. Native account refusal releases its
 existing owner without spending transport retries. Spot write diagnostics precede
 terminal; Futures retains typed unsent errors through native aggregate handling.
-The existing private, funding and broker-attribution targets pass with genuine
-provider preparation (62 executed, including six repeated native-oracle controls).
-Scoped original-target Clippy and registry compilation pass.
+Native fixture adapters use real provider preparation and retain wire/result
+assertions; invalid identity controls alter opaque references before construction,
+without manufacturing notices or silently normalizing invalid secondary input.
 
-This is an implementation checkpoint, not a freeze or complete migration receipt.
-Remaining native fixtures, negative recipe/provider coverage, actual prerequisite
-integration, exact inventories, final reviews and full CI remain required. No
-checker bootstrap allowance has been changed or claimed.
+Own request inventory is **46 occurrences / 42 fingerprints -> 37 / 35**. The
+remaining physical staging funnel keeps its native fingerprint; no request site
+was added or renamed to evade the scanner. Own signing inventory, including the
+migrated-family scan of sign.rs and sign/dispatch.rs, is **41 / 38 -> 15 / 13**.
+The recipe's three HmacSha256 declarations and test-only debug sentinel are
+explicitly inventoried; the test oracle is outside production source. All
+foreign map entries and their ordering remain unchanged. Credential-selection
+bookkeeping shrinks from 15 to 4 KuCoin sites through real opaque/SelectedRead
+adoption; no alias hides a production selection. One test function name was
+changed to avoid accidentally matching the banned `preserve_order` token, with
+all its native assertions unchanged. No STAGING_BOOTSTRAPS
+or SIGNER_POLICY_BOOTSTRAPS allowance has been changed or claimed.
+
+This is local composition evidence, not a freeze or actual shared landing claim.
+The shared alias policy tightening (requiring the primary's existing broker ref
+on a configured secondary), actual prerequisite integration, final reviews and
+full CI remain required. Current full request ratchet is red only for stale-base
+foreign BloFin/Hyperliquid/Kraken/MEXC/Polymarket map drift; own exact inventory and all 15
+request checker controls pass. No foreign map update is authorized by that drift.

@@ -314,11 +314,6 @@ impl Kucoin {
         );
         if let Some((selection, recipe)) = selected {
             selection.sign(cx, request, Box::new(recipe));
-        } else if matches!(
-            role,
-            CredentialRole::PrimaryRead { .. } | CredentialRole::SessionAuth
-        ) {
-            cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
         }
         request
     }
@@ -1475,4 +1470,9 @@ fn reread_partial<P>(
 }
 
 #[cfg(test)]
+extern crate self as safe_cex_venue_kucoin;
+#[cfg(test)]
 mod secondary_tests;
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod support;

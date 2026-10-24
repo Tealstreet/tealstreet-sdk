@@ -635,22 +635,20 @@ fn prepare_local_signer_with_policy(
         .primary
         .and_then(|rule| rule.extra)
         .is_some_and(|rule| rule.key == safe_cex_engine::signing::ExtraKey::KucoinBroker)
-    {
-        if let Some(broker) = options
+        && let Some(broker) = options
             .extra
             .as_mut()
             .and_then(|extra| extra.kucoin_broker.as_mut())
-        {
-            let material = Secret::new(std::mem::take(&mut broker.broker_key));
-            if let Some(primary) = &mut primary {
-                primary.extra.0.insert(
-                    safe_cex_engine::signing::ExtraKey::KucoinBroker,
-                    safe_cex_crypto::signer::LocalExtra {
-                        value: material,
-                        encoding: safe_cex_engine::signing::KeyEncoding::Utf8,
-                    },
-                );
-            }
+    {
+        let material = Secret::new(std::mem::take(&mut broker.broker_key));
+        if let Some(primary) = &mut primary {
+            primary.extra.0.insert(
+                safe_cex_engine::signing::ExtraKey::KucoinBroker,
+                safe_cex_crypto::signer::LocalExtra {
+                    value: material,
+                    encoding: safe_cex_engine::signing::KeyEncoding::Utf8,
+                },
+            );
         }
     }
     local_signer_from_setup(LocalSetup { primary, secondary }, policy, public_data_only)
@@ -1355,59 +1353,9 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "kucoinspot")]
         "kucoinspot" => {
-            if [&options.key, &options.secret, &options.passphrase]
-                .iter()
-                .any(|value| value.as_ref().is_some_and(|value| !value.is_empty()))
-                || options.read_credentials.is_some()
-                || options
-                    .extra
-                    .as_ref()
-                    .and_then(|extra| extra.kucoin_broker.as_ref())
-                    .is_some_and(|broker| !broker.broker_key.is_empty())
-            {
-                return Err(invalid(
-                    "KuCoin credentials belong in signer setup, not engine options",
-                ));
-            }
-            let mut identities = options.signing.take().unwrap_or_default();
-            if let Some(read) = &identities.secondary {
-                read.validate().map_err(invalid)?;
-                if read.passphrase.as_ref().is_none_or(|key| key.0.is_empty()) {
-                    return Err(invalid("Secondary read credentials require a passphrase"));
-                }
-            }
-            if identities.primary.as_ref().is_some_and(|identity| {
-                identity.credential.0.is_empty()
-                    || identity.signing.0.is_empty()
-                    || identity
-                        .passphrase
-                        .as_ref()
-                        .is_none_or(|key| key.0.is_empty())
-            }) {
-                identities.primary = None;
-            }
-            if let Some(primary) = &identities.primary {
-                primary.validate().map_err(invalid)?;
-            }
-            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
-            {
-                return Err(invalid("Engine signing provider is required"));
-            }
-            let registered = identities.clone();
-            let mut engine = Engine::new(
-                KucoinSpot::new(KucoinOptions {
-                    credentials: identities.primary,
-                    read_credentials: identities.secondary,
-                    broker: options
-                        .extra
-                        .take()
-                        .and_then(|extra| extra.kucoin_broker)
-                        .map(|broker| broker.metadata()),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                }),
-                entropy,
-            )?;
+            let (venue_options, registered) =
+                kucoin_setup::venue_options(&mut options, signer.is_some())?;
+            let mut engine = Engine::new(KucoinSpot::new(venue_options), entropy)?;
             engine.set_signer(signer)?;
             engine.set_identities(registered)?;
             finish(visitor, policy, startup, engine)
@@ -1415,59 +1363,9 @@ pub fn build_with_signer<T: Visit>(
 
         #[cfg(feature = "kucoin")]
         "kucoin" => {
-            if [&options.key, &options.secret, &options.passphrase]
-                .iter()
-                .any(|value| value.as_ref().is_some_and(|value| !value.is_empty()))
-                || options.read_credentials.is_some()
-                || options
-                    .extra
-                    .as_ref()
-                    .and_then(|extra| extra.kucoin_broker.as_ref())
-                    .is_some_and(|broker| !broker.broker_key.is_empty())
-            {
-                return Err(invalid(
-                    "KuCoin credentials belong in signer setup, not engine options",
-                ));
-            }
-            let mut identities = options.signing.take().unwrap_or_default();
-            if let Some(read) = &identities.secondary {
-                read.validate().map_err(invalid)?;
-                if read.passphrase.as_ref().is_none_or(|key| key.0.is_empty()) {
-                    return Err(invalid("Secondary read credentials require a passphrase"));
-                }
-            }
-            if identities.primary.as_ref().is_some_and(|identity| {
-                identity.credential.0.is_empty()
-                    || identity.signing.0.is_empty()
-                    || identity
-                        .passphrase
-                        .as_ref()
-                        .is_none_or(|key| key.0.is_empty())
-            }) {
-                identities.primary = None;
-            }
-            if let Some(primary) = &identities.primary {
-                primary.validate().map_err(invalid)?;
-            }
-            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
-            {
-                return Err(invalid("Engine signing provider is required"));
-            }
-            let registered = identities.clone();
-            let mut engine = Engine::new(
-                Kucoin::new(KucoinOptions {
-                    credentials: identities.primary,
-                    read_credentials: identities.secondary,
-                    broker: options
-                        .extra
-                        .take()
-                        .and_then(|extra| extra.kucoin_broker)
-                        .map(|broker| broker.metadata()),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                }),
-                entropy,
-            )?;
+            let (venue_options, registered) =
+                kucoin_setup::venue_options(&mut options, signer.is_some())?;
+            let mut engine = Engine::new(Kucoin::new(venue_options), entropy)?;
             engine.set_signer(signer)?;
             engine.set_identities(registered)?;
             finish(visitor, policy, startup, engine)

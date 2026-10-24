@@ -1880,46 +1880,52 @@ impl KucoinSpot {
 #[cfg(test)]
 mod security_credentials {
     use super::*;
-    use safe_cex_crypto::secrets::EraseSecrets;
     #[test]
-    fn spot_owns_both_credential_copies_in_scrubbing_carriers() {
-        let mut venue = KucoinSpot::new(Options {
+    fn spot_owns_only_opaque_identity_refs_and_broker_metadata() {
+        let (options, _provider, identities) = crate::support::credentials::Options {
             key: Some("private-key".into()),
             secret: Some("private-secret".into()),
             passphrase: Some("private-passphrase".into()),
-            broker: Some(sign::BrokerOptions {
+            broker: Some(crate::support::native_sign::BrokerOptions {
                 partner: "partner".into(),
                 broker_key: "private-broker-key".into(),
                 broker_name: "broker".into(),
                 verify: None,
             }),
-            ..Options::default()
-        });
-        let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
-        assert!(venue.credentials.is_some());
-        venue.options.erase_secrets();
-        venue.credentials.as_mut().unwrap().erase_secrets();
-        assert!(venue.options.secret.is_none());
-        assert!(venue.options.broker.as_ref().unwrap().broker_key.is_empty());
-        let credentials = venue.credentials.as_ref().unwrap();
-        assert!(credentials.secret.is_empty() && credentials.passphrase.is_empty());
-        assert!(credentials.broker.as_ref().unwrap().broker_key.is_empty());
+            ..Default::default()
+        }
+        .prepare();
+        let venue = KucoinSpot::new(options);
+        assert_eq!(venue.credentials, identities.primary);
+        assert_eq!(venue.options.credentials, identities.primary);
+        let debug = format!("{:?} {:?}", venue.options, venue.credentials);
+        for material in [
+            "private-key",
+            "private-secret",
+            "private-passphrase",
+            "private-broker-key",
+        ] {
+            assert!(!debug.contains(material));
+        }
     }
     #[test]
-    fn incomplete_and_public_only_credentials_keep_a_scrubbing_owner() {
-        for (key, public_data_only) in [
+    fn incomplete_and_public_only_credentials_never_become_private_identity() {
+        for (credential, public_data_only) in [
             (None, false),
             (Some(String::new()), false),
-            (Some("key".into()), true),
+            (Some("opaque-key".into()), true),
         ] {
             let venue = KucoinSpot::new(Options {
-                key,
-                secret: Some("private-secret".into()),
-                passphrase: Some("private-passphrase".into()),
+                credentials: credential.map(|credential| safe_cex_engine::signing::Identity {
+                    credential: safe_cex_engine::signing::KeyRef(credential),
+                    signing: safe_cex_engine::signing::KeyRef("opaque-signing".into()),
+                    passphrase: Some(safe_cex_engine::signing::KeyRef("opaque-passphrase".into())),
+                    stable_id: None,
+                    extra: Default::default(),
+                }),
                 public_data_only,
-                ..Options::default()
+                ..Default::default()
             });
-            let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
             assert!(venue.credentials.is_none());
         }
     }

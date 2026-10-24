@@ -9,7 +9,7 @@ use safe_cex_engine::{Action, Command, Engine, HttpRequest, Method, ReadCredenti
 use safe_cex_venue_kucoin::Kucoin;
 #[cfg(feature = "spot")]
 use safe_cex_venue_kucoin::spot::KucoinSpot;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use support::credentials::{BrokerOptions, Options};
 
@@ -17,6 +17,8 @@ const NOW: f64 = 1234.9;
 struct RecordingSigner {
     inner: LocalSigner,
     refuse: AtomicBool,
+    deferred: AtomicBool,
+    corrupt: AtomicUsize,
     requests: Arc<Mutex<Vec<SignRequest>>>,
 }
 impl Signer for RecordingSigner {
@@ -28,14 +30,37 @@ impl Signer for RecordingSigner {
         self.inner.sign(request)
     }
     fn immediate(&self) -> bool {
-        true
+        !self.deferred.load(Ordering::Relaxed)
     }
     fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
         self.requests.lock().unwrap().push(request.clone());
         if self.refuse.load(Ordering::Relaxed) {
             return Some(Err(SignError::Unsupported));
         }
-        self.inner.sign_ready(request)
+        if self.deferred.load(Ordering::Relaxed) {
+            return None;
+        }
+        self.inner.sign_ready(request).map(|result| {
+            result.map(|mut result| {
+                match self.corrupt.load(Ordering::Relaxed) {
+                    0 => {}
+                    1 => result.receipt.stamp_ms = Some(1235.),
+                    2 => result
+                        .headers
+                        .push(("fixture-injected".into(), "refuse".into())),
+                    3 => {
+                        result.values.pop();
+                    }
+                    4 => {
+                        result.values[1].pop();
+                    }
+                    5 => result.values[0] = b"fixture\r\nkey".to_vec(),
+                    6 => result.values[0] = vec![0xff],
+                    _ => result.values[0].clear(),
+                }
+                result
+            })
+        })
     }
     fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
         self.inner.can_sign(key, algorithm)
@@ -71,6 +96,8 @@ fn fixture<V: Venue>(
     let provider = Arc::new(RecordingSigner {
         inner,
         refuse: AtomicBool::new(false),
+        deferred: AtomicBool::new(false),
+        corrupt: AtomicUsize::new(0),
         requests: requests.clone(),
     });
     engine.set_signer(Some(provider.clone())).unwrap();
@@ -275,7 +302,7 @@ fn original_broker_catalogue_uses_one_atomic_provider_batch() {
 }
 
 #[test]
-fn native_broker_headers_preserve_order_trim_and_boolean_verify() {
+fn native_broker_headers_keep_sequence_trim_and_boolean_verify() {
     for (verify, expected) in [(None, "true"), (Some(false), "false")] {
         let mut h = fixture(broker_options(verify), Kucoin::new);
         h.engine.start(NOW);
@@ -599,4 +626,171 @@ fn opaque_native_options_retain_no_primary_read_or_broker_material() {
             .extra
             .contains_key(&safe_cex_engine::signing::ExtraKey::KucoinBroker)
     );
+}
+
+#[test]
+fn provider_result_tampering_never_releases_partial_identity_headers() {
+    use safe_cex_engine::Notice;
+    for corruption in 1..8 {
+        let mut h = fixture(broker_options(None), Kucoin::new);
+        h.provider.corrupt.store(corruption, Ordering::Relaxed);
+        h.engine
+            .handle_command(NOW, Command::FetchAccount { command: 281 }, Some(120_000))
+            .unwrap();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_))),
+            "corruption {corruption}"
+        );
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed {
+                    command: 281,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1, "corruption {corruption}: {actions:?}");
+        assert_eq!(failures[0].outcome, None);
+        assert!(!actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 281, .. })
+        )));
+    }
+}
+#[test]
+fn async_atomic_broker_batch_refusal_and_late_result_cannot_publish_http() {
+    use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+    use safe_cex_engine::{Event, Notice};
+    for refused in [false, true] {
+        let mut h = fixture(broker_options(None), Kucoin::new);
+        h.provider.deferred.store(true, Ordering::Relaxed);
+        h.engine
+            .handle_command(NOW, Command::FetchAccount { command: 282 }, Some(120_000))
+            .unwrap();
+        h.engine.prepare_dispatch(NOW);
+        let initial: Vec<_> = h.engine.drain_actions().collect();
+        let preparation = initial
+            .into_iter()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } => {
+                        assert_eq!(preparation.attempt().request, request.id);
+                        Some(preparation)
+                    }
+                    _ => panic!("a fresh request must prepare before binding"),
+                },
+                Action::Http(_) | Action::Sign { .. } => {
+                    panic!("no signing or HTTP before route preparation")
+                }
+                _ => None,
+            })
+            .expect("one genuine route preparation");
+        h.engine.http_prepared(
+            NOW,
+            preparation,
+            Prepared {
+                id: preparation.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let actions: Vec<_> = h.engine.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+        let (attempt, work) = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Sign { attempt, work, .. } => Some((*attempt, work.clone())),
+                _ => None,
+            })
+            .expect("one genuine deferred atomic batch");
+        assert_eq!(work.operations.len(), 4);
+        let result = h.provider.inner.sign_ready(&work).unwrap().unwrap();
+        h.engine.handle(
+            NOW + 0.1,
+            Event::Signed {
+                attempt,
+                result: if refused {
+                    Err(SignError::Refused)
+                } else {
+                    Ok(result.clone())
+                },
+            },
+        );
+        let mut actions = Vec::new();
+        for action in h.engine.drain_actions().collect::<Vec<_>>() {
+            match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Bind {
+                        preparation: bound,
+                        permit,
+                        request,
+                    } => {
+                        assert!(!refused);
+                        assert_eq!(bound, preparation);
+                        assert_eq!(permit.prepared_id(), preparation.attempt().request.0);
+                        assert!(matches!(
+                            h.engine.claim_http(NOW + 0.1, permit),
+                            Ok(Claim::Released(_))
+                        ));
+                        actions.push(Action::Http(request));
+                    }
+                    HttpAction::Cancel {
+                        preparation: cancelled,
+                        ..
+                    } => assert_eq!(cancelled, preparation),
+                    _ => panic!("a deferred result must not prepare another route"),
+                },
+                other => actions.push(other),
+            }
+        }
+        if refused {
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_)))
+            );
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|action| matches!(
+                        action,
+                        Action::Notice(Notice::CommandFailed { command: 282, .. })
+                    ))
+                    .count(),
+                1
+            );
+            h.engine.handle(
+                NOW + 0.2,
+                Event::Signed {
+                    attempt,
+                    result: Ok(result),
+                },
+            );
+            let late = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW + 0.2);
+            assert!(!late.iter().any(|action| matches!(
+                action,
+                Action::Http(_)
+                    | Action::Notice(Notice::CommandDone { .. })
+                    | Action::Notice(Notice::CommandFailed { .. })
+            )));
+        } else {
+            assert_eq!(
+                http(&actions).headers.len(),
+                11,
+                "working deferred provider control"
+            );
+        }
+    }
 }

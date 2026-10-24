@@ -7,7 +7,9 @@ use support::credentials::{BrokerOptions, Options};
 const NOW: f64 = 1000.;
 type TestEngine = Engine<Kucoin>;
 fn seeded(options: Options) -> TestEngine {
-    let mut engine = support::credentials::engine(options, Kucoin::new);
+    decorate(support::credentials::engine(options, Kucoin::new))
+}
+fn decorate(mut engine: TestEngine) -> TestEngine {
     engine
         .store_mut()
         .set_balance(safe_cex_engine::model::Balance {
@@ -23,10 +25,13 @@ fn seeded(options: Options) -> TestEngine {
 }
 fn ask(engine: &mut TestEngine) -> Vec<Action> {
     engine.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    engine.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(engine, NOW)
 }
 fn identity_request(engine: &mut TestEngine) -> HttpRequest {
-    let actions = ask(engine);
+    let actions: Vec<_> = ask(engine)
+        .into_iter()
+        .filter(|action| !matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .collect();
     assert_eq!(
         actions.len(),
         1,
@@ -242,34 +247,23 @@ fn failed_or_missing_identity_rejects_once_instead_of_empty_success() {
 }
 #[test]
 fn private_identity_requires_credentials_before_any_network() {
-    for opts in [
-        Options::default(),
-        Options {
-            public_data_only: true,
-            ..options(true)
-        },
-        Options {
-            passphrase: Some(String::new()),
-            ..options(false)
-        },
-        Options {
-            read_credentials: Some(safe_cex_engine::ReadCredentials {
-                key: "read".into(),
-                secret: "read-secret".into(),
-                passphrase: Some(String::new()),
-            }),
-            ..options(false)
-        },
-        Options {
-            read_credentials: Some(safe_cex_engine::ReadCredentials {
-                key: "read".into(),
-                secret: String::new(),
-                passphrase: None,
-            }),
-            ..options(false)
-        },
-    ] {
-        let mut engine = seeded(opts);
+    for variant in 0..5 {
+        // Deliberately malformed opaque options exercise the venue boundary;
+        // trusted setup's malformed raw-input refusal is covered separately.
+        let engine = support::credentials::engine(options(true), |mut options| {
+            match variant {
+                0 => {
+                    options.credentials = None;
+                    options.read_credentials = None;
+                }
+                1 => options.public_data_only = true,
+                2 => options.credentials.as_mut().unwrap().passphrase = None,
+                3 => options.read_credentials.as_mut().unwrap().passphrase = None,
+                _ => options.read_credentials.as_mut().unwrap().signing.0.clear(),
+            }
+            Kucoin::new(options)
+        });
+        let mut engine = decorate(engine);
         result(ask(&mut engine), true).unwrap_err();
     }
 }

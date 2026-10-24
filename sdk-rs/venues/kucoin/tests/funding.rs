@@ -62,9 +62,11 @@ impl Harness {
     }
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);
-        self.actions.extend(
-            safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now).into_iter(),
-        );
+        self.actions
+            .extend(safe_cex_engine::test_support::prepared_actions(
+                &mut self.engine,
+                self.now,
+            ));
     }
     fn query(&mut self, from: f64, to: f64, limit: Option<u32>) {
         self.event(Event::Command(Command::Query {

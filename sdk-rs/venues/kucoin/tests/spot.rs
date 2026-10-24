@@ -53,11 +53,7 @@ impl H {
         };
         options.read_credentials = read_credentials;
         let mut h = Self {
-            e: Engine::new(
-                KucoinSpot::new(options),
-                Some(safe_cex_engine::test_support::seeded_entropy(seed)),
-            )
-            .unwrap(),
+            e: support::credentials::with_seed(options, KucoinSpot::new, seed),
             actions: vec![],
             failures: vec![],
             requests: vec![],
@@ -523,7 +519,11 @@ fn hf_native_place_and_amend_keep_caller_identity_on_original() {
 }
 #[test]
 fn whole_batch_preflight_rejects_duplicate_ids_and_unsupported_shapes() {
-    assert!(!KucoinSpot::new(Options::default()).capabilities().options);
+    assert!(
+        !KucoinSpot::new(safe_cex_venue_kucoin::Options::default())
+            .capabilities()
+            .options
+    );
     for invalid in ["duplicate", "bracket", "type", "id", "iv"] {
         let mut h = H::new(true);
         h.actions.clear();
@@ -1345,8 +1345,21 @@ fn secondary_reads_preserve_primary_mutations_and_unsigned_public_gets() {
                         .any(|(name, value)| { *name == "X-CHANNEL-API-CODE" && value == "3zexp" })
                 );
             }
-            // Public requests stay unsigned; private GETs use the read identity.
-            assert_eq!(request.route, None);
+            let route = if secondary && request.url.contains("/bullet-private") {
+                Some(safe_cex_engine::RequestRoute::Primary)
+            } else if secondary
+                && request.method == Method::Get
+                && !request.url.contains("/api/v2/symbols")
+                && !request.url.contains("/market/allTickers")
+            {
+                Some(safe_cex_engine::RequestRoute::Secondary)
+            } else {
+                None
+            };
+            assert_eq!(
+                request.route, route,
+                "shared Selection binds private egress only"
+            );
         }
         h.command(Command::FetchAccount { command: 1 });
         assert_identity(&h.http("/api/v2/user-info"), secondary, passphrase, h.now);
@@ -1406,23 +1419,30 @@ fn secondary_reads_preserve_primary_mutations_and_unsigned_public_gets() {
 #[test]
 fn invalid_secondary_identity_rejects_before_any_startup_io() {
     for invalid in ["key", "secret", "passphrase", "missing-passphrase"] {
-        let mut read = secondary_credentials(Some("read-only-pass"));
-        match invalid {
-            "key" => read.key.clear(),
-            "secret" => read.secret.clear(),
-            "passphrase" => read.passphrase = Some(String::new()),
-            "missing-passphrase" => read.passphrase = None,
-            _ => unreachable!(),
-        }
         let mut e = support::credentials::engine(
             Options {
                 key: Some("replay-key".into()),
                 secret: Some("replay-secret".into()),
-                passphrase: (invalid != "missing-passphrase").then(|| "replay-passphrase".into()),
-                read_credentials: Some(read),
+                passphrase: Some("replay-passphrase".into()),
+                read_credentials: Some(secondary_credentials(Some("read-only-pass"))),
                 ..Options::default()
             },
-            KucoinSpot::new,
+            |mut options| {
+                let read = options.read_credentials.as_mut().unwrap();
+                match invalid {
+                    "key" => read.credential.0.clear(),
+                    "secret" => read.signing.0.clear(),
+                    "passphrase" => {
+                        read.passphrase = Some(safe_cex_engine::signing::KeyRef(String::new()))
+                    }
+                    "missing-passphrase" => {
+                        read.passphrase = None;
+                        options.credentials.as_mut().unwrap().passphrase = None;
+                    }
+                    _ => unreachable!(),
+                }
+                KucoinSpot::new(options)
+            },
         );
         e.start(1700000000000.0);
         let actions = e.drain_actions().collect::<Vec<_>>();

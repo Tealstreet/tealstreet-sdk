@@ -28,8 +28,3 @@ pub(crate) fn public_headers() -> Vec<(&'static str, String)> {
         .map(|(name, value)| (*name, (*value).into()))
         .collect()
 }
-#[cfg(test)]
-#[path = "../tests/support/native_sign.rs"]
-mod native;
-#[cfg(test)]
-pub(crate) use native::{Credentials, headers};
