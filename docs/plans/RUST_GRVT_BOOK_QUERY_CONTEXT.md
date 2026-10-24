@@ -72,7 +72,9 @@ Integrity/Internal and status/protocol/codec failures seal strictly. Preparation
 and provider/bind denial remain strict through on_http_preparation_failed. The
 sixth transport failure is terminal with the native Network/NotSent refusal and
 no seventh request. Revoked or stale delivery cannot fail a live replacement.
-No new engine API, history authority, retry grant, timer or queue is needed.
+plan_retry_context Err(Revoked) returns silently; every other refusal seals the
+Plan strictly. No new engine API, history authority, retry grant, timer or queue
+is needed.
 
 ## Composition and preservation
 
@@ -112,3 +114,18 @@ book assertions while adapting only fixture dispatch to prepared_actions.
 
 Scoped cargo only, CARGO_BUILD_JOBS=4, one own build at a time. CI covers full
 workspace/features/WASM/size/replay; source review and green CI precede READY.
+
+
+## API review pins before originals
+
+Fe7 cleared plan 82570c4b6ff. Originals must distinguish HTTP 408/504 DATA
+(refusal kind Timeout, one native NotSent terminal, no retry) from the genuine
+released physical-Timeout retry. A 429 with Retry-After must keep native clamp,
+venue_code/message and NotSent, one terminal and no new Prepare or auto-defer.
+Network failures still receive the six declared immediate attempts.
+
+CALLERS must explicitly disclose the local ordering change: shared admission
+and capacity precede unknown-market empty success, so a full pool now refuses
+where the native path succeeded without I/O. The 256 retained peer-root local
+empty control pins that new contract and exact recovery, alongside the remote
+capacity control. No projection or synthetic request can bypass it.
