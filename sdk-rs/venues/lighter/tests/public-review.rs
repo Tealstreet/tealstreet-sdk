@@ -22,8 +22,8 @@ fn setup() -> (Engine<Lighter>, SocketId, HttpRequest, TimerId) {
         ..Options::default()
     }));
     e.start(1_000.0);
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -55,8 +55,8 @@ fn setup() -> (Engine<Lighter>, SocketId, HttpRequest, TimerId) {
         })
         .unwrap();
     e.handle(1_000.0, Event::WsOpened { socket });
-    let seed = e
-        .drain_actions()
+    let seed = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 r.url.ends_with("exchangeStats").then_some(r)
@@ -309,8 +309,8 @@ fn wholly_unusable_ticker_seed_retains_live_quotes_and_retries_with_backoff() {
                 })
                 .expect("bad ticker source must back off even while live quotes exist");
             e.handle(retry_at, Event::TimerFired { timer });
-            request = e
-                .drain_actions()
+            request = safe_cex_engine::test_support::prepared_actions(&mut e, retry_at)
+                .into_iter()
                 .find_map(|a| match a {
                     Action::Http(r) if r.url.ends_with("exchangeStats") => Some(r),
                     _ => None,

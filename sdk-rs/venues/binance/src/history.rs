@@ -4,6 +4,7 @@ use crate::account::{order_side, order_type, venue_error};
 use crate::sign::Query;
 use crate::wire::{HistoricalOrderRow, IncomeRow, PublicTrade, UserTrade};
 use crate::{BinanceFutures, Pending};
+use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
 use safe_cex_engine::history::{Completion, HistoryRows, RangeHistory};
 use safe_cex_engine::model::{Order, OrderStatus};
 use safe_cex_engine::paging::{self, PageRow, RangeWalk, Step, WindowOrder};
@@ -321,7 +322,7 @@ impl BinanceFutures {
             self.lookup(cx, command, symbol, client_order_id);
             return;
         }
-        if self.credentials.is_none() && !matches!(read, Read::PublicTrades { .. }) {
+        if !self.credentials.has_primary() && !matches!(read, Read::PublicTrades { .. }) {
             cx.done(command, "[]".into());
             return;
         }
@@ -466,7 +467,7 @@ impl BinanceFutures {
         }
         // Secondary GET snapshots may belong to another account. Their cached
         // client IDs cannot establish primary placement identity.
-        if self.options.read_credentials.is_none()
+        if !self.credentials.secondary_supplied()
             && let Some(order) = cx.store.orders().iter().find(|order| {
                 order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
             })
@@ -480,7 +481,7 @@ impl BinanceFutures {
             };
             return;
         }
-        if self.credentials.is_none() || self.options.public_data_only {
+        if !self.credentials.has_primary() || self.options.public_data_only {
             cx.fail(command, "Binance client order lookup requires credentials");
             return;
         }
@@ -495,9 +496,12 @@ impl BinanceFutures {
             },
         );
         // Placement identity belongs to the primary account, even when reads use a secondary key.
-        let credentials = self
+        let (selection, credentials) = self
             .credentials
-            .as_ref()
+            .select(CredentialRole::PrimaryRead {
+                reason: PrimaryReason::ClientOrderLookup,
+                scope: None,
+            })
             .expect("lookup credentials checked");
         let request = cx.request(
             Method::Get,
@@ -506,11 +510,11 @@ impl BinanceFutures {
             None,
             Pending::History(Request { command }),
         );
-        cx.sign_http(
+        selection.sign(
+            cx,
             request,
             Box::new(self.signed_recipe(credentials.clone(), query)),
         );
-        cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
     }
 
     fn lookup_response(
@@ -626,6 +630,7 @@ impl BinanceFutures {
     ) {
         self.signed(
             cx,
+            CredentialRole::Read { scope: None },
             Method::Get,
             path,
             query,

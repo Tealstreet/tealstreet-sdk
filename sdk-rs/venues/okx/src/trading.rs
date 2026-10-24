@@ -1,8 +1,9 @@
 //! Commands are preflighted once, then executed as ordered, non-retried writes.
 use crate::{Okx, Pending, wire};
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Credential, Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -153,13 +154,14 @@ impl Okx {
                 price,
                 amount,
             } => (command, self.plan_amend(cx, &id, price, amount)),
-            Command::FetchLeverage { command, symbol } => {
-                self.fetch_leverage(cx, command, symbol);
+            // The engine binds the command when the read is admitted.
+            Command::FetchLeverage { command: _, symbol } => {
+                self.fetch_leverage(cx, symbol);
                 return;
             }
-            Command::SetMarginType { command, .. } => {
-                cx.fail(
-                    command,
+            Command::SetMarginType { .. } => {
+                self.refuse_entry(
+                    cx,
                     not_sent("Only cross mode is supported").kind(ErrorKind::Unsupported),
                 );
                 return;
@@ -236,11 +238,7 @@ impl Okx {
             _ => return,
         };
         if self.credentials.is_none() || !self.account.ready {
-            cx.fail(id, not_sent("OKX account is not ready"));
-            return;
-        }
-        if self.trading.jobs.contains_key(&id) {
-            cx.fail(id, not_sent("command is already running"));
+            self.refuse_entry(cx, not_sent("OKX account is not ready"));
             return;
         }
         match result {
@@ -261,7 +259,25 @@ impl Okx {
                 self.trading.jobs.insert(id, job);
                 self.next_write(cx, id);
             }
-            Err(error) => cx.fail(id, not_sent(error).kind(ErrorKind::InvalidInput)),
+            Err(error) => self.refuse_entry(cx, not_sent(error).kind(ErrorKind::InvalidInput)),
+        }
+    }
+
+    /// A write refused before I/O admits a terminal-only Mutation owner, so the
+    /// engine caps it at NotSent. A rejected admission already failed the command.
+    fn refuse_entry(&self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        let credential = self.credentials.as_ref().map(|identity| Credential {
+            slot: CredentialSlot::Primary,
+            reference: identity.credential.clone(),
+        });
+        if let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Mutation,
+            credential,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) {
+            let _ = cx.fail_context(&context, error);
         }
     }
 
@@ -792,15 +808,16 @@ impl Okx {
             return;
         };
         if let Some(step) = job.steps.front() {
-            let headers = self.headers(cx.now, Method::Post, step.path, &step.body, true);
+            let headers = self.headers(Method::Post);
             cx.command_progress(command, step.receipts.clone());
-            cx.request(
+            let request = cx.request(
                 Method::Post,
                 format!("{}{}", self.rest(), step.path),
                 headers,
                 Some(step.body.clone()),
                 Pending::Trade(Request { command }),
             );
+            self.sign_request(cx, request, Method::Post, step.path, true, true);
             return;
         }
         let job = self.trading.jobs.remove(&command).expect("job");
@@ -1035,6 +1052,15 @@ impl Okx {
     }
 
     fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: VenueError) {
+        self.finish_failed_trade(cx, request, error, false);
+    }
+
+    pub(crate) fn trade_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
         self.finish_failed_trade(cx, request, error, false);
     }
 

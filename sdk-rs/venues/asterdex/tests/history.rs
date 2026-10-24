@@ -4,8 +4,10 @@
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, Query, Response, TimerId,
 };
-use safe_cex_venue_asterdex::{AsterDex, Options, sign::Version};
+mod support;
+use safe_cex_venue_asterdex::{AsterDex, sign::Version};
 use serde_json::{Value, json};
+use support::Options;
 
 struct Harness {
     engine: Engine<AsterDex>,
@@ -35,7 +37,7 @@ impl Harness {
     }
     fn options(options: Options) -> Self {
         Self {
-            engine: safe_cex_engine::test_support::seeded_engine(AsterDex::new(options)),
+            engine: support::engine(options),
             now: 1700000000000.0,
             requests: Vec::new(),
             timers: Vec::new(),
@@ -43,7 +45,7 @@ impl Harness {
         }
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in support::drain(&mut self.engine, self.now).into_iter() {
             match action {
                 Action::Http(request) => self.requests.push(request),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
@@ -468,15 +470,14 @@ fn authentication_and_malformed_stream_failures_never_complete_as_empty_success(
         }
         assert!(h.result(1).is_err(), "{body}");
     }
-    let mut h = Harness::options(Options {
+    // An explicit V3 wallet key that is not hex never reaches the venue.
+    let setup = Options {
         key: Some("agent".into()),
         secret: Some("bad-key".into()),
         api_version: Some(Version::V3),
         ..Options::default()
-    });
-    h.query(1, fills());
-    assert!(h.result(1).is_err());
-    assert!(h.requests.is_empty());
+    };
+    assert!(setup.try_build().is_err());
 }
 
 #[test]

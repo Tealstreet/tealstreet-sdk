@@ -8,10 +8,20 @@ use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{Cx, ErrorKind, Method, Outcome, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
 const TRADES: &str = "/api/v1/futures/trade/get_history_trades";
 const ORDERS: &str = "/api/v1/futures/trade/get_history_orders";
+fn local_read_policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Fills,
@@ -209,18 +219,34 @@ fn optional(v: f64) -> Option<f64> {
 impl BitunixFutures {
     pub(crate) fn query(&mut self, cx: &mut Cx<'_, Pending>, command: u32, query: Query) {
         if matches!(query, Query::OrderByClientId { .. }) {
-            cx.fail(
-                command,
-                "Bitunix client order lookup is not supported by the Rust engine",
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Bitunix client order lookup is not supported by the Rust engine")
+                    .kind(ErrorKind::Unsupported)
+                    .outcome(Outcome::NotSent),
             );
             return;
         }
         if matches!(query, Query::PublicTrades { .. }) {
-            cx.fail(command, "Not implemented");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Not implemented")
+                    .kind(ErrorKind::Unsupported)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         }
         if self.credentials.is_none() {
-            cx.done(command, "[]".into());
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.done_context(&context, "[]".into());
             return;
         }
         let (kind, symbol, order_id, from, to, limit) = match query {
@@ -261,11 +287,22 @@ impl BitunixFutures {
             Query::PublicTrades { .. } | Query::OrderByClientId { .. } => unreachable!(),
         };
         if kind == Kind::Fills && symbol.as_ref().is_none_or(|s| cx.store.market(s).is_none()) {
-            cx.done(command, "[]".into());
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.done_context(&context, "[]".into());
             return;
         }
         if [from, to].into_iter().flatten().any(|v| !v.is_finite()) {
-            cx.fail(command, "Bitunix history time must be finite");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Bitunix history time must be finite")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         }
         let walk = match kind {

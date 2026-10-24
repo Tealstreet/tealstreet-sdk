@@ -236,7 +236,12 @@ impl KucoinSpot {
                 amount,
             } => {
                 let Some(order) = cx.store.order(&id) else {
-                    cx.fail(command, not_sent("KuCoin Spot amend order not found"));
+                    let Ok(context) = cx.admit_http_command(crate::local_mutation_command_policy())
+                    else {
+                        return;
+                    };
+                    let _ =
+                        cx.fail_context(&context, not_sent("KuCoin Spot amend order not found"));
                     return;
                 };
                 Command::AmendOrderWithSymbol {
@@ -366,33 +371,45 @@ impl KucoinSpot {
                 })();
                 (command, result)
             }
-            Command::SetLeverage {
-                command, symbol, ..
-            } => {
+            Command::SetLeverage { symbol, .. } => {
+                let _ = cx.done_local_setting("[]".into(), |store| {
+                    store.update_setting(&symbol, |s| {
+                        s.leverage = 1.0;
+                        s.buy_leverage = Some(1.0);
+                        s.sell_leverage = Some(1.0);
+                    });
+                });
+                return;
+            }
+            Command::FetchLeverage { symbol, .. } => {
+                let Ok(context) = cx.admit_http_command(crate::local_read_command_policy()) else {
+                    return;
+                };
+                if cx.validate_read_root_context(&context).is_err() {
+                    return;
+                }
                 cx.store.update_setting(&symbol, |s| {
                     s.leverage = 1.0;
                     s.buy_leverage = Some(1.0);
                     s.sell_leverage = Some(1.0);
                 });
-                cx.done(command, "[]".into());
+                let _ = cx.done_context(&context, "1".into());
                 return;
             }
-            Command::FetchLeverage { command, symbol } => {
-                cx.store.update_setting(&symbol, |s| {
-                    s.leverage = 1.0;
-                    s.buy_leverage = Some(1.0);
-                    s.sell_leverage = Some(1.0);
-                });
-                cx.done(command, "1".into());
-                return;
-            }
-            Command::SetMarginType { command, .. } | Command::SetPositionMode { command, .. } => {
-                cx.done(command, "[]".into());
+            Command::SetMarginType { .. } | Command::SetPositionMode { .. } => {
+                let _ = cx.done_local_setting("[]".into(), |_| {});
                 return;
             }
             Command::FetchAccount { command } => {
                 if self.credentials.is_none() {
-                    cx.fail(command, "KuCoin Spot requires credentials");
+                    let Ok(context) = cx.admit_http_command(crate::local_read_command_policy())
+                    else {
+                        return;
+                    };
+                    let _ = cx.fail_context(
+                        &context,
+                        not_sent("KuCoin Spot requires credentials").kind(ErrorKind::InvalidInput),
+                    );
                 } else {
                     self.request(
                         cx,
@@ -405,11 +422,19 @@ impl KucoinSpot {
                 }
                 return;
             }
-            Command::FetchStpMode { command }
-            | Command::FetchOrderBook { command, .. }
-            | Command::SetStpMode { command, .. } => {
-                cx.fail(
-                    command,
+            unsupported @ (Command::FetchStpMode { .. }
+            | Command::FetchOrderBook { .. }
+            | Command::SetStpMode { .. }) => {
+                let policy = if matches!(unsupported, Command::SetStpMode { .. }) {
+                    crate::local_mutation_command_policy()
+                } else {
+                    crate::local_read_command_policy()
+                };
+                let Ok(context) = cx.admit_http_command(policy) else {
+                    return;
+                };
+                let _ = cx.fail_context(
+                    &context,
                     not_sent("unsupported KuCoin Spot command").kind(ErrorKind::Unsupported),
                 );
                 return;
@@ -417,8 +442,11 @@ impl KucoinSpot {
             _ => return,
         };
         if self.credentials.is_none() {
-            cx.fail(
-                id,
+            let Ok(context) = cx.admit_http_command(crate::local_mutation_command_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
                 not_sent("KuCoin Spot requires credentials").kind(ErrorKind::AuthInvalid),
             );
             return;
@@ -435,7 +463,13 @@ impl KucoinSpot {
                     effective: false,
                 },
             ),
-            Err(e) => cx.fail(id, not_sent(e)),
+            Err(e) => {
+                let Ok(context) = cx.admit_http_command(crate::local_mutation_command_policy())
+                else {
+                    return;
+                };
+                let _ = cx.fail_context(&context, not_sent(e));
+            }
         }
     }
 }

@@ -1,19 +1,19 @@
 #![allow(dead_code)]
 mod support;
+use crate::support::FixtureOptions as Options;
+use crate::support::*;
 use safe_cex_engine::{Action, Event, Notice};
-use safe_cex_venue_okx::{Okx, Options};
-use support::*;
 
 #[test]
 fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut engine = crate::support::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("pass".into()),
         ..Options::default()
-    }));
+    });
     engine.start(0.);
-    let request = actions(&mut engine).remove(0);
+    let request = prepared(&mut engine, 0.).remove(0);
     reply(
         &mut engine,
         &request,
@@ -21,7 +21,7 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
         1.,
     );
     assert_eq!(engine.store().markets().len(), 1);
-    let out = actions(&mut engine);
+    let out = prepared(&mut engine, 1.);
     assert!(out.iter().any(|a| is_get(a, "/api/v5/account/config")));
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
     let ticker = out
@@ -35,9 +35,9 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
         2.,
     );
     assert!(!engine.store().loaded().tickers);
-    let timer = retry_timer(&actions(&mut engine), 2.0, 1_000.0).unwrap();
+    let timer = retry_timer(&prepared(&mut engine, 2.), 2.0, 1_000.0).unwrap();
     engine.handle(1002., Event::TimerFired { timer });
-    let retry = actions(&mut engine).remove(0);
+    let retry = prepared(&mut engine, 1002.).remove(0);
     reply(
         &mut engine,
         &retry,
@@ -60,7 +60,7 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
         (0., 0., 0., 0., 0.)
     );
     assert!(
-        !actions(&mut engine)
+        !prepared(&mut engine, 1003.)
             .iter()
             .any(|a| is_get(a, "/api/v5/account/config"))
     );
@@ -68,7 +68,7 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
 
 #[test]
 fn catalogue_transport_failure_retries_with_fresh_accumulation() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let mut engine = crate::support::engine(Options::default());
     engine.start(0.);
     let Action::Http(request) = actions(&mut engine).remove(0) else {
         panic!()
@@ -96,10 +96,10 @@ fn catalogue_transport_failure_retries_with_fresh_accumulation() {
 #[test]
 fn eea_later_source_cannot_hide_all_malformed_rows_behind_an_earlier_product() {
     const FUTURE: &str = r#"{"instId":"BTC-USD-UM","instType":"FUTURES","ruleType":"xperp","ctType":"linear","ctVal":"0.001","ctValCcy":"BTC","settleCcy":"USD","uly":"BTC-USD","state":"live","lotSz":"1","tickSz":"0.1","minSz":"1","maxLmtSz":"1000","lever":"10"}"#;
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope(MARKET), 1.0);
@@ -178,7 +178,7 @@ fn nonfinite_or_nonpositive_instrument_rails_are_isolated_from_valid_peers() {
             let end = start + MARKET[start..].find('"').unwrap();
             let bad_market = format!("{}{bad}{}", &MARKET[..start], &MARKET[end..])
                 .replace("BTC-USDT-SWAP", "BAD-USDT-SWAP");
-            let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+            let mut e = crate::support::engine(Options::default());
             e.start(0.0);
             let request = actions(&mut e).remove(0);
             reply(
@@ -200,10 +200,10 @@ fn recovering_an_earlier_product_keeps_existing_market_setting_indices() {
         "\"instType\":\"SWAP\"",
         "\"instType\":\"FUTURES\",\"ruleType\":\"xperp\"",
     );
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope("{}"), 1.0);
@@ -239,10 +239,10 @@ fn overlapping_catalogue_and_ticker_retries_keep_one_walk_and_protect_live_field
         "\"instType\":\"FUTURES\",\"ruleType\":\"xperp\"",
     );
     let future_quote = TICKER.replace("BTC-USDT-SWAP", "BTC-USD-UM");
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope(MARKET), 1.0);
@@ -316,16 +316,16 @@ fn overlapping_catalogue_and_ticker_retries_keep_one_walk_and_protect_live_field
 
 #[test]
 fn failed_account_config_is_retried_by_the_startup_backoff() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut engine = crate::support::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("pass".into()),
         ..Options::default()
-    }));
+    });
     engine.start(0.);
-    let request = actions(&mut engine).remove(0);
+    let request = prepared(&mut engine, 0.).remove(0);
     reply(&mut engine, &request, &envelope(MARKET), 1.);
-    let config = actions(&mut engine)
+    let config = prepared(&mut engine, 1.)
         .into_iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
         .unwrap();
@@ -335,9 +335,9 @@ fn failed_account_config_is_retried_by_the_startup_backoff() {
         r#"{"code":"50011","msg":"rate limit","data":[]}"#,
         2.,
     );
-    let timer = retry_timer(&actions(&mut engine), 2.0, 1_000.0).unwrap();
+    let timer = retry_timer(&prepared(&mut engine, 2.), 2.0, 1_000.0).unwrap();
     engine.handle(1_002., Event::TimerFired { timer });
-    let config = actions(&mut engine)
+    let config = prepared(&mut engine, 1_002.)
         .into_iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
         .expect("config retried after failure");
@@ -347,7 +347,7 @@ fn failed_account_config_is_retried_by_the_startup_backoff() {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         5_003.,
     );
-    let mut pending: Vec<_> = actions(&mut engine)
+    let mut pending: Vec<_> = prepared(&mut engine, 5_003.)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade")))
         .collect();
@@ -358,7 +358,7 @@ fn failed_account_config_is_retried_by_the_startup_backoff() {
             envelope("")
         };
         reply(&mut engine, &a, &body, 5_004.);
-        pending.extend(actions(&mut engine).into_iter().filter(|a| {
+        pending.extend(prepared(&mut engine, 5_004.).into_iter().filter(|a| {
             matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade"))
         }));
     }
@@ -368,7 +368,7 @@ fn failed_account_config_is_retried_by_the_startup_backoff() {
 
 #[test]
 fn catalogue_rate_limit_retry_waits_for_retry_after() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let mut engine = crate::support::engine(Options::default());
     engine.start(0.);
     let Action::Http(request) = actions(&mut engine).remove(0) else {
         panic!("catalogue request")

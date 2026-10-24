@@ -2,7 +2,7 @@ use super::*;
 use crate::sign::oracle::Signed;
 use crate::test_config::Options;
 use safe_cex_engine::test_support::{ProbeVenue, http_requests};
-use safe_cex_engine::{Action, ReadCredentials};
+use safe_cex_engine::{Action, HttpRequest, ReadCredentials, RequestRoute};
 fn options() -> Options {
     Options {
         key: Some("primary-key".into()),
@@ -22,8 +22,14 @@ fn probe(
 ) -> ProbeVenue<BinanceFutures, impl FnMut(&mut BinanceFutures, &mut Cx<'_, Pending>)> {
     ProbeVenue::new(venue, |venue, cx| {
         for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
+            let role = if method == Method::Get {
+                CredentialRole::Read { scope: None }
+            } else {
+                CredentialRole::Mutation
+            };
             venue.signed(
                 cx,
+                role,
                 method,
                 "/secondary-test",
                 sign::Query::new(),
@@ -103,9 +109,73 @@ fn secondary_get_keeps_primary_mutations() {
                     "{:?}",
                     request
                 );
+                let route = if request.method == Method::Get {
+                    RequestRoute::Secondary
+                } else {
+                    RequestRoute::Primary
+                };
+                let declared = request.route;
+                assert_eq!(declared, Some(route));
             }
         }
     }
+}
+
+/// The role, not the HTTP method, selects key and egress.
+#[test]
+fn declared_role_selects_key_and_egress_for_any_method() {
+    let (venue, signer) = options().build();
+    let probe = ProbeVenue::new(
+        venue,
+        |venue: &mut BinanceFutures, cx: &mut Cx<'_, Pending>| {
+            venue.signed(
+                cx,
+                CredentialRole::Read { scope: None },
+                Method::Post,
+                "/declared-read",
+                sign::Query::new(),
+                Pending::Daily,
+            );
+            venue.signed(
+                cx,
+                CredentialRole::PrimaryRead {
+                    reason: safe_cex_engine::credential_selection::PrimaryReason::History,
+                    scope: None,
+                },
+                Method::Get,
+                "/declared-primary",
+                sign::Query::new(),
+                Pending::Daily,
+            );
+        },
+    );
+    let mut engine = safe_cex_engine::test_support::seeded_engine(probe);
+    engine.set_signer(Some(signer)).unwrap();
+    engine.start(1700000000000.0);
+    let requests = http_requests(&mut engine);
+    let find = |path: &str| {
+        requests
+            .iter()
+            .find(|r| r.url.contains(path))
+            .unwrap_or_else(|| panic!("{path} not sent"))
+    };
+    let key = |request: &HttpRequest| {
+        request
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("X-MBX-APIKEY"))
+            .map(|(_, value)| value.clone())
+    };
+    let read = find("/declared-read");
+    assert_eq!(
+        (key(read).as_deref(), read.route),
+        (Some("read-key"), Some(RequestRoute::Secondary))
+    );
+    let primary = find("/declared-primary");
+    assert_eq!(
+        (key(primary).as_deref(), primary.route),
+        (Some("primary-key"), Some(RequestRoute::Primary))
+    );
 }
 
 #[test]

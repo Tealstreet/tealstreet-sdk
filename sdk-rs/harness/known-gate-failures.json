@@ -1291,25 +1291,6 @@
             "checkpoint 4 account.positions[0].contractsNative",
             "checkpoint 5 account.positions[0].contractsNative"
           ]
-        },
-        {
-          "divergence": "Reported flat-position realized PnL differs; zero-size rows must retain their financial evidence.",
-          "keys": [
-            "account flatPositionPnl.length",
-            "account flatPositionPnl[0]",
-            "checkpoint 0 account.flatPositionPnl.length",
-            "checkpoint 0 account.flatPositionPnl[0]",
-            "checkpoint 1 account.flatPositionPnl.length",
-            "checkpoint 1 account.flatPositionPnl[0]",
-            "checkpoint 2 account.flatPositionPnl.length",
-            "checkpoint 2 account.flatPositionPnl[0]",
-            "checkpoint 3 account.flatPositionPnl.length",
-            "checkpoint 3 account.flatPositionPnl[0]",
-            "checkpoint 4 account.flatPositionPnl.length",
-            "checkpoint 4 account.flatPositionPnl[0]",
-            "checkpoint 5 account.flatPositionPnl.length",
-            "checkpoint 5 account.flatPositionPnl[0]"
-          ]
         }
       ]
     },
@@ -1407,15 +1388,6 @@
             "checkpoint 1 account.orders.length",
             "checkpoint 1 account.orders[0]",
             "checkpoint 5 account.orders[1].status"
-          ]
-        },
-        {
-          "divergence": "Private protocol/authentication/stream coverage is incomplete in this fixture; this known FAIL is not authenticated lifecycle or complete private parity evidence.",
-          "keys": [
-            "rust: Binance Spot request never acknowledged",
-            "rust: Binance Spot subscription never acknowledged",
-            "ts: Binance Spot request never acknowledged",
-            "ts: Binance Spot subscription never acknowledged"
           ]
         }
       ]
@@ -17477,20 +17449,6 @@
             "checkpoint 8 account.orders[1].clientOrderId",
             "checkpoint 8 account.orders[2].clientOrderId"
           ]
-        },
-        {
-          "divergence": "Private protocol/authentication/stream coverage is incomplete in this fixture; this known FAIL is not authenticated lifecycle or complete private parity evidence.",
-          "keys": [
-            "rust: missing private subscription user.advance.order",
-            "rust: missing private subscription user.balance",
-            "rust: missing private subscription user.order",
-            "rust: missing private subscription user.positions",
-            "rust: missing private subscription user.trade",
-            "ts: missing private subscription user.advance.order",
-            "ts: missing private subscription user.balance",
-            "ts: missing private subscription user.order",
-            "ts: missing private subscription user.positions"
-          ]
         }
       ]
     },
@@ -17553,17 +17511,6 @@
             "checkpoint 4 account.orders[1].id",
             "checkpoint 4 account.orders[1].symbol",
             "checkpoint 4 account.orders[2]"
-          ]
-        },
-        {
-          "divergence": "Private protocol/authentication/stream coverage is incomplete in this fixture; this known FAIL is not authenticated lifecycle or complete private parity evidence.",
-          "keys": [
-            "rust: missing GRVT private stream: v1.fill",
-            "rust: missing GRVT private stream: v1.order",
-            "rust: missing GRVT private stream: v1.position",
-            "ts: missing GRVT private stream: v1.fill",
-            "ts: missing GRVT private stream: v1.order",
-            "ts: missing GRVT private stream: v1.position"
           ]
         }
       ]
@@ -53117,19 +53064,6 @@
             "checkpoint 16 account.positions[0]",
             "checkpoint 17 account.positions.length",
             "checkpoint 17 account.positions[0]"
-          ]
-        },
-        {
-          "divergence": "Private protocol/authentication/stream coverage is incomplete in this fixture; this known FAIL is not authenticated lifecycle or complete private parity evidence.",
-          "keys": [
-            "rust: WOO private authentication never completed",
-            "rust: WOO socket has no heartbeat wss://wss.woox.io/v2/ws/private/stream/undefined",
-            "rust: missing WOO subscription algoexecutionreportv2",
-            "rust: missing WOO subscription executionreport",
-            "ts: WOO private authentication never completed",
-            "ts: WOO socket has no heartbeat wss://wss.woox.io/v2/ws/private/stream/undefined",
-            "ts: missing WOO subscription algoexecutionreportv2",
-            "ts: missing WOO subscription executionreport"
           ]
         },
         {

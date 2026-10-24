@@ -41,6 +41,7 @@ fn fixture() -> (LocalSigner, Identities) {
         signing: KeyRef(format!("owned/{slot}/mac")),
         passphrase: None,
         stable_id: Some(format!("fixture/{slot}")),
+        extra: Default::default(),
     };
     let primary = identity("primary");
     let secondary = identity("read");
@@ -224,7 +225,13 @@ fn closed_schema_rejects_caller_refs_secret_exports_and_unknown_families() {
     ] {
         assert!(serde_json::from_str::<Input>(input).is_err());
     }
-    for venue in ["bitunix", "okx", "binance-unknown", "bybit-unknown", ""] {
+    for venue in [
+        "bitunix",
+        "okx-unknown",
+        "binance-unknown",
+        "bybit-unknown",
+        "",
+    ] {
         assert!(matches!(
             hosted_signing::prepare(venue, &ids, http(QUERY)),
             Err(SignError::Unsupported)

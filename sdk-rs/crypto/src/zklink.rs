@@ -52,7 +52,8 @@ pub fn sign(seed: &[u8], payload: &[u8]) -> Result<ZkLinkSignature, &'static str
     if payload.len() > 92 {
         return Err("zkLink payload exceeds 92 bytes");
     }
-    let mut effective_seed = Sha256::digest(seed).to_vec();
+    // Derived seed material is wiped; the franklin scalar type cannot be.
+    let mut effective_seed = zeroize::Zeroizing::new(Sha256::digest(seed).to_vec());
     let scalar = loop {
         let raw = Sha256::digest(&effective_seed);
         let mut repr = FsRepr::default();
@@ -60,7 +61,7 @@ pub fn sign(seed: &[u8], payload: &[u8]) -> Result<ZkLinkSignature, &'static str
             .map_err(|_| "zkLink scalar encoding failed")?;
         match Fs::from_repr(repr) {
             Ok(value) => break value,
-            Err(_) => effective_seed = raw.to_vec(),
+            Err(_) => effective_seed.copy_from_slice(&raw),
         }
     };
     let private_key = PrivateKey::<Bn256>(scalar);
