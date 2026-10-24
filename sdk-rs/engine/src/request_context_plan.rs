@@ -279,3 +279,25 @@ fn project_deadline(raw_now: f64, span_ms: u64) -> Result<f64, Error> {
 #[cfg(test)]
 #[path = "request_context_plan_tests.rs"]
 mod tests;
+
+/// One call of a streamed serial Plan. It is admitted only from the previous
+/// call's exact DATA custody, or its delayed-continuation callback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SerialCall {
+    /// Read or Mutation, under the Plan's admitted credential.
+    pub operation: super::Operation,
+    /// The per-call bound: `now + timeout_ms`. The root has no wall-clock.
+    pub timeout_ms: u32,
+    /// 1, or 2 for a native single resend of a proven refusal.
+    pub attempts: u8,
+}
+
+/// Admission terms of a streamed serial Plan; there is no declared length.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SerialPolicy {
+    pub credential: super::Credential,
+    pub pacing: Option<super::Pacing>,
+    /// Definitive refusals permit `done_plan` (native `done []`); never an
+    /// override of `fail_plan`.
+    pub refusals_complete: bool,
+}

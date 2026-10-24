@@ -366,6 +366,20 @@ fails at an assertion.
     the streamed IDs. With a released live call they project Unknown and arm
     the fence.
 
+### RED commit notes
+
+- Tests live in `request_context_serial_plan_tests.rs` as `serial_NN_*`, one
+  name prefix per control above. Inert stubs return State, so each RED fails
+  at an assertion (the admission check, or RED8's Invalid). RED15 is a GREEN
+  control on the existing `done_empty_plan`.
+- RED19's stop cases (credential revoke, Session retirement, shutdown, caller
+  cancel) are source-stage controls. Their engine entry points are fixed by
+  the source, and they are added with it before review.
+- The source changes one existing control on purpose:
+  `plan_receipt_cap_tests` `Mode::RefuseWrite` asserts that a WriteAfterReads
+  command wait is Revoked. It becomes a binding control, and every ReadOnly
+  case stays untouched.
+
 ## Gates
 
 - Engine focused tests in plans, locks, sockets and default feature modes, the

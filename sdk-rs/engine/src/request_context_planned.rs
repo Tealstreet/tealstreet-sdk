@@ -1648,6 +1648,10 @@ impl ContextRegistry {
             })
     }
     #[cfg(test)]
+    pub(in super::super) fn command_writes(&self, command: CommandId) -> Option<&CommandWrites> {
+        self.commands.get(&command)?.writes.as_ref()
+    }
+    #[cfg(test)]
     pub(in super::super) fn plan_context_storage(&self) -> (usize, usize, usize) {
         (
             self.contexts.len(),
@@ -1823,6 +1827,9 @@ impl<P> Cx<'_, P> {
 
 #[path = "request_context_history_plan.rs"]
 mod history;
+
+#[path = "request_context_serial_plan.rs"]
+mod serial;
 
 #[cfg(all(test, not(feature = "http-mutation-barriers")))]
 #[path = "request_context_group_disabled_tests.rs"]
