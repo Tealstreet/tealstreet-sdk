@@ -2937,3 +2937,14 @@ done_local_setting. Native pre-credential ordering and the true-mode refusal
 remain unchanged. No venue-local admission, owner or completion algorithm.
 Bitrue inventory 30 -> 29 occurrences, 18 -> 17 fingerprints; all private
 signing/read/write migrations remain separate.
+
+## Finite flat-position PnL evidence
+
+Plan-first `1fadf14a790` and original-control commit `bae23010581` isolate a
+shared evidence bug: unavailable native NaN passed the flat-row admission test
+and became a null-valued PnL row. Original controls report five PASS/two assertion
+FAIL; the finite-conversion predicate makes all seven PASS. The scoped financial,
+comparison and declaration-policy checks pass 28 controls. Zero, negative and
+numeric-string PnL remain evidence, genuine PnL changes still fail, and inputs
+remain immutable. Native state and all other comparison fields are untouched.
+The fourteen inverse declaration keys require fresh raw CI proof before pruning.

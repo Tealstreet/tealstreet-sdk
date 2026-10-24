@@ -1575,3 +1575,12 @@ controls: command-owner capacity/recovery, expired/sub-ms receipt, duplicate
 original owner/diagnostic, Background Context independence, all credential
 configurations, true-mode refusal and absent symbol behavior. No fabricated
 Context or missing-method compile failure is evidence.
+
+## Flat-position unavailable PnL projection
+
+Original financial-evidence controls reproduce two assertion failures: native
+NaN creates a null-PnL row, and native/TS unavailable evidence differs. Five
+working controls retain real finite PnL, numeric strings, non-flat positions and
+genuine PnL mismatches. Admission now uses the same finite conversion as the
+projection, preserving zero and losses while excluding unavailable sentinels.
+Declaration pruning requires fresh inverse replay evidence for each removed key.
