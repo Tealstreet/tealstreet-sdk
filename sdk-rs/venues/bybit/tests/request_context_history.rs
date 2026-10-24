@@ -178,7 +178,8 @@ fn closed_position_pages_are_managed_and_caller_bounded() {
         5_000,
     );
     let page = h.take("/v5/position/closed-pnl");
-    assert_eq!(page.timeout_ms, Some(20_000), "a managed page window");
+    // A managed page whose window never outlives the caller's 5 s wait.
+    assert_eq!(page.timeout_ms, Some(5_000));
     h.advance(5_001.0);
     assert_eq!(failure(&h, 66).kind, Some(ErrorKind::Timeout));
     assert!(!h.has_request("/v5/position/closed-pnl"));
