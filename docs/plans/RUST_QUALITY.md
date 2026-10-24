@@ -1655,3 +1655,59 @@ reference tests across26 targets pass (target counts include empty doc tests).
 Strict Clippy/fmt, bans and both inventory checks pass after the fix. Independent
 source/adversarial, caller and full-map delta reviews are CLEAR atbec93dd562a;
 architecture gate No. CI family size/CPU and other CI gates remain pending.
+
+
+### Hyperliquid spot candle custody controls
+
+Eleven dedicated controls cover standalone/merged spot on both networks, exact
+native wire and rows, validation order, real Prepare/Bind/Claim, early delivery,
+original deadline, preparation failure, clock/capacity recovery and duplicate
+owner/delivery. All pass with zero ignored. Existing candle and spot fixtures
+retain native assertions while driving managed preparation. The new probe opens
+no socket, so it makes no standalone socket-composition claim.
+
+
+## Crypto.com immediate trading managed controls
+
+Plan and original controls were committed before production. Re-executed on
+actual db6fa45bbb7 with unchanged source, the dedicated target produced 18
+assertion REDs and 8 working GREEN controls. After adoption all 26 pass, including
+all three non-finite clocks, full genuine-owner capacity and recovery, duplicate
+live owners, native validation/key precedence, missing-key auth-health isolation,
+fixed-mode Store preservation from either initial value, warning order, repeated
+slot reuse, private placement bytes/progress and legacy empty jobs. No ignored
+tests, removed financial assertion or fabricated custody; broad replay and
+WASM/CPU/memory checks belong to CI.
+
+The scoped Crypto.com suite passes 174 tests across 16 targets; strict all-target
+Clippy, formatting, bans and the 15 request inventory tests pass. Read-only
+credential scanning confirms no key-selection term change, and all production
+outside Crypto.com trading.rs stays base-exact. Original controls remain
+byte-identical to their RED checkpoint. CI is still required before readiness.
+
+
+## Crypto.com public discovery managed controls
+
+Plan preceded original compiling controls: 8 assertion RED/7 GREEN, then a
+caller-review live-prefix/expired-stream-end RED produced 9 RED/7 GREEN.
+All 16 now pass, covering Public preparation, parked expiry and late readiness,
+exact deadline in both ingress orders, cached quote preservation, genuine owner
+capacity/recovery, catalogue-to-ticker slot handoff, native wire/values/backoff,
+private startup ordering and expired-metadata sibling recovery.
+
+Two no-I/O assertions were corrected to permit only shared ManagedHttp::Cancel
+cleanup, after a diagnostic proved Cancel was their sole unexpected action;
+Http/Prepare/Bind/WsConnect remain forbidden, and Store assertions stay exact.
+Existing financial and signing assertions remain. Fixture preparation uses
+existing event times; cancelled deadlines are removed from the fixture's active
+timer list as a host would. Signer probes gain a genuine unused carrier Context,
+with no new managed-signing claim. Broad CI gates remain pending.
+
+
+Discovery closure adds a seventeenth managed control: raw ticker preparation
+remains parked while native private startup proceeds, then real prepare/bind/
+claim releases the ticker and publishes quotes. The overseer accepted this
+independence; CALLERS names the physical-order consequence. All three bounded
+reviews are CLEAR at a9282a7e787. Refreshed scoped suite: 165 tests/16 targets,
+zero ignored; strict all-target Clippy passes. Actual landing integration retains
+all incoming foreign changes and only the discovery singleton inventory prune.
