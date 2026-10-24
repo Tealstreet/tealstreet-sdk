@@ -123,3 +123,39 @@ custody assertions still fail. Log:
 `/tmp/codex-hcmq3f-polymarket-midpoint-original-failure-progress.log`.
 The expiry control name now explicitly distinguishes forbidden expired-DATA
 publication from preserved failure-owned progression.
+
+## Production design after plan/control clearance
+
+Both codex-uufub4 and codex-5c57jl cleared corrected checkpoint `c2a4a9c0f7f`.
+The implementation carries an engine-issued Context per inflight offset and in
+Pending, checks exact ownership/DATA before shared success(response), and retires
+the old Context before native successor/retry admission. Replaced catalogue
+batches retire their resources instead of retaining orphaned pending work.
+
+A newly possible unissued admission/queue refusal backs off the same offset
+without synchronous successor admission: recursively failing all later offsets
+under shared pressure would turn capacity refusal into unbounded stack work.
+Actual preparation, transport, timeout and malformed/native failures preserve
+native immediate next-batch progress and independent failed-offset backoff.
+This explicit boundary and the new20-second bound are documented in CALLERS.
+
+All nine original corrected controls now PASS unchanged. The first implementation
+compile used a Vec for the managed static-header slice; it did not execute tests
+and is not runtime evidence. The corrected header declaration emits the same
+single Content-Type header. Additional shared-capacity/credit recovery and stale
+host-token/DATA controls live in midpoint_admission.rs; full scoped verification,
+exact source/caller review, actual-tip integration and CI remain separate gates.
+
+The first broader scoped run stopped at36 account-fixture setup failures:
+its raw-only collector could not obtain the newly managed /midpoints request.
+The dedicated9+2 custody controls already passed. Account and trading fixture
+collectors now use the existing prepared_actions driver, one line each; every
+original financial/wire/assertion byte otherwise remains unchanged. No private
+account/trading production code is changed to accommodate the test harness.
+
+Scoped corrected native run:155 tests PASS, zero failures/ignored, including the
+unchanged original nine and two additional capacity/stale-host controls. Every
+account/trading financial assertion remains intact after the one-line collector
+changes. The exact implementation artifact is
+`/tmp/codex-hcmq3f-polymarket-midpoint-source.patch`, SHA256
+`4ef45a8e518bef1f8f44b80783f42387a301a0f3f8722be969c483781c9e10b6`.
