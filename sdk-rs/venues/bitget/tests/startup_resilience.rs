@@ -1,6 +1,8 @@
 //! Scripted discovery regressions; no network or account credentials.
+use crate::support::FixtureOptions as Options;
+mod support;
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
-use safe_cex_venue_bitget::{BitgetFutures, Options};
+use safe_cex_venue_bitget::BitgetFutures;
 
 /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
 fn jittered(actual: f64, nominal: f64) -> bool {
@@ -8,10 +10,10 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 }
 const CATALOGUE: &str = r###"{"code":"00000","data":[{"broken":true},{"symbol":"BTCUSDT","baseCoin":"BTC","quoteCoin":"USDT","symbolStatus":"normal","pricePlace":"1","priceEndStep":"1","sizeMultiplier":"0.001","minTradeNum":"0.001","maxOrderQty":"120","maxLever":"125"}]}"###;
 fn public_engine() -> Engine<BitgetFutures> {
-    safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(Options {
+    crate::support::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }))
+    })
 }
 #[test]
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
@@ -76,12 +78,12 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(Options {
+    let mut engine = crate::support::engine(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         passphrase: Some("scripted-passphrase".into()),
         ..Default::default()
-    }));
+    });
     engine.start(0.0);
     let catalogue = engine
         .drain_actions()

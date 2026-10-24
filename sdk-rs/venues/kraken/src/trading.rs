@@ -2,6 +2,7 @@
 use crate::{Kraken, Pending, sign};
 use safe_cex_engine::model::*;
 use safe_cex_engine::num;
+use safe_cex_engine::request_context::Operation;
 use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
@@ -181,10 +182,11 @@ impl Kraken {
                 symbol: _,
             } => {
                 if *hedged {
-                    cx.fail(
-                        *command,
-                        not_sent("Kraken Futures only supports one-way positions")
-                            .kind(ErrorKind::Unsupported),
+                    crate::public_context::local(
+                        cx,
+                        Operation::Mutation,
+                        Err(not_sent("Kraken Futures only supports one-way positions")
+                            .kind(ErrorKind::Unsupported)),
                     );
                 } else {
                     cx.done(*command, "null".into());
@@ -194,13 +196,26 @@ impl Kraken {
             _ => return false,
         };
         match result {
-            Err(error) => cx.fail(id, not_sent(error)),
+            Err(error) => crate::public_context::local(
+                cx,
+                if matches!(command, Command::FetchLeverage { .. }) {
+                    Operation::Read
+                } else {
+                    Operation::Mutation
+                },
+                Err(not_sent(error)),
+            ),
             Ok((steps, amend)) => {
                 if self.signer.is_none() || self.options.public_data_only {
-                    cx.fail(
-                        id,
-                        not_sent("Kraken trading requires API credentials")
-                            .kind(ErrorKind::AuthInvalid),
+                    crate::public_context::local(
+                        cx,
+                        if matches!(command, Command::FetchLeverage { .. }) {
+                            Operation::Read
+                        } else {
+                            Operation::Mutation
+                        },
+                        Err(not_sent("Kraken trading requires API credentials")
+                            .kind(ErrorKind::AuthInvalid)),
                     );
                 } else {
                     self.trading.queue.push_back(Job {
