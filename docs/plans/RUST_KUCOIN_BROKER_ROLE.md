@@ -53,13 +53,15 @@ refused.
   - The secondary's `extra[key]` becomes the primary's ref when the primary
     has one, and is absent otherwise.
   - Secondary-supplied material for that key is refused.
-  - **Open for claude-19pt8s:** `ExtraFieldPolicy` documents "extra refs never
-    fall back across slots, so there is no fallback variant". `AliasPrimary` is
-    not a fallback (no slot borrows another's material when its own is missing):
-    it is a declared, always-on share of one installed copy. If you would rather
-    keep the enum closed, the alternative is the caller supplying the broker
-    material on both identities, which installs two copies. I recommend the
-    alias.
+  - **Approved by claude-19pt8s**, as a declared, always-on share of one
+    installed copy (not a fallback), under four conditions:
+    - (a) the secondary never supplies its own broker material (refused);
+    - (b) no primary broker means the secondary gets none (no error, nothing
+      invented);
+    - (c) the alias names exactly the primary's role ref, so it carries
+      #1990's shared binding and #1973's role semantics;
+    - (d) Rust setup, codegen and TS accept `AliasPrimary` only on the
+      secondary's extra policy.
 - KuCoin construction rules (`kucoin` and `kucoinspot`), in `signerSetup`:
   - primary `extra: {key: kucoinBroker, field: optional, encoding: utf8,
     trim: true}`;
@@ -68,6 +70,9 @@ refused.
   both. codex-9czdjh's cutover supplies the material in setup.
 
 ## REDs (each shown failing first)
+
+The REDs decode the policy and role from JSON, so they fail at runtime (P4/P6b
+style) rather than at compile time.
 
 - R1 (crypto): a `kucoinBroker` extra under the KuCoin policy installs one ref,
   and that ref signs `HmacSha256` over `[stamp, partner, Credential(api key)]`
@@ -79,6 +84,8 @@ refused.
     material is installed once.
   - Secondary-supplied broker material is refused.
   - No primary broker means no secondary broker.
+- R3b (crypto): condition (d). `aliasPrimary` on the primary slot is
+  refused at setup.
 - R4 (after #1990 lands): the role binding. A broker ref refuses every other
   algorithm and `Present`/`Credential`; an ordinary ref cannot sign as a
   broker. This is pinned once the table exists.

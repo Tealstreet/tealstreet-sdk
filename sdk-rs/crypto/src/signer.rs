@@ -1351,30 +1351,20 @@ mod tests {
         assert_eq!(signer.key(&primary.signing).unwrap(), b"YXBleC1zZWNyZXQ=");
     }
 
-    // KuCoin broker role (RUST_KUCOIN_BROKER_ROLE.md). REDs: the role and the
-    // trim/alias setup options do not exist yet.
+    // KuCoin broker role (RUST_KUCOIN_BROKER_ROLE.md). The policy and role are
+    // decoded from JSON, so these REDs fail at runtime until both exist.
+    fn kucoin_policy_json() -> serde_json::Value {
+        serde_json::json!({
+            "primary": {"extra": {"key": "kucoinBroker", "field": "optional",
+                "encoding": "utf8", "trim": true}},
+            "secondary": {"extra": {"key": "kucoinBroker", "field": "aliasPrimary"}}
+        })
+    }
     fn kucoin_policy() -> CredentialSetupPolicy {
-        use safe_cex_engine::signing::{ExtraFieldPolicy, ExtraKeyPolicy, IdentitySetupPolicy};
-        CredentialSetupPolicy {
-            primary: Some(IdentitySetupPolicy {
-                extra: Some(ExtraKeyPolicy {
-                    key: ExtraKey::KucoinBroker,
-                    field: ExtraFieldPolicy::Optional,
-                    encoding: Some(KeyEncoding::Utf8),
-                    trim: true,
-                }),
-                ..Default::default()
-            }),
-            secondary: Some(IdentitySetupPolicy {
-                extra: Some(ExtraKeyPolicy {
-                    key: ExtraKey::KucoinBroker,
-                    field: ExtraFieldPolicy::AliasPrimary,
-                    encoding: None,
-                    trim: false,
-                }),
-                ..Default::default()
-            }),
-        }
+        serde_json::from_value(kucoin_policy_json()).expect("KuCoin broker setup policy decodes")
+    }
+    fn broker_role() -> ExtraKey {
+        serde_json::from_str("\"kucoinBroker\"").expect("kucoinBroker is a role")
     }
     fn kucoin_setup(broker: Option<&str>, secondary: serde_json::Value) -> serde_json::Value {
         let mut primary = serde_json::json!({"key": "api-key", "secret": "api-secret"});
@@ -1424,7 +1414,7 @@ mod tests {
         )
         .unwrap();
         let primary = ids.primary.unwrap();
-        let broker = primary.extra[&ExtraKey::KucoinBroker].clone();
+        let broker = primary.extra[&broker_role()].clone();
         assert_eq!(
             broker_sign(&signer, &broker, &primary.credential),
             Ok(hmac_of(b"broker-secret"))
@@ -1441,7 +1431,7 @@ mod tests {
         )
         .unwrap();
         let primary = ids.primary.unwrap();
-        let broker = primary.extra[&ExtraKey::KucoinBroker].clone();
+        let broker = primary.extra[&broker_role()].clone();
         assert_eq!(
             broker_sign(&signer, &broker, &primary.credential),
             Ok(hmac_of(b"b"))
@@ -1467,8 +1457,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            ids.secondary.unwrap().extra.get(&ExtraKey::KucoinBroker),
-            ids.primary.unwrap().extra.get(&ExtraKey::KucoinBroker)
+            ids.secondary.unwrap().extra.get(&broker_role()),
+            ids.primary.unwrap().extra.get(&broker_role())
         );
         let own = serde_json::json!({"key": "read-key", "secret": "read-secret",
             "extra": {"kucoinBroker": {"value": "other"}}});
@@ -1485,6 +1475,25 @@ mod tests {
         )
         .unwrap();
         assert!(ids.secondary.unwrap().extra.is_empty());
+    }
+
+    /// Condition (d): an alias is a secondary-only policy; the primary has
+    /// nothing to alias, so trusted setup refuses it there.
+    #[test]
+    fn kucoin_alias_policy_is_refused_on_the_primary_slot() {
+        let mut policy = kucoin_policy_json();
+        policy["primary"]["extra"] =
+            serde_json::json!({"key": "kucoinBroker", "field": "aliasPrimary"});
+        let policy: CredentialSetupPolicy =
+            serde_json::from_value(policy).expect("aliasPrimary decodes");
+        assert_eq!(
+            LocalSigner::from_json_with_policy(
+                kucoin_setup(Some("broker-secret"), serde_json::Value::Null).to_string(),
+                policy,
+            )
+            .err(),
+            Some(SignError::InvalidRequest)
+        );
     }
 
     #[test]
