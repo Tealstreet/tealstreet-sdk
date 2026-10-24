@@ -24,7 +24,7 @@ fn reply(e: &mut Engine<Okx>, request: RequestId, now: f64, body: &str) -> Vec<A
             },
         },
     );
-    e.drain_actions().collect()
+    crate::support::prepared(e, now)
 }
 fn events(out: &[Action], code: &str) -> usize {
     out.iter()
@@ -40,7 +40,7 @@ fn public_startup_degrades_once_keeps_retrying_and_recovers() {
             ..Default::default()
         });
         e.start(0.0);
-        let out: Vec<_> = e.drain_actions().collect();
+        let out = crate::support::prepared(&mut e, 0.0);
         let mut pending = request(&out, "public/instruments");
         let mut now = 0.0;
         if fail_tickers {
@@ -64,7 +64,7 @@ fn public_startup_degrades_once_keeps_retrying_and_recovers() {
                     error: &cause,
                 },
             );
-            let out: Vec<_> = e.drain_actions().collect();
+            let out = crate::support::prepared(&mut e, now);
             assert_eq!(
                 events(&out, "request.failed"),
                 1,
@@ -114,7 +114,7 @@ fn public_startup_degrades_once_keeps_retrying_and_recovers() {
                 .expect("continuing jittered capped retry");
             now = at;
             e.handle(now, Event::TimerFired { timer });
-            let out: Vec<_> = e.drain_actions().collect();
+            let out = crate::support::prepared(&mut e, now);
             pending = request(
                 &out,
                 if fail_tickers {
@@ -167,7 +167,7 @@ fn empty_aggregate_catalogue_keeps_startup_retrying() {
         ..Default::default()
     });
     e.start(0.0);
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = crate::support::prepared(&mut e, 0.0);
     let pending = request(&out, "public/instruments");
     let out = reply(&mut e, pending, 0.0, &crate::support::envelope(""));
     assert!(!e.store().loaded().markets);
@@ -180,7 +180,7 @@ fn empty_aggregate_catalogue_keeps_startup_retrying() {
         })
         .expect("empty catalogue requires retry");
     e.handle(1000.0, Event::TimerFired { timer });
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = crate::support::prepared(&mut e, 1000.0);
     let pending = request(&out, "public/instruments");
     reply(
         &mut e,
@@ -198,7 +198,7 @@ fn venue_rejection_reports_latest_parsed_cause_without_raw_body() {
         ..Default::default()
     });
     e.start(0.0);
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = crate::support::prepared(&mut e, 0.0);
     let mut pending = request(&out, "public/instruments");
     let mut now = 0.0;
     for attempt in 1..=6 {
@@ -235,7 +235,7 @@ fn venue_rejection_reports_latest_parsed_cause_without_raw_body() {
             .expect("retry remains armed");
         now = at;
         e.handle(now, Event::TimerFired { timer });
-        let out: Vec<_> = e.drain_actions().collect();
+        let out = crate::support::prepared(&mut e, now);
         pending = request(&out, "public/instruments");
     }
 }
@@ -247,7 +247,7 @@ fn malformed_body_does_not_leak_preview_into_degradation() {
         ..Default::default()
     });
     e.start(0.0);
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = crate::support::prepared(&mut e, 0.0);
     let mut pending = request(&out, "public/instruments");
     let mut now = 0.0;
     for attempt in 1..=6 {
@@ -277,7 +277,7 @@ fn malformed_body_does_not_leak_preview_into_degradation() {
             .expect("retry remains armed");
         now = at;
         e.handle(now, Event::TimerFired { timer });
-        let out: Vec<_> = e.drain_actions().collect();
+        let out = crate::support::prepared(&mut e, now);
         pending = request(&out, "public/instruments");
     }
 }

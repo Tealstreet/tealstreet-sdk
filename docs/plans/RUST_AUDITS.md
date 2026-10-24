@@ -3052,3 +3052,28 @@ prefix. Shared Context cleanup is separate from DATA admission: already-admitted
 failure keeps its native retry even after sibling issuance prunes expired
 retirement metadata. Completed catalogue retires before successor admission so
 capacity cannot strand ticker startup. No local issuer/timer/selection algorithm.
+
+### Kraken Futures public candle custody
+
+Four lib.rs legacy request occurrences are adopted: the chart send, numeric
+failure, and final numeric done/fail. Family27->23, lib4->0; only that exact
+manifest block is removed. No Spot, signing/key-selection, account, history,
+trading or shared engine changes. Existing fixture assertions remain intact;
+the secondary probe constructor receives only the root/context field carry.
+Plan and original assertion
+checkpoints precede source; the28 controls began17 assertionRED/11GREEN.
+Source-stage recovery suffix correction records the required root+child two-slot
+geometry without altering the original initial-capacity assertions. The28 now
+pass, plus47 existing public/startup/socket/local-context controls. Architecture
+gate No; bounded source review and full family CI remain pending.
+
+
+## Crypto.com PublicTrades authority
+
+The unsigned PublicTrades endpoint now owns an exclusive ReadHistoryRows
+completion rooted at the caller receipt. Shared admission precedes native wait;
+DATA admission precedes codec/staging and final response policy. The public
+legacy cursor branch is removed rather than retained beside a managed terminal.
+Exact-owner retirement drops only its queued work. Private cursor history stays
+legacy; no signer or key-selection migration is claimed. Three public lexical
+fingerprints/four occurrences are removed; history retains its private witness.
