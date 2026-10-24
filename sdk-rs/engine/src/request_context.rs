@@ -1598,9 +1598,6 @@ impl CommandWrites {
         Ok(())
     }
 
-    /// Seal exactly once. A caller's fallback text never chooses the outcome;
-    /// sent-leg errors have priority over pre-send siblings. Earlier release
-    /// evidence survives a signer/transport failure on a newer physical retry.
     /// Carry an owner's inherited maybe-sent fact; it can only raise a failure
     /// projection to Unknown and never clears.
     pub(crate) fn inheriting(mut self, uncertain: bool) -> Self {
@@ -1608,6 +1605,9 @@ impl CommandWrites {
         self
     }
 
+    /// Seal exactly once. A caller's fallback text never chooses the outcome;
+    /// sent-leg errors have priority over pre-send siblings. Earlier release
+    /// evidence survives a signer/transport failure on a newer physical retry.
     pub fn fail(&mut self, fallback: VenueError) -> Result<VenueError, Error> {
         let (error, budget) = self.failure_projection(fallback)?;
         self.evidence = budget;
