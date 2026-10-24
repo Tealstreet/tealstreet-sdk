@@ -480,7 +480,7 @@ Bind and release Claim; no Context, provider success or receipt is fabricated.
 Feature-off unit/adoption targets execute another 40 PASS, zero failed/ignored;
 scoped strict Clippy passes for KuCoin with/without Spot and for the registry
 target, and both packages pass formatting.
-The six registry construction controls pass after shared constructor validation
+The eight registry construction controls pass after shared constructor validation
 was deduplicated. The added public-only/passphrase-less-primary control drives
 real registry construction and public bullets, depth and candles, pinning unsigned
 headers and no signing failure even though the unused primary ref is registered.
@@ -515,7 +515,12 @@ independently reviewed 0d162668911 (parent exactly 265aee2c35f). Its original
 assertion RED observed a missing secondary alias and is now GREEN. A further
 registry control removes a host-supplied secondary alias, then proves both aliases
 acquire the primary's exact ref and emit the independent native read-key broker
-MAC with all four broker headers. Actual prerequisite integration, final reviews
+MAC with all four broker headers. The separately reviewed b39acfb805d is also
+plain-merged: malformed supplied Optional extra refs are refused before alias
+mutation. Registry controls pin empty/257-byte front-door refusal. Public-only
+complete opaque identities explicitly require a provider even without a
+passphrase; absent provider is typed InvalidInput, while installed provider
+produces the native unsigned public wire. Actual prerequisite integration, final reviews
 and full CI remain required. The current landing 9d344d541d5 was plain-merged
 at 265aee2c35f; all reviewed
 KuCoin and shared signing/custody blobs remained byte-exact. Four docs conflicts

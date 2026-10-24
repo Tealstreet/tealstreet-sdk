@@ -1675,3 +1675,16 @@ registry3 and SDK constructor5 pass; strict Phemex Clippy passes. The exact
 combined staging map is17F/18O ->16F/16O, with one temporary sign_http; trading
 stays4F/4O via its approved release-metadata re-expression. No checker predicate
 or negative assertion is weakened. Actual #1970/#1974 and final CI remain gates.
+
+## KuCoin opaque signer controls
+
+Original native provider assertions failed5/15 with Spot and4/13 without;
+broker-role NEW-CONTRACT controls initially failed at schema decode, with their
+downstream assertions unexecuted until composition. Scoped native KuCoin/Spot392
+executions and feature-off unit/adoption40 pass, zero ignored; repeated mounted
+native-oracle controls are included in those counts. Adoption23 covers genuine
+atomic deferred signing/refusal/late-result custody and seven malformed results.
+Registry controls pin same-ref alias installation and independent read-key broker
+MACs, malformed external-ref refusal, and public-only passphrase-less-primary
+wire plus provider requirements. SDK setup64 and scoped strict/fmt pass. These
+local receipts do not certify workspace/WASM/replay or actual shared landing.

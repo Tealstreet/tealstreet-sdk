@@ -3030,3 +3030,14 @@ accepted-prefix IDs and native rollback revisions; actual-release raw expiry
 is accumulated as a maximum before the native5s reconciliation skew. Production
 wire/financial controls pass. Independent source/caller reviews are CLEAR;
 full-map/HMAC review, final CI and the combined #1970/#1974 landing remain gates.
+
+## KuCoin HMAC provider and broker-role composition
+
+Draft2033 replaces venue raw material and local primitives with opaque provider
+recipes on the explicitly approved combo5b/#1990 composition. The credential
+owner's reviewed alias-fill and malformed-extra-ref fixes are plain-merged;
+actual shared prerequisite landings and final CI remain separate gates.
+HMAC/native source review9a277 and credential/setup review are CLEAR. Exact own
+request46/42->37/35, signing41/38->15/13 and credential15->4 maps match source;
+foreign entries/order and both bootstrap tables are preserved. Native staging
+owners remain explicit; no full command lifecycle or hosted admission is claimed.

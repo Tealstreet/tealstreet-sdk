@@ -302,3 +302,38 @@ fn host_supplied_read_identity_acquires_the_primary_broker_alias_and_native_mac(
         );
     }
 }
+
+#[test]
+fn malformed_host_broker_refs_are_refused_before_venue_construction() {
+    for venue in ["kucoin", "kucoinspot"] {
+        for invalid in [String::new(), "x".repeat(257)] {
+            let mut options = input();
+            let (provider, mut refs) = prepare_local_signer_for(venue, &mut options).unwrap();
+            refs.primary.as_mut().unwrap().extra.insert(
+                ExtraKey::KucoinBroker,
+                safe_cex_engine::signing::KeyRef(invalid),
+            );
+            refs.secondary.as_mut().unwrap().extra.clear();
+            options.signing = Some(refs);
+            let error =
+                build_with_signer(venue, options, entropy(), Some(provider), Identity).unwrap_err();
+            assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+            assert_eq!(error.message, "Invalid local signer setup");
+        }
+    }
+}
+
+#[test]
+fn complete_host_refs_require_a_provider_even_when_public_only() {
+    for venue in ["kucoin", "kucoinspot"] {
+        let mut options: EngineOptions = serde_json::from_str(
+            r#"{"key":"fixture-public-key","secret":"fixture-public-secret","publicDataOnly":true}"#,
+        ).unwrap();
+        let (_provider, refs) = prepare_local_signer_for(venue, &mut options).unwrap();
+        assert!(refs.primary.as_ref().unwrap().passphrase.is_none());
+        options.signing = Some(refs);
+        let error = build_with_signer(venue, options, entropy(), None, Identity).unwrap_err();
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(error.message, "Engine signing provider is required");
+    }
+}
