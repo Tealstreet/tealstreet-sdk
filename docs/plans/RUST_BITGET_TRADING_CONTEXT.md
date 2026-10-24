@@ -180,14 +180,56 @@ whole command has no input-count cap; request count is
 
 ## Gates before production
 
-1. **Streamed serial Plan** (fe7lgm), landed with the contract above,
-   including the WriteAfterReads command wait (`b2b40eb5a00`).
+1. **Streamed serial Plan** (fe7lgm #2092, `serial-plans`) and **condition
+   waits** (#2094, `condition-waits`), landed with the contracts above.
 2. **#1956 (6b).** Shared journal owner; stack on its landing.
-3. **WASM.** Bitget runs under the 1 363 968-byte override. Scratch run
-   `40114957320` (`875b60c5005`, only `http-plans` enabled on the bitget
-   crate, no venue use) measured **1 418 022** bytes, 54 054 over. The
-   slice cannot land under the override as is; a budget ruling or engine
-   size work is required before production.
+3. **Size: Bitget venue budget and the combined bundle.** See below.
+   Production waits until both fit; the combined bundle is currently over its
+   budget (2026-10-25), so a combined-adding PR waits for Sam's decision.
+
+## Size and engine features
+
+Bitget's engine dependency today is `features = ["order-locks"]`. Slice 3
+adds `condition-waits`, which pulls in `serial-plans` and `http-plans`. It
+needs nothing else: no `http-mutation-barriers` (calls are serial, never
+grouped) and no `metadata-freshness`.
+
+Bitget venue WASM, engine at size defaults since #2099 (`31176dfe121`):
+
+| Build | Bytes | Source |
+| --- | ---: | --- |
+| tip, no `http-plans` | 1 309 917 | #2099 PR run 40136607427 |
+| plus `http-plans`, no venue use | 1 349 551 | scratch run 40129484009 (base `bcaaa4acc56`) |
+| override | 1 363 968 | `wasm-budget.mjs` |
+
+- **`http-plans`:** about **+39.6 KB** on Bitget. This is measured, but across
+  two nearby bases, so it is approximate. It leaves about **14.4 KB** of
+  Bitget headroom for everything else.
+- **`serial-plans` + `condition-waits`:** **unmeasured**. #2092 and #2094 add
+  roughly 2.5k and 4.3k engine lines, tests included. Ask: fe7lgm reports the
+  Bitget-family and combined deltas of each feature from those PRs' builds.
+  If together they cost more than about 10 KB on Bitget, slice 3 does not fit
+  the override even with zero venue cost. That is the main size risk.
+- **Venue code:** an estimated **+2 to +4 KB** (about +200 / -120 lines in
+  `trading.rs`, minus the `send` body branch and the `Pending::Trade`
+  sign-error arm). Calibration: slice 2 cost +2 461 bytes before its trim and
+  about +0.9 KB after, for about 100 net lines.
+- **#2077 (slice 2, held):** about +0.9 KB more on Bitget if it lands first.
+
+Combined bundle (all features unioned):
+
+- **`http-plans`:** about **0**. WEEX, GRVT, BingX, Bybit and Backpack already
+  link it into combined.
+- **`serial-plans` and `condition-waits`:** the full engine cost lands on
+  whichever adopter links them first. If OKX's ordered-write consumer
+  (codex-ih35js) lands first, they cost Bitget about 0 on combined.
+- **Venue code:** about +2 to +4 KB, the same as on the Bitget family.
+- **Expected combined delta:** (serial-plans + condition-waits, unless already
+  linked) + about 2-4 KB. It is positive, so slice 3 lands only after the
+  combined budget clears, or once trims elsewhere make room.
+
+Measure at the implementation head with one PR run, paired against the tip.
+No local WASM builds while the machine is shared.
 
 ## Callers (tealstreet-next)
 
