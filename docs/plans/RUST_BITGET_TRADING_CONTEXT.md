@@ -159,9 +159,10 @@ whole command has no input-count cap; request count is
    parked command survives a 25-minute job. On detection expiry the venue
    wakes each queued Preflight and fails it NotSent in its ready custody
    (fe7lgm RED12). A re-park after promotion happens in ready custody.
-   Capacity: each parked Preflight counts against the engine-wide 256
-   concurrent commands; native's queue is unbounded. Pending overseer
-   ruling: disclose as a new Capacity refusal, or exempt parked Preflights.
+   Capacity (ruled 2026-10-25: accept and disclose, no exemption): each
+   parked Preflight counts against the engine-wide 256 concurrent commands,
+   so the 257th concurrent command is refused Capacity, NotSent, before any
+   send (fe7lgm condition-wait RED14, `df66105f30e`).
 
 ## Gates before production
 
@@ -176,9 +177,13 @@ whole command has no input-count cap; request count is
 
 ## Callers (tealstreet-next)
 
-TS-visible results are unchanged except one new bound: each write and read
-call ends at 20 000 ms as a typed Timeout (Unknown for a released write, which
-then reconciles). Native trading calls had no request deadline. Recorded in
+TS-visible results are unchanged except two new bounds:
+
+- Each write and read call ends at 20 000 ms as a typed Timeout (Unknown for
+  a released write, which then reconciles). Native trading calls had no
+  request deadline.
+- More than 256 concurrent commands (the active job plus queued writes) are
+  refused Capacity, NotSent, before any send. Native queued without limit. Recorded in
 `RUST_CUTOVER_CALLERS.md` at production time.
 
 ## Original REDs
