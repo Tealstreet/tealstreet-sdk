@@ -6924,3 +6924,12 @@ for admitted success. No arguments, signed wire bytes or remote write flow chang
 Empty order/cancel jobs and the asynchronous legacy trade terminals remain for
 the later managed-write conversion. Exactly eight request inventory occurrences
 are removed (Crypto.com 21 to 13); credential-selection inventory is unchanged.
+
+
+## CPU runtime environment mismatch evidence
+
+Shared CPU runtime restoration reports every differing identity field, including
+nested Node component versions, with the sealed expected and runner actual
+values in deterministic dotted-field order. Identity rejection still precedes
+all restore writes. The existing image, architecture, Node and component
+bindings remain enforced; provisioner versions are outside that identity.

@@ -37,3 +37,16 @@ planned. Source is a deterministic mismatch formatter at the existing rejection.
 Run scoped Node runtime/collection/CPU integration tests; full certification
 belongs to one fresh explicit Rust CI and one watcher at120s. Independent
 bounded source review and normal landing window remain readiness gates.
+
+
+Original controls: plan7b94d84a6a9 precedes test-only53571745cd3. The five
+new controls fail at assertions because the unchanged runtime reports only the
+generic mismatch; existing controls remain working. No compiler or import
+failure is used as a RED. The source change adds only deterministic recursive
+differences to the existing rejection; environment validation remains exact.
+
+Local evidence: unchanged runtime executes24GREEN/5assertionRED/0skip, with
+each failure only the missing field-level evidence assertion. After source,
+the exact same controls plus CPU collection/CI integration tests pass53/53,
+zero skipped. Existing same-identity fingerprints and before-write rejection
+controls remain GREEN. No identity schema or comparison policy is changed.
