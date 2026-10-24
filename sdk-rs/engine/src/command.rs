@@ -603,6 +603,10 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
 }
 
 #[cfg(test)]
+#[path = "command_wire_compat_tests.rs"]
+mod wire_compat;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
