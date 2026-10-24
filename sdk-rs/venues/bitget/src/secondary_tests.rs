@@ -27,7 +27,10 @@ pub(crate) fn headers(
     impl Venue for Probe {
         type Pending = Pending;
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-            let pending = Pending::Identity(1);
+            let pending = Pending::Markets {
+                rows: vec![],
+                invalid: false,
+            };
             self.venue.send(
                 cx,
                 self.method,
