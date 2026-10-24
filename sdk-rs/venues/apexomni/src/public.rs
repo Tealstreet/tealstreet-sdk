@@ -2,12 +2,16 @@
 use crate::{ApexOmni, Pending, public_wire as wire};
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, Interval, Limits, Market, MinMax, PositionSide, Precision, Ticker,
 };
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryEvidence, RetryPolicy};
+use safe_cex_engine::request_context::{
+    Context, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
+};
+use safe_cex_engine::selected_read::{BackgroundReadError, ReadPolicy, ReadRole, SelectedRead};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, VenueError,
@@ -199,23 +203,59 @@ impl ApexOmni {
     }
 
     pub(crate) fn start_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        let request = Pending::Public(Request::Markets {
+        let markets = Request::Markets {
             rows: vec![],
             contracts: HashMap::new(),
             skipped: vec![],
-        });
-        if let Err(error) = self.signed(
-            cx,
-            crate::sign::Request::get("/v3/symbols", vec![]),
-            request,
-            Some(ArrayAt::Path(&[
-                "data",
-                "contractConfig",
-                "perpetualContract",
-            ])),
-        ) {
-            cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-            self.public.seed_retry.failed(cx, ());
+        };
+        // Select first: the trusted passphrase ref alone decides signing, as
+        // legacy did. Without one, symbols stay public discovery.
+        let signed = self
+            .slots
+            .select(CredentialRole::Read { scope: None })
+            .is_ok_and(|(_, identity)| identity.passphrase.is_some());
+        let custody = if signed {
+            let selected = SelectedRead::select(&self.slots, ReadRole::Read { scope: None });
+            // ReadFailure covers only the one native signature resend; the
+            // startup backoff stays the transport retry.
+            let policy = ReadPolicy {
+                timeout_ms: crate::read::TIMEOUT_MS,
+                pacing: None,
+                retry: RetryPolicy::ReadFailure,
+            };
+            match SelectedRead::background(cx, selected, policy) {
+                Ok(read) => Ok(crate::read::Custody::Admitted(read)),
+                Err(BackgroundReadError::Selection(_)) => Err(crate::read::MISSING.to_owned()),
+                Err(BackgroundReadError::Admission(error)) => Err(error.read_venue_error().message),
+            }
+        } else {
+            let policy = Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: crate::read::TIMEOUT_MS,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            };
+            cx.http_context(Scope::Background, policy)
+                .map(crate::read::Custody::Public)
+                .map_err(|error| error.read_venue_error().message)
+        };
+        match custody {
+            Ok(custody) => self.send_read(
+                cx,
+                custody,
+                crate::sign::Request::get("/v3/symbols", vec![]),
+                Some(ArrayAt::Path(&[
+                    "data",
+                    "contractConfig",
+                    "perpetualContract",
+                ])),
+                crate::read::Native::Public(markets),
+            ),
+            Err(error) => {
+                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+                self.public.seed_retry.failed(cx, ());
+            }
         }
     }
     pub(crate) fn public_item(
@@ -362,7 +402,8 @@ impl ApexOmni {
                 cx.store.set_markets(rows);
                 cx.store.set_tickers(tickers);
                 self.connect_public(cx);
-                self.start_private(cx);
+                // Queued only after the symbols read retires.
+                self.follow_ups.push(crate::read::FollowUp::StartPrivate);
             }
         }
     }
