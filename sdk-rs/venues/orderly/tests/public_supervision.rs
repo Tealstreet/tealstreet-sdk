@@ -391,10 +391,24 @@ fn suppressed_public_feed_is_not_supervised() {
     h.advance(600_000.0);
     assert!(h.connects(Feed::Market).is_empty());
     assert!(h.connects(Feed::Funding).is_empty());
+    let seed_deadlines: Vec<_> = h.log.iter().filter_map(|(at, action)| match action {
+        Action::SetTimer { timer, at_ms } if *at == 1000.0 && *at_ms == 21_000.0
+            && h.log.iter().any(|(cleared_at, action)| *cleared_at == *at
+                && matches!(action, Action::ClearTimer { timer: cleared } if cleared == timer)) => Some(*timer),
+        _ => None,
+    }).collect();
+    assert_eq!(
+        seed_deadlines.len(),
+        2,
+        "both admitted seed deadlines retire at bootstrap"
+    );
     let churn: Vec<_> = h
         .log
         .iter()
-        .filter(|(_, a)| matches!(a, Action::WsClose { .. } | Action::SetTimer { .. }))
+        .filter(|(_, a)| {
+            matches!(a, Action::WsClose { .. })
+                || matches!(a, Action::SetTimer { timer, .. } if !seed_deadlines.contains(timer))
+        })
         .collect();
     assert!(churn.is_empty(), "no public retries: {churn:?}");
 }

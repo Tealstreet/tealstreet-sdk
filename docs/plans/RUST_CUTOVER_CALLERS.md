@@ -8077,6 +8077,20 @@ behind an in-flight command on the same order, or a placement behind an
 in-flight cancel-all, still report "Order amendment or cancellation is already
 in flight" with no outcome, and the uncertain cancel-all refusal is unchanged.
 
+
+## Orderly unsigned startup seed custody
+
+Markets and Tickers now admit independent keyless Background Read contexts for
+`/v1/public/info` and `/v1/public/futures`. Each physical leg has a new 20-second
+admission bound covering Prepare, Bind and streamed response; there is no aggregate
+startup-chain bound, signing, pacing or managed retry. Native per-Seed Backoff
+remains the recovery owner. Exact DATA validation precedes decoding and global
+effects; matching failure cleanup retires its returned Context even at expiry.
+Markets and Tickers retain live DATA custody through native map/Store publication,
+then retire before native account startup/ticker admission or socket/funding hooks. Independently issued reads retain independent custody.
+Only the common unsigned seed sender is pruned; key selection and other funnels
+are unchanged.
+
 ## Session-bound requests (Bearer hook)
 
 Plan: RUST_SESSION_BEARER_HOOK.md. This applies to venues that enable the
