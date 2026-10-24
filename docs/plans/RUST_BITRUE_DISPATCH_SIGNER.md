@@ -431,3 +431,10 @@ The isolated native host closure now enables dispatch signing; 20 host controls,
 strict Clippy, full local bans/ratchets and both current/historical secret scans
 pass. The exact historical allowance was explicitly granted by the maintainer.
 Fresh WASM/replay CI must still prove both original boundary failures corrected.
+
+Bounded independent delta review is CLEAR (architecture gate: No). The test-only
+adapter adds no new transport algorithm and leaves every original assertion and
+fake response unchanged. Shared recorded-transport control (1), package typecheck
+and fixture formatting pass. ESLint excludes this existing WASM fixture by repo
+configuration; no lint execution is claimed for it. No local WASM package/build
+or repaired replay result is claimed before fresh CI.

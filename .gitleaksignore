@@ -82,3 +82,7 @@ a44fd8ea8eb80f4e805280933728c0642d35cf2f:packages/safe-cex/src/exchanges/coinbas
 # Synthetic Coinbase capability-test key, replaced with the signing-test fixture.
 # Owner approved this exact historical fingerprint only; future changes scan.
 04c434dc2d482cd4498a50e9086be82dfb2071c4:sdk-rs/venues/coinbase/tests/support/history_family.rs:generic-api-key:116
+
+# Maintainer-approved historical Bitrue plan attribution prose; no credential.
+# Current wording changed; only this original commit/file/rule/line is ignored.
+48f8b6cbe5788fabdc417e507b6cded77b23aa7a:docs/plans/RUST_BITRUE_DISPATCH_SIGNER.md:generic-api-key:271
