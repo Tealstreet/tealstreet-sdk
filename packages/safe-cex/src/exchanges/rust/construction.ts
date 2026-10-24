@@ -14,6 +14,8 @@ export type IdentitySetupPolicy = {
   signingAlgorithm?: SigningAlgorithm;
 };
 export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
+/** Trusted setup's view: the slot policy plus the family's declared read-key policy. */
+export type SignerSetupPolicy = CredentialSetupPolicy & { readCredentials?: EngineBridgeConstruction['readCredentials'] };
 export type CredentialPresence = Readonly<{ key: boolean; secret: boolean }>;
 export type RemoteSigningPolicy = Readonly<{
   enabled?: boolean;
@@ -39,8 +41,11 @@ type Rule = {
 };
 
 /** Trusted setup policy; unspecified fields retain explicit caller metadata. */
-export const deriveSignerSetupPolicy = (name: ExchangeName): CredentialSetupPolicy =>
-  (rules.venues as Record<string, Rule>)[name]?.signerSetup ?? {};
+export const deriveSignerSetupPolicy = (name: ExchangeName): SignerSetupPolicy => {
+  const rule = (rules.venues as Record<string, Rule>)[name];
+  const readCredentials = rule?.bridge?.readCredentials;
+  return { ...rule?.signerSetup, ...(readCredentials === undefined ? {} : { readCredentials }) };
+};
 
 export const deriveSignerSetupMapping = (name: ExchangeName): Rule['setupMapping'] =>
   (rules.venues as Record<string, Rule>)[name]?.setupMapping;
@@ -59,6 +64,8 @@ export const deriveBridgeConstruction = (name: ExchangeName, options: ExchangeOp
     apiKeyIndexRequired: policy?.apiKeyIndexRequired === true,
     isolatedBookSubscriptions: policy?.isolatedBookSubscriptions === true,
     dispatchSigning:policy?.dispatchSigning===true,
+    // Omitted when undeclared, matching the native record byte for byte.
+    ...(policy?.readCredentials === undefined ? {} : { readCredentials: policy.readCredentials }),
   };
 };
 
