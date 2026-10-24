@@ -223,6 +223,28 @@ claude-ddi2il before the REDs freeze.
   replan is the next continuation with different calls. Nothing is sealed or
   re-admitted. This meets the "second admission from DATA custody" ruling
   without a second root.
+- **Engine conditions on these proposals (claude-dazzy3).**
+  - *Caller-wait expiry mid-chain.* Receipt expiry is not a Plan terminal and
+    emits no Timeout. The chain keeps sending, the command reads
+    `CommandWait::Expired` as a held command does today, and the order lock
+    and slot stay held. The command's one terminal is the Plan's own.
+  - *Stops without a root deadline.* Credential revoke or rotation, Session
+    loss, engine teardown and caller cancel each stop the chain at the next
+    custody point (a live call is still settled or retired, never orphaned).
+    They project failure with every streamed accepted ID, plus Unknown when a
+    released call is live, in which case the lock converts to the fence. These
+    terminals and `done_plan`/`fail_plan` are the only ways the lock and slot
+    are released.
+  - *Resend.* Allowed only from DATA custody of a definitive 40009 refusal
+    proven by `classify_write`, never after Unknown, 408 or 5xx, through the
+    existing resend grant and journal gate. A third attempt is refused.
+  - *Read calls.* A Read fact never enters the write journal, accepted IDs or
+    the `refusals_complete` accounting. A failed Read stops or retries as
+    native does, with no write side effects.
+  - *Delayed continuation.* Refused while any fact is uncertain, and
+    re-checked when the timer fires. The timer custody is single-use and
+    exclusive with a live call. With no root deadline, the Plan timer has no
+    other user.
 - **Partial batch is terminal (Classic).** A KnownPartial batch followed by
   `fail_plan` projects failure with every streamed accepted ID, including that
   batch's. Native keeps the success IDs and then fails the job.
@@ -300,7 +322,18 @@ fails at an assertion.
 17. (If ruled.) A two-attempt call resends once through `plan_resend_context`
     and refuses a third. A Read call inside a mutation chain. A delayed
     continuation fires from the Plan timer, refuses outside that callback, and
-    keeps one Context and one timer.
+    keeps one Context and one timer. An Unknown fact, then a resend, is
+    refused; so is a resend after 408 or 5xx. A Read fact leaves the journal,
+    the IDs and the refusal count unchanged. A delayed continuation is refused
+    while uncertain and when it fires after an uncertain fact, and its
+    callback cannot be used twice.
+18. (If ruled.) Caller-wait expiry mid-chain: no terminal or Timeout at
+    expiry, later calls are still accepted, and the command's single terminal
+    is the Plan's.
+19. (If ruled.) Mid-chain stops: credential revoke, Session loss, engine
+    teardown and caller cancel each stop at the next custody point and project
+    the streamed IDs. With a released live call they project Unknown and arm
+    the fence.
 
 ## Gates
 
