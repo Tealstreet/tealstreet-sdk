@@ -348,7 +348,21 @@ but not the kind. Once source defines the cause, pin `kind.is_some()` or the
 exact typed cause.
 
 **Gate status: plan and REDs are CLEAR from all three reviewers.** Source
-waits for Sam's go.
+started on Sam's go (phase 1: `402fd90851f`, `824ebf5889c`).
+
+**Superseded: Read outcome `None` (codex-zs5e83 accepted, phase 1).** The
+`outcome: None` note above and R3/R4 at `784ffa540f8` are superseded. Both
+fences use the shared `http_preparation_failed`, which marks every unreleased
+attempt `NotSent`, Reads included. That is the existing seam for any Read
+preparation failure, so changing it would change every venue's projection.
+- R3/R4 pin exactly one typed failure, `Some(NotSent)`, and no outbound.
+- Causes are engine preparation causes, never auth evidence. A retired
+  generation fails `Revoked` (`InvalidInput`), and venue `NotReady` fails
+  `State` (`Internal`). R3/R4 pin the health counters unchanged.
+- A recipe `Authorization` header is refused only on bound requests. Unbound
+  requests keep their own headers.
+- A whole-command terminal still comes from `failure_projection`, so prior
+  released attempts and receipt/journal aggregation dominate (R8, phase 2).
 
 **Engine facts the source must follow:**
 - **The real prepare point.** `queue_managed` emits `HttpAction::Prepare` at

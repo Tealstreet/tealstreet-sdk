@@ -564,6 +564,7 @@ fn r3_session_retired_after_prepare_never_releases_and_fails_typed() {
         let (mut e, shared) = engine(|shared| shared.next_generation_token = Some(next));
         let issued = ask(&mut e, 1);
         let (permit, request) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound packet");
+        let health = e.health().clone();
         retire(&mut e, &shared, NOW + 2.);
         e.drain_actions().for_each(drop);
         assert!(
@@ -575,6 +576,8 @@ fn r3_session_retired_after_prepare_never_releases_and_fails_typed() {
             one_typed_read_failure(&shared, ErrorKind::InvalidInput),
             "the Read owner was not failed once, typed and NotSent"
         );
+        // An engine preparation cause, never auth or HTTP failure evidence.
+        assert_eq!(e.health(), &health);
         respond(&mut e, NOW + 4., &request);
         assert_eq!(
             shared.borrow().responses,
@@ -649,12 +652,14 @@ fn r4_venue_not_ready_at_prepare_sends_nothing_and_fails_typed() {
         let (mut e, shared) = engine(|shared| shared.signed = signed);
         let issued = ask(&mut e, 1);
         shared.borrow_mut().refresh(None);
+        let health = e.health().clone();
         let actions = route(&mut e, NOW + 1., issued[0].0);
         assert!(
             sign_work(&actions).is_none() && bind(actions).is_none(),
             "provider work or a packet started while the venue's Bearer was NotReady"
         );
         assert!(one_typed_read_failure(&shared, ErrorKind::Internal));
+        assert_eq!(e.health(), &health);
     }
 }
 
