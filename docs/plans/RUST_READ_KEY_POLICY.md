@@ -90,8 +90,16 @@ is always `None` there, so `Slots` selection can only yield the read key for
 `Read` roles. `Mutation`, `SessionAuth` and `PrimaryRead` see `Missing`.
 Private mode is unchanged.
 
-- An invalid read key installs nothing and keeps the native typed status,
-  through the same `ReadCredentials::status` route as ValidateOnly.
+- **Validity stays the family's typed gate, not the ValidateOnly flag**
+  (codex-mxb4mq). For Backpack that is #2073's `validate_read_credentials`:
+  native `validate()` first (`Configuration`), then the one shared
+  `decode_seed` (STANDARD base64, 32 bytes, `Seed`). A malformed or 31-byte
+  read seed installs no read identity. It keeps its exact native startup
+  `CONFIG_INVALID` and the deferred history message, and in private dual
+  setup the valid primary is still installed instead of the whole
+  `LocalSetup` failing. The shared seam decides only *whether a valid read
+  identity may be installed without a primary*; it never replaces a family's
+  validity gate or its messages.
 - Backpack's own `backpack_provider` (#2073) consults the same declaration
   instead of a venue-local public-only rule.
 
@@ -111,6 +119,8 @@ Private mode is unchanged.
 **ValidateOnly**, each on native and JS:
 - valid, invalid and absent read key;
 - public-only with an invalid read key;
+- the unchanged default: an undeclared family installs its read key exactly
+  as today;
 - exact message text and the startup/identity precedence (through a probe
   venue declaring the policy);
 - no secondary identity installed and no secondary material in the provider
@@ -120,11 +130,21 @@ Private mode is unchanged.
 - both inputs together refused.
 
 **PublicRead:**
-- public-only with a valid read key gives a secondary-only provider, Read
-  selects the secondary, and Mutation is `Missing`;
-- public-only with an invalid read key installs nothing and keeps the status;
-- private mode is unchanged;
-- hosted admission refused in public-only.
+- public-only with a valid read key gives a secondary-only provider, and Read
+  selects the secondary. `Mutation`, `SessionAuth` and `PrimaryRead` are each
+  `Missing`.
+- The primary stays absent in public-only even when valid primary options are
+  supplied.
+- Public-only with a malformed or 31-byte read seed installs nothing and keeps
+  the typed Configuration/Seed message and precedence. Private dual setup with
+  a bad read seed keeps the valid primary.
+- Private mode is unchanged.
+- Hosted admission is refused in public-only, no private startup comes from a
+  read-only provider, and evidence stays read-scoped.
+- codex-mxb4mq's public-only saved-key history parity controls (`c5a8ebbd4bf`,
+  native and JS) run on this seam's prefix before managed adoption. Material
+  stripping or capsule changes therefore cannot break the still-legacy history
+  path.
 
 **Size:** the WASM delta for one ValidateOnly and one undeclared family build,
 measured with the existing size harness and reported in the PR.
