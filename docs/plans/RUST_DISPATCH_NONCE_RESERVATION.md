@@ -527,3 +527,14 @@ reviewed ordinary implementation. Obtain bounded review before this extension,
 then use the same original controls and exact combined measurement. The static
 per-venue fallback and current-tip/Bearer composition gates remain mandatory if
 this sharing approach cannot fit. Keep all work local.
+
+
+The broader shared Claim helper (`ab10defecfb`, 88 controls passing) measures
+14,165,173 bytes, still 9,397 over. Before changing venue capabilities, test
+function-level outlining of the existing `queue_managed_admitted` boundary
+when dispatch-nonce is ON. Its complete body and caller ordering remain exact;
+only `cfg_attr(feature = "dispatch-nonce", inline(never))` is added. This keeps
+the generic queue body out of inlined request wrappers identified by Twiggy,
+without changing any OFF code, API, admission, ownership or bind-once order.
+Measure the same combined artifact and retain it only if the complete result
+helps. Obtain bounded source review and run the same queue/Claim controls.
