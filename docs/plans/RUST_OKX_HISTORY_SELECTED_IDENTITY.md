@@ -60,8 +60,13 @@ only at the eligible native 100 ms dequeue. Stream the same native data field.
 Public trades use the existing unsigned caller Read root and managed request
 path, retaining demo headers. Missing selected identity must preserve existing
 local terminal ordering and shapes, including cached/unknown lookup outcomes;
-selection failure is not permission to add an earlier refusal. Local terminals
-still require genuine entry admission before any effect. Maintain exact
+selection failure is not permission to add an earlier refusal. Before admission, make only a pure local-versus-remote decision in the existing
+native precedence. A keyless empty response, cached lookup result or unsigned
+public request gets one plain genuine root; only a signed remote read gets one
+SelectedRead::command_root. Missing selection must never reach that constructor's
+automatic refusal ahead of a native local result. No plain-root cast, second
+admission or renewed receipt is allowed. Local terminals still require genuine
+entry admission before any effect. Maintain exact
 ReadCompletion delivery/terminal authority, strict root/local refusal and
 provider refusal for ordinary history, native soft physical query failures,
 accepted-output-based closed-position recovery, exact-owner retirement and
@@ -80,7 +85,10 @@ inert stale DATA/timers. Preserve raw mappers, queries, page caps and pacing.
 3. Add real native controls before implementation: both keys, primary only,
    secondary only, public_data_only/filtered primary, ordinary history versus
    primary lookup, optional public trades/demo header, provider refusal and
-   later-page selection/signature/egress. Existing root deadline, delayed child,
+   later-page selection/signature/egress. Explicitly pin keyless invalid-range
+   returning [], cached primary-client lookup FOUND with neither key and no
+   secondary-presence gate, and a supplied secondary disabling that cache before
+   the native missing-primary refusal. Existing root deadline, delayed child,
    reuse/late DATA, cap and financial controls remain unchanged. Record working
    controls separately from the inventory RED; this is behavior preservation.
 4. Implement direct shared selection consumption, then regenerate only the exact
