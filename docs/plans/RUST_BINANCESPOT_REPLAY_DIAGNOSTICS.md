@@ -49,3 +49,15 @@ sweep branch selects five private pairs without changing workflow policy.
 One historical pair per role is bounded evidence, not repeat qualification.
 Actual #1944 integration and fresh composed five-pair CI are required before
 final qualification. No merge without a granted window and separate guard.
+
+## Local regression controls
+
+The exact historical unconditional capture at `d59643b0b16` has two assertion
+REDs with fourteen working controls. Each RED asserts the completed final result
+first: a pre-ACK checkpoint permanently records both missing subscription and
+request acknowledgements in that receiver. All sixteen controls pass with the
+reviewed #1944 helper. Invalid HMAC, wrong typed ACK IDs, pre-ACK private data,
+active replacement incompleteness and a genuinely unanswered final request stay
+visible. Closed pending generations are ignored only through the existing
+explicit close/connected contract. Original/corrected logs are retained under
+`/tmp/codex-binancespot-original-capture-controls/`.
