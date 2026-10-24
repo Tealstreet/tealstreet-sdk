@@ -193,3 +193,23 @@ Scoped strict Clippy, rustfmt, diff whitespace and fixture secret scan pass.
 Production, existing fixtures, Cargo and inventories/checkers remain base-exact.
 Independent uuf original-8ffc archive receipt: 8 RED/8 GREEN, no setup failures;
 that receipt does not claim execution of these three added controls.
+
+## Scratch integration against frozen signer/socket dependency
+
+Prepared locally on `feat/rust-phemex-read-preintegration` from requested current
+landing `77f12408947`, with plain merges of original plan/control head
+`71bca31bffa` and frozen #1974 `8ddc3880eff`. The dependency merge is
+`d64ce6cb0e8`; neither frozen dependency nor original RED history was rewritten.
+Only README, AUDITS, CALLERS and QUALITY conflicted. Their resolution preserves
+current landing content followed by the dependency suffix once; all non-doc
+blobs equal Git's automatic merge. No source ownership conflict was found.
+
+The new target now uses #1974's existing trusted fixture setup for its three
+constructors. All nineteen test bodies/assertions are retained except those
+constructor expressions. Exact executed result remains ten intended assertion
+REDs, nine working controls, zero ignored, with no compile/setup failure. Scoped
+strict Clippy passes. This is dependency compatibility evidence, not managed
+read adoption: production, inventories and the history/income/PublicTrades paths
+are unchanged. Actual #1974 integration and the managed failure matrix above
+remain required before production certification. This scratch branch is local;
+no production PR, push or landing is claimed.

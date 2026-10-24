@@ -5,7 +5,9 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, RequestId, RequestRoute, Response,
     SocketId,
 };
-use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+mod support;
+use safe_cex_venue_phemex::PhemexPerpetuals;
+use support::Options;
 const NOW: f64 = 1_700_000_000_000.;
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1000","maxLeverage":"100"},{"symbol":"ETHUSDC","type":"PerpetualV2","settleCurrency":"USDC","baseCurrency":"ETH","quoteCurrency":"USDC","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1000","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"result":[{"symbol":"BTCUSDT","bidRp":"69999","askRp":"70001","lastRp":"70000","markRp":"70000","indexRp":"70000","openRp":"69000","openInterestRv":"100","fundingRateRr":"0","volumeRq":"10"},{"symbol":"ETHUSDC","bidRp":"1999","askRp":"2001","lastRp":"2000","markRp":"2000","indexRp":"2000","openRp":"1900","openInterestRv":"100","fundingRateRr":"0","volumeRq":"10"}]}"#;
@@ -52,7 +54,7 @@ fn envelope(currency: &str, total: f64, used: f64, rows: &str) -> String {
 }
 
 fn started() -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         read_credentials: Some(safe_cex_engine::ReadCredentials {
@@ -61,7 +63,7 @@ fn started() -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
             passphrase: None,
         }),
         ..Options::default()
-    }));
+    });
     e.start(NOW);
     let a: Vec<_> = e.drain_actions().collect();
     response(&mut e, NOW, request(&a, "products").id, 200, PRODUCTS);
@@ -141,7 +143,7 @@ fn opts(id: &str) -> PlaceOrderOpts {
 }
 
 fn identity(read: bool) -> (Engine<PhemexPerpetuals>, Vec<Action>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: read.then(|| safe_cex_engine::ReadCredentials {
@@ -150,7 +152,7 @@ fn identity(read: bool) -> (Engine<PhemexPerpetuals>, Vec<Action>) {
             passphrase: None,
         }),
         ..Default::default()
-    }));
+    });
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
     let actions = e.drain_actions().collect();
     (e, actions)
@@ -558,12 +560,12 @@ fn native_currency_reads_select_secondary_without_forcing_primary_route() {
 #[test]
 fn native_identity_local_refusal_is_once_and_creates_no_transport() {
     for public in [false, true] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+        let mut e = support::engine(Options {
             key: public.then(|| "key".into()),
             secret: public.then(|| "secret".into()),
             public_data_only: public,
             ..Default::default()
-        }));
+        });
         e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
         let actions: Vec<_> = e.drain_actions().collect();
         assert_eq!(
