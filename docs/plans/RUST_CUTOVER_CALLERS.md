@@ -7190,3 +7190,82 @@ Capacity refusal produces one shared failure, with no numeric fallback or
 physical action. The local helper must never be called from a delayed funding
 callback, accepted page delivery or queued trading work. Inventory: Orderly
 28F/29O to 25F/26O, solely the three documented initial failure fingerprints.
+
+## Command Read-Plan history authority (#2011)
+
+`PlanReadCompletion::from_plan` binds one freshly admitted command Read Plan
+with a retained command receipt cap before any Slot is selected or settled.
+Use `PlanHistoryRows::admit` in exact DATA custody, stage through its exclusive
+guard, then `accept_page` or `finish_with`; standalone public Plan terminals and
+Slot settlement refuse after binding. The guard exposes no Cx accessor.
+
+`admit_failure` requires the exact latest released Network/physical Timeout
+Attempt in its engine callback and a live original Plan. Recovery uses only
+nonempty accepted rows and discards the failed page; preparation/provider,
+logical expiry and integrity failures remain strict. `reject` uses the same
+prepared Plan seal and is inert during that Plan's engine expiry callback.
+No numeric completion, Context-root cast, external finalizer, owner renewal,
+Background/Execution Plan, or native consumer cutover is introduced.
+
+## HTTP pacing sets and signing eligibility
+
+A venue declares primitive floors through `http_pacing()` and optional immutable
+flat sets through `http_pacing_sets()`. `PacingSet { group, constraints }` gives a
+set its own declaration ID; member references name primitive IDs only. Sets share
+primitive release clocks and cannot nest, duplicate members or collide with
+primitive IDs. Engine construction validates and resolves bounded member indices.
+
+A Context's existing `Pacing { group, minimum_gap_ms }` selects one primitive or
+one set. Its outer minimum extends each member floor. For WOO, a set containing
+global100/algo500 with outer0 charges both on algo POST; ordinary writes select
+global100, PUT global200. Ordinary interleaving does not reset the algo clock.
+All bounds pass before one admission; only Released charges all members. Failed
+admission, stale/expired requests and waits consume none. Raw deadlines remain
+immutable through signing waits and route reprepare.
+
+Signed HTTP now retains a prepared resource without invoking its recipe/provider
+while any selected primitive is blocked. Its existing timer wakes at the earliest
+eligibility, route-expiry or physical-deadline boundary. Final Claim rechecks all
+bounds, including releases made by other requests after signing. Hosts continue
+to prepare, bind and Claim through the existing protocol; no wire change.
+Admission paths requiring no pacing must use `SendPacing::validate_zero`, which
+expands registered sets and checks every effective floor, including outer0 sets.
+G2b's owner composes its zero-pacing helper onto this resolver before IDs; this
+section does not claim that unlanded G2b adoption has occurred.
+
+## Independent Mutation Plan gateway failures
+
+PlanPolicy.independent_calls defaults to false at existing admission sites. A
+Mutation caller may opt in at admission for its native continue_on_error batch.
+An exact delivered unproven 408/5xx then reaches typed on_http_failed with the
+already-recorded Unknown fact and bounded evidence IDs; it never reaches DATA
+or grants a resend. The handler settles only an independent failed call through
+finish_plan_failed_call and advances its sibling. It declines settlement for a
+dependent follow-up, preserving the whole-Plan abort. A declining handler is
+auto-sealed once; Read admission with this flag is Invalid. Final completion
+still projects the one shared journal, including accepted IDs and uncertainty.
+
+BingX ordinary trading and Bybit #1914 adopt this in their separate caller PRs.
+The core declaration alone does not migrate either venue or remove legacy sites.
+
+## Parallel Mutation preparation barrier
+
+A caller explicitly declares each all-Mutation parallel step and implements the
+pure Unscheduled group-admission hook. The engine prepares routes and signatures
+in declaration order, then checks and commits the entire group before the host
+hands off any member. A precommit failure sends no member; the common journal
+projects NotSent only without prior released or inherited uncertain facts.
+Provider refusals are not venue auth evidence and do not create an uncertain
+order-lock fence. Resolved nonzero pacing floors refuse admission before IDs.
+
+Native and JS hosts bind/check all resources, claim once, and attempt sends in
+one turn before callbacks. After commit, a synchronous send failure or expiry is
+Unknown; remaining handoffs still run and accepted IDs remain in the projection.
+This provides no atomic execution guarantee at the venue. Independent reply
+handling requires the separate independent_calls declaration.
+
+Groups skip mutable on_http_release. A caller that stamps Pending there must
+move that state before admission or use committed on_signing_release; the pure
+hook cannot mutate Pending. Execution-owned groups, retries and fallback members
+are refused in this first slice. Later serial mixed Read/Mutation steps require
+G2. No venue is adopted and no legacy request site is removed by this seam alone.
