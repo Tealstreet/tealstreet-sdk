@@ -315,7 +315,11 @@ impl Coinbase {
                 self.history.active.insert(command);
                 self.history_read(cx, req, None)
             }
-            Err(e) => cx.fail(command, e),
+            Err(e) => crate::local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err(e.into()),
+            ),
         }
     }
     fn history_read(&mut self, cx: &mut Cx<'_, Pending>, req: Request, cursor: Option<&str>) {
