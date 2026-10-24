@@ -1,5 +1,5 @@
 //! Account ownership is reported by the spot identity route for every product.
-use crate::{BitgetFutures, Pending, paths};
+use crate::{BitgetFutures, Pending};
 use safe_cex_engine::{CommandId, Cx, Method, Response};
 use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
@@ -104,19 +104,16 @@ impl BitgetFutures {
             return;
         }
         const PATH: &str = "/api/v2/spot/account/info";
-        match self.signed_headers(cx.now, Method::Get, PATH, "") {
-            Ok(headers) => {
-                cx.request(
-                    Method::Get,
-                    format!("{}{PATH}", paths::REST),
-                    headers,
-                    None,
-                    Pending::Identity(command),
-                );
-            }
-            Err(error) => finish(cx, command, Err(error)),
-        }
+        self.send(
+            cx,
+            Method::Get,
+            PATH,
+            crate::Payload::Body(None),
+            true,
+            Pending::Identity(command),
+        );
     }
+
     pub(crate) fn identity_response(
         &self,
         cx: &mut Cx<'_, Pending>,

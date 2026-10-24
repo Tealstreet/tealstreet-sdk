@@ -123,7 +123,8 @@ impl<V: Venue> H<V> {
     }
     fn collect(&mut self) {
         loop {
-            let actions: Vec<_> = self.engine.drain_actions().collect();
+            let actions =
+                safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now);
             if actions.is_empty() {
                 return;
             }
