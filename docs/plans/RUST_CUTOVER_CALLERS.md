@@ -6548,15 +6548,6 @@ is explicitly a new admission-through-preparation/response whole-command bound,
 distinct from the old host's physical HTTP timeout fallback. Raw candle t/order
 and malformed numeric-string-to-zero coercion remain unchanged.
 
-## Flat-position realized PnL evidence
-
-Replay comparison includes flat-position realized PnL only when the producer
-reports a finite value. Native unavailable NaN and TS absent/null values produce
-no flat-PnL evidence row. Actual zero, losses and profits remain comparable,
-including the existing numeric-string conversion; losing or changing actual PnL
-still fails comparison. This corrects shared replay evidence without changing
-venue account state or the native frame's unavailable-value encoding.
-
 ## Lighter synchronous history Read custody
 
 The seven native local history replies (unsupported client ID/income category,
@@ -6567,3 +6558,51 @@ capacity and reused ownership produce one engine refusal without a financial
 outcome. Both Lighter and Robinhood, on mainnet/testnet, keep the same contract.
 Remote history requests, pagination, authentication and byte-level query/codec
 behavior are unchanged; this slice issues no remote-fallthrough Context.
+
+## GRVT synchronous history Read custody
+
+Seven native local history refusals retain their original validation order and
+error messages: unsupported income, missing session, unknown market, invalid
+bounds, range/empty order ID, client-ID syntax and missing subaccount. Publication
+now requires a genuine shared Read root. Clock/capacity rejection produces one
+typed terminal without a financial outcome. Revoked entry and live duplicate IDs
+preserve the existing owner without a second terminal. Successful local admission
+keeps the original untyped native error. Both networks preserve the same behavior.
+Remote history queries, session setup, headers, paging, completion and codecs
+remain unchanged. This slice issues no Context on remote fallthrough.
+
+## KuCoin synchronous command refusal admission
+
+Eight local futures/Spot refusal sites now acquire their genuine shared command
+owner before publishing the native error. Capacity or invalid-entry refusal can
+therefore supersede that error; duplicates cannot replace or complete another
+owner. Read admission failures carry no write outcome, while Mutation admission
+failures are NotSent. Free-capacity native error text, kind, outcome and validation
+order remain unchanged, including Unsupported/NotSent on Spot's unsupported reads.
+
+No local refusal sends HTTP or uses the signing provider. Spot placement building
+still consumes native UUID entropy before some credential/build errors; supplied
+IDs and later batch errors keep their original order. Valid private/public wire
+paths stay legacy, and KCS steady public events gain no admission work. Successful
+keyless fixed settings remain held for the shared local-setting success seam.
+
+## Bitrue initial local trading refusal admission
+
+Three synchronous trading refusals now acquire their genuine shared Mutation
+owner before returning the existing error. Shared entry refusal can supersede
+the native error, producing one NotSent terminal; duplicate callbacks retain the
+original owner. Free-capacity messages, kinds and credential/public-only ordering
+are unchanged. Refusal creates no HTTP, signing-provider work or Store effect.
+
+The queued trade_next error, native builder/entropy behavior, valid private wire
+and successful SetPositionMode(false) stay unchanged. This does not migrate the
+signer or admit keyless successful settings; that success awaits the shared seam.
+
+## Flat-position realized PnL evidence
+
+Replay comparison includes flat-position realized PnL only when the producer
+reports a finite value. Native unavailable NaN and TS absent/null values produce
+no flat-PnL evidence row. Actual zero, losses and profits remain comparable,
+including the existing numeric-string conversion; losing or changing actual PnL
+still fails comparison. This corrects shared replay evidence without changing
+venue account state or the native frame's unavailable-value encoding.
