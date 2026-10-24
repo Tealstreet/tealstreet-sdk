@@ -377,3 +377,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 - [Polymarket midpoint seed custody](RUST_POLYMARKET_MIDPOINT_READ_CONTEXT.md): one unsigned Background Read site; plan and original controls before production.
 
 | GRVT fixed local settings | Shared local terminal adoption under review | Before changing the three synchronous pre-credential settings terminals or their exact inventory prune. | [RUST_GRVT_LOCAL_SETTINGS_CONTEXT.md](RUST_GRVT_LOCAL_SETTINGS_CONTEXT.md) |
+
+| GRVT initial leverage Read refusals | Shared local terminal adoption under review | Before changing the two pre-issuance leverage refusals or their exact account inventory prune. | [RUST_GRVT_LOCAL_LEVERAGE_REFUSALS.md](RUST_GRVT_LOCAL_LEVERAGE_REFUSALS.md) |
