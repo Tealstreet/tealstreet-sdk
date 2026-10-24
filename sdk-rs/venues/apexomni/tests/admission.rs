@@ -48,7 +48,7 @@ fn refs_only(with_seed: bool) -> TestEngine {
     e.set_identities(identities).unwrap();
     e.set_signer(Some(signer)).unwrap();
     e.start(0.0);
-    let markets = requests(&mut e).remove(0);
+    let markets = requests(&mut e, 0.0).remove(0);
     response(&mut e, &markets, 10.0, MARKETS);
     e
 }

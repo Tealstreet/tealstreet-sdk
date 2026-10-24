@@ -15,8 +15,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         ..Options::default()
     }));
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = engine.prepared(0.0)
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -32,7 +31,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
                 error: "scripted public failure",
             },
         );
-        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let actions = engine.prepared(now).collect::<Vec<_>>();
         assert!(
             !actions.iter().any(|action| matches!(
                 action,
@@ -56,8 +55,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
             .expect("bounded public discovery backoff");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = engine.prepared(now)
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -68,7 +66,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
     engine.handle(now, Event::HttpResponse { request: request.id, response: Response { status: 200, headers: "", body: r###"{"code":0,"data":{"contractConfig":{"perpetualContract":[{"symbol":"BTC-USDT","crossSymbolName":"BTCUSDT","baseTokenId":"BTC","settleAssetId":"USDT","enableTrade":true,"stepSize":"0.001","tickSize":"0.1","minOrderSize":"0.001","maxOrderSize":"1000","displayMinLeverage":"1","displayMaxLeverage":"100","l2PairId":"50000","initialMarginRate":"","defaultInitialMarginRate":"0.05","maxMarketPriceRange":"0.045"},{"enableTrade":true,"tickSize":"malformed"}]}}}"### } });
     assert!(engine.store().loaded().markets);
     assert_eq!(engine.store().markets().len(), 1);
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let actions = engine.prepared(now).collect::<Vec<_>>();
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message.contains("Skipped malformed public discovery row"))));
 }
 
@@ -80,8 +78,7 @@ fn contract_without_positive_default_margin_rate_is_malformed() {
         ..Options::default()
     }));
     engine.start(0.0);
-    let request = engine
-        .drain_actions()
+    let request = engine.prepared(0.0)
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,

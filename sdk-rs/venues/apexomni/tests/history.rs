@@ -16,10 +16,9 @@ fn seeded_socket() -> (TestEngine, safe_cex_engine::SocketId) {
         },
     );
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 0.0).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let socket = e
-        .drain_actions()
+    let socket = e.prepared(10.0)
         .find_map(|a| {
             if let Action::WsConnect {
                 socket,
@@ -59,8 +58,8 @@ fn query(
         }),
     );
 }
-fn result(e: &mut TestEngine) -> Result<String, String> {
-    e.drain_actions()
+fn result(e: &mut TestEngine, now: f64) -> Result<String, String> {
+    e.prepared(now)
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { command: 7, result }) = a {
                 Some(Ok(result))
@@ -95,7 +94,7 @@ fn native_fills_are_signed_without_token_or_page_zero_and_exact_bounds() {
         Some(1700000001000.0),
         Some(1000),
     );
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 20.0).remove(0);
     assert!(r.url.contains("/v3/fills?"));
     assert!(r.url.contains("symbol=BTC-USDT"));
     assert!(r.url.contains("beginTimeInclusive=1699999999000"));
@@ -110,7 +109,7 @@ fn native_fills_are_signed_without_token_or_page_zero_and_exact_bounds() {
         30.0,
         &format!(r#"{{"code":0,"data":{{"fills":[{FILL}]}}}}"#),
     );
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0).unwrap()).unwrap();
     let row = &rows[0];
     assert_eq!(
         (row.timestamp, row.price, row.qty),
@@ -126,14 +125,14 @@ fn native_fills_are_signed_without_token_or_page_zero_and_exact_bounds() {
 fn compact_fills_and_iso_timestamps_parse_in_proxy_body() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 20.0).remove(0);
     response(
         &mut e,
         &r,
         30.0,
         r#"{"code":0,"body":{"result":{"list":[{"s":"PERP_BTC_USDT","S":"S","p":"2","v":"3","T":"2023-11-15T00:13:20+02:00","i":123}]}}}"#,
     );
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0).unwrap()).unwrap();
     assert_eq!((rows[0].timestamp, rows[0].qty), (1700000000.0, 3.0));
     assert_eq!(rows[0].side, "sell");
     assert_eq!(rows[0].order_id.as_deref(), Some("123"));
@@ -142,12 +141,12 @@ fn compact_fills_and_iso_timestamps_parse_in_proxy_body() {
 fn empty_native_symbol_tries_display_symbol_then_history_orders() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 20.0).remove(0);
     response(&mut e, &r, 30.0, r#"{"code":0,"data":{"fills":[]}}"#);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 30.0).remove(0);
     assert!(r.url.contains("symbol=BTCUSDT"));
     response(&mut e, &r, 40.0, r#"{"code":0,"data":[]}"#);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 40.0).remove(0);
     assert!(r.url.contains("/v3/history-orders?"));
     assert!(r.url.contains("orderType=HISTORY"));
     assert!(r.url.contains("symbol=BTC-USDT"));
@@ -157,14 +156,14 @@ fn empty_native_symbol_tries_display_symbol_then_history_orders() {
         50.0,
         r#"{"code":0,"data":{"orders":[{"id":"order","symbol":"BTCUSDT","side":"LONG","cumSuccessFillSize":"2","cumSuccessFillValue":"210","size":"10","createdAt":1700000000000}]}}"#,
     );
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 50.0).unwrap()).unwrap();
     assert_eq!((rows[0].price, rows[0].qty), (105.0, 2.0));
 }
 #[test]
 fn primary_nonempty_rows_are_authoritative_and_filter_wrong_symbol_side_and_order() {
     let mut e = seeded();
     query(&mut e, Some("order1"), None, None, None);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 20.0).remove(0);
     response(
         &mut e,
         &r,
@@ -176,14 +175,14 @@ fn primary_nonempty_rows_are_authoritative_and_filter_wrong_symbol_side_and_orde
             FILL.replace("order1", "other")
         ),
     );
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
 }
 #[test]
 fn native_execution_identity_keeps_same_second_same_quantity_distinct_fills() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 20.0).remove(0);
     let second = FILL.replace("trade1", "trade2");
     response(
         &mut e,
@@ -191,14 +190,14 @@ fn native_execution_identity_keeps_same_second_same_quantity_distinct_fills() {
         30.0,
         &format!(r#"{{"code":0,"data":[{FILL},{FILL},{second}]}}"#),
     );
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0).unwrap()).unwrap();
     assert_eq!(rows.len(), 2);
 }
 #[test]
 fn rows_without_execution_identity_deduplicate_by_order_time_and_economics() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 20.0).remove(0);
     let fill = FILL.replace("\"tradeId\":\"trade1\",", "");
     response(
         &mut e,
@@ -206,34 +205,34 @@ fn rows_without_execution_identity_deduplicate_by_order_time_and_economics() {
         30.0,
         &format!(r#"{{"code":0,"data":[{fill},{fill}]}}"#),
     );
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
 }
 #[test]
 fn malformed_explicit_price_never_uses_aggregate_derived_fallback() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 20.0).remove(0);
     response(
         &mut e,
         &r,
         30.0,
         r#"{"code":0,"data":[{"side":"BUY","fillPrice":"bad","cumSuccessFillSize":"2","cumSuccessFillValue":"200","createdAt":1700000000000}]}"#,
     );
-    assert_eq!(result(&mut e).unwrap(), "[]");
+    assert_eq!(result(&mut e, 30.0).unwrap(), "[]");
 }
 #[test]
 fn malformed_fee_is_absent_and_zero_fee_remains_zero() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 20.0).remove(0);
     response(
         &mut e,
         &r,
         30.0,
         &format!(r#"{{"code":0,"data":[{}]}}"#, FILL.replace("-0.2", "bad")),
     );
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0).unwrap()).unwrap();
     assert_eq!(rows[0].commission, None);
 }
 #[test]
@@ -246,7 +245,7 @@ fn bounds_filters_and_limit_sorts_latest_first() {
         Some(1700000003000.0),
         Some(1),
     );
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 20.0).remove(0);
     let newer = FILL
         .replace("trade1", "trade2")
         .replace("1700000000123", "1700000002000");
@@ -259,7 +258,7 @@ fn bounds_filters_and_limit_sorts_latest_first() {
         30.0,
         &format!(r#"{{"code":0,"data":[{FILL},{newer},{outside}]}}"#),
     );
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].timestamp, 1700000002.0);
 }
@@ -282,7 +281,7 @@ fn unsupported_income_and_orders_match_base_empty_and_client_lookup_is_not_defin
         },
     ] {
         e.handle(20.0, Event::Command(Command::Query { command: 7, query }));
-        assert_eq!(result(&mut e).unwrap(), "[]");
+        assert_eq!(result(&mut e, 20.0).unwrap(), "[]");
     }
     e.handle(
         30.0,
@@ -294,7 +293,7 @@ fn unsupported_income_and_orders_match_base_empty_and_client_lookup_is_not_defin
             },
         }),
     );
-    assert!(result(&mut e).unwrap_err().contains("definitive"));
+    assert!(result(&mut e, 30.0).unwrap_err().contains("definitive"));
 }
 
 #[test]
@@ -306,10 +305,10 @@ fn exhausted_rest_failures_reject_without_laundering_cache_then_rest_stays_autho
         15.0,
         r#"{"topic":"ws_zk_accounts_v3","type":"delta","contents":{"fills":[{"id":"cached","orderId":"cached-order","symbol":"BTC-USDT","side":"BUY","size":"1","price":"102","fee":"-0.02","createdAt":1700000000123}]}}"#,
     );
-    e.drain_actions().for_each(drop);
+    e.prepared(15.0).for_each(drop);
     query(&mut e, None, None, None, None);
     for i in 0..4 {
-        let r = owned_request(&mut e);
+        let r = owned_request(&mut e, 20.0);
         response(
             &mut e,
             &r,
@@ -318,19 +317,19 @@ fn exhausted_rest_failures_reject_without_laundering_cache_then_rest_stays_autho
         );
     }
     assert!(
-        owned_error(&mut e)
+        owned_error(&mut e, 30.0 + i as f64)
             .message
             .contains("temporarily unavailable")
     );
     query(&mut e, None, None, None, None);
-    let r = requests(&mut e).remove(0);
+    let r = requests(&mut e, 30.0 + i as f64).remove(0);
     response(
         &mut e,
         &r,
         40.0,
         &format!(r#"{{"code":0,"data":[{FILL}]}}"#),
     );
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 40.0).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].order_id.as_deref(), Some("order1"));
 }
@@ -339,7 +338,7 @@ fn exhausted_rest_failures_reject_without_laundering_cache_then_rest_stays_autho
 fn anonymous_distinct_subsecond_executions_remain_distinct_without_inventing_ids() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
-    let request = requests(&mut e).remove(0);
+    let request = requests(&mut e, 20.0).remove(0);
     let first = FILL.replace("\"tradeId\":\"trade1\",", "");
     let second = first.replace("1700000000123", "1700000000456");
     response(
@@ -348,7 +347,7 @@ fn anonymous_distinct_subsecond_executions_remain_distinct_without_inventing_ids
         30.0,
         &format!(r#"{{"code":0,"data":[{first},{second},{first}]}}"#),
     );
-    let result = result(&mut e).unwrap();
+    let result = result(&mut e, 30.0).unwrap();
     let rows: Vec<Row> = serde_json::from_str(&result).unwrap();
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|r| r.timestamp == 1700000000.0));
@@ -364,10 +363,10 @@ fn anonymous_ws_cache_preserves_raw_execution_identity_across_second_precision_o
         15.0,
         r#"{"topic":"ws_zk_accounts_v3","type":"delta","contents":{"fills":[{"orderId":"parent","symbol":"BTC-USDT","side":"BUY","size":"1","price":"102","createdAt":1700000000123},{"orderId":"parent","symbol":"BTC-USDT","side":"BUY","size":"1","price":"102","createdAt":1700000000456}]}}"#,
     );
-    e.drain_actions().for_each(drop);
+    e.prepared(15.0).for_each(drop);
     query(&mut e, None, None, None, None);
     for offset in 0..4 {
-        let request = requests(&mut e).remove(0);
+        let request = requests(&mut e, 15.0).remove(0);
         response(
             &mut e,
             &request,
@@ -375,7 +374,7 @@ fn anonymous_ws_cache_preserves_raw_execution_identity_across_second_precision_o
             r#"{"code":0,"data":[]}"#,
         );
     }
-    let result = result(&mut e).unwrap();
+    let result = result(&mut e, 30.0 + offset as f64).unwrap();
     let rows: Vec<Row> = serde_json::from_str(&result).unwrap();
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|r| r.timestamp == 1700000000.0));
@@ -391,10 +390,10 @@ fn same_second_ws_cache_uses_latest_execution_before_limit() {
         15.0,
         r#"{"topic":"ws_zk_accounts_v3","type":"delta","contents":{"fills":[{"id":"first","orderId":"first-order","symbol":"BTC-USDT","side":"BUY","size":"1","price":"102","createdAt":1700000000123},{"id":"second","orderId":"second-order","symbol":"BTC-USDT","side":"BUY","size":"2","price":"102","createdAt":1700000000456}]}}"#,
     );
-    e.drain_actions().for_each(drop);
+    e.prepared(15.0).for_each(drop);
     query(&mut e, None, None, None, Some(1));
     for offset in 0..4 {
-        let request = requests(&mut e).remove(0);
+        let request = requests(&mut e, 15.0).remove(0);
         response(
             &mut e,
             &request,
@@ -402,7 +401,7 @@ fn same_second_ws_cache_uses_latest_execution_before_limit() {
             r#"{"code":0,"data":[]}"#,
         );
     }
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0 + offset as f64).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].order_id.as_deref(), Some("second-order"));
     assert_eq!(rows[0].qty, 2.0);
@@ -412,7 +411,7 @@ fn same_second_ws_cache_uses_latest_execution_before_limit() {
 fn duplicate_rest_execution_preserves_first_seen_order_for_equal_second_timestamps() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
-    let request = requests(&mut e).remove(0);
+    let request = requests(&mut e, 20.0).remove(0);
     let second = FILL
         .replace("trade1", "trade2")
         .replace("\"fillSize\":\"2\"", "\"fillSize\":\"3\"");
@@ -422,7 +421,7 @@ fn duplicate_rest_execution_preserves_first_seen_order_for_equal_second_timestam
         30.0,
         &format!(r#"{{"code":0,"data":[{FILL},{second},{FILL}]}}"#),
     );
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0).unwrap()).unwrap();
     assert_eq!(rows.iter().map(|r| r.qty).collect::<Vec<_>>(), [2.0, 3.0]);
 }
 
@@ -437,7 +436,7 @@ fn millisecond_bounds_are_inclusive_and_sort_raw_times_before_truncating_output(
             Some(1700000000456.0),
             None,
         );
-        let request = requests(&mut e).remove(0);
+        let request = requests(&mut e, 20.0).remove(0);
         assert!(request.url.contains("endTimeExclusive=1700000000457"));
         let rows = [99, 100, 123, 456, 457].map(|millis| {
             let time = if format == "iso" { format!(r#""2023-11-15T00:13:20.{millis:03}+02:00""#) }
@@ -451,7 +450,7 @@ fn millisecond_bounds_are_inclusive_and_sort_raw_times_before_truncating_output(
             30.0,
             &format!(r#"{{"code":0,"data":[{rows}]}}"#),
         );
-        let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+        let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0).unwrap()).unwrap();
         assert_eq!(
             rows.iter()
                 .map(|r| r.order_id.as_deref().unwrap())
@@ -479,7 +478,7 @@ fn ws_and_synthetic_cache_filter_and_sort_using_original_milliseconds() {
             15.0,
             &format!(r#"{{"topic":"ws_zk_accounts_v3","type":"delta","contents":{contents}}}"#),
         );
-        e.drain_actions().for_each(drop);
+        e.prepared(15.0).for_each(drop);
         query(
             &mut e,
             None,
@@ -488,7 +487,7 @@ fn ws_and_synthetic_cache_filter_and_sort_using_original_milliseconds() {
             Some(1),
         );
         for offset in 0..4 {
-            let request = requests(&mut e).remove(0);
+            let request = requests(&mut e, 15.0).remove(0);
             response(
                 &mut e,
                 &request,
@@ -496,16 +495,16 @@ fn ws_and_synthetic_cache_filter_and_sort_using_original_milliseconds() {
                 r#"{"code":0,"data":[]}"#,
             );
         }
-        let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+        let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0 + offset as f64).unwrap()).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].order_id.as_deref(), Some("order-456"));
         assert_eq!(rows[0].timestamp, 1700000000.0);
     }
 }
 
-fn owned_request(e: &mut TestEngine) -> safe_cex_engine::HttpRequest {
+fn owned_request(e: &mut TestEngine, now: f64) -> safe_cex_engine::HttpRequest {
     let mut http = Vec::new();
-    for action in e.drain_actions() {
+    for action in e.prepared(now) {
         match action {
             Action::Http(r) => http.push(r),
             Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }) => {
@@ -520,9 +519,9 @@ fn owned_request(e: &mut TestEngine) -> safe_cex_engine::HttpRequest {
     assert_eq!(http.len(), 1);
     http.pop().unwrap()
 }
-fn owned_error(e: &mut TestEngine) -> safe_cex_engine::VenueError {
+fn owned_error(e: &mut TestEngine, now: f64) -> safe_cex_engine::VenueError {
     let mut errors = Vec::new();
-    for action in e.drain_actions() {
+    for action in e.prepared(now) {
         match action {
             Action::Http(_) => panic!("exhausted aliases continued"),
             Action::Notice(Notice::CommandDone { .. }) => {
@@ -544,9 +543,9 @@ fn owned_error(e: &mut TestEngine) -> safe_cex_engine::VenueError {
     assert_eq!(error.outcome, None);
     error
 }
-fn owned_rows(e: &mut TestEngine, expected_command: u32) -> Vec<Row> {
+fn owned_rows(e: &mut TestEngine, expected_command: u32, now: f64) -> Vec<Row> {
     let mut results = Vec::new();
-    for action in e.drain_actions() {
+    for action in e.prepared(now) {
         match action {
             Action::Http(_) => panic!("terminal selection continued"),
             Action::Notice(Notice::CommandFailed { .. }) => panic!("valid selection rejected"),
@@ -571,7 +570,7 @@ fn cached() -> TestEngine {
         15.0,
         r#"{"topic":"ws_zk_accounts_v3","type":"delta","contents":{"fills":[{"id":"cached","orderId":"cached-order","symbol":"BTC-USDT","side":"BUY","size":"1","price":"102","fee":"-0.02","createdAt":1700000000123}]}}"#,
     );
-    e.drain_actions().for_each(drop);
+    e.prepared(15.0).for_each(drop);
     e
 }
 fn candidate(r: &safe_cex_engine::HttpRequest, index: usize) {
@@ -591,7 +590,7 @@ fn all_native_alias_failures_reject_typed_instead_of_empty_success() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
     for i in 0..4 {
-        let r = owned_request(&mut e);
+        let r = owned_request(&mut e, 20.0);
         candidate(&r, i);
         response(
             &mut e,
@@ -600,7 +599,7 @@ fn all_native_alias_failures_reject_typed_instead_of_empty_success() {
             r#"{"code":40001,"msg":"native unavailable"}"#,
         );
     }
-    assert!(owned_error(&mut e).message.contains("native unavailable"));
+    assert!(owned_error(&mut e, 30.0 + i as f64).message.contains("native unavailable"));
 }
 #[test]
 fn malformed_and_missing_list_exhaustion_cannot_publish_valid_prefixes_or_cache() {
@@ -611,11 +610,11 @@ fn malformed_and_missing_list_exhaustion_cannot_publish_valid_prefixes_or_cache(
         let mut e = cached();
         query(&mut e, None, None, None, None);
         for i in 0..4 {
-            let r = owned_request(&mut e);
+            let r = owned_request(&mut e, 20.0);
             candidate(&r, i);
             response(&mut e, &r, 30.0 + i as f64, &body);
         }
-        owned_error(&mut e);
+        owned_error(&mut e, 30.0 + i as f64);
     }
 }
 #[test]
@@ -623,7 +622,7 @@ fn transport_exhaustion_resets_all_sixteen_attempt_prefixes_before_typed_rejecti
     let mut e = cached();
     query(&mut e, None, None, None, None);
     for attempt in 0..16 {
-        let r = owned_request(&mut e);
+        let r = owned_request(&mut e, 20.0);
         candidate(&r, attempt / 4);
         e.handle(
             30.0,
@@ -641,7 +640,7 @@ fn transport_exhaustion_resets_all_sixteen_attempt_prefixes_before_typed_rejecti
                 data: prefix.as_bytes(),
             },
         );
-        for action in e.drain_actions() {
+        for action in e.prepared(30.0) {
             match action {
                 Action::Http(_)
                 | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }) => {
@@ -661,7 +660,7 @@ fn transport_exhaustion_resets_all_sixteen_attempt_prefixes_before_typed_rejecti
             },
         );
     }
-    assert!(owned_error(&mut e).message.contains("network unavailable"));
+    assert!(owned_error(&mut e, 30.0).message.contains("network unavailable"));
 }
 #[test]
 fn validated_empty_or_filtered_success_keeps_cache_selection_amid_failed_alternatives() {
@@ -669,7 +668,7 @@ fn validated_empty_or_filtered_success_keeps_cache_selection_amid_failed_alterna
         let mut e = cached();
         query(&mut e, None, None, None, None);
         for i in 0..4 {
-            let r = owned_request(&mut e);
+            let r = owned_request(&mut e, 20.0);
             candidate(&r, i);
             let body = if i == success_at {
                 r#"{"code":0,"data":[]}"#
@@ -678,13 +677,13 @@ fn validated_empty_or_filtered_success_keeps_cache_selection_amid_failed_alterna
             };
             response(&mut e, &r, 30.0 + i as f64, body);
         }
-        let rows = owned_rows(&mut e, 7);
+        let rows = owned_rows(&mut e, 7, 30.0 + i as f64);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].order_id.as_deref(), Some("cached-order"));
     }
     let mut e = cached();
     query(&mut e, None, None, None, None);
-    let r = owned_request(&mut e);
+    let r = owned_request(&mut e, 20.0);
     response(
         &mut e,
         &r,
@@ -695,7 +694,7 @@ fn validated_empty_or_filtered_success_keeps_cache_selection_amid_failed_alterna
         ),
     );
     assert_eq!(
-        owned_rows(&mut e, 7)[0].order_id.as_deref(),
+        owned_rows(&mut e, 7, 30.0)[0].order_id.as_deref(),
         Some("cached-order")
     );
 }
@@ -709,18 +708,18 @@ fn identical_native_and_display_symbol_has_only_two_alternatives() {
     e.store_mut().set_markets(markets);
     query(&mut e, None, None, None, None);
     for route in ["/v3/fills?", "/v3/history-orders?"] {
-        let r = owned_request(&mut e);
+        let r = owned_request(&mut e, 20.0);
         assert!(r.url.contains(route));
         response(&mut e, &r, 30.0, r#"{"code":0,"data":[]}"#);
     }
-    assert!(owned_rows(&mut e, 7).is_empty());
+    assert!(owned_rows(&mut e, 7, 30.0).is_empty());
 }
 
 #[test]
 fn bounded_native_upsert_preserves_eviction_before_later_duplicate_replacement() {
     let mut e = seeded();
     query(&mut e, None, None, None, Some(1));
-    let r = owned_request(&mut e);
+    let r = owned_request(&mut e, 20.0);
     let newest = FILL.replace("1700000000123", "1700000005123");
     let evicted = FILL
         .replace("trade1", "trade2")
@@ -734,14 +733,14 @@ fn bounded_native_upsert_preserves_eviction_before_later_duplicate_replacement()
         30.0,
         &format!(r#"{{"code":0,"data":[{newest},{evicted},{replacement}]}}"#),
     );
-    let rows = owned_rows(&mut e, 7);
+    let rows = owned_rows(&mut e, 7, 30.0);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].timestamp, 1700000003.0);
     assert_eq!(rows[0].qty, 7.0);
 
     // An identity evicted from the bounded native page may reappear later.
     query(&mut e, None, None, None, Some(1));
-    let r = owned_request(&mut e);
+    let r = owned_request(&mut e, 20.0);
     let reappeared = FILL
         .replace("trade1", "trade2")
         .replace("1700000000123", "1700000006123")
@@ -752,7 +751,7 @@ fn bounded_native_upsert_preserves_eviction_before_later_duplicate_replacement()
         40.0,
         &format!(r#"{{"code":0,"data":[{newest},{evicted},{replacement},{reappeared}]}}"#),
     );
-    let rows = owned_rows(&mut e, 7);
+    let rows = owned_rows(&mut e, 7, 40.0);
     assert_eq!(rows.len(), 1);
     assert_eq!((rows[0].timestamp, rows[0].qty), (1700000006.0, 9.0));
 }
@@ -760,14 +759,14 @@ fn bounded_native_upsert_preserves_eviction_before_later_duplicate_replacement()
 fn signature_reset_discards_prefix_but_retains_original_history_owner() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
-    let first = owned_request(&mut e);
+    let first = owned_request(&mut e, 20.0);
     response(
         &mut e,
         &first,
         30.0,
         &format!(r#"{{"code":20016,"msg":"signature rejected","data":[{FILL}]}}"#),
     );
-    let retry = owned_request(&mut e);
+    let retry = owned_request(&mut e, 30.0);
     assert_eq!(first.url, retry.url);
     let corrected = FILL
         .replace("\"fillPrice\":\"100\"", "\"fillPrice\":\"101\"")
@@ -778,7 +777,7 @@ fn signature_reset_discards_prefix_but_retains_original_history_owner() {
         40.0,
         &format!(r#"{{"code":0,"data":[{corrected}]}}"#),
     );
-    let rows = owned_rows(&mut e, 7);
+    let rows = owned_rows(&mut e, 7, 40.0);
     assert_eq!(rows.len(), 1);
     assert_eq!((rows[0].price, rows[0].qty), (101.0, 3.0));
 }
@@ -786,7 +785,7 @@ fn signature_reset_discards_prefix_but_retains_original_history_owner() {
 fn history_rejection_does_not_erase_background_cache_or_cross_concurrent_owners() {
     let mut e = cached();
     query(&mut e, None, None, None, None);
-    let first = owned_request(&mut e);
+    let first = owned_request(&mut e, 20.0);
     e.handle(
         21.0,
         Event::Command(Command::Query {
@@ -800,14 +799,14 @@ fn history_rejection_does_not_erase_background_cache_or_cross_concurrent_owners(
             },
         }),
     );
-    let second = owned_request(&mut e);
+    let second = owned_request(&mut e, 21.0);
     response(
         &mut e,
         &second,
         30.0,
         &format!(r#"{{"code":0,"data":[{FILL}]}}"#),
     );
-    assert_eq!(owned_rows(&mut e, 8)[0].order_id.as_deref(), Some("order1"));
+    assert_eq!(owned_rows(&mut e, 8, 30.0)[0].order_id.as_deref(), Some("order1"));
     response(
         &mut e,
         &first,
@@ -815,17 +814,17 @@ fn history_rejection_does_not_erase_background_cache_or_cross_concurrent_owners(
         r#"{"code":40001,"msg":"unavailable"}"#,
     );
     for _ in 1..4 {
-        let r = owned_request(&mut e);
+        let r = owned_request(&mut e, 31.0);
         response(&mut e, &r, 32.0, r#"{"code":40001,"msg":"unavailable"}"#);
     }
-    owned_error(&mut e);
+    owned_error(&mut e, 32.0);
     query(&mut e, None, None, None, None);
     for _ in 0..4 {
-        let r = owned_request(&mut e);
+        let r = owned_request(&mut e, 20.0);
         response(&mut e, &r, 40.0, r#"{"code":0,"data":[]}"#);
     }
     assert_eq!(
-        owned_rows(&mut e, 7)[0].order_id.as_deref(),
+        owned_rows(&mut e, 7, 40.0)[0].order_id.as_deref(),
         Some("cached-order")
     );
     assert!(e.store().orders().is_empty());

@@ -1,5 +1,10 @@
 //! Atomic private snapshots, socket healing and execution identity.
-use crate::{ApexOmni, Pending, private_wire as wire, sign};
+use crate::{ApexOmni, Pending, private_wire as wire, read, sign};
+use safe_cex_engine::credential_selection::CredentialUnavailable;
+use safe_cex_engine::request_context::{CommandEntryError, Context, Operation, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    BackgroundReadError, CommandReadError, LocalRefusal, ReadPolicy, ReadRole, SelectedRead,
+};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::ArrayAt;
@@ -10,7 +15,9 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::Store;
-use safe_cex_engine::{Command, CommandId, Cx, Fill, Response, SocketChannel, SocketId, TimerId};
+use safe_cex_engine::{
+    Command, Cx, Fill, Response, SocketChannel, SocketId, TimerId, VenueError,
+};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -34,9 +41,8 @@ pub(crate) fn subtract(a: f64, b: f64) -> f64 {
 }
 
 pub enum Request {
-    Identity {
-        command: CommandId,
-    },
+    /// FetchAccount: its terminal publishes through the admitted command context.
+    Identity,
     Positions {
         generation: Option<u64>,
         revision: u64,
@@ -109,7 +115,7 @@ impl Request {
         match self {
             Self::Positions { rows, .. } => *rows = SnapshotBuilder::default(),
             Self::Orders { rows, .. } => *rows = SnapshotBuilder::default(),
-            Self::Balance | Self::Identity { .. } => {}
+            Self::Balance | Self::Identity => {}
         }
     }
 }
@@ -773,16 +779,12 @@ impl ApexOmni {
             revision: self.account.revision,
             rows: SnapshotBuilder::default(),
         };
-        if let Err(error) = self.signed(
+        self.snapshot_read(
             cx,
-            sign::Request::get("/v3/account", vec![]),
-            Pending::Account(pending),
+            "/v3/account",
             Some(ArrayAt::Path(&["data", "positions"])),
-        ) {
-            self.account.positions_pending = false;
-            self.account.snapshot = None;
-            cx.notice(Level::Error, code::CONFIG_INVALID, error);
-        }
+            pending,
+        );
     }
 
     fn request_orders(&mut self, cx: &mut Cx<'_, Pending>, generation: Option<u64>) {
@@ -792,16 +794,12 @@ impl ApexOmni {
             revision: self.account.revision,
             rows: SnapshotBuilder::default(),
         };
-        if let Err(error) = self.signed(
+        self.snapshot_read(
             cx,
-            sign::Request::get("/v3/open-orders", vec![]),
-            Pending::Account(pending),
+            "/v3/open-orders",
             Some(ArrayAt::Field("data")),
-        ) {
-            self.account.orders_pending = false;
-            self.account.snapshot = None;
-            cx.notice(Level::Error, code::CONFIG_INVALID, error);
-        }
+            pending,
+        );
     }
 
     fn request_balance(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -809,15 +807,57 @@ impl ApexOmni {
             return;
         }
         self.account.balance_pending = true;
-        if let Err(error) = self.signed(
+        self.snapshot_read(cx, "/v3/account-balance", None, Request::Balance);
+    }
+
+    /// One Background Read per snapshot leg; the native generation stays the join.
+    /// A refused selection, admission or queue settles the leg before any send.
+    fn snapshot_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        at: Option<ArrayAt>,
+        request: Request,
+    ) {
+        let selected = SelectedRead::select(&self.slots, ReadRole::Read { scope: None });
+        let policy = ReadPolicy {
+            timeout_ms: read::TIMEOUT_MS,
+            pacing: None,
+            retry: RetryPolicy::ReadFailure,
+        };
+        let read = match SelectedRead::background(cx, selected, policy) {
+            Ok(read) => read,
+            Err(error) => {
+                let error = match error {
+                    BackgroundReadError::Selection(_) => read::MISSING.to_owned(),
+                    BackgroundReadError::Admission(error) => error.read_venue_error().message,
+                };
+                self.snapshot_refused(cx, request, error);
+                return;
+            }
+        };
+        if let Err((pending, error)) = self.send_read(
             cx,
-            sign::Request::get("/v3/account-balance", vec![]),
-            Pending::Account(Request::Balance),
-            None,
+            read::Custody::Admitted(read),
+            sign::Request::get(path, vec![]),
+            at,
+            read::Native::Account(request),
         ) {
-            self.account.balance_pending = false;
-            cx.notice(Level::Error, code::CONFIG_INVALID, error);
+            self.failed(cx, pending, error.venue_error());
         }
+    }
+
+    fn snapshot_refused(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: String) {
+        match request {
+            Request::Positions { .. } => self.account.positions_pending = false,
+            Request::Orders { .. } => self.account.orders_pending = false,
+            Request::Balance => self.account.balance_pending = false,
+            Request::Identity => return,
+        }
+        if !matches!(request, Request::Balance) {
+            self.account.snapshot = None;
+        }
+        cx.notice(Level::Error, code::CONFIG_INVALID, error);
     }
 
     pub(crate) fn account_item(
@@ -890,13 +930,14 @@ impl ApexOmni {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
+        context: &Context,
         response: Response<'_>,
     ) {
         let data = serde_json::from_str::<wire::Envelope<'_>>(response.body)
             .ok()
             .map(|e| e.data);
         match request {
-            Request::Identity { command } => {
+            Request::Identity => {
                 let id = data
                     .and_then(|data| serde_json::from_str::<wire::Identity>(data.get()).ok())
                     .map(|identity| identity.id)
@@ -915,13 +956,18 @@ impl ApexOmni {
                                 affiliate_id: None,
                             })
                             .map_err(|e| e.to_string());
-                            match result {
-                                Ok(data) => cx.done(command, data),
-                                Err(error) => cx.fail(command, error),
-                            }
+                            let _ = match result {
+                                Ok(data) => cx.done_context(context, data),
+                                Err(error) => cx.fail_context(context, error),
+                            };
                         };
                     }
-                    None => cx.fail(command, "ApeX account identity payload missing or invalid"),
+                    None => {
+                        let _ = cx.fail_context(
+                            context,
+                            "ApeX account identity payload missing or invalid",
+                        );
+                    }
                 }
             }
             Request::Positions {
@@ -1071,11 +1117,12 @@ impl ApexOmni {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: &str,
+        context: &Context,
+        error: VenueError,
     ) {
         let generation = match request {
-            Request::Identity { command } => {
-                cx.fail(command, error.to_owned());
+            Request::Identity => {
+                let _ = cx.fail_context(context, error);
                 return;
             }
             Request::Positions { generation, .. } => {
@@ -1091,7 +1138,7 @@ impl ApexOmni {
                 None
             }
         };
-        self.snapshot_failed(cx, generation, error);
+        self.snapshot_failed(cx, generation, &error.message);
     }
 
     fn commit_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1238,20 +1285,40 @@ impl ApexOmni {
         cx: &mut Cx<'_, Pending>,
         command: Command,
     ) -> Result<(), Command> {
-        let Command::FetchAccount { command } = command else {
+        // The admitted context carries the command; its ID is not needed here.
+        let Command::FetchAccount { .. } = command else {
             return Err(command);
         };
-        if self.options.public_data_only || self.options.identity.is_none() {
-            cx.fail(command, "ApeX account identity requires API credentials");
-            return Ok(());
-        }
-        if let Err(error) = self.signed(
-            cx,
-            sign::Request::get("/v3/account", vec![]),
-            Pending::Account(Request::Identity { command }),
-            None,
-        ) {
-            cx.fail(command, error);
+        let selected = if self.options.public_data_only {
+            Err(CredentialUnavailable::Missing)
+        } else {
+            SelectedRead::select(&self.slots, ReadRole::Read { scope: None })
+        };
+        let policy = ReadPolicy {
+            timeout_ms: read::TIMEOUT_MS,
+            pacing: None,
+            retry: RetryPolicy::ReadFailure,
+        };
+        let missing = LocalRefusal {
+            diagnostic: None,
+            error: VenueError::new("ApeX account identity requires API credentials"),
+        };
+        match SelectedRead::command(cx, selected, policy, missing) {
+            Ok(read) => {
+                if let Err((pending, error)) = self.send_read(
+                    cx,
+                    read::Custody::Admitted(read),
+                    sign::Request::get("/v3/account", vec![]),
+                    None,
+                    read::Native::Account(Request::Identity),
+                ) {
+                    self.failed(cx, pending, error.venue_error());
+                }
+            }
+            Err(CommandReadError::Entry(CommandEntryError::Revoked)) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+            }
+            Err(_) => {}
         }
         Ok(())
     }

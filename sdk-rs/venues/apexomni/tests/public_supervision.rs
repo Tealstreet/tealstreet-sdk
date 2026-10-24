@@ -28,7 +28,7 @@ impl Harness {
         }));
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(0.0);
-        let request = support::requests(&mut engine).remove(0);
+        let request = support::requests(&mut engine, 0.0).remove(0);
         support::response(&mut engine, &request, 10.0, support::MARKETS);
         let mut h = Self {
             engine,

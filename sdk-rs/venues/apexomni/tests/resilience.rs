@@ -70,7 +70,7 @@ fn seeded(e: &mut TestEngine, markets: &str) -> (Option<SocketId>, Vec<HttpReque
     e.start(0.0);
     let r = requests(e).remove(0);
     response(e, &r, 10.0, markets);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(0.0).collect();
     let socket = actions.iter().find_map(|a| match a {
         Action::WsConnect {
             socket,
@@ -103,9 +103,9 @@ fn ready(orders: &str) -> (TestEngine, SocketId) {
     let (socket, http, _) = seeded(&mut e, MARKETS);
     let socket = socket.unwrap();
     e.handle(20.0, Event::WsOpened { socket });
-    e.drain_actions().for_each(drop);
+    e.prepared(20.0).for_each(drop);
     answer(&mut e, http, 30.0, ACCOUNT, orders);
-    e.drain_actions().for_each(drop);
+    e.prepared(20.0).for_each(drop);
     (e, socket)
 }
 fn frame(body: &str) -> String {
@@ -113,8 +113,7 @@ fn frame(body: &str) -> String {
 }
 fn heal_orders(e: &mut TestEngine, socket: SocketId, at: f64, body: &str) {
     ws(e, socket, at, &frame(r#"{"orders":[]}"#));
-    let timer = e
-        .drain_actions()
+    let timer = e.prepared(at)
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if at_ms == at + 1000.0 => Some(timer),
             _ => None,
@@ -167,8 +166,7 @@ fn accepted_cancel_fences_stale_reads_but_an_order_the_venue_kept_reappears() {
     assert_eq!(order_ids(&e), ["parent", "parent__stop_loss"]);
     // A read already in flight when the cancel lands cannot reopen it.
     ws(&mut e, socket, 100.0, &frame(r#"{"orders":[]}"#));
-    let timer = e
-        .drain_actions()
+    let timer = e.prepared(100.0)
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
@@ -178,7 +176,7 @@ fn accepted_cancel_fences_stale_reads_but_an_order_the_venue_kept_reappears() {
         })
         .unwrap();
     e.handle(1100.0, Event::TimerFired { timer });
-    let stale = requests(&mut e).remove(0);
+    let stale = requests(&mut e, 1100.0).remove(0);
     command(
         &mut e,
         1200.0,
@@ -196,7 +194,7 @@ fn accepted_cancel_fences_stale_reads_but_an_order_the_venue_kept_reappears() {
     // Well after the accepted cancel the venue's open list is authoritative again.
     heal_orders(&mut e, socket, 8000.0, &list(&[PARENT]));
     assert_eq!(order_ids(&e), ["parent", "parent__stop_loss"]);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(1300.0).collect();
     assert!(warned(
         &actions,
         "order parent is still open after its cancel"
@@ -207,8 +205,7 @@ fn accepted_cancel_fences_stale_reads_but_an_order_the_venue_kept_reappears() {
 fn stale_read_landing_after_the_grace_window_cannot_reopen_a_cancelled_order() {
     let (mut e, socket) = ready(&list(&[PARENT]));
     ws(&mut e, socket, 100.0, &frame(r#"{"orders":[]}"#));
-    let timer = e
-        .drain_actions()
+    let timer = e.prepared(100.0)
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
@@ -218,7 +215,7 @@ fn stale_read_landing_after_the_grace_window_cannot_reopen_a_cancelled_order() {
         })
         .unwrap();
     e.handle(1100.0, Event::TimerFired { timer });
-    let stale = requests(&mut e).remove(0);
+    let stale = requests(&mut e, 1100.0).remove(0);
     command(
         &mut e,
         1200.0,
@@ -229,12 +226,12 @@ fn stale_read_landing_after_the_grace_window_cannot_reopen_a_cancelled_order() {
     );
     response(&mut e, &stale, 7400.0, &list(&[PARENT]));
     assert!(order_ids(&e).is_empty());
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(7400.0).collect();
     assert!(!warned(&actions, "still open after its cancel"));
     // The stale read does not consume the check; a fresh read still reports it.
     heal_orders(&mut e, socket, 8000.0, &list(&[PARENT]));
     assert_eq!(order_ids(&e), ["parent", "parent__stop_loss"]);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(7400.0).collect();
     assert!(warned(
         &actions,
         "order parent is still open after its cancel"
@@ -347,7 +344,7 @@ fn null_fields_and_one_bad_row_never_drop_sibling_fills() {
             r#"{{"fills":[{nulls},{bad},{good}],"orders":[{order}],"positions":null}}"#
         )),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(100.0).collect();
     assert!(warned(&actions, "skipped malformed fill rows (f2)"));
     assert_eq!(fill_amounts(&mut e), [1.0, 0.5]);
     assert_eq!(e.store().order("o1").unwrap().amount, 3.0);
@@ -388,8 +385,7 @@ fn account_rows_on_a_skipped_market_are_reported_once_as_hidden() {
     let eth =
         r#"{"positions":[{"symbol":"ETH-USDT","side":"LONG","entryPrice":"3000","size":"2"}]}"#;
     ws(&mut e, socket, 100.0, &frame(eth));
-    let hidden = e
-        .drain_actions()
+    let hidden = e.prepared(100.0)
         .filter(|a| {
             matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
                 if message.contains("position on ETH-USDT is hidden"))
@@ -439,7 +435,7 @@ fn invalid_omni_seed_keeps_read_only_monitoring_and_rejects_placement() {
             orders: vec![order],
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(40.0).collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,

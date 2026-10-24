@@ -86,11 +86,10 @@ fn ready_with_provider_mode(hmac_only: bool, remote: bool) -> (TestEngine, Socke
     e.set_identities(identities).unwrap();
     e.set_signer(Some(provider)).unwrap();
     e.start(NOW);
-    let symbols = requests(&mut e).remove(0);
+    let symbols = requests(&mut e, NOW).remove(0);
     response(&mut e, &symbols, NOW + 1.0, MARKETS);
     let mut socket = None;
-    let reads = e
-        .drain_actions()
+    let reads = e.prepared(NOW + 1.0)
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             Action::WsConnect {
@@ -116,7 +115,7 @@ fn ready_with_provider_mode(hmac_only: bool, remote: bool) -> (TestEngine, Socke
             },
         );
     }
-    for request in requests(&mut e) {
+    for request in requests(&mut e, NOW + 2.0) {
         response(
             &mut e,
             &request,
@@ -128,7 +127,7 @@ fn ready_with_provider_mode(hmac_only: bool, remote: bool) -> (TestEngine, Socke
         t.last = 60000.0;
         t.mark = 60000.0;
     });
-    e.drain_actions().for_each(drop);
+    e.prepared(NOW + 3.0).for_each(drop);
     (e, socket.unwrap())
 }
 fn order(extra: serde_json::Value) -> PlaceOrderOpts {
@@ -387,7 +386,7 @@ fn signature_rejection_retries_once_with_same_l2_body_and_fresh_legacy_auth() {
         NOW + 20.0,
         r#"{"code":20016,"msg":"signature rejected"}"#,
     );
-    let retry = requests(&mut e).remove(0);
+    let retry = requests(&mut e, NOW + 20.0).remove(0);
     assert_eq!(first.body, retry.body);
     assert_ne!(first.headers, retry.headers);
     response(
@@ -396,7 +395,7 @@ fn signature_rejection_retries_once_with_same_l2_body_and_fresh_legacy_auth() {
         NOW + 30.0,
         r#"{"code":20016,"msg":"signature rejected"}"#,
     );
-    assert!(requests(&mut e).is_empty());
+    assert!(requests(&mut e, NOW + 30.0).is_empty());
 }
 
 #[test]
@@ -422,7 +421,7 @@ fn http_and_business_rejections_never_cancel_replace_or_retry_writes() {
                 },
             },
         );
-        assert!(requests(&mut e).is_empty());
+        assert!(requests(&mut e, NOW + 11.0).is_empty());
     }
 }
 
@@ -440,7 +439,7 @@ fn virtual_cancellation_deduplicates_parent_and_never_retries_ambiguous_write() 
             ],
         }),
     );
-    let first = requests(&mut e).remove(0);
+    let first = requests(&mut e, NOW + 10.0).remove(0);
     assert_eq!(form(&first)["id"], "abc");
     e.handle(
         NOW + 20.0,
@@ -449,7 +448,7 @@ fn virtual_cancellation_deduplicates_parent_and_never_retries_ambiguous_write() 
             error: "reset",
         },
     );
-    assert!(requests(&mut e).is_empty());
+    assert!(requests(&mut e, NOW + 20.0).is_empty());
 }
 
 #[test]
@@ -464,7 +463,7 @@ fn leverage_uses_real_multipart_and_clamps_to_market_rails() {
             side: None,
         }),
     );
-    let request = requests(&mut e).remove(0);
+    let request = requests(&mut e, NOW + 10.0).remove(0);
     assert!(
         request
             .headers
@@ -527,7 +526,7 @@ fn partial_parent_and_virtual_amendments_replace_only_remaining_and_keep_sibling
         e.drain_actions().for_each(drop);
         let cancel = amend(&mut e, id, None).remove(0);
         response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-        let replacement = requests(&mut e).remove(0);
+        let replacement = requests(&mut e, NOW + 15.0).remove(0);
         let fields = form(&replacement);
         assert_eq!(fields["size"], "4");
         assert_eq!(fields["slSize"], "4");
@@ -555,9 +554,9 @@ fn amend_rechecks_remaining_when_its_fifo_turn_starts() {
             error: "lost placement response",
         },
     );
-    let cancel = requests(&mut e).remove(0);
+    let cancel = requests(&mut e, NOW + 12.0).remove(0);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
+    assert_eq!(form(&requests(&mut e, NOW + 15.0).remove(0))["size"], "2");
 }
 
 #[test]
@@ -575,7 +574,7 @@ fn in_flight_amend_counts_same_execution_once_in_both_topic_orders() {
             amend_fill(&mut e, socket, NOW + 11.0, 1.0);
         }
         response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-        assert_eq!(form(&requests(&mut e).remove(0))["size"], "3");
+        assert_eq!(form(&requests(&mut e, NOW + 15.0).remove(0))["size"], "3");
     }
 }
 
@@ -587,7 +586,7 @@ fn delayed_pre_amend_fill_does_not_reduce_the_captured_remaining_again() {
     let cancel = amend(&mut e, "parent", None).remove(0);
     amend_fill(&mut e, socket, NOW + 4.0, 6.0);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    assert_eq!(form(&requests(&mut e).remove(0))["size"], "4");
+    assert_eq!(form(&requests(&mut e, NOW + 15.0).remove(0))["size"], "4");
 }
 
 #[test]
@@ -599,7 +598,7 @@ fn new_genuine_amend_fill_counts_despite_outstanding_old_synthetic_coverage() {
     let cancel = amend(&mut e, "parent", None).remove(0);
     amend_fill(&mut e, socket, NOW + 11.0, 1.0);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
+    assert_eq!(form(&requests(&mut e, NOW + 15.0).remove(0))["size"], "2");
 }
 
 #[test]
@@ -611,7 +610,7 @@ fn distinct_execution_after_a_cumulative_report_reduces_remaining_again() {
     parent_update(&mut e, socket, NOW + 11.0, 7.0, "OPEN", false);
     amend_fill(&mut e, socket, NOW + 12.0, 1.0);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
+    assert_eq!(form(&requests(&mut e, NOW + 15.0).remove(0))["size"], "2");
 }
 
 #[test]
@@ -704,7 +703,7 @@ fn explicit_amend_quantity_remains_verbatim_after_an_additional_fill() {
     let cancel = amend(&mut e, "parent", Some(2.5)).remove(0);
     parent_update(&mut e, socket, NOW + 12.0, 7.0, "OPEN", false);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2.5");
+    assert_eq!(form(&requests(&mut e, NOW + 15.0).remove(0))["size"], "2.5");
 }
 
 #[test]
@@ -814,7 +813,7 @@ fn amendment_receipts_are_published_only_for_final_selected_replacement() {
     let cancel = http(cancel_actions).remove(0);
     // An additional fill discards the prebuilt replacement and selects new signed IDs.
     amend_fill(&mut e, socket, NOW + 11.0, 1.0);
-    e.drain_actions().for_each(drop);
+    e.prepared(NOW + 10.0).for_each(drop);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
     let out: Vec<_> = actions(&mut e);
     let write = out
@@ -893,8 +892,7 @@ fn write_failures_use_shared_classification_and_preserve_network_text() {
                 },
             },
         );
-        let error = e
-            .drain_actions()
+        let error = e.prepared(NOW + 11.0)
             .find_map(|a| match a {
                 Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
                 _ => None,
@@ -916,8 +914,7 @@ fn write_failures_use_shared_classification_and_preserve_network_text() {
             error: "connection reset",
         },
     );
-    let error = e
-        .drain_actions()
+    let error = e.prepared(NOW + 11.0)
         .find_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
             _ => None,
@@ -936,12 +933,12 @@ fn default_decimal_amendment_subtracts_late_fill_without_float_noise() {
         serde_json::json!({"topic":"ws_zk_accounts_v3","type":"delta","contents":{"orders":[{"id":"parent","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"OPEN","size":"0.3","price":"60000","cumSuccessFillSize":filled}]}}).to_string()
     };
     ws(&mut e, socket, NOW + 5.0, &decimal_parent("0.1"));
-    e.drain_actions().for_each(drop);
+    e.prepared(NOW + 5.0).for_each(drop);
     let cancel = amend(&mut e, "parent", None).remove(0);
     ws(&mut e, socket, NOW + 12.0, &decimal_parent("0.2"));
-    e.drain_actions().for_each(drop);
+    e.prepared(NOW + 12.0).for_each(drop);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    assert_eq!(form(&requests(&mut e).remove(0))["size"], "0.1");
+    assert_eq!(form(&requests(&mut e, NOW + 15.0).remove(0))["size"], "0.1");
 }
 
 #[test]
@@ -1020,7 +1017,7 @@ fn p0_write_unlisted_native_code_is_explicitly_unknown() {
 fn hmac_write_failure_is_unknown(command: Command, status: u16, body: &str, code: &str) {
     let mut e = ready();
     e.handle(NOW + 10.0, Event::Command(command));
-    let first = requests(&mut e).remove(0);
+    let first = requests(&mut e, NOW + 10.0).remove(0);
     e.handle(
         NOW + 11.0,
         Event::HttpResponse {
@@ -1176,7 +1173,7 @@ fn write_provider(hmac_only: bool) -> (Arc<dyn Signer>, Identities) {
 fn managed_provider_cancel_stages_prepare_before_any_signed_http() {
     let mut e = ready();
     e.handle(NOW + 10., Event::Command(hmac_cancel()));
-    let staged = e.drain_actions().collect::<Vec<_>>();
+    let staged = e.prepared(NOW + 10.).collect::<Vec<_>>();
     assert!(
         staged.iter().any(|a| matches!(a, Action::ManagedHttp(_))),
         "cancel must enter trusted preparation before signing"
@@ -1216,7 +1213,7 @@ fn managed_provider_without_zklink_refuses_entire_amend_before_cancel() {
             amount: None,
         }),
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.prepared(NOW + 10.).collect::<Vec<_>>();
     assert!(
         !actions.iter().any(|a| matches!(
             a,
@@ -1237,7 +1234,7 @@ fn non_success_status_with_code_zero_never_accepts_or_changes_leverage() {
     let mut e = ready();
     let before = e.store().setting("BTCUSDT").unwrap().leverage;
     e.handle(NOW + 10., Event::Command(hmac_setting()));
-    let first = requests(&mut e).remove(0);
+    let first = requests(&mut e, NOW + 10.).remove(0);
     e.handle(
         NOW + 11.,
         Event::HttpResponse {
@@ -1263,7 +1260,7 @@ fn quoted_refusal_codes_share_the_integer_code_table_and_message() {
     for code in ["401", "429"] {
         let mut e = ready();
         e.handle(NOW + 10., Event::Command(hmac_cancel()));
-        let first = requests(&mut e).remove(0);
+        let first = requests(&mut e, NOW + 10.).remove(0);
         response(
             &mut e,
             &first,
@@ -1298,9 +1295,9 @@ fn accepted_cancel_ids_survive_the_next_cancel_transport_loss() {
             ids: vec!["one".into(), "two".into()],
         }),
     );
-    let first = requests(&mut e).remove(0);
+    let first = requests(&mut e, NOW + 10.).remove(0);
     response(&mut e, &first, NOW + 11., r#"{"code":0,"data":null}"#);
-    let second = requests(&mut e).remove(0);
+    let second = requests(&mut e, NOW + 11.).remove(0);
     e.handle(
         NOW + 12.,
         Event::HttpFailed {
@@ -1357,7 +1354,7 @@ fn late_cancel_ack_preserves_uncertainty_without_bypassing_native_read_fences() 
         );
         if update_after_release {
             parent_update(&mut e, socket, deadline + 1., 1., "OPEN", true);
-            e.drain_actions().for_each(drop);
+            e.prepared(deadline).for_each(drop);
         }
         response(&mut e, &first, deadline + 2., r#"{"code":0,"data":null}"#);
         let late = actions(&mut e);
