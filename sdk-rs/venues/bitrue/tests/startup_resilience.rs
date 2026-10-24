@@ -1,14 +1,15 @@
+mod support;
 use safe_cex_engine::{Action, Event, Response};
-use safe_cex_venue_bitrue::{Bitrue, Options};
+use support::Options;
 
 // A transport failure must yield to the host clock; malformed individual rows
 // cannot discard valid neighbours from the subsequent successful catalogue.
 #[test]
 fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
+    let mut engine = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     engine.start(0.0);
     let mut request = engine
         .drain_actions()

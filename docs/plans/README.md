@@ -359,3 +359,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Kraken Futures unsigned PublicTrades ownership | Managed implementation; focused proof and source review in progress | Before changing caller-root cursor pages or accepted-only failure recovery. | [RUST_KRAKEN_FUTURES_PUBLIC_TRADES_CONTEXT.md](RUST_KRAKEN_FUTURES_PUBLIC_TRADES_CONTEXT.md) |
 
 | Receipt-bound stamp floor | Focused gates/reviews clear; full CI pending | Before monotonic per-request signature or transport reissues; floor grants no resend authority. | [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md) |
+
+| Bitrue dispatch signing | Production candidate; original REDs green, review and CI pending | Before replacing inline Bitrue HMAC, selection or native signature resend. | [RUST_BITRUE_DISPATCH_SIGNER.md](RUST_BITRUE_DISPATCH_SIGNER.md) |
