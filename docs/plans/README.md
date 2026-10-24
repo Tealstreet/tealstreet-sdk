@@ -373,3 +373,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | OKX history selected identity | Implemented; scoped checks pass, review pending | Before removing the closed/history credential-selection legacy sites. | [RUST_OKX_HISTORY_SELECTED_IDENTITY.md](RUST_OKX_HISTORY_SELECTED_IDENTITY.md) |
 
 - [Polymarket midpoint seed custody](RUST_POLYMARKET_MIDPOINT_READ_CONTEXT.md): one unsigned Background Read site; plan and original controls before production.
+
+| GRVT serial write funnel | Plan and original controls only; shared revision-gated waits, parsed auth grant, provider recipe and header ordering OPEN | Before changing the five trading terminals, FIFO custody, signing or cached-session headers. | [RUST_GRVT_WRITE_FUNNEL.md](RUST_GRVT_WRITE_FUNNEL.md) |

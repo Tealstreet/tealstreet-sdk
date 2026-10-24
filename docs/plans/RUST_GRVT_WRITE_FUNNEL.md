@@ -20,9 +20,9 @@ The requested five trading.rs occurrences are one coherent command lifecycle:
 | trade_finish failure | b780b823ba70712169e1be98fecae4d2a2655f7ca35f27bea4b99f09bd684696 | 1 | Shared Plan failure projection |
 | trade_finish success | d6abf86165880819d2e37443be1918451a6c2b07fb046edbc4503019bdc79eff | 1 | Shared Plan success projection |
 
-Base trading inventory is8. The separate fixed-settings #2076 owns3, leaving5;
+Base trading inventory is 8. The separate fixed-settings #2076 owns 3, leaving 5;
 this plan does not prune them early or claim any current removal. After the four
-pending local/catalog slices GRVT has25, projecting20 only after complete future
+pending local/catalog slices GRVT has 25, projecting 20 only after complete future
 write adoption. The common lib sender also serves account, identity and history;
 its references remain until their own adoption. No rename-only prune is allowed.
 
@@ -49,14 +49,19 @@ Mutations do not retry a transport failure. HTTP/protocol failures are DATA,
 never transport evidence. Typed preparation/provider/credential/integrity refusal
 must be strict, not inferred into a retry from error text.
 
-Code1000 authentication refusal is handled only from on_response DATA. If
+Parsed code 1000 authentication refusal is handled only from on_response DATA. If
 !auth_resent, the same Pending is reset, queued for login and sent once afterward.
 The per-Step auth_resent flag and the network retry count are independent and
 neither resets the other. Existing trading.rs control
 explicit_session_rejection_resends_identical_signed_order_once proves the resent
-Step.body is byte-identical, while cookie/account headers change. A second1000
+Step.body is byte-identical, while cookie/account headers change. A second code 1000
 fails with no third send or second login. This includes cancel and verification
-Reads, not just creation. Unknown, 408 and 5xx grant no Mutation resend.
+Reads, not just creation. The native branch checks parsed code 1000 without an
+HTTP-status guard: 401, 408 or 503 carrying that code still refresh and resend
+once. Per claude-ddi2il's ruling, preserve this narrow venue-declared definitive
+refusal grant regardless of status. A 408/5xx without parsed code 1000, or an
+Unknown transport result, grants no Mutation resend. The serial resend owner
+must add the explicit parsed-refusal grant hook; no generic status gate widens.
 
 Keep every native client/native ID, large integer, accepted-ID order, bracket
 reduce-only/side/trigger, cancellation reconciliation and amend execution/lifecycle
@@ -65,7 +70,11 @@ http_write_fact/http_write_batch; a provisional Store Creating/Canceling effect 
 not an Accepted fact. Reserve owner/call/provider work before any provisional
 native effect, and pin its native cleanup on refusal. Shared journal projection
 must preserve all earlier accepted IDs and Unknown; no numeric terminal or
-successful-empty substitution may bypass it.
+successful-empty substitution may bypass it. Native trade_finish strips a
+Rejected/NotSent outcome to None after effective work, created IDs or cancellation
+attempts. The shared journal owns the future terminal instead; CALLERS must
+disclose this difference, with original controls preserving the native evidence,
+rather than claiming outcome parity.
 
 ## Queue custody and existing shared pieces
 
@@ -83,7 +92,11 @@ Proposed consumer flow, subject to exact API composition review:
    occurs later in that command's on_http_preflight_ready; re-park is progress.
 3. When all native prerequisites are ready, admit_serial_plan with the selected
    Primary credential, no pacing floor and the appropriate first Read/Mutation.
+   Declare attempts: 2 on EVERY Mutation and Read SerialCall, reserving the
+   one auth resend. Reads with two attempts depend on the resend PR's source.
    Issue only the one current Slot, through managed transport and the recipe.
+   A Read without a read-role key uses request_managed unsigned, still bound
+   to the same Session header bundle and the same parsed-1000 Read path.
 4. Validate exact Plan DATA before every codec/reducer/continuation. Record only
    proven write facts; continue_serial_plan/continue_serial_plan_after or park
    through a reviewed shared seam. No next call follows uncertainty.
@@ -92,18 +105,22 @@ Proposed consumer flow, subject to exact API composition review:
 
 No WriteAfterReads Preflight binds the caller receipt. Serial roots have no
 wall-clock; receipt expiry while queued or mid-chain is not a terminal. Each call
-has its own bound. A proposed20s call bound would newly include route, Prepare,
-Bind, provider and physical I/O: native explicitly has no timeout. This remains
-an OPEN behavior/source ruling for GRVT, to be disclosed in CALLERS; it is not a
-claim that native had a20s cap. No new command step/order/page cap is proposed.
-The existing256 command-owner capacity becomes a typed NotSent admission refusal
+has its own bound. The ruled 20 s call bound newly includes route, Prepare,
+Bind, provider and physical I/O: native explicitly has no timeout. The no-root
+clock/per-call-bound contract is already ruled, and claude-ddi2il has approved
+20 s for GRVT, with CALLERS disclosure. SerialCall.timeout_ms is a positive u32;
+expressing native None instead would require fe7lgm to change the engine API,
+which this plan does not request. Physical Read timeouts also feed the immediate
+Read-retry ledger, a new behavior to disclose alongside the bound. No new command step/order/page cap
+is proposed.
+The existing 256 command-owner capacity becomes a typed NotSent admission refusal
 before queue, signing or provisional Store effects; disclose this new capacity
 precedence. GRVT's existing order-lock configuration must remain the audit base,
-not be silently replaced with another venue's64-scope configuration.
+not be silently replaced with another venue's 64-scope configuration.
 
 Builder check geometry does not need a new Preflight delay-then-ready API:
-get_authorized_builders is a separate account read with10s native timeout and
-three attempts with2s/4s backoff. Commands park while it runs. Its final DATA or
+get_authorized_builders is a separate account read with 10 s native timeout and
+three attempts with 2 s/4 s backoff. Commands park while it runs. Its final DATA or
 failure releases the command's ready callback, which proceeds or returns the
 native typed builder cause. The retry timer does not grant command custody.
 Keep the existing builder transport/account scope unless separately assigned;
@@ -114,20 +131,24 @@ this five-site plan does not claim its account inventory removal.
 | Gap / dependency | Owner proposal | Exact status / required proof |
 | --- | --- | --- |
 | Serial Plan and condition wait actual composition | claude-fe7lgm | Source pins above CLEAR but unlanded. Actual #2012/#2037 plus refrozen pins required; one owner, one reserved Context, no positive pacing floor. |
-| Same-call serial Session resend and immediate failed-Read continuation | claude-fe7lgm | RUST_SERIAL_SESSION_RESEND.md at606488cba17 (initial239c705f2b6) is a PLAN, OPEN before source. Same call attempt2 after code1000, Mutation ResendGrant or validated Read DATA, Session park with no third send; immediate Read failure continuation carries no fabricated DATA or1ms delay. |
+| Same-call serial Session resend and immediate failed-Read continuation | claude-fe7lgm | RUST_SERIAL_SESSION_RESEND.md at 606488cba17 (initial 239c705f2b6) is a PLAN, OPEN before source. Same call attempt 2 after parsed code 1000, Mutation ResendGrant or validated Read DATA, Session park with no third send; immediate Read failure continuation carries no fabricated DATA or 1 ms delay. |
+| Revision-gated new call and same-call auth resend | claude-fe7lgm with claude-m26ps4 for the revision signal | OPEN amendment to 606488cba17: native first calls and resends both wait during refresh even if the engine Session is still Ready. Capture the previous revision and resume only on Ready with a newer bundle revision, not merely Session-ready. |
+| Refresh after Prepare/Bind, before Claim | claude-m26ps4 (#2069 engine-wide Bind path), fe7lgm offers serial fallback | OPEN shared unreleased-call park/reissue. Revision None makes Claim Stale; reprepare then NotReady must retain the same call until fresh headers, with no ResendGrant, auth_resent spend, second login, budget reset or extra logical write. Require Mutation and Read ingress REDs. |
 | Cached Session header bundle | claude-m26ps4 | #2069 generalized source dd7fd51d03a is consumer-reviewed CLEAR locally, unlanded. Needs actual #2037/G2b and final pin. Bundle generation/revision, aggregate packet budgets, collision refusal and cleanup must compose with serial waits. |
 | GRVT EIP712 provider-payload HTTP recipe | codex-zs5e83, reviewed by m26ps4 and core/custody owner | OPEN consumer recipe/constructor work. Existing provider Secp256k1Digest/PublicAddress primitives suffice; no new crypto algorithm or legacy SignPayload bypass. Exact recipe API and construction witness reviewed before source. |
 | Login completion / credential and header lifetime | codex-zs5e83 with claude-55ao7t login ownership and m26ps4 core review | OPEN consumer composition: native login_session is a login-operation engine Session, distinct from cached cookie/account state. Connect honest Session-ready/failed transitions and provider installation; never mint a substitute Session or treat a native counter as engine provenance. |
-| GRVT new per-call bound and header ordering | claude-ddi2il ruling, native review codex-9czdjh | OPEN source decisions: proposed20s policy and general bundle-first ordering differ from native unset timeout / Content-Type-first headers. Keep them explicit before production. |
+| Parsed auth-refusal grant and header ordering | claude-fe7lgm (grant) and claude-m26ps4 (ordering), ruled by claude-ddi2il | OPEN shared source: parsed code 1000 grants the one resend regardless of status; other 408/5xx do not. Preserve Content-Type-first through a recipe-controlled ordering seam in #2069, not a venue header insertion bypass. GRVT 20 s per-call value is ruled; disclose the new bound in CALLERS. |
 
 The Session resend proposal consumes the exact current call's DATA and, for a
 Mutation, its classify_write RefusedResend grant. It parks the reserved remaining
 attempt, not a new logical write or fake Read. On Session ready, the same call
 resumes through on_http_plan_ready with a new Context/window and provider work.
-Session failure/retire may re-park that same remaining attempt on a fresh Session
-or fail through the shared terminal. The venue retains auth_resent across the
+Session failure/retire delivers on_plan_session_wait_ended in failure custody:
+fail with native error/outcome, with no re-park and never a second resend. A
+hook that declines to finish seals once. The venue retains auth_resent across the
 six immediate network Read attempts; there is no extra login after the flag is
-spent. The604/606 proposal, not today's serial implementation, owns this gap.
+spent. The 606488cba17 proposal and its OPEN amendments own these gaps; today's
+serial implementation does not.
 
 ## Session header audit and hosted material
 
@@ -141,22 +162,34 @@ queues the original Pending while login may reuse the same engine Session.
 
 Therefore the typical refresh is the same engine generation with a new header
 revision, not a replacement anchor. The hook is NotReady while the cache is
-cleared, so writes must park and issue only after login is Ready. A stale packet
-must reprepare; it cannot release its old bundle. Failed login replacement is a
-new engine generation. Revision increment must be checked and fail closed on
-overflow; the native unchecked generation counter is not a provenance witness.
+cleared. Both first calls and auth resends must park until a Ready header set
+has a newer revision; the still-Ready engine Session alone is insufficient.
+A stale packet must reprepare; it cannot release its old bundle. If refresh
+starts after Prepare/Bind, the shared same-call unreleased park must retain the
+Pending instead of converting NotReady into a native terminal or spending an
+auth resend. NotReady/retired/header-invalid need distinct typed preparation
+causes, not error text. AuthInvalid/AuthExpired are not accepted merely for local
+cache state: credentialed terminals count those as auth-health evidence. Core
+must preserve the existing health-unchanged contract or obtain a separate ruling.
+Failed login replacement is a
+new engine generation. Any cookie OR account-ID change moves one shared revision;
+session_bearer and session_bearer_revision read that exact same counter. Increment
+is checked and overflow fails closed; the native unchecked generation counter
+is not a provenance witness.
 
 The bundle is exactly X-Ts-Grvt-Session, Cookie with native value
 "rm=true; gravity=<cookie>", and X-Grvt-Account-Id. All are login-bound. Static
-Content-Type remains recipe-owned. One revision covers the complete set. Names
-colliding with recipe or provider headers refuse; values are redacted and engine
-copies wiped. The reviewed fix validates combined recipe+signer+Session header
+Content-Type remains recipe-owned. The recipe emits NONE of the three bundle
+names, pinned by a recipe-header control. One revision covers the complete set.
+Names colliding with recipe or provider headers refuse; values are redacted and
+engine copies wiped. The reviewed fix validates combined recipe+signer+Session header
 count and bytes, not separate lists. Host-owned copies follow existing signer
 header disposal; do not claim JavaScript string zeroization.
 
-#2069's general bundle-first policy differs from GRVT's native Content-Type-first
-order. Name this wire ordering adjustment rather than claiming exact header order;
-native header values, spelling, duplication policy and authentication remain.
+#2069 currently inserts the bundle first. The overseer ruled that GRVT must
+retain native Content-Type-first order, so a recipe-controlled ordering seam in
+#2069 is OPEN with m26ps4. A native-wire original pins this order. Do not reorder
+outside shared packet assembly or claim the current hook already fits.
 
 Minimum hosted signing inputs are the existing login API credential and the
 secp256k1 scalar needed for GRVT order signing, plus public account/chain/order
@@ -165,20 +198,25 @@ The provider owns installed secret refs; the venue recipe receives the actual
 selected immutable identity and public derivation, never reconstructs a key from
 KeyRef, signer_address, native cookie or an anchor. A stale expected signer_address
 keeps its native warning behavior and does not replace the actual derived signer.
-API-key login presentation and installed identity must match the same Primary
-setup; this plan does not claim the existing raw API-key login input is already
-migrated. Proposed constructor/setup changes need the named owners' exact review.
+Roles are explicit: the login uses Slots::select(CredentialRole::SessionAuth)
+and session_egress; order signing uses Primary (the scalar). Login API-key
+presentation must use the existing SessionAuth seam so the API key never reaches
+venue code. This plan does not claim the current raw login key is migrated.
+Proposed constructor/setup changes need the named owners' exact review.
 No credential is added to logs, Debug, Context or policy evidence.
 
-The recipe preserves native EIP712 domain GRVT Exchange/version0, chain325 mainnet
-or326 testnet, Order/OrderWithBuilderFee schema, builder addresses/0.03 fee,
-integer scaling and65-byte r/s/v serialization. Signing nonce uses the native
-UUID(signing entropy)->Keccak first4-byte construction; generated client IDs use
+The recipe preserves native EIP712 domain GRVT Exchange/version 0, chain 325 mainnet
+or 326 testnet, Order/OrderWithBuilderFee schema, builder addresses/0.03 fee,
+integer scaling and 65-byte r/s/v serialization. Signing nonce uses the native
+UUID(signing entropy)->Keccak first 4-byte construction; generated client IDs use
 identity entropy, not signing entropy. Preserve the collision guard and explicit
-caller IDs. Materialize once per logical native Step and re-sign its immutable
-canonical nonce/expiration/client IDs on auth resend. No cached signature bytes,
+caller IDs. Materialize nonce, expiration, client IDs and canonical payload
+ONCE per native Step. SignStep::prepare only reads these fields on every Stale
+reprepare and auth resend; it never generates replacements. The random UUID
+nonce MUST NOT use monotonic NonceClaim/reserve_nonce. Re-sign the same immutable
+canonical payload on auth resend. No cached signature bytes,
 raw private-key fallback or hand-written transport may bypass managed dispatch.
-Native expiration is planning time+1h in nanoseconds; changes to that or nonce
+Native expiration is planning time + 1 h in nanoseconds; changes to that or nonce
 placement under delayed preparation require explicit recipe/native review.
 
 ## Original controls and held suffixes
@@ -195,9 +233,15 @@ queued command wake from a foreign callback, bracket continuation, full owner
 capacity before provisional effects, absent/held Prepare/Bind/provider cleanup,
 unknown/rejected/partial progress and no replacement after execution. Pin the new
 bound as proposed policy, not native evidence. Working controls retain native
-schema/financial outcomes, exact one code1000 login/body-identical resend, six
-immediate Read network attempts and independent auth ledger, builder10s/2s/4s,
+schema/financial outcomes, exact one code 1000 login/body-identical resend, six
+immediate Read network attempts and independent auth ledger, builder 10 s/2 s/4 s,
 FIFO, typed builder causes and public responses unable to replace private state.
+Add original 401/408/503 x parsed-1000/non-1000 cases and second-1000/no-third-send
+controls. Pin native partial-progress outcome stripping separately from the
+ruled future journal terminal. Refresh-between-Prepare-and-Claim controls cover
+both a Mutation and a Read; their exact shared reissue suffix stays gated until
+the named shared API exists. Pin account-ID-only revision movement, recipe-header
+exclusion, immutable payload on Stale reprepare and native Content-Type-first.
 
 Provider/Session-bundle/serial-resend suffixes that cannot run until the actual
 recipe and shared pins exist remain explicit source gates after their first
