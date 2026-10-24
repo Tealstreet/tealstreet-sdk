@@ -4880,8 +4880,10 @@ authority. The call shape and success value (`null`) are unchanged.
 Engine capacity refusal text: every engine request-context capacity refusal
 (execution-group joins above, Binance command entry, Hyperliquid candle reads
 and any other `Capacity` refusal) now reads `Engine request capacity reached`
-instead of `Too many requests in flight`; kind `internal` and outcome
-`notSent` are unchanged. The old text matched the `rate_limit` health
+instead of `Too many requests in flight`. Kind `internal` and each site's
+outcome are unchanged: a refusal keeps whatever outcome it already carried,
+for example none on a Read command-admission refusal (engine control
+`unissued_read_command_is_rejected_once_without_a_numeric_fallback`). The old text matched the `rate_limit` health
 pattern (`/too.*many.*request/i`), so NX showed a rate-limit toast and a false
 rate-limit health signal for a local engine bound. The new text matches no
 `errorPatterns.ts` category.
@@ -6745,6 +6747,111 @@ including the existing numeric-string conversion; losing or changing actual PnL
 still fails comparison. This corrects shared replay evidence without changing
 venue account state or the native frame's unavailable-value encoding.
 
+## Paradex public Read refusals and Lighter catalog custody
+
+Paradex candle requests keep unsupported-interval-before-market validation and
+native messages. Their two immediate refusals now require a genuine Read root.
+The existing managed public book read uses shared command entry, so clock/capacity
+rejection yields one typed failure with no financial outcome. Revoked entry/live
+duplicates preserve the existing owner without a second terminal. Remote candle
+klines/TradingView fallback, polling, book GET bytes and book schema stay native.
+
+Lighter/Robinhood public startup catalogs now await managed Prepare/Bind/Claim
+and validate their exact Background Read callback before decoding or publishing.
+Their20s budget includes host preparation/claim delay; a delayed custom transport
+can expire before outbound. Each native orderBookDetails/orderBooks attempt has
+its own budget. Native endpoint fallback and shared startup backoff are retained,
+with the old attempt retired before follow-up. No command result is introduced.
+All four deployments keep their headers/body, route, catalog codec and metadata.
+
+## HTTP pacing sets and signing eligibility
+
+A venue declares primitive floors through `http_pacing()` and optional immutable
+flat sets through `http_pacing_sets()`. `PacingSet { group, constraints }` gives a
+set its own declaration ID; member references name primitive IDs only. Sets share
+primitive release clocks and cannot nest, duplicate members or collide with
+primitive IDs. Engine construction validates and resolves bounded member indices.
+
+A Context's existing `Pacing { group, minimum_gap_ms }` selects one primitive or
+one set. Its outer minimum extends each member floor. For WOO, a set containing
+global100/algo500 with outer0 charges both on algo POST; ordinary writes select
+global100, PUT global200. Ordinary interleaving does not reset the algo clock.
+All bounds pass before one admission; only Released charges all members. Failed
+admission, stale/expired requests and waits consume none. Raw deadlines remain
+immutable through signing waits and route reprepare.
+
+Signed HTTP now retains a prepared resource without invoking its recipe/provider
+while any selected primitive is blocked. Its existing timer wakes at the earliest
+eligibility, route-expiry or physical-deadline boundary. Final Claim rechecks all
+bounds, including releases made by other requests after signing. Hosts continue
+to prepare, bind and Claim through the existing protocol; no wire change.
+Admission paths requiring no pacing must use `SendPacing::validate_zero`, which
+expands registered sets and checks every effective floor, including outer0 sets.
+G2b's owner composes its zero-pacing helper onto this resolver before IDs; this
+section does not claim that unlanded G2b adoption has occurred.
+
+## Retained command readiness
+
+With the engine's `http-plans` feature, native FIFO commands can park their own
+Preflight during genuine entry and activate it once after a predecessor physically
+retires. They keep their original command generation; waiting creates no request,
+timer or artificial deadline. Final native Plan admission establishes its bound.
+A predecessor's HTTP DATA cannot donate command-entry or response authority to
+the next command. Cleanup returns only an already-parked handle; actual activation
+runs after cleanup, callback exit and the execution sweep.
+
+A ready callback must finish, submit a bounded prerequisite read or admit its Plan.
+An unhandled callback or a selected read with no submitted HTTP fails once with
+Internal. ReadOnly has no write outcome; a truly unissued mutation is NotSent.
+NX consumes that one terminal and keeps any prior uncertain effects for ordinary
+reconciliation. Ready custody cannot submit or retire another command's work.
+Root expiry and preparation refusal wake the successor in the same engine event;
+no unrelated feed event is needed. No host wire or signer capability is added.
+
+While either retained-Preflight readiness or Plan readiness owns the callback,
+Session creation, derived legs, retirement and waiter changes refuse with State
+before reserving IDs or consuming timers/continuations. Session-ready/failed
+drains return empty; session_wait returns its pending unchanged. Read-only
+session_live and the active Plan's own APIs remain available. Ordinary Session,
+socket, timer and startup callbacks retain their existing Session authority.
+
+
+## Independent Mutation Plan gateway failures
+
+PlanPolicy.independent_calls defaults to false at existing admission sites. A
+Mutation caller may opt in at admission for its native continue_on_error batch.
+An exact delivered unproven 408/5xx then reaches typed on_http_failed with the
+already-recorded Unknown fact and bounded evidence IDs; it never reaches DATA
+or grants a resend. The handler settles only an independent failed call through
+finish_plan_failed_call and advances its sibling. It declines settlement for a
+dependent follow-up, preserving the whole-Plan abort. A declining handler is
+auto-sealed once; Read admission with this flag is Invalid. Final completion
+still projects the one shared journal, including accepted IDs and uncertainty.
+
+BingX ordinary trading and Bybit #1914 adopt this in their separate caller PRs.
+The core declaration alone does not migrate either venue or remove legacy sites.
+
+## Parallel Mutation preparation barrier
+
+A caller explicitly declares each all-Mutation parallel step and implements the
+pure Unscheduled group-admission hook. The engine prepares routes and signatures
+in declaration order, then checks and commits the entire group before the host
+hands off any member. A precommit failure sends no member; the common journal
+projects NotSent only without prior released or inherited uncertain facts.
+Provider refusals are not venue auth evidence and do not create an uncertain
+order-lock fence. Resolved nonzero pacing floors refuse admission before IDs.
+
+Native and JS hosts bind/check all resources, claim once, and attempt sends in
+one turn before callbacks. After commit, a synchronous send failure or expiry is
+Unknown; remaining handoffs still run and accepted IDs remain in the projection.
+This provides no atomic execution guarantee at the venue. Independent reply
+handling requires the separate independent_calls declaration.
+
+Groups skip mutable on_http_release. A caller that stamps Pending there must
+move that state before admission or use committed on_signing_release; the pure
+hook cannot mutate Pending. Execution-owned groups, retries and fallback members
+are refused in this first slice. Later serial mixed Read/Mutation steps require
+G2. No venue is adopted and no legacy request site is removed by this seam alone.
 ## Immutable account setup contract (G2c owner decision, 2026-10-24)
 
 Account configuration changes create a new engine. Signer, selected identity and

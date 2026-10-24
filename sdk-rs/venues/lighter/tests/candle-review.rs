@@ -12,8 +12,8 @@ fn stale_fallback_candle_cannot_overwrite_same_bar_from_recovered_stream() {
         ..Options::default()
     }));
     e.start(NOW);
-    let markets = e
-        .drain_actions()
+    let markets = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -101,8 +101,8 @@ fn prior_subscription_candle_response_or_failure_cannot_touch_new_fallback() {
             ..Options::default()
         }));
         e.start(NOW);
-        let markets = e
-            .drain_actions()
+        let markets = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
