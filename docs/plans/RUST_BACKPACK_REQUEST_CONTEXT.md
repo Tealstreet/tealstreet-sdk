@@ -724,3 +724,17 @@ Book-seed control compile checkpoint: protocol_now belongs to Cx rather than
 the public Engine fixture API. Replace that mistaken helper lookup with an
 explicit clock argument equal to each native cause time; no runtime/API change
 or fabricated clock. Exclude this compile error from original RED evidence.
+
+
+Book-seed original evidence: plan1039ba4acc4 precedes original controls
+8cf5b2bf795 and explicit fixture-clock compile correctionee63cde52bc.
+Unchanged actual7501 source executes6 cases:3GREEN/3assertionRED/0ignored.
+Wire/static header/native subscription-before-HTTP order, native buffered
+bridge/deletion output and unsubscribe/resubscribe generation rejection are
+working controls. REDs are physical raw depth HTTP before provider handoff,
+raw depth HTTP at NaN background clock, and publication of native book DATA
+after the NEW proposed20s bound. These are adoption targets, not claims of
+an existing managed-root vulnerability. The Prepare-count assertion after the
+first raw-release failure and the no-Prepare/book assertions after the NaN
+failure are unexecuted until GREEN. Only plan+new controls differ from7501;
+all production, inventories, keys and combo5b files remain byte-identical.
