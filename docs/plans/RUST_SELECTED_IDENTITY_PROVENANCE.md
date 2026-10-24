@@ -515,3 +515,24 @@ Primary are explicit and atomic; environment is closed, never a free string.
 
 Revised API and construction/teardown hooks require both reviewers again before
 runtime edits. Candidate native codec accepted forms still need their owners.
+
+## Expanded boundary evidence after API review
+
+The expanded host controls execute on unchanged runtime with five NEW-CONTRACT
+assertion REDs and five working GREENs, zero skipped. Four REDs cover normal
+`dispose` and `failEngine`, each borrowed and owned. Their ordered logs now put
+retirement ahead of pending write deadline/settlement, socket-failure cleanup,
+HTTP, all three signing maps, sockets/timers, transport and optional free.
+Pending write rejection preserves Unknown and its caller IDs. A retirement
+return containing an action cannot be drained or dispatched. Existing fencing,
+once-only retirement and empty-resource assertions are retained.
+
+The fifth RED requires final seal after the actual two entropy injections and
+external-signer capability declaration, before start. A separate working control
+checks both distinct length-to-Uint8Array entropy callbacks and signer algorithm
+data survive current host construction. The old four working controls remain
+unchanged. These are spies on actual host boundaries, not an implementation of
+snapshot installation, typed subject errors, native cancellation, or safe Rust
+retirement after a trap. In the REDs the retirement spy is still unexecuted; its
+internal fence checks and no-action assertions remain mandatory post-cutover
+checks. Exact hooks must be reviewed before making these tests pass.
