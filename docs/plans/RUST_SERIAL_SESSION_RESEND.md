@@ -154,8 +154,10 @@ The grant therefore needs one named, venue-declared exemption:
 
 - A new Venue method with a default: `fn status_exempt_refusal(&self, pending:
   &Self::Pending, response: Response<'_>) -> bool` (default `false`). It is
-  consulted only when `from_status` is Unproven. GRVT returns `true` only when
-  its own parser reads code 1000 from the body.
+  consulted only when `from_status` is Unproven, and BEFORE
+  `unproven_http_evidence` is recorded. GRVT returns `true` only when its full
+  error envelope parses (the JSON object with `code == 1000`); a substring match
+  is not enough, since a proxy or CDN 503 can carry arbitrary HTML.
 - When it returns `true`, that delivery is treated as native-codec evidence:
   `on_response` runs in DATA custody, and `classify_write` skips rule 3 for
   that delivery only (engine-internal, per-delivery state). The venue's table
@@ -218,8 +220,10 @@ Written against #2069 phase 3 (its park and seed), stacked after it.
 14. Status-exempt grant: a 503 whose body parses as code 1000 reaches
     `on_response`, gets the RefusedResend grant and resends once. A 408 or 503
     with any other code stays Unknown with no grant and the fence armed. A 503
-    whose 1000 body fails to parse stays Unknown. A venue that does not
-    override the hook keeps today's path for 1000 at 503.
+    whose 1000 body fails to parse stays Unknown, and so does a 503 HTML page
+    that merely mentions 1000. An exempted delivery leaves no unproven
+    evidence and no fence; a non-exempt one keeps today's exact evidence. A
+    venue that does not override the hook keeps today's path for 1000 at 503.
 15. Immediate continuation mirrors continue_after: an unreleased failure stops;
     a Mutation `next` and a second continuation from one callback are refused,
     spending nothing.
