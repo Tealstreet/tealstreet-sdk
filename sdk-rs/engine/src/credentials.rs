@@ -75,11 +75,15 @@ mod tests {
     fn a_validation_flag_carried_without_the_material_reproduces_validate_exactly() {
         let valid: ReadCredentials =
             serde_json::from_str(r#"{"key":"read","secret":"secret"}"#).unwrap();
-        let invalid: ReadCredentials = serde_json::from_str(r#"{"key":"read"}"#).unwrap();
-        for read in [valid, invalid] {
-            let result = read.validate();
-            assert_eq!(ReadCredentials::status(result.is_ok()), result);
-        }
+        let no_secret: ReadCredentials = serde_json::from_str(r#"{"key":"read"}"#).unwrap();
+        let no_key: ReadCredentials =
+            serde_json::from_str(r#"{"key":"","secret":"secret"}"#).unwrap();
+        let native = Err("Secondary read credentials require a nonempty key and secret");
+        assert_eq!(valid.validate(), Ok(()));
+        assert_eq!(no_secret.validate(), native);
+        assert_eq!(no_key.validate(), native);
+        assert_eq!(ReadCredentials::status(true), Ok(()));
+        assert_eq!(ReadCredentials::status(false), native);
     }
     #[test]
     fn secondary_credentials_debug_never_exposes_signing_material() {
