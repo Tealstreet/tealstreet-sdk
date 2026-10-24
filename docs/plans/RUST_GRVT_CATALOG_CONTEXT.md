@@ -176,3 +176,9 @@ Scoped library, account, login_session, products, markets_refresh, public,
 startup_resilience and request_context_catalog execute123PASS/0ignored. Strict
 all-target GRVT Clippy -D warnings passes sequentially with CARGO_BUILD_JOBS=4.
 Source review and intended-head CI remain required before READY.
+
+Post-review fixture check: the entire GRVT crate executes292PASS/0ignored.
+Depth-query startup also required the same genuine prepared_actions collector;
+only that bootstrap changes, with every assertion retained. The source-stage
+Shared-feed control now checks no socket actions at startup, timeout and retry.
+Production source remains byte-exact to0e0393051d5.

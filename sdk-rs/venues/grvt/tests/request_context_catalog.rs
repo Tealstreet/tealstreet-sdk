@@ -821,6 +821,11 @@ fn suppressed_feed_keeps_the_unanswered_catalog_deadline_and_backoff() {
         .unwrap();
     e.start(NOW);
     let actions = drain(&mut e);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::WsConnect { .. } | Action::WsSend { .. }))
+    );
     let (first, _) = prep(&actions);
     release_managed(&mut e, &actions, NOW);
     let timer = actions
@@ -832,6 +837,11 @@ fn suppressed_feed_keeps_the_unanswered_catalog_deadline_and_backoff() {
         .expect("unanswered shared-feed catalog remains bounded");
     e.handle(NOW + 20_000., Event::TimerFired { timer });
     let actions = drain(&mut e);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::WsConnect { .. } | Action::WsSend { .. }))
+    );
     let retry = backoff(&actions, NOW + 20_000., 1000.);
     assert!(!e.store().loaded().markets);
     e.handle(NOW + 21_000., Event::TimerFired { timer: retry });

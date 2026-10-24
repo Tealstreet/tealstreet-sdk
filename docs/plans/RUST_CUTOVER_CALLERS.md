@@ -7690,7 +7690,7 @@ startup Backoff, without an immediate transport retry or authentication refresh.
 Each later retry or refresh has a distinct root. Shared public-feed mode still
 bounds unanswered catalog HTTP and backs off failures; it only suppresses the
 public socket. The socket-supervision fixture services its REST refresh to keep
-that distinction observable; a separate unanswered-refresh control pins it.
+that distinction observable; a separate unanswered-catalog-request control pins it.
 
 DELETION, not adoption: the options refusal arm was unreachable because
 capabilities.options=false rejects FetchOptionChain, FetchOptionExpiries and

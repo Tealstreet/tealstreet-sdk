@@ -1884,3 +1884,9 @@ passes with four jobs. Existing fixture transport collectors drive genuine
 Prepare/Bind/Claim; native assertions remain, with the socket-only fixture now
 servicing its allowed REST refresh. Workspace/features/WASM/performance remain
 CI gates; no local broad-build or full-CI claim.
+
+Post-review fixture check: the entire GRVT crate executes292PASS/0ignored.
+Depth-query startup also required the same genuine prepared_actions collector;
+only that bootstrap changes, with every assertion retained. The source-stage
+Shared-feed control now checks no socket actions at startup, timeout and retry.
+Production source remains byte-exact to0e0393051d5.
