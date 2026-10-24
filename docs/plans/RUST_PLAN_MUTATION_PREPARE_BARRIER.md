@@ -400,3 +400,11 @@ SigningRelease/HttpRelease expiry projectors are retained. Existing single-claim
 controls pass 47/47. The original async barrier assertions still both fail when
 explicitly unignored on this integration; the both-succeed compatibility control
 passes. This refresh does not claim a group implementation or READY.
+
+Core cleared the exact group-storage and pure-hook artifact against 20549629e52.
+The implemented batch insertion prepares all checks, boxes and map capacity
+before publishing any record. Four focused controls pass: complete insertion,
+duplicate rejection, expiry rejection, and slot/byte capacity including a record
+currently delivering its response. Failure preserves prior bytes and records.
+The pure group hook defaults to Invalid; single admission is unchanged. Neither
+hook is wired to group release yet, so the original barrier REDs remain open.

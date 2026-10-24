@@ -2658,6 +2658,18 @@ pub trait Venue {
         Ok(crate::request_context::Admission::Unscheduled)
     }
 
+    /// Explicit pure group admission; the default refuses group support.
+    /// Implementations must not mutate state, schedule work or use interior
+    /// mutability here. This first contract accepts only Unscheduled.
+    #[cfg(feature = "http-plans")]
+    fn prepare_group_http_release(
+        &self,
+        _pending: &Self::Pending,
+        _release: &crate::request_context::HttpRelease,
+    ) -> Result<crate::request_context::Admission, crate::request_context::Error> {
+        Err(crate::request_context::Error::Invalid)
+    }
+
     /// Typed setup/bind/denial failures are pre-send facts, distinct from a
     /// transport failure after release. Read schedulers can retire denied work
     /// neutrally rather than count another network/authentication failure.
