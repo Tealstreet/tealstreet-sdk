@@ -68,6 +68,7 @@ impl SignStep for Recipe {
         request.body = Some(body.clone());
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(context.stamp_ms()),
                 expiry_ms: None,
             },
@@ -489,6 +490,7 @@ fn existing_counter_is_exact_for_regression_more_than_one_thousand_and_exhaustio
 #[test]
 fn existing_timestamp_receipt_stays_safe_integer_and_without_nonce() {
     let receipt = SignReceipt {
+        nonce: None,
         stamp_ms: Some(1_000.),
         expiry_ms: Some(2_000.),
     };
@@ -500,6 +502,7 @@ fn existing_timestamp_receipt_stays_safe_integer_and_without_nonce() {
     for stamp in [f64::NAN, f64::INFINITY, -1., 1.5, 9_007_199_254_740_992.] {
         assert!(
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(stamp),
                 expiry_ms: None
             }

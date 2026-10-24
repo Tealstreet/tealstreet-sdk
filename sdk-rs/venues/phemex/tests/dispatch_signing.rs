@@ -437,6 +437,7 @@ fn native_rest_fixed_vector_and_all_query_decoding_edges() {
 fn existing_local_provider_is_an_independent_working_hmac_control() {
     let (local, refs) = local();
     let receipt = SignReceipt {
+        nonce: None,
         stamp_ms: Some(NOW),
         expiry_ms: Some(NOW + 60_000.),
     };

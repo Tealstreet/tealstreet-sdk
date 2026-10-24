@@ -35,6 +35,7 @@ impl SignStep for Recipe {
         request.url = format!("https://release.test/write?stamp={}", context.now_ms);
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(context.now_ms),
                 expiry_ms: self.expiry.then_some(context.now_ms + WINDOW),
             },

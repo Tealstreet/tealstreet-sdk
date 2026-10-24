@@ -64,6 +64,7 @@ mod tests {
     }
     fn receipt(expiry_ms: f64) -> SignReceipt {
         SignReceipt {
+            nonce: None,
             stamp_ms: None,
             expiry_ms: Some(expiry_ms),
         }

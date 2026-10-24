@@ -1661,6 +1661,7 @@ mod tests {
             http.url = format!("https://venue.test/read?stamp={}", context.stamp_ms());
             Ok(crate::signing::SignRequest {
                 receipt: crate::signing::SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(context.stamp_ms()),
                     expiry_ms: Some(context.stamp_ms() + 3_000.),
                 },

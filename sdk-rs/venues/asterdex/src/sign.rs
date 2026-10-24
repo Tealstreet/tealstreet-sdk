@@ -537,6 +537,7 @@ impl SignStep for Recipe {
         Ok(SignRequest {
             // Code queries carry a nonce, not a signed timestamp.
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: (!code).then_some(stamp),
                 expiry_ms: None,
             },

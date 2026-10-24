@@ -113,6 +113,7 @@ fn every_compiled_alias_uses_the_owned_primary_refs_for_exact_complete_http_prei
             assert_eq!(
                 work.receipt,
                 SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(STAMP),
                     expiry_ms: None
                 }
@@ -279,6 +280,7 @@ fn trusted_capture_bounds_receipt_and_single_use_checks_apply_before_output_form
         SignResult::new(
             vec![b"hosted-primary".to_vec()],
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(STAMP),
                 expiry_ms: None,
             },
@@ -286,6 +288,7 @@ fn trusted_capture_bounds_receipt_and_single_use_checks_apply_before_output_form
         SignResult::new(
             vec![b"hosted-primary".to_vec(), vec![1; 31]],
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(STAMP),
                 expiry_ms: None,
             },
@@ -293,6 +296,7 @@ fn trusted_capture_bounds_receipt_and_single_use_checks_apply_before_output_form
         SignResult::new(
             vec![b"hosted-primary".to_vec(), vec![1; 32]],
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(STAMP + 1.),
                 expiry_ms: None,
             },

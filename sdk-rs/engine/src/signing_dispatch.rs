@@ -582,6 +582,7 @@ mod header_tests {
         ) -> Result<SignRequest, SignError> {
             Ok(SignRequest {
                 receipt: SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(1000.),
                     expiry_ms: None,
                 },
