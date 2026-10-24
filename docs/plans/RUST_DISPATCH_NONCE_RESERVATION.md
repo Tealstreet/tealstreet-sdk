@@ -370,3 +370,28 @@ venue-slot replacement, missing subject before recipe construction, plain-queue
 refusal even for an otherwise valid claim, substituted/missing nonce authority,
 and a real ReadFailure retry with fresh signing/request IDs and increasing nonce.
 This is an additional API/source review gate before Kraken account adoption.
+
+## Real WASM proof boundary
+
+The selected-read source and immutable `NonceClaim::slot()` metadata accessor
+have bounded engine, credential-core and consumer review clearance. This does
+not certify Kraken's native private callers or registry adoption. The nonce
+branch stays local until the independent real WASM/HMAC proof is cleared.
+
+At fixed raw time 9007199254740 ms, a fresh KRAKEN subject first reserves
+9007199254740000. Reservations 994 and 996 reach 9007199254740993 and
+9007199254740995 respectively. The proof must observe these genuine reservations
+across the JS/WASM boundary, their exact recipe preimages and MACs, and a stale
+Claim repair whose fresh signature uses a strictly greater reserved nonce.
+
+The independent reviewer accepted a separate u64::MAX proof: canonical receipt
+codec/parser traversal and the real recipe MAC in WASM, without claiming an
+engine reservation. A MAX_SAFE raw timestamp cannot directly seed that counter
+value; reaching it by unit increments is impractical. No production counter
+seed, unsafe clock or new test seed API is introduced. Existing engine-private
+near-limit arithmetic controls remain the allocator exhaustion evidence.
+
+Spot form fields keep native order: nonce is appended last when other fields
+exist. Reference MAC computations alone, recipe-only probes, stub engines and
+native host controls do not establish actual-family WASM adoption. The proof
+receipt must identify its exact source, module hash, commands and scope.

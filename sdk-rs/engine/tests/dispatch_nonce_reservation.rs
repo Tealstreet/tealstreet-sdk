@@ -34,6 +34,8 @@ struct Trace {
     applied: Vec<u8>,
     deny_release: bool,
     reserve_twice: bool,
+    stamp_floor: Option<safe_cex_engine::StampFloor>,
+    releases: Vec<safe_cex_engine::SigningRelease>,
     command_root: Option<safe_cex_engine::request_context::Context>,
 }
 struct Recipe {
@@ -73,7 +75,7 @@ impl SignStep for Recipe {
         Ok(SignRequest {
             receipt: SignReceipt {
                 nonce: Some(nonce),
-                stamp_ms: Some(context.stamp_ms()),
+                stamp_ms: Some(context.stamp_after(self.trace.lock().unwrap().stamp_floor)?),
                 expiry_ms: None,
             },
             operations: vec![Operation::Sign {
@@ -129,6 +131,13 @@ impl<const SUPPORTED: bool> Venue for NonceProbe<SUPPORTED> {
                 Ok(safe_cex_engine::request_context::Admission::Unscheduled)
             })
         }
+    }
+    fn on_signing_release(
+        &mut self,
+        _: safe_cex_engine::SigningTarget<'_, u8>,
+        release: safe_cex_engine::SigningRelease,
+    ) {
+        self.trace.lock().unwrap().releases.push(release);
     }
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         self.pacing.as_slice()
@@ -306,7 +315,6 @@ fn drain(engine: &mut Engine<Probe>) -> Batch {
                     request,
                 }),
                 HttpAction::Cancel { .. } => {}
-                #[cfg(feature = "http-mutation-barriers")]
                 HttpAction::BindGroup { .. } => panic!("nonce fixture declares no barriers"),
             },
             Action::Sign { attempt, work, .. } => batch.work.push(Work { attempt, work }),
@@ -975,4 +983,35 @@ fn ignored_second_reserve_refuses_before_provider_or_handoff() {
         engine.venue().errors[0].outcome,
         Some(safe_cex_engine::Outcome::NotSent)
     );
+}
+
+#[test]
+fn actual_stamp_floor_and_nonce_counter_remain_independent_at_dispatch() {
+    let subject = "nonce-source/actual-stamp-floor";
+    let (mut engine, routes) = fixture(subject, Allocation::PrepareProbe, 2);
+    let first = ready(&mut engine, &routes[0], START);
+    assert_eq!(first.work.receipt.stamp_ms, Some(1000.));
+    assert_eq!(first.work.receipt.nonce, Some(1000000));
+    let first = bind(&mut engine, first, START);
+    send(&mut engine, &first, START);
+    let floor = engine.venue().trace.lock().unwrap().releases[0].stamp_floor();
+    assert!(floor.is_some());
+    engine.venue().trace.lock().unwrap().stamp_floor = floor;
+    let second = ready(&mut engine, &routes[1], START);
+    assert_eq!(second.work.receipt.stamp_ms, Some(1001.));
+    assert_eq!(
+        second.work.receipt.nonce,
+        Some(1000001),
+        "stamp floor never scales the nonce floor"
+    );
+    let second = bind(&mut engine, second, START);
+    send(&mut engine, &second, START);
+    let (mut peer, routes) = fixture(subject, Allocation::PrepareProbe, 1);
+    let third = ready(&mut peer, &routes[0], START);
+    assert_eq!(
+        third.work.receipt.stamp_ms,
+        Some(1000.),
+        "nonce release never creates a StampFloor"
+    );
+    assert_eq!(third.work.receipt.nonce, Some(1000002));
 }

@@ -1,7 +1,7 @@
 import type { LocalIdentityMetadata, LocalSignerMetadata, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions } from '../../types';
-import type { CredentialPresence, CredentialSetupPolicy, IdentitySetupPolicy } from './construction';
+import type { CredentialPresence, IdentitySetupPolicy, SignerSetupPolicy } from './construction';
 
 type LocalIdentity = LocalIdentityMetadata & {
   key?: string;
@@ -9,6 +9,8 @@ type LocalIdentity = LocalIdentityMetadata & {
   passphrase?: string;
   /** Secondary only, set by a family setup mapping: sign with the primary's ref. */
   signingFromPrimary?: true;
+  /** Primary only, set by a family setup mapping: role-bound provider material. */
+  extra?: { zklinkSeed?: { value: string; encoding: 'hex' } };
 };
 type Credentials = { primary?: LocalIdentity; secondary?: LocalIdentity };
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
@@ -82,16 +84,26 @@ export class LocalSignerSetup {
   readonly hasSecondary: boolean;
   readonly primaryComplete: boolean;
   readonly credentialPresence: CredentialPresence;
+  /** A ValidateOnly family's read-key result (Rust `ReadCredentials::validate`); the key never leaves. */
+  readonly readCredentialsValid: boolean | undefined;
 
-  constructor(options: ExchangeOptions, policy: CredentialSetupPolicy = {}, secondarySigningFromPrimary = false) {
+  constructor(
+    options: ExchangeOptions,
+    policy: SignerSetupPolicy = {},
+    secondarySigningFromPrimary = false,
+    zklinkSeed?: string,
+  ) {
     const setupMetadata = parseLocalSignerMetadata(options.localSigner);
     const primaryMetadata = effectiveIdentityMetadata(setupMetadata.primary, policy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(setupMetadata.secondary, policy.secondary);
-    const secondary =
+    const validateOnly = policy.readCredentials === 'validateOnly';
+    if (validateOnly && setupMetadata.secondary !== undefined) invalidMetadata();
+    this.readCredentialsValid = validateOnly ? readCredentialsValidity(options) : undefined;
+    const secondary = !validateOnly && (
       options.secondary_key !== undefined ||
       options.secondary_secret !== undefined ||
       options.secondary_passphrase !== undefined ||
-      setupMetadata.secondary !== undefined;
+      setupMetadata.secondary !== undefined);
     if (secondary && (!credentialPresent(options.secondary_key, secondaryMetadata?.trimCredential === true)
       || (!secondarySigningFromPrimary && !options.secondary_secret))) {
       const message = 'Rust engine secondary signing keys require a nonempty key and secret';
@@ -105,9 +117,14 @@ export class LocalSignerSetup {
     this.primaryComplete = this.credentialPresence.key && this.credentialPresence.secret;
     resolveSetupPassphrase('primary', this.primaryComplete, options.passphrase, options.passphrase, policy.primary, options.publicDataOnly === true);
     resolveSetupPassphrase('secondary', secondary, options.secondary_passphrase, options.passphrase, policy.secondary, options.publicDataOnly === true);
+    // A public-only PublicRead provider holds no primary (native drops it too).
+    const primaryDropped = policy.readCredentials === 'publicRead' && options.publicDataOnly === true;
     this.#credentials = {
-      ...(options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined
-        ? { primary: { ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase } }
+      ...(!primaryDropped && (options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined)
+        ? { primary: {
+          ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase,
+          ...(zklinkSeed ? { extra: { zklinkSeed: { value: zklinkSeed, encoding: 'hex' as const } } } : {}),
+        } }
         : {}),
       ...(secondary
         ? { secondary: secondarySigningFromPrimary
@@ -122,12 +139,13 @@ export class LocalSignerSetup {
     if (!credentials) throw new Error('Local signer setup has already been consumed or disposed');
     this.#credentials = undefined;
     try {
-      return new Constructor(venue, optionsJson, JSON.stringify(credentials));
+      return new Constructor(venue, withReadCredentialsValid(optionsJson, this.readCredentialsValid), JSON.stringify(credentials));
     } finally {
       if (credentials.primary) {
         credentials.primary.key = undefined;
         credentials.primary.secret = undefined;
         credentials.primary.passphrase = undefined;
+        credentials.primary.extra = undefined;
       }
       if (credentials.secondary) {
         credentials.secondary.key = undefined;
@@ -142,6 +160,22 @@ export class LocalSignerSetup {
   }
 }
 
+/** A ValidateOnly read key's `ReadCredentials::validate` result, without the key.
+ * Presence follows the legacy bridge (a truthy `secondary_key`); validity is
+ * Rust's rule: key and secret both nonempty, untrimmed. */
+export const readCredentialsValidity = (options: ExchangeOptions): boolean | undefined =>
+  options.secondary_key ? typeof options.secondary_secret === 'string' && options.secondary_secret.length > 0 : undefined;
+
+/** Splice the result in as text: re-parsing could round large numeric options.
+ * A caller-supplied duplicate key is refused by the Rust parser. */
+const withReadCredentialsValid = (optionsJson: string, valid: boolean | undefined): string => {
+  if (valid === undefined) return optionsJson;
+  const open = optionsJson.indexOf('{');
+  if (open < 0) return invalidMetadata();
+  const rest = optionsJson.slice(open + 1);
+  return `${optionsJson.slice(0, open)}{"readCredentialsValid":${valid}${/^\s*\}/.test(rest) ? '' : ','}${rest}`;
+};
+
 /** Caller-owned input is unchanged; the generic exchange receives no credentials. */
 export const withoutSigningCredentials = (options: ExchangeOptions): ExchangeOptions => {
   const {
@@ -152,6 +186,8 @@ export const withoutSigningCredentials = (options: ExchangeOptions): ExchangeOpt
     secondary_secret: _readSecret,
     secondary_passphrase: _readPassphrase,
     localSigner: _setupMetadata,
+    // ApeX's OmniKey seed is signing material: it lives only in provider setup.
+    omniKeySeed: _omniKeySeed,
     auth,
     ...routing
   } = options;

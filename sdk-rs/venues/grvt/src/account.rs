@@ -9,6 +9,7 @@ use safe_cex_engine::model::{
     Balance, CurrencyBalance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::store::Store;
 use safe_cex_engine::{Cx, Fill, Response, SocketChannel, SocketId, TimerId};
@@ -1216,11 +1217,29 @@ impl Grvt {
         symbol: String,
     ) {
         if cx.store.market(&symbol).is_none() {
-            cx.fail(command, "Unknown GRVT leverage market");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "Unknown GRVT leverage market");
             return;
         }
         let Some(account) = self.account.trading_account_id.as_deref() else {
-            cx.fail(command, "GRVT private account is not authenticated");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "GRVT private account is not authenticated");
             return;
         };
         let body =
@@ -2402,3 +2421,7 @@ fn session_headers(response: &Response<'_>) -> (Option<String>, Option<String>) 
         .map(str::to_owned);
     (cookie, account)
 }
+
+#[cfg(test)]
+#[path = "login_preparation_tests.rs"]
+mod login_preparation_tests;

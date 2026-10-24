@@ -1,12 +1,41 @@
 //! ApeX API canonicalization and zkLink contract bytes; no provider or JS runtime.
-use crate::Options;
+/// Raw API credentials for the legacy canonicalization oracle only. The venue
+/// never builds one: production signs through `Http` and `WsLogin` at dispatch.
+#[derive(Clone, Default)]
+pub struct LegacyCredentials {
+    pub key: Option<String>,
+    pub secret: Option<String>,
+    pub passphrase: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(LegacyCredentials);
+impl safe_cex_crypto::secrets::EraseSecrets for LegacyCredentials {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+    }
+}
 use safe_cex_crypto::{Encoding, encode as crypto_encode, hex, hmac_sha256, sha256, zklink};
 use safe_cex_engine::signing::{
-    Algorithm, Context, Encoding as PartEncoding, Identity, Operation, PayloadPart, SignError,
-    SignReceipt, SignRequest, SignResult,
+    Algorithm, Context, Encoding as PartEncoding, ExtraKey, Identity, KeyUse, Need, Operation,
+    PayloadPart, SignError, SignReceipt, SignRequest, SignResult,
 };
 pub use safe_cex_engine::url::encode;
 use safe_cex_engine::{Action, DispatchContext, Method, SignStep, num};
+
+/// Capability each ApeX command needs before its first release (Cx::can_sign).
+pub const REST_NEEDS: &[Need] = &[Need {
+    key: KeyUse::Signing,
+    algorithm: Algorithm::HmacSha256,
+}];
+/// Order placement and amend: the HMAC request plus every zkLink contract.
+pub const CONTRACT_NEEDS: &[Need] = &[
+    REST_NEEDS[0],
+    Need {
+        key: KeyUse::Extra(ExtraKey::ZklinkSeed),
+        algorithm: Algorithm::ZkLinkContract,
+    },
+];
 
 #[derive(Clone)]
 pub enum Body {
@@ -97,7 +126,7 @@ fn body_canonical(body: &Body, legacy: bool) -> String {
 }
 
 pub fn request(
-    options: &Options,
+    options: &LegacyCredentials,
     now: f64,
     request: &Request,
     legacy: bool,
@@ -144,7 +173,8 @@ pub fn request(
     })
 }
 
-fn request_path(request: &Request) -> String {
+/// The request target the venue stages: path plus serialized query.
+pub fn request_path(request: &Request) -> String {
     let serialized_query = query(&request.params);
     if serialized_query.is_empty() {
         request.path.clone()
@@ -154,7 +184,7 @@ fn request_path(request: &Request) -> String {
 }
 
 /// Klines are the sole authentication exception: no ApeX headers at all.
-fn is_unsigned(request: &Request) -> bool {
+pub fn is_unsigned(request: &Request) -> bool {
     request.path == "/v3/klines" && request.method == Method::Get
 }
 
@@ -242,7 +272,7 @@ fn transport(body: &Body) -> Result<(String, Option<String>), String> {
     })
 }
 
-pub fn ws_login(options: &Options, now: f64) -> Result<String, String> {
+pub fn ws_login(options: &LegacyCredentials, now: f64) -> Result<String, String> {
     let key = options
         .key
         .as_deref()

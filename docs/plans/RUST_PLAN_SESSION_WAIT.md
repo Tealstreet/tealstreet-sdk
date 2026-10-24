@@ -306,10 +306,11 @@ New-contract REDs follow the API review:
      ready custody. A hook that neither re-parks, issues a read nor finishes
      fails the Preflight once with the ended error (NotSent).
    - Parking inside #1896's Preflight-ready callback counts as progress.
-   - A capped Preflight's reads (issued directly or at resume) have windows
-     ending at the original receipt cap, so a late resume can never release
-     past the caller's receipt (codex-zs5e83 review P1). Uncapped Preflights
-     keep their declared window.
+   - A capped Preflight's read that is parked on, or resumed from, a Session
+     has a window ending at the original receipt cap, so a late resume can
+     never release past the caller's receipt (codex-zs5e83 review P1). A read
+     issued in ordinary custody keeps its declared window, so a valid handoff
+     past the receipt still delivers (`engine/tests/plan_receipt_cap.rs`).
 4. **Bearer composition.** N8b and R10b' land with or after the Bearer hook's
    packet fence.
 

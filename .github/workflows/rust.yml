@@ -178,6 +178,7 @@ jobs:
           if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
+      - uses: ./.github/actions/prefetch-cargo
       - name: Install pinned binaryen (wasm-opt)
         run: bash sdk-rs/harness/install-binaryen.sh
       - name: Build and measure both capabilities from this checkout
@@ -540,7 +541,7 @@ jobs:
         run: corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
       - name: Check the wasm size budget
         if: inputs.replay_artifact != 'combined'
-        run: corepack yarn -s rust:wasm-budget
+        run: corepack yarn -s rust:wasm-budget --venue '${{ matrix.venue }}'
       - name: Replay request normalization
         run: corepack yarn rust:test-harness
       - name: Credentialed lifecycle runner (scripted transport only)
@@ -731,7 +732,7 @@ jobs:
     needs: gate
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 32
     outputs:
       has_eligible: ${{ steps.plan.outputs.has_eligible }}
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -772,7 +773,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.cpu-plan.outputs.matrix) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 42
     defaults:
       run:
         working-directory: .
@@ -800,7 +801,7 @@ jobs:
     needs: [gate, cpu-plan, cpu-second]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 42
     outputs:
       results: ${{ steps.certify.outputs.results }}
     defaults:
