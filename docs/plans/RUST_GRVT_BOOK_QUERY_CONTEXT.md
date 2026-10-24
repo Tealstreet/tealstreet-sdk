@@ -165,3 +165,8 @@ native success. Neither setup experiment is included in the reported counts.
 
 Scoped strict Clippy on the new target, rustfmt and diff checks pass. Cargo used
 four jobs serially; no workspace, all-feature or WASM build was run locally.
+
+Fe7 original review acb6 is CLEAR for production. Before source, the two timeout
+controls now additionally assert the actual Bind/Claim packet timeout (20 s or
+remaining caller cap). Re-executed strengthened originals remain 16 assertion
+RED / 8 GREEN / zero ignored on unchanged production; those suffixes remain gated.

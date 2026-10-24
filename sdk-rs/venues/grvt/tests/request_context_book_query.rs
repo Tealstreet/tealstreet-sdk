@@ -599,6 +599,7 @@ fn physical_timeout_keeps_a_fresh_twenty_second_window() {
     assert_ne!(request.id, first.id);
     assert_eq!(request.timeout_ms, Some(20_000));
     let second = release(&mut e, NOW + 20_000., &actions);
+    assert_eq!(second.timeout_ms, Some(20_000));
     assert_eq!(
         done(&reply(&mut e, NOW + 39_000., &second, 200, BOOK))["asks"]
             .as_array()
@@ -616,6 +617,7 @@ fn short_remaining_caller_cap_shortens_a_retry() {
     let (_, request) = prep(&actions);
     assert!(request.timeout_ms.unwrap() <= 100);
     let second = release(&mut e, NOW + 900., &actions);
+    assert!(second.timeout_ms.is_some_and(|ms| ms <= 100));
     let actions = reply(&mut e, NOW + 1000., &second, 200, BOOK);
     no_io(&actions);
     let values = outcomes(&actions, OWNER);
