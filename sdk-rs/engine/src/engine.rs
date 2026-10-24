@@ -851,6 +851,9 @@ mod command_entry_tests;
 #[cfg(test)]
 #[path = "command_wait_tests.rs"]
 mod command_wait_tests;
+#[cfg(all(test, feature = "order-locks"))]
+#[path = "order_lock_capacity_tests.rs"]
+mod order_lock_capacity_tests;
 #[cfg(test)]
 #[path = "read_root_expiry_tests.rs"]
 mod read_root_expiry_tests;
