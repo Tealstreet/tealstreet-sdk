@@ -117,3 +117,39 @@ review clears, integrate current actual landing, and await a train window.
 - `venues/kraken/src/trading.rs:190` — `35058464be07d81db637fa288630993ec85908b4d75d5e863ad46e8e5a1cb92b`: cx.done(*command, "null".into())
 - `venues/kraken/src/trading.rs:197` — `2f0770d2ea5f5246cd2ddcd35b614bce738e564c2d95193ff5a84eb8479811e5`: cx.fail(id, not_sent(error))
 - `venues/kraken/src/trading.rs:200` — `5d0b0c93e4647bbcb1a8083fdb3059600f03febcb10aee2a745e56a833e726e2`: cx.fail( id, not_sent("Kraken trading requires API credentials") .kind(ErrorKind::AuthInvalid), )
+
+## Original checkpoint and focused conversion
+
+Plan 8ccb55a16c3 precedes original control commit b5c45336471. With unchanged
+production, the dedicated real-Engine target executes eight assertion REDs and
+one compatibility GREEN, zero ignored. Four expired-publication controls each
+first pass the live-body case. The other failures are two raw sends before host
+preparation and two local terminals bypassing invalid-entry admission. No absent
+API, compiler or fixture failure is counted as an original RED.
+
+All nine original controls pass unchanged after conversion. Four added controls
+prove expired catalogue retirement plus actual native retry recovery, old-reply
+inertness while the next attempt lives, and held-Prepare timeout releasing busy
+state for both Futures and Spot. Contexts remain engine-owned; no local owner
+registry, retry budget, generation or timer was added. Source/core plan direction
+and the HMAC owner's disjoint file window are CLEAR.
+
+Existing fixtures now drive real Prepare/Bind/Claim without changing their wire,
+financial, supervision, retry-delay or row assertions. A signature-only internal
+ProbeVenue used catalogue Pending as an inert carrier; that is replaced by the
+existing unowned candle carrier, with no fake Context or account/signing edit.
+The probe still ignores every response and all header/nonce assertions are exact.
+Compiler failures from that new required field and obsolete raw-bootstrap fixture
+expectations were corrected explicitly, not counted as REDs.
+
+The inventory delta is exactly 17 fingerprints / 19 occurrences across the five
+selected maps; fixed-setting success and all blocked entries remain. Native
+verification and independent implementation reviews follow on the frozen source.
+
+
+Focused final native run passes 260 tests across 19 targets, zero failures or
+ignored tests. Strict all-target Clippy and package fmt pass. Earlier full-package
+attempts exposed obsolete raw-bootstrap fixtures (one public ticker helper, then
+socket/trading bootstraps); corrected transport-only fixtures preserve all
+assertions. The final successful run supersedes those failures. Shared checker
+and bans receipts, independent review and exact-head CI remain separate gates.

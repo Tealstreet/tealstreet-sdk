@@ -183,3 +183,102 @@ fn local_finite_results_and_refusals_keep_native_text_without_network() {
     let a = actions(&mut spot, 0.);
     assert!(matches!(&a[..],[Action::Notice(Notice::CommandDone{result,..})]if result=="null"));
 }
+
+fn recover_catalogue<V: Venue>(venue: V, suffix: &str, body: &str) {
+    let mut e = safe_cex_engine::test_support::seeded_engine(venue);
+    e.start(0.);
+    let old = request(&mut e, 0., suffix);
+    answer(&mut e, 20_000., &old, body);
+    assert!(!e.store().loaded().markets);
+    let a = actions(&mut e, 20_000.);
+    let timer = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (20_750. ..=21_000.).contains(at_ms) => {
+                Some(*timer)
+            }
+            _ => None,
+        })
+        .expect("native first discovery backoff");
+    e.handle(21_000., Event::TimerFired { timer });
+    let current = request(&mut e, 21_000., suffix);
+    assert_ne!(old.id, current.id);
+    answer(&mut e, 21_001., &old, body);
+    assert!(!e.store().loaded().markets);
+    assert!(
+        !actions(&mut e, 21_001.)
+            .iter()
+            .any(|a| matches!(a, Action::Http(_)))
+    );
+    answer(&mut e, 21_002., &current, body);
+    assert!(e.store().loaded().markets);
+    actions(&mut e, 21_002.);
+    answer(&mut e, 21_003., &old, "{}");
+    assert!(e.store().loaded().markets);
+    assert!(
+        !actions(&mut e, 21_003.)
+            .iter()
+            .any(|a| matches!(a, Action::Http(_)))
+    );
+}
+
+#[test]
+fn futures_timeout_retires_old_catalogue_and_native_retry_recovers() {
+    recover_catalogue(Kraken::new(public_options()), "/instruments", support::META);
+}
+
+#[test]
+fn spot_timeout_retires_old_catalogue_and_native_retry_recovers() {
+    recover_catalogue(
+        KrakenSpot::new(public_options()),
+        "/AssetPairs",
+        spot_support::META,
+    );
+}
+
+fn held_prepare_recovers<V: Venue>(venue: V, suffix: &str, body: &str) {
+    let mut e = safe_cex_engine::test_support::seeded_engine(venue);
+    e.start(0.);
+    let a: Vec<_> = e.drain_actions().collect();
+    assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
+    let timer = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 20_000. => Some(*timer),
+            _ => None,
+        })
+        .expect("preparation is deadline bounded");
+    e.handle(20_000., Event::TimerFired { timer });
+    let a = actions(&mut e, 20_000.);
+    assert!(!a.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+    )));
+    let timer = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (20_750. ..=21_000.).contains(at_ms) => {
+                Some(*timer)
+            }
+            _ => None,
+        })
+        .expect("stalled preparation releases native discovery busy state");
+    e.handle(21_000., Event::TimerFired { timer });
+    let current = request(&mut e, 21_000., suffix);
+    answer(&mut e, 21_001., &current, body);
+    assert!(e.store().loaded().markets);
+}
+
+#[test]
+fn futures_held_preparation_expires_and_releases_busy_state() {
+    held_prepare_recovers(Kraken::new(public_options()), "/instruments", support::META);
+}
+
+#[test]
+fn spot_held_preparation_expires_and_releases_busy_state() {
+    held_prepare_recovers(
+        KrakenSpot::new(public_options()),
+        "/AssetPairs",
+        spot_support::META,
+    );
+}
