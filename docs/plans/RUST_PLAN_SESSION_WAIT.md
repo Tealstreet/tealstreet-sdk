@@ -252,6 +252,9 @@ New-contract REDs follow the API review:
     Plan's own operation. Re-park inside `on_plan_session_wait_ended` must target
     an already-live Session, since opening one there is refused. A control will
     pin that re-park in the hook succeeds.
+  - The flush guard gains #1896's `http_preflight_ready` (and G1's
+    `http_background_activation`, when it lands), so no venue hook runs inside
+    another owner's readiness scope. Add a control.
   - Test `SessionPolicy` literals gain `private_egress: None`, with a workspace
     check and check-bans on that composition.
 
