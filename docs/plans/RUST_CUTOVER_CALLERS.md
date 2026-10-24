@@ -6893,3 +6893,30 @@ the Polymarket conversion (#1882) adopts it. Caller-visible changes:
   identity (no L2 key or secret yet) is valid pre-import setup.
 - **Types.** The TS `ExtraKeyPolicy.key` union and `host.d.mts`
   `SigningIdentity.extra` gain `l1Wallet`.
+
+
+## Socket login and native snapshot completion
+
+`register_socket_feed_with_snapshot` declares a private authenticated feed whose
+configured authentication timeout runs from physical connect until the native
+snapshot is accepted. Login acceptance permits the subscription needed to obtain
+that snapshot; it does not remove or renew the snapshot bound. Account ping
+callbacks and queued private one-shot frames wait for accepted login; the login
+frame itself remains permitted. Private one-shots use the shared
+`send_after_socket_interests` custody rather than an unconditional opening send.
+Pongs retain their separate receive-liveness meaning. Existing `register_socket_feed` semantics stay
+the same.
+
+The venue prepares and validates its native snapshot once, then calls
+`complete_socket_snapshot()` before publishing affected Store state. The engine
+requires the exact current managed text callback, physical epoch and receipt
+time; callers supply no feed, socket, generation or clock. Duplicate, retired,
+wrong-scope and borrowed callbacks cannot complete the barrier. Capacity refusal
+retains the pending proof and deadline, so no snapshot commit is authorized by a
+failed completion. A caller-modified timestamp cannot discharge the barrier.
+
+The existing shared Supervisor owns expiry, timers and reconnect. Equality at
+the immutable deadline fences ingress before native decoding/publication, even
+if the host delivers its watchdog late. Hosts use the existing socket actions
+and ordinary timer ingress; no new host message or wire format is required.
+Snapshot completion grants no command, HTTP, signing or new send authority.
