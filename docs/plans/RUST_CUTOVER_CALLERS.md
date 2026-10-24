@@ -7728,3 +7728,17 @@ metadata wait, not a replay/measurement retry or a new timing sample. Exact
 upload/checkout windows, ZIP/digest checks, raw observations and final
 provenance validation remain enforced. No venue policy or legacy non-Rust
 production changes. Plan: RUST_CPU_PRODUCER_STEP_METADATA.md.
+
+
+### Coinbase immediate local command custody
+
+Ten initial-entry completion sites now use shared Read ownership or keyless
+Mutation refusal: portfolio lookup, cached/unavailable leverage, initial
+history validation, startup queue capacity and trading validation/refusals.
+Native messages, JSON, Unsupported/NotSent metadata, validation order and the
+256-entry warning remain intact. Invalid or expired caller entry is rejected
+before local completion through the cause-aware shared API. No physical I/O,
+signed/private custody, FIFO pacing or deferred callback is adopted. The three
+candle validation sites, Instruments discovery and Daily seed remain held for
+retained command ownership and coordinated native REST release. Coinbase's
+legacy inventory decreases from 34 to 24 occurrences.
