@@ -278,4 +278,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Caller-wait Read root expiry | Plan under review (claude-fe7lgm) | Before relying on engine-owned expiry of a tracked caller-wait Read root, or refusing a missing command receipt. | [RUST_READ_ROOT_EXPIRY.md](RUST_READ_ROOT_EXPIRY.md) |
 | Store order fence domains | Keep-both documentation plan | Before changing the broad late-ACK revision or selective logical snapshot epoch. | [RUST_ORDER_FENCE_DOMAINS.md](RUST_ORDER_FENCE_DOMAINS.md) |
 | Selected Read roots and page legs | Shared implementation; final dependency integration pending | Before retaining one selected caller-wait root across native physical history pages. | [RUST_SELECTED_READ_LEGS.md](RUST_SELECTED_READ_LEGS.md) |
+
+| TxFlow whole managed socket family | Managed adapter | Before converting api-ws and node ws together using shared pacing and subscription handoff; no new socket seam. | [RUST_TXFLOW_MANAGED_SOCKETS.md](RUST_TXFLOW_MANAGED_SOCKETS.md) |
 | KuCoin local command refusals | Implemented; focused checks/reviews clear, CI pending | Before migrating the eight synchronous pre-I/O refusals while preserving valid signed paths and successful local setting policy. | [RUST_KUCOIN_LOCAL_COMMAND_REFUSALS.md](RUST_KUCOIN_LOCAL_COMMAND_REFUSALS.md) |
