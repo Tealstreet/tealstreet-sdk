@@ -74,6 +74,108 @@ impl Managed {
             && self.lifecycle.release().is_some()
             && self.lifecycle.accepts_response()
     }
+
+    #[cfg(feature = "dispatch-nonce")]
+    #[inline(never)]
+    fn claim_nonce(
+        &mut self,
+        permit: Permit,
+        time: ReleaseTime,
+        pacing: &mut crate::request_context::SendPacing,
+        admit: &mut dyn FnMut(&HttpRelease) -> Result<(), Error>,
+        signing_release: &mut Option<crate::SigningRelease>,
+        nonce_stale: &mut bool,
+    ) -> Option<Result<Claim, Error>> {
+        let nonce = self
+            .recipe
+            .as_ref()
+            .and_then(|recipe| recipe.nonce.as_ref());
+        let has_nonce_claim = self
+            .recipe
+            .as_ref()
+            .is_some_and(crate::signing_dispatch::Pending::has_nonce_claim);
+        let result = match (has_nonce_claim, nonce) {
+            (true, Some(nonce)) => {
+                let prepared = self.lifecycle.prepare_claim(permit, time, pacing);
+                match prepared {
+                    Ok(crate::request_context::group_lifecycle::ClaimPreparation::WaitUntil(
+                        at,
+                    )) => Ok(Claim::WaitUntil(at)),
+                    Ok(crate::request_context::group_lifecycle::ClaimPreparation::Ready(draft)) => {
+                        let admission = admit(draft.release()).and_then(|()| {
+                            let release = *draft.release();
+                            let observation =
+                                crate::SigningRelease::new(release.signature, release.time)?;
+                            let ready =
+                                draft.admit(crate::request_context::Admission::Unscheduled)?;
+                            Ok((observation, ready, release))
+                        });
+                        match admission {
+                            Err(reason) => Err(reason),
+                            Ok((observation, ready, release)) => {
+                                *signing_release = Some(observation);
+                                let committed = nonce.commit_release(|| {
+                                    self.lifecycle.commit_claim(ready, pacing);
+                                });
+                                match committed {
+                                    Ok(true) => Ok(Claim::Released(release)),
+                                    Ok(false) => {
+                                        *nonce_stale = true;
+                                        Err(Error::Stale)
+                                    }
+                                    Err(_) => Err(Error::State),
+                                }
+                            }
+                        }
+                    }
+                    Err(reason) => Err(reason),
+                }
+            }
+            (true, None) | (false, Some(_)) => Err(Error::State),
+            (false, None) => return None,
+        };
+        Some(result)
+    }
+}
+
+#[cfg(feature = "dispatch-nonce")]
+#[inline(never)]
+fn validate_nonce_recipe(
+    step: Option<&dyn crate::SignStep>,
+    selected_claim: &Option<Option<std::sync::Arc<crate::nonce::ClaimAuthority>>>,
+    nonce_unscheduled: bool,
+    identities: &crate::signing::Identities,
+    context: &Context,
+) -> Result<Option<std::sync::Arc<crate::nonce::ClaimAuthority>>, Error> {
+    let nonce_claim = step
+        .and_then(|step| step.nonce_claim())
+        .map(|claim| claim.authority());
+    if nonce_claim.is_some() && !nonce_unscheduled {
+        return Err(Error::Invalid);
+    }
+    if let Some(expected) = selected_claim {
+        let matches = match (expected, &nonce_claim) {
+            (None, None) => true,
+            (Some(expected), Some(actual)) => std::sync::Arc::ptr_eq(expected, actual),
+            _ => false,
+        };
+        if !matches {
+            return Err(Error::Invalid);
+        }
+    }
+    if let Some(authority) = &nonce_claim {
+        let installed = match authority.selection.slot() {
+            CredentialSlot::Primary => identities.primary.as_ref(),
+            CredentialSlot::Secondary => identities.secondary.as_ref(),
+        };
+        if installed.is_none_or(|identity| !authority.matches_identity(identity))
+            || context.credential() != Some(&authority.credential)
+            || context.routing_intent() != authority.selection.intent()
+        {
+            return Err(Error::Invalid);
+        }
+    }
+    Ok(nonce_claim)
 }
 
 impl<P> Cx<'_, P> {
@@ -245,40 +347,41 @@ impl<P> Cx<'_, P> {
         if let Err(error) = self.io.http_pacing.check(context.pacing(), self.now) {
             return Err((pending, error));
         }
-        let nonce_claim = step
-            .as_ref()
-            .and_then(|step| step.nonce_claim())
-            .map(|claim| claim.authority());
-        if nonce_claim.is_some() && !self.io.nonce_unscheduled {
-            return Err((pending, Error::Invalid));
-        }
-        if let Some(expected) = selected_claim {
-            let matches = match (&expected, &nonce_claim) {
-                (None, None) => true,
-                (Some(expected), Some(actual)) => std::sync::Arc::ptr_eq(expected, actual),
-                _ => false,
-            };
-            if !matches {
-                return Err((pending, Error::Invalid));
-            }
-        }
         #[cfg(feature = "dispatch-nonce")]
-        if let Some(authority) = &nonce_claim {
-            let installed = match authority.selection.slot() {
-                CredentialSlot::Primary => self.io.identities.primary.as_ref(),
-                CredentialSlot::Secondary => self.io.identities.secondary.as_ref(),
-            };
-            if installed.is_none_or(|identity| !authority.matches_identity(identity))
-                || context.credential() != Some(&authority.credential)
-                || context.routing_intent() != authority.selection.intent()
-            {
+        let nonce_claim = match validate_nonce_recipe(
+            step.as_deref(),
+            &selected_claim,
+            self.io.nonce_unscheduled,
+            &self.io.identities,
+            &context,
+        ) {
+            Ok(claim) => claim,
+            Err(error) => return Err((pending, error)),
+        };
+        #[cfg(not(feature = "dispatch-nonce"))]
+        let nonce_claim = {
+            let nonce_claim = step
+                .as_ref()
+                .and_then(|step| step.nonce_claim())
+                .map(|claim| claim.authority());
+            if nonce_claim.is_some() && !self.io.nonce_unscheduled {
                 return Err((pending, Error::Invalid));
             }
-        }
-        #[cfg(not(feature = "dispatch-nonce"))]
-        if nonce_claim.is_some() {
-            return Err((pending, Error::Invalid));
-        }
+            if let Some(expected) = selected_claim {
+                let matches = match (&expected, &nonce_claim) {
+                    (None, None) => true,
+                    (Some(expected), Some(actual)) => std::sync::Arc::ptr_eq(expected, actual),
+                    _ => false,
+                };
+                if !matches {
+                    return Err((pending, Error::Invalid));
+                }
+            }
+            if nonce_claim.is_some() {
+                return Err((pending, Error::Invalid));
+            }
+            nonce_claim
+        };
         if context.credential().is_some() != step.is_some() {
             return Err((pending, Error::Invalid));
         }
@@ -1074,65 +1177,26 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "dispatch-nonce")]
         let mut nonce_stale = false;
         #[cfg(feature = "dispatch-nonce")]
-        let nonce = managed
-            .recipe
-            .as_ref()
-            .and_then(|recipe| recipe.nonce.as_ref());
+        let nonce_result = {
+            let release_mode = self.http_release;
+            let venue = &self.venue;
+            let value = &pending.value;
+            managed.claim_nonce(
+                permit,
+                time,
+                &mut self.io.http_pacing,
+                &mut |release| match release_mode {
+                    super::HttpRelease::NonceUnscheduled(admit) => admit(venue, value, release),
+                    super::HttpRelease::Mutable(_) => Err(Error::Invalid),
+                },
+                &mut signing_release,
+                &mut nonce_stale,
+            )
+        };
         #[cfg(feature = "dispatch-nonce")]
-        let has_nonce_claim = managed
-            .recipe
-            .as_ref()
-            .is_some_and(crate::signing_dispatch::Pending::has_nonce_claim);
-        #[cfg(feature = "dispatch-nonce")]
-        let result = match (has_nonce_claim, nonce) {
-            (true, Some(nonce)) => {
-                let prepared = managed
-                    .lifecycle
-                    .prepare_claim(permit, time, &self.io.http_pacing);
-                match prepared {
-                    Ok(crate::request_context::group_lifecycle::ClaimPreparation::WaitUntil(
-                        at,
-                    )) => Ok(Claim::WaitUntil(at)),
-                    Ok(crate::request_context::group_lifecycle::ClaimPreparation::Ready(draft)) => {
-                        let admission = match self.http_release {
-                            super::HttpRelease::NonceUnscheduled(admit) => {
-                                admit(&self.venue, &pending.value, draft.release())
-                            }
-                            super::HttpRelease::Mutable(_) => Err(Error::Invalid),
-                        }
-                        .and_then(|()| {
-                            let release = *draft.release();
-                            let observation =
-                                crate::SigningRelease::new(release.signature, release.time)?;
-                            let ready =
-                                draft.admit(crate::request_context::Admission::Unscheduled)?;
-                            Ok((observation, ready, release))
-                        });
-                        match admission {
-                            Err(reason) => Err(reason),
-                            Ok((observation, ready, release)) => {
-                                signing_release = Some(observation);
-                                let committed = nonce.commit_release(|| {
-                                    managed
-                                        .lifecycle
-                                        .commit_claim(ready, &mut self.io.http_pacing);
-                                });
-                                match committed {
-                                    Ok(true) => Ok(Claim::Released(release)),
-                                    Ok(false) => {
-                                        nonce_stale = true;
-                                        Err(Error::Stale)
-                                    }
-                                    Err(_) => Err(Error::State),
-                                }
-                            }
-                        }
-                    }
-                    Err(reason) => Err(reason),
-                }
-            }
-            (true, None) | (false, Some(_)) => Err(Error::State),
-            (false, None) => {
+        let result = match nonce_result {
+            Some(result) => result,
+            None => {
                 managed
                     .lifecycle
                     .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
