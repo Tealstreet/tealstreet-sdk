@@ -228,3 +228,12 @@ provider/preparation recovery is preserved, while root expiry and local child
 admission/submission refusal strictly settle the exact root. Full native,
 strict, provenance, bounded source reviews and CI are recorded separately as
 they complete; these focused results do not certify WASM size or replay gates.
+
+Verification at source checkpoint `2ca9e6f147a`: scoped OKX/Binance native
+594 tests pass across46 targets (including two zero-test doc targets), strict
+all-target/all-feature Clippy and scoped fmt pass, and both request-context
+checks (15 checker controls) plus full bans pass. Three independent bounded
+source/adversarial, caller/financial and full-map reviews are CLEAR at that
+immutable source pin; architecture gate No. Original16 bodies remain exact,
+all30 existing closed-position assertion macros remain unchanged, and every
+unowned source/map/checker path is preserved. Fresh CI remains pending.
