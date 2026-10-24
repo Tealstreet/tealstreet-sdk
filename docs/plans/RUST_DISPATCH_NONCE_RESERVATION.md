@@ -508,3 +508,22 @@ owner and the auditor. The generation/Bearer fence must precede the nonce helper
 whoever integrates second must retain the joint stale/supersession control and
 measure the combined artifact with both features. No joint-fit claim is made by
 this extraction alone.
+
+
+The first extraction (`8847d34b315`, original 85 controls passing) measures
+14,167,903 Node bytes: 20,473 saved, still 12,127 over. Before the per-venue
+fallback, extend the concrete Claim helper to share ordinary Claim orchestration
+as well. Its admission input is a private exclusive enum of borrowed Mutable
+and NonceUnscheduled callbacks, retaining their distinct signatures. Engine
+instantiations only construct the callback appropriate to their captured mode.
+
+The ordinary helper branch preserves SigningRelease construction before admit;
+the nonce branch preserves pure admit before SigningRelease construction. A
+Mutable callback still refuses declared nonce work. Neither callback escapes or
+runs under the nonce mutex. The missing/invented reservation matrix, WaitUntil,
+Released-only bookkeeping and floor-only stale flag stay unchanged. This moves
+ordinary source only when dispatch-nonce is enabled; the OFF body remains the
+reviewed ordinary implementation. Obtain bounded review before this extension,
+then use the same original controls and exact combined measurement. The static
+per-venue fallback and current-tip/Bearer composition gates remain mandatory if
+this sharing approach cannot fit. Keep all work local.
