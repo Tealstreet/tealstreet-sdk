@@ -1596,6 +1596,76 @@ A255-peer registry-pressure control forces each catalog attempt to retire before
 fallback/retry and successful slot reuse; expiry cannot conceal a root leak.
 Existing startup fixtures retain their assertions while using shared preparation.
 
+## Joined order-read authority: WOO and Crypto.com
+
+WOO's regular/algo pages and Crypto.com's regular/advanced reads carry one owned
+Store token across the logical census. All native classification/membership and
+initial execution-baseline publication is inside the admitted callback; later
+metadata/repair HTTP and timers stay outside. ACK invalidation follows the
+existing validated order-only success boundaries, including absent rows and
+partial success. Per-ID WS progress, terminal fences and rejection retention
+remain unchanged. Capture/late exhaustion, accepted/refused/malformed ACKs,
+both WOO arrival orders, Crypto auth/transport retry after ACK, WS peer progress
+and later WOO amend/fill behavior have bounded native controls. Native original
+RED receipts distinguish the two accepted-write crossings from API-adoption
+controls; no live/private or full-parity claim follows from local tests.
+
+## BloFin local leverage Read controls
+
+Five native tests retain two compiling original capacity assertion REDs plus
+three working controls: exact validation/credential precedence, Store/empty
+financial state preservation, duplicate original-owner release, and 300 sequential
+failures with 255 Background peers and one free Context slot. Capacity recovery
+releases exact Background roots. No fabricated Context, numeric fallback or
+missing-method compile failure is regression evidence.
+
+## OKX closed-position managed controls
+
+Ten original compiling assertion REDs and six native working controls now pass
+through the managed adapter. Five additional managed controls pin dequeue-time
+child bounds, release-aware typed timeout fields, provider/preparation metadata
+and accepted-prefix recovery, reversed equal-deadline ingress order, and an
+explicit180s caller receipt completing after the default120s boundary. All21
+controls and all9 existing closed-position tests pass without ignored tests or
+removed financial assertions. Existing fixtures only drive managed preparation
+and advance each native100ms page clock. Capacity uses genuine retained peers;
+reuse controls now reach and pass their stale-timer/DATA assertions. Family
+WASM/replay/CPU/memory certification remains CI's responsibility.
+
+## MEXC unsigned Background Read verification
+
+Plan3690a27236f precedes original controlsc58c123d68c:18 executed controls,
+11 assertion RED/7 working GREEN/zero ignored against unchanged production.
+The same18 assertions pass after managed adoption. They cover parked dispatch,
+preparation refusal, deadline equality, expired stream end, native startup retry,
+exact500ms depth recovery, old-response isolation, a concurrent live symbol,
+malformed-envelope429 precedence, wire values and buffered version replay.
+All221 MEXC native tests pass across18 targets including the empty doc target;
+strict all-target/all-feature Clippy, scoped fmt, full bans and both request
+ratchets (15 checker tests) pass. Existing native test expectations stay intact;
+public fixture collectors now drive the shared prepared-action executor at their
+explicit event times. Signed secondary probes use an inert Identity continuation
+instead of a public Markets continuation.
+
+Two independent runtime findings received their own assertion-RED commit221bfbfc2ff
+and fixbec93dd562a: expired cleanup metadata must not suppress native failure
+recovery; accepted catalogue custody must retire before successor admission. All
+20 controls now pass; refreshed223 MEXC tests across19 targets and305 Binance
+reference tests across26 targets pass (target counts include empty doc tests).
+Strict Clippy/fmt, bans and both inventory checks pass after the fix. Independent
+source/adversarial, caller and full-map delta reviews are CLEAR atbec93dd562a;
+architecture gate No. CI family size/CPU and other CI gates remain pending.
+
+
+### Hyperliquid spot candle custody controls
+
+Eleven dedicated controls cover standalone/merged spot on both networks, exact
+native wire and rows, validation order, real Prepare/Bind/Claim, early delivery,
+original deadline, preparation failure, clock/capacity recovery and duplicate
+owner/delivery. All pass with zero ignored. Existing candle and spot fixtures
+retain native assertions while driving managed preparation. The new probe opens
+no socket, so it makes no standalone socket-composition claim.
+
 ### Phemex full signer cutover evidence
 
 Original signer test checkpoint17b9ee461cb had6GREEN/16assertionRED/0ignored.

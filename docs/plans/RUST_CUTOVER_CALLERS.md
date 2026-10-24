@@ -6765,6 +6765,111 @@ its own budget. Native endpoint fallback and shared startup backoff are retained
 with the old attempt retired before follow-up. No command result is introduced.
 All four deployments keep their headers/body, route, catalog codec and metadata.
 
+## WOO and Crypto.com joined order-snapshot freshness
+
+Rust WOO and Crypto.com retain the last accepted order rows when a regular/algo
+or regular/advanced REST census crosses an accepted native order mutation.
+The shared Store token rejects the entire joined publication before changing
+native algo classification, advanced-list membership or startup fill baselines.
+Accepted ACKs invalidate older reads even when their IDs have no stored copy;
+malformed/refused order responses and leverage/mode operations keep their
+existing acceptance and outcome rules. Successful members of a batch retain
+their fence if a later member fails. Bounded Crypto.com retries keep the original
+read's token and collected regular half, so retrying after an ACK cannot renew
+old authority.
+
+Per-ID WS version/timestamp/terminal fences remain in force: newer live rows
+survive while healthy snapshot peers progress, and snapshot publication does
+not invalidate sibling read tokens. A discarded WOO join waits its ordinary
+account cadence rather than publishing caches or issuing an immediate repair;
+Crypto.com releases its reconciliation cycle and schedules its ordinary timer.
+When capture for a new census is exhausted, no new order census starts; stored
+rows and readiness are preserved. Existing in-flight retries can finish but cannot
+publish exhausted authority. Positions, balances and normal polling continue. Public wire
+payloads, signing, commands/results, IDs and frame shapes keep their contracts.
+No wrapper, SDK, CLI, MCP or server caller needs a new parameter or outcome type.
+
+## BloFin local FetchLeverage Read refusals
+
+Unknown market still precedes margin/mode-not-loaded before credentials, with
+exact native messages and absent kind/outcome fields. Each of these two local
+refusals now acquires its genuine shared Read owner; capacity refusal supersedes
+the native error with one typed Read failure and no write Outcome. No numeric
+fallback or extra terminal occurs. Duplicate live ids preserve their diagnostic
+and original owner. No Store change, HTTP, provider, timer or private credential
+is introduced. Valid signed leverage queries retain their original issuance,
+path, request fields, revision checks, response handling and native retries.
+
+## Polymarket and Kraken fixed settings (2026-10-24)
+
+Polymarket SetLeverage/SetMarginType/SetPositionMode and Kraken Futures
+SetPositionMode(false) adopt actual #1989 done_local_setting. They remain
+keyless Store no-ops with exact `[]` and `null` results, respectively, and no
+I/O. Success is confined to genuine Setting entry and now honors its receipt;
+an invalid clock produces typed InvalidInput/NotSent instead of numeric
+success. No Context, credential, physical attempt or signer readiness is
+created. Kraken true-mode refusal is unchanged. Inventory shrinks by two
+occurrences. See RUST_FIXED_SETTING_ADOPTION.md for the native compatibility
+and NEW-CONTRACT refusal controls.
+
+## OKX reported closed-position caller-root custody
+
+FetchClosedPositions now owns the immutable original caller receipt deadline
+(default120000ms, or the supplied rustCommandTimeoutMs). Each signed page has a
+20s/Never child minted only at its actual native100ms dequeue, capped by that
+root. Keyless and unknown-symbol empty results require genuine Read admission;
+missing/invalid receipts or full capacity can therefore produce one typed Read
+refusal instead of bypassing custody. No local timeout default is fabricated.
+
+Root expiry strictly returns one typed Timeout with no rows or INCOMPLETE, and
+local child admission/submission refusal strictly rejects the root. Physical
+HTTP/transport/live-child-timeout and provider/preparation failure preserve the
+native policy: fail without accepted output, otherwise return only accepted
+rows with owned INCOMPLETE. Shared typed failure metadata is retained on strict
+failure; released Read timeouts have no money outcome. Exact-owner retirement
+prevents late data and native timers from affecting a reused command ID.
+
+Raw OKX rows, Secondary-else-Primary selection behind the primary-required gate,
+wire parameters, PAGE100/MAX100, cursor/cycle/cap semantics and mapper stay
+unchanged. SDK fetchClosedPnl/fetchReportedClosedPnl still catches and reports
+failure then returns[]; fetchHistoricalPositions/okxJournal with report:false
+still propagates it. Recovered results keep copyHistoryCompleteness. This
+retires the Closed funnel consumer with0 direct lexical inventory removals;
+account/discovery/writes retain their shared list/sign sites until conversion.
+
+## MEXC unsigned discovery and subscription snapshot custody
+
+Markets, ticker discovery and subscription depth snapshots use unsigned managed
+Background Reads with an immutable 20-second bound per operation. Public route
+preparation and final release precede HTTP. At deadline equality, including before
+host timer ingress, payload rows and stream completion cannot load markets or
+tickers, mutate volume-unit metadata or replace a subscription book. Expired
+responses are discarded before headers reach the venue, so they supply no new
+Retry-After evidence. A still-live operation from an old subscription generation
+retains native 429 pause evidence without publishing stale book data.
+
+Failed preparation, submission, transport and timeout retire their own Context
+and retain native startup backoff or depth resync. The first depth resync remains
+exactly 500ms; discovery keeps its nominal1/2/4-second jittered backoff. The native
+private startup after markets, malformed catalogue recovery, book generation and
+version fences, contract-size scaling and buffer limits remain. Public reads
+carry no credential and publish neither command terminals nor account-auth
+evidence. Existing safe-cex startup/subscribed-order-book consumers require no
+new input; host dispatch uses the existing managed prepare/bind/claim protocol.
+
+
+### Hyperliquid spot candles share managed Read custody
+
+Standalone and merged spot FetchCandles now use the existing perps public Read
+Context: unsigned,20s from command admission, Never retry. Admission precedes
+native interval/market/range validation. Preparation and host claim time consume
+that original deadline; expired or unreleased replies cannot publish candles.
+Native POST/info body, @coin mapping, header order, rows and local error strings
+remain. Existing perps metadata is retained: an unreleased preparation failure or
+timeout carries NotSent; a released Read timeout has no financial outcome.
+No signer, Session, Plan or socket authority is introduced. Six real legacy
+terminal occurrences are removed (Hyperliquid37->31, lib9->3).
+
 ## Retained command readiness
 
 With the engine's `http-plans` feature, native FIFO commands can park their own

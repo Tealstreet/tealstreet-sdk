@@ -274,12 +274,10 @@
   },
   "venues/blofin/src/account.rs": {
     "1a8e09311f93f0d7d9c69519e6d325d16f9366b33946b861ab28ffaa45d927f5": 1,
-    "37bc238a40045dda234a3daaf68329976cef33caee8f13734a73f526bfef32cd": 1,
     "4f2afd7cb212a9914e8dece3dbb3733c167148c003035b2f7628bb8aab8876c8": 1,
     "569abc443c07aca5127ee71c347600be68bb35c14aeae80c3a14b2f5f2642980": 1,
     "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
-    "e2c8da59c7ed525a6d5342feecd9df9ef825904a02af1c97de61f39d1a7abf89": 1
+    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
   },
   "venues/blofin/src/closed.rs": {
     "bb5ed84ac1882574929599a10507277895dbe7521e20ef78b3f641d2ff116b38": 1
@@ -516,12 +514,7 @@
   },
   "venues/hyperliquid/src/lib.rs": {
     "2cda0ed5e578b86a8694a63ad2d9bd00b450bd15351aeef0ab0c86504facde43": 1,
-    "4108d1559a4ad73e52be4c21b463683f0720640e6139a19d3dc124fc94a3a924": 1,
-    "6da4c02a5a70033ee0de34264a840871baf53725343f51167d02daeff7708798": 1,
-    "8deb2561ea92dfced0e817f532fab6f972df593bdce587a4360f0fddc59f7d6d": 2,
-    "ae0c28ce939a28c6614ef199cbb7eae2c3061d25690063d605ed713d389341ae": 1,
-    "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 2
+    "8deb2561ea92dfced0e817f532fab6f972df593bdce587a4360f0fddc59f7d6d": 2
   },
   "venues/hyperliquid/src/trading.rs": {
     "06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3": 1,
@@ -579,7 +572,6 @@
   },
   "venues/kraken/src/trading.rs": {
     "06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3": 1,
-    "35058464be07d81db637fa288630993ec85908b4d75d5e863ad46e8e5a1cb92b": 1,
     "604f28d91adfdb4cd0caac06047abd9569f9a6c248b698a784032256d7cf8047": 1,
     "9584979d6cce6bf6576093402c85d6195493ed09a64ba6f72927c8f53bf61847": 2,
     "ca37246cf8052b21b57e7f1400b1026f755a6bdaadfe661eb481c929ddcc2d68": 1
@@ -692,8 +684,6 @@
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
   },
   "venues/mexc/src/lib.rs": {
-    "2cb4c59f38cca507a15b20d1ace303afd27defc1b4fe0aba50dddcbcb1f9c37c": 1,
-    "a1d7eb3cdf7f4e938351efa132ee68dac79fc9e6e26db557c0ffd67282e9ae14": 1,
     "e7ec3b5f8c170e9a5887721f2eedda084ecf9f5a5eba8d1e899957c63019e0bb": 1
   },
   "venues/mexc/src/secondary_tests.rs": {
@@ -854,9 +844,6 @@
     "56e99f37347afd5a3125760ebe88af363da636585bb23c2106b573894f2450dc": 1,
     "766f5ee44b7b25802cc85973a468fc872f0d83bbef8320e067ed436d4985244b": 2,
     "9abef505f5f9a1664cdae8b3c966edfebd4748240d5855c984067457d1b77499": 1
-  },
-  "venues/polymarket/src/history.rs": {
-    "2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b": 1
   },
   "venues/polymarket/src/lib.rs": {
     "2f8cf761894919a113431881453a07440eca0a5c424ff04fe48e592b62a33a8b": 1,

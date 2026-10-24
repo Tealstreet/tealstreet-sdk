@@ -1,6 +1,6 @@
 //! Rare account identity reads never commit live account state.
 use crate::{Bingx, Pending};
-use safe_cex_engine::credential_selection::{CredentialUnavailable, SlotPolicy, Slots};
+use safe_cex_engine::credential_selection::CredentialUnavailable;
 use safe_cex_engine::request_context::RetryPolicy;
 use safe_cex_engine::selected_read::{
     AdmittedRead, LocalRefusal, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
@@ -75,18 +75,7 @@ impl Bingx {
         let selected = if self.config_error.is_some() {
             Err(CredentialUnavailable::Missing)
         } else {
-            let slots = Slots::new(
-                self.credentials
-                    .as_ref()
-                    .map(|credentials| credentials.primary.clone()),
-                self.credentials
-                    .as_ref()
-                    .and_then(|credentials| credentials.read.clone()),
-                SlotPolicy {
-                    secondary_requires_primary: true,
-                },
-            );
-            SelectedRead::select(&slots, ReadRole::Read { scope: None })
+            SelectedRead::select(&self.account.slots, ReadRole::Read { scope: None })
         };
         let message = self
             .config_error
