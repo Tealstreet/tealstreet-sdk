@@ -374,3 +374,34 @@ HMAC, selection and core Plan-source reviews; do not inherit executed evidence
 from the constructor review. Push only an intended freeze candidate after the
 requested reviews return, with one PR Rust run per head. READY follows green CI
 and clear source reviews; landing still requires the overseer's window.
+
+## Actual ValidateOnly composition
+
+Actual #2078 `cec22de6e875dc0e7b9e0ec628bba5ceeb7ae2ff` is plain-merged at
+`ff18f131bbe`; the current rewrite tip was already contained. Only CALLERS
+conflicted and keeps incoming plus the exact own suffix once. Crypto's atomic
+consumer row declares dispatchSigning and ValidateOnly. Its registry feature
+enables provider setup, its constructor receives opaque Primary plus
+read_credentials_valid.map(ReadCredentials::status), and the engine registers
+the same identities as the provider. No shared setup algorithm changes here.
+
+The five registry controls pin trusted consumption/erasure with primary-only
+provider installation, raw-invalid read precedence, absent/valid input, and
+injected-secondary refusal. A native caller cannot preset a trusted validation
+result; that refuses as unexpected input. A host-supplied false result instead
+keeps the original secondary-validation error before venue construction.
+Direct-venue startup and identity precedence remain in the private-funnel
+controls. Four JS wrapper controls use the real construction declaration and
+generic setup: no raw options or secondary capsule, true/false/absent bounded
+status, and unchanged caller-owned input. Their mocked constructor proves
+transport, while registry controls prove native refusal semantics.
+
+At this composition all252 native Crypto tests, five registry controls and four
+wrapper tests pass; strict scoped checks and bans/ratchets follow before push.
+The new wrapper target is excluded by the existing ESLint test ignore, so its
+successful Vitest execution supplies its local check; no lint coverage is claimed.
+The exact inventory delta versus cec22 is request8->0, credential-selection5->0,
+and signing14->2 (only EraseSecrets). No foreign inventory or checker changes.
+Per the overseer's current instruction, push a draft once and run its one
+PR-triggered Rust workflow in parallel with bounded source reviews. Keep the
+two Aster runs unchanged; full custody/size/CPU/READY are not claimed here.

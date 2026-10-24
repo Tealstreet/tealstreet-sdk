@@ -116,7 +116,14 @@ fn validate_only_false_status_keeps_the_same_registry_refusal() {
                 }
                 .unwrap_err();
                 assert!(!visited.get());
-                assert_eq!(error.message, SECONDARY_ERROR);
+                assert_eq!(
+                    error.message,
+                    if injected_route {
+                        SECONDARY_ERROR
+                    } else {
+                        "Unexpected read credential validation result"
+                    }
+                );
                 assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
                 assert!(
                     error.outcome.is_none(),
@@ -125,4 +132,56 @@ fn validate_only_false_status_keeps_the_same_registry_refusal() {
             }
         }
     }
+}
+
+#[test]
+fn trusted_setup_consumes_secondary_without_installing_or_retaining_it() {
+    for public_only in [false, true] {
+        let mut options = options(
+            public_only,
+            true,
+            "fixture-read-key",
+            "fixture-read-material",
+        );
+        let (provider, identities) =
+            safe_cex_venues::prepare_local_signer_for("cryptocom", &mut options).unwrap();
+        assert!(options.key.is_none());
+        assert!(options.secret.is_none());
+        assert!(options.read_credentials.is_none());
+        assert_eq!(options.read_credentials_valid, Some(true));
+        assert!(identities.primary.is_some());
+        assert!(identities.secondary.is_none());
+        options.signing = Some(identities);
+        let visited = Cell::new(false);
+        build_with_signer(
+            "cryptocom",
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(17)),
+            Some(provider),
+            Constructed(&visited),
+        )
+        .unwrap();
+        assert!(visited.get());
+    }
+}
+
+#[test]
+fn injected_secondary_identity_is_refused_before_venue_construction() {
+    let mut source = options(false, true, "fixture-read-key", "fixture-read-material");
+    let (provider, mut identities) = safe_cex_venues::prepare_local_signer(&mut source).unwrap();
+    assert!(identities.secondary.is_some());
+    let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
+    options.signing = Some(std::mem::take(&mut identities));
+    let visited = Cell::new(false);
+    let error = build_with_signer(
+        "cryptocom",
+        options,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Some(provider),
+        Constructed(&visited),
+    )
+    .unwrap_err();
+    assert!(!visited.get());
+    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    assert!(error.outcome.is_none());
 }
