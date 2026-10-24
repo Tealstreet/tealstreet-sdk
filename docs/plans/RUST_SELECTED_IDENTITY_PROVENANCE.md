@@ -580,3 +580,23 @@ constructor/source review must cover native and hosted modes consistently.
 Changes are scoped to Rust engine/hosted-Rust paths; the existing non-Rust AWS
 production path must remain unaffected. No build profile, CPU threshold or
 WASM-budget edit is part of this provenance slice.
+
+## Reconciled boundary controls
+
+The earlier poisoned-retirement expectations are replaced by the reviewed
+zero-engine-access contract. Healthy dispose keeps its ordered borrowed/owned
+retirement assertions. A real WebAssembly.RuntimeError thrown inside an engine
+call arms a proxy that records every subsequent engine property lookup and
+export/free call; dispose follows that trap. Host commands still settle Unknown
+with the original IDs, and all signing/HTTP/socket/timer resources are checked.
+Borrowed poison cleanup is a working control. Owned poison cleanup exposes the
+existing defect: current cleanup reads and calls free after the trap. That is an
+original assertion RED against existing behavior, not an absent snapshot API.
+
+The reconciled exact controls have six GREEN and five assertion RED outcomes,
+zero skipped, on unchanged runtime: one original poisoned-owned-free RED and
+four NEW-CONTRACT REDs (two healthy retirement orders, the missing healthy
+throwing-retirement entry, and final seal). The throwing-retirement spy is not
+executed yet, so continuation after an actual retirement exception remains a
+source-stage assertion. Group preclaim/first-dispatch controls and native
+owned/retained/cancelled/panic controls still require exact owner-reviewed hooks.
