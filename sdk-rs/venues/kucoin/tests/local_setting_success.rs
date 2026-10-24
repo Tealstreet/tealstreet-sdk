@@ -1,12 +1,14 @@
 #![cfg(feature = "spot")]
 //! Native fixed settings through real command receipts and shared LocalSetting admission.
+mod support;
 use safe_cex_engine::model::MarginType;
 use safe_cex_engine::request_context::{Context, Error, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, Notice, Outcome, Response, SocketId, TimerId, Venue,
     VenueError,
 };
-use safe_cex_venue_kucoin::{Options, spot::KucoinSpot};
+use safe_cex_venue_kucoin::spot::KucoinSpot;
+use support::credentials::Options;
 const SYMBOL: &str = "BTC-USDT";
 const COMMAND: u32 = 71;
 fn policy() -> Policy {
@@ -132,19 +134,23 @@ impl<V: Venue> Venue for Probe<V> {
 }
 
 fn seeded(keyed: bool, public_only: bool) -> Engine<Probe<KucoinSpot>> {
+    let (options, provider, identities) = Options {
+        key: keyed.then(|| "fixture-key".into()),
+        secret: keyed.then(|| "fixture-secret".into()),
+        passphrase: keyed.then(|| "fixture-passphrase".into()),
+        public_data_only: public_only,
+        ..Options::default()
+    }
+    .prepare();
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
-        inner: KucoinSpot::new(Options {
-            key: keyed.then(|| "fixture-key".into()),
-            secret: keyed.then(|| "fixture-secret".into()),
-            passphrase: keyed.then(|| "fixture-passphrase".into()),
-            public_data_only: public_only,
-            ..Options::default()
-        }),
+        inner: KucoinSpot::new(options),
         owners: vec![],
         backgrounds: vec![],
         hold_next: false,
         delay: 0.,
     });
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
     e.store_mut().update_setting(SYMBOL, |s| {
         s.leverage = 9.;
         s.buy_leverage = Some(8.);

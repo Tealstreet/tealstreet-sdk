@@ -1,0 +1,796 @@
+//! Original native-builder custody assertions; no signer recipe or production cutover.
+mod support;
+use safe_cex_crypto::signer::LocalSigner;
+use safe_cex_engine::signing::{
+    Algorithm, Capability, Context as SignContext, Identities, Identity, KeyRef, Operation,
+    PayloadPart, SignError, SignFuture, SignReceipt, SignRequest, SignResult, Signer,
+};
+use safe_cex_engine::{Action, Command, Engine, HttpRequest, Method, ReadCredentials, Venue};
+use safe_cex_venue_kucoin::Kucoin;
+#[cfg(feature = "spot")]
+use safe_cex_venue_kucoin::spot::KucoinSpot;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use support::credentials::{BrokerOptions, Options};
+
+const NOW: f64 = 1234.9;
+struct RecordingSigner {
+    inner: LocalSigner,
+    refuse: AtomicBool,
+    deferred: AtomicBool,
+    corrupt: AtomicUsize,
+    requests: Arc<Mutex<Vec<SignRequest>>>,
+}
+impl Signer for RecordingSigner {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.requests.lock().unwrap().push(request.clone());
+        if self.refuse.load(Ordering::Relaxed) {
+            return Box::pin(std::future::ready(Err(SignError::Unsupported)));
+        }
+        self.inner.sign(request)
+    }
+    fn immediate(&self) -> bool {
+        !self.deferred.load(Ordering::Relaxed)
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        self.requests.lock().unwrap().push(request.clone());
+        if self.refuse.load(Ordering::Relaxed) {
+            return Some(Err(SignError::Unsupported));
+        }
+        if self.deferred.load(Ordering::Relaxed) {
+            return None;
+        }
+        self.inner.sign_ready(request).map(|result| {
+            result.map(|mut result| {
+                match self.corrupt.load(Ordering::Relaxed) {
+                    0 => {}
+                    1 => result.receipt.stamp_ms = Some(1235.),
+                    2 => result
+                        .headers
+                        .push(("fixture-injected".into(), "refuse".into())),
+                    3 => {
+                        result.values.pop();
+                    }
+                    4 => {
+                        result.values[1].pop();
+                    }
+                    5 => result.values[0] = b"fixture\r\nkey".to_vec(),
+                    6 => result.values[0] = vec![0xff],
+                    _ => result.values[0].clear(),
+                }
+                result
+            })
+        })
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.inner.can_sign(key, algorithm)
+    }
+}
+struct Harness<V: Venue> {
+    engine: Engine<V>,
+    requests: Arc<Mutex<Vec<SignRequest>>>,
+    identities: Identities,
+    provider: Arc<RecordingSigner>,
+}
+fn options() -> Options {
+    Options {
+        key: Some("fixture-primary-key".into()),
+        secret: Some("fixture-primary-secret".into()),
+        passphrase: Some("fixture-primary-passphrase".into()),
+        read_credentials: Some(ReadCredentials {
+            key: "fixture-read-key".into(),
+            secret: "fixture-read-secret".into(),
+            passphrase: Some("fixture-read-passphrase".into()),
+        }),
+        ..Options::default()
+    }
+}
+fn fixture<V: Venue>(
+    options: Options,
+    venue: impl FnOnce(safe_cex_venue_kucoin::Options) -> V,
+) -> Harness<V> {
+    let (options, inner, identities) = options.prepare();
+    let venue = venue(options);
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
+    let provider = Arc::new(RecordingSigner {
+        inner,
+        refuse: AtomicBool::new(false),
+        deferred: AtomicBool::new(false),
+        corrupt: AtomicUsize::new(0),
+        requests: requests.clone(),
+    });
+    engine.set_signer(Some(provider.clone())).unwrap();
+    engine.set_identities(identities.clone()).unwrap();
+    Harness {
+        engine,
+        requests,
+        identities,
+        provider,
+    }
+}
+fn http(actions: &[Action]) -> &HttpRequest {
+    let requests: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(requests.len(), 1, "one native request: {actions:?}");
+    requests[0]
+}
+fn selected_batch<V: Venue>(h: &Harness<V>, identity: &Identity) {
+    let requests = h.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "native signing must pass through the injected provider"
+    );
+    let request = &requests[0];
+    assert_eq!(request.receipt.stamp_ms, Some(1234.));
+    assert_eq!(
+        request.operations.len(),
+        3,
+        "one key presentation and two atomic HMACs"
+    );
+    assert!(
+        matches!(&request.operations[0], Operation::Present { key } if key == &identity.credential)
+    );
+    for operation in &request.operations[1..] {
+        assert!(
+            matches!(operation, Operation::Sign { algorithm: Algorithm::HmacSha256, key, .. }
+            if key == &identity.signing)
+        );
+    }
+}
+#[test]
+fn original_futures_authenticated_catalogue_uses_primary_atomic_provider() {
+    let mut h = fixture(options(), Kucoin::new);
+    h.engine.start(NOW);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+    let request = http(&actions);
+    assert_eq!(request.method, Method::Get);
+    assert!(request.url.ends_with("/api/v1/contracts/active"));
+    selected_batch(&h, h.identities.primary.as_ref().unwrap());
+}
+#[test]
+fn original_futures_identity_uses_secondary_atomic_provider() {
+    let mut h = fixture(options(), Kucoin::new);
+    h.engine
+        .handle_command(NOW, Command::FetchAccount { command: 71 }, Some(120_000))
+        .unwrap();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+    assert!(http(&actions).url.ends_with("/api/v1/user-info"));
+    selected_batch(&h, h.identities.secondary.as_ref().unwrap());
+}
+#[cfg(feature = "spot")]
+#[test]
+fn original_spot_identity_uses_secondary_atomic_provider() {
+    let mut h = fixture(options(), KucoinSpot::new);
+    h.engine
+        .handle_command(NOW, Command::FetchAccount { command: 71 }, Some(120_000))
+        .unwrap();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+    assert!(http(&actions).url.ends_with("/api/v2/user-info"));
+    selected_batch(&h, h.identities.secondary.as_ref().unwrap());
+}
+#[test]
+fn native_futures_ordered_wire_matches_independent_fixed_stamp_vectors() {
+    let mut h = fixture(options(), Kucoin::new);
+    h.engine.start(NOW);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+    let request = http(&actions);
+    // Independently computed with Python's hmac/hashlib and standard padded base64.
+    assert_eq!(
+        request.headers,
+        vec![
+            ("KC-API-KEY", "fixture-primary-key".into()),
+            ("KC-API-TIMESTAMP", "1234".into()),
+            ("KC-API-KEY-VERSION", "2".into()),
+            (
+                "KC-API-SIGN",
+                "qPzTd/t+AOs5TVn+1qDaP7eWIbi/DZKLCA79jXFYmbM=".into()
+            ),
+            (
+                "KC-API-PASSPHRASE",
+                "XY2N6aArz59rfZ2rp5NyjVGaK5OMltv3hIFwjskG4L4=".into()
+            ),
+            ("Content-Type", "application/json".into()),
+            ("X-CHANNEL-API-CODE", "3zexp".into()),
+        ]
+    );
+}
+#[cfg(feature = "spot")]
+#[test]
+fn native_spot_public_catalogue_stays_unsigned_with_configured_read_key() {
+    let mut h = fixture(options(), KucoinSpot::new);
+    h.engine.start(NOW);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+    assert_eq!(
+        http(&actions).headers,
+        vec![
+            ("X-CHANNEL-API-CODE", "3zexp".into()),
+            ("Content-Type", "application/json".into()),
+        ]
+    );
+    assert!(h.requests.lock().unwrap().is_empty());
+}
+#[test]
+fn native_keyless_public_futures_catalogue_stays_unsigned() {
+    let mut h = fixture(
+        Options {
+            public_data_only: true,
+            ..Options::default()
+        },
+        Kucoin::new,
+    );
+    h.engine.start(NOW);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+    assert_eq!(
+        http(&actions).headers,
+        vec![
+            ("X-CHANNEL-API-CODE", "3zexp".into()),
+            ("Content-Type", "application/json".into()),
+        ]
+    );
+    assert!(h.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn recording_provider_working_control_matches_both_independent_mac_vectors() {
+    let h = fixture(options(), Kucoin::new);
+    let identity = h.identities.primary.as_ref().unwrap();
+    let mut request = safe_cex_engine::signing::hmac_sha256_work(
+        identity,
+        vec![PayloadPart::Bytes {
+            bytes: b"1234GET/api/v1/contracts/active".to_vec(),
+        }],
+        SignContext {
+            venue: "kucoin".into(),
+            method: "GET".into(),
+            host: "api-futures.kucoin.com".into(),
+            path: "/api/v1/contracts/active".into(),
+        },
+        SignReceipt {
+            stamp_ms: Some(1234.),
+            expiry_ms: None,
+        },
+    );
+    request.operations.push(Operation::Sign {
+        algorithm: Algorithm::HmacSha256,
+        key: identity.signing.clone(),
+        payload: vec![PayloadPart::Credential {
+            key: identity.passphrase.clone().unwrap(),
+        }],
+    });
+    let result = h.provider.sign_ready(&request).unwrap().unwrap();
+    assert_eq!(result.values.len(), 3);
+    assert_eq!(result.values[0], b"fixture-primary-key");
+    assert_eq!(
+        safe_cex_crypto::encode(&result.values[1], safe_cex_crypto::Encoding::Base64),
+        "qPzTd/t+AOs5TVn+1qDaP7eWIbi/DZKLCA79jXFYmbM="
+    );
+    assert_eq!(
+        safe_cex_crypto::encode(&result.values[2], safe_cex_crypto::Encoding::Base64),
+        "XY2N6aArz59rfZ2rp5NyjVGaK5OMltv3hIFwjskG4L4="
+    );
+    assert_eq!(h.requests.lock().unwrap().len(), 1);
+}
+
+fn broker_options(verify: Option<bool>) -> Options {
+    let mut options = options();
+    options.broker = Some(BrokerOptions {
+        partner: " fixture-partner \t".into(),
+        broker_key: " fixture-broker-secret \t".into(),
+        broker_name: " fixture-name \t".into(),
+        verify,
+    });
+    options
+}
+
+#[test]
+fn original_broker_catalogue_uses_one_atomic_provider_batch() {
+    let mut h = fixture(broker_options(None), Kucoin::new);
+    h.engine.start(NOW);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+    assert_eq!(http(&actions).headers.len(), 11);
+    let requests = h.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1, "broker signing must enter the provider");
+    assert_eq!(requests[0].receipt.stamp_ms, Some(1234.));
+    assert_eq!(requests[0].operations.len(), 4);
+}
+
+#[test]
+fn native_broker_headers_keep_sequence_trim_and_boolean_verify() {
+    for (verify, expected) in [(None, "true"), (Some(false), "false")] {
+        let mut h = fixture(broker_options(verify), Kucoin::new);
+        h.engine.start(NOW);
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+        let request = http(&actions);
+        assert_eq!(request.headers[1], ("KC-API-TIMESTAMP", "1234".into()));
+        assert_eq!(request.headers.len(), 11);
+        assert_eq!(
+            &request.headers[7..],
+            &[
+                ("KC-API-PARTNER", "fixture-partner".into()),
+                (
+                    "KC-API-PARTNER-SIGN",
+                    "QZajsbPrEIWDNZvcc2gaC6WQ0dVWLovAICOP4Xu9iEE=".into()
+                ),
+                ("KC-BROKER-NAME", "fixture-name".into()),
+                ("KC-API-PARTNER-VERIFY", expected.into()),
+            ]
+        );
+    }
+}
+
+#[test]
+fn native_partial_broker_triplets_omit_all_four_headers() {
+    for missing in 0..3 {
+        let mut options = broker_options(None);
+        let broker = options.broker.as_mut().unwrap();
+        match missing {
+            0 => broker.partner = " \t ".into(),
+            1 => broker.broker_key = " \t ".into(),
+            _ => broker.broker_name = " \t ".into(),
+        }
+        let mut h = fixture(options, Kucoin::new);
+        h.engine.start(NOW);
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+        assert_eq!(http(&actions).headers.len(), 7);
+    }
+}
+
+#[test]
+fn native_secondary_identity_broker_mac_binds_the_read_api_key() {
+    let mut h = fixture(broker_options(None), Kucoin::new);
+    h.engine
+        .handle_command(NOW, Command::FetchAccount { command: 92 }, Some(120_000))
+        .unwrap();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+    let request = http(&actions);
+    assert_eq!(
+        request.headers[0],
+        ("KC-API-KEY", "fixture-read-key".into())
+    );
+    assert_eq!(request.headers[1], ("KC-API-TIMESTAMP", "1234".into()));
+    assert_eq!(
+        request.headers[8],
+        (
+            "KC-API-PARTNER-SIGN",
+            "E9VO/x0oG8e8e6XpbCv03ouisGZKFD/WeWtGaH10zGI=".into()
+        )
+    );
+}
+
+fn write_retry_pair() -> (Harness<Kucoin>, HttpRequest, HttpRequest) {
+    let mut h = fixture(broker_options(None), Kucoin::new);
+    h.engine
+        .handle_command(
+            NOW,
+            Command::CancelSymbolOrders {
+                command: 93,
+                symbol: String::new(),
+            },
+            Some(120_000),
+        )
+        .unwrap();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+    let first = http(&actions).clone();
+    assert_eq!(first.method, Method::Delete);
+    assert!(first.url.ends_with("/api/v3/orders"));
+    h.engine.handle(
+        NOW + 1.,
+        safe_cex_engine::Event::HttpResponse {
+            request: first.id,
+            response: safe_cex_engine::Response {
+                status: 400,
+                headers: "",
+                body: r#"{"code":"400005","msg":"Invalid KC-API-SIGN"}"#,
+            },
+        },
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW + 1.);
+    let second = http(&actions).clone();
+    assert_eq!(first.method, second.method);
+    assert_eq!(first.url, second.url);
+    assert_eq!(first.body, second.body);
+    (h, first, second)
+}
+fn header<'a>(request: &'a HttpRequest, name: &str) -> &'a str {
+    request
+        .headers
+        .iter()
+        .find(|(key, _)| *key == name)
+        .unwrap()
+        .1
+        .as_str()
+}
+
+#[test]
+fn native_futures_write_400005_recomputes_stamp_and_stamp_bearing_macs() {
+    let (_, first, second) = write_retry_pair();
+    assert_eq!(header(&first, "KC-API-TIMESTAMP"), "1234");
+    assert_eq!(header(&second, "KC-API-TIMESTAMP"), "1235");
+    for name in ["KC-API-SIGN", "KC-API-PARTNER-SIGN"] {
+        assert_ne!(header(&first, name), header(&second, name));
+    }
+    assert_eq!(
+        header(&first, "KC-API-PASSPHRASE"),
+        header(&second, "KC-API-PASSPHRASE")
+    );
+}
+
+#[test]
+fn original_futures_write_retry_prepares_two_atomic_provider_batches() {
+    let (h, _, _) = write_retry_pair();
+    let requests = h.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "each write attempt must prepare a fresh atomic provider batch"
+    );
+    assert_eq!(requests[0].receipt.stamp_ms, Some(1234.));
+    assert_eq!(requests[1].receipt.stamp_ms, Some(1235.));
+    assert!(requests.iter().all(|request| request.operations.len() == 4));
+}
+
+#[test]
+fn native_raw_query_vectors_include_plus_space_and_exact_passphrase_bytes() {
+    let credentials = support::native_sign::Credentials {
+        key: "vec-key".into(),
+        secret: "vec-secret".into(),
+        passphrase: "vec-pass".into(),
+        broker: Some(BrokerOptions {
+            partner: "vec-partner".into(),
+            broker_key: "vec-broker".into(),
+            broker_name: "vec-name".into(),
+            verify: None,
+        }),
+    };
+    let headers = support::native_sign::headers(
+        &credentials,
+        Method::Get,
+        "/api/v1/fills?symbol=XBTUSDTM&tag=a+b c",
+        "",
+        1712345678901.,
+    );
+    for (index, expected) in [
+        (3, "0ePxUrECY39K3CDMSZwivyQ9XkWaAiArn/m+n9J4XYU="),
+        (4, "T/lfqwDY7hXYb2+FkkGNjx/w8JkbAsSZadi+D6UO4Vg="),
+        (8, "z6fb1jvHciuBj6IGZAYxnHwx0tQ8KqBW9RmlkLVSQ24="),
+    ] {
+        assert_eq!(headers[index].1, expected);
+    }
+}
+
+#[test]
+fn compatibility_fixture_debug_never_exposes_primary_read_or_broker_material() {
+    let options = broker_options(None);
+    let debug = format!("{options:?} {:?}", options.broker.as_ref().unwrap());
+    assert!(debug.contains("REDACTED") || debug.contains("redacted"));
+    for material in [
+        "fixture-primary-key",
+        "fixture-primary-secret",
+        "fixture-primary-passphrase",
+        "fixture-read-key",
+        "fixture-read-secret",
+        "fixture-read-passphrase",
+        "fixture-broker-secret",
+    ] {
+        assert!(!debug.contains(material));
+    }
+}
+
+#[test]
+fn native_negative_zero_stamp_uses_integer_zero_for_both_macs_and_header() {
+    for now in [-0.0, 0.0] {
+        let mut h = fixture(broker_options(None), Kucoin::new);
+        h.engine.start(now);
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, now);
+        let request = http(&actions);
+        assert_eq!(request.headers[1], ("KC-API-TIMESTAMP", "0".into()));
+        assert_eq!(
+            request.headers[3],
+            (
+                "KC-API-SIGN",
+                "+L2l2z2wAjxzVsVAj3CHySNw31iBXUthExEEGMwQ054=".into()
+            )
+        );
+        assert_eq!(
+            request.headers[8],
+            (
+                "KC-API-PARTNER-SIGN",
+                "C4YZe14gzGmgjqsPw40jhRsHdjfb2ugxLMzmhaMsOvc=".into()
+            )
+        );
+    }
+}
+
+fn identity_failure_controls<V: Venue>(constructor: impl Fn(safe_cex_venue_kucoin::Options) -> V) {
+    use safe_cex_engine::{ErrorKind, Event, Notice};
+    for cause in 0..3 {
+        let mut h = fixture(options(), &constructor);
+        h.provider.refuse.store(cause == 0, Ordering::Relaxed);
+        h.engine
+            .handle_command(NOW, Command::FetchAccount { command: 271 }, Some(120_000))
+            .unwrap();
+        let mut actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+        if cause == 0 {
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_)))
+            );
+            assert_eq!(h.requests.lock().unwrap().len(), 1);
+        } else {
+            let request = http(&actions).clone();
+            if cause == 1 {
+                h.engine.handle(
+                    NOW + 1.,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: "fixture network loss",
+                    },
+                );
+            } else {
+                let timer = actions
+                    .iter()
+                    .find_map(|action| match action {
+                        Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => {
+                            Some(*timer)
+                        }
+                        _ => None,
+                    })
+                    .expect("the physical native timeout");
+                h.engine.handle(NOW + 20_000., Event::TimerFired { timer });
+            }
+            actions.extend(h.engine.drain_actions());
+        }
+        let expected = [
+            ErrorKind::Unsupported,
+            ErrorKind::Network,
+            ErrorKind::Timeout,
+        ][cause];
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed {
+                    command: 271,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1, "one typed terminal: {actions:?}");
+        assert_eq!(failures[0].kind, Some(expected));
+        assert_eq!(failures[0].outcome, None, "a Read has no financial outcome");
+        let diagnostic = actions
+            .iter()
+            .position(|action| {
+                matches!(
+                    action,
+                    Action::Notice(Notice::CommandError { command: 271, .. })
+                )
+            })
+            .unwrap();
+        let terminal = actions
+            .iter()
+            .position(|action| {
+                matches!(
+                    action,
+                    Action::Notice(Notice::CommandFailed { command: 271, .. })
+                )
+            })
+            .unwrap();
+        assert!(diagnostic < terminal);
+        assert!(!actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 271, .. })
+        )));
+    }
+}
+#[test]
+fn futures_identity_preserves_typed_provider_network_and_timeout_failures_without_write_outcomes() {
+    identity_failure_controls(Kucoin::new);
+}
+#[cfg(feature = "spot")]
+#[test]
+fn spot_identity_preserves_typed_provider_network_and_timeout_failures_without_write_outcomes() {
+    identity_failure_controls(KucoinSpot::new);
+}
+
+#[test]
+fn opaque_native_options_retain_no_primary_read_or_broker_material() {
+    let (options, _provider, identities) = broker_options(None).prepare();
+    assert_eq!(options.credentials, identities.primary);
+    assert_eq!(options.read_credentials, identities.secondary);
+    let debug = format!("{options:?} {:?}", options.broker.as_ref().unwrap());
+    for material in [
+        "fixture-primary-key",
+        "fixture-primary-secret",
+        "fixture-primary-passphrase",
+        "fixture-read-key",
+        "fixture-read-secret",
+        "fixture-read-passphrase",
+        "fixture-broker-secret",
+    ] {
+        assert!(!debug.contains(material));
+    }
+    assert!(
+        options
+            .credentials
+            .as_ref()
+            .unwrap()
+            .extra
+            .contains_key(&safe_cex_engine::signing::ExtraKey::KucoinBroker)
+    );
+}
+
+#[test]
+fn provider_result_tampering_never_releases_partial_identity_headers() {
+    use safe_cex_engine::Notice;
+    for corruption in 1..8 {
+        let mut h = fixture(broker_options(None), Kucoin::new);
+        h.provider.corrupt.store(corruption, Ordering::Relaxed);
+        h.engine
+            .handle_command(NOW, Command::FetchAccount { command: 281 }, Some(120_000))
+            .unwrap();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW);
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_))),
+            "corruption {corruption}"
+        );
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed {
+                    command: 281,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1, "corruption {corruption}: {actions:?}");
+        assert_eq!(failures[0].outcome, None);
+        assert!(!actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 281, .. })
+        )));
+    }
+}
+#[test]
+fn async_atomic_broker_batch_refusal_and_late_result_cannot_publish_http() {
+    use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+    use safe_cex_engine::{Event, Notice};
+    for refused in [false, true] {
+        let mut h = fixture(broker_options(None), Kucoin::new);
+        h.provider.deferred.store(true, Ordering::Relaxed);
+        h.engine
+            .handle_command(NOW, Command::FetchAccount { command: 282 }, Some(120_000))
+            .unwrap();
+        h.engine.prepare_dispatch(NOW);
+        let initial: Vec<_> = h.engine.drain_actions().collect();
+        let preparation = initial
+            .into_iter()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } => {
+                        assert_eq!(preparation.attempt().request, request.id);
+                        Some(preparation)
+                    }
+                    _ => panic!("a fresh request must prepare before binding"),
+                },
+                Action::Http(_) | Action::Sign { .. } => {
+                    panic!("no signing or HTTP before route preparation")
+                }
+                _ => None,
+            })
+            .expect("one genuine route preparation");
+        h.engine.http_prepared(
+            NOW,
+            preparation,
+            Prepared {
+                id: preparation.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let actions: Vec<_> = h.engine.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+        let (attempt, work) = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Sign { attempt, work, .. } => Some((*attempt, work.clone())),
+                _ => None,
+            })
+            .expect("one genuine deferred atomic batch");
+        assert_eq!(work.operations.len(), 4);
+        let result = h.provider.inner.sign_ready(&work).unwrap().unwrap();
+        h.engine.handle(
+            NOW + 0.1,
+            Event::Signed {
+                attempt,
+                result: if refused {
+                    Err(SignError::Refused)
+                } else {
+                    Ok(result.clone())
+                },
+            },
+        );
+        let mut actions = Vec::new();
+        for action in h.engine.drain_actions().collect::<Vec<_>>() {
+            match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Bind {
+                        preparation: bound,
+                        permit,
+                        request,
+                    } => {
+                        assert!(!refused);
+                        assert_eq!(bound, preparation);
+                        assert_eq!(permit.prepared_id(), preparation.attempt().request.0);
+                        assert!(matches!(
+                            h.engine.claim_http(NOW + 0.1, permit),
+                            Ok(Claim::Released(_))
+                        ));
+                        actions.push(Action::Http(request));
+                    }
+                    HttpAction::Cancel {
+                        preparation: cancelled,
+                        ..
+                    } => assert_eq!(cancelled, preparation),
+                    _ => panic!("a deferred result must not prepare another route"),
+                },
+                other => actions.push(other),
+            }
+        }
+        if refused {
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_)))
+            );
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|action| matches!(
+                        action,
+                        Action::Notice(Notice::CommandFailed { command: 282, .. })
+                    ))
+                    .count(),
+                1
+            );
+            h.engine.handle(
+                NOW + 0.2,
+                Event::Signed {
+                    attempt,
+                    result: Ok(result),
+                },
+            );
+            let late = safe_cex_engine::test_support::prepared_actions(&mut h.engine, NOW + 0.2);
+            assert!(!late.iter().any(|action| matches!(
+                action,
+                Action::Http(_)
+                    | Action::Notice(Notice::CommandDone { .. })
+                    | Action::Notice(Notice::CommandFailed { .. })
+            )));
+        } else {
+            assert_eq!(
+                http(&actions).headers.len(),
+                11,
+                "working deferred provider control"
+            );
+        }
+    }
+}

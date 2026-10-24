@@ -1,6 +1,11 @@
 //! Classic Futures user identity; the Spot identity route stays separate.
 use crate::{Kucoin, Pending};
-use safe_cex_engine::{CommandId, Cx, Method, Response};
+use safe_cex_engine::credential_selection::CredentialUnavailable;
+use safe_cex_engine::request_context::RetryPolicy;
+use safe_cex_engine::selected_read::{
+    AdmittedRead, LocalRefusal, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
+use safe_cex_engine::{CommandId, Cx, Method, Response, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -71,57 +76,92 @@ fn parse(response: Response<'_>) -> Result<Identity, String> {
         affiliate_id: data.referrer_user_id.filter(Id::truthy).and_then(Id::value),
     })
 }
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
-    let result = result
-        .and_then(|identity| serde_json::to_string(&identity).map_err(|error| error.to_string()));
-    match result {
-        Ok(data) => cx.done(command, data),
-        Err(error) => {
-            cx.command_error(command, &error);
-            cx.fail(command, error);
-        }
-    }
-}
 impl Kucoin {
-    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read
-                .validate()
-                .and_then(|()| read.validate_passphrase(self.options.passphrase.as_deref()))
-        {
-            finish(cx, command, Err(error.into()));
-            return;
-        }
-        if self.options.public_data_only || self.credentials.is_none() {
-            finish(
-                cx,
-                command,
-                Err("KuCoin account identity requires credentials".into()),
-            );
-            return;
-        }
-        self.signed(
+    pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>, _command: CommandId) {
+        let invalid = self.options.read_error();
+        let selected = if invalid.is_some() {
+            Err(CredentialUnavailable::Missing)
+        } else {
+            SelectedRead::select(&self.slots(), ReadRole::Read { scope: None })
+        };
+        let message = invalid.unwrap_or("KuCoin account identity requires credentials");
+        let Ok(read) = SelectedRead::command(
             cx,
-            Method::Get,
-            "/api/v1/user-info",
-            None,
-            Pending::Identity(command),
-        );
+            selected,
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+            LocalRefusal {
+                diagnostic: Some(message.into()),
+                error: message.into(),
+            },
+        ) else {
+            return;
+        };
+        const PATH: &str = "/api/v1/user-info";
+        let broker = self
+            .options
+            .broker
+            .as_ref()
+            .map(crate::sign::BrokerOptions::descriptor);
+        if let Err((Pending::Identity(read), error)) = read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url: format!("{}{PATH}", crate::REST),
+                body: None,
+                stream: None,
+            },
+            |identity| {
+                Box::new(crate::sign::dispatch::Http::new(
+                    identity.clone(),
+                    Method::Get,
+                    crate::REST,
+                    PATH.into(),
+                    None,
+                    broker,
+                ))
+            },
+            Pending::Identity,
+        ) {
+            self.identity_failed(cx, read, error.read_venue_error());
+        }
     }
     pub(crate) fn identity_response(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        read: AdmittedRead,
         response: Response<'_>,
     ) {
-        finish(cx, command, parse(response));
+        if cx
+            .validate_read_http_delivery(read.context(), read.context())
+            .is_err()
+        {
+            return;
+        }
+        match parse(response)
+            .and_then(|identity| serde_json::to_string(&identity).map_err(|e| e.to_string()))
+        {
+            Ok(data) => {
+                let _ = cx.done_context(read.context(), data);
+            }
+            Err(error) => self.identity_failed(cx, read, error.into()),
+        }
     }
     pub(crate) fn identity_failed(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        error: &str,
+        read: AdmittedRead,
+        mut error: VenueError,
     ) {
-        finish(cx, command, Err(error.into()));
+        error.outcome = None;
+        if cx
+            .command_error_context(read.context(), error.message.clone())
+            .is_ok()
+        {
+            let _ = cx.fail_context(read.context(), error);
+        }
     }
 }

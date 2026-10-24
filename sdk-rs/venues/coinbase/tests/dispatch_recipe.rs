@@ -7,8 +7,8 @@ use p256::pkcs8::EncodePrivateKey;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::book::Book;
 use safe_cex_engine::signing::{
-    CredentialSetupPolicy, Identities, Identity, IdentitySetupPolicy, KeyEncoding, KeyRef,
-    SignFuture, SignRequest, Signer,
+    Algorithm, CredentialSetupPolicy, Identities, Identity, IdentitySetupPolicy, KeyEncoding,
+    KeyRef, SignFuture, SignRequest, Signer,
 };
 use safe_cex_engine::test_support::{prepared_actions, seeded_entropy};
 use safe_cex_engine::{
@@ -53,10 +53,12 @@ fn provider() -> (Arc<LocalSigner>, Identities) {
     let policy = CredentialSetupPolicy {
         primary: Some(IdentitySetupPolicy {
             secret_encoding: Some(KeyEncoding::Pem),
+            signing_algorithm: Some(Algorithm::Es256),
             ..Default::default()
         }),
         secondary: Some(IdentitySetupPolicy {
             secret_encoding: Some(KeyEncoding::Base64),
+            signing_algorithm: Some(Algorithm::Ed25519),
             ..Default::default()
         }),
     };

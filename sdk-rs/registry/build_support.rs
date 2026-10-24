@@ -119,6 +119,7 @@ enum SigningAlgorithm {
     Es256,
     Secp256k1Digest,
     StarkDigest,
+    SchnorrDigest,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,21 +141,25 @@ struct ExtraKeyPolicy {
     field: ExtraFieldPolicy,
     #[serde(default)]
     encoding: Option<KeyEncoding>,
+    #[serde(default)]
+    trim: bool,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 enum ExtraFieldPolicy {
     #[default]
     Optional,
     RequiredForPrivate,
+    AliasPrimary,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 enum ExtraKey {
     ZklinkSeed,
     L1Wallet,
+    KucoinBroker,
 }
 
 #[derive(Debug, Deserialize)]
@@ -246,8 +251,8 @@ fn rule(value: &Rule) -> String {
                         |encoding| format!("Some(safe_cex_engine::signing::KeyEncoding::{encoding:?})"),
                     );
                     format!(
-                        "Some(safe_cex_engine::signing::ExtraKeyPolicy {{ key: safe_cex_engine::signing::ExtraKey::{:?}, field: safe_cex_engine::signing::ExtraFieldPolicy::{:?}, encoding: {encoding} }})",
-                        extra.key, extra.field
+                        "Some(safe_cex_engine::signing::ExtraKeyPolicy {{ key: safe_cex_engine::signing::ExtraKey::{:?}, field: safe_cex_engine::signing::ExtraFieldPolicy::{:?}, encoding: {encoding}, trim: {} }})",
+                        extra.key, extra.field, extra.trim
                     )
                 },
             );
@@ -309,6 +314,28 @@ pub fn generate(json: &str) -> Result<String, String> {
         return Err("default signing and private conditions are required".into());
     }
     for policy in std::iter::once(&rules.default).chain(rules.venues.values()) {
+        // An alias names the primary's ref, so only a secondary may declare one.
+        let primary_extra = policy
+            .signer_setup
+            .primary
+            .as_ref()
+            .and_then(|primary| primary.extra.as_ref());
+        if primary_extra.is_some_and(|extra| extra.field == ExtraFieldPolicy::AliasPrimary) {
+            return Err("aliasPrimary is valid only on a secondary extra policy".into());
+        }
+        // A secondary alias names the primary's declared key and decodes nothing.
+        if let Some(alias) = policy
+            .signer_setup
+            .secondary
+            .as_ref()
+            .and_then(|secondary| secondary.extra.as_ref())
+            .filter(|extra| extra.field == ExtraFieldPolicy::AliasPrimary)
+            && (primary_extra.is_none_or(|extra| extra.key != alias.key)
+                || alias.trim
+                || alias.encoding.is_some())
+        {
+            return Err("aliasPrimary must name the primary's declared extra key".into());
+        }
         if policy
             .remote_signing
             .passphrase_header
@@ -395,6 +422,8 @@ mod tests {
         assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }) }"));
         assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: None }"));
         assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest) }), secondary: None }"));
+        // Lighter's Schnorr key is declarable for Sign typing.
+        assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"schnorrDigest"}}}}}"#).unwrap().contains("Algorithm::SchnorrDigest"));
         // MAC algorithms are never declarable.
         assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"hmacSha256"}}}}}"#).is_err());
         assert!(output.contains("CredentialSetupPolicy { primary: None, secondary: None }"));
@@ -427,7 +456,50 @@ mod tests {
         let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
             "p":{"signerSetup":{"primary":{"extra":{"key":"l1Wallet","field":"requiredForPrivate","encoding":"hex"}}}}
         }}"#).unwrap();
-        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::L1Wallet, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
+        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::L1Wallet, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex), trim: false })"));
+    }
+
+    // KuCoin broker role: trim and a secondary alias compile; a primary alias fails closed.
+    #[test]
+    fn kucoin_broker_trim_and_secondary_alias_compile() {
+        let output = generate(
+            r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "k":{"signerSetup":{
+                "primary":{"extra":{"key":"kucoinBroker","encoding":"utf8","trim":true}},
+                "secondary":{"extra":{"key":"kucoinBroker","field":"aliasPrimary"}}}}
+        }}"#,
+        )
+        .unwrap();
+        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::KucoinBroker, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: Some(safe_cex_engine::signing::KeyEncoding::Utf8), trim: true })"));
+        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::KucoinBroker, field: safe_cex_engine::signing::ExtraFieldPolicy::AliasPrimary, encoding: None, trim: false })"));
+        assert!(
+            generate(
+                r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "k":{"signerSetup":{"primary":{"extra":{"key":"kucoinBroker","field":"aliasPrimary"}}}}
+        }}"#
+            )
+            .is_err()
+        );
+        // A secondary alias without the primary's key, or with decoding, fails.
+        for (primary, secondary) in [
+            (
+                r#"{"extra":{"key":"zklinkSeed"}}"#,
+                r#"{"extra":{"key":"kucoinBroker","field":"aliasPrimary"}}"#,
+            ),
+            (
+                r#"{}"#,
+                r#"{"extra":{"key":"kucoinBroker","field":"aliasPrimary"}}"#,
+            ),
+            (
+                r#"{"extra":{"key":"kucoinBroker","trim":true}}"#,
+                r#"{"extra":{"key":"kucoinBroker","field":"aliasPrimary","trim":true}}"#,
+            ),
+        ] {
+            let json = format!(
+                r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"k":{{"signerSetup":{{"primary":{primary},"secondary":{secondary}}}}}}}}}"#
+            );
+            assert!(generate(&json).is_err(), "{primary} {secondary}");
+        }
     }
 
     #[test]
@@ -436,8 +508,8 @@ mod tests {
             "v":{"signerSetup":{"primary":{"secretEncoding":"base64Text","extra":{"key":"zklinkSeed","field":"requiredForPrivate","encoding":"hex"}}}},
             "o":{"signerSetup":{"primary":{"extra":{"key":"zklinkSeed"}}}}
         }}"#).unwrap();
-        assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
-        assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None })"));
+        assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex), trim: false })"));
+        assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None, trim: false })"));
         let base58 = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"secretEncoding":"base58"}}}}}"#;
         assert!(generate(base58).unwrap().contains("KeyEncoding::Base58"));
         for field in [

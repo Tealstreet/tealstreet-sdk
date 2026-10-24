@@ -6,6 +6,7 @@ use crate::{Options, encoded_path, interval, sign, success};
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Rejection, Report};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::history::{Completion, HistoryRows};
@@ -13,6 +14,10 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
+use safe_cex_engine::selected_read::{
+    AdmittedRead, LocalRefusal, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
+use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
@@ -55,7 +60,7 @@ pub enum Pending {
         invalid: bool,
     },
     Fills(Box<HistoryRows<String>>),
-    Account(CommandId),
+    Account(AdmittedRead),
 }
 impl Pending {
     fn discovery_context(&self) -> Option<&Context> {
@@ -112,9 +117,9 @@ struct SpotBook {
     last: f64,
 }
 pub struct KucoinSpot {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     discovery: safe_cex_engine::startup::Backoff<bool>,
-    credentials: Option<sign::Credentials>,
+    credentials: Option<Identity>,
     sockets: [Socket; 2],
     books: BTreeMap<String, SpotBook>,
     candles: BTreeMap<(String, Interval), u32>,
@@ -141,23 +146,7 @@ pub struct KucoinSpot {
 }
 impl KucoinSpot {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
-        let credentials = (!options.public_data_only)
-            .then(|| {
-                options
-                    .key
-                    .as_ref()
-                    .filter(|v| !v.is_empty())
-                    .zip(options.secret.as_ref().filter(|v| !v.is_empty()))
-                    .zip(options.passphrase.as_ref().filter(|v| !v.is_empty()))
-                    .map(|((key, secret), passphrase)| sign::Credentials {
-                        key: key.clone(),
-                        secret: secret.clone(),
-                        passphrase: passphrase.clone(),
-                        broker: options.broker.clone(),
-                    })
-            })
-            .flatten();
+        let credentials = options.primary();
         Self {
             options,
             discovery: Default::default(),
@@ -252,39 +241,108 @@ impl KucoinSpot {
         private: bool,
         pending: Pending,
     ) {
-        let headers = if private {
-            let read_credentials = self
-                .options
-                .read_credentials
-                .as_ref()
-                .filter(|_| method == Method::Get && self.credentials.is_some())
-                .map(|read| sign::Credentials {
-                    key: read.key.clone(),
-                    secret: read.secret.clone(),
-                    passphrase: read
-                        .passphrase
-                        .clone()
-                        .or_else(|| self.options.passphrase.clone())
-                        .unwrap_or_default(),
-                    broker: self.options.broker.clone(),
-                });
-            read_credentials
-                .as_ref()
-                .or(self.credentials.as_ref())
-                .map_or_else(sign::public_headers, |c| {
-                    sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
-                })
-        } else {
-            sign::public_headers()
+        let role = match &pending {
+            Pending::Write(_) => CredentialRole::Mutation,
+            Pending::Bullet { .. } => CredentialRole::SessionAuth,
+            _ => CredentialRole::Read { scope: None },
         };
-        cx.request(
+        let selected = private
+            .then(|| {
+                self.slots().select(role).ok().map(|(selection, identity)| {
+                    (
+                        selection,
+                        sign::dispatch::Http::new(
+                            identity.clone(),
+                            method,
+                            REST,
+                            path.into(),
+                            body.clone(),
+                            self.options
+                                .broker
+                                .as_ref()
+                                .map(sign::BrokerOptions::descriptor),
+                        ),
+                    )
+                })
+            })
+            .flatten();
+        let headers = sign::public_headers();
+        let request = cx.request(
             method,
             format!("{REST}{}", encoded_path(path)),
             headers,
             body,
             pending,
         );
+        if let Some((selection, recipe)) = selected {
+            selection.sign(cx, request, Box::new(recipe));
+        }
     }
+    fn slots(&self) -> Slots<Identity> {
+        Slots::new(
+            self.credentials.clone(),
+            self.options.read_credentials.clone(),
+            SlotPolicy {
+                secondary_requires_primary: true,
+            },
+        )
+    }
+    pub(super) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Ok(read) = SelectedRead::command(
+            cx,
+            SelectedRead::select(&self.slots(), ReadRole::Read { scope: None }),
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+            LocalRefusal {
+                diagnostic: None,
+                error: crate::wire::not_sent("KuCoin Spot requires credentials")
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput),
+            },
+        ) else {
+            return;
+        };
+        const PATH: &str = "/api/v2/user-info";
+        let broker = self
+            .options
+            .broker
+            .as_ref()
+            .map(sign::BrokerOptions::descriptor);
+        if let Err((Pending::Account(read), error)) = read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url: format!("{REST}{PATH}"),
+                body: None,
+                stream: None,
+            },
+            |identity| {
+                Box::new(sign::dispatch::Http::new(
+                    identity.clone(),
+                    Method::Get,
+                    REST,
+                    PATH.into(),
+                    None,
+                    broker,
+                ))
+            },
+            Pending::Account,
+        ) {
+            self.identity_failed(cx, read, error.read_venue_error());
+        }
+    }
+    fn identity_failed(&self, cx: &mut Cx<'_, Pending>, read: AdmittedRead, mut error: VenueError) {
+        error.outcome = None;
+        if cx
+            .command_error_context(read.context(), error.message.clone())
+            .is_ok()
+        {
+            let _ = cx.fail_context(read.context(), error);
+        }
+    }
+
     fn bullet(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         let c = &mut self.sockets[channel];
         if c.token_pending || c.socket.is_some() || c.supervisor.is_waiting() {
@@ -944,11 +1002,7 @@ impl Venue for KucoinSpot {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read
-                .validate()
-                .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
-        {
+        if let Some(error) = self.options.read_error() {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
@@ -1064,6 +1118,13 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(read) = &pending
+            && cx
+                .validate_read_http_delivery(read.context(), read.context())
+                .is_err()
+        {
+            return;
+        }
         if let Pending::Candles { context, .. } = &pending
             && cx.validate_read_http_delivery(context, context).is_err()
         {
@@ -1365,7 +1426,7 @@ impl Venue for KucoinSpot {
                     let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
                 }
             }
-            Pending::Account(command) => {
+            Pending::Account(read) => {
                 #[derive(Deserialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Summary<'a> {
@@ -1395,8 +1456,10 @@ impl Venue for KucoinSpot {
                     })
                     .map_err(|e| e.to_string());
                 match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                    Ok(data) => {
+                        let _ = cx.done_context(read.context(), data);
+                    }
+                    Err(error) => self.identity_failed(cx, read, error.into()),
                 };
             }
             Pending::Fills(mut owner) => {
@@ -1447,10 +1510,18 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        self.on_http_failed(cx, pending, error);
+        match pending {
+            Pending::Account(read) => self.identity_failed(cx, read, error),
+            Pending::Write(job) => {
+                cx.command_error(job.command, &error.message);
+                self.write_failed(cx, job, error);
+            }
+            other => self.on_http_failed(cx, other, error),
+        }
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
+            Pending::Account(read) => self.identity_failed(cx, read, error),
             Pending::Candles { context, .. } => {
                 if cx.command_error_context(&context, &error.message).is_ok() {
                     let _ = cx.fail_context(&context, error);
@@ -1503,9 +1574,8 @@ impl Venue for KucoinSpot {
                 self.on_http_failed(cx, pending, VenueError::new(error));
                 return;
             }
-            Pending::Account(command) => {
-                cx.command_error(command, error);
-                cx.fail(command, error);
+            Pending::Account(read) => {
+                self.identity_failed(cx, read, error.into());
                 return;
             }
             Pending::Markets { .. } => self.discovery.failed(cx, false),
@@ -1810,46 +1880,52 @@ impl KucoinSpot {
 #[cfg(test)]
 mod security_credentials {
     use super::*;
-    use safe_cex_crypto::secrets::EraseSecrets;
     #[test]
-    fn spot_owns_both_credential_copies_in_scrubbing_carriers() {
-        let mut venue = KucoinSpot::new(Options {
+    fn spot_owns_only_opaque_identity_refs_and_broker_metadata() {
+        let (options, _provider, identities) = crate::support::credentials::Options {
             key: Some("private-key".into()),
             secret: Some("private-secret".into()),
             passphrase: Some("private-passphrase".into()),
-            broker: Some(sign::BrokerOptions {
+            broker: Some(crate::support::native_sign::BrokerOptions {
                 partner: "partner".into(),
                 broker_key: "private-broker-key".into(),
                 broker_name: "broker".into(),
                 verify: None,
             }),
-            ..Options::default()
-        });
-        let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
-        assert!(venue.credentials.is_some());
-        venue.options.erase_secrets();
-        venue.credentials.as_mut().unwrap().erase_secrets();
-        assert!(venue.options.secret.is_none());
-        assert!(venue.options.broker.as_ref().unwrap().broker_key.is_empty());
-        let credentials = venue.credentials.as_ref().unwrap();
-        assert!(credentials.secret.is_empty() && credentials.passphrase.is_empty());
-        assert!(credentials.broker.as_ref().unwrap().broker_key.is_empty());
+            ..Default::default()
+        }
+        .prepare();
+        let venue = KucoinSpot::new(options);
+        assert_eq!(venue.credentials, identities.primary);
+        assert_eq!(venue.options.credentials, identities.primary);
+        let debug = format!("{:?} {:?}", venue.options, venue.credentials);
+        for material in [
+            "private-key",
+            "private-secret",
+            "private-passphrase",
+            "private-broker-key",
+        ] {
+            assert!(!debug.contains(material));
+        }
     }
     #[test]
-    fn incomplete_and_public_only_credentials_keep_a_scrubbing_owner() {
-        for (key, public_data_only) in [
+    fn incomplete_and_public_only_credentials_never_become_private_identity() {
+        for (credential, public_data_only) in [
             (None, false),
             (Some(String::new()), false),
-            (Some("key".into()), true),
+            (Some("opaque-key".into()), true),
         ] {
             let venue = KucoinSpot::new(Options {
-                key,
-                secret: Some("private-secret".into()),
-                passphrase: Some("private-passphrase".into()),
+                credentials: credential.map(|credential| safe_cex_engine::signing::Identity {
+                    credential: safe_cex_engine::signing::KeyRef(credential),
+                    signing: safe_cex_engine::signing::KeyRef("opaque-signing".into()),
+                    passphrase: Some(safe_cex_engine::signing::KeyRef("opaque-passphrase".into())),
+                    stable_id: None,
+                    extra: Default::default(),
+                }),
                 public_data_only,
-                ..Options::default()
+                ..Default::default()
             });
-            let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
             assert!(venue.credentials.is_none());
         }
     }

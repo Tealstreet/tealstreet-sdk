@@ -2,8 +2,9 @@
 //! This module alone owns key material; engine/venue state receives opaque refs.
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
-    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef,
-    Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
+    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraFieldPolicy, ExtraKey, Identities,
+    Identity, KeyRef, Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult,
+    Signer,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
@@ -196,6 +197,10 @@ pub struct LocalSigner {
     /// Trusted setup policy's asymmetric declarations; only these refs answer
     /// public operations, so a MAC secret is never fingerprinted.
     algorithms: HashMap<KeyRef, Algorithm>,
+    /// Refs an aliased secondary shares with the primary, with the algorithm
+    /// setup declared for both slots (if any). A plain `insert` keeps that
+    /// algorithm on the new material; only `remove` ends the binding.
+    shared: HashMap<KeyRef, Option<Algorithm>>,
 }
 impl LocalSigner {
     pub fn new() -> Self {
@@ -204,9 +209,17 @@ impl LocalSigner {
     /// Consumes bytes; neither this provider nor its keys implement Debug/export.
     /// Replaced material is undeclared: a declaration describes the bytes setup
     /// installed, never later ones. A role ref keeps its role, which is its
-    /// declaration; trusted callers replace role material only with that kind.
+    /// declaration, and a ref an aliased slot shares keeps its slots' algorithm;
+    /// neither's type changes this way.
     pub fn insert(&mut self, reference: KeyRef, bytes: Vec<u8>) {
-        self.algorithms.remove(&reference);
+        match self.shared.get(&reference) {
+            Some(Some(algorithm)) => {
+                self.algorithms.insert(reference.clone(), *algorithm);
+            }
+            _ => {
+                self.algorithms.remove(&reference);
+            }
+        }
         self.keys.insert(reference, Zeroizing::new(bytes));
     }
     pub fn from_setup(
@@ -238,11 +251,33 @@ impl LocalSigner {
                 if let Some(encoding) = rule.and_then(|rule| rule.secret_encoding) {
                     identity.secret_encoding = encoding;
                 }
-                if let Some(extra) = rule.and_then(|rule| rule.extra)
-                    && let Some(encoding) = extra.encoding
-                    && let Some(material) = identity.extra.0.get_mut(&extra.key)
-                {
-                    material.encoding = encoding;
+                if let Some(extra) = rule.and_then(|rule| rule.extra) {
+                    // An alias names the primary's one copy; it never carries its own.
+                    if extra.field == ExtraFieldPolicy::AliasPrimary
+                        && identity.extra.0.contains_key(&extra.key)
+                    {
+                        return Err(SignError::InvalidRequest);
+                    }
+                    if let Some(material) = identity.extra.0.get_mut(&extra.key) {
+                        if let Some(encoding) = extra.encoding {
+                            material.encoding = encoding;
+                        }
+                        if extra.trim {
+                            let trimmed = material.value.0.trim().to_owned();
+                            material.value = Secret::new(trimmed);
+                        }
+                    }
+                    // Blank-after-trim optional material is absent, not an error.
+                    if extra.trim
+                        && extra.field == ExtraFieldPolicy::Optional
+                        && identity
+                            .extra
+                            .0
+                            .get(&extra.key)
+                            .is_some_and(|material| material.value.0.is_empty())
+                    {
+                        identity.extra.0.remove(&extra.key);
+                    }
                 }
             }
         }
@@ -302,6 +337,15 @@ impl LocalSigner {
             }
             secondary.signing = primary.signing.clone();
         }
+        // An aliased extra names the primary's installed ref: one copy, one role.
+        if let Some(extra) = policy.secondary.and_then(|rule| rule.extra)
+            && extra.field == ExtraFieldPolicy::AliasPrimary
+            && let (Some(primary), Some(secondary)) =
+                (identities.primary.as_ref(), identities.secondary.as_mut())
+            && let Some(reference) = primary.extra.get(&extra.key)
+        {
+            secondary.extra.insert(extra.key, reference.clone());
+        }
         // The same policy validates bytes and opaque refs. Empty decoded material
         // is represented only in temporary validation metadata as an invalid ref.
         // Optional explicit-empty passphrases retain their existing installed ref.
@@ -347,6 +391,11 @@ impl LocalSigner {
                     .insert(identity.signing.clone(), algorithm);
             }
         }
+        // After declarations, so the shared binding keeps the slots' algorithm.
+        if alias && let Some(primary) = identities.primary.as_ref() {
+            let declared = signer.algorithms.get(&primary.signing).copied();
+            signer.shared.insert(primary.signing.clone(), declared);
+        }
         Ok((signer, identities))
     }
     /// Own and wipe the setup input on both successful and malformed construction.
@@ -380,6 +429,7 @@ impl LocalSigner {
         self.keys.remove(reference);
         self.roles.remove(reference);
         self.algorithms.remove(reference);
+        self.shared.remove(reference);
     }
     /// Ordinary material declared for exactly this asymmetric algorithm.
     /// A role is its own declaration; ordinary refs need trusted policy's.
@@ -398,6 +448,46 @@ impl LocalSigner {
             return Err(SignError::InvalidRequest);
         }
         self.raw_key(reference)
+    }
+    /// Signing material, typed before any arm runs. A role ref serves only its
+    /// role's algorithm and role-only algorithms never read ordinary material;
+    /// an ordinary asymmetric key needs trusted policy's matching declaration,
+    /// and a declared key never MACs. Undeclared refs keep MAC behaviour.
+    fn sign_key(&self, reference: &KeyRef, algorithm: Algorithm) -> Result<&[u8], SignError> {
+        if self.roles.contains_key(reference) || algorithm == Algorithm::ZkLinkContract {
+            return self.algorithm_key(reference, algorithm);
+        }
+        let declared = self.algorithms.get(reference).copied();
+        if asymmetric(algorithm) {
+            if declared != Some(algorithm) {
+                return Err(SignError::InvalidRequest);
+            }
+        } else if declared.is_some() {
+            return Err(SignError::InvalidRequest);
+        }
+        self.key(reference)
+    }
+    /// Trusted installation of asymmetric material with its declaration, in one
+    /// step. A ref an aliased slot shares is never retyped, because both slots
+    /// rely on its declaration; it may rotate within it. Role refs refuse.
+    pub fn insert_declared(
+        &mut self,
+        reference: KeyRef,
+        bytes: Vec<u8>,
+        algorithm: Algorithm,
+    ) -> Result<(), SignError> {
+        if !asymmetric(algorithm)
+            || self.roles.contains_key(&reference)
+            || self
+                .shared
+                .get(&reference)
+                .is_some_and(|expected| *expected != Some(algorithm))
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        self.keys.insert(reference.clone(), Zeroizing::new(bytes));
+        self.algorithms.insert(reference, algorithm);
+        Ok(())
     }
     /// Signing material: a role ref serves only its role's one algorithm, and a
     /// role-only algorithm never reads ordinary material.
@@ -525,7 +615,7 @@ impl LocalSigner {
                     payload,
                 } => {
                     let message = self.expand(payload, &result)?;
-                    let key = self.algorithm_key(key, *algorithm)?;
+                    let key = self.sign_key(key, *algorithm)?;
                     match algorithm {
                         Algorithm::HmacSha256 => {
                             let mut mac = Hmac::<Sha256>::new_from_slice(key)
@@ -604,11 +694,16 @@ fn ed25519_canonical_y(bytes: &[u8; 32]) -> bool {
     modulus[31] = 0x7f;
     y.iter().rev().lt(modulus.iter().rev())
 }
-/// Algorithms whose keys have a public form; MAC secrets never do.
+/// Asymmetric algorithms: a key must be declared for exactly one of them, and
+/// MAC secrets never are. Only some have a public form (`public_key_len`).
 fn asymmetric(algorithm: Algorithm) -> bool {
     matches!(
         algorithm,
-        Algorithm::Ed25519 | Algorithm::Es256 | Algorithm::Secp256k1Digest | Algorithm::StarkDigest
+        Algorithm::Ed25519
+            | Algorithm::Es256
+            | Algorithm::Secp256k1Digest
+            | Algorithm::StarkDigest
+            | Algorithm::SchnorrDigest
     )
 }
 /// Mirrors the `sign_now` arms; keep the two in step.
@@ -630,7 +725,7 @@ impl Signer for LocalSigner {
         true
     }
     fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
-        let usable = self.algorithm_key(key, algorithm).is_ok();
+        let usable = self.sign_key(key, algorithm).is_ok();
         if usable && implemented(algorithm) {
             Capability::Supported
         } else {
@@ -891,9 +986,9 @@ mod tests {
     fn schnorr_digest_matches_the_legacy_hedged_lighter_signature() {
         let key =
             "01000000000000000000000000000000000000000000000000000000000000000000000000000000";
-        let (signer, ids) = LocalSigner::from_json(
-            serde_json::json!({"primary":{"key":"lighter-api-key","secret":format!("0x{key}"),"secretEncoding":"hex"}})
-                .to_string(),
+        let (signer, ids) = try_public_setup(
+            serde_json::json!({"primary":{"signingAlgorithm":"schnorrDigest"}}),
+            serde_json::json!({"primary":{"key":"lighter-api-key","secret":format!("0x{key}"),"secretEncoding":"hex"}}),
         )
         .unwrap();
         let signing = ids.primary.unwrap().signing;
@@ -949,9 +1044,9 @@ mod tests {
 
     fn schnorr_signer(key: &[u8]) -> (LocalSigner, KeyRef) {
         let hex: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
-        let (signer, ids) = LocalSigner::from_json(
-            serde_json::json!({"primary":{"key":"k","secret":hex,"secretEncoding":"hex"}})
-                .to_string(),
+        let (signer, ids) = try_public_setup(
+            serde_json::json!({"primary":{"signingAlgorithm":"schnorrDigest"}}),
+            serde_json::json!({"primary":{"key":"k","secret":hex,"secretEncoding":"hex"}}),
         )
         .unwrap();
         (signer, ids.primary.unwrap().signing)
@@ -1481,6 +1576,7 @@ mod tests {
                     key: ExtraKey::ZklinkSeed,
                     field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate,
                     encoding: Some(KeyEncoding::Hex),
+                    trim: false,
                 }),
                 ..Default::default()
             }),
@@ -1558,6 +1654,241 @@ mod tests {
             "754e7df89fca47eee8f6c2458bb820526604226248620adb40045b6b003d6ad0"
         );
         assert_eq!(signer.key(&primary.signing).unwrap(), b"YXBleC1zZWNyZXQ=");
+    }
+
+    // KuCoin broker role (RUST_KUCOIN_BROKER_ROLE.md). The policy and role are
+    // decoded from JSON, so these REDs fail at runtime until both exist.
+    fn kucoin_policy_json() -> serde_json::Value {
+        serde_json::json!({
+            "primary": {"extra": {"key": "kucoinBroker", "field": "optional",
+                "encoding": "utf8", "trim": true}},
+            "secondary": {"extra": {"key": "kucoinBroker", "field": "aliasPrimary"}}
+        })
+    }
+    fn kucoin_policy() -> CredentialSetupPolicy {
+        serde_json::from_value(kucoin_policy_json()).expect("KuCoin broker setup policy decodes")
+    }
+    fn broker_role() -> ExtraKey {
+        serde_json::from_str("\"kucoinBroker\"").expect("kucoinBroker is a role")
+    }
+    fn kucoin_setup(broker: Option<&str>, secondary: serde_json::Value) -> serde_json::Value {
+        let mut primary = serde_json::json!({"key": "api-key", "secret": "api-secret"});
+        if let Some(broker) = broker {
+            primary["extra"] = serde_json::json!({"kucoinBroker": {"value": broker}});
+        }
+        serde_json::json!({"primary": primary, "secondary": secondary})
+    }
+    fn broker_sign(
+        signer: &LocalSigner,
+        broker: &KeyRef,
+        api: &KeyRef,
+    ) -> Result<Vec<u8>, SignError> {
+        signer
+            .sign_now(&SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![Operation::Sign {
+                    algorithm: Algorithm::HmacSha256,
+                    key: broker.clone(),
+                    payload: vec![
+                        PayloadPart::Bytes {
+                            bytes: b"1700000000000".to_vec(),
+                        },
+                        PayloadPart::Bytes {
+                            bytes: b"partner".to_vec(),
+                        },
+                        PayloadPart::Credential { key: api.clone() },
+                    ],
+                }],
+            })
+            .map(|result| result.values[0].clone())
+    }
+    fn hmac_of(key: &[u8]) -> Vec<u8> {
+        let mut mac = Hmac::<Sha256>::new_from_slice(key).unwrap();
+        mac.update(b"1700000000000partnerapi-key");
+        mac.finalize().into_bytes().to_vec()
+    }
+
+    /// R1: one trimmed broker ref signs HMAC-SHA256 over stamp + partner +
+    /// the selected API key, equal to an independent HMAC.
+    #[test]
+    fn kucoin_broker_ref_signs_stamp_partner_and_the_selected_api_key() {
+        let (signer, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("broker-secret"), serde_json::Value::Null).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        let primary = ids.primary.unwrap();
+        let broker = primary.extra[&broker_role()].clone();
+        assert_eq!(
+            broker_sign(&signer, &broker, &primary.credential),
+            Ok(hmac_of(b"broker-secret"))
+        );
+    }
+
+    /// R2: the native Rust `str::trim` before install (U+FEFF is not trimmed);
+    /// blank after trim is absent, not an error.
+    #[test]
+    fn kucoin_broker_material_is_trimmed_and_blank_mints_nothing() {
+        let (signer, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("  b \t"), serde_json::Value::Null).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        let primary = ids.primary.unwrap();
+        let broker = primary.extra[&broker_role()].clone();
+        assert_eq!(
+            broker_sign(&signer, &broker, &primary.credential),
+            Ok(hmac_of(b"b"))
+        );
+        // Control: native str::trim keeps U+FEFF, so its bytes are kept too.
+        let (signer, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("\u{feff}b"), serde_json::Value::Null).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        let primary = ids.primary.unwrap();
+        let broker = primary.extra[&broker_role()].clone();
+        assert_eq!(
+            broker_sign(&signer, &broker, &primary.credential),
+            Ok(hmac_of("\u{feff}b".as_bytes()))
+        );
+        for blank in ["   ", ""] {
+            let (_, ids) = LocalSigner::from_json_with_policy(
+                kucoin_setup(Some(blank), serde_json::Value::Null).to_string(),
+                kucoin_policy(),
+            )
+            .unwrap();
+            assert!(ids.primary.unwrap().extra.is_empty(), "{blank:?}");
+        }
+    }
+
+    /// R2b: blank-after-trim optional material is absent even under an
+    /// encoding where an empty value would fail to decode (PEM).
+    #[test]
+    fn blank_trimmed_optional_extra_is_absent_before_decoding() {
+        let mut policy = kucoin_policy_json();
+        policy["primary"]["extra"]["encoding"] = serde_json::json!("pem");
+        let policy: CredentialSetupPolicy = serde_json::from_value(policy).unwrap();
+        let (_, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("  \t "), serde_json::Value::Null).to_string(),
+            policy,
+        )
+        .unwrap();
+        assert!(ids.primary.unwrap().extra.is_empty());
+    }
+
+    /// R3: a read-key identity names the primary's one broker ref; it cannot
+    /// supply its own, and without a primary broker it has none.
+    #[test]
+    fn kucoin_read_identity_aliases_the_primary_broker_ref() {
+        let read = serde_json::json!({"key": "read-key", "secret": "read-secret"});
+        let (signer, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("broker-secret"), read.clone()).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        assert_eq!(
+            ids.secondary.unwrap().extra.get(&broker_role()),
+            ids.primary.unwrap().extra.get(&broker_role())
+        );
+        // One installed copy: the secondary slot has no broker material of its own.
+        assert_eq!(
+            signer
+                .keys
+                .keys()
+                .filter(|reference| reference.0.ends_with(".extra.kucoinBroker"))
+                .count(),
+            1
+        );
+        let own = serde_json::json!({"key": "read-key", "secret": "read-secret",
+            "extra": {"kucoinBroker": {"value": "other"}}});
+        assert!(
+            LocalSigner::from_json_with_policy(
+                kucoin_setup(Some("broker-secret"), own).to_string(),
+                kucoin_policy(),
+            )
+            .is_err()
+        );
+        let (_, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(None, read).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        assert!(ids.secondary.unwrap().extra.is_empty());
+    }
+
+    /// R4: the broker role signs only HMAC-SHA256 (its table row), is never
+    /// presented or interpolated, and an ordinary ref is never a broker.
+    #[test]
+    fn kucoin_broker_role_serves_only_its_algorithm() {
+        let (signer, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("broker-secret"), serde_json::Value::Null).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        let primary = ids.primary.unwrap();
+        let broker = primary.extra[&broker_role()].clone();
+        let request = |operation: Operation| SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![operation],
+        };
+        for algorithm in [
+            Algorithm::HmacSha512,
+            Algorithm::Sha256SecretSuffix,
+            Algorithm::Ed25519,
+        ] {
+            assert_eq!(
+                signer.sign_now(&request(Operation::Sign {
+                    algorithm,
+                    key: broker.clone(),
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: b"m".to_vec()
+                    }],
+                })),
+                Err(SignError::InvalidRequest),
+                "{algorithm:?}"
+            );
+        }
+        assert_eq!(
+            signer.sign_now(&request(Operation::Present {
+                key: broker.clone()
+            })),
+            Err(SignError::InvalidRequest)
+        );
+        assert_eq!(
+            broker_sign(&signer, &primary.credential, &broker),
+            Err(SignError::InvalidRequest),
+            "a broker ref is never interpolated as a Credential"
+        );
+        assert_eq!(
+            signer.can_sign(&broker, Algorithm::HmacSha256),
+            Capability::Supported
+        );
+        assert_eq!(
+            signer.can_sign(&broker, Algorithm::HmacSha512),
+            Capability::Unsupported
+        );
+    }
+
+    /// Condition (d): an alias is a secondary-only policy; the primary has
+    /// nothing to alias, so trusted setup refuses it there.
+    #[test]
+    fn kucoin_alias_policy_is_refused_on_the_primary_slot() {
+        let mut policy = kucoin_policy_json();
+        policy["primary"]["extra"] =
+            serde_json::json!({"key": "kucoinBroker", "field": "aliasPrimary"});
+        let policy: CredentialSetupPolicy =
+            serde_json::from_value(policy).expect("aliasPrimary decodes");
+        assert_eq!(
+            LocalSigner::from_json_with_policy(
+                kucoin_setup(Some("broker-secret"), serde_json::Value::Null).to_string(),
+                policy,
+            )
+            .err(),
+            Some(SignError::InvalidRequest)
+        );
     }
 
     #[test]
@@ -2186,5 +2517,222 @@ mod tests {
         signer.insert(role.clone(), (0..32).map(|_| 0x22).collect());
         assert_eq!(address(&signer), Err(SignError::InvalidRequest));
         assert!(present(&signer).is_ok());
+    }
+
+    // Asymmetric key typing REDs: Sign obeys the same declaration as public
+    // operations, in both directions.
+    fn sign_request(algorithm: &str, key: &KeyRef, bytes: Vec<u8>) -> SignRequest {
+        public_request(
+            serde_json::json!([{"kind": "sign", "algorithm": algorithm, "key": key,
+            "payload": [{"kind": "bytes", "bytes": bytes}]}]),
+        )
+    }
+
+    fn undeclared_mac_secret() -> (LocalSigner, KeyRef) {
+        // A 32-byte HMAC secret parses as a valid secp256k1 and Ed25519 key.
+        let (signer, ids) = LocalSigner::from_json(
+            serde_json::json!({"primary": {"key": "account", "secret": "s".repeat(32)}})
+                .to_string(),
+        )
+        .unwrap();
+        (signer, ids.primary.unwrap().signing)
+    }
+    // One test per algorithm, so every variant runs. The declaration check
+    // precedes the arm, so these refuse the same way in every build.
+    fn assert_undeclared_refused(algorithm: &str) {
+        let (signer, key) = undeclared_mac_secret();
+        assert_eq!(
+            signer.sign_now(&sign_request(algorithm, &key, vec![7; 32])),
+            Err(SignError::InvalidRequest),
+            "{algorithm}"
+        );
+    }
+    #[test]
+    fn undeclared_ref_never_signs_secp256k1_digest() {
+        assert_undeclared_refused("secp256k1Digest");
+    }
+    #[test]
+    fn undeclared_ref_never_signs_ed25519() {
+        assert_undeclared_refused("ed25519");
+    }
+    #[test]
+    fn undeclared_ref_never_signs_es256() {
+        assert_undeclared_refused("es256");
+    }
+    #[test]
+    fn undeclared_ref_never_signs_stark_digest() {
+        assert_undeclared_refused("starkDigest");
+    }
+    #[test]
+    fn undeclared_ref_never_signs_schnorr_digest() {
+        assert_undeclared_refused("schnorrDigest");
+    }
+    #[test]
+    fn undeclared_mac_secret_still_macs() {
+        let (signer, key) = undeclared_mac_secret();
+        let result = signer
+            .sign_now(&sign_request("hmacSha256", &key, b"m".to_vec()))
+            .unwrap();
+        assert_eq!(result.values[0].len(), 32);
+    }
+
+    fn assert_declared_wallet_never_macs(algorithm: &str) {
+        let (signer, key) = public_setup("secp256k1Digest", SCALAR);
+        assert_eq!(
+            signer.sign_now(&sign_request(algorithm, &key, b"m".to_vec())),
+            Err(SignError::InvalidRequest),
+            "{algorithm}"
+        );
+    }
+    #[test]
+    fn declared_wallet_never_signs_hmac_sha256() {
+        assert_declared_wallet_never_macs("hmacSha256");
+    }
+    #[test]
+    fn declared_wallet_never_signs_hmac_sha512() {
+        assert_declared_wallet_never_macs("hmacSha512");
+    }
+    #[test]
+    fn declared_wallet_never_signs_sha256_secret_suffix() {
+        assert_declared_wallet_never_macs("sha256SecretSuffix");
+    }
+
+    // A declared ref in a build without its arm stays Unsupported.
+    #[cfg(not(feature = "secp256k1"))]
+    #[test]
+    fn declared_refs_without_their_arm_are_unsupported() {
+        let (signer, key) = public_setup("secp256k1Digest", SCALAR);
+        assert_eq!(
+            signer.sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32])),
+            Err(SignError::Unsupported)
+        );
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn insert_declared_is_atomic_asymmetric_only_and_never_on_a_role() {
+        let mut signer = LocalSigner::new();
+        let key = KeyRef("raw.signing".into());
+        let scalar = || vec![0x11; 32];
+        // MAC algorithms are never declarable, and nothing is installed.
+        assert_eq!(
+            signer.insert_declared(key.clone(), scalar(), Algorithm::HmacSha256),
+            Err(SignError::InvalidRequest)
+        );
+        assert_eq!(
+            signer.sign_now(&sign_request("hmacSha256", &key, b"m".to_vec())),
+            Err(SignError::Unavailable)
+        );
+        signer
+            .insert_declared(key.clone(), scalar(), Algorithm::Secp256k1Digest)
+            .unwrap();
+        assert!(
+            signer
+                .sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32]))
+                .is_ok()
+        );
+        let before = signer
+            .sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32]))
+            .unwrap()
+            .values
+            .clone();
+        signer
+            .insert_declared(key.clone(), vec![0x22; 32], Algorithm::Secp256k1Digest)
+            .unwrap();
+        let rotated = signer
+            .sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32]))
+            .unwrap()
+            .values
+            .clone();
+        assert_ne!(before, rotated);
+        // An unaliased raw ref may be retyped, replacing key and declaration.
+        signer
+            .insert_declared(key.clone(), scalar(), Algorithm::Ed25519)
+            .unwrap();
+        assert_eq!(
+            signer.sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32])),
+            Err(SignError::InvalidRequest)
+        );
+        // Permanent control (codex-uufub4's repro): an aliased read agent shares
+        // the primary's ref, so neither slot's ref can be retyped; rotation can.
+        let (mut aliased, ids) = try_public_setup(
+            serde_json::json!({
+                "primary": {"secretEncoding": "hex", "signingAlgorithm": "secp256k1Digest"},
+                "secondary": {"secretEncoding": "hex", "signingAlgorithm": "secp256k1Digest"}
+            }),
+            serde_json::json!({
+                "primary": {"key": "account", "secret": SCALAR},
+                "secondary": {"key": "read", "signingFromPrimary": true}
+            }),
+        )
+        .unwrap();
+        let shared = ids.secondary.unwrap().signing;
+        assert_eq!(shared, ids.primary.unwrap().signing);
+        assert_eq!(
+            aliased.insert_declared(shared.clone(), vec![0x33; 32], Algorithm::Ed25519),
+            Err(SignError::InvalidRequest)
+        );
+        assert!(
+            aliased
+                .sign_now(&sign_request("secp256k1Digest", &shared, vec![7; 32]))
+                .is_ok()
+        );
+        aliased
+            .insert_declared(shared.clone(), vec![0x33; 32], Algorithm::Secp256k1Digest)
+            .unwrap();
+        // A plain insert rotates the shared material but keeps its type, so it
+        // never downgrades to a MAC key or opens a later retype (second and
+        // third repros, from codex-uufub4 and claude-m26ps4).
+        aliased.insert(shared.clone(), vec![0x44; 32]);
+        assert!(
+            aliased
+                .sign_now(&sign_request("secp256k1Digest", &shared, vec![7; 32]))
+                .is_ok()
+        );
+        assert_eq!(
+            aliased.sign_now(&sign_request("hmacSha256", &shared, b"m".to_vec())),
+            Err(SignError::InvalidRequest)
+        );
+        assert_eq!(
+            aliased.insert_declared(shared.clone(), vec![0x55; 32], Algorithm::Ed25519),
+            Err(SignError::InvalidRequest)
+        );
+        // Removal ends the binding; the ref is then unshared raw material.
+        aliased.remove(&shared);
+        aliased
+            .insert_declared(shared.clone(), vec![0x55; 32], Algorithm::Ed25519)
+            .unwrap();
+        // A role ref is its own declaration and refuses another.
+        let (seed, _, _) = zklink_case();
+        let (mut zklink, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let role = ids.primary.unwrap().extra[&ExtraKey::ZklinkSeed].clone();
+        assert_eq!(
+            zklink.insert_declared(role, scalar(), Algorithm::Secp256k1Digest),
+            Err(SignError::InvalidRequest)
+        );
+    }
+
+    // can_sign is the same typing check, so admission agrees with signing.
+    #[test]
+    fn can_sign_mirrors_key_typing() {
+        let (mac, key) = undeclared_mac_secret();
+        assert_eq!(
+            mac.can_sign(&key, Algorithm::HmacSha256),
+            Capability::Supported
+        );
+        assert_eq!(
+            mac.can_sign(&key, Algorithm::Secp256k1Digest),
+            Capability::Unsupported
+        );
+        let (wallet, key) = public_setup("secp256k1Digest", SCALAR);
+        assert_eq!(
+            wallet.can_sign(&key, Algorithm::HmacSha256),
+            Capability::Unsupported
+        );
+        assert_eq!(
+            wallet.can_sign(&key, Algorithm::Ed25519),
+            Capability::Unsupported
+        );
     }
 }

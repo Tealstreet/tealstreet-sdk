@@ -194,7 +194,7 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
   it.each(['binance', 'binancepm', 'binancespot', 'binanceinverse', 'bybit', 'kucoin'] as const)(
     'rejects Aster-only STP intent on %s before any single or mixed-batch engine command',
     async (name) => {
-      const { exchange, commands } = fixture({}, name);
+      const { exchange, commands } = fixture(name === 'kucoin' ? { passphrase: 'fixture-passphrase' } : {}, name);
       await exchange.start();
       const order = { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100 };
       const stpOrder = { ...order, stpMode: 'EXPIRE_BOTH' as const };

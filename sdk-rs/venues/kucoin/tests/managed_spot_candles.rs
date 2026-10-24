@@ -8,18 +8,17 @@ use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, HttpRequest, Method, Notice,
     Outcome, PublicFeedPolicy, RequestId, Response, SocketId, TimerId, Venue, VenueError,
 };
-use safe_cex_venue_kucoin::{
-    Options,
-    spot::{KucoinSpot, Pending},
-};
+use safe_cex_venue_kucoin::spot::{KucoinSpot, Pending};
+mod support;
 use serde_json::{Value, json};
+use support::credentials::Options;
 
 const MARKETS: &str = r#"{"code":"200000","data":[{"symbol":"BTC-USDT","baseCurrency":"BTC","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.001","priceIncrement":"0.1","baseMinSize":"0.001","baseMaxSize":"100"}]}"#;
 const TICKERS: &str = r#"{"code":"200000","data":{"ticker":[{"symbol":"BTC-USDT","last":"100","buy":"99","sell":"101"}]}}"#;
 const EMPTY: &str = r#"{"code":"200000","data":[]}"#;
 const ROW: &str = r#"{"code":"200000","data":[[100,1,2,3,0,4]]}"#;
-fn venue(keyed: bool) -> KucoinSpot {
-    KucoinSpot::new(if keyed {
+fn venue(keyed: bool) -> Options {
+    if keyed {
         Options {
             key: Some("fixture-key".into()),
             secret: Some("fixture-secret".into()),
@@ -31,13 +30,17 @@ fn venue(keyed: bool) -> KucoinSpot {
             public_data_only: true,
             ..Options::default()
         }
-    })
+    }
 }
-fn seeded<V: Venue>(venue: V) -> Engine<V> {
-    seeded_policy(venue, PublicFeedPolicy::Disabled)
+fn seeded(options: Options) -> Engine<KucoinSpot> {
+    seeded_policy(options, KucoinSpot::new, PublicFeedPolicy::Disabled)
 }
-fn seeded_policy<V: Venue>(venue: V, policy: PublicFeedPolicy) -> Engine<V> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(venue);
+fn seeded_policy<V: Venue>(
+    options: Options,
+    constructor: impl FnOnce(safe_cex_venue_kucoin::Options) -> V,
+    policy: PublicFeedPolicy,
+) -> Engine<V> {
+    let mut e = support::credentials::engine(options, constructor);
     e.set_public_feed_policy(policy).unwrap();
     e.start(0.);
     for (suffix, body) in [("/symbols", MARKETS), ("/allTickers", TICKERS)] {
@@ -681,7 +684,7 @@ impl Venue for Capacity {
                                 Method::Get,
                                 "https://fixture.invalid/parked".into(),
                                 None,
-                                Pending::Account(0)
+                                Pending::Symbols { revision: 0 }
                             )
                             .is_ok()
                         );
@@ -702,8 +705,9 @@ impl Venue for Capacity {
 }
 fn capacity_refusal(roots: bool) {
     let mut e = seeded_policy(
-        Capacity {
-            venue: venue(false),
+        venue(false),
+        |options| Capacity {
+            venue: KucoinSpot::new(options),
             held: vec![],
         },
         PublicFeedPolicy::Direct,

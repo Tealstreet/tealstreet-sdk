@@ -666,6 +666,15 @@ impl Kucoin {
             r.invalid = true;
         }
     }
+    pub(crate) fn history_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+    ) {
+        error.outcome = None;
+        request.owner.reject(cx, error);
+    }
     pub(crate) fn history_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -819,16 +828,19 @@ impl Kucoin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Options;
+    use crate::support::credentials::Options;
     use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
     use safe_cex_engine::{Action, Engine, Event, Notice, Response};
     fn engine() -> Engine<Kucoin> {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-            key: Some("fixture-key".into()),
-            secret: Some("fixture-secret".into()),
-            passphrase: Some("fixture-passphrase".into()),
-            ..Default::default()
-        }));
+        let mut e = crate::support::credentials::engine(
+            Options {
+                key: Some("fixture-key".into()),
+                secret: Some("fixture-secret".into()),
+                passphrase: Some("fixture-passphrase".into()),
+                ..Default::default()
+            },
+            Kucoin::new,
+        );
         e.store_mut().set_markets(vec![Market {
             id: "XBTUSDTM".into(),
             symbol: "BTCUSDT".into(),
@@ -867,7 +879,8 @@ mod tests {
             2_000_000_000_000.0,
             Event::Command(safe_cex_engine::Command::Query { command: 77, query }),
         );
-        e.drain_actions()
+        safe_cex_engine::test_support::prepared_actions(e, 2_000_000_000_000.0)
+            .into_iter()
             .find_map(|a| {
                 if let Action::Http(r) = a {
                     Some(r)
@@ -889,7 +902,9 @@ mod tests {
                 },
             },
         );
-        e.drain_actions().collect()
+        safe_cex_engine::test_support::prepared_actions(e, 2_000_000_000_000.0)
+            .into_iter()
+            .collect()
     }
     fn done(actions: &[Action]) -> &str {
         actions
@@ -905,7 +920,7 @@ mod tests {
     }
     #[test]
     fn client_id_lookup_fails_explicitly_without_network_io() {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options::default()));
+        let mut e = crate::support::credentials::engine(Options::default(), Kucoin::new);
         e.handle(
             1740640088002.5,
             Event::Command(safe_cex_engine::Command::Query {
@@ -916,7 +931,9 @@ mod tests {
                 },
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 2_000_000_000_000.0)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert_eq!(actions.len(), 1);
         assert!(matches!(
             &actions[0],
@@ -1197,7 +1214,10 @@ mod tests {
                 1_740_640_088_002.5,
                 Event::Command(safe_cex_engine::Command::Query { command: 77, query }),
             );
-            let actions = e.drain_actions().collect::<Vec<_>>();
+            let actions =
+                safe_cex_engine::test_support::prepared_actions(&mut e, 1_740_640_088_002.5)
+                    .into_iter()
+                    .collect::<Vec<_>>();
             let request = actions
                 .iter()
                 .find_map(|a| {
@@ -1230,7 +1250,10 @@ mod tests {
                     },
                 }),
             );
-            let actions = e.drain_actions().collect::<Vec<_>>();
+            let actions =
+                safe_cex_engine::test_support::prepared_actions(&mut e, 2_000_000_000_000.0)
+                    .into_iter()
+                    .collect::<Vec<_>>();
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
             assert!(
                 actions
@@ -1313,7 +1336,7 @@ mod tests {
     }
     #[test]
     fn public_trades_need_no_credentials() {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options::default()));
+        let mut e = crate::support::credentials::engine(Options::default(), Kucoin::new);
         e.store_mut()
             .set_markets(engine().store().markets().to_vec());
         let r = query(
@@ -1361,7 +1384,9 @@ mod tests {
                 },
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 2_000_000_000_000.0)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions

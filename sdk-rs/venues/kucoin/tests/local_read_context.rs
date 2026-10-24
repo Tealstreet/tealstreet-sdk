@@ -1,5 +1,6 @@
 #![cfg(feature = "spot")]
 //! Local Read authority through genuine callbacks; native private fallthrough stays legacy.
+mod support;
 use safe_cex_engine::model::{
     Limits, MarginType, Market, MinMax, Order, OrderSide, OrderStatus, OrderType, Precision,
 };
@@ -8,8 +9,9 @@ use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, HttpRequest, Method, Notice,
     Outcome, Query, Response, SocketId, TimerId, Venue, VenueError,
 };
-use safe_cex_venue_kucoin::{Kucoin, Options, spot::KucoinSpot};
+use safe_cex_venue_kucoin::{Kucoin, spot::KucoinSpot};
 use serde_json::{Value, json};
+use support::credentials::Options;
 
 const SYMBOL: &str = "BTC-USDT";
 const COMMAND: u32 = 71;
@@ -107,8 +109,11 @@ impl<V: Venue> Venue for Probe<V> {
                 Some("saturate") => {
                     assert!(self.held.is_empty());
                     for _ in 0..256 {
-                        self.held
-                            .push(cx.http_context(Scope::Background, policy()).unwrap());
+                        match cx.http_context(Scope::Background, policy()) {
+                            Ok(root) => self.held.push(root),
+                            Err(safe_cex_engine::request_context::Error::Capacity) => break,
+                            other => panic!("unexpected peer admission: {other:?}"),
+                        }
                     }
                 }
                 Some("hold-next") => self.hold_next = true,
@@ -173,13 +178,20 @@ fn order() -> Order {
         extra: None,
     }
 }
-fn seeded<V: Venue>(inner: V) -> Engine<Probe<V>> {
+fn seeded<V: Venue>(
+    options: Options,
+    constructor: impl FnOnce(safe_cex_venue_kucoin::Options) -> V,
+) -> Engine<Probe<V>> {
+    let (options, provider, identities) = options.prepare();
+    let inner = constructor(options);
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
         inner,
         held: vec![],
         hold_next: false,
         original: None,
     });
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
     e.store_mut().set_markets(vec![Market {
         id: SYMBOL.into(),
         symbol: SYMBOL.into(),
@@ -221,11 +233,11 @@ fn seeded<V: Venue>(inner: V) -> Engine<Probe<V>> {
     e
 }
 fn spot(keyed: bool) -> Engine<Probe<KucoinSpot>> {
-    seeded(KucoinSpot::new(options(keyed)))
+    seeded(options(keyed), KucoinSpot::new)
 }
 fn run<V: Venue>(e: &mut Engine<Probe<V>>, now: f64, command: Command) -> Vec<Action> {
     e.handle(now, Event::Command(command));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, now)
 }
 fn control<V: Venue>(e: &mut Engine<Probe<V>>, tag: Option<&str>) -> Vec<Action> {
     run(
@@ -370,7 +382,7 @@ fn local_spot_errors_gain_typed_metadata_without_changing_credential_precedence(
 #[test]
 fn futures_leverage_remains_unsupported_with_typed_local_authority() {
     for keyed in [false, true] {
-        let mut e = seeded(Kucoin::new(options(keyed)));
+        let mut e = seeded(options(keyed), Kucoin::new);
         typed(
             &run(&mut e, 100., leverage("UNKNOWN")),
             UNSUPPORTED_LEVERAGE,
@@ -444,7 +456,7 @@ fn nonfinite_clock_refuses_every_local_spot_path_before_projection_or_publicatio
 }
 #[test]
 fn nonfinite_clock_refuses_futures_unsupported_terminal() {
-    let mut e = invalid_clocks(seeded(Kucoin::new(options(true))), || {
+    let mut e = invalid_clocks(seeded(options(true), Kucoin::new), || {
         vec![leverage(SYMBOL)]
     });
     typed(
@@ -499,7 +511,7 @@ fn genuine_capacity_refusal_covers_every_local_spot_path_and_same_clock_recovery
 #[test]
 fn genuine_capacity_refusal_covers_futures_local_terminal_and_recovery() {
     saturated(
-        seeded(Kucoin::new(options(true))),
+        seeded(options(true), Kucoin::new),
         || vec![leverage(SYMBOL)],
         leverage(SYMBOL),
         Expected::Failed(UNSUPPORTED_LEVERAGE, ErrorKind::Unsupported),
@@ -578,7 +590,7 @@ fn fixed_clock_reuse_retires_all_local_owners_beyond_registry_capacity() {
             }
         }
     }
-    let mut e = seeded(Kucoin::new(options(true)));
+    let mut e = seeded(options(true), Kucoin::new);
     for _ in 0..270 {
         typed(
             &run(&mut e, 100., leverage(SYMBOL)),
@@ -654,10 +666,10 @@ fn reply<V: Venue>(
             },
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, 100.)
 }
 #[test]
-fn private_fill_and_identity_fallthrough_keep_native_wire_and_completion() {
+fn private_fill_and_selected_identity_keep_native_wire_and_completion() {
     for (command, path, body, expected) in [
         (
             query(Query::Fills {
@@ -678,19 +690,24 @@ fn private_fill_and_identity_fallthrough_keep_native_wire_and_completion() {
             json!({"userId":"u","subId":"s","affiliateId":"a"}),
         ),
     ] {
+        let managed_identity = matches!(command, Command::FetchAccount { .. });
         let mut e = spot(true);
         let a = run(&mut e, 100., command);
         let id = native_request(&a, path).id;
         assert!(control(&mut e, Some("saturate")).is_empty());
         assert_eq!(
             e.venue().held.len(),
-            256,
-            "native pending HTTP owns no Read root"
+            if managed_identity { 255 } else { 256 },
+            "only the migrated Identity retains a Read root"
         );
+        let terminal: Vec<_> = reply(&mut e, id, body)
+            .into_iter()
+            .filter(|action| !matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+            .collect();
         assert_eq!(
-            done(&reply(&mut e, id, body)),
+            done(&terminal),
             expected,
-            "numeric native completion remains unfenced"
+            "native result bytes remain exact"
         );
         assert!(control(&mut e, None).is_empty());
         assert!(e.venue().held.is_empty());

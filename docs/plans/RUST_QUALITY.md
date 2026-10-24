@@ -1737,3 +1737,16 @@ checks are scoped locally, with full workspace/WASM/replay proof delegated to CI
 The CI unit-fixture correction changes only the secondary probe's pending
 constructor fields, preserving every original assertion. Scoped unit tests and
 all-target Clippy now cover this constructor as well as integration targets.
+
+## KuCoin opaque signer controls
+
+Original native provider assertions failed5/15 with Spot and4/13 without;
+broker-role NEW-CONTRACT controls initially failed at schema decode, with their
+downstream assertions unexecuted until composition. Scoped native KuCoin/Spot392
+executions and feature-off unit/adoption40 pass, zero ignored; repeated mounted
+native-oracle controls are included in those counts. Adoption23 covers genuine
+atomic deferred signing/refusal/late-result custody and seven malformed results.
+Registry controls pin same-ref alias installation and independent read-key broker
+MACs, malformed external-ref refusal, and public-only passphrase-less-primary
+wire plus provider requirements. SDK setup64 and scoped strict/fmt pass. These
+local receipts do not certify workspace/WASM/replay or actual shared landing.

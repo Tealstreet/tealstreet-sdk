@@ -7266,3 +7266,66 @@ requiring longer native walks must raise rustCommandTimeoutMs. A host listener
 timeout does not cancel transport or grant engine detach authority. NX remains
 on its existing TS path until Rust is selected; no executed NX adoption is
 claimed by this venue change.
+
+## Asymmetric key typing for Sign (P4 follow-up)
+
+`LocalSigner` now types signing keys by trusted declaration
+(`RUST_SIGNER_PREREQUISITES.md`, "Asymmetric key typing (P4 follow-up)").
+Caller-visible changes:
+
+- **Asymmetric `Sign` needs a declaration.** `Ed25519`, `Es256`,
+  `Secp256k1Digest`, `StarkDigest` and `SchnorrDigest` sign only on a ref
+  whose `signing_algorithm` matches. Anything else is `InvalidRequest`, in
+  every build and before any arm runs. A declared ref never MACs. Undeclared
+  refs keep MAC behaviour exactly, and role refs are unchanged.
+- **Who declares.**
+  - AsterDEX V3 wallets are declared from the explicit resolved
+    `asterdex.api_version` on both setup paths; V1 declares nothing.
+  - Backpack's seed is declared `ed25519` by its registry setup.
+  - `schnorrDigest` is now a declarable `signingAlgorithm` (codegen and TS),
+    for Lighter.
+  - Callers who build a `LocalSigner` directly for an asymmetric family must
+    pass a policy declaring it (`from_setup_with_policy`), or use
+    `LocalSigner::insert_declared`. That call is atomic and refuses MAC
+    algorithms and role refs. It never retypes a ref an aliased secondary
+    shares with the primary (rotating within the same algorithm is fine).
+    A plain `insert` on such a ref keeps its algorithm. Unshared refs may be
+    retyped.
+- **`local_signer_from_json_for_mode(venue, input, &EngineOptions)`.** The
+  third argument is now the parsed account options, not a bool. Public intent
+  derives from them (`signer_setup_public_data_only`), and so do resolved
+  setup facts such as AsterDEX's version. `local_signer_from_json_for`, which
+  has no options, refines nothing.
+
+## KuCoin opaque HMAC custody and native staging
+
+Both aliases consume raw key/secret/passphrase and optional broker material only
+at trusted setup. Native Options hold opaque identities and broker metadata.
+The secondary aliases the primary's one broker ref; supplied differing, empty
+or oversized declared refs are refused before alias installation. Native Rust
+trim keeps BOM bytes; blank broker material mints no ref. Partner/name remain
+metadata, partial triplets omit all four broker headers and verify defaults true.
+
+Every signed physical issue prepares one atomic provider batch: selected API key
+presentation, request MAC, selected passphrase MAC, optional broker MAC over the
+same selected API key. Native raw path/query and escaped URL remain separate;
+7+4 headers keep native order and one integer-ms receipt stamp. Read selection
+requires a primary and uses the configured secondary; mutation/session calls use
+primary, Futures public conditionally uses primary, and Spot public is unsigned.
+
+A complete host-supplied identity requires a provider even in public-only mode,
+including a primary without a passphrase. This opaque-constructor requirement is
+explicit: without a provider it returns InvalidInput; with a provider public
+bullets/depth/candles stay unsigned, and the unused primary remains registered.
+Raw engine-option material is refused; trusted legacy constructors first consume
+it into provider custody. No raw REST fallback is available.
+
+Only Identity's single command Read adopts SelectedRead here (native20s/Never).
+Existing aggregate/history/session/write owners retain their explicit staging
+scope; the physical funnel does not claim logical owner migration. Eligible
+400005 reissues always prepare a fresh batch/receipt: funding/history keep their
+1000*n delays, account keeps native counters, Futures writes retry once without
+delay, and Spot gains no generic retry. Provider refusal is strict for history
+and funding, never transport retry or accepted-prefix recovery evidence. Reads
+publish no financial outcome; native aggregate handling retains prior-effect/ID
+outcome downgrades. Exact request inventory37/35 and credential sites4 remain.

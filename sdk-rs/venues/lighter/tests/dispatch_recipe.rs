@@ -5,7 +5,10 @@ use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::book::Book;
 use safe_cex_engine::entropy::Entropy;
 use safe_cex_engine::signing::Signer as _;
-use safe_cex_engine::signing::{Identity, KeyEncoding, Operation, PayloadPart, SignError};
+use safe_cex_engine::signing::{
+    Algorithm, CredentialSetupPolicy, Identity, IdentitySetupPolicy, KeyEncoding, Operation,
+    PayloadPart, SignError,
+};
 use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{
     Action, Command, Cx, Engine, Event, HttpRequest, Method, RequestId, Response, SocketId,
@@ -42,15 +45,25 @@ fn order(order_id: u64) -> Order {
 }
 
 fn provider() -> (Arc<LocalSigner>, Identity) {
-    let (signer, ids) = LocalSigner::from_setup(LocalSetup {
-        primary: Some(LocalIdentity {
-            key: Secret::new("lighter-api-key".into()),
-            secret: Secret::new(KEY.into()),
-            secret_encoding: KeyEncoding::Hex,
+    let policy = CredentialSetupPolicy {
+        primary: Some(IdentitySetupPolicy {
+            signing_algorithm: Some(Algorithm::SchnorrDigest),
             ..Default::default()
         }),
         secondary: None,
-    })
+    };
+    let (signer, ids) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(LocalIdentity {
+                key: Secret::new("lighter-api-key".into()),
+                secret: Secret::new(KEY.into()),
+                secret_encoding: KeyEncoding::Hex,
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+        policy,
+    )
     .unwrap();
     (Arc::new(signer), ids.primary.unwrap())
 }

@@ -777,7 +777,7 @@ describe('Rust frame recovery callers', () => {
 
   it('publishes KuCoin Spot leverage acknowledgements from engine SETTINGS and keeps them authoritative', async () => {
     const store = new DefaultStore();
-    const exchange = new RustEngineExchange('kucoinspot', { key: 'key', secret: 'secret' }, store);
+    const exchange = new RustEngineExchange('kucoinspot', { key: 'key', secret: 'secret', passphrase: 'fixture-passphrase' }, store);
     receive(exchange, fixture({ fills: 0 }));
     const command = vi.fn().mockResolvedValue(undefined);
     (exchange as unknown as { command: unknown }).command = command;

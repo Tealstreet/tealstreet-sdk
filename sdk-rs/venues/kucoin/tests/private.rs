@@ -6,7 +6,8 @@ use safe_cex_engine::model::{MarginType, OrderSide, OrderType, PositionMode, Tim
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
 };
-use safe_cex_venue_kucoin::{Kucoin, Options};
+use safe_cex_venue_kucoin::Kucoin;
+use support::credentials::Options;
 use support::jittered;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 500.0;
@@ -41,12 +42,15 @@ impl Harness {
     }
     fn with_markets(markets: &str) -> Self {
         let mut h = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-                key: Some("key".into()),
-                secret: Some("secret".into()),
-                passphrase: Some("passphrase".into()),
-                ..Default::default()
-            })),
+            engine: support::credentials::engine(
+                Options {
+                    key: Some("key".into()),
+                    secret: Some("secret".into()),
+                    passphrase: Some("passphrase".into()),
+                    ..Default::default()
+                },
+                Kucoin::new,
+            ),
             actions: vec![],
             failures: vec![],
             now: 1610000000000.0,
@@ -92,7 +96,9 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in
+            safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now).into_iter()
+        {
             let action = plain(action, &mut self.failures);
             self.actions.push(action);
         }
@@ -1213,12 +1219,15 @@ fn unknown_terminal_execution_never_guesses_fill_size_or_removes_another_symbol_
 #[test]
 fn account_reconciliation_starts_without_the_private_socket() {
     let mut h = Harness {
-        engine: safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-            key: Some("key".into()),
-            secret: Some("secret".into()),
-            passphrase: Some("passphrase".into()),
-            ..Default::default()
-        })),
+        engine: support::credentials::engine(
+            Options {
+                key: Some("key".into()),
+                secret: Some("secret".into()),
+                passphrase: Some("passphrase".into()),
+                ..Default::default()
+            },
+            Kucoin::new,
+        ),
         actions: vec![],
         failures: vec![],
         now: 1610000000000.0,
