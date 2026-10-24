@@ -191,7 +191,14 @@ fn explicitly_bounded_income_limit_zero_and_successful_histories_keep_native_dis
     ] {
         let private = !matches!(read, Query::PublicTrades { .. });
         let mut e = engine(private);
-        let actions = query(&mut e, NOW, 603, read);
+        e.handle(
+            NOW,
+            Event::Command(Command::Query {
+                command: 603,
+                query: read,
+            }),
+        );
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
         assert!(terminal(&actions, 603).is_empty());
         assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(_))));
         let request = actions
