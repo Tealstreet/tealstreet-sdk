@@ -29,6 +29,14 @@ impl Serial {
         };
         (self.call.operation, retry_policy(self.call), credential)
     }
+
+    /// Whether `next` signs: a Read only under the read role.
+    fn signs(&self, next: SerialCall, write: &Option<Credential>) -> bool {
+        match next.operation {
+            Operation::Read => self.read.is_some(),
+            Operation::Mutation => write.is_some(),
+        }
+    }
 }
 
 pub(super) fn wake(timer: TimerId, at_ms: f64) -> Action {
@@ -219,7 +227,11 @@ impl<P> Cx<'_, P> {
             .ok_or(Error::State)?
             .validate_serial_continuation(leg)?;
         let attempts = u64::from(next.attempts);
-        let signed = body.policy.credential.is_some();
+        let signed = body
+            .serial
+            .as_ref()
+            .expect("checked serial Plan")
+            .signs(next, &body.policy.credential);
         if !self.io.next_id.available(1 + 3 * attempts)
             || (signed && !self.io.signing.available_ids(attempts))
         {
@@ -272,20 +284,22 @@ impl<P> Cx<'_, P> {
             .expect("checked serial call identities");
         let logical = take(&mut ids, 1).start;
         let call_ids = take(&mut ids, 3 * attempts);
-        let signing = self
+        let body = self
             .io
             .request_contexts
             .plan_body(plan)
+            .expect("validated serial Plan");
+        let signed = body
+            .serial
+            .as_ref()
             .expect("validated serial Plan")
-            .policy
-            .credential
-            .is_some()
-            .then(|| {
-                self.io
-                    .signing
-                    .reserve_ids(attempts)
-                    .expect("checked serial signing identities")
-            });
+            .signs(next, &body.policy.credential);
+        let signing = signed.then(|| {
+            self.io
+                .signing
+                .reserve_ids(attempts)
+                .expect("checked serial signing identities")
+        });
         let terms = schedule
             .declarations()
             .next()
