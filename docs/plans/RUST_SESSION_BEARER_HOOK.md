@@ -342,6 +342,14 @@ These are added with the source.
   reprepare takes Primary from the packet's binding and never re-reads
   `context.routing_intent()`.
 
+**Consumer recheck (codex-zs5e83, CLEAR at `784ffa540f8`).** Non-blocking
+note for source: `one_typed_read_failure` proves the count and `outcome: None`
+but not the kind. Once source defines the cause, pin `kind.is_some()` or the
+exact typed cause.
+
+**Gate status: plan and REDs are CLEAR from all three reviewers.** Source
+waits for Sam's go.
+
 **Engine facts the source must follow:**
 - **The real prepare point.** `queue_managed` emits `HttpAction::Prepare` at
   issue, with headers snapshotted from static slices (`http_lifecycle.rs:180`).
