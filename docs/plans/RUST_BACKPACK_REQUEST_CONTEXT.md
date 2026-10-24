@@ -760,3 +760,99 @@ FetchCandles command binding after this refusal conversion; remove that unused
 binding only. This compile failure is not an original RED. Original six
 controls remain unchanged. Fresh CI is required for this source composition;
 the older163a CI stays historical.
+
+## Next plan/RED slice: local history-query refusals, 2026-10-24
+
+Owner mxb4mq. Fresh branch `fix/rust-backpack-local-history-refusals` starts at
+actual `557de7ae7fbf6d2a00fdd3cbf1d0a962bd7fc570`. Plan + original REDs only at
+this checkpoint; no production, inventory, key-selection or shared-source edit.
+The open-PR file map leaves Backpack history.rs and the new local test path
+unoccupied. Both the original combo-5b and its current `989603e75a4` refresh
+change no Backpack runtime file. #1870/#2044/#2047 remain frozen separately.
+
+Four initial-only numeric refusals in history_command are in scope, before any
+page owner, credential choice, signed request or public transport is constructed:
+
+| Native branch | Exact fingerprint, each count one |
+| --- | --- |
+| OrderByClientId unsupported | dfd77b4e5b63c20a2980a0daf2a87b52d71b54e7389a0b8ab4b83cc09f4e9c44 |
+| Non-funding Income kind unsupported | 9b3adb3b1766d2dc6999e2d6032c71c0af3cd853931092aa839972828fe32016 |
+| Invalid history bounds | 3305fa21e56e82fd162910828b2249d986e2b5557f6c0e7b8475dccd31d4e12f |
+| Requested market absent | 465c0d77039125ad56cc26f76f44ea3cdc2befb62f5d1badbb8062f48908811c |
+
+Thus this is four occurrences/four fingerprints. Base Backpack totals are six
+paths, 19 fingerprints and 20 occurrences; this slice alone would yield six
+paths, 15 fingerprints and 16 occurrences. Retain the fifth history fingerprint
+0451c299... (legacy signed-request preparation failure), every numeric delivered
+history completion in shared owners and every other map. Do not copy the three
+other queued branches' removals into this one.
+
+Preserve the exact four native messages, their existing absent kind and absent
+write outcome on valid keyless public/private entry, and validation precedence:
+unsupported lookup/kind before bounds, bounds before market lookup. No HTTP,
+managed preparation, signing, socket, timer, CursorHistory row/page or Store
+effect may be created by refusal. Zero supported history feature, paging,
+filtering, completion, retry or signing behavior is changed. Valid public trades
+and signed fills/orders/funding keep their current source. No key-selection
+site, key map, selected credential or registry setup changes until combo-5b.
+
+Future source proposal is a thin native rejection helper using existing shared
+receipt APIs: None -> reject_unstamped_command(Read), Expired ->
+reject_expired_command(Read), Remaining -> genuine keyless Read admission with
+20-second maximum/no pacing/Never retry, then fail_context(original message).
+Only a genuine initial command entry can reject; Rejected already emitted its
+terminal and Revoked grants no fallback. This proposes no venue-local issuer,
+policy engine, callback wrapper or shared API. Production waits review and a
+separate authorization after this checkpoint.
+
+Commit the plan first, then new controls on unchanged actual source. Working
+controls pin all four messages/fields with keyless public/private setup, no I/O
+or Store/row changes, native precedence, duplicate owner real book delivery and
+immediate command reuse. Each branch gets its own invalid-clock assertion RED
+(shared InvalidInput without outcome) and capacity assertion RED (shared
+Internal without outcome at the 256-owner bound). Preserve successful prior
+owner delivery after refusal as a post-cutover gate; do not claim assertions
+past a failing original kind check ran. Label only reproduced assertion failures;
+compile errors and missing APIs are not REDs.
+
+Execute only the new test file with CARGO_BUILD_JOBS=4 and no concurrent local
+Cargo build. Freeze the plan/control commit, send bounded review, and report the
+slice/count. No production application, manifest prune, push, PR or extra CI is
+part of this plan/RED checkpoint. Existing three CI watchers remain sole at
+120-second intervals; no new watcher is needed here.
+
+Original-source checkpoint: plan `781734ad009` precedes separate original
+controls `740d55a3b04`. On unchanged actual `557de7ae7fb` source, the single
+scoped file compiles and executes twelve cases: four GREEN, eight assertion
+RED, zero ignored. All four native branches report absent kind rather than
+shared InvalidInput at invalid command clocks, and absent kind rather than
+shared Internal at capacity. Native messages/fields, precedence, no I/O/Store,
+real duplicate prior-owner delivery and immediate ID reuse are working controls.
+Capacity delivery past each failing kind assertion remains a mandatory GREEN
+post-cutover gate, not original execution evidence. Only this plan and the new
+test file differ from base; production, all inventories, key-selection and
+combo-5b source are unchanged. No runtime implementation or prune is applied.
+
+
+Production authorization and plan/control review checkpoint: the overseer
+approved the four-site implementation after hcmq3f's bounded review of exact
+53cf1c7aac3. Actual candle adoption #1870 10d01de52795 is now genuinely merged
+in f15c0e601a5; history.rs and the original twelve controls are unchanged by
+that integration. The source patch is SHA-256
+eba3e3f9fbc5c6835cca4e25691867de77dd9df9e5160fb11765aa445e01a51d.
+It replaces only the four initial refusals with the full receipt-aware Read
+helper above. Inventory removes only the four one-count history fingerprints;
+the signed preparation failure 0451c299 remains, as do all incoming candle
+prunes and every other inventory map. Applied-source preservation review and
+fresh CI remain separate from the cleared plan/control evidence.
+
+Applied-source local evidence: all twelve original controls are byte-identical
+to 740d55a3b04 and now PASS, including all four capacity prior-owner real
+Prepare/Bind/Claim/response deliveries. Scoped Backpack native tests pass
+185 with zero failures and one pre-existing ignored repair control. Strict
+all-target Clippy and formatting pass with CARGO_BUILD_JOBS=4, one local Cargo
+job at a time. The entire history source matches the prepared patch result;
+exactly five own paths differ from actual #1870, with every other source and
+map preserved. This is local execution/preservation evidence; independent
+applied-source review and fresh CI remain separate readiness gates.
+Bans and all inventory scanner/ratchet controls also pass on this tree.

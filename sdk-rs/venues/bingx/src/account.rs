@@ -1,7 +1,10 @@
 //! Private account state and its independently recovered listen key.
+#[path = "metadata.rs"]
+mod metadata;
 use crate::Pending;
 use crate::account_wire::*;
 use crate::sign::{Credentials, Params};
+pub use metadata::{Leg as MetadataLeg, fail as fail_metadata_plan};
 use safe_cex_engine::Level;
 use safe_cex_engine::credential_selection::Slots;
 use safe_cex_engine::execution::ObservedProgress;
@@ -36,14 +39,6 @@ const REPAIR_MS: f64 = 750.0;
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
-    Metadata {
-        command: u32,
-        symbol: String,
-        revision: u64,
-        generation: u64,
-        publish: bool,
-        leverage: Option<(f64, f64)>,
-    },
     ListenKey {
         epoch: u64,
     },
@@ -333,24 +328,7 @@ impl Account {
             return;
         };
         let native = market.id.clone();
-        let generation = self.metadata_generations.entry(symbol.clone()).or_default();
-        *generation = generation.wrapping_add(1);
-        Self::request(
-            cx,
-            credentials,
-            Method::Get,
-            crate::paths::LEVERAGE,
-            Params::new().str("symbol", &native),
-            Request::Metadata {
-                command,
-                symbol,
-                revision: self.settings_revision,
-                generation: *generation,
-                publish,
-                leverage: None,
-            },
-            false,
-        );
+        self.start_metadata(cx, credentials, symbol, native, publish);
     }
     /// Keeps earlier malformed markets the new catalogue still lacks; returns the
     /// malformed count before and after.
@@ -459,28 +437,6 @@ impl Account {
             // Nothing parks on a listen-key session: it never has waiters.
             let _ = cx.retire_session(&session);
         }
-    }
-
-    /// Metadata requests keep their legacy signed transport.
-    fn request(
-        cx: &mut Cx<'_, Pending>,
-        credentials: &Credentials,
-        method: Method,
-        path: &'static str,
-        params: Params,
-        request: Request,
-        stream: bool,
-    ) {
-        let at = stream.then_some(ArrayAt::EnvelopeField("data"));
-        crate::issue(
-            cx,
-            Some(credentials),
-            method,
-            path,
-            params,
-            at,
-            Pending::Account(request),
-        );
     }
 
     /// Account snapshot reads run under an engine-issued background Context.
@@ -945,86 +901,6 @@ impl Account {
             return;
         }
         match request {
-            Request::Metadata {
-                command,
-                symbol,
-                revision,
-                generation,
-                publish,
-                leverage,
-            } => {
-                let current = publish
-                    && revision == self.settings_revision
-                    && self.metadata_generations.get(&symbol) == Some(&generation);
-                if let Some((buy, sell)) = leverage {
-                    if !current {
-                        current_metadata(cx, command, &symbol, (buy, sell));
-                        return;
-                    }
-                    let parsed = serde_json::from_str::<Data<MarginMode<'_>>>(response.body);
-                    let margin = match parsed.as_ref().map(|row| row.data.margin_type.as_ref()) {
-                        Ok("ISOLATED") => MarginType::Isolated,
-                        Ok("CROSSED") => MarginType::Cross,
-                        _ => {
-                            cx.fail(command, metadata_error("Invalid BingX margin metadata"));
-                            return;
-                        }
-                    };
-                    self.bump_positions();
-                    cx.store.update_setting(&symbol, |s| {
-                        s.leverage = buy;
-                        s.buy_leverage = Some(buy);
-                        s.sell_leverage = Some(sell);
-                        s.margin_type = Some(margin);
-                    });
-                    cx.done(
-                        command,
-                        format!(r#"{{"buyLeverage":{buy},"sellLeverage":{sell}}}"#),
-                    );
-                } else {
-                    let parsed = serde_json::from_str::<Data<Leverage>>(response.body);
-                    let Some(rails) = parsed
-                        .ok()
-                        .map(|p| p.data)
-                        .filter(|l| l.long_leverage > 0.0 && l.short_leverage > 0.0)
-                    else {
-                        cx.fail(command, metadata_error("Invalid BingX leverage metadata"));
-                        return;
-                    };
-                    if !current {
-                        current_metadata(
-                            cx,
-                            command,
-                            &symbol,
-                            (rails.long_leverage, rails.short_leverage),
-                        );
-                        return;
-                    }
-                    let Some(market) = cx.store.market(&symbol) else {
-                        cx.fail(
-                            command,
-                            metadata_error("BingX market disappeared during metadata read"),
-                        );
-                        return;
-                    };
-                    Self::request(
-                        cx,
-                        credentials,
-                        Method::Get,
-                        "/openApi/swap/v2/trade/marginType",
-                        Params::new().str("symbol", &market.id),
-                        Request::Metadata {
-                            command,
-                            symbol,
-                            revision,
-                            generation,
-                            publish,
-                            leverage: Some((rails.long_leverage, rails.short_leverage)),
-                        },
-                        false,
-                    );
-                }
-            }
             Request::ListenKey { .. } => {
                 self.key_in_flight = false;
                 let parsed = serde_json::from_str::<ListenKey<'_>>(response.body);
@@ -1231,10 +1107,6 @@ impl Account {
         error: safe_cex_engine::VenueError,
         credentials: &Credentials,
     ) {
-        if let Request::Metadata { command, .. } = request {
-            fail_metadata(cx, command, error);
-            return;
-        }
         let owns_read = match &request {
             Request::Balance { revision, .. } => self.balance_in_flight == Some(*revision),
             Request::Positions { revision, .. } => self.positions_in_flight == Some(*revision),
@@ -1275,7 +1147,6 @@ impl Account {
                 }
                 self.keepalive = Some(cx.set_timer(RETRY_MS));
             }
-            Request::Metadata { command, .. } => fail_metadata(cx, command, error),
             Request::PositionMode { .. } => self.mode_in_flight = false,
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { .. } => self.positions_in_flight = None,
@@ -1783,24 +1654,6 @@ pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Optio
     })
 }
 
-/// A superseded read still answers without publishing stale settings.
-fn current_metadata(cx: &mut Cx<'_, Pending>, command: u32, symbol: &str, read: (f64, f64)) {
-    let setting = cx.store.setting(symbol);
-    let valid = |value: &f64| value.is_finite() && *value > 0.0;
-    let buy = setting
-        .and_then(|s| s.buy_leverage)
-        .filter(valid)
-        .unwrap_or(read.0);
-    let sell = setting
-        .and_then(|s| s.sell_leverage)
-        .filter(valid)
-        .unwrap_or(read.1);
-    cx.done(
-        command,
-        format!(r#"{{"buyLeverage":{buy},"sellLeverage":{sell}}}"#),
-    );
-}
-
 /// Tag an account read with the credential slot that actually signs it.
 pub(crate) fn tag_read(
     cx: &mut Cx<'_, Pending>,
@@ -1889,15 +1742,6 @@ pub(crate) fn metadata_error(
     } else {
         error.outcome(safe_cex_engine::Outcome::NotSent)
     }
-}
-
-/// Native and signer metadata failures share one command completion.
-fn fail_metadata(
-    cx: &mut Cx<'_, Pending>,
-    command: safe_cex_engine::CommandId,
-    error: impl Into<safe_cex_engine::VenueError>,
-) {
-    cx.fail(command, metadata_error(error));
 }
 
 #[cfg(test)]
@@ -1990,15 +1834,7 @@ mod sign_failure_owners {
                 unavailable: false,
             },
             3 => Request::ListenKey { epoch: 4 },
-            4 => Request::Keepalive { epoch: 4 },
-            _ => Request::Metadata {
-                command: 42,
-                symbol: "BTCUSDT".into(),
-                revision: 0,
-                generation: 1,
-                publish: true,
-                leverage: Some((5., 6.)),
-            },
+            _ => Request::Keepalive { epoch: 4 },
         };
         let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
             native,
@@ -2013,15 +1849,6 @@ mod sign_failure_owners {
             })
             .collect();
         assert_eq!(timers.len(), 1);
-        if kind == 5 {
-            engine.handle(
-                1_000.5,
-                Event::WsMessage {
-                    socket: SocketId(44),
-                    text: r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":25}}"#,
-                },
-            );
-        }
         engine.handle(1_001., Event::TimerFired { timer: timers[0] });
         engine
     }
@@ -2068,36 +1895,6 @@ mod sign_failure_owners {
             assert_eq!(a.keepalive, Some(TimerId(77)));
             assert!(engine.drain_actions().next().is_none());
         }
-    }
-    #[test]
-    fn typed_margin_failure_preserves_newer_native_settings_ack() {
-        let mut engine = fail(5, 1);
-        assert_eq!(engine.venue().native.account.settings_revision, 1);
-        let setting = engine.store().setting("BTCUSDT").unwrap();
-        assert_eq!(setting.leverage, 25.);
-        assert_eq!(
-            (setting.buy_leverage, setting.sell_leverage),
-            (Some(25.), Some(25.))
-        );
-        let actions: Vec<_> = engine.drain_actions().collect();
-        let errors: Vec<_> = actions
-            .iter()
-            .filter_map(|a| match a {
-                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 42, error }) => {
-                    Some(error)
-                }
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            errors,
-            [&safe_cex_engine::signing::SignError::Refused.venue_error()]
-        );
-        assert!(
-            !actions
-                .iter()
-                .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
-        );
     }
 }
 
