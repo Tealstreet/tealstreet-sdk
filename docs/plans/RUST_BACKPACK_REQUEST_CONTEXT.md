@@ -662,3 +662,60 @@ Backpack trading fingerprint removal. Key-selection maps are unchanged.
 Fresh CI and exact committed preservation review are in flight; no merge or
 full-package proof is claimed. Architecture gate: No shared policy copy, only
 native refusal messages composed through existing shared custody APIs.
+
+
+## Next plan/RED slice: subscribed-book REST seed custody, 2026-10-24
+
+Owner mxb4mq, branch fix/rust-backpack-book-seed-context from actual
+7501c8c4412629ec74292035cba3bb49cd907c6c. Identity plan/control is CLEAR but
+its private composition still waits actual5b; this unsigned slice has no such
+credential dependency. Existing2054/2047/2053 watches remain sole120s watchers.
+
+Target ONE occurrence/fingerprint in lib.rs public get's non-streaming branch:
+9d039db0b83b2ae54446aa0bc9e3aff9127670a816554104c007a106d268becd,
+count1, cx.request(Method::Get, url, headers, None, pending). Only snapshot()
+passes false, producing Pending::Depth for a subscribed book's REST seed.
+All startup catalogue/ticker/mark and public-trade history callers stream.
+Actual Backpack totals6paths/15fingerprints/15occurrences; this slice alone
+would yield6/14/14. Keep all queued interval/history/identity prunes separate.
+
+Future source: snapshot uses existing http_context(Background, Read/keyless/
+20s/no pacing/Never), request_managed_with_headers with exactX-Broker-Id1200,
+and retains that real Context with Pending::Depth. Validate exact background
+HTTP delivery before native status/body/book callbacks; retire the context
+on every terminal path, including a stale native generation. Preparation/
+bind/claim/deadline/physical failure comes through existing engine callbacks,
+then the existing native recover_book policy for the current generation.
+No command root, fake issuer, WS authority, signer or selected key is minted.
+The20s admission-to-expiry policy is NEW for this currently unmanaged path.
+
+Remove the now-orphaned get stream flag/non-streaming branch in the same
+change, since all remaining get calls stream. This needs a mechanical argument
+removal at history_request's public-trades get call, not a history owner,
+selection, parser or paging change. Other call sites are in lib.rs. #2053
+owns different initial history-refusal hunks; integrate its actual if it lands
+first. #2047's lib interval branch is separate; preserve its actual source
+before final CI if it lands first. Open-PR map shows no other depth/book
+production owner. Combo5b/engine/key-choice/signing/account/trading source
+and all credential/selection maps remain outside scope.
+
+Preserve exact GET depth URL/symbol query/static header/no body/no auth and
+native lastUpdateId/generation filtering, bridge/sequence rules, buffered
+deltas, zero-quantity deletes, subscriber reference counts, book publication,
+reconnect/cache rules and recovery/backoff. No subscribe-frame/HTTP ordering
+change or socket migration; preserve current order as a working control.
+Retain raw startup/public-trade streaming path and every native row assertion.
+Existing depth public fixtures may use shared test_support::prepared_actions
+at protocol_now() for genuine route Prepare/Bind/Claim, without changing
+economic assertions or inventing opens/clocks.
+
+Plan first, original controls next on unchanged production. Working controls
+pin native wire/book output, buffered bridge and unsubscribe/resubscribe
+generation rejection. Original adoption RED targets: zero physical HTTP before
+Prepare/Bind/Claim, invalid background clock refusal before physical work,
+and no book publication from DATA beyond the proposed20s bound. Clearly label
+any compile-only fixture correction, genuinely executed assertions and any
+gated suffixes. Scoped Cargo jobs4, one local build; no broad local sweep.
+After bounded plan/original review CLEAR, standing authorization permits
+production then draft push/full CI parallel with exact source review. No
+prune or source edit belongs to this plan/original checkpoint.
