@@ -990,6 +990,11 @@ family closure automatically. Add two own explicit controls there:
 `http-plans,metadata-freshness,order-locks,test-support`. These run the
 metadata-only configuration and the original Plan integration fixtures in CI;
 preserve every existing row and the peers' reserved feature controls.
+The overseer's standing rule also requires a named OFF entry inside the
+seeded `grouped` dictionary. Preserve its two existing seed rows and add
+`order-locks,polling-control,test-support`, labelled in both its comment and
+name as the metadata-freshness OFF control. It matches standalone Bitget's
+engine closure with test support and leaves metadata freshness disabled.
 
 Rebuild only the Bitget family using the identical pinned local command,
 profile, lockfile and optimizer. Aim to recover the baseline's approximate
