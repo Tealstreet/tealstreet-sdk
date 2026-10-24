@@ -619,3 +619,93 @@ fn candle_preparation_refusal_keeps_typed_not_sent_and_has_no_auth_evidence() {
         Action::Sign { .. } | Action::Notice(Notice::Deactivate | Notice::AccountAuth { .. })
     )));
 }
+
+#[test]
+fn unsupported_candle_interval_keeps_native_absent_kind_and_outcome() {
+    let mut e = engine();
+    e.handle_command(
+        1000.,
+        Command::FetchCandles {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            interval: Interval::H2,
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        },
+        Some(120_000),
+    )
+    .unwrap();
+    let out = drain(&mut e, 1000.);
+    let errors: Vec<_> = out
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        errors,
+        vec![&safe_cex_engine::VenueError::new(
+            Interval::H2.unsupported("WEEX")
+        )]
+    );
+    assert_eq!(out.actions.iter().filter(|a| terminal(a, 7)).count(), 1);
+    assert!(out.requests.is_empty());
+    assert_eq!((out.legacy, out.prepared, out.claimed), (0, 0, 0));
+}
+
+#[test]
+fn released_candle_network_failure_keeps_its_full_typed_read_error() {
+    let mut e = engine();
+    let request = ask(&mut e, 1000., 7, 120_000, false).requests.remove(0);
+    e.handle(
+        1001.,
+        Event::HttpFailed {
+            request: request.id,
+            error: "network gone",
+        },
+    );
+    let out = drain(&mut e, 1001.);
+    failure_message(&out.actions, 7, "network gone");
+    let errors: Vec<_> = out
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        errors,
+        vec![&safe_cex_engine::VenueError::new("network gone").kind(ErrorKind::Network)]
+    );
+}
+
+#[test]
+fn delivered_candle_http_400_has_canonical_internal_kind_without_write_outcome() {
+    let mut e = engine();
+    let request = ask(&mut e, 1000., 7, 120_000, false).requests.remove(0);
+    let out = reply(&mut e, &request, 1001., 400, "", "bad request");
+    failure_message(&out.actions, 7, "HTTP 400: bad request");
+    internal(&out.actions, 7);
+}
+
+#[test]
+fn delivered_candle_http_500_has_canonical_internal_kind_without_write_outcome() {
+    let mut e = engine();
+    let request = ask(&mut e, 1000., 7, 120_000, false).requests.remove(0);
+    let out = reply(&mut e, &request, 1001., 500, "", "bad");
+    failure_message(&out.actions, 7, "HTTP 500: bad");
+    internal(&out.actions, 7);
+}
+
+#[test]
+fn malformed_candle_row_has_canonical_internal_kind_without_write_outcome() {
+    let mut e = engine();
+    let request = ask(&mut e, 1000., 7, 120_000, false).requests.remove(0);
+    let out = reply(&mut e, &request, 1001., 200, "", "[[1]]");
+    failure_message(&out.actions, 7, "malformed REST row");
+    internal(&out.actions, 7);
+}

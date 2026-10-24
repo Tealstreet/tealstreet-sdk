@@ -6840,7 +6840,8 @@ FetchCandles keeps its native live/history endpoint selection, query ordering,
 raw symbol, limit clamps, empty unsigned headers, streamed variable-length row
 decoder, timestamp conversion, ascending sort and serialized output. It does not
 subscribe to candles or publish WS/cache state. Unsupported REST intervals keep
-their native message. Native HTTP, malformed-row and missing-list messages remain,
+their native message and absent kind/outcome fields through the genuine root
+before creating the Read completion. Native HTTP, malformed-row and missing-list messages remain,
 with one Warn REQUEST_FAILED for live request failures.
 
 Each query now retains its original configured caller receipt deadline across
@@ -6854,7 +6855,7 @@ Exact live root/leg/attempt validation precedes streamed decoding, the response
 reducer and 429 pause learning. Expired/revoked late 429s cannot extend the pause.
 Released transport/physical expiry keeps Network/Timeout and outcome None;
 stream integrity failures keep Internal and their native messages. Shared Read
-completion supplies Internal for previously untyped native HTTP/row/local-interval
+completion supplies Internal for previously untyped native HTTP/row
 errors; explicitly typed pre-send failures retain their fields and NotSent.
 Entry admission refusal precedes a native local reply. Stale generations and
 late timers cannot settle reused IDs or alter unrelated live queries. No signer

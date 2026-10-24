@@ -110,7 +110,9 @@ The ordinary response gate still precedes malformed-row handling
 (`malformed REST row`) and non-429 HTTP handling (`HTTP {status}: {body}`).
 Retain each of those native messages and warnings. The shared ReadCompletion
 projection supplies Internal when a native string failure has no kind; this
-also affects native row/status and local unsupported-interval errors. Existing
+affects native row/status errors. The local unsupported interval instead uses
+fail_context on its genuine root before constructing ReadCompletion, preserving
+the native absent kind/outcome fields. Existing
 typed causes and outcomes are preserved. Record this classification in CALLERS
 and obtain native source review rather than claim the untyped shape unchanged.
 No streamed failure can publish staged candles.
@@ -172,7 +174,8 @@ ReadCompletion, an optional physical Context and the native staged candle rows.
 Every callback validates delivery before row decode or response side effects;
 typed failures retire the child and reject the original live root. The shared
 ReadCompletion preserves typed fields and supplies Internal for native untyped
-string failures, including the local unsupported-interval message.
+row/status string failures. A local unsupported interval preserves its untyped
+error via fail_context before ReadCompletion construction.
 
 The original 16 assertions are unchanged and now GREEN. Five added controls
 cover delivered non-UTF8 bytes, staged rows discarded at root expiry with late
@@ -196,3 +199,15 @@ Scoped execution: candle_context 21/21 and public 15/15 pass, zero ignored;
 Clippy on those two changed targets with warnings denied and scoped rustfmt pass.
 All builds use CARGO_BUILD_JOBS=4 and run serially. No local all-feature,
 workspace, CPU benchmark or WASM build was run for this checkpoint.
+
+## Native source-review correction
+
+The local unsupported interval now rejects through fail_context on the genuine
+Read root before constructing ReadCompletion. Its full native error, including
+absent kind/outcome, is pinned. Five appended controls also pin released Network
+and canonical Internal/None for HTTP 400, HTTP 500 and malformed rows. Original
+assertions remain unchanged. Updated scoped receipt: candle_context 26/26 and
+public 15/15 PASS, target Clippy and rustfmt PASS, request inventory PASS.
+Source re-review is required before READY; no new shared source or numeric
+fallback is introduced. The initial draft dispatch is superseded by the fresh
+run on this corrected head.

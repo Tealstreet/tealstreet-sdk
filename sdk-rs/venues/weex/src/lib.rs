@@ -293,7 +293,11 @@ impl WeexFutures {
             cx.request(Method::Get, url, vec![], None, pending);
         }
     }
-    fn candle_query(cx: &mut Cx<'_, Pending>, command: CommandId) -> Option<CandleQuery> {
+    fn candle_query(
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        requested_interval: Interval,
+    ) -> Option<CandleQuery> {
         match cx.command_wait() {
             Some(CommandWait::Expired) => {
                 let _ = cx.reject_expired_command(Operation::Read);
@@ -306,6 +310,10 @@ impl WeexFutures {
             Some(CommandWait::Remaining(_)) => {}
         }
         let root = cx.admit_caller_read_root(None, None).ok()?;
+        if !interval(requested_interval, false) {
+            let _ = cx.fail_context(&root, requested_interval.unsupported("WEEX"));
+            return None;
+        }
         match ReadCompletion::from_context(cx, command, root.clone()) {
             Ok(completion) => Some(CandleQuery {
                 completion,
@@ -1522,15 +1530,9 @@ impl Venue for WeexFutures {
                 from_ms,
                 to_ms,
             } => {
-                let Some(request) = Self::candle_query(cx, command) else {
+                let Some(request) = Self::candle_query(cx, command, i) else {
                     return;
                 };
-                if !interval(i, false) {
-                    let _ = request
-                        .completion
-                        .finish(cx, Err(i.unsupported("WEEX").into()));
-                    return;
-                }
                 let historical = from_ms.is_some() || to_ms.is_some();
                 let mut query = format!(
                     "interval={i}&limit={}&symbol={symbol}",
