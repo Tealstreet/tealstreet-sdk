@@ -808,3 +808,52 @@ Mutations:
 - a wake that never re-prepares fails eight P tests;
 - no removal in reprepare fails the host-Stale test;
 - ignoring placement fails O1.
+
+## Phase 4: post-6b refresh (PLAN, 2026-10-25)
+
+#2037 (`da45fa2f614`) and G2b (#1956) landed inside combo-6b. The branch
+merged the actual tip `97e91565d78` (`eef3c47a926`). Conflicts: README (both
+rows kept) and OKX history (the tip's refactor taken). The only manual non-doc
+hunks pass `None` at the 26 managed call sites that landed since Phase 1 added
+the `bearer` argument. Bearer 53/59, engine lib 880/1089, and
+`cargo check --workspace --all-targets` are clean. Next, the base moves to
+`feat/rust-rewrite` (ruling: claude-ddi2il). No push until this phase is
+reviewed.
+
+Items, each a test written before any source change:
+- **R10b.** A Plan holds one parked session-wait unit and one bound unreleased
+  leg on the same Session, and the Session is retired:
+  - the shared flush fails the bound packet first, which seals the Plan;
+  - the seal retires the parked unit;
+  - `on_plan_session_wait_ended` is not called after the seal;
+  - the parked pending comes back once through `on_session_wait_expired`
+    (NotSent, no custody, no grant).
+
+  Exactly one terminal, zero HTTP, no re-entry.
+- **R10b'.** A Preflight parked on Session S, S retired, and the ended hook
+  binds S: exactly one terminal. A control re-parks on a live Session.
+- **P3 (restack review):**
+  - a Bearer-bound group member is refused at issue before any effect, with
+    its reservation dropped;
+  - a signed bound call waiting on pacing whose Session retires refuses
+    Revoked when signing begins;
+  - the same call whose bundle goes NotReady now parks (phase 3) instead of
+    refusing.
+- **P9.** No parked call carries a group: covered by the issue-time refusal
+  test above.
+- **R11, decision requested.** R11 would let Bearer-bound requests join
+  mutation groups by checking every member's revision in the group claim: a
+  moved revision on one member fails the whole group precommit, and no single
+  member is re-prepared. No consumer needs Bearer-bound groups today:
+  - GRVT's writes are a serial Plan (one live call);
+  - Paradex and BreakoutProp DXAPI issue no grouped mutations.
+
+  Recommendation: keep the issue-time refusal as the contract, pinned by the
+  P3 test, and implement R11 with the first consumer that needs a bound
+  group. The alternative is to implement R11 now: the group claim checks each
+  member's `Bearer::current` and fails the group precommit on any moved or
+  cleared revision. Reviewers rule; nothing changes until they do.
+
+Gates before freeze: the workspace check after the final tip merge, the
+CALLERS note for R4 (a venue without the hook now waits out the window), and
+one PR run on the frozen head.
