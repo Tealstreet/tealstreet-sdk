@@ -50,15 +50,10 @@ pub enum Pending {
         context: Context,
         request: account::Request,
     },
-    Markets {
+    /// A contracts or tickers read under its own Background Context.
+    Discovery {
         context: Context,
-        rows: Vec<Market>,
-        invalid: bool,
-    },
-    Tickers {
-        context: Context,
-        rows: Vec<Ticker>,
-        invalid: bool,
+        rows: Discovered,
     },
     Candles {
         root: Context,
@@ -67,11 +62,16 @@ pub enum Pending {
     },
 }
 
+pub enum Discovered {
+    Markets(Vec<Market>),
+    Tickers(Vec<Ticker>),
+}
+
 const DISCOVERY_HEADERS: &[(&str, &str)] = &[("X-CHANNEL-API-CODE", "Tealstreet")];
 
 fn discovery_context(pending: &Pending) -> Option<&Context> {
     match pending {
-        Pending::Markets { context, .. } | Pending::Tickers { context, .. } => Some(context),
+        Pending::Discovery { context, .. } => Some(context),
         _ => None,
     }
 }
@@ -164,78 +164,23 @@ impl BitgetFutures {
         );
     }
 
-    /// Contracts and tickers publish only under live custody, retire, then follow up.
-    fn discovery_response(
+    /// Retires a discovery read's Context, then reports it on the native backoff.
+    #[inline(never)]
+    fn discovery_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        pending: Pending,
-        response: Response<'_>,
+        pending: &Pending,
+        error: safe_cex_engine::VenueError,
     ) {
-        if !discovery_delivered(cx, &pending) {
-            retire_discovery(cx, &pending);
-            return;
-        }
-        let tickers = matches!(pending, Pending::Tickers { .. });
-        let valid = serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
-            .map_err(|e| e.to_string())
-            .and_then(Envelope::checked);
-        if valid.is_err() || response.status != 200 {
-            retire_discovery(cx, &pending);
-            self.public_failed(cx, tickers, discovery_error(&response));
-            return;
-        }
-        match pending {
-            Pending::Markets {
-                context,
-                rows,
-                invalid: false,
-            } => {
-                if rows.is_empty() {
-                    let _ = cx.finish_http_context(&context);
-                    self.public_failed(
-                        cx,
-                        false,
-                        safe_cex_engine::VenueError::new("Empty Bitget catalogue")
-                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
-                    );
-                    return;
-                }
-                cx.store.set_markets(rows);
-                self.ticker_index = ticker_index(cx.store);
-                let _ = cx.finish_http_context(&context);
-                self.connect(cx, 0);
-                self.discovery.succeeded(cx, DiscoveryRead::Markets);
-                self.discovery_read(cx, true);
-                self.start_private(cx);
+        retire_discovery(cx, pending);
+        let tickers = matches!(
+            pending,
+            Pending::Discovery {
+                rows: Discovered::Tickers(_),
+                ..
             }
-            Pending::Tickers {
-                context,
-                mut rows,
-                invalid: false,
-            } => {
-                if rows.is_empty() {
-                    let _ = cx.finish_http_context(&context);
-                    self.public_failed(
-                        cx,
-                        true,
-                        safe_cex_engine::VenueError::new("Empty Bitget tickers")
-                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
-                    );
-                    return;
-                }
-                self.live_tickers.finish(cx.store, &mut rows);
-                cx.store.set_tickers(rows);
-                self.ticker_index = ticker_index(cx.store);
-                let _ = cx.finish_http_context(&context);
-                self.discovery.succeeded(cx, DiscoveryRead::Tickers);
-                self.connect(cx, 1);
-                self.connect(cx, 2);
-            }
-            pending => {
-                retire_discovery(cx, &pending);
-                self.public_failed(cx, tickers, discovery_error(&response));
-            }
-        }
+        );
+        self.public_failed(cx, tickers, error);
     }
 
     pub fn new(options: Options) -> Self {
@@ -259,16 +204,8 @@ impl BitgetFutures {
         if tickers {
             self.live_tickers.begin();
         }
-        let context = match cx.http_context(
-            safe_cex_engine::request_context::Scope::Background,
-            Policy {
-                operation: Operation::Read,
-                credential: None,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            },
-        ) {
+        let scope = safe_cex_engine::request_context::Scope::Background;
+        let context = match cx.http_context(scope, read_policy(None)) {
             Ok(context) => context,
             Err(reason) => return self.public_failed(cx, tickers, reason.read_venue_error()),
         };
@@ -278,18 +215,13 @@ impl BitgetFutures {
             paths::CONTRACTS
         };
         let url = format!("{}{path}?productType={}", paths::REST, self.product());
-        let pending = if tickers {
-            Pending::Tickers {
-                context: context.clone(),
-                rows: vec![],
-                invalid: false,
-            }
-        } else {
-            Pending::Markets {
-                context: context.clone(),
-                rows: vec![],
-                invalid: false,
-            }
+        let pending = Pending::Discovery {
+            context: context.clone(),
+            rows: if tickers {
+                Discovered::Tickers(vec![])
+            } else {
+                Discovered::Markets(vec![])
+            },
         };
         match cx.request_managed_with_headers(
             context,
@@ -301,8 +233,7 @@ impl BitgetFutures {
         ) {
             Ok(id) => cx.stream_response(id, ArrayAt::Envelope(&[&["data"]])),
             Err((pending, reason)) => {
-                retire_discovery(cx, &pending);
-                self.public_failed(cx, tickers, reason.read_venue_error());
+                self.discovery_failed(cx, &pending, reason.read_venue_error())
             }
         }
     }
@@ -809,9 +740,6 @@ impl Venue for BitgetFutures {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
-        if !discovery_delivered(cx, pending) {
-            return;
-        }
         match pending {
             Pending::Identity(_) => {}
             Pending::History(request) => self.query_item(cx, request, item),
@@ -827,63 +755,72 @@ impl Venue for BitgetFutures {
                     self.account_item(cx, request, item);
                 }
             }
-            Pending::Markets { rows, .. } => match serde_json::from_str::<Contract>(item) {
-                Ok(row) if row.quote_coin == self.quote() => {
-                    if row.symbol.is_empty()
-                        || row.base_coin.is_empty()
-                        || row.price_place.0.is_none()
-                        || row.price_place.get().fract() != 0.0
-                        || !(0.0..=18.0).contains(&row.price_place.get())
-                        || row.price_end_step.get() <= 0.0
-                        || row.size_multiplier.get() <= 0.0
-                    {
-                        safe_cex_engine::startup::skipped_row(cx);
-                    } else {
-                        let mut mapped = market(&row);
-                        if self.inverse() {
-                            if row.min_lever.get() == 0.0 {
-                                mapped.limits.leverage.min = 1.0;
-                            }
-                            mapped.is_inverse = Some(true);
-                            mapped.limits.amount.max = row
-                                .max_trade_num
-                                .0
-                                .filter(|n| *n > 0.0)
-                                .unwrap_or(f64::INFINITY);
-                            if row.max_lever.get() == 0.0 {
-                                mapped.limits.leverage.max = 20.0;
-                            }
-                        }
-                        if !mapped.precision.price.is_finite() || mapped.precision.price <= 0.0 {
-                            safe_cex_engine::startup::skipped_row(cx);
-                        } else {
-                            rows.push(mapped);
-                        }
-                    }
+            Pending::Discovery { context, rows } => {
+                if cx.validate_background_read_http_delivery(context).is_err() {
+                    return;
                 }
-                Ok(_) => {}
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
-            },
-            Pending::Tickers { rows, .. } => {
-                match serde_json::from_str::<TickerRow>(item) {
-                    Ok(row) if row.has_values() => {
-                        if let Some(m) = cx.store.market_by_id(&row.symbol) {
-                            let mut ticker = Ticker {
-                                id: m.id.clone(),
-                                symbol: m.symbol.clone(),
-                                mark: row.value(TickerField::LastPr).unwrap_or(0.0),
-                                ..Ticker::default()
-                            };
-                            update_ticker(&mut ticker, &row);
-                            ticker.mark = row.value(TickerField::LastPr).unwrap_or(0.0);
-                            // The REST seed uses the UTC change; the live stream uses change24h.
-                            ticker.percentage =
-                                row.value(TickerField::ChangeUtc24h).unwrap_or(0.0) * 100.0;
-                            ticker.funding_time = 0.0;
-                            rows.push(ticker);
+                match rows {
+                    Discovered::Markets(rows) => match serde_json::from_str::<Contract>(item) {
+                        Ok(row) if row.quote_coin == self.quote() => {
+                            if row.symbol.is_empty()
+                                || row.base_coin.is_empty()
+                                || row.price_place.0.is_none()
+                                || row.price_place.get().fract() != 0.0
+                                || !(0.0..=18.0).contains(&row.price_place.get())
+                                || row.price_end_step.get() <= 0.0
+                                || row.size_multiplier.get() <= 0.0
+                            {
+                                safe_cex_engine::startup::skipped_row(cx);
+                            } else {
+                                let mut mapped = market(&row);
+                                if self.inverse() {
+                                    if row.min_lever.get() == 0.0 {
+                                        mapped.limits.leverage.min = 1.0;
+                                    }
+                                    mapped.is_inverse = Some(true);
+                                    mapped.limits.amount.max = row
+                                        .max_trade_num
+                                        .0
+                                        .filter(|n| *n > 0.0)
+                                        .unwrap_or(f64::INFINITY);
+                                    if row.max_lever.get() == 0.0 {
+                                        mapped.limits.leverage.max = 20.0;
+                                    }
+                                }
+                                if !mapped.precision.price.is_finite()
+                                    || mapped.precision.price <= 0.0
+                                {
+                                    safe_cex_engine::startup::skipped_row(cx);
+                                } else {
+                                    rows.push(mapped);
+                                }
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                    },
+                    Discovered::Tickers(rows) => {
+                        match serde_json::from_str::<TickerRow>(item) {
+                            Ok(row) if row.has_values() => {
+                                if let Some(m) = cx.store.market_by_id(&row.symbol) {
+                                    let mut ticker = Ticker {
+                                        id: m.id.clone(),
+                                        symbol: m.symbol.clone(),
+                                        mark: row.value(TickerField::LastPr).unwrap_or(0.0),
+                                        ..Ticker::default()
+                                    };
+                                    update_ticker(&mut ticker, &row);
+                                    ticker.mark = row.value(TickerField::LastPr).unwrap_or(0.0);
+                                    // The REST seed uses the UTC change; the live stream uses change24h.
+                                    ticker.percentage =
+                                        row.value(TickerField::ChangeUtc24h).unwrap_or(0.0) * 100.0;
+                                    ticker.funding_time = 0.0;
+                                    rows.push(ticker);
+                                }
+                            }
+                            Ok(_) | Err(_) => safe_cex_engine::startup::skipped_row(cx),
                         }
                     }
-                    Ok(_) | Err(_) => safe_cex_engine::startup::skipped_row(cx),
                 }
             }
             Pending::Candles { rows, invalid, .. } => match serde_json::from_str::<CandleRow>(item)
@@ -923,26 +860,63 @@ impl Venue for BitgetFutures {
             let _ = cx.finish_http_context(&context);
             return;
         }
-        if discovery_context(&pending).is_some() {
-            self.discovery_response(cx, pending, response);
+        // Contracts and tickers decode and publish only under live custody.
+        if !discovery_delivered(cx, &pending) {
+            retire_discovery(cx, &pending);
             return;
         }
         let valid = serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
             .map_err(|e| e.to_string())
             .and_then(Envelope::checked);
-        if let Err(error) = valid {
+        if valid.is_err() || response.status != 200 {
+            if discovery_context(&pending).is_some() {
+                return self.discovery_failed(cx, &pending, discovery_error(&response));
+            }
+            let error = match valid {
+                Err(error) => error,
+                Ok(_) => format!("Bitget HTTP {}: {}", response.status, response.body),
+            };
             self.on_request_failed(cx, pending, &error);
             return;
         }
-        if response.status != 200 {
-            self.on_request_failed(
-                cx,
-                pending,
-                &format!("Bitget HTTP {}: {}", response.status, response.body),
-            );
-            return;
-        }
         match pending {
+            Pending::Discovery { context, rows } => {
+                let tickers = matches!(rows, Discovered::Tickers(_));
+                let empty = match &rows {
+                    Discovered::Markets(rows) => rows.is_empty(),
+                    Discovered::Tickers(rows) => rows.is_empty(),
+                };
+                if empty {
+                    let _ = cx.finish_http_context(&context);
+                    let message = if tickers {
+                        "Empty Bitget tickers"
+                    } else {
+                        "Empty Bitget catalogue"
+                    };
+                    let error = safe_cex_engine::VenueError::new(message)
+                        .kind(safe_cex_engine::ErrorKind::VenueUnavailable);
+                    return self.public_failed(cx, tickers, error);
+                }
+                match rows {
+                    Discovered::Markets(rows) => cx.store.set_markets(rows),
+                    Discovered::Tickers(mut rows) => {
+                        self.live_tickers.finish(cx.store, &mut rows);
+                        cx.store.set_tickers(rows);
+                    }
+                }
+                self.ticker_index = ticker_index(cx.store);
+                let _ = cx.finish_http_context(&context);
+                if tickers {
+                    self.discovery.succeeded(cx, DiscoveryRead::Tickers);
+                    self.connect(cx, 1);
+                    self.connect(cx, 2);
+                } else {
+                    self.connect(cx, 0);
+                    self.discovery.succeeded(cx, DiscoveryRead::Markets);
+                    self.discovery_read(cx, true);
+                    self.start_private(cx);
+                }
+            }
             Pending::Candles {
                 root,
                 rows,
@@ -964,12 +938,8 @@ impl Venue for BitgetFutures {
         error: &str,
     ) {
         if discovery_context(&pending).is_some() {
-            retire_discovery(cx, &pending);
-            self.public_failed(
-                cx,
-                matches!(pending, Pending::Tickers { .. }),
-                safe_cex_engine::startup::public_response_error(status, None, None),
-            );
+            let error = safe_cex_engine::startup::public_response_error(status, None, None);
+            self.discovery_failed(cx, &pending, error);
         } else {
             self.on_request_failed(cx, pending, error);
         }
@@ -981,14 +951,10 @@ impl Venue for BitgetFutures {
         response: Response<'_>,
     ) {
         if discovery_context(&pending).is_some() {
-            let delivered = discovery_delivered(cx, &pending);
-            retire_discovery(cx, &pending);
-            if delivered {
-                self.public_failed(
-                    cx,
-                    matches!(pending, Pending::Tickers { .. }),
-                    discovery_error(&response),
-                );
+            if discovery_delivered(cx, &pending) {
+                self.discovery_failed(cx, &pending, discovery_error(&response));
+            } else {
+                retire_discovery(cx, &pending);
             }
             return;
         }
@@ -1020,10 +986,7 @@ impl Venue for BitgetFutures {
                 cx.fail(command, error)
             }
             Pending::Trade(request) => self.trade_sign_failed(cx, *request, error),
-            pending @ (Pending::Markets { .. } | Pending::Tickers { .. }) => {
-                retire_discovery(cx, &pending);
-                self.public_failed(cx, matches!(pending, Pending::Tickers { .. }), error);
-            }
+            pending @ Pending::Discovery { .. } => self.discovery_failed(cx, &pending, error),
             Pending::Account {
                 generation,
                 context,
@@ -1052,10 +1015,7 @@ impl Venue for BitgetFutures {
                 let _ = cx.fail_context(&root, error);
             }
             Pending::Identity(root) if deadline => self.identity_failed(cx, &root, error),
-            pending @ (Pending::Markets { .. } | Pending::Tickers { .. }) => {
-                retire_discovery(cx, &pending);
-                self.public_failed(cx, matches!(pending, Pending::Tickers { .. }), error);
-            }
+            pending @ Pending::Discovery { .. } => self.discovery_failed(cx, &pending, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
@@ -1082,14 +1042,10 @@ impl Venue for BitgetFutures {
                     self.resume_trading(cx);
                 }
             }
-            pending @ (Pending::Markets { .. } | Pending::Tickers { .. }) => {
-                retire_discovery(cx, &pending);
-                self.public_failed(
-                    cx,
-                    matches!(pending, Pending::Tickers { .. }),
-                    safe_cex_engine::VenueError::new(error)
-                        .kind(safe_cex_engine::ErrorKind::Network),
-                );
+            pending @ Pending::Discovery { .. } => {
+                let error = safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::Network);
+                self.discovery_failed(cx, &pending, error);
             }
             Pending::Identity(_) => unreachable!(),
         }

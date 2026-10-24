@@ -39,10 +39,9 @@ pub(crate) fn headers(
                     },
                 )
                 .unwrap();
-            let pending = Pending::Markets {
+            let pending = Pending::Discovery {
                 context,
-                rows: vec![],
-                invalid: false,
+                rows: Discovered::Markets(vec![]),
             };
             self.venue.send(
                 cx,
