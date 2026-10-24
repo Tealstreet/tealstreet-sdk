@@ -4415,8 +4415,12 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    /// Outer paths without `finish_event_scope` (start, delivery exit,
+    /// `drain_actions`) still deliver a retire's Bearer fences.
     #[cfg(not(feature = "http-plans"))]
-    fn flush_http_plans(&mut self, _now: f64) {}
+    fn flush_http_plans(&mut self, now: f64) {
+        self.flush_bearer_fences(now);
+    }
 
     #[cfg(not(feature = "http-plans"))]
     fn expire_plan_timer(&mut self, _now: f64, _event: &Event<'_>) -> bool {
@@ -4455,11 +4459,15 @@ impl<V: Venue> Engine<V> {
         self.io.request_contexts.plan_scan_visits()
     }
 
+    /// A Plan-ready callback, the Plan timer, delivery exit and
+    /// `drain_actions` run no `finish_event_scope`: a retire there is fenced
+    /// at this tail, not left queued for a later event.
     #[cfg(feature = "http-plans")]
     fn flush_http_plans(&mut self, now: f64) {
         if self.io.request_contexts.has_plans() {
             self.flush_live_http_plans(now);
         }
+        self.flush_bearer_fences(now);
     }
 
     #[inline(never)]

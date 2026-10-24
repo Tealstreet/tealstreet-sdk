@@ -403,6 +403,25 @@ retires a second Session in the same flush. Composition with combo-5b
   follows the existing signer-header discipline. There is no new host or
   JS zeroization guarantee.
 
+**Phase 2, part 1 (R8, R9, R10 and the outer-path gate).**
+- R8 cannot be a same-leg retry of an unanswered write: `Context::retry`
+  refuses `ReadFailure` for a Mutation, and a resend needs a `ResendGrant`
+  from a `RefusedResend` answer. Two truthful variants are pinned instead:
+  - a released, unanswered write followed by a fenced sibling write on the
+    same command;
+  - a granted resend fenced before release.
+  Both terminals are `Unknown` through `failure_projection`.
+- R9 is a guard: expiry and retire in one event fail the Plan as `Timeout`.
+- R10: one Plan with two bound legs, plus a plain Command. Exactly one
+  terminal per owner, no HTTP, and callback depth 1.
+- Gate: `flush_http_plans` drains `bearer_fenced` at its tail (both feature
+  variants), covering start, delivery exit, the Plan timer and
+  `drain_actions`. Its test retires inside a Plan-ready callback. When
+  `session_scope` (#1896/#1897) lands that retire refuses `State`, so the test
+  moves to another outer trigger, such as a retire in `start`.
+- Still waiting on dependencies: R10b/R10b' (#2037), R11 and the group gate
+  (G2b), R14's refusal half and the `Egress::Session` control (#1896/#1897).
+
 **Engine facts the source must follow:**
 - **The real prepare point.** `queue_managed` emits `HttpAction::Prepare` at
   issue, with headers snapshotted from static slices (`http_lifecycle.rs:180`).

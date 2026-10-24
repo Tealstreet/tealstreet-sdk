@@ -91,6 +91,26 @@ struct Shared {
     /// Session drains observed inside the Preflight owner's callback.
     #[cfg(feature = "http-plans")]
     scoped_drains: Option<usize>,
+    /// This command id admits a Read Plan of `plan_legs` peer calls.
+    #[cfg(feature = "http-plans")]
+    plan_command: Option<u32>,
+    #[cfg(feature = "http-plans")]
+    plan_legs: usize,
+    #[cfg(feature = "http-plans")]
+    plan_wait_ms: u32,
+    #[cfg(feature = "http-plans")]
+    plan: Option<safe_cex_engine::request_context::Plan>,
+    #[cfg(feature = "http-plans")]
+    retire_on_plan_ready: bool,
+    #[cfg(feature = "http-plans")]
+    plan_ready_calls: usize,
+    /// An AmendOrder issues this many bound Mutation legs.
+    write_legs: usize,
+    /// A delivered write is refused `RefusedResend` and resent.
+    resend: bool,
+    /// Venue callbacks in progress, and the most ever nested.
+    depth: usize,
+    max_depth: usize,
     hook_calls: usize,
     issued: Vec<Context>,
     issue_errors: Vec<Error>,
@@ -124,6 +144,22 @@ impl Shared {
             preflight: false,
             #[cfg(feature = "http-plans")]
             scoped_drains: None,
+            #[cfg(feature = "http-plans")]
+            plan_command: None,
+            #[cfg(feature = "http-plans")]
+            plan_legs: 0,
+            #[cfg(feature = "http-plans")]
+            plan_wait_ms: 0,
+            #[cfg(feature = "http-plans")]
+            plan: None,
+            #[cfg(feature = "http-plans")]
+            retire_on_plan_ready: false,
+            #[cfg(feature = "http-plans")]
+            plan_ready_calls: 0,
+            write_legs: 0,
+            resend: false,
+            depth: 0,
+            max_depth: 0,
             hook_calls: 0,
             issued: Vec::new(),
             issue_errors: Vec::new(),
@@ -187,6 +223,22 @@ struct Pending {
 struct Probe {
     shared: Rc<RefCell<Shared>>,
 }
+/// Held for the length of one venue callback.
+struct Depth(Rc<RefCell<Shared>>);
+impl Drop for Depth {
+    fn drop(&mut self) {
+        self.0.borrow_mut().depth -= 1;
+    }
+}
+fn write_policy() -> Policy {
+    Policy {
+        operation: Operation::Mutation,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::DefinitiveRefusal,
+    }
+}
 fn policy(retry: bool, signed: bool) -> Policy {
     Policy {
         operation: Operation::Read,
@@ -209,6 +261,93 @@ const RECIPE_AUTHORIZATION: &[(&str, &str)] = &[
     ("Content-Type", "application/json"),
 ];
 impl Probe {
+    fn enter(&self) -> Depth {
+        let mut shared = self.shared.borrow_mut();
+        shared.depth += 1;
+        shared.max_depth = shared.max_depth.max(shared.depth);
+        Depth(self.shared.clone())
+    }
+    /// A resend passes no Session: it inherits the leg's binding.
+    fn issue_write(&self, cx: &mut Cx<'_, Pending>, context: Context, url: &str, bound: bool) {
+        let session = bound
+            .then(|| self.shared.borrow().session.clone())
+            .flatten();
+        cx.request_managed(
+            context.clone(),
+            session.as_ref(),
+            Method::Post,
+            format!("https://fixture/{url}"),
+            Some("{}".into()),
+            Pending { context },
+        )
+        .map_err(|(_, error)| error)
+        .unwrap();
+    }
+    /// Bound Mutation legs of one command: the root, then sibling legs.
+    fn amend(&self, cx: &mut Cx<'_, Pending>, command: u32) {
+        let root = cx
+            .http_context(Scope::Command(command), write_policy())
+            .unwrap();
+        for leg in 1..self.shared.borrow().write_legs {
+            let context = cx.http_leg_context(&root, write_policy()).unwrap();
+            self.issue_write(cx, context, &format!("write-{leg}"), true);
+        }
+        self.issue_write(cx, root, "write-0", true);
+    }
+    #[cfg(feature = "http-plans")]
+    fn admit_plan(&self, cx: &mut Cx<'_, Pending>) {
+        use safe_cex_engine::request_context::plan::{CallBound, RetryWindow, StepBound};
+        use safe_cex_engine::request_context::{PlanPolicy, PreflightPolicy, PreflightPurpose};
+        let preflight = cx
+            .begin_preflight(PreflightPolicy {
+                purpose: PreflightPurpose::ReadOnly,
+                read_credential: None,
+                write_credential: None,
+            })
+            .unwrap();
+        let (legs, wait_ms) = {
+            let shared = self.shared.borrow();
+            (shared.plan_legs, shared.plan_wait_ms)
+        };
+        let calls = (0..legs)
+            .map(|_| CallBound {
+                timeout_ms: 20_000,
+                attempts: 1,
+                retry_window: RetryWindow::Shared,
+                after_refusal: &[],
+            })
+            .collect::<Vec<_>>();
+        let plan = cx
+            .admit_plan(
+                &preflight,
+                &[StepBound {
+                    wait_ms,
+                    calls: &calls,
+                }],
+                PlanPolicy {
+                    operation: Operation::Read,
+                    credential: None,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .unwrap();
+        let session = self.shared.borrow().session.clone();
+        for slot in cx.plan_slots(&plan).unwrap() {
+            let context = cx.plan_leg_context(&plan, &slot).unwrap();
+            cx.request_managed(
+                context.clone(),
+                session.as_ref(),
+                Method::Get,
+                "https://fixture/plan".into(),
+                None,
+                Pending { context },
+            )
+            .map_err(|(_, error)| error)
+            .unwrap();
+        }
+        self.shared.borrow_mut().plan = Some(plan);
+    }
     /// A retry passes no Session: it inherits the leg's binding.
     fn issue(&self, cx: &mut Cx<'_, Pending>, context: Context, retried: bool) {
         let mut shared = self.shared.borrow_mut();
@@ -354,10 +493,40 @@ impl Venue for Probe {
         shared.session = Some(session);
         shared.retire_timer = Some(timer);
     }
-    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        let Command::FetchAccount { command } = command else {
-            return;
+    fn capture_http_reconciliation(
+        &self,
+        _: &Pending,
+    ) -> Result<safe_cex_engine::request_context::ReconciliationData, Error> {
+        safe_cex_engine::request_context::ReconciliationData::new("bearer-probe".into())
+    }
+    #[cfg(feature = "http-plans")]
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        _: &safe_cex_engine::request_context::Plan,
+    ) {
+        let _depth = self.enter();
+        let retire = {
+            let mut shared = self.shared.borrow_mut();
+            shared.plan_ready_calls += 1;
+            shared.retire_on_plan_ready
         };
+        if retire {
+            self.retire_now(cx);
+        }
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let _depth = self.enter();
+        let command = match command {
+            Command::AmendOrder { command, .. } => return self.amend(cx, command),
+            Command::FetchAccount { command } => command,
+            _ => return,
+        };
+        #[cfg(feature = "http-plans")]
+        if self.shared.borrow().plan_command == Some(command) {
+            self.admit_plan(cx);
+            return;
+        }
         #[cfg(feature = "http-plans")]
         if self.shared.borrow().preflight {
             self.preflight(cx);
@@ -397,12 +566,45 @@ impl Venue for Probe {
         self.issue(cx, root, false);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        let _depth = self.enter();
         if self.shared.borrow().retire_timer == Some(timer) {
             self.retire_now(cx);
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: Response<'_>) {
+        let _depth = self.enter();
         self.shared.borrow_mut().responses += 1;
+        if pending.context.operation() == Operation::Mutation && self.shared.borrow().resend {
+            use safe_cex_engine::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
+            const TIMESTAMP: CodeTable = CodeTable {
+                rows: &[Row {
+                    key: Key::Int(10002),
+                    verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+                    only: None,
+                }],
+                success: &[],
+                unlisted: Verdict::Unknown(None),
+                status: &[],
+            };
+            let native = Native {
+                code: NativeCode::Int(10002),
+                message: "invalid timestamp",
+            };
+            let (_, grant) = cx
+                .http_write_failure(
+                    &pending.context,
+                    &TIMESTAMP,
+                    Some(&native),
+                    "native timestamp refusal",
+                    None,
+                )
+                .unwrap();
+            let resend = cx
+                .http_resend_context(&pending.context, grant.expect("resend grant"))
+                .unwrap();
+            self.issue_write(cx, resend, "resend", false);
+            return;
+        }
         // The sibling leg's delivery only retires; the command stays open for
         // its bound root.
         if self.shared.borrow().retire_on_response {
@@ -412,6 +614,7 @@ impl Venue for Probe {
         let _ = cx.done_context(&pending.context, "[]".into());
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        let _depth = self.enter();
         if self.shared.borrow().retry && self.shared.borrow().issued.len() == 1 {
             let retry = cx
                 .http_retry_context(&pending.context, RetryEvidence::ReadFailure)
@@ -428,6 +631,7 @@ impl Venue for Probe {
         _: Error,
         error: VenueError,
     ) {
+        let _depth = self.enter();
         let second = {
             let mut shared = self.shared.borrow_mut();
             shared
@@ -1044,4 +1248,253 @@ fn control_r13_released_before_retire_still_delivers_its_response() {
     respond(&mut e, NOW + 4., &request);
     assert_eq!(shared.borrow().responses, 1);
     assert!(shared.borrow().failures.is_empty());
+}
+
+/// Every command terminal in `actions`, as `(command, Some(failure))` or
+/// `(command, None)` for a success.
+fn terminals(actions: &[Action]) -> Vec<(u32, Option<VenueError>)> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command, error }) => {
+                Some((*command, Some(error.clone())))
+            }
+            Action::Notice(Notice::CommandDone { command, .. }) => Some((*command, None)),
+            _ => None,
+        })
+        .collect()
+}
+fn amend(e: &mut Engine<Probe>, command: u32) -> Vec<(Preparation, HttpRequest, RoutingIntent)> {
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command,
+            id: "native".into(),
+            price: Some(1.),
+            amount: None,
+        }),
+    );
+    prepares(e)
+}
+fn released(e: &mut Engine<Probe>, now: f64, permit: Permit) -> bool {
+    matches!(e.claim_http(now, permit), Ok(Claim::Released(_)))
+}
+
+/// R8: a Mutation command's first write is released and unanswered; the
+/// Session is retired before its second bound write releases. The fence fails
+/// the second write NotSent, and the command terminal still projects Unknown.
+/// A same-leg retry or resend cannot follow an unanswered write (only a
+/// definitive `RefusedResend` answer grants one), so the second write is a
+/// sibling leg of the same command.
+#[test]
+fn r8_retire_after_an_unanswered_released_write_projects_unknown() {
+    let (mut e, shared) = engine(|shared| {
+        shared.write_legs = 2;
+        shared.next_generation_token = Some("C");
+    });
+    let issued = amend(&mut e, 1);
+    assert_eq!(issued.len(), 2);
+    let mut first = None;
+    let mut second = None;
+    for (preparation, request, intent) in issued {
+        assert_eq!(intent, RoutingIntent::Primary);
+        let packet = prepared(&mut e, NOW + 1., preparation).expect("bound write");
+        assert_eq!(authorization(&packet.1), Some("Bearer A"));
+        if request.url.ends_with("/write-0") {
+            first = Some(packet.0);
+        } else {
+            second = Some(packet.0);
+        }
+    }
+    assert!(released(&mut e, NOW + 2., first.expect("first write")));
+    e.drain_actions().for_each(drop);
+    retire(&mut e, &shared, NOW + 3.);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let fenced = &shared.borrow().failures;
+    assert_eq!(fenced.len(), 1);
+    assert_eq!(fenced[0].outcome, Some(Outcome::NotSent), "the attempt");
+    let terminals = terminals(&actions);
+    assert_eq!(terminals.len(), 1, "one command terminal: {terminals:?}");
+    let (command, error) = &terminals[0];
+    assert_eq!(*command, 1);
+    assert_eq!(
+        error.as_ref().and_then(|error| error.outcome),
+        Some(Outcome::Unknown),
+        "a released, unanswered write was relabelled by the Session retire"
+    );
+    assert!(!released(&mut e, NOW + 4., second.expect("second write")));
+}
+
+/// R8, resend: a write refused `RefusedResend` is resent through
+/// `http_resend_context`, inheriting the binding; the Session is retired
+/// before the resend releases. The resend fails NotSent, and the command
+/// terminal is the journal's projection (Unknown), not NotSent.
+#[test]
+fn r8_retire_before_a_bound_resend_releases_projects_unknown() {
+    let (mut e, shared) = engine(|shared| {
+        shared.write_legs = 1;
+        shared.resend = true;
+        shared.next_generation_token = Some("C");
+    });
+    let issued = amend(&mut e, 1);
+    let (permit, request) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound write");
+    assert!(released(&mut e, NOW + 2., permit));
+    e.handle(
+        NOW + 3.,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    let resent = prepares(&mut e);
+    assert_eq!(resent.len(), 1, "the refused write was resent");
+    assert_eq!(resent[0].2, RoutingIntent::Primary);
+    let (permit, request) = prepared(&mut e, NOW + 4., resent[0].0).expect("bound resend");
+    assert!(request.url.ends_with("/resend"));
+    assert_eq!(authorization(&request), Some("Bearer A"));
+    retire(&mut e, &shared, NOW + 5.);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(shared.borrow().failures.len(), 1);
+    let terminals = terminals(&actions);
+    assert_eq!(terminals.len(), 1, "one command terminal: {terminals:?}");
+    assert_eq!(
+        terminals[0].1.as_ref().and_then(|error| error.outcome),
+        Some(Outcome::Unknown)
+    );
+    assert!(!released(&mut e, NOW + 6., permit));
+}
+
+/// R9 guard: the Plan's root expiry and the Session retire land in the same
+/// event. The Plan fails as expired, never relabelled by the retire.
+#[cfg(feature = "http-plans")]
+#[test]
+fn r9_plan_expiry_and_retire_in_one_event_fail_the_plan_as_expired() {
+    let (mut e, shared) = engine(|shared| {
+        shared.plan_command = Some(1);
+        shared.plan_legs = 1;
+        shared.next_generation_token = Some("C");
+    });
+    let legs = ask(&mut e, 1);
+    assert_eq!(legs.len(), 1);
+    let (permit, request) = prepared(&mut e, NOW + 1., legs[0].0).expect("bound leg");
+    assert_eq!(authorization(&request), Some("Bearer A"));
+    let deadline = shared.borrow().plan.as_ref().expect("plan").deadline();
+    retire(&mut e, &shared, deadline);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let terminals = terminals(&actions);
+    assert_eq!(terminals.len(), 1, "one Plan terminal: {terminals:?}");
+    let error = terminals[0].1.as_ref().expect("the Plan failed");
+    assert_eq!(terminals[0].0, 1);
+    assert_eq!(
+        error.kind,
+        Some(ErrorKind::Timeout),
+        "the retire relabelled an expired Plan: {error:?}"
+    );
+    assert!(!released(&mut e, deadline + 1., permit));
+    assert!(terminals_after(&mut e).is_empty());
+}
+
+#[cfg(feature = "http-plans")]
+fn terminals_after(e: &mut Engine<Probe>) -> Vec<(u32, Option<VenueError>)> {
+    terminals(&e.drain_actions().collect::<Vec<_>>())
+}
+
+/// R10: one Plan with two bound unreleased legs and one plain Command with a
+/// bound request, all on one Session. The retire fails each owner once, sends
+/// nothing, and never nests a venue callback.
+#[cfg(feature = "http-plans")]
+#[test]
+fn r10_retire_fails_each_owner_once_without_http_or_reentry() {
+    let (mut e, shared) = engine(|shared| {
+        shared.plan_command = Some(1);
+        shared.plan_legs = 2;
+        shared.next_generation_token = Some("C");
+    });
+    let legs = ask(&mut e, 1);
+    assert_eq!(legs.len(), 2, "two peer Plan legs");
+    let command = ask(&mut e, 2);
+    assert_eq!(command.len(), 1);
+    let permits = legs
+        .iter()
+        .chain(&command)
+        .map(|(preparation, ..)| {
+            let (permit, request) = prepared(&mut e, NOW + 1., *preparation).expect("bound packet");
+            assert_eq!(authorization(&request), Some("Bearer A"));
+            permit
+        })
+        .collect::<Vec<_>>();
+    shared.borrow_mut().max_depth = 0;
+    retire(&mut e, &shared, NOW + 2.);
+    let mut actions = e.drain_actions().collect::<Vec<_>>();
+    for permit in permits {
+        assert!(!released(&mut e, NOW + 3., permit));
+    }
+    actions.extend(e.drain_actions());
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Http(_))),
+        "a fenced packet released"
+    );
+    let mut owners = terminals(&actions)
+        .into_iter()
+        .map(|(command, error)| {
+            let error = error.expect("each owner fails");
+            assert_eq!(error.outcome, Some(Outcome::NotSent));
+            command
+        })
+        .collect::<Vec<_>>();
+    owners.sort_unstable();
+    assert_eq!(owners, [1, 2], "one terminal per owner");
+    assert_eq!(
+        shared.borrow().max_depth,
+        1,
+        "a venue callback ran inside another"
+    );
+}
+
+/// Source gate: a retire inside a Plan-ready callback on the Plan timer path,
+/// which runs no `finish_event_scope`, delivers its fence in the same
+/// `handle()` call rather than leaving it queued for a later event.
+#[cfg(feature = "http-plans")]
+#[test]
+fn gate_retire_in_a_plan_ready_callback_is_fenced_in_the_same_handle() {
+    let (mut e, shared) = engine(|shared| {
+        shared.plan_command = Some(1);
+        shared.plan_legs = 1;
+        shared.plan_wait_ms = 1_000;
+        shared.retire_on_plan_ready = true;
+        shared.next_generation_token = Some("C");
+    });
+    let command = ask(&mut e, 2);
+    let (permit, _) = prepared(&mut e, NOW + 1., command[0].0).expect("bound packet");
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 1 }));
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms == NOW + 1_000. => Some(timer),
+            _ => None,
+        })
+        .expect("the Plan's readiness timer");
+    shared.borrow_mut().max_depth = 0;
+    e.handle(NOW + 1_000., Event::TimerFired { timer });
+    {
+        let shared = shared.borrow();
+        assert_eq!(shared.plan_ready_calls, 1);
+        assert!(shared.retired.is_some(), "the Plan-ready callback retired");
+        assert_eq!(
+            shared.failures.len(),
+            1,
+            "the retire's fence is still queued after the Plan timer event"
+        );
+        assert_eq!(shared.max_depth, 1);
+    }
+    assert!(!released(&mut e, NOW + 1_001., permit));
+    let terminals = terminals_after(&mut e);
+    assert_eq!(terminals.len(), 1);
+    assert_eq!(terminals[0].0, 2);
 }
