@@ -633,3 +633,27 @@ Capacity delivery past each failing kind assertion remains a mandatory GREEN
 post-cutover gate, not original execution evidence. Only this plan and the new
 test file differ from base; production, all inventories, key-selection and
 combo-5b source are unchanged. No runtime implementation or prune is applied.
+
+
+Production authorization and plan/control review checkpoint: the overseer
+approved the four-site implementation after hcmq3f's bounded review of exact
+53cf1c7aac3. Actual candle adoption #1870 10d01de52795 is now genuinely merged
+in f15c0e601a5; history.rs and the original twelve controls are unchanged by
+that integration. The source patch is SHA-256
+eba3e3f9fbc5c6835cca4e25691867de77dd9df9e5160fb11765aa445e01a51d.
+It replaces only the four initial refusals with the full receipt-aware Read
+helper above. Inventory removes only the four one-count history fingerprints;
+the signed preparation failure 0451c299 remains, as do all incoming candle
+prunes and every other inventory map. Applied-source preservation review and
+fresh CI remain separate from the cleared plan/control evidence.
+
+Applied-source local evidence: all twelve original controls are byte-identical
+to 740d55a3b04 and now PASS, including all four capacity prior-owner real
+Prepare/Bind/Claim/response deliveries. Scoped Backpack native tests pass
+185 with zero failures and one pre-existing ignored repair control. Strict
+all-target Clippy and formatting pass with CARGO_BUILD_JOBS=4, one local Cargo
+job at a time. The entire history source matches the prepared patch result;
+exactly five own paths differ from actual #1870, with every other source and
+map preserved. This is local execution/preservation evidence; independent
+applied-source review and fresh CI remain separate readiness gates.
+Bans and all inventory scanner/ratchet controls also pass on this tree.
