@@ -7504,3 +7504,15 @@ work retain explicit legacy ownership until their shared owner adoptions; signin
 does not provide Mutation journal/ResendGrant or Plan/history authority. The stable
 legacy request funnel remains a remove-before-master obligation. SDK/NX history
 outer-wait behavior is unchanged by this single command-read adoption.
+
+
+## Backpack initial local history refusals
+
+Backpack rejects unsupported client-order-ID lookup, non-funding income kinds,
+invalid history time bounds and unknown requested markets through the original
+command receipt and a keyless Read Context. Missing or expired receipts use the
+shared rejection causes; valid admission preserves each native message, absent
+kind and absent write outcome. The Read policy has a 20-second maximum, no
+pacing and Never retry. Refusals create no transport or paging work, and retain
+native validation precedence. Supported history requests use their existing
+selection, signing, paging and completion paths.
