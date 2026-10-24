@@ -2794,3 +2794,38 @@ owns deadlines, typed causes and strict root expiry; no venue custody algorithm
 is added. Standalone spot and already-managed cached local lookup stay outside
 this conversion. Exact own shrink:history.rs9F/11O, including five conservative
 macro occurrences; shared Account physical send sites remain counted.
+
+## OKX history managed caller-root custody
+
+History now consumes shared caller-root expiry/refusal and ReadCompletion with
+exact page delivery validation before native DATA/progress mutation. Native
+pacing derives every20s page from the same original root; retirement drops only
+that Owner's delayed history entries. Engine-owned whole-root expiry is strict;
+ordinary live-root released failures retain the native discard-prefix soft[]
+query shape. Provider/preparation and synchronous issuance refusal remain hard
+failures; no release inference, root timer, retry loop or error table is added.
+The exact prune is history.rs14F/18O plus History's lib signing-failure1F/1O.
+Discovery's two list/sign sites and the OKX staging entry remain because actual
+Markets/Tickers consumers still use them, confirmed with the signer owner.
+
+## Crypto.com read-command Context adoption
+
+~~Public candle commands publish numeric terminals after direct HTTP, without
+shared preparation/root-deadline custody; five local history terminals bypass
+Context admission.~~ Candle Pending carries its issued Read root through managed
+release and shared delivery validation, then uses Context finalizers. Local
+history branches alone borrow genuine entry without a numeric fallback; valid
+native history remains untouched. Exactly nine occurrences/seven entries are
+removed,30/27 becomes21/20. No background discovery, private signer, account,
+trading or shared-policy migration is implied. Architecture gate No: all
+release, lifetime, root-validation and finalization authority stays in the engine.
+
+### Crypto.com Read adoption on actual shared seams
+
+The five local history branches now invoke genuine entry directly; the historical
+finish_local_history issuer/finalizer wrapper is removed. One pure policy serves
+local terminals and unsigned candles. The shared public-auth-health fix is actual:
+the original public_typed_route_auth_errors_keep_metadata_without_auth_health_evidence
+control preserves AuthInvalid/Expired/Permission metadata while health stays0,
+without any venue workaround. Exact seven-fingerprint/nine-occurrence prune is
+unchanged; discovery's shared get sender and every private/retrying site remain.

@@ -1406,3 +1406,69 @@ Focused Hyperliquid+Binance suites pass568 tests/45 targets; the request-context
 checker unit suite passes15. Full inventory provenance awaits the replacement
 #1976 composition carrying current incoming Aster/OKX prunes. Independent source, caller
 and full-map reviews and fresh CI remain required before freezing this consumer.
+
+## OKX history caller-root controls
+
+Revised test-only916a3e65f5a runs15 controls on unchanged OKX production:9 genuine
+assertion REDs and6 native positives, zero ignored. This retains the original
+fourteen-control checkpoint and updates two whole-root expiry expectations to
+the newer strict engine contract; the added parked-root timer assertion pins
+the missing shared tracked-root behavior. Subsequent review counts all correlated
+terminals and forbids owned incompleteness on expiry. The implementation target
+now passes20 controls, adding Primary preparation intent, pre-release versus
+released20s child expiry, typed preparation metadata (query/lookup/public), real
+registry-capacity refusal at paced dequeue with peer preservation, and retired
+pacing/late-data isolation after command-ID reuse.
+
+Existing17 history,8 lookup and5 dispatch-signer controls pass with financial,
+identity, signature and absence assertions retained. Fixtures perform actual
+managed preparation; deferred-provider refusal drives the route-then-sign seam
+explicitly, since the immediate fixture deliberately rejects parked signing.
+History response clocks use their original relative offsets on the command's
+absolute epoch instead of running backward. Primary physical routeNone is checked
+as the host's default primary route, and the dedicated intent control proves the
+same primary egress before signing. Fresh complete native, strict/fmt and inventory
+provenance results are recorded in the plan checkpoint; CI and replacement#1976
+composition remain separate readiness gates.
+
+## Crypto.com managed candles and local history controls
+
+Original regression commit cc2916a8037 precedes source edits. Fixture correction
+b89ca9aaa52 permits only engine Cancel cleanup and preserves native streamed
+malformed-body behavior; its independent original-source rerun proves nine
+assertion REDs and seven native controls, with no compile failure counted. All
+sixteen pass after the cutover. The discarded Internal expectation on ordinary
+malformed text is explicitly excluded from RED evidence.
+
+Actual managed book peers fill256 owners; local and candle admissions refuse
+without dispatch, then recover after one peer settles. Controls cover invalid
+clocks/finite ID reuse, single preparation/bind/claim, parked/released expiry,
+stale callbacks, typed setup/network errors, native full error fields/auth health,
+raw candle order/timestamps/numeric coercion, all timeframes/live-UAT roots and
+credential combinations. All five local branches, native validation precedence,
+explicitly ranged Income limit0, and valid private/public history continuations
+remain controlled. Exact scanner prune removes only Crypto lib/history entries;
+no existing assertion is removed. Full native/replay/size verification follows.
+Local Crypto.com/Binance verification passes432 tests across41 targets, strict
+Clippy/fmt and fifteen ratchet controls. A later independent-review callback
+control exposes the engine's credential-free public typed-error auth-health
+accounting defect (health1 versus0); shared-owner closure remains required.
+The adapter preserves kind/metadata and adds no local demotion or exemption.
+
+### Crypto.com refreshed original and managed controls
+
+The test-only original branch is genuinely merged onto actual6a6845c4491; its
+expanded checkpoint1d576566cb4 runs both targets with --no-fail-fast and proves
+16 behavioral assertion REDs plus seven native positives, zero ignored. Seven
+added controls pin private range/nanosecond and unsupported-interval admission
+at bad clock/full capacity, retained genuine peers and real settlement recovery,
+and stale bind/item/failure/timer isolation with a distinct exact replacement row.
+The original public-auth-health regression from27b051a8907 is retained verbatim
+and passes against the actual shared fix. Managed targets pass24 controls.
+
+One original working expectation is intentionally updated: malformed delivered
+text at200 keeps its exact message but now carries shared Internal/NotSent. The
+unchanged native baseline is preserved in the original checkpoint; this change
+is declared in CALLERS rather than hidden by stripping the engine's typed cause.
+HTTP500 still returns its native string-only error. Existing financial assertions
+remain; tests/public.rs only drives the genuine prepared executor at its old clocks.

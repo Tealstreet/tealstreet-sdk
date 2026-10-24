@@ -6477,6 +6477,77 @@ it only against its own family's declaration. OKX keeps its exact concatenation,
 MAC, receipt and external wire. Per-alias actual-WASM hosted and native-login
 tests run in CI only; no live capture is claimed.
 
+## OKX history caller-root custody
+
+All four OKX aliases admit history, income, public trades and client-ID lookup
+through a Read root at the exact caller receipt deadline. The absent host wait
+is stamped120000ms at engine receipt; configured/per-call waits keep their raw
+absolute deadline, and a missing receipt gets one typed Read refusal with no
+outcome or fallback. Native local[]/lookup validation still follows admission.
+
+Each physical page has a20s/Never child minted at its actual native send/dequeue
+boundary, capped by that root. Native100ms orders/income pacing, immediate fills
+archive fallback and EEA product transitions stay unchanged. Ordinary signed
+reads retain Secondary else Primary, client-ID lookup Primary, and public trades
+stay unsigned. Demo headers, exact paths/query bytes and dispatch recipes are
+unchanged. Hosts must perform managed route preparation and final release;
+managed Primary intent uses the host's default primary egress (physical routeNone).
+
+Whole-root expiry is strict: one Timeout with no financial outcome, rows,
+INCOMPLETE marker or soft[]; parked continuations and late DATA cannot resume or
+finish a reused command. Ordinary released page transport/HTTP/parse failure or
+a child-only timeout while the root is live still emits the native command_error
+then soft[] for queries, discarding every prior page. Lookup rejects instead of
+claiming absence. Provider/preparation refusals before release are strict typed NotSent failures.
+Synchronous child/submission refusals are also strict, with the shared Read
+projection (outcome None). Native
+lookup codec errors retain their untyped kind. Serialization errors finalized
+through ReadCompletion use the shared Internal classification.
+
+fetchHistoricalFills, fetchHistoricalOrders, fetchIncomeHistory and its range
+variant, fetchPublicTrades and findOrderByClientOrderId use this bound. Native
+PAGE100, orders cap50, income cap200 per product, EEA SWAP/FUTURES composition,
+decimal ID cursors, sorting, dedup, fee/PnL decomposition and contract conversion
+are unchanged. Plain page-cap/stall results retain their own incomplete notice;
+EEA composite cap/stall still rejects. Only successful native51603 is definitive
+lookup absence. FetchClosedPositions/okxJournal remains its separate unchanged
+source. Discovery still uses the retained legacy list/sign funnel.
+
+## Crypto.com candle and local-history read ownership
+
+fetchCandles uses unsigned Public managed HTTP with one physical attempt and a
+20-second engine deadline spanning preparation and response. Custom transports
+must drive prepare, bind and the final engine claim before sending; this candle
+path supplies no legacy-request fallback. Legacy unsigned
+HTTP relied on the host timeout after dispatch; preparation now consumes the
+same immutable command bound. Expiry/transport failures preserve typed Timeout/
+Network with public-read NotSent. Initial invalid-time/capacity refusals retain
+typed InvalidInput/Internal and no outcome. Native URL/timeframe mapping, raw
+bounds and candle timestamps/order, ignored limit and numeric-string parsing
+remain unchanged. Native HTTP/envelope/row/missing-list errors retain full string
+error fields and auth-health isolation; no public401/403/40101 auth retry is added.
+Undecodable text remains the native stream-list string at200 and HTTP string at500.
+
+Only five synchronous history terminals borrow shared entry and finalize a
+Context. Finite native errors/[] and validation order stay exact; invalid engine
+time or owner-capacity exhaustion gives one typed engine refusal instead.
+fetchHistoricalFills/fetchHistoricalOrders, fetchIncomeHistory/fetchIncomeHistoryRange,
+fetchPublicTrades and findOrderByClientOrderId consumers retain all successful
+native history signing/pagination/coverage paths. Explicitly bounded income
+with caller limit0 still dispatches native HTTP. This is not managed network
+history or signer adoption.
+
+### Crypto.com current shared failure contract
+
+Managed delivered text without the expected list at HTTP200 retains the native
+message and now carries the shared engine Internal kind, with the established
+public-read NotSent outcome. HTTP500 retains its native HTTP-error string.
+This follows the existing typed undecodable-response seam; the adapter does not
+demote the kind to mimic legacy string-only callbacks. The20s Context lifetime
+is explicitly a new admission-through-preparation/response whole-command bound,
+distinct from the old host's physical HTTP timeout fallback. Raw candle t/order
+and malformed numeric-string-to-zero coercion remain unchanged.
+
 ### Bitget caller adoption: candles, identity, account reads and trade entry (slice 1)
 
 This covers `bitget`, `bitgetusdc` and `bitgetinverse`.
