@@ -393,3 +393,229 @@ fn a_non_rate_limited_http_error_preserves_its_native_error_and_warning() {
     let out = reply(&mut e, &request, 1001., 500, "", "bad");
     failure_message(&out.actions, 7, "HTTP 500: bad");
 }
+
+#[test]
+fn delivered_non_utf8_candle_bytes_are_strict_internal_with_one_warning() {
+    let mut e = engine();
+    let request = ask(&mut e, 1000., 7, 120_000, false).requests.remove(0);
+    e.handle(
+        1001.,
+        Event::HttpStart {
+            request: request.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        1002.,
+        Event::HttpChunk {
+            request: request.id,
+            data: b"\xff",
+        },
+    );
+    e.handle(
+        1003.,
+        Event::HttpEnd {
+            request: request.id,
+        },
+    );
+    let out = drain(&mut e, 1003.);
+    internal(&out.actions, 7);
+    let message = out
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => {
+                Some(error.message.as_str())
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(out.actions.iter().filter(|a| terminal(a, 7)).count(), 1);
+    warning(&out.actions, message);
+}
+
+#[test]
+fn staged_candles_are_discarded_at_root_expiry_and_late_end_is_inert() {
+    let mut e = engine();
+    let request = ask(&mut e, 1000., 7, 100, true).requests.remove(0);
+    e.handle(
+        1001.,
+        Event::HttpStart {
+            request: request.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    let body = format!("{},", ROWS.strip_suffix(']').unwrap());
+    e.handle(
+        1002.,
+        Event::HttpChunk {
+            request: request.id,
+            data: body.as_bytes(),
+        },
+    );
+    assert!(!drain(&mut e, 1002.).actions.iter().any(|a| terminal(a, 7)));
+    e.handle(1100., Event::PollScaleChanged { scale: 1. });
+    timeout(&drain(&mut e, 1100.).actions, 7);
+    let next = ask(&mut e, 1101., 7, 5000, false).requests.remove(0);
+    e.handle(
+        1102.,
+        Event::HttpEnd {
+            request: request.id,
+        },
+    );
+    assert!(!drain(&mut e, 1102.).actions.iter().any(|a| terminal(a, 7)));
+    let out = reply(&mut e, &next, 1103., 200, "", "[]");
+    success(&out.actions, 7, "[]");
+}
+
+#[test]
+fn physical_candle_timeout_keeps_its_kind_and_allows_same_id_reuse() {
+    let mut e = engine();
+    let out = ask(&mut e, 1000., 7, 120_000, false);
+    let request = out.requests[0].id;
+    let timer = out
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 21_000. => Some(*timer),
+            _ => None,
+        })
+        .expect("physical child timer");
+    e.handle(21_000., Event::TimerFired { timer });
+    timeout(&drain(&mut e, 21_000.).actions, 7);
+    let next = ask(&mut e, 21_001., 7, 5000, false).requests.remove(0);
+    e.handle(
+        21_002.,
+        Event::HttpFailed {
+            request,
+            error: "late old failure",
+        },
+    );
+    assert!(
+        !drain(&mut e, 21_002.)
+            .actions
+            .iter()
+            .any(|a| terminal(a, 7))
+    );
+    success(
+        &reply(&mut e, &next, 21_003., 200, "", "[]").actions,
+        7,
+        "[]",
+    );
+}
+
+#[test]
+fn held_final_candle_claim_cannot_release_at_root_expiry() {
+    let mut e = engine();
+    e.handle_command(
+        1000.,
+        Command::FetchCandles {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            interval: Interval::M1,
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        },
+        Some(100),
+    )
+    .unwrap();
+    let (preparation, request) = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => Some((preparation, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("managed prepare");
+    e.http_prepared(
+        1001.,
+        preparation,
+        Prepared {
+            id: request.id.0,
+            expires_at: None,
+        },
+    );
+    let permit = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("held bind");
+    assert!(!matches!(
+        e.claim_http(1100., permit),
+        Ok(Claim::Released(_))
+    ));
+    let out = drain(&mut e, 1100.);
+    timeout(&out.actions, 7);
+    assert!(out.requests.is_empty());
+}
+
+#[test]
+fn candle_preparation_refusal_keeps_typed_not_sent_and_has_no_auth_evidence() {
+    let mut e = engine();
+    e.handle_command(
+        1000.,
+        Command::FetchCandles {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            interval: Interval::M1,
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        },
+        Some(1000),
+    )
+    .unwrap();
+    let preparation = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("managed preparation");
+    let cause = safe_cex_engine::VenueError::new("public candle preparation refused")
+        .kind(ErrorKind::AuthInvalid)
+        .venue_code("route-refused")
+        .venue_message("host route unavailable")
+        .outcome(safe_cex_engine::Outcome::NotSent);
+    e.http_preparation_failed(
+        1001.,
+        preparation,
+        safe_cex_engine::request_context::Error::Invalid,
+        cause.clone(),
+    );
+    let out = drain(&mut e, 1001.);
+    let errors: Vec<_> = out
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors, vec![&cause]);
+    assert_eq!(out.actions.iter().filter(|a| terminal(a, 7)).count(), 1);
+    warning(&out.actions, &cause.message);
+    assert!(out.requests.is_empty());
+    assert_eq!(out.claimed, 0);
+    assert!(!out.actions.iter().any(|a| matches!(
+        a,
+        Action::Sign { .. } | Action::Notice(Notice::Deactivate | Notice::AccountAuth { .. })
+    )));
+}

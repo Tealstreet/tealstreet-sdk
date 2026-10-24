@@ -11,8 +11,11 @@ fn engine() -> Engine<WeexFutures> {
     })
 }
 fn response(e: &mut Engine<WeexFutures>, id: RequestId, body: &str) {
+    response_at(e, id, 1_773_295_700_000.0, body);
+}
+fn response_at(e: &mut Engine<WeexFutures>, id: RequestId, now: f64, body: &str) {
     e.handle(
-        1_773_295_700_000.0,
+        now,
         Event::HttpResponse {
             request: id,
             response: Response {
@@ -323,8 +326,9 @@ fn malformed_envelopes_cannot_commit_streamed_markets() {
 #[test]
 fn requested_candles_decode_variable_length_rows_and_sort_by_open_time() {
     let (mut e, _) = started();
+    let now = 1_773_295_700_001.0;
     e.handle(
-        1.0,
+        now,
         Event::Command(Command::FetchCandles {
             command: 8,
             symbol: "BTCUSDT".into(),
@@ -334,12 +338,13 @@ fn requested_candles_decode_variable_length_rows_and_sort_by_open_time() {
             to_ms: Some(1_700_000_120_000.0),
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
     let id = request(actions.clone(), "historyKlines");
     assert!(actions.iter().any(|a| matches!(a, Action::Http(r) if r.url.contains("limit=100") && r.url.contains("priceType=LAST"))));
-    response(
+    response_at(
         &mut e,
         id,
+        now + 1.,
         r#"[[1700000060000,"3572.1","3574","3571.8","3573.4","18.2"],[1700000000000,"3571","3573","3570","3572","10",1700000059999,"35720",9,"5","17860"]]"#,
     );
     let result = e
@@ -390,15 +395,16 @@ fn active_tickers_send_incremental_diffs_and_identical_updates_send_nothing() {
 #[test]
 fn public_candle_reads_wait_for_the_shared_ip_ban() {
     let (mut e, _) = started();
+    let now = 1_773_295_700_000.0;
     e.handle(
-        10.0,
+        now + 10.,
         Event::Command(Command::SubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
     );
     let depth = request(e.drain_actions().collect(), "/depth");
     e.handle(
-        11.0,
+        now + 11.,
         Event::HttpResponse {
             request: depth,
             response: Response {
@@ -410,7 +416,7 @@ fn public_candle_reads_wait_for_the_shared_ip_ban() {
     );
     e.drain_actions().for_each(drop);
     e.handle(
-        12.0,
+        now + 12.,
         Event::Command(Command::FetchCandles {
             command: 9,
             symbol: "BTCUSDT".into(),
@@ -421,16 +427,23 @@ fn public_candle_reads_wait_for_the_shared_ip_ban() {
         }),
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+    );
     let timer = actions
         .into_iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, .. } => Some(timer),
+            Action::SetTimer { timer, at_ms } if at_ms == now + 2011. => Some(timer),
             _ => None,
         })
         .unwrap();
-    e.handle(2011.0, Event::TimerFired { timer });
-    request(e.drain_actions().collect(), "/market/klines");
+    e.handle(now + 2011., Event::TimerFired { timer });
+    request(
+        safe_cex_engine::test_support::prepared_actions(&mut e, now + 2011.),
+        "/market/klines",
+    );
 }
 #[test]
 fn null_or_malformed_public_rows_are_skipped_without_stopping_startup() {

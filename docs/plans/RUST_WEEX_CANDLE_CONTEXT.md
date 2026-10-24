@@ -108,8 +108,12 @@ for a typed failure callback; reject the exact retained root while it is live,
 and let already-retired generations drop inertly. Root expiry never recovers.
 The ordinary response gate still precedes malformed-row handling
 (`malformed REST row`) and non-429 HTTP handling (`HTTP {status}: {body}`).
-Retain each of those native messages and warnings, without adding a new kind
-to native row/status errors. No streamed failure can publish staged candles.
+Retain each of those native messages and warnings. The shared ReadCompletion
+projection supplies Internal when a native string failure has no kind; this
+also affects native row/status and local unsupported-interval errors. Existing
+typed causes and outcomes are preserved. Record this classification in CALLERS
+and obtain native source review rather than claim the untyped shape unchanged.
+No streamed failure can publish staged candles.
 
 ## Original assertion checkpoint
 
@@ -160,3 +164,34 @@ missing Internal kind: `(None, None)` versus `(Some(Internal), None)`. Malformed
 row and non-429 HTTP message/warning controls pass. The pause helper additionally
 pins one native Warn REQUEST_FAILED. Total: eight assertion REDs and eight
 GREEN controls, zero ignored or setup failures; production remains base-exact.
+
+## Local production source checkpoint
+
+After native plan CLEAR at `e8e39b7b135`, the local source uses one original
+ReadCompletion, an optional physical Context and the native staged candle rows.
+Every callback validates delivery before row decode or response side effects;
+typed failures retire the child and reject the original live root. The shared
+ReadCompletion preserves typed fields and supplies Internal for native untyped
+string failures, including the local unsupported-interval message.
+
+The original 16 assertions are unchanged and now GREEN. Five added controls
+cover delivered non-UTF8 bytes, staged rows discarded at root expiry with late
+End/same-ID reuse, physical Timeout/reuse, held final Claim at expiry, and exact
+typed preparation refusal without signing/auth/deactivation. The UTF8 control
+certifies real non-UTF8 ingress, not a claim about one particular internal branch.
+Native public candle fixtures use managed drain and live monotonic timestamps;
+their exact financial output and WS interval assertions are retained.
+
+Only WEEX lib, the two candle-related test files and this standalone plan change.
+To honor the requested zero overlap with combo-5b, its shared inventory and
+RUST_CUTOVER_CALLERS.md remain untouched. A source-derived artifact confirms
+exactly the three declared removed occurrences, zero additions; apply that prune
+and the caller entry after the train's shared files are released. This local
+checkpoint is not READY and cannot claim inventory/CI/landing clearance yet.
+The original source compile import and a missing preparation-fixture argument
+were corrected; neither is counted as assertion RED evidence.
+
+Scoped execution: candle_context 21/21 and public 15/15 pass, zero ignored;
+Clippy on those two changed targets with warnings denied and scoped rustfmt pass.
+All builds use CARGO_BUILD_JOBS=4 and run serially. No local all-feature,
+workspace, CPU benchmark or WASM build was run for this checkpoint.
