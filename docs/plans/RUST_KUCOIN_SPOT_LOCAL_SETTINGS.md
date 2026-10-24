@@ -54,11 +54,15 @@ lands first. No other lane claims this file. Signer branch remains plan/RED-only
 
 1. Commit this plan and independently review native/API/collision fit.
 2. Commit compiling original assertion REDs against unchanged native source:
-   all three commands refuse capacity/missing/sub-ms receipt before projection;
+   all three commands refuse command-owner capacity and sub-ms/expired receipts before projection;
    duplicate id preserves its original live owner and Store. Working controls
    pin exact [] plus native fields/no-ops/unknown symbols, keyless/public-only/
-   keyed precedence and zero HTTP/signing. Capacity comes from 256 genuine
-   Background peers in a separate callback, never a fabricated tested entry.
+   keyed precedence and zero HTTP/signing. Capacity comes from 256 genuinely admitted command owners, each in its own
+   callback. A working control pins that 256 Background Contexts do not block this
+   Context-free seam. Engine::handle now supplies a default receipt (#2004), so
+   missing-receipt defense remains shared-engine coverage, not a native receipt.
+   Sub-ms/expired controls advance the exposed callback clock after genuine
+   receipt ingress; they do not create a Context or alter the receipt.
 3. Replace the two branches, prune only that fingerprint, add CALLERS/AUDITS/
    QUALITY, rerun controls and scoped KuCoin/Binance/strict/fmt and both ratchets.
 4. Independent source/adversarial, caller and full-map reviews, draft PR and full
