@@ -2957,3 +2957,12 @@ read with exact delivery validation and retirement before fallback/retry. No
 signer, private authority, session or engine policy is changed. Original new
 targets execute seven native controls PASS and15 intended assertion REDs, zero
 ignored. Exact own prune is four singleton occurrences across three keys.
+
+### Paradex config/local-entry original controls
+
+Plan b29ea97d0d4, original e743120ab7b: 22 compiling assertion REDs and four
+working controls against unchanged actual77f124 source/map, zero ignored.
+All26 original assertions pass with the seven-site implementation. This receipt
+covers real retained-peer capacity, native metadata, duplicate custody, receipt
+expiry and config Prepare/Bind/Claim/expiry/retry; CI and independent source
+review are separate gates.

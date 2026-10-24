@@ -1595,3 +1595,11 @@ preclaim/released expiry, failed streamed prefixes and inert stale/duplicate wor
 A255-peer registry-pressure control forces each catalog attempt to retire before
 fallback/retry and successful slot reuse; expiry cannot conceal a root leak.
 Existing startup fixtures retain their assertions while using shared preparation.
+
+### Paradex config and initial local entry
+
+Original e743120ab7b compiles with 22 intended REDs/four controls on actual77f124;
+all26 pass unchanged after implementation. Exact request inventory shrinks seven
+occurrences (account10->9/trading21->15/family48->41), with no bootstrap/shared
+engine/signing edit. Config expiry now includes host preparation; typed entry
+refusals and LocalSetting receipt enforcement are caller-visible boundaries.

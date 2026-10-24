@@ -77,3 +77,18 @@ trigger private I/O. This is the only new expiry boundary in this slice.
 Shared docs may append; manifest pruning touches only account.rs/trading.rs.
 The seven-site source scope includes only Config representation/issuance and
 callback guard/failure cleanup plus those six initial trading branches.
+
+## Original receipt and implementation checkpoint
+
+Plan `b29ea97d0d4`, metadata clarification `882575cc101`, original test-only
+checkpoint `e743120ab7b`. Production and manifest were byte-exact to actual
+77f124 when the originals ran: 22 compiling assertion REDs, 4 working controls,
+zero ignored. Capacity/clock assertions execute separately for all eight native
+Read/Mutation presentations of the six local branches. Original config REDs
+stop first at eager raw HTTP; their deeper claim/recovery assertions are only
+executed after that boundary turns green. No compilation error is a RED.
+
+All original 26 controls now pass unchanged. The implementation uses the
+existing Background-specific delivery validator; the command Read validator
+correctly rejects a Background owner and was corrected during implementation.
+No new engine authority or signer capability was introduced.

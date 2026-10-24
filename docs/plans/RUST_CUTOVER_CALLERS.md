@@ -6761,3 +6761,21 @@ can expire before outbound. Each native orderBookDetails/orderBooks attempt has
 its own budget. Native endpoint fallback and shared startup backoff are retained,
 with the old attempt retired before follow-up. No command result is introduced.
 All four deployments keep their headers/body, route, catalog codec and metadata.
+
+## Paradex config and initial local command custody
+
+Paradex's unsigned `/system/config` GET now waits for managed Prepare/Bind/Claim
+under a 20s Background Read; the bound includes preparation delay. Exact live
+Background delivery precedes config decode, credential installation, private
+socket opening and auth/account I/O. Failure/expiry retires that root and keeps
+the native 2s retry; late/duplicate/unreleased responses cannot initialize it.
+
+Initial unsupported and missing-account branches plus isolated-margin/hedged-mode
+refusals now use genuine command admission before their one native terminal.
+Native strings, validation order, Unsupported kind and existing NotSent metadata
+(including native Read refusals) remain. New clock/capacity admission failures
+are typed once by the engine, with Read outcome None or Mutation NotSent.
+Fixed cross-margin and one-way `[]` successes use LocalSetting entry and honor
+the original caller receipt, without credentials, I/O, Store changes or a write
+journal. Remote signing/JWT/trading/history behavior is untouched. Exact legacy
+inventory: config 1 plus initial terminals 6 removed; Paradex 48 -> 41.
