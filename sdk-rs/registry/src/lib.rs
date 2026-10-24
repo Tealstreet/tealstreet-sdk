@@ -1136,7 +1136,13 @@ pub fn build_with_signer<T: Visit>(
                     "Bitrue credentials belong in signer setup, not engine options",
                 ));
             }
-            let identities = options.signing.take().unwrap_or_default();
+            let mut identities = options.signing.take().unwrap_or_default();
+            identities.primary = identities.primary.filter(|identity| {
+                !identity.credential.0.is_empty() && !identity.signing.0.is_empty()
+            });
+            if let Some(primary) = &identities.primary {
+                primary.validate().map_err(invalid)?;
+            }
             let registered = identities.clone();
             if let Some(read) = &identities.secondary {
                 read.validate().map_err(invalid)?;
