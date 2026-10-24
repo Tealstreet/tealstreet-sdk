@@ -699,3 +699,12 @@ No group claim/dispatch, typed deferred completion or Rust/native hook is part
 of this audit. Proposed host callback fences and managed-readiness revalidation
 are sent as exact hunks to their owners before source edits. Checks stay scoped
 to Node tests with test concurrency one; no Cargo or full-workspace build.
+
+The observer/readiness controls execute 22 cases:17 GREEN/5 assertion RED, zero
+skipped. Four socket observer continuations read wsOpen/wsBinary/wsClose after
+the observer fences the host; a readiness callback similarly leaves one httpClaim
+property read. All five final Proxy assertions fail only after zero-export,
+resource-retirement and healthy-delivery assertions pass. The already captured
+text-message continuation is GREEN. These are property reads, not demonstrated
+post-poison WASM calls. Exact fixes are four post-observer disposal checks and
+one live-resource revalidation after bound.ready, with group source unchanged.

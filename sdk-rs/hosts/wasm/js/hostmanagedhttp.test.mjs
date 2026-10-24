@@ -186,3 +186,31 @@ test('post-handoff bookkeeping never reads an engine property after synchronous 
   assert.equal(r.events.some(([event]) => ['drain', 'start', 'chunk', 'end', 'httpFailed'].includes(event)), false);
   assert.deepEqual(accesses, [], 'late post callback must check the host fence before reading prepareDispatch');
 });
+
+test('a readiness callback that poisons the host cannot read the later Claim export', async () => {
+  let poisoned = false;
+  let sends = 0;
+  const accesses = [];
+  let r;
+  r = rig(() => ({ bind: () => ({
+    ready() {
+      r.host.failEngine(new WebAssembly.RuntimeError('ready callback poisoned engine'));
+      poisoned = true;
+      return true;
+    },
+    dispatch() { sends++; return new Promise(() => {}); },
+  }) }), engine => new Proxy(engine, {
+    get(target, property, receiver) {
+      if (poisoned) accesses.push(String(property));
+      return Reflect.get(target, property, receiver);
+    },
+  }));
+  r.host.execute(prepare);
+  await tick();
+  assert.equal(r.host.dead, true);
+  assert.equal(sends, 0);
+  assert.equal(r.host.managedHttp.resources.size, 0);
+  assert.equal(r.timers.size, 0);
+  assert.equal(r.events.some(([event]) => event === 'claim'), false);
+  assert.deepEqual(accesses, [], 'readiness continuation must revalidate before evaluating httpClaim');
+});
