@@ -9,8 +9,8 @@ fn ready() -> (TestEngine, Vec<(String, SocketId)>) {
         ..Options::default()
     }));
     e.start(0.0);
-    let r = e
-        .drain_actions()
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -30,7 +30,7 @@ fn ready() -> (TestEngine, Vec<(String, SocketId)>) {
     );
     let mut sockets = Vec::new();
     loop {
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
         if actions.is_empty() {
             break;
         }

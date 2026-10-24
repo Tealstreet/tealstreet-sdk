@@ -3,7 +3,7 @@
 use super::{CommandId, Cx, RequestId};
 use crate::VenueError;
 use crate::request_context::{
-    Attempt, CommandWrites, Context, Error, Operation, Owner, Policy, RejectionReports,
+    Attempt, CommandWrites, Context, Egress, Error, Operation, Owner, Policy, RejectionReports,
     ResendGrant, RetryEvidence, Scope, WriteResult,
 };
 #[cfg(feature = "http-plans")]
@@ -18,6 +18,10 @@ const CAPACITY: usize = 256;
 
 #[path = "session_context.rs"]
 pub(super) mod session;
+
+#[cfg(all(test, feature = "http-plans"))]
+#[path = "plan_receipt_cap_tests.rs"]
+mod receipt_cap_tests;
 
 #[cfg(all(test, feature = "http-plans"))]
 #[path = "request_context_preflight_tests.rs"]
@@ -69,6 +73,10 @@ enum CommandPhase {
     Context {
         root: Context,
         entry_owned: bool,
+        /// A caller-wait Read root the engine expires at its deadline.
+        tracked: bool,
+        /// Past its deadline: no send, publication or venue completion.
+        expired: bool,
     },
     #[cfg(feature = "http-plans")]
     Preflight(preflight::State),
@@ -302,7 +310,9 @@ impl ContextRegistry {
         let owner = self.commands.get_mut(&id).expect("issued command entry");
         assert_eq!(owner.generation, generation);
         let (root, entry_owned) = match &mut owner.phase {
-            CommandPhase::Context { root, entry_owned } => (root, entry_owned),
+            CommandPhase::Context {
+                root, entry_owned, ..
+            } => (root, entry_owned),
             #[cfg(feature = "http-plans")]
             _ => panic!("command entry must retain a Context root"),
         };
@@ -320,6 +330,7 @@ impl ContextRegistry {
             .is_none_or(|owner| owner.credentialed)
     }
 
+    #[cfg(test)]
     fn issue(
         &mut self,
         identity: u64,
@@ -327,16 +338,35 @@ impl ContextRegistry {
         policy: Policy,
         now: f64,
     ) -> Result<Context, Error> {
-        self.issue_bound(identity, scope, policy, now, None)
+        self.issue_with_egress(identity, scope, policy, now, None, None)
     }
 
-    fn issue_bound(
+    /// Egress is captured here, before binding, so the registered context and
+    /// completion root hold it exactly. Legs inherit their parent's egress.
+    fn issue_with_egress(
         &mut self,
         identity: u64,
         scope: Scope,
         policy: Policy,
         now: f64,
         parent: Option<&Context>,
+        egress: Option<Egress>,
+    ) -> Result<Context, Error> {
+        self.issue_until(identity, scope, policy, now, parent, egress, None)
+    }
+
+    /// `until` is an exact absolute deadline that replaces the policy timeout
+    /// (the caller's raw receipt), never rounded through whole milliseconds.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn issue_until(
+        &mut self,
+        identity: u64,
+        scope: Scope,
+        policy: Policy,
+        now: f64,
+        parent: Option<&Context>,
+        egress: Option<Egress>,
+        until: Option<f64>,
     ) -> Result<Context, Error> {
         if let Some(parent) = parent {
             self.validate(parent, now)?;
@@ -344,6 +374,10 @@ impl ContextRegistry {
                 return Err(Error::Invalid);
             }
         }
+        let egress = match (egress, parent.and_then(Context::egress)) {
+            (Some(own), Some(inherited)) if own != inherited => return Err(Error::Invalid),
+            (own, inherited) => own.or(inherited),
+        };
         if scope == Scope::Background && policy.operation == Operation::Mutation {
             return Err(Error::Invalid);
         }
@@ -369,6 +403,13 @@ impl ContextRegistry {
         {
             return Err(Error::State);
         }
+        // A tracked caller-wait root stays plain Read: a Timeout seal must
+        // never erase a released write.
+        if policy.operation == Operation::Mutation
+            && matches!(scope, Scope::Command(id) if self.tracked(id))
+        {
+            return Err(Error::Invalid);
+        }
         let owner = match parent.map(Context::owner) {
             Some(owner) => owner,
             None => match scope {
@@ -385,7 +426,7 @@ impl ContextRegistry {
                 Scope::Execution => return Err(Error::Invalid),
             },
         };
-        self.commit(owner, identity, policy, now, parent)
+        self.commit(owner, identity, policy, now, parent, egress, until)
     }
 
     fn issue_session(
@@ -408,9 +449,20 @@ impl ContextRegistry {
         self.sessions.admit(generation, &policy)?;
         self.contexts.retain(|_, old| old.deadline() > now);
         self.sessions.prune(&self.contexts);
-        self.commit(Owner::Session { generation }, identity, policy, now, parent)
+        // Session legs inherit their parent's egress like every other leg.
+        let egress = parent.and_then(Context::egress);
+        self.commit(
+            Owner::Session { generation },
+            identity,
+            policy,
+            now,
+            parent,
+            egress,
+            None,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn commit(
         &mut self,
         owner: Owner,
@@ -418,15 +470,17 @@ impl ContextRegistry {
         policy: Policy,
         now: f64,
         parent: Option<&Context>,
+        egress: Option<Egress>,
+        until: Option<f64>,
     ) -> Result<Context, Error> {
-        let deadline = parent.map_or(now + f64::from(policy.timeout_ms), |parent| {
-            parent.deadline().min(now + f64::from(policy.timeout_ms))
-        });
+        let deadline = until.unwrap_or(now + f64::from(policy.timeout_ms));
+        let deadline = parent.map_or(deadline, |parent| parent.deadline().min(deadline));
         if let Owner::Command { id, .. } = owner
             && let Some(root) = self.commands.get(&id).and_then(|owner| match &owner.phase {
                 CommandPhase::Context {
                     root,
                     entry_owned: true,
+                    ..
                 } => Some(root),
                 _ => None,
             })
@@ -448,7 +502,8 @@ impl ContextRegistry {
             deadline,
             policy.pacing,
         )?
-        .with_retry(policy.retry)?;
+        .with_retry(policy.retry)?
+        .with_egress(egress)?;
         if self.contexts.len() + self.reserved_context_count() >= CAPACITY
             || matches!(owner, Owner::Command { id, .. }
                 if !self.commands.contains_key(&id) && self.commands.len() >= CAPACITY)
@@ -481,6 +536,8 @@ impl ContextRegistry {
                     phase: CommandPhase::Context {
                         root: context.clone(),
                         entry_owned: false,
+                        tracked: false,
+                        expired: false,
                     },
                     last_deadline,
                     writes: None,
@@ -570,7 +627,8 @@ impl ContextRegistry {
                 parent.deadline().min(now + f64::from(policy.timeout_ms)),
                 policy.pacing,
             )?
-            .with_retry(policy.retry)?;
+            .with_retry(policy.retry)?
+            .with_egress(parent.egress())?;
             child.bind_issuer(&self.issuer);
             legs.push(leg);
             children.push(child);
@@ -625,6 +683,9 @@ impl ContextRegistry {
 
     /// Retirement authority only; expiry cannot create fresh send permission.
     fn validate_handle(&self, context: &Context) -> Result<(), Error> {
+        if matches!(context.owner(), Owner::Command { id, .. } if self.expired(id)) {
+            return Err(Error::Revoked);
+        }
         if !context.issued_by(&self.issuer)
             || self.contexts.get(&context.leg()) != Some(context)
             || matches!(context.owner(), Owner::Command {id, generation}
@@ -935,10 +996,11 @@ impl ContextRegistry {
         if observer != self.is_observer(command) || (observer && delivery.is_some()) {
             return Err(Error::Revoked);
         }
-        if self
-            .commands
-            .get(&command)
-            .is_some_and(|owner| !matches!(owner.phase, CommandPhase::Context { .. }))
+        if self.expired(command)
+            || self
+                .commands
+                .get(&command)
+                .is_some_and(|owner| !matches!(owner.phase, CommandPhase::Context { .. }))
         {
             return Err(Error::Revoked);
         }
@@ -1090,6 +1152,101 @@ impl ContextRegistry {
         Ok(Seal::Failure(error, reports))
     }
 
+    /// Effect-free: a new command root would fit the bounded registry, and
+    /// its storage is reserved, so issuance after the ID spend cannot fail.
+    pub(super) fn reserve_command_root(&mut self, command: CommandId) -> Result<(), Error> {
+        let new_owner = !self.commands.contains_key(&command);
+        if self.contexts.len() + self.reserved_context_count() >= CAPACITY
+            || (new_owner && self.commands.len() >= CAPACITY)
+        {
+            return Err(Error::Capacity);
+        }
+        self.contexts
+            .try_reserve(1 + self.reserved_context_count())
+            .map_err(|_| Error::Capacity)?;
+        if new_owner {
+            self.commands.try_reserve(1).map_err(|_| Error::Capacity)?;
+        }
+        Ok(())
+    }
+
+    /// Whether `root`'s owner is a tracked caller-wait Read root.
+    pub(super) fn tracked_owner(&self, root: &Context) -> bool {
+        matches!(root.owner(), Owner::Command { id, .. } if self.tracked(id))
+    }
+
+    fn tracked(&self, command: CommandId) -> bool {
+        self.commands
+            .get(&command)
+            .is_some_and(|owner| matches!(owner.phase, CommandPhase::Context { tracked: true, .. }))
+    }
+
+    fn expired(&self, command: CommandId) -> bool {
+        self.commands
+            .get(&command)
+            .is_some_and(|owner| matches!(owner.phase, CommandPhase::Context { expired: true, .. }))
+    }
+
+    /// Track this command's just-retained entry root for engine expiry.
+    pub(super) fn track_read_root(&mut self, root: &Context) {
+        let Owner::Command { id, generation } = root.owner() else {
+            panic!("a tracked root is a command root");
+        };
+        let owner = self.commands.get_mut(&id).expect("issued tracked root");
+        assert_eq!(owner.generation, generation);
+        let CommandPhase::Context {
+            root: issued,
+            entry_owned: true,
+            tracked,
+            ..
+        } = &mut owner.phase
+        else {
+            panic!("a tracked root is a retained Context root");
+        };
+        assert!(issued == root && root.operation() == Operation::Read);
+        *tracked = true;
+    }
+
+    /// Mark this exact tracked root expired; `false` when it is already gone.
+    pub(super) fn expire_read_root(&mut self, command: CommandId, generation: u64) -> bool {
+        let Some(owner) = self.commands.get_mut(&command) else {
+            return false;
+        };
+        match &mut owner.phase {
+            CommandPhase::Context {
+                tracked: true,
+                expired,
+                ..
+            } if owner.generation == generation => {
+                *expired = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The engine's own Timeout seal for an expired tracked Read root. No
+    /// venue path reaches it: the expired flag refuses every other seal.
+    pub(super) fn seal_expired_root(&mut self, command: CommandId, generation: u64) -> Seal {
+        let sealable = self.commands.get(&command).is_some_and(|owner| {
+            owner.generation == generation
+                && owner.writes.is_none()
+                && !owner.mutation_declared
+                && matches!(
+                    owner.phase,
+                    CommandPhase::Context {
+                        tracked: true,
+                        expired: true,
+                        ..
+                    }
+                )
+        });
+        if !sealable {
+            return Seal::Stale;
+        }
+        Seal::Legacy(Some(Error::TimedOut.read_venue_error()))
+    }
+
     pub(super) fn finish(&mut self, command: CommandId) -> bool {
         #[cfg(feature = "http-plans")]
         if let Some(owner) = self.commands.get_mut(&command) {
@@ -1189,7 +1346,18 @@ impl<P> Cx<'_, P> {
     /// Capture the logical raw deadline and engine-owned owner/leg generation.
     /// This neither queues HTTP nor reserves admission, a transport or pacing.
     pub fn http_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
-        self.make_http_context(scope, policy, None)
+        self.make_http_context(scope, policy, None, None)
+    }
+
+    /// As `http_context`, with egress declared at issuance. Only unsigned
+    /// reads declare egress; a credentialed context may only confirm Primary.
+    pub fn http_context_with_egress(
+        &mut self,
+        scope: Scope,
+        policy: Policy,
+        egress: Egress,
+    ) -> Result<Context, Error> {
+        self.make_http_context(scope, policy, None, Some(egress))
     }
 
     /// A new physical leg under the same logical authority. Preserve its exact
@@ -1212,7 +1380,7 @@ impl<P> Cx<'_, P> {
             }
             Owner::Execution { .. } => Scope::Execution,
         };
-        self.make_http_context(scope, policy, Some(parent))
+        self.make_http_context(scope, policy, Some(parent), None)
     }
 
     fn make_http_context(
@@ -1220,20 +1388,22 @@ impl<P> Cx<'_, P> {
         scope: Scope,
         policy: Policy,
         parent: Option<&Context>,
+        egress: Option<Egress>,
     ) -> Result<Context, Error> {
         if !self.io.entry_context_allowed(scope) {
             return Err(Error::Revoked);
         }
+        // A tracked caller-wait root stays plain Read: refused before any spend.
+        if policy.operation == Operation::Mutation
+            && matches!(scope, Scope::Command(id) if self.io.request_contexts.tracked(id))
+        {
+            return Err(Error::Invalid);
+        }
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        let context = if let Some(parent) = parent {
-            self.io
-                .request_contexts
-                .issue_bound(identity, scope, policy, self.now, Some(parent))?
-        } else {
-            self.io
-                .request_contexts
-                .issue(identity, scope, policy, self.now)?
-        };
+        let context = self
+            .io
+            .request_contexts
+            .issue_with_egress(identity, scope, policy, self.now, parent, egress)?;
         #[cfg(feature = "order-locks")]
         if context.operation() == Operation::Mutation
             && let Owner::Command { id, .. } = context.owner()
@@ -2282,6 +2452,129 @@ mod tests {
             pacing: None,
             retry: RetryPolicy::ReadFailure,
         }
+    }
+
+    #[test]
+    fn issuance_captures_egress_that_legs_and_retries_cannot_widen() {
+        use crate::request_context::{Credential, RoutingIntent};
+        use crate::signing::KeyRef;
+        use crate::{CredentialSlot, RequestRoute};
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let signed = |slot| Policy {
+            credential: Some(Credential {
+                slot,
+                reference: KeyRef("slot.credential".into()),
+            }),
+            ..policy()
+        };
+        // Keyless primary egress (Bitrue catalog) without a fabricated credential.
+        let keyless = cx
+            .http_context_with_egress(Scope::Background, policy(), Egress::Primary)
+            .unwrap();
+        assert_eq!(keyless.routing_intent(), RoutingIntent::Primary);
+        assert_eq!(keyless.route(), None);
+        assert!(keyless.credential().is_none());
+        cx.io.request_contexts.validate(&keyless, cx.now).unwrap();
+        // Retries clone it; legs inherit it and may not change or widen it.
+        let retry = cx
+            .http_retry_context(&keyless, RetryEvidence::ReadFailure)
+            .unwrap();
+        assert_eq!(retry.egress(), Some(Egress::Primary));
+        let leg = cx.http_leg_context(&keyless, policy()).unwrap();
+        assert_eq!(leg.routing_intent(), RoutingIntent::Primary);
+        assert_eq!(
+            cx.http_leg_context(&keyless, signed(CredentialSlot::Secondary)),
+            Err(Error::Invalid)
+        );
+        // A keyed leg under a keyless primary root keeps the pin for its own legs.
+        let keyed = cx
+            .http_leg_context(&keyless, signed(CredentialSlot::Primary))
+            .unwrap();
+        assert_eq!(keyed.egress(), Some(Egress::Primary));
+        assert_eq!(
+            cx.http_leg_context(&keyed, policy())
+                .map(|c| c.routing_intent()),
+            Ok(RoutingIntent::Primary)
+        );
+        assert_eq!(
+            cx.http_leg_context(&keyed, signed(CredentialSlot::Secondary)),
+            Err(Error::Invalid)
+        );
+        // Public CORS and direct egress (TxFlow candles) project an explicit route.
+        for (egress, route) in [
+            (Egress::PublicCors, RequestRoute::PublicCors),
+            (Egress::Direct, RequestRoute::Direct),
+        ] {
+            let public = cx
+                .http_context_with_egress(Scope::Background, policy(), egress)
+                .unwrap();
+            assert_eq!(
+                (public.routing_intent(), public.route()),
+                (RoutingIntent::Public, Some(route))
+            );
+            let leg = cx.http_leg_context(&public, policy()).unwrap();
+            assert_eq!(leg.route(), Some(route));
+            // A credential can never ride a public egress.
+            assert_eq!(
+                cx.http_leg_context(&public, signed(CredentialSlot::Primary)),
+                Err(Error::Invalid)
+            );
+            assert_eq!(
+                cx.http_context_with_egress(
+                    Scope::Background,
+                    signed(CredentialSlot::Primary),
+                    egress
+                ),
+                Err(Error::Invalid)
+            );
+        }
+        // A credentialed context may only confirm a primary slot.
+        let confirmed = cx
+            .http_context_with_egress(
+                Scope::Background,
+                signed(CredentialSlot::Primary),
+                Egress::Primary,
+            )
+            .unwrap();
+        assert_eq!(confirmed.routing_intent(), RoutingIntent::Primary);
+        assert_eq!(
+            cx.http_context_with_egress(
+                Scope::Background,
+                signed(CredentialSlot::Secondary),
+                Egress::Primary
+            ),
+            Err(Error::Invalid)
+        );
+        // Keyless egress is for reads only.
+        let write = Policy {
+            operation: Operation::Mutation,
+            retry: RetryPolicy::Never,
+            ..policy()
+        };
+        for egress in [Egress::Primary, Egress::PublicCors, Egress::Direct] {
+            assert_eq!(
+                cx.http_context_with_egress(Scope::Command(9), write.clone(), egress),
+                Err(Error::Invalid)
+            );
+        }
+        // A command's completion root holds the egress; its retry still validates.
+        let root = cx
+            .http_context_with_egress(Scope::Command(7), policy(), Egress::PublicCors)
+            .unwrap();
+        let retry = cx
+            .http_retry_context(&root, RetryEvidence::ReadFailure)
+            .unwrap();
+        cx.io.request_contexts.validate(&retry, cx.now).unwrap();
+        assert_eq!(retry, root);
+        // No declaration keeps the credential-derived intent and host routing.
+        let plain = cx.http_context(Scope::Background, policy()).unwrap();
+        assert_eq!((plain.egress(), plain.route()), (None, None));
     }
 
     #[test]

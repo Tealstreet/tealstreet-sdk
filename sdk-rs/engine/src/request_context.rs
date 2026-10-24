@@ -155,6 +155,17 @@ pub enum RoutingIntent {
     Secondary,
 }
 
+/// Egress declared at trusted issuance, independent of HTTP method.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Egress {
+    /// Primary account egress: keyless reads, or confirming a primary credential.
+    Primary,
+    /// Unsigned public reads through the host's public CORS egress.
+    PublicCors,
+    /// Unsigned public reads sent directly, bypassing account proxies.
+    Direct,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RetryPolicy {
     #[default]
@@ -218,6 +229,8 @@ pub struct Context {
     leg: u64,
     operation: Operation,
     credential: Option<Credential>,
+    /// Egress declared at issuance; it may only confirm a credential's intent.
+    egress: Option<Egress>,
     deadline: f64,
     pacing: Option<Pacing>,
     retry: RetryPolicy,
@@ -268,10 +281,53 @@ impl Context {
             leg,
             operation,
             credential,
+            egress: None,
             deadline,
             pacing,
             retry: RetryPolicy::Never,
         })
+    }
+
+    /// Capture egress before issuer binding: unsigned reads declare it, a
+    /// credentialed context may only confirm a primary slot. Descendants keep it;
+    /// it never grants credential, nonce or identity authority.
+    pub(crate) fn with_egress(mut self, egress: Option<Egress>) -> Result<Self, Error> {
+        let Some(egress) = egress else {
+            return Ok(self);
+        };
+        let valid = match self.credential.as_ref() {
+            Some(credential) => {
+                egress == Egress::Primary && credential.slot == CredentialSlot::Primary
+            }
+            None => self.operation == Operation::Read,
+        };
+        if !valid {
+            return Err(Error::Invalid);
+        }
+        self.egress = Some(egress);
+        Ok(self)
+    }
+
+    pub(crate) fn egress(&self) -> Option<Egress> {
+        self.egress
+    }
+
+    /// Explicit host route for the managed Prepare packet; None keeps the
+    /// host's intent-based routing.
+    pub fn route(&self) -> Option<crate::RequestRoute> {
+        match self.egress? {
+            Egress::Primary => None,
+            Egress::PublicCors => Some(crate::RequestRoute::PublicCors),
+            Egress::Direct => Some(crate::RequestRoute::Direct),
+        }
+    }
+
+    fn credential_intent(&self) -> RoutingIntent {
+        match self.credential.as_ref().map(|credential| credential.slot) {
+            None => RoutingIntent::Public,
+            Some(CredentialSlot::Primary) => RoutingIntent::Primary,
+            Some(CredentialSlot::Secondary) => RoutingIntent::Secondary,
+        }
     }
 
     pub fn owner(&self) -> Owner {
@@ -301,10 +357,10 @@ impl Context {
         self.credential.as_ref()
     }
     pub fn routing_intent(&self) -> RoutingIntent {
-        match self.credential.as_ref().map(|credential| credential.slot) {
-            None => RoutingIntent::Public,
-            Some(CredentialSlot::Primary) => RoutingIntent::Primary,
-            Some(CredentialSlot::Secondary) => RoutingIntent::Secondary,
+        match self.egress {
+            Some(Egress::Primary) => RoutingIntent::Primary,
+            Some(Egress::PublicCors | Egress::Direct) => RoutingIntent::Public,
+            None => self.credential_intent(),
         }
     }
     pub fn deadline(&self) -> f64 {
@@ -440,20 +496,9 @@ impl HttpRelease {
         if time.raw_ms >= deadline {
             return Err(Error::TimedOut);
         }
-        signature.validate().map_err(|_| Error::Invalid)?;
-        let signature_valid_until = if let Some(expiry) = signature.expiry_ms {
-            let remaining = expiry - time.protocol_ms;
-            let projected = time.raw_ms + remaining;
-            if !remaining.is_finite() || !projected.is_finite() {
-                return Err(Error::Invalid);
-            }
-            if remaining <= 0. {
-                return Err(Error::Stale);
-            }
-            Some(deadline.min(projected))
-        } else {
-            None
-        };
+        let signature_valid_until = crate::SigningRelease::new(signature, time)?
+            .raw_expiry_ms()
+            .map(|projected| deadline.min(projected));
         if !deadline.is_finite() || deadline <= time.raw_ms {
             return Err(Error::Invalid);
         }

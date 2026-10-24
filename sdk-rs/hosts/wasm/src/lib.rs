@@ -110,6 +110,17 @@ trait AnyEngine {
     ) -> Result<(), &'static str>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
+    /// A host command with the caller's wait (see `Engine::handle_command`).
+    fn handle_command(
+        &mut self,
+        now: f64,
+        command: safe_cex_engine::Command,
+        wait_ms: Option<u32>,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        let _ = wait_ms;
+        self.handle(now, Event::Command(command));
+        Ok(())
+    }
     fn drain(&mut self) -> Vec<Action>;
     fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]>;
     fn snapshot(&mut self, now: f64) -> &[u8];
@@ -204,6 +215,15 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
     fn handle(&mut self, now: f64, event: Event<'_>) {
         Engine::handle(self, now, event);
+    }
+
+    fn handle_command(
+        &mut self,
+        now: f64,
+        command: safe_cex_engine::Command,
+        wait_ms: Option<u32>,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        Engine::handle_command(self, now, command, wait_ms)
     }
 
     fn drain(&mut self) -> Vec<Action> {
@@ -1214,7 +1234,15 @@ impl WasmEngine {
                         .map_err(JsError::new)?;
                     return Ok(self.flush());
                 }
-                safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
+                safe_cex_engine::command::HostInput::Command {
+                    command,
+                    timeout_ms,
+                } => {
+                    self.inner
+                        .handle_command(now, command, timeout_ms)
+                        .map_err(|error| JsError::new(&format!("{error:?}")))?;
+                    return Ok(self.flush());
+                }
                 safe_cex_engine::command::HostInput::PollScaleChanged { scale, ceiling_ms } => {
                     self.inner
                         .handle(now, Event::PollCeilingChanged { ceiling_ms });
@@ -1238,7 +1266,15 @@ impl WasmEngine {
                     .map_err(JsError::new)?;
                 return Ok(self.flush());
             }
-            safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
+            safe_cex_engine::command::HostInput::Command {
+                command,
+                timeout_ms,
+            } => {
+                self.inner
+                    .handle_command(now, command, timeout_ms)
+                    .map_err(|error| JsError::new(&format!("{error:?}")))?;
+                return Ok(self.flush());
+            }
             safe_cex_engine::command::HostInput::PollScaleChanged { scale, ceiling_ms } => {
                 self.inner
                     .handle(now, Event::PollCeilingChanged { ceiling_ms });
@@ -1529,7 +1565,7 @@ mod tests {
 
         #[cfg(feature = "bitunix")]
         #[test]
-        fn shared_provider_feature_does_not_adopt_unmigrated_public_bitunix() {
+        fn shared_provider_feature_keeps_managed_public_bitunix_unsigned() {
             let Ok(mut engine) =
                 super::super::WasmEngine::new("bitunix", r#"{"publicDataOnly":true}"#, None)
             else {
@@ -1538,17 +1574,62 @@ mod tests {
             assert!(!engine.dispatch_signing);
             assert!(!engine.requires_external_signer());
             #[derive(serde::Deserialize)]
+            struct Packet {
+                request: u64,
+                url: String,
+                method: String,
+                headers: Vec<(String, String)>,
+            }
+            #[derive(serde::Deserialize)]
             struct Outbound {
                 op: String,
-                url: Option<String>,
+                phase: Option<String>,
+                intent: Option<String>,
+                preparation: Option<String>,
+                permit: Option<String>,
+                packet: Option<Packet>,
             }
             let actions: Vec<Outbound> = serde_json::from_str(&engine.start(1000.)).unwrap();
-            assert!(actions.iter().any(|action| {
-                action.op == "http"
-                    && action
-                        .url
-                        .as_deref()
-                        .is_some_and(|url| url.contains("/api/v1/futures/market/"))
+            let preparation = actions
+                .iter()
+                .find(|action| {
+                    action.op == "managedHttp"
+                        && action.phase.as_deref() == Some("prepare")
+                        && action
+                            .packet
+                            .as_ref()
+                            .is_some_and(|packet| packet.url.contains("/api/v1/futures/market/"))
+                })
+                .expect("managed public discovery must prepare before release");
+            assert_eq!(preparation.intent.as_deref(), Some("public"));
+            assert!(actions.iter().all(|action| action.op != "http"));
+            let token = preparation.preparation.as_deref().unwrap();
+            assert!(engine.http_preparation_pending(token));
+            let bound: Vec<Outbound> =
+                serde_json::from_str(&engine.http_prepared(token, "1", None, 1000.).unwrap())
+                    .unwrap();
+            let binding = bound
+                .iter()
+                .find(|action| {
+                    action.op == "managedHttp" && action.phase.as_deref() == Some("bind")
+                })
+                .expect("public transport must bind before claim");
+            assert_eq!(binding.preparation.as_deref(), Some(token));
+            let unsigned = preparation.packet.as_ref().unwrap();
+            let released = binding.packet.as_ref().unwrap();
+            assert_eq!(released.request, unsigned.request);
+            assert_eq!(released.url, unsigned.url);
+            assert_eq!(released.method, "GET");
+            assert_eq!(released.headers, unsigned.headers);
+            assert_eq!(
+                engine.http_claim(binding.permit.as_deref().unwrap(), 1000.),
+                r#"{"status":"released"}"#
+            );
+            assert!(bound.iter().all(|action| {
+                !matches!(
+                    action.op.as_str(),
+                    "http" | "sign" | "signPayload" | "signedOutbound"
+                )
             }));
             assert!(actions.iter().all(|action| {
                 !matches!(
@@ -2051,7 +2132,10 @@ mod tests {
             fn start(&mut self, _: f64) {}
             fn handle(&mut self, now: f64, event: Event<'_>) {
                 let input = match event {
-                    Event::Command(command) => HostInput::Command(command),
+                    Event::Command(command) => HostInput::Command {
+                        command,
+                        timeout_ms: None,
+                    },
                     Event::PollScaleChanged { scale } => HostInput::PollScaleChanged {
                         scale,
                         ceiling_ms: None,
