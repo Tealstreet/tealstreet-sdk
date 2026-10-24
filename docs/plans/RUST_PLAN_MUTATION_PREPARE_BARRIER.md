@@ -656,8 +656,9 @@ grant no owner, admission or release authority. Off-build pending/claim probes
 are inert false/Invalid stubs without clock, staging, credit or ID effects.
 
 Native and WASM hosts expose the same explicit feature forwarding to the engine.
-WASM group exports/serialization and native group state, wake and handoff code
-are gated coherently. A host built without support rejects a received group
+WASM group exports and native group state, wake and handoff code are gated
+coherently. Minimal group serialization metadata remains a protocol contract,
+without granting release authority. A host without support rejects a group
 before resource bind or claim; it never invokes individual release as fallback.
 The JS helper already refuses missing group exports before binding resources.
 Future family adoption must opt its host and engine into the capability in that
