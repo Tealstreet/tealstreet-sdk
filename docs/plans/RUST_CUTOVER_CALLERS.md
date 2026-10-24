@@ -7418,6 +7418,22 @@ supersedes the native diagnostic with its typed NotSent terminal. Schedule time
 <now+5000 refuses; equality and None disarm still reach the unchanged signed path.
 No caller parameter, signing/selection change, valid write, retry or timer is added.
 
+## Command Read-Plan history authority (#2011)
+
+`PlanReadCompletion::from_plan` binds one freshly admitted command Read Plan
+with a retained command receipt cap before any Slot is selected or settled.
+Use `PlanHistoryRows::admit` in exact DATA custody, stage through its exclusive
+guard, then `accept_page` or `finish_with`; standalone public Plan terminals and
+Slot settlement refuse after binding. The guard exposes no Cx accessor.
+
+`admit_failure` requires the exact latest released Network/physical Timeout
+Attempt in its engine callback and a live original Plan. Recovery uses only
+nonempty accepted rows and discards the failed page; preparation/provider,
+logical expiry and integrity failures remain strict. `reject` uses the same
+prepared Plan seal and is inert during that Plan's engine expiry callback.
+No numeric completion, Context-root cast, external finalizer, owner renewal,
+Background/Execution Plan, or native consumer cutover is introduced.
+
 ## HTTP pacing sets and signing eligibility
 
 A venue declares primitive floors through `http_pacing()` and optional immutable
@@ -7836,3 +7852,40 @@ precommit NotSent is not a released financial outcome. Late callbacks cannot
 retire a reused command generation. Native discovery, account/history and write
 senders remain; only three command candle terminals are removed (25 to 22 on
 this base, or 10 to 7 after the separate local-custody slice lands).
+
+## Independent Mutation Plan gateway failures
+
+PlanPolicy.independent_calls defaults to false at existing admission sites. A
+Mutation caller may opt in at admission for its native continue_on_error batch.
+An exact delivered unproven 408/5xx then reaches typed on_http_failed with the
+already-recorded Unknown fact and bounded evidence IDs; it never reaches DATA
+or grants a resend. The handler settles only an independent failed call through
+finish_plan_failed_call and advances its sibling. It declines settlement for a
+dependent follow-up, preserving the whole-Plan abort. A declining handler is
+auto-sealed once; Read admission with this flag is Invalid. Final completion
+still projects the one shared journal, including accepted IDs and uncertainty.
+
+BingX ordinary trading and Bybit #1914 adopt this in their separate caller PRs.
+The core declaration alone does not migrate either venue or remove legacy sites.
+
+## Parallel Mutation preparation barrier
+
+A caller explicitly declares each all-Mutation parallel step and implements the
+pure Unscheduled group-admission hook. The engine prepares routes and signatures
+in declaration order, then checks and commits the entire group before the host
+hands off any member. A precommit failure sends no member; the common journal
+projects NotSent only without prior released or inherited uncertain facts.
+Provider refusals are not venue auth evidence and do not create an uncertain
+order-lock fence. Resolved nonzero pacing floors refuse admission before IDs.
+
+Native and JS hosts bind/check all resources, claim once, and attempt sends in
+one turn before callbacks. After commit, a synchronous send failure or expiry is
+Unknown; remaining handoffs still run and accepted IDs remain in the projection.
+This provides no atomic execution guarantee at the venue. Independent reply
+handling requires the separate independent_calls declaration.
+
+Groups skip mutable on_http_release. A caller that stamps Pending there must
+move that state before admission or use committed on_signing_release; the pure
+hook cannot mutate Pending. Execution-owned groups, retries and fallback members
+are refused in this first slice. Later serial mixed Read/Mutation steps require
+G2. No venue is adopted and no legacy request site is removed by this seam alone.

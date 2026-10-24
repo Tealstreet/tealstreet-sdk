@@ -7,10 +7,10 @@ use crate::execution_group::{Execution, Groups, Joined, Member, Observer, Root, 
 pub(super) struct Executions {
     groups: Groups,
     /// Execution root identity (its `Owner::Execution` generation) to group.
-    roots: HashMap<u64, Execution>,
-    observers: HashMap<CommandId, Observer>,
+    roots: crate::IdMap<u64, Execution>,
+    observers: std::collections::HashMap<CommandId, Observer>,
     /// Background read Context rooting each background execution.
-    backgrounds: HashMap<u64, Context>,
+    backgrounds: crate::IdMap<u64, Context>,
 }
 
 fn root_identity(context: &Context) -> Option<u64> {
@@ -327,6 +327,21 @@ impl ContextRegistry {
         self.executions.observers.insert(command, observer);
         self.observe_execution_credential(command, execution_root);
         Ok(joined)
+    }
+
+    /// Identity progress for every live observer, retained for late joiners.
+    pub(in crate::engine) fn execution_progress(
+        &mut self,
+        execution_root: &Context,
+        receipts: Vec<crate::OrderIdentityReceipt>,
+    ) -> Result<Vec<(CommandId, u64, Vec<crate::OrderIdentityReceipt>)>, Error> {
+        if !execution_root.issued_by(&self.issuer)
+            || self.contexts.get(&execution_root.leg()) != Some(execution_root)
+        {
+            return Err(Error::Revoked);
+        }
+        let execution = self.execution_of(execution_root).ok_or(Error::Revoked)?;
+        self.executions.groups.progress(execution, receipts)
     }
 
     /// An observer seals through the shared execution: a signed execution's
