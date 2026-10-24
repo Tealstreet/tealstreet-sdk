@@ -285,6 +285,20 @@ are pending.
 
 These are added with the source.
 
+**claude-55ao7t's RED review (CLEAR to source), to apply:**
+- **Required at #1897 integration:** #1897 adds `SessionPolicy::private_egress`.
+  Add `private_egress: None` to both probe `SessionPolicy` literals (in `start`
+  and in `on_timer`), then run a workspace check plus `check-bans.sh` on that
+  composition.
+- **R3 extension:** a late `HttpResponse` or `Signed` event for the fenced
+  attempt reaches no `on_response` (the probe's recorded responses are
+  unchanged). That asserts "late callbacks ignored" directly, not only through
+  the absence of a release.
+- **R14, both directions:** a retained Preflight or Plan owner binding its own
+  request succeeds, while `open`, `retire` and `session_context` inside that
+  same scope still refuse with `State` (`session_scope`), so binding is never
+  mistaken for the scope exemption.
+
 **Engine facts the source must follow:**
 - **The real prepare point.** `queue_managed` emits `HttpAction::Prepare` at
   issue, with headers snapshotted from static slices (`http_lifecycle.rs:180`).
