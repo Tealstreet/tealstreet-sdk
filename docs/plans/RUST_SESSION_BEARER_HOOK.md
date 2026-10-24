@@ -663,7 +663,9 @@ fix belongs at Bind, once, for every owner kind.
     own. The seed is not public; venues cannot set it.
 
 Venue obligations (documented, not engine-enforced): the revision moves on
-every change to any bundle value; `session_bearer` and
+every change to any bundle value AND on every successful refresh, even when
+the values are unchanged (dazzy3: a seeded attempt 2 waits for a revision
+above the refused one, so an identical re-login must still advance it); `session_bearer` and
 `session_bearer_revision` read the same counter; and the venue calls
 `session_ready` after every refresh. A refresh that is never announced leaves
 parked calls to expire at their window.
@@ -709,7 +711,8 @@ per-recipe proposal):
   re-prepares nothing.
 - P11 seeded (fe7lgm): a call seeded with `seen` = r that binds while the hook
   is still Ready at r parks, then wakes and binds at r+1. No attempt is spent
-  beyond the seeded call itself.
+  beyond the seeded call itself. Variant: a refresh with an unchanged cookie
+  still announces r+1 and wakes the seeded call.
 - P12 mixed order (zs5e83): parked call A; the same `session_ready` returns
   waiter B, whose callback queues B. Both prepare and bind on the new
   revision, and A keeps its attempt. The control records the observed
