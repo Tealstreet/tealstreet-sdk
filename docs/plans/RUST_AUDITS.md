@@ -2757,3 +2757,12 @@ two-attempt retrieval budget with socket recovery. Exact artifact size/digest,
 producer/source, archive and restored-runtime ownership are unchanged. The failed
 Bybit attempt remains failed and supplies no timing or mean; transport recovery
 creates no physical retry or third sample.
+
+### Remaining immediately workable public Read sites
+
+Paradex removes two local candle terminals and its numeric book issuance-refusal
+fallback. Lighter's final public lib request becomes a managed Background catalog
+read with exact delivery validation and retirement before fallback/retry. No
+signer, private authority, session or engine policy is changed. Original new
+targets execute seven native controls PASS and15 intended assertion REDs, zero
+ignored. Exact own prune is four singleton occurrences across three keys.

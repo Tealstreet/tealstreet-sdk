@@ -278,4 +278,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Caller-wait Read root expiry | Plan under review (claude-fe7lgm) | Before relying on engine-owned expiry of a tracked caller-wait Read root, or refusing a missing command receipt. | [RUST_READ_ROOT_EXPIRY.md](RUST_READ_ROOT_EXPIRY.md) |
 | Store order fence domains | Keep-both documentation plan | Before changing the broad late-ACK revision or selective logical snapshot epoch. | [RUST_ORDER_FENCE_DOMAINS.md](RUST_ORDER_FENCE_DOMAINS.md) |
 
-| Paradex public refusals and Lighter catalog | Plan; original REDs next | Before converting the last four immediately workable public request sites. | [RUST_PUBLIC_READ_TAIL.md](RUST_PUBLIC_READ_TAIL.md) |
+| Paradex public refusals and Lighter catalog | Implementation under review; original REDs recorded | Before converting the last four immediately workable public request sites. | [RUST_PUBLIC_READ_TAIL.md](RUST_PUBLIC_READ_TAIL.md) |

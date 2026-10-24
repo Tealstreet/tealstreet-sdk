@@ -1369,3 +1369,14 @@ regressions are committed: 5 RED with 16 working controls. The observed
 metadata/log/ordinary bounds, 4 GiB overflow, empty response recovery/exhaustion,
 mixed socket/empty budgets and CDN credential stripping remain explicit controls.
 Routing tests cover every registered suite and reject unknown runtime names.
+
+### Public refusal and catalog custody controls
+
+Paradex uses genuine retained peers to pin local candle and book-entry capacity,
+clock/reuse and duplicate custody, with native GET/schema and saturated candle
+fallthrough controls. Lighter pins exact public catalog wire across four hosts,
+spot filtering/precision, endpoint fallback/backoff, real Prepare/Bind/Claim,
+preclaim/released expiry, failed streamed prefixes and inert stale/duplicate work.
+A255-peer registry-pressure control forces each catalog attempt to retire before
+fallback/retry and successful slot reuse; expiry cannot conceal a root leak.
+Existing startup fixtures retain their assertions while using shared preparation.

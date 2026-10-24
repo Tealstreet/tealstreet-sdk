@@ -1,6 +1,6 @@
 //! Request-owned REST books never enter the live SBE/JSON book state machine.
 use crate::{Paradex, Pending};
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -83,27 +83,18 @@ impl Paradex {
     pub(crate) fn fetch_book_query(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        _command: CommandId,
         symbol: &str,
         limit: Option<u32>,
     ) {
-        let context = match cx.http_context(
-            Scope::Command(command),
-            Policy {
-                operation: Operation::Read,
-                credential: None,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            },
-        ) {
-            Ok(context) => context,
-            Err(_) => {
-                // Issuance refusal returns no authority to pass to fail_context.
-                let error = failure("Paradex book lifecycle is unavailable", ErrorKind::Internal);
-                cx.fail(command, error);
-                return;
-            }
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
         };
         if cx
             .request_managed(

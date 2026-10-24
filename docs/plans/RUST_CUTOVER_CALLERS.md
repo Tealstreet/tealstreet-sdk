@@ -6326,3 +6326,20 @@ distinguish the following:
 | --- | --- |
 | Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
 | Engine Timeout terminal | The root expired. No further work is issued. |
+
+## Paradex public Read refusals and Lighter catalog custody
+
+Paradex candle requests keep unsupported-interval-before-market validation and
+native messages. Their two immediate refusals now require a genuine Read root.
+The existing managed public book read uses shared command entry, so clock/capacity
+rejection yields one typed failure with no financial outcome. Revoked entry/live
+duplicates preserve the existing owner without a second terminal. Remote candle
+klines/TradingView fallback, polling, book GET bytes and book schema stay native.
+
+Lighter/Robinhood public startup catalogs now await managed Prepare/Bind/Claim
+and validate their exact Background Read callback before decoding or publishing.
+Their20s budget includes host preparation/claim delay; a delayed custom transport
+can expire before outbound. Each native orderBookDetails/orderBooks attempt has
+its own budget. Native endpoint fallback and shared startup backoff are retained,
+with the old attempt retired before follow-up. No command result is introduced.
+All four deployments keep their headers/body, route, catalog codec and metadata.

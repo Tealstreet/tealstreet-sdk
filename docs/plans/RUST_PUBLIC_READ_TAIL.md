@@ -106,3 +106,44 @@ Run scoped targets, native Lighter/Paradex/Binance, strict touched-crate Clippy,
 formatting, bans and both request-context checks. CI owns WASM/replay/size/timing.
 Open one draft, one>=120s watcher; green CI/reviews and explicit train window plus
 a fresh separate own-path/own-key guard precede head-matched merge.
+
+
+## Original RED checkpoints
+
+Plan0ff04e3b105 independently source/caller/full-map CLEAR. Caller review corrected
+the managed preparation-budget disclosure in57079383b24. New test-only579a9c6e0ee
+runs Lighter10tests (3 native PASS/7 assertion RED) and Paradex10tests (4 native
+PASS/6 assertion RED), zero ignored. Initial unused-import compilation issues
+were corrected before executed runs and are not RED proof. Deeper managed
+assertions remain behind the original missing-Prepare/deadline assertions.
+
+Source review requested stronger catalog retirement pressure and a real streamed
+transport-failure prefix. Test-only1751463a194 adds255 retained genuine20s peers,
+leaving one catalog slot: released primary/fallback failures must retire before
+fallback/retry, and success must free the slot before another peer can admit.
+The full cycle stays below the peers'20s deadline so expiry cannot mask a leak.
+It also drives HttpStart/valid HttpChunk prefix, HttpFailed and inert late HttpEnd,
+then real fresh fallback recovery. Paradex clock cases now include finite reuse.
+All original assertions remain. The unchanged-source expanded run has22tests:
+7 native PASS/15 intended assertion RED/0 ignored. Probe trait/field compile errors
+in the added fixture were corrected before that run, not counted as evidence.
+
+
+## Implementation checkpoint
+
+Original target1751463a194 is retained. The first managed execution passed11/12
+catalog tests and all10 Paradex tests; the remaining catalog suffix mistakenly
+observed fresh-success startup actions before checking a stale reply. Test-only
+b497c839f8c adds an explicit native startup-connect assertion and drains those
+success actions before the unchanged stale-response assertion. No production
+behavior or previous assertion was relaxed. Final expanded execution remains a
+required gate for every suffix originally blocked by REDs.
+
+Production changes only the three planned files: two inline local command Read
+refusals, shared book command entry without numeric fallback, and the catalog's
+managed Background root/stream/delivery/retirement plumbing. Existing native
+codecs and predicates remain. Necessary existing Lighter startup fixture drains
+use shared prepared_actions at their exact original event time, retaining all
+wire/financial/timer expectations. The backoff fixture tracks its unchanged last
+event time for transport preparation; no native timer timestamp is altered.
+Only the four singleton manifest sites are removed; foreign bytes stay exact.
