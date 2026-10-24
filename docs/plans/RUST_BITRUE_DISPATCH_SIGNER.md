@@ -58,7 +58,7 @@ continuations. No rename/move may be claimed as a genuine request-site prune.
 ## Native canonical bytes and atomic recipe
 
 Actual source: sign.rs:12-18 signature; lib.rs:269-340 send/issue;
-lib.rs:824-839 response resend and905-942 streamed-failure resend/transport retry;
+lib.rs:839-853 response resend and920-948 streamed-failure resend/transport retry;
 account.rs:534 listen POST,814 keepalive PUT,1755-1804 token acceptance/retirement.
 
 One SignRequest and one receipt per physical preparation:
@@ -140,9 +140,11 @@ minimum-stamp API needs shared clock/dispatcher review before production; do not
 implement a venue-owned timestamp allocator or infer retry permission from metadata.
 
 Native retry flags are independent: one signature resend and up to3transport
-retries for GETs or listen POST only; no generic uncertain write/PUT replay.
-The two budgets do not reset one another. Native per-attempt HTTP default is20s;
-a request can physically issue up to5times. A single20s SelectedRead root would
+retries for eligible NON-market GETs or listen POST only. Catalogues explicitly
+skip that immediate branch and retain startup backoff. Malformed-list/UTF-8 failures
+and a second parsed -1022 do not enter transport retry. No generic uncertain
+write/PUT replay is added. The two budgets do not reset one another. Native
+per-attempt HTTP default is20s; an eligible non-market chain can issue up to5times. A single20s SelectedRead root would
 narrow that chain. Freeze the native physical/root/queue declaration with core
 review before conversion, with near20s response/retry controls; do not assume a
 new100s root or renew a root by renaming work. Keep retries explicit staging
@@ -167,8 +169,9 @@ not readiness for zero legacy, Plan history or G2 provenance.
    POST and PUT; fixed/backward-clock -1022 fresh provider preparation; refusal of
    -1022/500 replay. Working controls pin exact native HMAC vectors/header order,
    selected keys/routes, static unsigned keyless catalogue, no recvWindow in MAC,
-   read validation/public-only behavior, one eligible resend, token keepalive and
-   both method/body bytes. Installed trusted RecordingSigner must have an independent
+   read validation/public-only behavior, one eligible resend, independent mixed
+   signature/transport budgets, catalogue backoff, malformed-list/UTF-8 retry exclusion,
+   token keepalive/obsolete-session completion and both method/body bytes. Installed trusted RecordingSigner must have an independent
    positive work control so provider0 cannot be blamed on a broken fixture.
    These tests use existing public APIs; missing-API compilation is not RED evidence.
 3. Test-only recipe/oracles may proceed after plan review. Production custody and
@@ -193,3 +196,13 @@ Architecture gate: no per-venue fix of a cross-cutting concern. Shared provider,
 Selection, clock, lifecycle, classifier, session, execution and history cores own
 authority. The venue owns canonical bytes, codecs and native continuation data.
 No local Context maker, completion wrapper, retry engine or signer provider.
+
+## Independent plan review refinement
+
+Source/adversarial and caller reviews verified native signing/selection/session
+shape, with one retry-scope correction: immediate transport retries exclude
+catalogues, malformed-list/UTF-8 failures and a second parsed signature refusal.
+The five-physical-attempt observation applies only to eligible non-market chains.
+Those exceptions and exact source anchors are corrected before test implementation.
+Full-map review CLEAR confirms all20baseline fingerprints, source holds and the
+unapproved-only candidate transition. No production source is authorized.
