@@ -1632,6 +1632,16 @@ and advance each native100ms page clock. Capacity uses genuine retained peers;
 reuse controls now reach and pass their stale-timer/DATA assertions. Family
 WASM/replay/CPU/memory certification remains CI's responsibility.
 
+### Phemex full signer cutover evidence
+
+Original signer test checkpoint17b9ee461cb had6GREEN/16assertionRED/0ignored.
+All22 are now GREEN with the same assertions, plus2 malformed-provider controls
+and the trusted-setup security control. Native256 and extended signer24/security2,
+registry3 and SDK constructor5 pass; strict Phemex Clippy passes. The exact
+combined staging map is17F/18O ->16F/16O, with one temporary sign_http; trading
+stays4F/4O via its approved release-metadata re-expression. No checker predicate
+or negative assertion is weakened. Actual #1970/#1974 and final CI remain gates.
+
 ## MEXC unsigned Background Read verification
 
 Plan3690a27236f precedes original controlsc58c123d68c:18 executed controls,
@@ -1711,13 +1721,3 @@ independence; CALLERS names the physical-order consequence. All three bounded
 reviews are CLEAR at a9282a7e787. Refreshed scoped suite: 165 tests/16 targets,
 zero ignored; strict all-target Clippy passes. Actual landing integration retains
 all incoming foreign changes and only the discovery singleton inventory prune.
-
-### Phemex full signer cutover evidence
-
-Original signer test checkpoint17b9ee461cb had6GREEN/16assertionRED/0ignored.
-All22 are now GREEN with the same assertions, plus2 malformed-provider controls
-and the trusted-setup security control. Native256 and extended signer24/security2,
-registry3 and SDK constructor5 pass; strict Phemex Clippy passes. The exact
-combined staging map is17F/18O ->16F/16O, with one temporary sign_http; trading
-stays4F/4O via its approved release-metadata re-expression. No checker predicate
-or negative assertion is weakened. Actual #1970/#1974 and final CI remain gates.

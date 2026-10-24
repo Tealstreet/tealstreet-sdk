@@ -322,14 +322,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Polymarket/Kraken fixed settings | LocalSetting adoption | Before changing the two held keyless fixed-setting success sites. | [RUST_FIXED_SETTING_ADOPTION.md](RUST_FIXED_SETTING_ADOPTION.md) |
 | OKX reported closed-position Read custody | Implemented; native/strict/reviews clear, CI pending | Before migrating request_closed_page from legacy Completion/list to the caller-root/history bridge. | [RUST_OKX_CLOSED_HISTORY_CONTEXT.md](RUST_OKX_CLOSED_HISTORY_CONTEXT.md) |
-| MEXC unsigned discovery and depth ownership | Managed adoption under review | Before adopting the two public Background Read send sites. | [RUST_MEXC_PUBLIC_BACKGROUND_CONTEXT.md](RUST_MEXC_PUBLIC_BACKGROUND_CONTEXT.md) |
-
-| Hyperliquid spot candle custody | Managed adoption; focused controls pass, review and CI pending | Before changing standalone or merged spot candles; reuses the existing perps Context and wire path. | [RUST_HYPERLIQUID_SPOT_CANDLES_CONTEXT.md](RUST_HYPERLIQUID_SPOT_CANDLES_CONTEXT.md) |
-| Aster frozen startup clock boundary | Test-only plan and deterministic control | Before assuming startup readiness occurs at a fixed post-sync timestamp. | [RUST_ASTERDEX_REPLAY_CLOCK_BOUNDARY.md](RUST_ASTERDEX_REPLAY_CLOCK_BOUNDARY.md) |
-| Crypto.com immediate trading custody | Implemented; native/strict/reviews pass, CI pending | Before converting the eight local refusal/fixed-setting sites. | [RUST_CRYPTOCOM_LOCAL_TRADING_CONTEXT.md](RUST_CRYPTOCOM_LOCAL_TRADING_CONTEXT.md) |
-| Crypto.com public discovery ownership | Managed implementation under review | Before managing the last unsigned discovery sender and its Markets/Tickers continuations. | [RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md](RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md) |
-
-| Orderly initial history refusals | Implemented; bounded reviews and CI pending | Before converting the three initial history refusals; excludes combo-5b signer/source work. | [RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md](RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md) |
 
 
 | Native socket snapshot barrier | Shared prerequisite API plan | Before separating login acceptance from a connect-origin native snapshot completion; no venue timer or second reducer. | [RUST_SOCKET_SNAPSHOT_BARRIER.md](RUST_SOCKET_SNAPSHOT_BARRIER.md) |
@@ -338,4 +330,12 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 
 | Phemex dispatch HMAC custody | Full cutover reviewed; folds into #1974 after #1970 | Before changing Phemex REST/WS canonical signing, provider setup or reconciliation expiry | [RUST_PHEMEX_DISPATCH_SIGNING.md](RUST_PHEMEX_DISPATCH_SIGNING.md) |
+| MEXC unsigned discovery and depth ownership | Managed adoption under review | Before adopting the two public Background Read send sites. | [RUST_MEXC_PUBLIC_BACKGROUND_CONTEXT.md](RUST_MEXC_PUBLIC_BACKGROUND_CONTEXT.md) |
+
+| Hyperliquid spot candle custody | Managed adoption; focused controls pass, review and CI pending | Before changing standalone or merged spot candles; reuses the existing perps Context and wire path. | [RUST_HYPERLIQUID_SPOT_CANDLES_CONTEXT.md](RUST_HYPERLIQUID_SPOT_CANDLES_CONTEXT.md) |
+| Aster frozen startup clock boundary | Test-only plan and deterministic control | Before assuming startup readiness occurs at a fixed post-sync timestamp. | [RUST_ASTERDEX_REPLAY_CLOCK_BOUNDARY.md](RUST_ASTERDEX_REPLAY_CLOCK_BOUNDARY.md) |
+| Crypto.com immediate trading custody | Implemented; native/strict/reviews pass, CI pending | Before converting the eight local refusal/fixed-setting sites. | [RUST_CRYPTOCOM_LOCAL_TRADING_CONTEXT.md](RUST_CRYPTOCOM_LOCAL_TRADING_CONTEXT.md) |
+| Crypto.com public discovery ownership | Managed implementation under review | Before managing the last unsigned discovery sender and its Markets/Tickers continuations. | [RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md](RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md) |
+
+| Orderly initial history refusals | Implemented; bounded reviews and CI pending | Before converting the three initial history refusals; excludes combo-5b signer/source work. | [RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md](RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md) |
 | Phemex identity and recurring account read owners | Plan and original RED phase; production held on actual #1974 | Before SelectedRead identity, Background currency cycles or Primary order reconciliation. | [RUST_PHEMEX_READ_OWNERS.md](RUST_PHEMEX_READ_OWNERS.md) |
