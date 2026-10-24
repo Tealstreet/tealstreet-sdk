@@ -994,6 +994,8 @@ impl AsterDex {
                 .open_session(safe_cex_engine::request_context::SessionPolicy {
                     credential: Some(credential.clone()),
                     repeat_safe: true,
+                    // Signed: routed by its credential, never a session egress.
+                    private_egress: None,
                 })
                 .ok();
         }
