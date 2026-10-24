@@ -5,7 +5,6 @@ use crate::signing_headers::ResultHeaderPolicy;
 use crate::{Action, HttpRequest, RequestId, SocketId, TimerId};
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
     sync::Arc,
 };
 
@@ -160,9 +159,9 @@ impl Pending {
 }
 #[derive(Default)]
 pub(crate) struct Dispatch {
-    pending: HashMap<RequestId, Pending>,
+    pending: crate::IdMap<RequestId, Pending>,
     /// Metadata only: materialised values live exclusively in the outbound action.
-    outbound: HashMap<RequestId, Pending>,
+    outbound: crate::IdMap<RequestId, Pending>,
     next: crate::resource_ids::ResourceIds,
 }
 pub(crate) enum Completion {
@@ -382,11 +381,20 @@ impl Dispatch {
         p.deadline = deadline;
         Ok(())
     }
-    pub fn activate_managed(&mut self, id: RequestId, deadline: f64) -> Result<(), SignError> {
-        let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
+    pub(crate) fn validate_managed_activation(
+        &self,
+        id: RequestId,
+        deadline: f64,
+    ) -> Result<(), SignError> {
+        let p = self.pending.get(&id).ok_or(SignError::Unavailable)?;
         if !p.managed || p.route_ready || !deadline.is_finite() || deadline <= p.staged_at {
             return Err(SignError::InvalidRequest);
         }
+        Ok(())
+    }
+    pub fn activate_managed(&mut self, id: RequestId, deadline: f64) -> Result<(), SignError> {
+        self.validate_managed_activation(id, deadline)?;
+        let p = self.pending.get_mut(&id).expect("validated managed recipe");
         // The route can only tighten the staged physical cap. Delayed provider
         // preparation and every stale retry retain the same immutable bound.
         p.deadline = p.deadline.min(deadline);

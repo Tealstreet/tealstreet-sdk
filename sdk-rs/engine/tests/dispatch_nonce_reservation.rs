@@ -306,6 +306,8 @@ fn drain(engine: &mut Engine<Probe>) -> Batch {
                     request,
                 }),
                 HttpAction::Cancel { .. } => {}
+                #[cfg(feature = "http-mutation-barriers")]
+                HttpAction::BindGroup { .. } => panic!("nonce fixture declares no barriers"),
             },
             Action::Sign { attempt, work, .. } => batch.work.push(Work { attempt, work }),
             Action::Http(_) => panic!("managed packet escaped final Claim"),

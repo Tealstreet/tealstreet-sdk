@@ -465,7 +465,7 @@ fn public_replacement_requires_current_delivery_and_retry_permission() {
 
 #[derive(Debug, PartialEq)]
 struct RegistryState {
-    contexts: std::collections::HashMap<u64, Context>,
+    contexts: crate::IdMap<u64, Context>,
     generation: u64,
     completion_root: Context,
     last_deadline: f64,
