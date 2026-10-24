@@ -167,7 +167,7 @@ impl SessionHeaders {
     /// Refuses an empty or oversized set, a duplicate (case-insensitive) or
     /// invalid name, or a transport-owned name. Refused values are wiped on drop.
     pub fn new(entries: Vec<(&'static str, SecretHeaderValue)>) -> Result<Self, Error> {
-        const TRANSPORT: [&str; 12] = [
+        const TRANSPORT: [&str; 13] = [
             "Host",
             "Content-Length",
             "Transfer-Encoding",
@@ -176,19 +176,21 @@ impl SessionHeaders {
             "Keep-Alive",
             "Proxy-Authorization",
             "Proxy-Authenticate",
+            "Proxy-Connection",
             "TE",
             "Trailer",
             "Upgrade",
             "Expect",
         ];
+        if entries.is_empty() || entries.len() > MAX_SESSION_HEADERS {
+            return Err(Error::Invalid);
+        }
         let distinct = entries.iter().enumerate().all(|(index, (name, _))| {
             entries[..index]
                 .iter()
                 .all(|(earlier, _)| !earlier.eq_ignore_ascii_case(name))
         });
-        let valid = !entries.is_empty()
-            && entries.len() <= MAX_SESSION_HEADERS
-            && distinct
+        let valid = distinct
             && entries.iter().all(|(name, value)| {
                 !TRANSPORT
                     .iter()

@@ -93,6 +93,8 @@ struct Shared {
     recipe_cookie: bool,
     /// The signing step writes a Cookie header at this site.
     signed_cookie: Option<CookieSite>,
+    /// The signing step adds this many distinct signer headers.
+    signer_fill: usize,
     crowded: bool,
     /// The sibling leg binds the same Session as the root.
     sibling_bound: bool,
@@ -159,6 +161,7 @@ impl Shared {
             cookie_session: false,
             recipe_cookie: false,
             signed_cookie: None,
+            signer_fill: 0,
             crowded: false,
             sibling_bound: false,
             signed: false,
@@ -239,6 +242,7 @@ enum CookieSite {
 }
 struct Recipe {
     cookie: Option<CookieSite>,
+    signer_fill: usize,
 }
 impl SignStep for Recipe {
     fn prepare(
@@ -274,6 +278,9 @@ impl SignStep for Recipe {
                 .push(("Cookie".into(), "signer=1".into())),
             None => {}
         }
+        request
+            .signer_headers
+            .extend((0..self.signer_fill).map(|index| (format!("x-s{index}"), "v".into())));
         Ok(())
     }
     fn freshness_ms(&self) -> f64 {
@@ -442,6 +449,7 @@ impl Probe {
                 None,
                 Box::new(Recipe {
                     cookie: shared.signed_cookie,
+                    signer_fill: shared.signer_fill,
                 }),
                 pending,
             )
@@ -1887,6 +1895,34 @@ fn a_signed_header_colliding_with_the_bundle_is_refused() {
     }
 }
 
+/// R6, signed: the header limit spans packet, signer and Session headers. A
+/// packet at exactly the limit binds; one more signer header fails NotSent.
+#[test]
+fn a_signed_bundle_counts_signer_headers_against_the_header_limit() {
+    let signed = |fill: usize| {
+        let (mut e, shared) = engine(|shared| {
+            shared.cookie_session = true;
+            shared.signed = true;
+            shared.signer_fill = fill;
+        });
+        let issued = ask(&mut e, 1);
+        let bound = prepared(&mut e, NOW + 1., issued[0].0);
+        let failures = shared.borrow().failures.clone();
+        (bound.map(|(_, request)| request), failures)
+    };
+    let (base, _) = signed(0);
+    let base = base.expect("unfilled signed packet");
+    let room = 32 - base.headers.len() - base.signer_headers.len();
+    let (full, failures) = signed(room);
+    let full = full.expect("a packet at exactly the limit binds");
+    assert_eq!(full.headers.len() + full.signer_headers.len(), 32);
+    assert!(failures.is_empty());
+    let (over, failures) = signed(room + 1);
+    assert!(over.is_none(), "an over-limit signed packet was bound");
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].outcome, Some(Outcome::NotSent));
+}
+
 /// R6 for a bundle: a crowded recipe cannot take a two-header bundle; the
 /// attempt fails NotSent before any packet is bound.
 #[test]
@@ -1924,6 +1960,7 @@ fn session_header_sets_are_bounded_and_redacted() {
         "keep-alive",
         "Proxy-Authorization",
         "Proxy-Authenticate",
+        "proxy-connection",
         "te",
         "Trailer",
         "Upgrade",

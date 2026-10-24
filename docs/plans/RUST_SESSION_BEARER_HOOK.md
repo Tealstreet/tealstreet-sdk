@@ -521,7 +521,8 @@ before landing rather than adding a second, parallel one.
   (case-insensitive) venue-declared names with `SecretHeaderValue` values.
   Transport-owned and hop-by-hop names (Host, Content-Length,
   Transfer-Encoding, Connection, Content-Type, Keep-Alive,
-  Proxy-Authorization, Proxy-Authenticate, TE, Trailer, Upgrade, Expect) and
+  Proxy-Authorization, Proxy-Authenticate, Proxy-Connection, TE, Trailer,
+  Upgrade, Expect) and
   invalid names are refused. `SessionHeaders::authorization`
   is the single-header case, so Paradex and BreakoutProp DXAPI are unchanged.
 - One revision covers the whole set. All existing fences apply to it:
@@ -531,9 +532,15 @@ before landing rather than adding a second, parallel one.
   - the retire cascade;
   - `Wiping` on drop.
 - `attach_session_headers` refuses, on a bound request, any recipe or signer
-  header whose name collides with a bundle name. It inserts every entry,
-  re-checks the header limits and wipes all inserted copies on refusal. The
-  issue-time refusal of a recipe `Authorization` on bound requests stays.
+  header whose name collides with a bundle name. It inserts every entry, then
+  re-checks the count and byte limits over the whole outbound packet (recipe,
+  signer and Session headers together, as the host chains them), and wipes
+  all inserted copies on refusal. The issue-time refusal of a recipe
+  `Authorization` on bound requests stays; other bundle names are unknown
+  until the just-in-time read, so their collisions are refused NotSent at Bind.
+- Ordering: the bundle is prepended, ahead of recipe headers (so GRVT's
+  `Content-Type` follows it, where native sends it first). This is the general
+  policy; a venue's native-wire test pins the order it needs.
 - Venue obligation (GRVT audit, codex-zs5e83):
   - A rotation within one engine Session is a new revision; the stale packet
     is reprepared and the old revision is never released.
@@ -548,7 +555,10 @@ Controls (`session_bearer.rs`). Mutation checks:
 - dropping the recipe-header clause of `attach_session_headers`'s collision
   check fails `a_recipe_header_colliding_with_the_bundle_is_refused`;
 - dropping its `signer_headers` clause fails
-  `a_signed_header_colliding_with_the_bundle_is_refused` (the Signer site).
+  `a_signed_header_colliding_with_the_bundle_is_refused` (the Signer site);
+- passing no signer headers to the post-insert limit check fails
+  `a_signed_bundle_counts_signer_headers_against_the_header_limit` and both
+  `http_lifecycle` budget unit tests.
 - A GRVT-style bundle attaches together and refreshes together on a revision
   move, unsigned and signed.
 - A recipe `Cookie` colliding with the bundle is refused NotSent before Bind,
@@ -556,8 +566,12 @@ Controls (`session_bearer.rs`). Mutation checks:
 - A signing step writing `Cookie` on the packet or among the signer headers
   is refused NotSent before the signed Bind.
 - A two-header bundle overflowing a crowded recipe is refused NotSent.
+- Signed: a packet at exactly 32 headers across packet, signer and Session
+  headers binds; one more signer header fails NotSent. Unit tests pin the
+  count and byte budgets across recipe and signer headers and that a refusal
+  leaves both vectors unchanged.
 - `SessionHeaders::new` refuses an empty set, 5 entries, duplicate names,
   every transport and hop-by-hop name and an invalid name, and redacts its `Debug` output.
 
-Results: 31 default and 37 with barriers; engine lib 868; clippy
+Results: 32 default and 38 with barriers; engine lib 868; clippy
 `-D warnings` in both modes.

@@ -83,8 +83,8 @@ fn bearer_refused(reason: Error) -> VenueError {
 }
 
 /// Insert the Bind packet's one copy of each session header, then re-check the
-/// header limits. A name the packet already carries (recipe or signer) or an
-/// overflow is refused with every inserted copy wiped.
+/// limits over the whole packet (recipe, signer and session headers). A name
+/// the packet already carries or an overflow is refused, inserted copies wiped.
 fn attach_session_headers(
     headers: &mut Vec<(&'static str, String)>,
     signer_headers: &[(String, String)],
@@ -105,7 +105,7 @@ fn attach_session_headers(
     for (index, (name, value)) in session.entries().iter().enumerate() {
         headers.insert(index, (*name, value.expose().to_owned()));
     }
-    if crate::signing_headers::validate_owned(headers).is_err() {
+    if crate::signing_headers::validate_packet(headers, signer_headers).is_err() {
         for (_, mut value) in headers.drain(..inserted) {
             zeroize::Zeroize::zeroize(&mut value);
         }
@@ -1858,6 +1858,82 @@ mod tests {
     include!("request_context_plan_expiry_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_plan_independence_tests.rs");
+
+    use crate::request_context::SecretHeaderValue;
+    use crate::signing_headers::{MAX_HEADERS, MAX_VALUE_BYTES};
+
+    fn session(names: &[&'static str], value: &str) -> SessionHeaders {
+        SessionHeaders::new(
+            names
+                .iter()
+                .map(|name| (*name, SecretHeaderValue::new(value.into()).unwrap()))
+                .collect(),
+        )
+        .unwrap()
+    }
+    fn signer(count: usize, value: &str) -> Vec<(String, String)> {
+        (0..count)
+            .map(|index| (format!("x-s{index}"), value.to_owned()))
+            .collect()
+    }
+    const RECIPE_NAMES: [&str; 29] = [
+        "x-r0", "x-r1", "x-r2", "x-r3", "x-r4", "x-r5", "x-r6", "x-r7", "x-r8", "x-r9", "x-r10",
+        "x-r11", "x-r12", "x-r13", "x-r14", "x-r15", "x-r16", "x-r17", "x-r18", "x-r19", "x-r20",
+        "x-r21", "x-r22", "x-r23", "x-r24", "x-r25", "x-r26", "x-r27", "x-r28",
+    ];
+    fn recipe(count: usize, value: &str) -> Vec<(&'static str, String)> {
+        RECIPE_NAMES[..count]
+            .iter()
+            .map(|name| (*name, value.to_owned()))
+            .collect()
+    }
+
+    /// The final packet is recipe + signer + session headers; its count limit
+    /// spans all three and a refusal leaves both vectors exactly as they were.
+    #[test]
+    fn session_headers_count_against_the_whole_packet_including_signer_headers() {
+        let signer_headers = signer(3, "v");
+        let mut headers = recipe(28, "v");
+        attach_session_headers(&mut headers, &signer_headers, &session(&["Cookie"], "c"))
+            .expect("exactly 32 headers");
+        assert_eq!(headers.len() + signer_headers.len(), MAX_HEADERS);
+
+        let original = recipe(29, "v");
+        let mut headers = original.clone();
+        assert_eq!(
+            attach_session_headers(&mut headers, &signer_headers, &session(&["Cookie"], "c")),
+            Err(Error::Invalid)
+        );
+        assert_eq!(headers, original);
+        assert_eq!(signer_headers, signer(3, "v"));
+    }
+
+    /// Bytes likewise: each vector fits the budget alone; together they don't.
+    #[test]
+    fn session_headers_byte_budget_spans_recipe_and_signer_headers() {
+        let big = "x".repeat(MAX_VALUE_BYTES);
+        let original = recipe(1, &big);
+        let signer_headers = signer(1, &big);
+        let mut headers = original.clone();
+        assert_eq!(
+            attach_session_headers(
+                &mut headers,
+                &signer_headers,
+                &session(&["Cookie", "X-Id"], &big)
+            ),
+            Err(Error::Invalid)
+        );
+        assert_eq!(headers, original);
+
+        let fits = "x".repeat(MAX_VALUE_BYTES - 64);
+        let mut headers = recipe(1, &fits);
+        attach_session_headers(
+            &mut headers,
+            &signer(1, &fits),
+            &session(&["Cookie", "X-Id"], &fits),
+        )
+        .expect("four values under the shared budget");
+    }
 
     #[derive(Debug)]
     struct Pending(Context);
