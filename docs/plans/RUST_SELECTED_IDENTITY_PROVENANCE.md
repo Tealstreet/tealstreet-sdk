@@ -631,3 +631,12 @@ property lookup or free. This is separate from a trap in an ordinary engine
 call, and from an ordinary Error thrown during retirement. The fatal controls
 must preserve Unknown and caller IDs and release every host-owned resource;
 they do not claim the absent retirement hook already executes.
+
+The additional RuntimeError/RangeError retirement controls run against unchanged
+runtime with six GREEN/seven assertion RED outcomes (13 total, zero skipped).
+Both new REDs reach the missing private-retirement-entry assertion after all
+host resource and Unknown/ID assertions pass. Their fatal-export throw, deadError
+transition and no-engine-access assertions are unexecuted until retirement is
+implemented; they are gates, not evidence that a fatal retirement is handled.
+The earlier six-GREEN/five-RED review remains exact historical evidence for
+fe85831efa0, not a result claimed for these expanded controls.

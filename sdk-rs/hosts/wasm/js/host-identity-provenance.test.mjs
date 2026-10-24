@@ -168,6 +168,67 @@ test('NEW-CONTRACT: a throwing healthy retirement cannot strand command or resou
   ]);
 });
 
+for (const FatalError of [WebAssembly.RuntimeError, RangeError]) {
+  test(`NEW-CONTRACT: ${FatalError.name} from retirement poisons cleanup before any engine access or free`, () => {
+    const calls = [];
+    const engineAccess = [];
+    const fatal = new FatalError('retirement trapped');
+    let poisoned = false;
+    let host;
+    const engine = new Proxy({
+      retireIdentitySnapshot() {
+        assert.equal(host.disposed, true);
+        calls.push('retire identity');
+        poisoned = true;
+        throw fatal;
+      },
+      free() { calls.push('free engine'); engineAccess.push('free call'); },
+    }, {
+      get(target, property, receiver) {
+        if (poisoned) engineAccess.push(`get ${String(property)}`);
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    host = new EngineHost(engine, {
+      now: () => 0,
+      clearTimeout: (handle) => calls.push(`clear ${handle}`),
+      dispose: () => calls.push('dispose transport'),
+    }, {}, { ownsEngine: true });
+    host.commands.set(7, {
+      identity: { op: 'placeOrders', clientOrderIds: ['keep-retirement-trap'] },
+      clearDeadline: () => calls.push('clear command deadline'),
+      reject(error) {
+        assert.equal(error.outcome, 'unknown');
+        assert.deepEqual(error.clientOrderIds, ['keep-retirement-trap']);
+        calls.push('settle command');
+      },
+      resolve() { assert.fail('retirement trap cannot report write success'); },
+    });
+    host.requests.set(1, { abort: () => calls.push('abort HTTP') });
+    host.socketFailures.set(8, { key: 81, handle: 'socket failure' });
+    host.timers.set(81, 'socket failure');
+    host.signings.set(2, { controller: { abort: () => calls.push('abort signing') }, timer: 'signing' });
+    host.primitiveSignings.set(3, { cancel: () => calls.push('cancel primitive') });
+    host.hostedSignings.set(4, { cancel: () => calls.push('cancel hosted') });
+    host.sockets.set(5, { close: () => calls.push('close socket') });
+    host.timers.set(6, 'ordinary');
+    assert.doesNotThrow(() => host.dispose());
+    host.dispose();
+    assert.deepEqual(calls.filter(call => !['retire identity', 'free engine'].includes(call)), [
+      'clear command deadline', 'settle command', 'clear socket failure', 'abort HTTP',
+      'abort signing', 'clear signing', 'cancel primitive', 'cancel hosted',
+      'close socket', 'clear ordinary', 'dispose transport',
+    ]);
+    for (const map of [host.commands, host.requests, host.socketFailures, host.signings,
+      host.primitiveSignings, host.hostedSignings, host.sockets, host.timers]) assert.equal(map.size, 0);
+    assert.equal(calls.filter(call => call === 'retire identity').length, 1, 'missing private retirement entry');
+    assert.equal(host.deadError?.cause, fatal, 'private fatal catch must mark dead despite disposed=true');
+    assert.equal(host.ownsEngine, false);
+    assert.deepEqual(engineAccess, []);
+    assert.equal(calls.includes('free engine'), false);
+  });
+}
+
 test('working control: public ingress is already fenced during resource cleanup', () => {
   let reads = 0;
   let checks = 0;
