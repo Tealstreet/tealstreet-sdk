@@ -414,6 +414,7 @@ impl BybitLinear {
                 &entry.preflight,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Mutation,
                     credential: entry.write_credential.clone(),
                     pacing: None,

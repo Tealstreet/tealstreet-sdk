@@ -1350,6 +1350,7 @@ fn a_planned_command_is_refused_a_session_wait_instead_of_parking() {
                 &preflight,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Read,
                     credential: None,
                     pacing: None,

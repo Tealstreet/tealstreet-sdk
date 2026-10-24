@@ -659,6 +659,7 @@ impl Backpack {
             preflight,
             &bounds,
             PlanPolicy {
+                independent_calls: false,
                 operation: Operation::Mutation,
                 credential: self.options.identity.as_ref().map(|identity| Credential {
                     slot: safe_cex_engine::CredentialSlot::Primary,

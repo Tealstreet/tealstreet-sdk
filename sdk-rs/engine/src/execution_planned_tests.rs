@@ -20,6 +20,7 @@ mod planned_execution {
 
     fn plan_policy() -> PlanPolicy {
         PlanPolicy {
+            independent_calls: false,
             operation: Operation::Mutation,
             credential: Some(credential()),
             pacing: None,
@@ -56,6 +57,7 @@ mod planned_execution {
 
     fn read_plan_policy() -> PlanPolicy {
         PlanPolicy {
+            independent_calls: false,
             operation: Operation::Read,
             credential: None,
             pacing: None,
