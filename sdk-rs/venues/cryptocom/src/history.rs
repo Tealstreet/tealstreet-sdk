@@ -4,9 +4,8 @@ use crate::account::{OrderRow, id, side};
 use crate::sign::Params;
 use crate::{Cryptocom, Pending};
 use safe_cex_engine::history::{Completion, CursorHistory};
-use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
-use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId, VenueError, num};
+use safe_cex_engine::{CommandId, Cx, Query, TimerId, VenueError, num};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet};
@@ -16,7 +15,6 @@ enum Kind {
     Fills,
     Orders,
     Income,
-    Trades,
 }
 pub struct Request {
     kind: Kind,
@@ -48,7 +46,6 @@ enum Row {
     Fill(Execution),
     Order(HistoricalOrder),
     Income(Income),
-    Trade(Trade),
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -96,18 +93,7 @@ struct Income {
     trade_id: Option<String>,
     category: &'static str,
 }
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Trade {
-    id: String,
-    symbol: String,
-    price: f64,
-    qty: f64,
-    quote_qty: f64,
-    timestamp: f64,
-    side: &'static str,
-}
-fn millis_ns(value: f64) -> Option<u64> {
+pub(crate) fn millis_ns(value: f64) -> Option<u64> {
     if !value.is_finite() || value < 0.0 {
         return None;
     }
@@ -171,16 +157,6 @@ struct IncomeRow<'a> {
     event_timestamp_ms: f64,
     #[serde(borrow, default)]
     event_timestamp_ns: Option<&'a RawValue>,
-}
-#[derive(Deserialize)]
-struct TradeRow<'a> {
-    #[serde(borrow)]
-    d: &'a RawValue,
-    i: &'a str,
-    p: &'a str,
-    q: &'a str,
-    s: &'a str,
-    t: f64,
 }
 
 impl Request {
@@ -269,18 +245,12 @@ impl Cryptocom {
                 to_ms,
                 limit,
             ),
-            Query::PublicTrades { symbol, limit } => (
-                Kind::Trades,
-                "public/get-trades",
-                Some(symbol),
-                None,
-                None,
-                None,
-                None,
-                limit,
-            ),
+            Query::PublicTrades { symbol, limit } => {
+                self.public_trades_start(cx, command, symbol, limit);
+                return;
+            }
         };
-        if !matches!(kind, Kind::Trades) && self.credentials.is_none() {
+        if self.credentials.is_none() {
             let Ok(context) = cx.admit_http_command(crate::read_policy()) else {
                 return;
             };
@@ -314,11 +284,7 @@ impl Cryptocom {
             limit: if matches!(kind, Kind::Income) && from_ms.is_some() && to_ms.is_some() {
                 usize::MAX
             } else {
-                limit.unwrap_or(if matches!(kind, Kind::Trades) {
-                    25
-                } else {
-                    100
-                }) as usize
+                limit.unwrap_or(100) as usize
             },
             history: Box::new(CursorHistory::new(
                 Completion::new(command),
@@ -361,33 +327,16 @@ impl Cryptocom {
             + match request.kind {
                 Kind::Fills | Kind::Orders => 1000.0,
                 Kind::Income => 100.0,
-                Kind::Trades => 10.0,
             };
-        if matches!(request.kind, Kind::Trades) {
-            let symbol = request.symbol.as_deref().unwrap_or("");
-            let url = format!(
-                "{}/public/get-trades?instrument_name={}&count={}",
-                self.rest,
-                crate::encode(symbol),
-                request.limit.min(150)
-            );
-            cx.request_streamed(
-                Method::Get,
-                url,
-                vec![],
-                ArrayAt::Path(&["result", "data"]),
-                Pending::History(request),
-            );
-        } else {
-            self.signed(
-                cx,
-                request.path,
-                &request.params(),
-                Pending::History(request),
-                true,
-            );
-        }
+        self.signed(
+            cx,
+            request.path,
+            &request.params(),
+            Pending::History(request),
+            true,
+        );
     }
+
     pub(crate) fn history_item(&self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
         let parsed = match request.kind {
             Kind::Fills => serde_json::from_str::<FillRow>(item).map(|r| {
@@ -474,20 +423,6 @@ impl Cryptocom {
                     true,
                 );
             }),
-            Kind::Trades => serde_json::from_str::<TradeRow>(item).map(|r| {
-                let price = num::parse(r.p);
-                let qty = num::parse(r.q);
-                request.page_count += 1;
-                request.history.stage(Row::Trade(Trade {
-                    id: id(r.d),
-                    symbol: r.i.into(),
-                    price,
-                    qty,
-                    quote_qty: price * qty,
-                    timestamp: r.t,
-                    side: side_name(r.s),
-                }));
-            }),
         };
         request.invalid |= parsed.is_err();
     }
@@ -497,8 +432,7 @@ impl Cryptocom {
             return;
         }
         let mut next_bound = None;
-        if !matches!(request.kind, Kind::Trades)
-            && request.page_count > 0
+        if request.page_count > 0
             && request.history.accepted_len() + request.history.staged_len() < request.limit
             // A short page of only prior identities proves native exhaustion,
             // even when its rows omit exact cursors. Full pages may move older.

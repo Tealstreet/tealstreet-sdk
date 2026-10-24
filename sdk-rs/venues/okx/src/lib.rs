@@ -16,7 +16,10 @@ use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::request_context::{Context, Credential, Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{
+    Context, Credential, Operation, Policy, RetryPolicy, Scope,
+};
+use safe_cex_engine::selected_read::{BackgroundReadError, ReadRequest, ReadRole, SelectedRead};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
@@ -83,6 +86,8 @@ pub enum Pending {
     Closed(Box<closed::Request>),
     Trade(trading::Request),
     Markets {
+        /// This physical discovery read's Background Context, once admitted.
+        context: Option<Context>,
         kind: InstrumentType,
         rows: Vec<Market>,
         scope_start: usize,
@@ -90,6 +95,7 @@ pub enum Pending {
         invalid: bool,
     },
     Tickers {
+        context: Option<Context>,
         kind: InstrumentType,
         rows: Vec<Ticker>,
         scope_start: usize,
@@ -143,6 +149,39 @@ pub struct Okx {
     /// Instruments skipped as malformed by the catalogue read in flight.
     skipping_instruments: HashSet<String>,
     catalogue_partial: bool,
+}
+
+fn discovery_read_policy() -> safe_cex_engine::selected_read::ReadPolicy {
+    safe_cex_engine::selected_read::ReadPolicy {
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+
+fn discovery_context(pending: &Pending) -> Option<Context> {
+    match pending {
+        Pending::Markets { context, .. } | Pending::Tickers { context, .. } => context.clone(),
+        _ => None,
+    }
+}
+
+/// A discovery read decodes and publishes only its own exact Background
+/// delivery; without an admitted Context it has no authority (fail closed).
+fn discovery_delivered(cx: &Cx<'_, Pending>, pending: &Pending) -> bool {
+    match pending {
+        Pending::Markets { context, .. } | Pending::Tickers { context, .. } => context
+            .as_ref()
+            .is_some_and(|context| cx.validate_background_read_http_delivery(context).is_ok()),
+        _ => true,
+    }
+}
+
+fn with_discovery_context(mut pending: Pending, admitted: Context) -> Pending {
+    if let Pending::Markets { context, .. } | Pending::Tickers { context, .. } = &mut pending {
+        *context = Some(admitted);
+    }
+    pending
 }
 
 fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
@@ -324,9 +363,106 @@ impl Okx {
         }
     }
 
+    /// One physical discovery read under its own Background Read: public reads
+    /// unsigned with the native static headers, the EEA account catalogue on the
+    /// selected key. A refused admission or queue is a pre-send discovery failure.
+    fn discovery_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        private: bool,
+        pending: Pending,
+    ) {
+        let markets = matches!(pending, Pending::Markets { .. });
+        let url = format!("{}{path}", self.rest());
+        let stream = ArrayAt::EnvelopeField("data");
+        if private {
+            let slots = self.read_slots(SlotPolicy::default());
+            let selected = SelectedRead::select(&slots, ReadRole::Read { scope: None });
+            let read = match SelectedRead::background(cx, selected, discovery_read_policy()) {
+                Ok(read) => read,
+                Err(BackgroundReadError::Selection(_)) => {
+                    let error = safe_cex_engine::VenueError::new(
+                        "OKX account catalogue requires credentials",
+                    );
+                    self.public_failed(cx, markets, error);
+                    return;
+                }
+                Err(BackgroundReadError::Admission(error)) => {
+                    self.public_failed(cx, markets, error.read_venue_error());
+                    return;
+                }
+            };
+            let pending = with_discovery_context(pending, read.context().clone());
+            let demo = self.options.testnet;
+            let queued = read.queue(
+                cx,
+                ReadRequest {
+                    method: Method::Get,
+                    url,
+                    body: None,
+                    stream: Some(stream),
+                },
+                |identity| {
+                    Box::new(sign::Http::new(Some(identity.clone()), path.into()).demo(demo))
+                },
+                |_| pending,
+            );
+            // The refused page's Context retires before the native failure path.
+            if let Err((pending, error)) = queued {
+                Self::retire_discovery(cx, &pending);
+                self.public_failed(cx, markets, error.read_venue_error());
+            }
+            return;
+        }
+        let policy = Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        };
+        let context = match cx.http_context(Scope::Background, policy) {
+            Ok(context) => context,
+            Err(error) => {
+                self.public_failed(cx, markets, error.read_venue_error());
+                return;
+            }
+        };
+        let pending = with_discovery_context(pending, context.clone());
+        let headers: &'static [(&'static str, &'static str)] = if self.options.testnet {
+            &[("x-simulated-trading", "1")]
+        } else {
+            &[]
+        };
+        match cx.request_managed_with_headers(
+            context.clone(),
+            Method::Get,
+            url,
+            headers,
+            None,
+            pending,
+        ) {
+            Ok(id) => cx.stream_response(id, stream),
+            Err((_, error)) => {
+                let _ = cx.finish_http_context(&context);
+                self.public_failed(cx, markets, error.read_venue_error());
+            }
+        }
+    }
+
+    /// Retire a failed discovery read's Context before the native failure path.
+    /// A failure (including its own deadline) always belongs to that read; only
+    /// successful deliveries are gated on live custody.
+    fn retire_discovery(cx: &mut Cx<'_, Pending>, pending: &Pending) {
+        if let Some(context) = discovery_context(pending) {
+            let _ = cx.finish_http_context(&context);
+        }
+    }
+
     /// Product chains carry earlier products' rows so a later failure republishes nothing.
     fn load_markets(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         kind: InstrumentType,
         rows: Vec<Market>,
@@ -334,11 +470,12 @@ impl Okx {
     ) {
         let private = self.options.eea && self.credentials.is_some();
         let scope = if private { "account" } else { "public" };
-        self.list(
+        self.discovery_read(
             cx,
             &format!("/api/v5/{scope}/instruments?instType={}", kind.as_str()),
             private,
             Pending::Markets {
+                context: None,
                 kind,
                 scope_start: rows.len(),
                 incomplete,
@@ -355,18 +492,19 @@ impl Okx {
     }
 
     fn load_tickers(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         kind: InstrumentType,
         rows: Vec<Ticker>,
         incomplete: bool,
         seeded: u32,
     ) {
-        self.list(
+        self.discovery_read(
             cx,
             &format!("/api/v5/market/tickers?instType={}", kind.as_str()),
             false,
             Pending::Tickers {
+                context: None,
                 kind,
                 scope_start: rows.len(),
                 incomplete,
@@ -468,18 +606,6 @@ impl Okx {
             Ok(id) => cx.stream_response(id, ArrayAt::EnvelopeField("data")),
             Err((pending, reason)) => self.on_sign_error(cx, pending, reason.venue_error()),
         }
-    }
-
-    fn list(&self, cx: &mut Cx<'_, Pending>, path: &str, private: bool, pending: Pending) {
-        let headers = self.headers(Method::Get);
-        let request = cx.request_streamed(
-            Method::Get,
-            format!("{}{path}", self.rest()),
-            headers,
-            ArrayAt::EnvelopeField("data"),
-            pending,
-        );
-        self.sign_request(cx, request, Method::Get, path, private, false);
     }
 
     fn ensure_feed(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
@@ -874,6 +1000,10 @@ impl Venue for Okx {
 
     fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        // A discovery row decodes only for its own exact Background delivery.
+        if !discovery_delivered(cx, pending) {
+            return;
+        }
         match pending {
             Pending::SocketRefresh { .. } => (),
             Pending::Account(request) => self.account_item(cx, request, item),
@@ -1180,6 +1310,12 @@ impl Venue for Okx {
             let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         }
+        // Gate before the envelope; the Context retires after publication below.
+        let discovery = discovery_context(&pending);
+        if !discovery_delivered(cx, &pending) {
+            Self::retire_discovery(cx, &pending);
+            return;
+        }
         if let Pending::Account(account::Request::Config { .. }) = &pending {
             self.account.config_pause_ms =
                 safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
@@ -1190,6 +1326,9 @@ impl Venue for Okx {
             Err(format!("OKX HTTP {}: {}", response.status, response.body))
         };
         if let Err(error) = result {
+            if let Some(context) = &discovery {
+                let _ = cx.finish_http_context(context);
+            }
             if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
                 self.public_failed(
                     cx,
@@ -1216,22 +1355,30 @@ impl Venue for Okx {
                 invalid,
                 scope_start,
                 incomplete,
-            } => {
+                ..
+            } => 'settle: {
                 let incomplete = incomplete || (invalid && rows.len() == scope_start);
                 self.catalogue_partial |= invalid;
                 if let Some(next) = self.next_instrument_type(kind) {
+                    // The settled product retires before the next one is admitted.
+                    if let Some(context) = &discovery {
+                        let _ = cx.finish_http_context(context);
+                    }
                     self.load_markets(cx, next, rows, incomplete);
-                    return;
+                    break 'settle;
                 }
                 self.catalogue_incomplete = incomplete;
                 if rows.is_empty() && !cx.store.loaded().markets {
+                    if let Some(context) = &discovery {
+                        let _ = cx.finish_http_context(context);
+                    }
                     self.public_failed(
                         cx,
                         true,
                         safe_cex_engine::VenueError::new("Empty OKX catalogue")
                             .kind(safe_cex_engine::ErrorKind::VenueUnavailable),
                     );
-                    return;
+                    break 'settle;
                 }
                 // A partial catalogue commits so private reads start, and is re-read.
                 if incomplete || self.catalogue_partial {
@@ -1245,7 +1392,7 @@ impl Venue for Okx {
                     self.startup.succeeded(cx, DiscoveryRead::Markets);
                 }
                 if rows.is_empty() && incomplete {
-                    return;
+                    break 'settle;
                 }
                 let was_loaded = cx.store.loaded().markets;
                 let mut merged = cx.store.markets().to_vec();
@@ -1303,11 +1450,15 @@ impl Venue for Okx {
                 scope_start,
                 incomplete,
                 seeded,
-            } => {
+                ..
+            } => 'settle: {
                 let incomplete = incomplete || (invalid && rows.len() == scope_start);
                 if let Some(next) = self.next_instrument_type(kind) {
+                    if let Some(context) = &discovery {
+                        let _ = cx.finish_http_context(context);
+                    }
                     self.load_tickers(cx, next, rows, incomplete, seeded);
-                    return;
+                    break 'settle;
                 }
                 if seeded > 0 {
                     cx.notice(
@@ -1332,7 +1483,7 @@ impl Venue for Okx {
                     if refresh {
                         self.ticker_seed(cx, false);
                     }
-                    return;
+                    break 'settle;
                 }
                 let mut rows = rows;
                 if incomplete || self.catalogue_incomplete || refresh {
@@ -1382,6 +1533,9 @@ impl Venue for Okx {
             }
             other => self.on_request_failed(cx, other, "malformed OKX list item"),
         }
+        if let Some(context) = &discovery {
+            let _ = cx.finish_http_context(context);
+        }
     }
 
     fn on_stream_malformed(
@@ -1393,6 +1547,7 @@ impl Venue for Okx {
         error: &str,
     ) {
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            Self::retire_discovery(cx, &pending);
             self.public_failed(
                 cx,
                 matches!(pending, Pending::Markets { .. }),
@@ -1411,6 +1566,7 @@ impl Venue for Okx {
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
             let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+            Self::retire_discovery(cx, &pending);
             self.public_failed(
                 cx,
                 matches!(pending, Pending::Markets { .. }),
@@ -1474,6 +1630,10 @@ impl Venue for Okx {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        // A failed discovery read retires first, then takes the native failure path.
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            Self::retire_discovery(cx, &pending);
+        }
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
             let _ = cx.finish_http_context(context);
             self.config_unanswered();
@@ -1782,7 +1942,8 @@ mod price_index_tests {
 
     const MARKET: &str = r#"{"instId":"BTC-USDT-SWAP","instType":"SWAP","ctType":"linear","ctVal":"0.01","ctValCcy":"BTC","settleCcy":"USDT","lotSz":"0.01","tickSz":"0.1","minSz":"0.01","maxIcebergSz":"1000","maxLmtSz":"1000","maxMktSz":"1000","maxStopSz":"1000","maxTriggerSz":"1000","maxTwapSz":"1000","lever":"100"}"#;
     fn request(e: &mut Engine<Okx>) -> safe_cex_engine::HttpRequest {
-        e.drain_actions()
+        safe_cex_engine::test_support::prepared_actions(e, 1.0)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
