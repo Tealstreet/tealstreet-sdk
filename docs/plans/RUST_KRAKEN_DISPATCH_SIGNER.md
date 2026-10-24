@@ -280,7 +280,8 @@ the unchanged 20 originals: 9 intended assertion REDs / 11 GREEN / zero ignored.
 The prior fixture compile/mistaken read-only positive remain excluded. No WIP
 push or duplicate CI run is needed for this local plan/original checkpoint.
 
-uufub4's shared nonce plan/original028e4db578f has bounded consumer/API/original
+uufub4's shared nonce plan/original028e4db578f, reviewed descendant27fdf8000cf
+with explicit legacy-control ports, has bounded consumer/API/original
 fit CLEAR: separate reservation and global released-floor fences at provider
 apply/final Claim, exact decimal u64 receipt, private raw-ms ceiling and eight
 pre-send repairs. Its legacy allocator probe is explicitly original fence
@@ -337,3 +338,21 @@ Full post-extension target execution:23 controls compile/run,10 intended asserti
 REDs /13 GREEN /zero ignored. The first20 test bytes remain exactd3d30; only the
 three retirement controls are appended. Scoped target strict Clippy passes. No
 push or CI dispatch; the four frozen PR heads are untouched.
+
+
+### HMAC review and release-hook fit
+
+4yjlw0 reviewed898e0183040 HMAC/native/original CLEAR, including all three
+independently recomputed literals and both Futures deadline phases. The real
+wire-MAC assertions comparing against native sign::Signer are parity evidence;
+only the literal vectors are independent HMAC evidence. Original-review CLEAR
+does not supply the missing dispatch nonce or socket epoch authority.
+
+Neither Kraken implementation overrides on_http_release on actual219d. Both
+use Venue's default Unscheduled admission. Native mutation queues advance their
+waiting/step state before issuance, not during final Claim. A new pure explicit
+Unscheduled nonce-release opt-in fits those consumers, provided unsent repairs
+retain the original pending/selection/queue position without re-emitting progress
+or advancing a step. Default Unsupported for unreviewed nonce consumers is safe.
+This is consumer-direction fit only; exact pure-hook and global-floor/Claim
+composition remain core source-review gates, with no callback under the lock.
