@@ -403,3 +403,19 @@ fn bad_secondary_seed_keeps_native_identity_refusal_and_no_send() {
         }
     }
 }
+
+#[test]
+fn unregistered_direct_constructor_keeps_native_missing_credentials_refusal() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let mut e = engine(Options {
+        key: Some("primary-key".into()),
+        secret: Some(STANDARD.encode([7; 32])),
+        ..Default::default()
+    });
+    let actions = ask(&mut e, 7, 10.);
+    let error = failure(&actions, 7);
+    assert_eq!(error.message, "Backpack credentials unavailable");
+    assert_eq!(error.kind, None);
+    assert_eq!(error.outcome, None);
+    unchanged(&e);
+}
