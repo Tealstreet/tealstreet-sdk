@@ -381,3 +381,17 @@ failure with no Partial. Missing-list is a separate real stream case. No synthet
 HttpFailed error string supplies classification evidence. Exact incoming5653-path
 and all25original-assertion preservation review was independently completed on727;
 final bounded delta review and CI remain separate gates.
+
+Second bounded review found that feeding already decoded Text into decode_int
+could strip a second quote layer. New committed1d3d0b313a7 POST/streamed-GET
+controls reproduced two assertion REDs; code is now extracted as RawValue and
+its exact raw JSON token is handed once to the shared strict decoder. Canonical
+integer/string -1022 remains positive; nested quotes, padding and float/exponent
+aliases never authorize reissue. This adopts shared canonical native-code policy.
+
+The temporary ffa175 effect check also introduced one extra conservative matches!
+occurrence. Provider-failure projection now consumes the same existing typed
+Request::credential_role declaration used for signing, eliminating that duplicate
+read/write classification rather than renaming bindings or adding an inventory
+exception. Independent semantic-dedup review is required; current scanner and
+manifest agree21/14. No financial authority is inferred from the role or floor.

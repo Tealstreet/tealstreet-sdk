@@ -1171,8 +1171,11 @@ impl Bitrue {
         mut error: VenueError,
         prior_attempt: bool,
     ) {
-        let read = matches!(request.step.effect, Effect::Inspect(_) | Effect::Verify(_));
-        if (prior_attempt && !read) || request.plan.effective || !request.plan.ids.is_empty() {
+        let prior_mutation = match request.credential_role() {
+            safe_cex_engine::credential_selection::CredentialRole::Mutation => prior_attempt,
+            _ => false,
+        };
+        if prior_mutation || request.plan.effective || !request.plan.ids.is_empty() {
             error.outcome = Some(Outcome::Unknown);
         }
         self.trade_failed(cx, request, error);

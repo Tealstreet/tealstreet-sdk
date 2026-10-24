@@ -31,11 +31,19 @@ pub const BITRUE: CodeTable = CodeTable {
     status: &[],
 };
 
+#[derive(serde::Deserialize)]
+struct Envelope<'a> {
+    #[serde(borrow)]
+    code: &'a serde_json::value::RawValue,
+    #[serde(borrow, default)]
+    msg: std::borrow::Cow<'a, str>,
+}
+
 pub fn resend(response: &Response<'_>) -> bool {
-    let envelope = serde_json::from_str::<crate::wire::Envelope<'_>>(response.body).ok();
+    let envelope = serde_json::from_str::<Envelope<'_>>(response.body).ok();
     let code = envelope
         .as_ref()
-        .and_then(|e| classify::decode_int(&e.code));
+        .and_then(|e| classify::decode_int(e.code.get()));
     let native = code.map(|code| Native {
         code: NativeCode::Int(code),
         message: envelope.as_ref().map_or("", |e| e.msg.as_ref()),
