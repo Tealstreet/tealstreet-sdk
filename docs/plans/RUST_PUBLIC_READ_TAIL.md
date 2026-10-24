@@ -47,8 +47,11 @@ a financial outcome instead of native local NotSent.
 
 The one native markets(fallback) request becomes an unsigned managed Background
 Read, credential None,20000ms,no pacing,Never. Each physical startup/fallback
-request has its own Background root, matching the existing physical20s HTTP
-window. There is no command/caller-wait/joined authority or multi-page Plan.
+request has its own Background root. Unlike the old raw HTTP window, this20s
+budget starts at issue and includes host preparation/bind/claim delay; delayed
+custom transports can expire before outbound. Native primary/fallback physical
+attempts retain independent budgets, with no guessed extra wait. There is no
+command/caller-wait/joined authority or multi-page Plan.
 Keep exact GET hosts across Lighter/Robinhood main/testnet, no headers/body,
 orderBookDetails then orderBooks, and ArrayAt::Envelope order/details and books.
 
@@ -86,7 +89,8 @@ Lighter controls use actual Engine start and Prepare/Bind/Claim: zero HTTP befor
 claim, exact unsigned public intent/header/body/host bytes, native nonempty
 catalog codec/precision/spot filter, orderBooks fallback on native failure, no
 publication from malformed/failed prefixes, prep refusal and released timeout,
-late/duplicate response inert, repeated attempt retirement, and native backoff.
+preclaim20s expiry with zero outbound/inert late claim, late/duplicate response
+inert, repeated attempt retirement, and native backoff.
 Keep identifiable native controls GREEN even while managed assertions RED; do not
 count compile failures as RED evidence. Cover all four deployments. Deeper suffix
 assertions behind a first RED are disclosed until implementation executes them.
