@@ -608,3 +608,40 @@ fn invalid_clock_precedes_the_missing_selector_terminal() {
 fn invalid_clock_precedes_remote_identity_issue() {
     invalid_clock(options());
 }
+
+#[test]
+fn physical_timeout_advances_a_different_candidate_while_the_original_root_lives() {
+    let mut e = engine(Options {
+        application_id: Some(ADDRESS_A.into()),
+        public_data_only: true,
+        ..Default::default()
+    });
+    let actions = ask(&mut e, NOW, 60_000);
+    let (first, _) = prep(&actions);
+    let physical = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
+            _ => None,
+        })
+        .expect("the first candidate has its own physical deadline");
+    let (permit, _) = bind(&mut e, NOW, first);
+    assert!(matches!(e.claim_http(NOW, permit), Ok(Claim::Released(_))));
+    e.handle(NOW + 20_000., Event::TimerFired { timer: physical });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        outcomes(&actions).is_empty(),
+        "the original caller still has time for another native candidate"
+    );
+    let (_, request) = prep(&actions);
+    assert!(request.url.contains("accountsByL1Address"));
+    let request = released(&mut e, NOW + 20_000., &actions);
+    let actions = reply(
+        &mut e,
+        NOW + 39_000.,
+        &request,
+        200,
+        r#"{"sub_accounts":[{"index":5}]}"#,
+    );
+    assert_eq!(outcomes(&actions), [Ok(r#"{"userId":"5"}"#.into())]);
+}

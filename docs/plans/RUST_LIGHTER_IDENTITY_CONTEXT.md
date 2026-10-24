@@ -126,8 +126,7 @@ four-candidate ordering, missing-selector/key-index refusal, a later physical
 window after19s, and first-row/field-presence validation. Snapshot comparison uses
 one identical frame clock, avoiding timestamp bytes masquerading as Store changes.
 Initial missing Probe trait delegations and the frame-clock mismatch were fixture
-setup corrections before this receipt, not intended RED evidence. Invalid-clock,
-stale-generation/held-claim and complete post-cutover cleanup coverage remain
+setup corrections before this receipt, not intended RED evidence. Stale-generation/held-claim and complete post-cutover cleanup coverage remain
 source-certification work. No production adoption is included or authorized.
 
 Scoped strict Clippy on this new test target and scoped rustfmt/diff checks pass.
@@ -155,3 +154,8 @@ physical child even while the caller root lives. The exact physical-timeout
 callback's authority for advancing a DIFFERENT native candidate must be confirmed
 by the core owner before source. Do not convert that rejection into publication
 rights, infer release from text, renew the root or invent a failure validator.
+
+A twentieth original control pins real released physical-timeout fallback under
+a live longer root; it currently fails at the eager-HTTP/Prepare boundary. Its
+real timer/next-candidate suffix remains gated, not a claimed failure-validator
+proof. The current complete target executes14 intended REDs/6 GREEN/0ignored.
