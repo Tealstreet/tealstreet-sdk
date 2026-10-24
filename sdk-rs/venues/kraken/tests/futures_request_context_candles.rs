@@ -385,6 +385,7 @@ fn second_page_keeps_original_root_and_discards_staged_prefix_on_expiry() {
     let error = terminal(&actions).expect_err("staged pages cannot become late success");
     assert_eq!(error.kind, Some(ErrorKind::Timeout));
     assert_eq!(error.outcome, None);
+    no_next_page(&actions);
 }
 #[test]
 fn second_page_gets_its_own_managed_preparation() {
@@ -802,4 +803,110 @@ fn zero_wait_is_rejected_before_native_entry() {
         Err(Error::Invalid)
     );
     assert!(e.drain_actions().next().is_none());
+}
+
+fn no_next_page(actions: &[Action]) {
+    no_http(actions);
+    assert!(
+        !actions.iter().any(|action| matches!(action,
+            Action::ManagedHttp(action) if matches!(**action, HttpAction::Prepare { .. })
+        )),
+        "terminal walk cannot prepare another page"
+    );
+}
+fn child_timer(actions: &[Action], deadline: f64) -> TimerId {
+    actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == deadline => Some(*timer),
+            _ => None,
+        })
+        .expect("original physical admission deadline")
+}
+fn stuck_preparation(bind: bool) {
+    let (mut e, _) = boot();
+    let actions = fetch(&mut e, NOW, 60_000);
+    let (token, _) = preparation(&actions);
+    let timer = child_timer(&actions, NOW + 20_000.);
+    let permit = if bind {
+        e.http_prepared(
+            NOW + 1.,
+            token,
+            Prepared {
+                id: token.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        Some(
+            e.drain_actions()
+                .find_map(|action| match action {
+                    Action::ManagedHttp(action) => match *action {
+                        HttpAction::Bind { permit, .. } => Some(permit),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .expect("genuine held bind"),
+        )
+    } else {
+        None
+    };
+    e.handle(NOW + 20_000., Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let error = terminal(&actions).unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::Timeout));
+    assert_eq!(
+        error.outcome,
+        Some(Outcome::NotSent),
+        "child preparation expired while original60s root was live"
+    );
+    no_next_page(&actions);
+    if let Some(permit) = permit {
+        assert!(e.claim_http(NOW + 20_001., permit).is_err());
+    } else {
+        e.http_prepared(
+            NOW + 20_001.,
+            token,
+            Prepared {
+                id: token.attempt().request.0,
+                expires_at: None,
+            },
+        );
+    }
+    let late: Vec<_> = e.drain_actions().collect();
+    no_next_page(&late);
+    assert!(!late.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { .. }) | Action::Notice(Notice::CommandFailed { .. })
+    )));
+}
+#[test]
+fn live_original_root_does_not_extend_stuck_prepare_admission_deadline() {
+    stuck_preparation(false)
+}
+#[test]
+fn live_original_root_does_not_extend_unclaimed_bind_admission_deadline() {
+    stuck_preparation(true)
+}
+#[test]
+fn second_child_timeout_fails_without_prefix_or_third_page() {
+    let (mut e, _) = boot();
+    let actions = fetch(&mut e, NOW, 60_000);
+    let first = native_packet(&mut e, actions, NOW);
+    let actions = outcome(&mut e, NOW + 1., &first, &page(NOW - 120_000., true));
+    let timer = child_timer(&actions, NOW + 20_001.);
+    let second = native_packet(&mut e, actions, NOW + 1.);
+    e.handle(NOW + 20_001., Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let error =
+        terminal(&actions).expect_err("failed second page cannot publish its accepted prefix");
+    assert_eq!(error.kind, Some(ErrorKind::Timeout));
+    assert_eq!(error.outcome, None);
+    no_next_page(&actions);
+    let late = outcome(&mut e, NOW + 20_002., &second, &page(NOW - 60_000., false));
+    no_next_page(&late);
+    assert!(!late.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { .. }) | Action::Notice(Notice::CommandFailed { .. })
+    )));
 }

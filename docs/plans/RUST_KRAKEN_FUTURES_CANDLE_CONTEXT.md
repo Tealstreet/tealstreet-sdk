@@ -153,3 +153,22 @@ passes. Those setup failures are not adoption defect evidence. Source/maps/Cargo
 and existing tests across219 Kraken/engine/crypto/registry/checker paths remain
 byte-exact10d. Scoped target strict Clippy and rustfmt/diff checks pass with
 CARGO_BUILD_JOBS=4 and sequential builds. No full-workspace/all-feature build.
+
+## Root-owner original-control review fold
+
+Fe7lgm reviewed9afcaf83f17 read-only: original assertion/custody fit CLEAR with
+a required coverage gap. The held-bind original used a1s root and therefore
+proved root expiry, not the NEW20s admission deadline under a longer live root.
+Two appended controls now hold Prepare unanswered or Bind unclaimed under a60s
+original root, fire the genuine20s child timer and require exactly one Timeout
+with the existing localNotSent projection, no HTTP/next page, and inert late
+preparation/claim. These controls first fail at raw HTTP on unchanged production;
+the timer/metadata/late suffixes remain gated, not already executed proof.
+
+A third appended control accepts page1, releases page2, then requires physical
+child Timeout with no prefix/third page/late result. Its original first RED is
+the absent child deadline. The existing staged-root-expiry control additionally
+pins no HTTP or Prepare after its first failed terminal assertion. Primary
+original boundaries and all native assertions are unchanged. Current target28
+executes **17 intended assertion REDs / 11 GREEN / zero ignored** against10d.
+The final review delta requires the root owner's bounded closure before source.
