@@ -2629,3 +2629,67 @@ fn a_disagreeing_revision_and_bundle_cannot_spin_the_wake() {
     }
     assert!(shared.borrow().failures.is_empty());
 }
+
+/// Restack P3: a signed bound call that waits on pacing behind a released
+/// sibling. A retire during the wait fails it Revoked, NotSent; a bundle that
+/// goes NotReady during the wait parks it when signing would begin, and the
+/// next announce binds it on the new revision. No provider work starts first.
+fn pacing_waiting_signed_call(retire_during_wait: bool) {
+    let (mut e, shared) = engine(|shared| {
+        shared.paced = true;
+        shared.signed = true;
+    });
+    let first = ask(&mut e, 1);
+    let (permit, _) = prepared(&mut e, NOW + 1., first[0].0).expect("first bound");
+    assert!(matches!(
+        e.claim_http(NOW + 1., permit),
+        Ok(Claim::Released(_))
+    ));
+    e.drain_actions().for_each(drop);
+    let second = ask(&mut e, 2);
+    let actions = route(&mut e, NOW + 1.5, second[0].0);
+    assert!(
+        sign_work(&actions).is_none(),
+        "the second call waits on pacing"
+    );
+    let (timer, at) = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms < NOW + 1_000. + 20_000. => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("the pacing wake");
+    if retire_during_wait {
+        retire(&mut e, &shared, NOW + 1.6);
+        e.drain_actions().for_each(drop);
+        let shared = shared.borrow();
+        assert_eq!(shared.failures.len(), 1, "{:?}", shared.failures);
+        assert_eq!(shared.failures[0].outcome, Some(Outcome::NotSent));
+        assert_eq!(shared.failures[0].kind, Some(ErrorKind::InvalidInput));
+        return;
+    }
+    shared.borrow_mut().refresh(None);
+    e.handle(at, Event::TimerFired { timer });
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        sign_work(&actions).is_none(),
+        "no provider work while NotReady"
+    );
+    assert!(shared.borrow().failures.is_empty(), "parked, not failed");
+    shared.borrow_mut().refresh(Some("B"));
+    let woken = prepare_actions(announce(&mut e, &shared, at + 1.));
+    assert_eq!(woken.len(), 1);
+    let (_, packet) = prepared(&mut e, at + 2., woken[0].0).expect("bound packet");
+    assert_eq!(authorization(&packet), Some("Bearer B"));
+}
+#[test]
+fn a_pacing_waiting_signed_call_whose_session_retires_is_revoked() {
+    pacing_waiting_signed_call(true);
+}
+#[test]
+fn a_pacing_waiting_signed_call_whose_bundle_goes_not_ready_parks() {
+    pacing_waiting_signed_call(false);
+}

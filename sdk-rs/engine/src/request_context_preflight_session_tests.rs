@@ -35,6 +35,9 @@ struct Reads {
     expired: Vec<(u32, VenueError, bool)>,
     park_in_ready: Option<Session>,
     ready_park_result: Option<Result<(), Error>>,
+    /// The ended hook tries to bind a read to this (retired) Session (#2069).
+    bind_in_ended: Option<Session>,
+    bind_result: Option<Result<RequestId, Error>>,
 }
 
 fn preflight_policy() -> PreflightPolicy {
@@ -185,6 +188,22 @@ impl Venue for Reads {
             .as_ref()
             .is_some_and(|ready| ready.owner() == handle.owner());
         self.ended.push((pending, error, own));
+        if let Some(session) = self.bind_in_ended.take() {
+            let read = cx
+                .preflight_read_context(handle, read_policy(), terms())
+                .unwrap();
+            self.bind_result = Some(
+                cx.request_managed(
+                    read,
+                    Some(&session),
+                    Method::Get,
+                    "https://venue.test/read".into(),
+                    None,
+                    pending,
+                )
+                .map_err(|(_, error)| error),
+            );
+        }
         if let Some(session) = self.repark_on.take() {
             let parked = if self.repark_retry {
                 let read = self.read.clone().unwrap();
@@ -535,6 +554,28 @@ fn an_ended_preflight_wait_without_progress_fails_once() {
         terminals[0].as_ref().unwrap_err().message,
         "Session retired"
     );
+}
+
+/// #2069 R10b': the ended hook tries to bind a read to the retired Session.
+/// The binding is refused Revoked before any effect, and that refused issue
+/// in the Preflight's custody is its one terminal (the owned-admission
+/// failure, NotSent). Nothing is sent.
+#[test]
+fn an_ended_preflight_hook_cannot_bind_its_retired_session() {
+    let (mut e, old, _) = parked(Reads::default(), 60_000);
+    e.venue.bind_in_ended = Some(old.clone());
+    let _ = cx(&mut e, 1.).retire_session(&old).unwrap();
+    let actions = flush(&mut e, 2.);
+    assert_eq!(e.venue.ended.len(), 1);
+    assert_eq!(e.venue.bind_result, Some(Err(Error::Revoked)));
+    assert!(prepares(&actions).is_empty());
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let terminals = terminals(&actions);
+    assert_eq!(terminals.len(), 1, "one terminal");
+    let error = terminals[0].as_ref().unwrap_err();
+    assert_eq!(error.message, "HTTP read admission failed");
+    assert_eq!(error.outcome, Some(crate::Outcome::NotSent));
+    assert_eq!(error.kind, Some(crate::ErrorKind::InvalidInput));
 }
 
 /// N7 sealed: a Preflight failed while its read is parked returns the
