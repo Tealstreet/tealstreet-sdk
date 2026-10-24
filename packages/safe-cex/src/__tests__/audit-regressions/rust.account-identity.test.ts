@@ -96,7 +96,9 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
     capabilities: () => engineCapabilities(name),
     start: vi.fn(idle),
     command(json) {
-      const command = JSON.parse(json);
+      // The caller wait is engine receipt metadata (pinned by the host tests),
+      // not part of the native command these regressions compare.
+      const { timeoutMs: _wait, ...command } = JSON.parse(json);
       commands.push(command);
       if (command.command === undefined) return '[]';
       if (failure !== undefined) throw failure;

@@ -12,8 +12,13 @@ const MAX_ROWS: u32 = 200;
 
 #[derive(Default)]
 pub struct State {
-    active: HashSet<CommandId>,
-    deferred: Vec<(TimerId, Request)>,
+    pub(super) active: HashSet<CommandId>,
+    pub(super) deferred: Vec<(TimerId, Deferred)>,
+}
+
+pub(super) enum Deferred {
+    Signed(Box<Request>),
+    PublicTrades(Box<crate::public_trades::Read>),
 }
 
 pub struct Request {
@@ -163,13 +168,13 @@ struct HistoricalOrder {
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Trade {
+pub(super) struct Trade {
     id: String,
     symbol: String,
     price: f64,
     qty: f64,
     quote_qty: f64,
-    timestamp: f64,
+    pub(super) timestamp: f64,
     side: &'static str,
 }
 
@@ -224,6 +229,13 @@ impl PhemexPerpetuals {
     ) {
         if matches!(query, Query::Income { .. }) {
             self.income_query(cx, command, query);
+            return;
+        }
+        if self.credentials.is_none()
+            && self.read_credentials.is_none()
+            && let Query::PublicTrades { symbol, limit } = query
+        {
+            self.fetch_public_trades(cx, command, symbol, limit);
             return;
         }
         let mut client_id = None;
@@ -335,7 +347,9 @@ impl PhemexPerpetuals {
     fn history_send(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         if cx.now < self.paused_until {
             let timer = cx.set_timer(self.paused_until - cx.now);
-            self.history.deferred.push((timer, request));
+            self.history
+                .deferred
+                .push((timer, Deferred::Signed(Box::new(request))));
             return;
         }
         let (path, at) = match request.rows {
@@ -499,8 +513,11 @@ impl PhemexPerpetuals {
         else {
             return false;
         };
-        let (_, request) = self.history.deferred.swap_remove(index);
-        self.history_send(cx, request);
+        let (_, deferred) = self.history.deferred.swap_remove(index);
+        match deferred {
+            Deferred::Signed(request) => self.history_send(cx, *request),
+            Deferred::PublicTrades(read) => self.send_public_trades(cx, read),
+        }
         true
     }
 }
@@ -650,28 +667,32 @@ fn decode(request: &mut Request, text: &str) -> Option<()> {
             }
         }
         Rows::Trades(_) => {
-            let (time, raw_side, price, qty): (u64, &str, Number<'_>, Number<'_>) =
-                serde_json::from_str(text).ok()?;
-            let side = side(raw_side)?;
-            let price = price.value().filter(|v| *v > 0.0)?;
-            let qty = qty.value().filter(|v| *v > 0.0)?;
-            if time == 0 || !(price * qty).is_finite() {
-                return None;
-            }
-            // The API has no execution ID; equal tuples can be distinct trades.
-            let id = format!("{time}:{}", request.count - 1);
+            let row = decode_public_trade(text, &request.symbol, request.count - 1)?;
             if let Rows::Trades(rows) = &mut request.rows {
-                rows.stage(Trade {
-                    id,
-                    symbol: request.symbol.clone(),
-                    price,
-                    qty,
-                    quote_qty: price * qty,
-                    timestamp: milliseconds(time),
-                    side,
-                });
+                rows.stage(row);
             }
         }
     }
     Some(())
+}
+
+pub(super) fn decode_public_trade(text: &str, symbol: &str, index: usize) -> Option<Trade> {
+    let (time, raw_side, price, qty): (u64, &str, Number<'_>, Number<'_>) =
+        serde_json::from_str(text).ok()?;
+    let side = side(raw_side)?;
+    let price = price.value().filter(|v| *v > 0.0)?;
+    let qty = qty.value().filter(|v| *v > 0.0)?;
+    if time == 0 || !(price * qty).is_finite() {
+        return None;
+    }
+    // The API has no execution ID; equal tuples can be distinct trades.
+    Some(Trade {
+        id: format!("{time}:{index}"),
+        symbol: symbol.into(),
+        price,
+        qty,
+        quote_qty: price * qty,
+        timestamp: milliseconds(time),
+        side,
+    })
 }

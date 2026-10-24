@@ -7,6 +7,7 @@ description = "Native (tokio) host for the sans-I/O exchange engine"
 
 [features]
 default = ["venues"]
+http-plans = ["safe-cex-engine/http-plans"]
 # Construct any registered venue by name (`FrameServer::add_venue`).
 venues = ["dep:safe-cex-venues", "safe-cex-venues/default"]
 

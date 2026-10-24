@@ -828,6 +828,9 @@ impl Venue for WeexFutures {
         {
             return;
         }
+        if matches!(p.task, Task::Account(_)) && p.seed_generation != self.seed_generation {
+            return;
+        }
         let ok = match &mut p.task {
             Task::Account(r) => self.account_item(cx, r, item),
             Task::History(r) => self.history_item(cx, r, item),
@@ -903,9 +906,49 @@ impl Venue for WeexFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, response: Response<'_>) {
+        if let Task::Account(request) = p.task {
+            let context = request.context.clone();
+            // A native rate-limit signal still pauses this immutable identity's
+            // other reads even when this snapshot's seed/cycle is stale.
+            if response.status == 429 {
+                self.paused_until = self
+                    .paused_until
+                    .max(cx.now + rate::delay(response, cx.now));
+            }
+            if p.seed_generation == self.seed_generation
+                && self.account_delivery_current(cx, &request)
+            {
+                if response.status >= 400 {
+                    if let Some(context) = &context {
+                        let _ = cx.finish_http_context(context);
+                    }
+                    self.account_failed(
+                        cx,
+                        request,
+                        &format!("HTTP {}: {}", response.status, response.body),
+                    );
+                } else if p.invalid {
+                    if let Some(context) = &context {
+                        let _ = cx.finish_http_context(context);
+                    }
+                    self.account_failed(cx, request, "malformed REST row");
+                } else {
+                    self.account_response(cx, request, response);
+                }
+            }
+            if let Some(context) = context {
+                let _ = cx.finish_http_context(&context);
+            }
+            return;
+        }
+
         if matches!(p.task, Task::Daily | Task::BookTickers)
             && p.seed_generation != self.seed_generation
         {
+            return;
+        }
+        if let Task::Trade(request) = p.task {
+            self.trade_response(cx, request, response);
             return;
         }
         if response.status == 429 {
@@ -918,16 +961,6 @@ impl Venue for WeexFutures {
             return;
         }
         if response.status >= 400 {
-            if let Task::Trade(request) = p.task {
-                let error = trading::http_failure(response.status, response.body);
-                cx.notice(
-                    safe_cex_engine::Level::Warn,
-                    code::ORDER_REJECTED,
-                    format!("WEEX: {}", error.message),
-                );
-                self.trade_failed(cx, request, error);
-                return;
-            }
             self.fail(
                 cx,
                 p.task,
@@ -964,7 +997,7 @@ impl Venue for WeexFutures {
                 ..
             } => self.leverage_response(cx, &context, &symbol, revision, response),
             Task::Identity { context, .. } => self.identity_response(cx, &context, response),
-            Task::Account(r) => self.account_response(cx, r, response),
+            Task::Account(_) => unreachable!("account response handled before reducer"),
             Task::Trade(r) => self.trade_response(cx, r, response),
             Task::History(r) => self.history_response(cx, r, response),
             Task::Markets(markets) => {
@@ -1068,6 +1101,9 @@ impl Venue for WeexFutures {
         error: safe_cex_engine::VenueError,
     ) {
         match p.task {
+            Task::Account(r) => {
+                self.account_request_failed(cx, r, p.seed_generation, &error.message)
+            }
             Task::Identity { context, .. } => Self::identity_failed(cx, &context, error),
             Task::Leverage { context, .. } => managed::reject(cx, &context, error),
             Task::Trade(r) => self.trade_failed(cx, r, error),
@@ -1075,7 +1111,52 @@ impl Venue for WeexFutures {
             task => self.on_request_failed(cx, Pending { task, ..p }, &error.message),
         }
     }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        p: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Task::Trade(request) = p.task {
+            self.trade_failed(cx, request, error);
+        } else {
+            self.on_request_failed(cx, p, &error.message);
+        }
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.retire_trade(owner);
+    }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Task::Trade(request) = &pending.task {
+            request.unproven_evidence(response.body, evidence);
+        }
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match &pending.task {
+            Task::Trade(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: &str) {
+        if let Task::Account(request) = p.task {
+            self.account_request_failed(cx, request, p.seed_generation, error);
+            return;
+        }
+
         if matches!(p.task, Task::Daily | Task::BookTickers)
             && p.seed_generation != self.seed_generation
         {

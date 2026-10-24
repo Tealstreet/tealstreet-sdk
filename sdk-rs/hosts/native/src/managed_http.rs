@@ -1,4 +1,6 @@
 //! Prepared resources stay in the same actor that claims and hands off HTTP.
+#[path = "managed_http_group.rs"]
+mod group;
 use super::*;
 use safe_cex_engine::VenueError;
 use safe_cex_engine::request_context::{Claim, Error, HttpAction, Permit, Preparation, Prepared};
@@ -131,6 +133,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     Err(error) => self.fail_http_preparation(preparation, error),
                 }
             }
+            HttpAction::BindGroup { permit, members } => self.bind_http_group(permit, members),
             HttpAction::Cancel {
                 preparation,
                 signing,

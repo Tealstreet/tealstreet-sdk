@@ -25,6 +25,9 @@ pub struct IdentitySetupPolicy {
     pub secret_encoding: Option<KeyEncoding>,
     /// The only extra signing ref trusted setup may install for this slot.
     pub extra: Option<ExtraKeyPolicy>,
+    /// Declares the signing ref an asymmetric key of this algorithm; only a
+    /// declared ref answers public operations, so no secret is fingerprinted.
+    pub signing_algorithm: Option<Algorithm>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -252,7 +255,8 @@ pub enum Algorithm {
     HmacSha512,
     /// SHA256(message || key), raw 32-byte digest. No implicit hex or prehash.
     Sha256SecretSuffix,
-    /// Ed25519 exact message, without a prehash; raw 64-byte signature.
+    /// Ed25519 exact message, without a prehash; raw 64-byte signature. The key is
+    /// a 32-byte seed or the `seed || public` keypair whose public half must match.
     Ed25519,
     /// ECDSA P-256 with one SHA256 of message; fixed-width r || s, 64 bytes.
     Es256,
@@ -306,6 +310,11 @@ pub enum Operation {
     },
     /// Credential value for an outbound header/body/upgrade field, not storage.
     Present { key: KeyRef },
+    /// Non-secret 20-byte Ethereum address of a ref declared `Secp256k1Digest`.
+    PublicAddress { key: KeyRef },
+    /// Non-secret public key of a ref declared for exactly `algorithm`:
+    /// `Ed25519` 32 bytes, `StarkDigest` the 32-byte big-endian felt.
+    PublicKey { algorithm: Algorithm, key: KeyRef },
 }
 
 /// Context is advisory; providers may optionally refuse it. No enforcement core.
@@ -379,6 +388,17 @@ pub fn hmac_sha256_work(
     }
 }
 
+/// Login preimage `seconds + method + path` as three typed byte parts. The shape
+/// keeps it distinct from an HTTP capture of identical bytes; the remote wire
+/// decodes it only against the family's declared `secondsSuffix`.
+pub fn seconds_suffix_payload(seconds: &str, method: &str, path: &str) -> Vec<PayloadPart> {
+    [seconds, method, path]
+        .map(|part| PayloadPart::Bytes {
+            bytes: part.as_bytes().to_vec(),
+        })
+        .into()
+}
+
 impl SignRequest {
     /// Validate provider output against this exact atomic request. Dispatch and
     /// signing-only capture share receipt, result-count and byte-shape policy.
@@ -403,6 +423,11 @@ impl SignRequest {
             .map(|operation| match operation {
                 Operation::Present { .. } => None,
                 Operation::Sha256 { .. } => Some(32),
+                Operation::PublicAddress { .. } => Some(20),
+                // `validate` refuses an algorithm without a public form first.
+                Operation::PublicKey { algorithm, .. } => {
+                    Some(public_key_len(*algorithm).unwrap_or(usize::MAX))
+                }
                 Operation::Sign { algorithm, .. } => Some(match algorithm {
                     Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => 32,
                     Algorithm::HmacSha512
@@ -443,6 +468,14 @@ impl SignRequest {
                 Operation::Sign { key, .. } if !valid_key_ref(key) => {
                     return Err(SignError::InvalidRequest);
                 }
+                Operation::PublicAddress { key } if !valid_key_ref(key) => {
+                    return Err(SignError::InvalidRequest);
+                }
+                Operation::PublicKey { algorithm, key }
+                    if !valid_key_ref(key) || public_key_len(*algorithm).is_none() =>
+                {
+                    return Err(SignError::InvalidRequest);
+                }
                 Operation::Sign { payload, .. } | Operation::Sha256 { payload } => {
                     if payload.len() > 256 {
                         return Err(SignError::InvalidRequest);
@@ -469,6 +502,14 @@ impl SignRequest {
             }
         }
         Ok(())
+    }
+}
+
+/// Algorithms with a public form; consumers exist only for these two.
+fn public_key_len(algorithm: Algorithm) -> Option<usize> {
+    match algorithm {
+        Algorithm::Ed25519 | Algorithm::StarkDigest => Some(32),
+        _ => None,
     }
 }
 
@@ -588,8 +629,36 @@ pub trait Signer: ProviderBounds {
     fn sign_ready(&self, _request: &SignRequest) -> Option<Result<SignResult, SignError>> {
         None
     }
+    /// Advisory admission answer from installed state only; never signs to probe.
+    /// Release-time signing remains the choke point.
+    fn can_sign(&self, _key: &KeyRef, _algorithm: Algorithm) -> Capability {
+        Capability::Unknown
+    }
 }
 pub type Provider = Arc<dyn Signer>;
+
+/// What a provider declares it can sign for one ref; anything but
+/// `Supported` fails command admission closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Capability {
+    Supported,
+    Unsupported,
+    Unknown,
+}
+
+/// Which ref of the selected identity a command will sign with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyUse {
+    Signing,
+    Extra(ExtraKey),
+}
+
+/// One signature a multi-release command will need before its first release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Need {
+    pub key: KeyUse,
+    pub algorithm: Algorithm,
+}
 
 // Authenticated payloads and values are deliberately absent from Debug output.
 macro_rules! redacted_debug {
@@ -833,5 +902,21 @@ mod setup_field_policy_tests {
         assert!(
             serde_json::from_str::<IdentitySetupPolicy>(r#"{"secretEncoding":"base58"}"#).is_err()
         );
+    }
+
+    #[test]
+    fn seconds_suffix_payload_keeps_three_exact_parts_for_each_family() {
+        for (method, path) in [("GET", "/users/self/verify"), ("GET", "/user/verify")] {
+            let parts = seconds_suffix_payload("1700000000", method, path);
+            assert!(
+                parts
+                    == [
+                        b"1700000000".to_vec(),
+                        method.as_bytes().to_vec(),
+                        path.as_bytes().to_vec()
+                    ]
+                    .map(|bytes| PayloadPart::Bytes { bytes })
+            );
+        }
     }
 }

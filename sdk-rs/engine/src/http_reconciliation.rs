@@ -11,6 +11,10 @@ pub(crate) const DATA_LIMIT: usize = 8 * 1024;
 const TOTAL_LIMIT: usize = 4 * 1024 * 1024;
 const GRACE_MS: f64 = 30_000.;
 
+#[cfg(all(test, feature = "http-plans"))]
+#[path = "http_group_storage_tests.rs"]
+mod group_storage_tests;
+
 /// Native correlation facts for the late codec, never an outbound request or
 /// credentials. This value is neither logged nor serialized onto the host wire.
 pub struct ReconciliationData(String);
@@ -133,6 +137,48 @@ impl Responses {
         self.bytes += size;
         self.slots
             .insert(record.attempt.request, Slot::Stored(Box::new(record)));
+        Ok(())
+    }
+
+    /// Prepare every record and container slot before publishing any member.
+    /// The caller completes one synchronous release transaction after success.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn insert_group(&mut self, records: Vec<Record>, now: f64) -> Result<(), Error> {
+        if !now.is_finite() {
+            return Err(Error::Invalid);
+        }
+        let mut prepared = Vec::new();
+        prepared
+            .try_reserve_exact(records.len())
+            .map_err(|_| Error::Capacity)?;
+        let mut bytes = 0usize;
+        for record in records {
+            if now >= record.expires_at {
+                return Err(Error::TimedOut);
+            }
+            let request = record.attempt.request;
+            if self.slots.contains_key(&request) || prepared.iter().any(|(id, _)| *id == request) {
+                return Err(Error::Duplicate);
+            }
+            bytes = bytes.checked_add(record.bytes()).ok_or(Error::Capacity)?;
+            prepared.push((request, Slot::Stored(Box::new(record))));
+        }
+        if self
+            .slots
+            .len()
+            .checked_add(prepared.len())
+            .is_none_or(|n| n > CAPACITY)
+            || bytes > TOTAL_LIMIT - self.bytes
+        {
+            return Err(Error::Capacity);
+        }
+        self.slots
+            .try_reserve(prepared.len())
+            .map_err(|_| Error::Capacity)?;
+        self.bytes += bytes;
+        for (request, record) in prepared {
+            self.slots.insert(request, record);
+        }
         Ok(())
     }
 

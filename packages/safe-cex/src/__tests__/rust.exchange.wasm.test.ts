@@ -149,6 +149,7 @@ const recordedOkxTransport = () => {
     'amend-order': [{ ordId: '301', sCode: '0', sMsg: '' }],
   };
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect: (_url, { onOpen, onMessage }) => {
       let closed = false;
@@ -729,7 +730,7 @@ describe('RustEngineExchange', () => {
     const { WasmEngine } = await loadNodeEngine();
     for (const passphrase of [undefined, '']) {
       expect(() => new WasmEngine(venue, JSON.stringify({ key: 'k', secret: 's', passphrase }))).toThrow(
-        'Bitget requires a passphrase',
+        'Invalid local signer setup',
       );
     }
   });
@@ -1532,6 +1533,7 @@ describe('RustEngineExchange', () => {
       collateral: '{"netEquity":"1000","netEquityAvailable":"900","netEquityLocked":"100","pnlUnrealized":"0"}',
     };
     const transport: Transport = {
+      prepareHttp: prepareRecordedHttp,
       now: () => correctedTime,
       connect: (_url, { onOpen, onMessage }) => {
         sockets.push(onMessage);
@@ -1567,6 +1569,9 @@ describe('RustEngineExchange', () => {
       }
       request(...args: Parameters<Transport['request']>) {
         return this.#inner.request(...args);
+      }
+      prepareHttp(...args: Parameters<NonNullable<Transport['prepareHttp']>>) {
+        return this.#inner.prepareHttp!(...args);
       }
       setTimeout(...args: Parameters<Transport['setTimeout']>) {
         return this.#inner.setTimeout(...args);
