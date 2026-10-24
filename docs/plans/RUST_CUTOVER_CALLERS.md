@@ -6327,6 +6327,22 @@ distinguish the following:
 | Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
 | Engine Timeout terminal | The root expired. No further work is issued. |
 
+## Selected caller-wait roots and physical history pages
+
+Signed plain command reads can retain one selected identity, slot, route and
+account-evidence scope across physical pages. The original root captures the
+caller's exact receipt deadline. Each eligible page or native re-send gets a
+fresh Read/Never child capped by that root; a preceding page's shorter deadline
+does not bound the next page. Selection never changes midway through a query.
+
+Root expiry uses the shared strict Timeout terminal without accepted-row
+publication or an incomplete marker. A physical page timeout while the root is
+live retains the shared history caller's accepted-prefix recovery. Queued native
+state retires by exact owner through the shared expiry hook. Consumers complete
+only through their original root and keep their existing retry eligibility,
+paging, body validation and finalization policy. This helper changes no host
+wait, numeric completion contract or native venue issuer by itself.
+
 ## KuCoin synchronous command refusal admission
 
 Eight local futures/Spot refusal sites now acquire their genuine shared command
