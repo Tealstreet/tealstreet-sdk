@@ -1449,26 +1449,45 @@ impl Polls {
 #[path = "engine_socket.rs"]
 mod managed_sockets;
 
-/// The undrained action queue. Actions the host never drained may hold a
-/// Bearer or signed packet, so the engine wipes its own copies on drop; a
-/// drained action is the host's to dispose of.
-#[derive(Default)]
-struct Actions(Vec<Action>);
+/// An engine-held action queue: the undrained queue, or the transient
+/// dispatch queue. Its actions may hold a Bearer or signed packet, so the
+/// engine wipes what it still holds on drop, unwinding included. A drained
+/// action is the host's to dispose of, as signer headers are.
+struct Wiping<C>(C)
+where
+    for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>;
 
-impl std::ops::Deref for Actions {
-    type Target = Vec<Action>;
-    fn deref(&self) -> &Vec<Action> {
+type Actions = Wiping<Vec<Action>>;
+
+impl Default for Actions {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl<C> std::ops::Deref for Wiping<C>
+where
+    for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>,
+{
+    type Target = C;
+    fn deref(&self) -> &C {
         &self.0
     }
 }
 
-impl std::ops::DerefMut for Actions {
-    fn deref_mut(&mut self) -> &mut Vec<Action> {
+impl<C> std::ops::DerefMut for Wiping<C>
+where
+    for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>,
+{
+    fn deref_mut(&mut self) -> &mut C {
         &mut self.0
     }
 }
 
-impl Drop for Actions {
+impl<C> Drop for Wiping<C>
+where
+    for<'a> &'a mut C: IntoIterator<Item = &'a mut Action>,
+{
     fn drop(&mut self) {
         for action in &mut self.0 {
             crate::signing_dispatch::wipe(action);
@@ -4591,7 +4610,9 @@ impl<V: Venue> Engine<V> {
             self.sign_failed(now, outbound, error);
             self.assert_live();
         }
-        let mut queued = std::collections::VecDeque::from(std::mem::take(&mut *self.io.actions));
+        let mut queued = Wiping(std::collections::VecDeque::from(std::mem::take(
+            &mut *self.io.actions,
+        )));
         loop {
             self.assert_live();
             while let Some(action) = queued.pop_front() {

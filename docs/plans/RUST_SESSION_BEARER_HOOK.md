@@ -392,6 +392,17 @@ retires a second Session in the same flush. Composition with combo-5b
   it is not zeroized; wipe it on that removal. The fence flush already drains
   in place.
 
+**Token custody scope (codex-zs5e83, accepted).**
+- Engine-owned copies, all wiped:
+  - the `SecretHeaderValue`, on drop;
+  - an overflowing header copy, on refusal;
+  - a refused signed packet;
+  - every action still in the undrained queue or the transient dispatch
+    queue, on drop (unwinding included), via the `Wiping` queue wrapper.
+- Host-owned copies: once `drain_actions` hands over the Bind, disposal
+  follows the existing signer-header discipline. There is no new host or
+  JS zeroization guarantee.
+
 **Engine facts the source must follow:**
 - **The real prepare point.** `queue_managed` emits `HttpAction::Prepare` at
   issue, with headers snapshotted from static slices (`http_lifecycle.rs:180`).
