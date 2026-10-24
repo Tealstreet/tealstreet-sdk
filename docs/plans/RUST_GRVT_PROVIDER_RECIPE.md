@@ -103,12 +103,17 @@ an empty signing-ref sentinel that Identity::validate rejects, and refs lose
 the native credential-presence distinctions. He owns the proposed
 RUST_CREDENTIAL_ONLY_SETUP.md plan: optional signing material represented as
 explicit absence, plus trusted Absent/Empty/Blank/Nonblank credential facts.
-That proposal is not yet an installed API or a complete consumer CLEAR.
+That proposal is not yet an installed API or a complete constructor CLEAR.
+m26ps4 accepted the consumer corrections: selection itself never refuses for
+absent signing material; only an operation needing a signature requires its ref.
 In particular, do not reject every Mutation solely for missing signing material:
 native CancelOrders, CancelSymbolOrders and SetLeverage use Session-authenticated
 unsigned calls without the scalar. Placement needs the Secp256k1Digest capability;
-unsigned native effects do not acquire that requirement. The shared plan must
-also define empty-value login presentation and egress without fabricating a ref.
+unsigned native effects do not acquire that requirement. Presence Empty installs
+no credential ref: its known non-secret api_key "" is rendered directly, with
+no Present or retained material. Missing remains distinct and does not become
+an empty login. Blank/Nonblank facts preserve identity eligibility. The shared
+plan and exact constructor proof, including native egress, remain required.
 
 Adoption will enable dispatch-signing for the GRVT registry family, declare its
 setup policy in the existing shared construction table, and use the existing
@@ -127,10 +132,14 @@ serialize it. A small login SignStep is part of the same future cutover:
 - Pin POST to the native edge host (mainnet or testnet) and
   /auth/api_key/login. Its unsigned static headers remain Content-Type:
   application/json, X-Grvt-Remember-Me: true, Cookie: rm=true, in that order.
-- One provider batch contains only Present(selected primary credential).
+- For a nonempty supplied key, one provider batch contains only
+  Present(selected primary credential).
   Validate the exact result shape/receipt and build the native JSON body with
   the existing serializer in apply; do not interpolate an API key in venue code.
   This login request is not bound to the cached Session header bundle.
+- For trusted presence Empty, render the known non-secret api_key "" with no
+  Present and no invented ref. Absent does not issue login; Blank remains an
+  exact-byte credential for login while identity rejects a whitespace-only key.
 - Retain #1905's real login Session operation, Primary session_egress,
   preparation-failure delegation, login retry budget and failure retirement.
   A failed/expired provider result is a strict unreleased failure, never parsed
@@ -186,6 +195,12 @@ Create payload. Preserve native checksum signer text, 0x-prefixed 32-byte r/s
 and wire v=27+recovery, decimal expiration/nonce and chain text. The native
 sign_order/oracle vectors settle this conversion; do not forward raw 0/1 as v.
 Malformed, wrong-ref/receipt, high-s or wrong-digest results never reach Bind.
+Bind the expected actual signer to the installed signing ref using trusted
+public derivation. Each PublicAddress result must equal that pinned signer
+before signed_by verifies the prepared digest. It cannot move with a later
+provider answer, native account ID or optional configured signer_address;
+the latter retains its warning-only behavior. A different recovered signer or
+digest refuses the resend before release, even if its signature is otherwise valid.
 
 The SignReceipt carries the fixed payload expiry in protocol milliseconds,
 not a newly extended expiry or inferred timestamp. Shared dispatch also keeps
@@ -194,16 +209,16 @@ order even if the serial root is live. Exact receipt and freshness integration
 is reviewed against the actual feature pins before source, without a timer or
 clock policy hidden in the recipe.
 
-The native local signer is RFC6979-deterministic and low-s: preserve complete
-wire-byte parity locally, including on auth resend. Supported Secp256k1Digest
-does not promise a deterministic external signer. Proposed external acceptance
-is the same digest, actual signer and every frozen unsigned/order field, with
-a verified low-s signature; randomized-k signatures may differ in r/s/v.
-Whether full signed-body identity is required externally is OPEN for the
-overseer's disposition and 9czdjh/fe7lgm fit. Native body-identical originals
-remain unchanged evidence for the local path. Test a real external fixture,
-not only LocalSigner, and neither cache signed bytes nor silently claim that
-structural length checks prove signature validity or determinism.
+The overseer approved this external criterion: the native local provider keeps
+complete wire-byte parity (RFC6979, low-s), including on auth resend. An external
+provider may return different r/s/v ONLY: the prepared digest, expected actual
+signer and every frozen order/unsigned field remain identical, and the signature
+must verify and be low-s. Deterministic external signatures are not required.
+Unchanged order identity gives deduplication safety; signed-byte identity is not
+its authority. Native body-identical originals remain unchanged local evidence.
+Test a real external fixture with two different valid signatures over the same
+digest, and refuse wrong-signer or wrong-digest variants. Never cache signed
+bytes, renew nonce/expiry/client IDs or reset an attempt to achieve this result.
 
 ## Session headers, unsigned calls and same-call resend
 
@@ -269,7 +284,7 @@ drop condition-waits rather than paying for an unused feature.
 | EIP712/Create and login recipes, trusted setup, installed registry/native/WASM path | zs5e83; 9czdjh native/construction review and fe7lgm resend fit |
 | Existing login lifecycle and callback composition | zs5e83 with 55ao7t's login contract; exact real login preparation-failure control retained |
 | API-key-only and identity eligibility without raw key retention | m26ps4 confirmed shared gap; proposed credential-only setup plan, consumer zs5e83. Explicit absent signing plus trusted presence facts; preserve unsigned Mutation eligibility and define empty-key login before source. |
-| External provider signature criterion on resend | Overseer disposition plus 9czdjh/fe7lgm fit: local complete byte parity, proposed external same digest/signer/frozen fields with verified low-s; full external body identity remains OPEN |
+| External provider signature criterion on resend | Overseer ruling CLEAR: local complete byte parity; external r/s/v may vary only with identical digest, pinned actual signer and frozen fields, verified low-s. Actual provider/ingress controls still required. |
 | GRVT adoption WASM budget and size review | Adopter zs5e83 and overseer: review the actual GRVT build with serial-plans, needed condition-waits, session-bearer, dispatch-signing and secp256k1 enabled; measured release/CI size and unchanged replay/budget gates before adoption. No assumed headroom or budget increase. No builds at this plan checkpoint. |
 
 ## Later originals and preservation proof
@@ -280,8 +295,9 @@ These are requested next-phase tests, not compiled controls or claimed REDs:
    checksum signer; 65-byte provider parity conversion and signature recovery.
 2. Installed local provider preserves native placement bytes through real
    Prepare/Sign/Bind/Claim. An async external fixture must prove the same
-   digest/signer/frozen fields and verified low-s signature; exact external
-   signed-body parity is subject to the named OPEN disposition. Capture
+   digest/signer/frozen fields and verified low-s signature. Pin two different
+   valid r/s/v results over the same digest as accepted, a result recovering to
+   a different signer as refused, and a wrong-digest result as refused. Capture
    SignRequest: exactly two order operations, no API key/scalar in venue state.
 3. Provider login Present produces the exact native edge POST/header/body;
    no scalar/payload operation, no private bundle on login. Missing provider,
@@ -290,7 +306,7 @@ These are requested next-phase tests, not compiled controls or claimed REDs:
    order. Include public-only and API-key-only constructor controls.
 4. Parsed-1000 single resend through actual serial DATA custody preserves the
    full local-provider order body and two independent auth/network ledgers;
-   external signature acceptance follows the named disposition. Second 1000 has
+   external signatures follow the approved r/s/v-only variation. Second 1000 has
    no third send. Cover 401/408/503 x parsed/nonparsed bodies and shared outcome
    disclosures already pinned by bf61; no 408/5xx-wide resend permission.
 5. Stale reprepare, account-ID-only rotation and identical-value refresh keep
@@ -319,7 +335,14 @@ shared source landings/refreeze and a fresh production scope instruction.
 9czdjh's read-only review at ca7d5c67782 is CLEAR for the stated native/recipe
 direction: schema, domain, integer units, entropy, login bytes/header order,
 atomic same-ref operations, parity conversion and immutable Step requirements.
-No GRVT build was run for that review. Credential-only installed construction
-and deterministic external-provider full-body resend both remain OPEN. This
-receipt is neither installed-constructor nor production/source clearance;
-LocalSigner alone cannot discharge the external-provider gate.
+No GRVT build was run for that review. That direction-only receipt did not
+clear credential-only installed construction or external-provider fit.
+
+fe7lgm's correction review at a9694bbb008 is CLEAR for plan fit, read-only:
+feature proposal status, adoption size gate, the concrete ready-scope re-park,
+and ownership of credential-only unsigned-Mutation eligibility are correct.
+The subsequent overseer ruling closes the external signature criterion as
+specified above; CALLERS records the approved future contract. m26ps4 owns the
+shared credential-only plan and accepted the two consumer corrections. Its
+actual setup API/source and all recipe/provider controls remain unimplemented
+gates. No receipt here is installed-constructor or production/source clearance.

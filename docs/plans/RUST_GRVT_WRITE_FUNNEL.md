@@ -377,6 +377,9 @@ OPEN #2069 feature proposal at 6945dbbb73c, not an existing Cargo declaration.
 The adopter gets its own measured WASM budget review for these features plus
 dispatch-signing and secp256k1. Exact source pins, credential-only construction
 and external signature acceptance remain named gates in the recipe plan.
-bf61's native full-body resend evidence is local-provider parity; the proposed
-external same-digest/signer/frozen-fields plus verified low-s criterion needs
-explicit disposition before replacing a full signed-body requirement.
+bf61's native full-body resend evidence is local-provider parity. The overseer
+approved external r/s/v-only variation with identical digest, pinned actual
+signer and every frozen order/unsigned field, verified low-s and fail-closed
+wrong-signer/digest results. No cached signed bytes or renewed order identity.
+The recipe plan and CALLERS carry that future contract; source still needs its
+actual external-provider acceptance/refusal controls and shared dependencies.
