@@ -3000,6 +3000,15 @@ recovery remains separate from strict root/local refusal. Shared list/sign
 consumer deletion is deferred to the remaining account/discovery/write owners;
 this conversion does not remove or relax any staging/checker inventory row.
 
+### Phemex dispatch-signing custody candidate
+
+Full native funnel and WS auth now use opaque provider recipes, removing14
+legacy lib credential/material fingerprints. Typed signer refusal preserves
+accepted-prefix IDs and native rollback revisions; actual-release raw expiry
+is accumulated as a maximum before the native5s reconciliation skew. Production
+wire/financial controls pass. Independent source/caller reviews are CLEAR;
+full-map/HMAC review, final CI and the combined #1970/#1974 landing remain gates.
+
 ## MEXC unsigned discovery and depth Context adoption
 
 The public catalogue/ticker streamed sender and subscription-depth GET sender
