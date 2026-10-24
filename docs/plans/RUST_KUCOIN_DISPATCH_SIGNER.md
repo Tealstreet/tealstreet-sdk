@@ -437,3 +437,24 @@ reviewed checkpoint; their 5/10 and 4/9 receipts are unchanged. Scoped strict
 Clippy and whitespace checks pass. Independent test-delta review is CLEAR,
 architecture gate No. Actual shared prerequisites or explicit composition still
 gate production; this is no claim that the broker contract executes successfully.
+
+## Approved source composition
+
+claude-ddi2il explicitly approved local source composition on combo-5b
+b485b4e5fd9 and #1990's owner-composed0f276adbe22. The latter retains the closed
+role resolver and ordinary asymmetric declarations together; its review/CI and
+actual landing remain separate gates. No resolver was locally substituted.
+
+The reviewed broker deltas from d545ee95bb4/62e412720d3/62377e9368e now compose on
+that pin. Mechanical conflicts retained incoming base58 support and controls,
+added broker assertions and trim-aware generated expectations; shared Sign and
+can_sign resolver bodies remain unchanged. The isolated broker target now runs
+all ten controls GREEN, zero ignored, including previously schema-gated alias,
+trim/BOM, missing-primary, algorithm and redaction assertions. This is local
+composition evidence, not an actual shared landing claim.
+
+Recipe preparation is not yet wired into the venue. Independent source review
+found a valid negative-zero formatting edge and an untyped result-index compile
+error. The recipe now uses native validated u64 decimal conversion and an
+explicit usize index. The appended native zero/negative-zero broker/header MAC
+vector control passes; integrated recipe execution still follows wiring.

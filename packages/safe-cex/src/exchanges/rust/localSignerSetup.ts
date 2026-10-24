@@ -1,7 +1,7 @@
 import type { LocalIdentityMetadata, LocalSignerMetadata, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions } from '../../types';
-import type { CredentialPresence, CredentialSetupPolicy, IdentitySetupPolicy } from './construction';
+import type { AnyIdentitySetupPolicy, CredentialPresence, CredentialSetupPolicy } from './construction';
 
 type LocalIdentity = LocalIdentityMetadata & {
   key?: string;
@@ -47,7 +47,7 @@ const credentialPresent = (key: string | undefined, trim: boolean): boolean =>
 
 export const effectiveIdentityMetadata = (
   metadata: LocalIdentityMetadata | undefined,
-  policy: IdentitySetupPolicy | undefined,
+  policy: AnyIdentitySetupPolicy | undefined,
 ): LocalIdentityMetadata | undefined =>
   policy?.trimCredential === undefined ? metadata : { ...metadata, trimCredential: policy.trimCredential };
 
@@ -59,7 +59,7 @@ export const resolveSetupPassphrase = (
   complete: boolean,
   passphrase: string | undefined,
   primaryPassphrase: string | undefined,
-  policy: IdentitySetupPolicy | undefined,
+  policy: AnyIdentitySetupPolicy | undefined,
   publicDataOnly: boolean,
 ): Readonly<{ value?: string; inheritPrimary: boolean }> => {
   const rule = policy?.passphrase;
