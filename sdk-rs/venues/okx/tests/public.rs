@@ -25,7 +25,7 @@ fn accepts_sequence_reset_keepalive_and_recovers_gap_once() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    actions(&mut e);
+    prepared(&mut e, 4.0);
     ws(
         &mut e,
         socket,
@@ -43,19 +43,19 @@ fn accepts_sequence_reset_keepalive_and_recovers_gap_once() {
         socket,
         r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"update","data":[{"seqId":10,"prevSeqId":10,"bids":[],"asks":[]}]}"#,
     );
-    assert!(actions(&mut e).is_empty());
+    assert!(prepared(&mut e, 4.0).is_empty());
     let gap = r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"update","data":[{"seqId":12,"prevSeqId":11,"bids":[],"asks":[]}]}"#;
     ws(&mut e, socket, gap);
     assert!(e.book("BTCUSDT").is_none());
     assert_eq!(
-        actions(&mut e)
+        prepared(&mut e, 4.0)
             .iter()
             .filter(|a| matches!(a, Action::WsSend { .. }))
             .count(),
         2
     );
     ws(&mut e, socket, gap);
-    assert!(actions(&mut e).is_empty());
+    assert!(prepared(&mut e, 4.0).is_empty());
 }
 
 #[test]
@@ -69,11 +69,11 @@ fn envelope_failure_never_marks_empty_markets_loaded() {
     ] {
         let mut e = crate::support::engine(Options::default());
         e.start(0.0);
-        let request = actions(&mut e).remove(0);
+        let request = take_http(&mut prepared(&mut e, 0.0));
         reply(&mut e, &request, body, 1.0);
         assert!(!e.store().loaded().markets, "{body}");
         assert!(
-            actions(&mut e)
+            prepared(&mut e, 1.0)
                 .iter()
                 .all(|a| !matches!(a, Action::Http(_)))
         );
@@ -90,7 +90,7 @@ fn candles_on_business_and_all_sockets_watch_silence() {
             interval: safe_cex_engine::model::Interval::Mo1,
         }),
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text.contains("candle1Mutc"))));
+    assert!(prepared(&mut e, 4.0).iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text.contains("candle1Mutc"))));
     e.handle(
         4.0,
         Event::Command(Command::FetchCandles {
@@ -148,9 +148,9 @@ fn fire_until(e: &mut Engine<Okx>, timers: &mut Timers, until: f64) -> Vec<Actio
 fn every_open_socket_pings_times_out_and_reconnects() {
     let mut e = crate::support::engine(Options::default());
     e.start(0.0);
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &request, &envelope(MARKET), 1.0);
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 1.0));
     reply(&mut e, &request, &envelope(TICKER), 2.0);
     let mut timers = Timers::new();
     let sockets: Vec<_> = track(&mut e, &mut timers)
@@ -189,7 +189,7 @@ fn every_open_socket_pings_times_out_and_reconnects() {
     for socket in sockets {
         ws(&mut e, socket, "pong");
     }
-    assert!(actions(&mut e).is_empty());
+    assert!(prepared(&mut e, 4.0).is_empty());
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn malformed_levels_force_resnapshot_and_valid_depth_ignores_stale_trade() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    actions(&mut e);
+    prepared(&mut e, 4.0);
     ws(
         &mut e,
         socket,
@@ -215,7 +215,7 @@ fn malformed_levels_force_resnapshot_and_valid_depth_ignores_stale_trade() {
     );
     assert!(e.book("BTCUSDT").is_none());
     assert_eq!(
-        actions(&mut e)
+        prepared(&mut e, 4.0)
             .iter()
             .filter(|a| matches!(a, Action::WsSend { .. }))
             .count(),
@@ -233,7 +233,7 @@ fn malformed_levels_force_resnapshot_and_valid_depth_ignores_stale_trade() {
 fn malformed_supported_instrument_is_not_committed() {
     let mut e = crate::support::engine(Options::default());
     e.start(0.0);
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 0.0));
     reply(
         &mut e,
         &request,
@@ -257,7 +257,7 @@ fn variants_use_entity_hosts_and_demo_header() {
             ..Options::default()
         });
         e.start(0.0);
-        let request = actions(&mut e).remove(0);
+        let request = take_http(&mut prepared(&mut e, 0.0));
         let Action::Http(r) = &request else { panic!() };
         assert!(r.url.starts_with(&format!("https://{host}/")));
         assert_eq!(
@@ -268,18 +268,18 @@ fn variants_use_entity_hosts_and_demo_header() {
         );
         reply(&mut e, &request, &envelope(MARKET), 1.0);
         if eea {
-            let request = actions(&mut e).remove(0);
+            let request = take_http(&mut prepared(&mut e, 1.0));
             assert!(is_get(&request, "instruments?instType=FUTURES"));
             reply(&mut e, &request, &envelope(""), 1.5);
         }
-        let request = actions(&mut e).remove(0);
+        let request = take_http(&mut prepared(&mut e, 1.5));
         reply(&mut e, &request, &envelope(TICKER), 2.0);
         if eea {
-            let request = actions(&mut e).remove(0);
+            let request = take_http(&mut prepared(&mut e, 2.0));
             assert!(is_get(&request, "tickers?instType=FUTURES"));
             reply(&mut e, &request, &envelope(""), 2.5);
         }
-        assert_eq!(actions(&mut e).iter().filter(|a| matches!(a, Action::WsConnect { url, .. } if url.starts_with(&format!("wss://{ws_host}/")))).count(), 2);
+        assert_eq!(prepared(&mut e, 2.5).iter().filter(|a| matches!(a, Action::WsConnect { url, .. } if url.starts_with(&format!("wss://{ws_host}/")))).count(), 2);
     }
 }
 
@@ -287,9 +287,9 @@ fn variants_use_entity_hosts_and_demo_header() {
 fn blank_known_ticker_seeds_zero_and_startup_continues() {
     let mut e = crate::support::engine(Options::default());
     e.start(0.0);
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &request, &envelope(MARKET), 1.0);
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 1.0));
     reply(
         &mut e,
         &request,
@@ -300,7 +300,7 @@ fn blank_known_ticker_seeds_zero_and_startup_continues() {
     let t = e.store().ticker("BTCUSDT").unwrap();
     assert_eq!((t.bid, t.ask, t.last, t.volume), (0.0, 0.0, 0.0, 0.0));
     assert!(
-        actions(&mut e)
+        prepared(&mut e, 2.0)
             .iter()
             .any(|a| matches!(a, Action::WsConnect { .. }))
     );
@@ -310,11 +310,11 @@ fn blank_known_ticker_seeds_zero_and_startup_continues() {
 fn failed_ticker_read_retries_with_backoff_keeping_the_committed_catalog() {
     let mut e = crate::support::engine(Options::default());
     e.start(0.0);
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &request, &envelope(MARKET), 1.0);
     let mut now = 2.0;
     for delay in [1_000.0, 2_000.0, 4_000.0] {
-        let request = actions(&mut e).remove(0);
+        let request = take_http(&mut prepared(&mut e, 1.0));
         assert!(is_get(&request, "/api/v5/market/tickers?instType=SWAP"));
         reply(
             &mut e,
@@ -323,11 +323,11 @@ fn failed_ticker_read_retries_with_backoff_keeping_the_committed_catalog() {
             now,
         );
         assert!(e.store().loaded().markets && !e.store().loaded().tickers);
-        let timer = retry_timer(&actions(&mut e), now, delay).expect("backoff timer");
+        let timer = retry_timer(&prepared(&mut e, now), now, delay).expect("backoff timer");
         now += delay;
         e.handle(now, Event::TimerFired { timer });
     }
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, now));
     reply(&mut e, &request, &envelope(TICKER), now);
     assert!(e.store().loaded().tickers);
 }
@@ -413,15 +413,15 @@ fn public_topics_keep_their_order_and_cap_across_market_boundaries() {
         .map(|i| MARKET.replace("BTC", &format!("COIN{i}")))
         .collect::<Vec<_>>()
         .join(",");
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &request, &envelope(&market_rows), 1.0);
     let ticker_rows = (0..101)
         .map(|i| TICKER.replace("BTC", &format!("COIN{i}")))
         .collect::<Vec<_>>()
         .join(",");
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 1.0));
     reply(&mut e, &request, &envelope(&ticker_rows), 2.0);
-    let socket = actions(&mut e)
+    let socket = prepared(&mut e, 2.0)
         .into_iter()
         .find_map(|action| match action {
             Action::WsConnect { socket, url, .. } if url.ends_with("/public") => Some(socket),
@@ -429,7 +429,7 @@ fn public_topics_keep_their_order_and_cap_across_market_boundaries() {
         })
         .unwrap();
     e.handle(3.0, Event::WsOpened { socket });
-    let batches: Vec<serde_json::Value> = actions(&mut e)
+    let batches: Vec<serde_json::Value> = prepared(&mut e, 3.0)
         .into_iter()
         .filter_map(|action| match action {
             Action::WsSend { text, .. } if text != "ping" => {
@@ -475,7 +475,7 @@ fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
         ..Options::default()
     });
     e.start(0.0);
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 0.0));
     let eth = MARKET
         .replace("BTC-USDT-SWAP", "ETH-USDT-SWAP")
         .replace(r#""ctValCcy":"BTC""#, r#""ctValCcy":"ETH""#);
@@ -487,7 +487,7 @@ fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
         &envelope(&[MARKET, &eth, &alias, &missing].join(",")),
         1.0,
     );
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 1.0));
     let eth_ticker = TICKER.replace("BTC-USDT-SWAP", "ETH-USDT-SWAP");
     let alias_ticker = TICKER.replace("BTC-USDT-SWAP", "BTCUSDT-SWAP");
     reply(
@@ -496,7 +496,7 @@ fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
         &envelope(&[eth_ticker.as_str(), alias_ticker.as_str(), TICKER].join(",")),
         2.0,
     );
-    let socket = actions(&mut e)
+    let socket = prepared(&mut e, 2.0)
         .into_iter()
         .find_map(|a| match a {
             Action::WsConnect { socket, url, .. } if url.ends_with("/public") => Some(socket),
@@ -504,7 +504,7 @@ fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
         })
         .unwrap();
     e.handle(3.0, Event::WsOpened { socket });
-    actions(&mut e);
+    prepared(&mut e, 3.0);
     for message in [
         r#"{"arg":{"channel":"tickers"},"data":[{"instId":"BTC-USDT-SWAP","bidPx":"11","askPx":"13","last":"12","open24h":"8","volCcy24h":"4","vol24h":"5"}]}"#,
         r#"{"arg":{"channel":"mark-price"},"data":[{"instId":"BTC-USDT-SWAP","markPx":"14"}]}"#,
@@ -548,9 +548,9 @@ fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
 fn null_ticker_quote_seeds_zero_like_a_blank() {
     let mut e = crate::support::engine(Options::default());
     e.start(0.0);
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &request, &envelope(MARKET), 1.0);
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 1.0));
     reply(
         &mut e,
         &request,
@@ -571,9 +571,9 @@ fn null_ticker_quote_seeds_zero_like_a_blank() {
 fn all_undecodable_ticker_rows_retry_startup() {
     let mut e = crate::support::engine(Options::default());
     e.start(0.0);
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &request, &envelope(MARKET), 1.0);
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 1.0));
     reply(
         &mut e,
         &request,
@@ -581,11 +581,11 @@ fn all_undecodable_ticker_rows_retry_startup() {
         2.0,
     );
     assert!(!e.store().loaded().tickers);
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 2.0);
     assert!(out.iter().all(|a| !matches!(a, Action::WsConnect { .. })));
     let timer = retry_timer(&out, 2.0, 1_000.0).expect("startup retry timer");
     e.handle(1_002.0, Event::TimerFired { timer });
-    let request = actions(&mut e).remove(0);
+    let request = take_http(&mut prepared(&mut e, 1_002.0));
     assert!(is_get(&request, "/api/v5/market/tickers?instType=SWAP"));
     reply(&mut e, &request, &envelope(TICKER), 1_003.0);
     assert!(e.store().loaded().tickers);
