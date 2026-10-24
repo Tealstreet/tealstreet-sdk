@@ -1450,6 +1450,7 @@ impl Polls {
 mod managed_sockets;
 
 struct Io<P> {
+    nonce_unscheduled: bool,
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
     // Typed cause of the HttpFailed being delivered: Network from the host,
@@ -1557,6 +1558,7 @@ struct Io<P> {
 impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
+            nonce_unscheduled: false,
             request_contexts: Default::default(),
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
@@ -2075,6 +2077,12 @@ impl<P> Cx<'_, P> {
     }
 
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
+        if step.nonce_claim().is_some() {
+            self.io
+                .signing_admission
+                .push((outbound, crate::signing::SignError::InvalidRequest));
+            return;
+        }
         self.io.opaque_entry_activity();
         self.io.assert_action_safe(&outbound);
         let attempt = self.io.signing.next_id();
@@ -3039,6 +3047,7 @@ impl<V: Venue> Engine<V> {
             io: Io {
                 entropy: Some(entropy),
                 http_pacing,
+                nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
                 ..Io::default()
             },
             started: false,
@@ -4371,6 +4380,7 @@ impl<V: Venue> Engine<V> {
         if match &completion {
             Completion::Ready(pending, _)
             | Completion::Stale(pending)
+            | Completion::NonceStale(pending)
             | Completion::Failed(pending, _) => pending.managed,
         } {
             self.managed_sign_completed(now, completion);
@@ -4389,7 +4399,7 @@ impl<V: Venue> Engine<V> {
                     outbound: Box::new(outbound),
                 });
             }
-            Completion::Stale(mut pending) => {
+            Completion::Stale(mut pending) | Completion::NonceStale(mut pending) => {
                 if pending.timer.0 != 0 {
                     self.io.actions.push(Action::ClearTimer {
                         timer: pending.timer,
@@ -4734,7 +4744,10 @@ impl<V: Venue> Engine<V> {
                                 }
                                 self.io.actions.push(outbound);
                             }
-                            Some(Completion::Stale(mut pending)) => {
+                            Some(
+                                Completion::Stale(mut pending)
+                                | Completion::NonceStale(mut pending),
+                            ) => {
                                 pending.timer = TimerId(0);
                                 let next = self.io.signing.next_id();
                                 self.io.signing.retry(next, pending);

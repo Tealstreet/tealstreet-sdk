@@ -678,6 +678,11 @@ pub enum Claim {
     WaitUntil(f64),
 }
 
+pub(crate) enum PreparedClaim {
+    WaitUntil(f64),
+    Release(HttpRelease),
+}
+
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
@@ -820,26 +825,10 @@ impl Lifecycle {
         pacing: &mut SendPacing,
         admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
     ) -> Result<Claim, Error> {
-        let State::Permitted(route, expected) = self.state else {
-            return Err(Error::State);
+        let mut release = match self.prepare_claim(permit, time, pacing)? {
+            PreparedClaim::WaitUntil(at) => return Ok(Claim::WaitUntil(at)),
+            PreparedClaim::Release(release) => release,
         };
-        if permit != expected {
-            return Err(Error::Revoked);
-        }
-        let mut release = HttpRelease::new(self.attempt, time, self.signature, self.deadline)?;
-        if route.expires_at.is_some_and(|at| time.raw_ms >= at)
-            || self.signed_revision.is_some_and(|rev| rev != time.revision)
-            || time.raw_ms >= self.fresh_until
-        {
-            return Err(Error::Stale);
-        }
-        if let Some(at) = pacing.check(self.context.pacing, time.raw_ms)? {
-            return if at >= self.deadline {
-                Err(Error::TimedOut)
-            } else {
-                Ok(Claim::WaitUntil(at))
-            };
-        }
         let admission = match admit(&release) {
             Ok(admission) => admission,
             Err(error) => {
@@ -857,9 +846,42 @@ impl Lifecycle {
                 return Err(Error::Revoked);
             }
         }
-        pacing.released(self.context.pacing, time.raw_ms);
+        Ok(self.commit_claim(release, pacing))
+    }
+
+    pub(crate) fn prepare_claim(
+        &self,
+        permit: Permit,
+        time: ReleaseTime,
+        pacing: &SendPacing,
+    ) -> Result<PreparedClaim, Error> {
+        let State::Permitted(route, expected) = self.state else {
+            return Err(Error::State);
+        };
+        if permit != expected {
+            return Err(Error::Revoked);
+        }
+        let release = HttpRelease::new(self.attempt, time, self.signature, self.deadline)?;
+        if route.expires_at.is_some_and(|at| time.raw_ms >= at)
+            || self.signed_revision.is_some_and(|rev| rev != time.revision)
+            || time.raw_ms >= self.fresh_until
+        {
+            return Err(Error::Stale);
+        }
+        if let Some(at) = pacing.check(self.context.pacing, time.raw_ms)? {
+            return if at >= self.deadline {
+                Err(Error::TimedOut)
+            } else {
+                Ok(PreparedClaim::WaitUntil(at))
+            };
+        }
+        Ok(PreparedClaim::Release(release))
+    }
+
+    pub(crate) fn commit_claim(&mut self, release: HttpRelease, pacing: &mut SendPacing) -> Claim {
+        pacing.released(self.context.pacing, release.time.raw_ms);
         self.state = State::Released(release);
-        Ok(Claim::Released(release))
+        Claim::Released(release)
     }
 
     /// Reprepare after stale route/signature metadata; the old permit becomes

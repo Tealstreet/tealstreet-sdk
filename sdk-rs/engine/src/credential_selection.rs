@@ -180,6 +180,28 @@ impl<T> Slots<T> {
     }
 }
 
+impl Slots<crate::signing::Identity> {
+    /// Mint the nonce authority from the exact immutable member just selected.
+    pub fn select_with_nonce(
+        &self,
+        role: CredentialRole,
+        domain: &'static crate::nonce::NonceDomain,
+    ) -> Result<
+        (
+            Selection,
+            &crate::signing::Identity,
+            crate::nonce::NonceClaim,
+        ),
+        crate::nonce::NonceSelectionError,
+    > {
+        let (selection, identity) = self
+            .select(role)
+            .map_err(|_| crate::nonce::NonceSelectionError::MissingCredential)?;
+        let claim = crate::nonce::NonceClaim::mint(domain, selection, identity)?;
+        Ok((selection, identity, claim))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
