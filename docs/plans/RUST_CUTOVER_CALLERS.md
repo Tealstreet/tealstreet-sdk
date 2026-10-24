@@ -8047,6 +8047,20 @@ query/history and valid trading remain on their own paths. Two singleton lib
 removals comprise one reachable refusal adoption and one dead-arm deletion.
 The independent catalog slice and its two inventory removals are separate.
 
+
+### Coinbase immediate local command custody
+
+Ten initial-entry completion sites now use shared Read ownership or keyless
+Mutation refusal: portfolio lookup, cached/unavailable leverage, initial
+history validation, startup queue capacity and trading validation/refusals.
+Native messages, JSON, Unsupported/NotSent metadata, validation order and the
+256-entry warning remain intact. Invalid or expired caller entry is rejected
+before local completion through the cause-aware shared API. No physical I/O,
+signed/private custody, FIFO pacing or deferred callback is adopted. The three
+candle validation sites, Instruments discovery and Daily seed remain held for
+retained command ownership and coordinated native REST release. Coinbase's
+legacy inventory decreases from 34 to 24 occurrences.
+
 ### TxFlow unsigned account-setting polls
 
 Each activeAssetData setting poll retains one keyless Background Read Context
