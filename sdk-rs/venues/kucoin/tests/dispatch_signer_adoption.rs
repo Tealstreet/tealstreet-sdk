@@ -451,3 +451,28 @@ fn native_debug_never_exposes_primary_read_or_broker_material() {
         assert!(!debug.contains(material));
     }
 }
+
+#[test]
+fn native_negative_zero_stamp_uses_integer_zero_for_both_macs_and_header() {
+    for now in [-0.0, 0.0] {
+        let mut h = fixture(Kucoin::new(broker_options(None)));
+        h.engine.start(now);
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, now);
+        let request = http(&actions);
+        assert_eq!(request.headers[1], ("KC-API-TIMESTAMP", "0".into()));
+        assert_eq!(
+            request.headers[3],
+            (
+                "KC-API-SIGN",
+                "+L2l2z2wAjxzVsVAj3CHySNw31iBXUthExEEGMwQ054=".into()
+            )
+        );
+        assert_eq!(
+            request.headers[8],
+            (
+                "KC-API-PARTNER-SIGN",
+                "C4YZe14gzGmgjqsPw40jhRsHdjfb2ugxLMzmhaMsOvc=".into()
+            )
+        );
+    }
+}

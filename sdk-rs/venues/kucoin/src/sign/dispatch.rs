@@ -106,6 +106,7 @@ impl SignStep for Http {
             expiry_ms: None,
         };
         receipt.validate()?;
+        let timestamp = (stamp as u64).to_string();
         let mut operations = vec![
             Operation::Present {
                 key: self.identity.credential.clone(),
@@ -115,7 +116,7 @@ impl SignStep for Http {
                 key: self.identity.signing.clone(),
                 payload: vec![PayloadPart::Bytes {
                     bytes: format!(
-                        "{stamp:.0}{}{}{}",
+                        "{timestamp}{}{}{}",
                         self.method.as_str(),
                         self.path,
                         self.body.as_deref().unwrap_or("")
@@ -140,7 +141,7 @@ impl SignStep for Http {
                 key: self.identity.extra[&ExtraKey::KucoinBroker].clone(),
                 payload: vec![
                     PayloadPart::Bytes {
-                        bytes: format!("{stamp:.0}{}", broker.partner).into_bytes(),
+                        bytes: format!("{timestamp}{}", broker.partner).into_bytes(),
                     },
                     PayloadPart::Credential {
                         key: self.identity.credential.clone(),
@@ -194,7 +195,7 @@ impl SignStep for Http {
             ("KC-API-KEY", key.into()),
             (
                 "KC-API-TIMESTAMP",
-                format!("{:.0}", receipt.stamp_ms.ok_or(SignError::InvalidResult)?),
+                (receipt.stamp_ms.ok_or(SignError::InvalidResult)? as u64).to_string(),
             ),
             ("KC-API-KEY-VERSION", "2".into()),
             ("KC-API-SIGN", mac(1)),
