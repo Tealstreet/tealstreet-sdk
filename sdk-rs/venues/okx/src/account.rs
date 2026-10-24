@@ -146,10 +146,17 @@ impl Request {
         }
     }
 
-    /// An admitted page decodes and publishes only its own exact delivery.
+    /// An account-cycle page decodes and publishes only its own exact delivery;
+    /// without an admitted Context it has no authority (fail closed).
     fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
-        self.page_context()
-            .is_none_or(|context| cx.validate_background_read_http_delivery(context).is_ok())
+        match self {
+            Self::Balance { context, .. }
+            | Self::Positions { context, .. }
+            | Self::Orders { context, .. } => context
+                .as_ref()
+                .is_some_and(|context| cx.validate_background_read_http_delivery(context).is_ok()),
+            Self::Config { .. } | Self::Leverage { .. } => true,
+        }
     }
 
     fn with_context(mut self, admitted: Context) -> Self {
@@ -469,6 +476,12 @@ impl Okx {
         }
     }
 
+    /// One ingress gate for a delivery: exact Background custody for a cycle
+    /// page, plus the native generation fence, before any codec runs.
+    pub(crate) fn account_delivery_current(&self, cx: &Cx<'_, Pending>, request: &Request) -> bool {
+        request.delivered(cx) && self.account_request_current(request)
+    }
+
     fn account_request_current(&self, request: &Request) -> bool {
         match request {
             Request::Balance { generation, .. } | Request::Positions { generation, .. } => self
@@ -507,7 +520,7 @@ impl Okx {
         request: &mut Request,
         item: &str,
     ) {
-        if !self.account_request_current(request) || !request.delivered(cx) {
+        if !self.account_delivery_current(cx, request) {
             return;
         }
         match request {

@@ -6,9 +6,12 @@ mod support;
 use crate::support::FixtureOptions as Options;
 use crate::support::*;
 use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, RequestId, TimerId};
+use safe_cex_engine::signing::{Provider, SignError, SignFuture, SignRequest, SignResult, Signer};
+use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice, RequestId, TimerId};
 use safe_cex_venue_okx::Okx;
 use std::collections::HashSet;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const DEADLINE_MS: f64 = 20_000.0;
 const BALANCE: &str = "/api/v5/account/account-position-risk?instType=SWAP";
@@ -21,11 +24,16 @@ struct Cycle {
     requests: Vec<HttpRequest>,
     managed: HashSet<RequestId>,
     timers: Vec<(TimerId, f64)>,
+    auth_notices: usize,
 }
 
 impl Cycle {
     /// Startup through login; the account-cycle reads it issues stay pending.
     fn started(read_key: bool) -> Self {
+        Self::started_with(read_key, |_| {})
+    }
+
+    fn started_with(read_key: bool, configure: impl FnOnce(&mut Engine<Okx>)) -> Self {
         let opts = Options {
             key: Some("test-key".into()),
             secret: Some("test-secret".into()),
@@ -37,12 +45,15 @@ impl Cycle {
             }),
             ..Options::default()
         };
+        let mut engine = crate::support::engine(opts);
+        configure(&mut engine);
         let mut cycle = Self {
-            engine: crate::support::engine(opts),
+            engine,
             now: 0.0,
             requests: Vec::new(),
             managed: HashSet::new(),
             timers: Vec::new(),
+            auth_notices: 0,
         };
         cycle.engine.start(0.0);
         cycle.collect();
@@ -92,6 +103,7 @@ impl Cycle {
                 Action::Http(request) => self.requests.push(request),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(Notice::AccountAuth { .. }) => self.auth_notices += 1,
                 _ => {}
             }
             for action in self
@@ -319,5 +331,58 @@ fn a_walk_longer_than_one_deadline_completes_page_by_page() {
             .any(|r| r.url.contains("orders-algo-pending")),
         "the second page was not accepted inside its own deadline: {:?}",
         cycle.urls()
+    );
+}
+
+/// Refuses synchronously once armed, so managed preparation sees it.
+struct Refusing {
+    provider: Provider,
+    refuse: Arc<AtomicBool>,
+}
+impl Signer for Refusing {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.provider.sign(request)
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        if self.refuse.load(Ordering::SeqCst) && request.context.method == "GET" {
+            Some(Err(SignError::Refused))
+        } else {
+            self.provider.sign_ready(request)
+        }
+    }
+}
+
+#[test]
+fn a_provider_refusal_sends_no_account_read_and_reports_no_auth() {
+    let refuse = Arc::new(AtomicBool::new(false));
+    let armed = refuse.clone();
+    let mut cycle = Cycle::started_with(false, move |engine| {
+        let provider = engine.signer().unwrap();
+        engine
+            .set_signer(Some(Arc::new(Refusing {
+                provider,
+                refuse: armed,
+            })))
+            .unwrap();
+    });
+    // Startup already released the first cycle; refuse every later account read.
+    for suffix in [BALANCE, POSITIONS, ORDERS] {
+        cycle.take(suffix);
+    }
+    refuse.store(true, Ordering::SeqCst);
+    let before = cycle.requests.len();
+    cycle.advance(cycle.now + 2.0 * DEADLINE_MS);
+    let sent: Vec<_> = cycle.requests[before..]
+        .iter()
+        .filter(|r| r.url.contains("/api/v5/account/") || r.url.contains("/api/v5/trade/orders"))
+        .map(|r| r.url.clone())
+        .collect();
+    assert!(
+        sent.is_empty(),
+        "a refused account read was released: {sent:?}"
+    );
+    assert_eq!(
+        cycle.auth_notices, 0,
+        "a provider refusal is not auth evidence"
     );
 }

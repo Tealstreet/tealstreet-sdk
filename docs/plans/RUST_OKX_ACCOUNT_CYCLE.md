@@ -151,3 +151,21 @@ The source pin follows the API-fit review by codex-cxxyqr (CLEAR at `fef6facac7e
   completing page by page. All OKX tests and strict all-target Clippy pass.
   There is zero inventory delta.
 
+Bounded source review by codex-cxxyqr at `764c55c30d7`, addressed:
+
+- **Fail closed.** `Balance`, `Positions` and `Orders` with no admitted Context
+  have no delivery authority. `Config` and `Leverage` keep their own routes.
+- **One ingress gate.** `account_delivery_current` (exact Background custody
+  plus the native generation fence) runs in `on_response` before
+  `wire::envelope`, and in `account_item` before decode. A stale or
+  unauthorized page only retires.
+- **Fixture times.** Fixed the times that went backward: resweep now prepares
+  at `at + 1` after its reply, and the settings test prepares at 5 and 6.
+- **New control.** `a_provider_refusal_sends_no_account_read_and_reports_no_auth`:
+  once refusal is armed, no account read is released and no auth notice fires.
+  Disarming it releases the reads, so the control is not vacuous.
+- **Stale parent and live peer.** Covered by the existing
+  `authenticated_reopen_retires_pre_disconnect_reads_and_order_walk` and
+  `settings_refresh_retires_position_join_without_discarding_inflight_orders`,
+  which now run under managed custody inside the live 20 s bounds.
+

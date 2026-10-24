@@ -1133,15 +1133,16 @@ impl Venue for Okx {
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
             let _ = cx.finish_http_context(context);
         }
-        // An account-cycle page publishes only its exact delivery, then retires.
+        // An account-cycle page passes custody and generation before any codec,
+        // publishes, then retires; a stale or unauthorized one only retires.
         let page = match &pending {
             Pending::Account(request) => request.page_context().cloned(),
             _ => None,
         };
-        if let Some(context) = &page
-            && cx.validate_background_read_http_delivery(context).is_err()
+        if let Pending::Account(request) = &pending
+            && !self.account_delivery_current(cx, request)
         {
-            let _ = cx.finish_http_context(context);
+            account::retire(cx, page.as_ref());
             return;
         }
         if let Pending::Account(account::Request::Config { .. }) = &pending

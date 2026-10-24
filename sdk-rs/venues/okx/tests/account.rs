@@ -429,7 +429,7 @@ fn resweep(
         };
         reply(e, &a, &body, at + 1.0);
         requests.extend(
-            prepared(e, at)
+            prepared(e, at + 1.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -590,7 +590,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
             side: None,
         }),
     );
-    let out = prepared(&mut e, 4.0);
+    let out = prepared(&mut e, 5.0);
     let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
     reply(
         &mut e,
@@ -598,7 +598,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
         &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"20","mgnMode":"cross"}"#),
         6.0,
     );
-    let fresh: Vec<_> = prepared(&mut e, 4.0)
+    let fresh: Vec<_> = prepared(&mut e, 6.0)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
