@@ -356,22 +356,6 @@
     "d6aab93d8c0593f58c17fbc2fba81bb939f0d498ba488ca2bac1d11287e68324": 1,
     "e81908cb0fae07346d55748a9e80db822d8af6006cc38fbc4aaaef11041c0283": 1
   },
-  "venues/cryptocom/src/account.rs": {
-    "83c6b712d19379913a85bf575a1a1834358d1b5f84d4c7a04a2f241487399a9c": 1,
-    "a77d14858a6b097716fd945cddafa2c827e671194bbe1122e95c60b698c56006": 1
-  },
-  "venues/cryptocom/src/history.rs": {
-    "dfb17bdf89f16befd8bb7566ac05d0bddf2980c6627b642f20e1f1b5a4859508": 1
-  },
-  "venues/cryptocom/src/identity.rs": {
-    "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-  },
-  "venues/cryptocom/src/trading.rs": {
-    "8c1d78bb768fb392694ad91c49f963ab64ba87a71d151646bff0298b85a6b734": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
-    "f32eb32f491028d71654d8ec05bbdf592328cd7f7156d848a17d430553a77638": 1
-  },
   "venues/grvt/src/account.rs": {
     "190dc4fe24cd734ffc175ff98e58994db3f141d0443164b8dd1a5d9200125834": 1,
     "2b1d9411d14819314659a0f77a4c9f2787fd17e551adb57d5ca62d67877a7d37": 1,

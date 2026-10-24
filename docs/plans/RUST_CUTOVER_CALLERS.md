@@ -7836,3 +7836,67 @@ precommit NotSent is not a released financial outcome. Late callbacks cannot
 retire a reused command generation. Native discovery, account/history and write
 senders remain; only three command candle terminals are removed (25 to 22 on
 this base, or 10 to 7 after the separate local-custody slice lands).
+
+## Crypto.com private dispatch and Plan custody
+
+Private REST remains POST through Primary with no route or account-read tag,
+including configurations with a valid unused secondary. Native and JS trusted
+setup consume that secondary once under the separate declared ValidateOnly
+prerequisite. Registry construction preserves its existing invalid-secondary
+InvalidInput refusal, exact message and absent command outcome before entering
+the venue arm. A directly constructed venue instead retains its CONFIG_INVALID
+startup notice and identity validation precedence. The venue receives only an
+opaque Primary and bounded status.
+Hosted setup sends no unused secondary material. REST and WS auth share the
+native sorted Text/u64/Strings envelope, millisecond stamp without a counter,
+and exact receipt/outbound binding. WS retains its native one-second auth
+eligibility; shared signing order may hold it behind earlier parked HTTP work.
+
+Identity and private history use the original caller-wait Read root and fresh
+20s children at eligible dequeue. Exact root/child delivery precedes decoding
+and Store effects. Root expiry is strict, with no partial history or INCOMPLETE
+marker; live-root released failures retain native retry budgets and recovery.
+Preparation/provider and local submission refusals are strict. Background
+account stages retain their native counters, snapshot tokens and financial
+reducers; failure-only cleanup retires the exact returned Pending without
+granting DATA authority.
+
+Trading uses the genuine WriteAfterReads Preflight and serial Mutation Plan.
+Each final write reserves two physical attempts, so a batch of at most128 final
+writes can be admitted within the256-credit bound; larger declarations refuse
+atomically before progress or I/O. Leverage's prerequisite has its separate
+20s read attempts and only the native one40101 resend. The final Plan starts
+after that read; no caller-wait cap is claimed for WriteAfterReads. The final
+span is40000*N plus declared step waits, with20ms between settled jobs and an
+immediate proven40101 resend. Network,408,5xx and malformed replies never grant
+a write resend.
+
+After the last settled call the native20ms timer may seal the same live Plan,
+then release one parked FIFO owner through shared ready custody. There is no
+tail extension: root expiry at or before that timer wins, produces one failure
+and retires the old timer's authority. Both equality event orders and the live
+tail/FIFO positive are pinned. All-failed batches fail; partial and unknown
+outcomes retain the journal's accepted IDs. Malformed success ACKs now carry
+Internal/Unknown,5xx carries VenueUnavailable/Unknown, and an unlisted native
+error carries Unknown instead of an untyped outcome. The shared classifier
+owns these projections; native decoded code/message and rejection text remain.
+
+Fixture setup installs an opaque LocalSigner before startup. Host collectors
+drive actual Prepare/Bind/Claim; capacity controls deliberately retain raw
+Prepare tokens. The parked-WS provider control completes prior HTTP setup so
+it tests the WS provider boundary independently of the shared signing barrier.
+Existing financial assertions remain in place; eager-signing comparisons are
+replaced by independent literal envelopes, including the WS HMAC vector.
+
+Private read integrity failures retain the engine's typed cause. Identity and
+History fail strictly without retry or partial history; Account retires the
+exact active read and schedules one native poll, without an inline resend.
+Only genuine Network/physical Timeout callbacks spend native transport budgets.
+The separately documented native40101 response/list-error compatibility retains
+its minimal text check and shared counters; typed integrity failures never enter
+that compatibility path. Old contexts retire before successor reads are minted.
+
+The native build API refuses a caller-preset readCredentialsValid result as
+"Unexpected read credential validation result" (InvalidInput, no outcome).
+Trusted host setup may carry its computed false result, which retains the
+native secondary-credentials validation error before venue construction.

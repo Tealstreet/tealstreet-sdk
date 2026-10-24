@@ -1839,21 +1839,37 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "cryptocom")]
-        "cryptocom" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "cryptocom" => {
+            if options.key.as_ref().is_some_and(|value| !value.is_empty())
+                || options
+                    .secret
+                    .as_ref()
+                    .is_some_and(|value| !value.is_empty())
+            {
+                return Err(invalid(
+                    "Crypto.com credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.primary.is_some() && signer.is_none() {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let registered = identities.clone();
+            let mut engine = Engine::new(
                 Cryptocom::new(CryptocomOptions {
-                    read_credentials: options.read_credentials.take(),
+                    credentials: identities.primary,
+                    secondary_validation: options
+                        .read_credentials_valid
+                        .map(safe_cex_engine::ReadCredentials::status),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "hyperliquid")]
         "hyperliquid" | "hyperliquidspot" => {
             let config = HyperliquidOptions {
