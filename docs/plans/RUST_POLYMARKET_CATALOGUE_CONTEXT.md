@@ -64,8 +64,9 @@ failing assertion as executed evidence.
 
 Working controls pin exact wire/filters; opaque two-page atomic accumulation;
 failure/cycle/full-page/malformed backoff and no prefix publication; malformed
-row neighbour retention; final metadata and uint256 identity; private startup
-independence and no successful empty publication. Deadline failure must
+row neighbour retention; final metadata and uint256 identity; and no successful
+empty publication. Private-startup independence remains a separate existing-
+fixture/source-stage check; all new original fixtures are public-only. Deadline failure must
 preserve retry rather than prohibit all post-expiry work. Streamed expiry must
 also prevent expired rows from poisoning dedup state on a subsequent retry.
 
