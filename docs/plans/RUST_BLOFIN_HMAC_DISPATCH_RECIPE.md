@@ -253,3 +253,4 @@ owner is codex-5c57jl, and 55ao7t may push its consumer commits here. Final sign
 review is claude-4yjlw0 and selection review is claude-m26ps4. No recipe-only PR
 or CI push with knowingly failing native originals is made.
 
+The unchanged native secondary_get_keeps_primary_mutations control also passes.
