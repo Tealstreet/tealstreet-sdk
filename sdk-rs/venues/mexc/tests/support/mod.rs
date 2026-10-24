@@ -29,15 +29,27 @@ pub fn requests(e: &mut TestEngine) -> Vec<HttpRequest> {
         })
         .collect()
 }
+pub fn prepared(e: &mut TestEngine, now: f64) -> Vec<Action> {
+    safe_cex_engine::test_support::prepared_actions(e, now)
+}
+pub fn public_requests(e: &mut TestEngine, now: f64) -> Vec<HttpRequest> {
+    prepared(e, now)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect()
+}
 pub fn started() -> (TestEngine, SocketId) {
     let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
         public_data_only: true,
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = public_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, MARKETS);
-    let r = requests(&mut e).remove(0);
+    let r = public_requests(&mut e, 100.).remove(0);
     response(&mut e, &r, TICKERS);
     let socket = e
         .drain_actions()
@@ -93,9 +105,9 @@ pub fn private_started_with_retry(
         secret: Some("replay-secret".into()),
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = public_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, markets);
-    let mut actions: Vec<_> = e.drain_actions().collect();
+    let mut actions = prepared(&mut e, 100.);
     let retry = actions.iter().find_map(|a| match a {
         Action::SetTimer { timer, at_ms } if jittered(*at_ms - 100.0, 1000.0) => Some(*timer),
         _ => None,
@@ -108,7 +120,7 @@ pub fn private_started_with_retry(
         })
         .unwrap();
     response(&mut e, &ticker, TICKERS);
-    actions.extend(e.drain_actions());
+    actions.extend(prepared(&mut e, 100.));
     let private_socket = actions
         .iter()
         .find_map(|a| match a {

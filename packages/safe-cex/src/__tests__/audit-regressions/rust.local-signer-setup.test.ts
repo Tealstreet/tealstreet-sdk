@@ -3,7 +3,7 @@ import type { ExchangeOptions } from '../../types';
 
 import { describe, expect, it } from 'vitest';
 
-import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { RustEngineExchange, runsOnRustEngine } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { LocalSignerSetup, withoutSigningCredentials } from '../../exchanges/rust/localSignerSetup';
 import { deriveBridgeConstruction, derivePublicMode, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
@@ -89,17 +89,17 @@ describe('trusted local signer setup', () => {
     });
     expect(() => setup.construct(Engine as never, 'binance', '{}')).toThrow(/consumed/);
   });
-  it('forwards the declared base64Text key encoding to the Rust provider unchanged', () => {
+  it.each(['base64Text', 'base58'] as const)('forwards the declared %s key encoding to the Rust provider unchanged', (encoding) => {
     let received: unknown;
     class Engine {
       constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); }
     }
-    new LocalSignerSetup({ ...options(), localSigner: { primary: { secretEncoding: 'base64Text' as const } } })
+    new LocalSignerSetup({ ...options(), localSigner: { primary: { secretEncoding: encoding } } })
       .construct(Engine as never, 'binance', '{}');
-    expect(received).toMatchObject({ primary: { secretEncoding: 'base64Text' } });
+    expect(received).toMatchObject({ primary: { secretEncoding: encoding } });
   });
   it('refuses provider metadata on unmigrated Rust families before construction', () => {
-    expect(() => new RustEngineExchange('okx', { ...options(), localSigner: {} }, new DefaultStore()))
+    expect(() => new RustEngineExchange('kraken', { ...options(), localSigner: {} }, new DefaultStore()))
       .toThrow(/not supported/);
   });
   it('rejects malformed or unknown setup metadata before constructing an engine', () => {
@@ -244,16 +244,25 @@ const setupPayload = (setup: LocalSignerSetup, venue = 'okx'): unknown => {
 };
 
 describe('shared required passphrase field policy', () => {
-  it.each(passphraseFamilies)('%s declares both slot rules; only migrated WEEX adopts dispatch signing', (venue) => {
+  it.each(passphraseFamilies)('%s declares both slot rules; only migrated OKX, Bitget and WEEX adopt dispatch signing', (venue) => {
     expect(deriveSignerSetupPolicy(venue)).toEqual({
       primary: { passphrase: 'requiredForPrivate' },
       secondary: { passphrase: 'requiredWithPrimaryFallback' },
     });
-    const migrated = venue === 'weex';
+    const stripped = venue.startsWith('okx') || venue.startsWith('bitget');
+    const migrated = stripped || venue === 'weex';
     expect(deriveBridgeConstruction(venue, {} as ExchangeOptions).dispatchSigning).toBe(migrated);
     const construct = () => new RustEngineExchange(venue, { key: 'key', secret: 'secret', passphrase: 'pass', localSigner: {} } as ExchangeOptions, new DefaultStore());
-    if (migrated) expect(construct).not.toThrow();
-    else expect(construct).toThrow(/not supported/);
+    if (stripped) {
+      const exchange = construct();
+      expect(exchange.options.key).toBeUndefined();
+      expect(exchange.options.secret).toBeUndefined();
+      expect(exchange.options.passphrase).toBeUndefined();
+    } else if (migrated) {
+      expect(construct).not.toThrow();
+    } else {
+      expect(construct).toThrow(/not supported/);
+    }
   });
 
   it.each(passphraseFamilies)('%s rejects missing/empty primary passphrase only for complete private material', (venue) => {
@@ -389,4 +398,43 @@ it('preserves JSON null-as-None secondary fallback while explicit empty never in
     secondary: { key: 'read', secret: 'read-secret', passphrase: null },
   });
   expect(() => new LocalSignerSetup({ ...options, secondary_passphrase: '' }, deriveSignerSetupPolicy('okx'))).toThrow('secondary signing credentials require a passphrase');
+});
+
+describe('ApeX signer admission (RUST_APEXOMNI_SIGNER_ADMISSION.md)', () => {
+  const apex = {
+    engine: 'rust',
+    key: 'api-key',
+    secret: 'audit-apex-material',
+    passphrase: 'pass',
+    omniKeySeed: `0x${'11'.repeat(65)}`,
+  } as unknown as ExchangeOptions;
+
+  it('carries the OmniKey seed only in provider setup, as the zklinkSeed extra', () => {
+    const setup = new LocalSignerSetup(apex, deriveSignerSetupPolicy('apexomni'), false, apex.omniKeySeed);
+    const safe = withoutSigningCredentials(apex);
+    expect(JSON.stringify(safe)).not.toContain('11'.repeat(65));
+    expect(JSON.stringify(safe)).not.toContain('audit-apex-material');
+    const calls: unknown[][] = [];
+    class Engine {
+      constructor(...args: unknown[]) {
+        calls.push(args);
+      }
+    }
+    setup.construct(Engine as never, 'apexomni', JSON.stringify(safe));
+    expect(JSON.parse(calls[0][2] as string)).toEqual({
+      primary: {
+        key: 'api-key',
+        secret: 'audit-apex-material',
+        passphrase: 'pass',
+        extra: { zklinkSeed: { value: apex.omniKeySeed, encoding: 'hex' } },
+      },
+    });
+    expect(deriveBridgeConstruction('apexomni', apex).dispatchSigning).toBe(true);
+  });
+
+  it('keeps keyless and remote-signer ApeX accounts on TS until P8', () => {
+    const remoteSigner = { sign: async () => ({}) } as unknown as ExchangeOptions['remoteSigner'];
+    expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: '', remoteSigner })).toBe(false);
+    expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: 'local' })).toBe(true);
+  });
 });

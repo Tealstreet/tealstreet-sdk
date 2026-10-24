@@ -19,8 +19,8 @@ fn boot(robinhood: bool, testnet: bool) -> (Engine<Lighter>, TimerId, SocketId) 
         ..Options::default()
     }));
     engine.start(NOW);
-    let metadata = engine
-        .drain_actions()
+    let metadata = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(r) => Some(r),
             _ => None,

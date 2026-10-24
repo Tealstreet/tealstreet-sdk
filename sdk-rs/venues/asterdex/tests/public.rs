@@ -4,7 +4,9 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, Response, SocketChannel,
     SocketId, TimerId,
 };
-use safe_cex_venue_asterdex::{AsterDex, Options, sign::Version};
+mod support;
+use safe_cex_venue_asterdex::{AsterDex, sign::Version};
+use support::Options;
 
 /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
 fn jittered(actual: f64, nominal: f64) -> bool {
@@ -33,7 +35,7 @@ impl Harness {
 
     fn start_with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
         let mut harness = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(AsterDex::new(options)),
+            engine: support::engine(options),
             now: 1_700_000_000_000.0,
             requests: Vec::new(),
             sockets: Vec::new(),
@@ -86,7 +88,10 @@ impl Harness {
         self.sockets.last().unwrap().0
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions().collect::<Vec<_>>() {
+        for action in support::drain(&mut self.engine, self.now)
+            .into_iter()
+            .collect::<Vec<_>>()
+        {
             match action {
                 Action::Http(request) => self.requests.push(request),
                 Action::WsConnect {

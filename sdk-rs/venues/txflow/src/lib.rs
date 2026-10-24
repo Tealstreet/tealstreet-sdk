@@ -1,7 +1,10 @@
 //! TxFlow testnet perpetuals, using separate node and API-service feeds.
 mod account;
+mod candle_read;
 mod history;
+mod local_context;
 pub mod sign;
+mod socket_codec;
 mod trading;
 mod wire;
 
@@ -10,10 +13,13 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::request_context::{
+    Context as HttpContext, Egress, Operation, Policy, RetryPolicy, Scope,
+};
+use safe_cex_engine::socket::Config;
+use safe_cex_engine::socket_lifecycle::{FeedId, SocketError};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    Venue,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -62,39 +68,23 @@ pub enum Pending {
     },
     Ticker {
         asset: u32,
+        context: HttpContext,
     },
     Candles {
-        command: CommandId,
+        read: candle_read::Read,
         rows: Vec<Candle>,
         valid: bool,
     },
     Account(account::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
+    SocketRefresh,
 }
+#[derive(Default)]
 struct Connection {
-    socket: Option<SocketId>,
+    feed: Option<FeedId>,
     open: bool,
-    supervisor: Supervisor,
-    subscriptions: VecDeque<String>,
-    subscription_timer: Option<TimerId>,
-}
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            socket: None,
-            open: false,
-            supervisor: Supervisor::new(Config {
-                idle_timeout_ms: 30_000.0,
-                ping_interval_ms: Some(10_000.0),
-                backoff_base_ms: 1_000.0,
-                backoff_cap_ms: 16_000.0,
-                ..Config::default()
-            }),
-            subscriptions: VecDeque::new(),
-            subscription_timer: None,
-        }
-    }
+    refresh_due: bool,
 }
 #[derive(Default)]
 struct Ladder {
@@ -134,6 +124,7 @@ pub struct TxFlow {
     seed_tickers: Vec<Ticker>,
     ticker_seeded: std::collections::HashSet<u32>,
     ticker_timer: Option<TimerId>,
+    ticker_contexts: HashMap<u32, HttpContext>,
     discovery: safe_cex_engine::startup::Backoff<Option<u32>>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     catalogue_partial: bool,
@@ -158,6 +149,7 @@ impl TxFlow {
             seed_tickers: Vec::new(),
             ticker_seeded: Default::default(),
             ticker_timer: None,
+            ticker_contexts: Default::default(),
             discovery: Default::default(),
             live_tickers: Default::default(),
             catalogue_partial: false,
@@ -231,20 +223,64 @@ impl TxFlow {
             },
         );
     }
-    fn ticker_request(&self, cx: &mut Cx<'_, Pending>, asset: u32) {
-        let id = cx.request(
+    fn ticker_request(&mut self, cx: &mut Cx<'_, Pending>, asset: u32) {
+        if let Some(old) = self.ticker_contexts.remove(&asset) {
+            let _ = cx.finish_http_context(&old);
+        }
+        let context = match cx.http_context_with_egress(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+            Egress::PublicCors,
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                self.ticker_failed(cx, asset, &error.to_string());
+                return;
+            }
+        };
+        self.ticker_contexts.insert(asset, context.clone());
+        if let Err((Pending::Ticker { asset, context }, error)) = cx.request_managed_with_headers(
+            context.clone(),
             Method::Post,
             format!("{}/info", self.rest()),
-            vec![
-                ("Content-Type", "application/json".into()),
-                ("x-api-version", API_VERSION.into()),
+            &[
+                ("Content-Type", "application/json"),
+                ("x-api-version", API_VERSION),
             ],
             Some(format!(
                 "{{\"type\":\"activeAssetCtx\",\"coin\":\"{asset}\"}}"
             )),
-            Pending::Ticker { asset },
-        );
-        cx.route_request(id, safe_cex_engine::RequestRoute::PublicCors);
+            Pending::Ticker { asset, context },
+        ) && self.finish_ticker_context(cx, asset, &context)
+        {
+            self.ticker_failed(cx, asset, &error.to_string());
+        }
+    }
+    fn finish_ticker_context(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        asset: u32,
+        context: &HttpContext,
+    ) -> bool {
+        let current = self.ticker_contexts.get(&asset) == Some(context);
+        if current {
+            self.ticker_contexts.remove(&asset);
+        }
+        let _ = cx.finish_http_context(context);
+        current
+    }
+    fn ticker_failed(&mut self, cx: &mut Cx<'_, Pending>, asset: u32, error: &str) {
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+        if cx.now.is_finite() {
+            self.discovery.failed(cx, Some(asset));
+            self.ticker_timer = Some(cx.set_timer(25.0));
+        }
     }
     fn next_ticker(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(asset) = self.ticker_queue.pop_front() {
@@ -256,6 +292,7 @@ impl TxFlow {
             let mut rows = std::mem::take(&mut self.seed_tickers);
             self.live_tickers.finish(cx.store, &mut rows);
             cx.store.set_tickers(rows);
+            self.index_tickers(cx.store);
             self.open_sockets(cx);
         }
         // TS records the account execution window after the paced seed; once every
@@ -265,98 +302,13 @@ impl TxFlow {
         }
     }
     fn open_sockets(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.node.socket.is_none() {
-            self.connect(cx, false);
-        }
-        if self.api.socket.is_none() {
-            self.connect(cx, true);
-        }
-    }
-    fn connect(&mut self, cx: &mut Cx<'_, Pending>, api: bool) {
-        let channel = if api || self.options.public_data_only {
-            SocketChannel::Public
-        } else {
-            SocketChannel::Private
-        };
-        let conn = if api { &mut self.api } else { &mut self.node };
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if channel != SocketChannel::Public || cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            conn.supervisor.connecting(cx);
-        }
-        conn.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(format!(
-                    "{}/{}",
-                    REST_URL.replacen("https:", "wss:", 1),
-                    if api { "api-ws" } else { "ws" }
-                ))
-                .channel(channel),
-            ),
-        );
-    }
-    fn subscribe(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        api: bool,
-        method: &str,
-        subscription: Sub<'_>,
-    ) {
-        #[derive(Serialize)]
-        struct Frame<'a> {
-            method: &'a str,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            r#type: Option<&'a str>,
-            subscription: Sub<'a>,
-        }
-        let conn = if api { &mut self.api } else { &mut self.node };
-        if !conn.open {
-            return;
-        }
-        if conn.subscriptions.len() >= 4096 {
-            if let Some(socket) = conn.socket {
-                cx.notice(
-                    Level::Warn,
-                    code::SUBSCRIPTION_REJECTED,
-                    "TxFlow subscription backlog exhausted",
-                );
-                cx.close(socket);
-                self.on_close(cx, socket, 1006);
+        for api in [false, true] {
+            if (if api { &self.api } else { &self.node }).feed.is_none()
+                && let Err(error) = self.managed_connect(cx, api)
+            {
+                Self::socket_refused(cx, error);
             }
-            return;
         }
-        conn.subscriptions.push_back(
-            serde_json::to_string(&Frame {
-                method,
-                r#type: if api { None } else { Some(subscription.r#type) },
-                subscription,
-            })
-            .unwrap(),
-        );
-        Self::pump_subscriptions(cx, conn);
-    }
-    fn pump_subscriptions(cx: &mut Cx<'_, Pending>, conn: &mut Connection) {
-        if conn.open
-            && conn.subscription_timer.is_none()
-            && let Some(socket) = conn.socket
-            && let Some(text) = conn.subscriptions.pop_front()
-        {
-            cx.send(socket, text);
-            conn.subscription_timer = Some(cx.set_timer(150.0));
-        }
-    }
-    pub(crate) fn node_subscribe(&mut self, cx: &mut Cx<'_, Pending>, kind: &str, user: &str) {
-        self.subscribe(
-            cx,
-            false,
-            "subscribe",
-            Sub {
-                r#type: kind,
-                coin: None,
-                interval: None,
-                user: Some(user),
-                instrument_id: None,
-            },
-        );
     }
     fn context(cx: &mut Cx<'_, Pending>, symbol: &str, c: Context) {
         cx.store
@@ -458,6 +410,20 @@ impl TxFlow {
         cx.store
             .update_ticker(symbol, |t| Self::ticker_update(t, row, seed));
     }
+    fn index_tickers(&mut self, store: &safe_cex_engine::Store) {
+        for instrument in self.instruments.values_mut() {
+            instrument.ticker_index = None;
+        }
+        for (index, ticker) in store.tickers().iter().enumerate() {
+            if let Some(instrument) = self
+                .assets
+                .get(&ticker.symbol)
+                .and_then(|asset| self.instruments.get_mut(asset))
+            {
+                instrument.ticker_index = Some(index as u32);
+            }
+        }
+    }
     fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
         let Ok(frame) = PublicFrame::decode(text) else {
             return false;
@@ -489,10 +455,22 @@ impl TxFlow {
                 }
             }
             PublicFrame::Ticker(row) => {
-                if let Some(symbol) = self.symbol(row.instrument_id).map(str::to_owned) {
+                if let Some(instrument) = self.instruments.get(&row.instrument_id) {
+                    let symbol = instrument.name.as_str();
                     let mask = Self::ticker_mask(&row, false);
-                    Self::apply_ticker(cx, &symbol, row, false);
-                    self.live_tickers.record(cx.store, &symbol, mask);
+                    if let Some(index) = instrument.ticker_index.filter(|index| {
+                        cx.store
+                            .tickers()
+                            .get(*index as usize)
+                            .is_some_and(|ticker| ticker.symbol == symbol)
+                    }) {
+                        cx.store.update_ticker_at(index, |ticker| {
+                            Self::ticker_update(ticker, row, false)
+                        });
+                    } else {
+                        Self::apply_ticker(cx, symbol, row, false);
+                    }
+                    self.live_tickers.record(cx.store, symbol, mask);
                 }
             }
             PublicFrame::Depth(row) => {
@@ -564,20 +542,7 @@ impl TxFlow {
             }
             self.books.remove(&symbol);
         }
-        if let Some(asset) = self.assets.get(&symbol) {
-            self.subscribe(
-                cx,
-                false,
-                if add { "subscribe" } else { "unsubscribe" },
-                Sub {
-                    r#type: "l2Book",
-                    coin: Some(&asset.to_string()),
-                    interval: None,
-                    user: None,
-                    instrument_id: None,
-                },
-            );
-        }
+        self.propose_socket_interests(cx, false);
     }
     fn candle_sub(
         &mut self,
@@ -612,20 +577,7 @@ impl TxFlow {
             }
             self.candles.remove(&(symbol.clone(), interval));
         }
-        if let Some(asset) = self.assets.get(&symbol) {
-            self.subscribe(
-                cx,
-                true,
-                if add { "subscribe" } else { "unsubscribe" },
-                Sub {
-                    r#type: "candle",
-                    coin: Some(&asset.to_string()),
-                    interval: Some(interval.as_str()),
-                    user: None,
-                    instrument_id: None,
-                },
-            );
-        }
+        self.propose_socket_interests(cx, true);
     }
     fn fetch_candles(&self, cx: &mut Cx<'_, Pending>, request: Command) {
         let Command::FetchCandles {
@@ -640,11 +592,19 @@ impl TxFlow {
             return;
         };
         let Some(asset) = self.asset(cx, &symbol) else {
-            cx.fail(command, "Market not found");
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err("Market not found".into()),
+            );
             return;
         };
         if !supported(interval) {
-            cx.fail(command, interval.unsupported("TxFlow"));
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err(interval.unsupported("TxFlow").into()),
+            );
             return;
         }
         let end = to_ms.unwrap_or(cx.now);
@@ -658,7 +618,11 @@ impl TxFlow {
             || end > 9_007_199_254_740_991.0
             || from_ms.is_some_and(|t| t < 0.0)
         {
-            cx.fail(command, "Invalid candle time range");
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err("Invalid candle time range".into()),
+            );
             return;
         }
         #[derive(Serialize)]
@@ -684,16 +648,9 @@ impl TxFlow {
             },
         })
         .unwrap();
-        self.info(
-            cx,
-            body,
-            ArrayAt::Field("data"),
-            Pending::Candles {
-                command,
-                rows: Vec::new(),
-                valid: true,
-            },
-        );
+        if let Some(read) = candle_read::Read::new(cx, command) {
+            read.queue(cx, body);
+        }
     }
 }
 impl Venue for TxFlow {
@@ -720,139 +677,62 @@ impl Venue for TxFlow {
         }
         self.metadata(cx);
     }
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        let api = self.api.socket == Some(socket);
-        if !api && self.node.socket != Some(socket) {
-            return;
+    fn on_open(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId) {}
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), SocketError> {
+        self.managed_socket_event(cx, event)
+    }
+    fn on_socket_interests_released(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        epoch: safe_cex_engine::socket_lifecycle::Epoch,
+        pending: Pending,
+    ) -> Result<(), SocketError> {
+        if self.node.feed != Some(epoch.feed()) || cx.socket_epoch(epoch.feed()) != Some(epoch) {
+            return Err(SocketError::Stale);
         }
-        let conn = if api { &mut self.api } else { &mut self.node };
-        conn.open = true;
-        conn.supervisor.opened(cx);
-        if let Some(timer) = conn.subscription_timer.take() {
-            cx.clear_timer(timer);
+        if matches!(pending, Pending::SocketRefresh) && self.node.refresh_due {
+            self.account_refresh(cx);
         }
-        conn.subscriptions.clear();
-        if api {
-            if cx.public_feed_policy() != PublicFeedPolicy::Direct {
-                return;
-            }
-            let tickers = self
-                .assets
-                .iter()
-                .map(|(symbol, asset)| {
-                    let base = cx
-                        .store
-                        .market(symbol)
-                        .map(|m| m.base.clone())
-                        .unwrap_or_else(|| symbol.clone());
-                    (base, *asset)
-                })
-                .collect::<Vec<_>>();
-            for (base, asset) in tickers {
-                self.subscribe(
-                    cx,
-                    true,
-                    "subscribe",
-                    Sub {
-                        r#type: "ticker",
-                        coin: Some(&base),
-                        interval: None,
-                        user: None,
-                        instrument_id: Some(asset),
-                    },
-                );
-            }
-            let candles = self
-                .candles
-                .keys()
-                .filter_map(|(symbol, interval)| {
-                    self.assets.get(symbol).map(|asset| (*asset, *interval))
-                })
-                .collect::<Vec<_>>();
-            for (asset, interval) in candles {
-                self.subscribe(
-                    cx,
-                    true,
-                    "subscribe",
-                    Sub {
-                        r#type: "candle",
-                        coin: Some(&asset.to_string()),
-                        interval: Some(interval.as_str()),
-                        user: None,
-                        instrument_id: None,
-                    },
-                );
-            }
-        } else {
-            // Node account sockets also carry public contexts and books.
-            if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-                self.subscribe(
-                    cx,
-                    false,
-                    "subscribe",
-                    Sub {
-                        r#type: "allAssetCtxs",
-                        coin: None,
-                        interval: None,
-                        user: None,
-                        instrument_id: None,
-                    },
-                );
-                for (symbol, ladder) in &mut self.books {
-                    ladder.book.clear();
-                    ladder.time = None;
-                    // Only a published book needs clearing; others were never sent.
-                    if ladder.published {
-                        cx.book_changed(symbol);
-                    }
-                }
-                let books = self
-                    .books
-                    .keys()
-                    .filter_map(|symbol| self.assets.get(symbol).copied())
-                    .collect::<Vec<_>>();
-                for asset in books {
-                    self.subscribe(
-                        cx,
-                        false,
-                        "subscribe",
-                        Sub {
-                            r#type: "l2Book",
-                            coin: Some(&asset.to_string()),
-                            interval: None,
-                            user: None,
-                            instrument_id: None,
-                        },
-                    );
-                }
-            }
-            if !self.options.public_data_only {
-                if let Some(user) = self.user().map(str::to_owned) {
-                    for kind in ["orderUpdates", "clearinghouseState", "userAssetData"] {
-                        self.node_subscribe(cx, kind, &user);
-                    }
-                }
-                self.account_refresh(cx);
-            }
-        }
+        Ok(())
+    }
+    fn encode_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: FeedId,
+        subscribe: bool,
+        interests: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), SocketError>,
+    ) -> Result<(), SocketError> {
+        self.managed_socket_encode(store, feed, subscribe, interests, emit)
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
-        let node = self.node.socket == Some(socket);
-        if node {
-            self.node.supervisor.received(cx.now);
-        } else if self.api.socket == Some(socket) {
-            self.api.supervisor.received(cx.now);
-        } else {
+        let Some(feed) = [self.node.feed, self.api.feed]
+            .into_iter()
+            .flatten()
+            .find(|feed| {
+                cx.socket_epoch(*feed)
+                    .is_some_and(|epoch| epoch.socket() == socket)
+            })
+        else {
             return;
-        }
+        };
+        let node = self.node.feed == Some(feed);
         if self.public_frame(cx, text) {
             cx.notice(
                 Level::Warn,
                 code::WS_DISCONNECTED,
                 "TxFlow socket rate limited; reconnecting subscriptions",
             );
-            cx.close(socket);
-            self.on_close(cx, socket, 1006);
+            cx.retire_socket(
+                feed,
+                safe_cex_engine::socket_lifecycle::RetireReason::Closed,
+            );
             return;
         }
         if node {
@@ -861,31 +741,20 @@ impl Venue for TxFlow {
             self.account_api_frame(cx, text);
         }
     }
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        let api = self.api.socket == Some(socket);
-        if !api && self.node.socket != Some(socket) {
+    fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
+    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Ticker { asset, context } = &pending
+            && (self.ticker_contexts.get(asset) != Some(context)
+                || cx.validate_background_read_http_delivery(context).is_err())
+        {
+            self.finish_ticker_context(cx, *asset, context);
             return;
         }
-        let conn = if api { &mut self.api } else { &mut self.node };
-        conn.socket = None;
-        conn.open = false;
-        if let Some(timer) = conn.subscription_timer.take() {
-            cx.clear_timer(timer);
+        if let Pending::Candles { read, .. } = &pending
+            && !read.validate(cx)
+        {
+            return;
         }
-        conn.subscriptions.clear();
-        conn.supervisor.retry(cx);
-        if !api {
-            for (symbol, ladder) in &mut self.books {
-                ladder.book.clear();
-                ladder.time = None;
-                if ladder.published {
-                    cx.book_changed(symbol);
-                }
-            }
-            self.account_disconnected(cx);
-        }
-    }
-    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if !(200..300).contains(&response.status) {
             self.on_request_failed(cx, pending, &format!("TxFlow HTTP {}", response.status));
             return;
@@ -997,6 +866,9 @@ impl Venue for TxFlow {
                     );
                     return;
                 }
+                for (_, context) in self.ticker_contexts.drain() {
+                    let _ = cx.finish_http_context(&context);
+                }
                 self.assets = assets;
                 self.coins = coins;
                 self.instruments = instruments;
@@ -1024,7 +896,7 @@ impl Venue for TxFlow {
                 self.live_tickers.begin();
                 self.next_ticker(cx);
             }
-            Pending::Ticker { asset } => {
+            Pending::Ticker { asset, context } => {
                 match serde_json::from_str::<Reply<TickerRow>>(response.body) {
                     Ok(reply)
                         if reply.success
@@ -1054,32 +926,27 @@ impl Venue for TxFlow {
                     _ => {
                         self.on_request_failed(
                             cx,
-                            Pending::Ticker { asset },
+                            Pending::Ticker { asset, context },
                             "Invalid TxFlow ticker seed identity or envelope",
                         );
                         return;
                     }
                 };
+                self.finish_ticker_context(cx, asset, &context);
                 self.ticker_timer = Some(cx.set_timer(25.0));
             }
-            Pending::Candles {
-                command,
-                rows,
-                valid,
-            } => {
+            Pending::Candles { read, rows, valid } => {
                 let result: Result<String, String> = if valid && Header::valid(response.body) {
                     Ok(serde_json::to_string(&rows).unwrap())
                 } else {
                     Err("Invalid TxFlow candle response".into())
                 };
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
-                }
+                read.finish(cx, result);
             }
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, Ok(response)),
             Pending::History(request) => self.history_response(cx, *request, response),
+            Pending::SocketRefresh => {}
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
@@ -1091,13 +958,41 @@ impl Venue for TxFlow {
                     safe_cex_engine::startup::skipped_row(cx);
                 }
             },
-            Pending::Candles { rows, valid, .. } => match serde_json::from_str::<CandleRow>(item) {
-                Ok(row) => rows.push(row.candle()),
-                Err(_) => *valid = false,
-            },
+            Pending::Candles { read, rows, valid } => {
+                if !read.validate(cx) {
+                    return;
+                }
+                match serde_json::from_str::<CandleRow>(item) {
+                    Ok(row) => rows.push(row.candle()),
+                    Err(_) => *valid = false,
+                }
+            }
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::History(request) => self.history_item(cx, request, item),
             _ => {}
+        }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Candles { read, .. } => read.failed(cx, error),
+            pending => self.on_sign_error(cx, pending, error),
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Candles { read, .. } => read.failed(cx, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -1106,15 +1001,18 @@ impl Venue for TxFlow {
                 cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.discovery.failed(cx, None);
             }
-            Pending::Ticker { asset } => {
-                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-                self.discovery.failed(cx, Some(asset));
-                self.ticker_timer = Some(cx.set_timer(25.0));
+            Pending::Ticker { asset, context } => {
+                if self.finish_ticker_context(cx, asset, &context) {
+                    self.ticker_failed(cx, asset, error);
+                }
             }
-            Pending::Candles { command, .. } => cx.fail(command, error),
+            Pending::Candles { read, .. } => {
+                read.failed(cx, safe_cex_engine::VenueError::new(error))
+            }
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, *request, error),
+            Pending::SocketRefresh => {}
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1130,28 +1028,6 @@ impl Venue for TxFlow {
         if self.ticker_timer == Some(timer) {
             self.ticker_timer = None;
             self.next_ticker(cx);
-        }
-        for api in [false, true] {
-            let conn = if api { &mut self.api } else { &mut self.node };
-            if conn.subscription_timer == Some(timer) {
-                conn.subscription_timer = None;
-                Self::pump_subscriptions(cx, conn);
-            }
-            match conn.supervisor.on_timer(cx, timer) {
-                Tick::Reconnect => self.connect(cx, api),
-                Tick::Ping => {
-                    if let Some(socket) = conn.socket {
-                        cx.send(socket, "{\"method\":\"ping\"}");
-                    }
-                }
-                Tick::TimedOut(_) => {
-                    if let Some(socket) = conn.socket {
-                        cx.close(socket);
-                        self.on_close(cx, socket, 1006);
-                    }
-                }
-                Tick::Handled | Tick::Unhandled => {}
-            }
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -1192,3 +1068,7 @@ fn supported(interval: Interval) -> bool {
         M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H8 | H12 | D1
     )
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/ticker_seed_custody.rs"]
+mod ticker_seed_custody_tests;

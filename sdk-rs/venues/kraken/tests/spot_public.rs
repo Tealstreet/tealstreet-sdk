@@ -333,7 +333,7 @@ fn first_rest_seed_retains_live_quotes_and_values_early_native_holdings_with_the
     engine.start(NOW);
     let metadata = requests(&mut engine).pop().unwrap();
     reply(&mut engine, &metadata, META);
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
     let socket = actions
         .iter()
         .find_map(|action| match action {

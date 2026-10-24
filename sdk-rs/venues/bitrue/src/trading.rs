@@ -7,6 +7,17 @@ use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Outcome, Respon
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+fn local_mutation_policy() -> safe_cex_engine::request_context::Policy {
+    use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+    Policy {
+        operation: Operation::Mutation,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Trading {
     acknowledged: HashMap<String, Target>,
@@ -638,10 +649,7 @@ impl Bitrue {
             | Command::SetLeverage { command, .. } => *command,
             _ => return Err("Unsupported Bitrue trading command".into()),
         };
-        if self.options.public_data_only
-            || self.options.key.as_deref().is_none_or(str::is_empty)
-            || self.options.secret.as_deref().is_none_or(str::is_empty)
-        {
+        if self.options.public_data_only || self.options.credentials.is_none() {
             return Err("Bitrue trading requires API credentials".into());
         }
         let mut plan = Plan::new(id);
@@ -824,41 +832,45 @@ impl Bitrue {
                 .iter()
                 .any(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
         });
-        let id = match &command {
-            Command::PlaceOrders { command, .. }
-            | Command::CancelOrders { command, .. }
-            | Command::CancelSymbolOrders { command, .. }
-            | Command::AmendOrder { command, .. }
-            | Command::SetLeverage { command, .. } => *command,
-            Command::SetMarginType { command, .. } => {
-                cx.fail(
-                    *command,
+        match &command {
+            Command::PlaceOrders { .. }
+            | Command::CancelOrders { .. }
+            | Command::CancelSymbolOrders { .. }
+            | Command::AmendOrder { .. }
+            | Command::SetLeverage { .. } => {}
+            Command::SetMarginType { .. } => {
+                let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                    return true;
+                };
+                let _ = cx.fail_context(
+                    &context,
                     not_sent("Bitrue margin mode cannot be changed through the API")
                         .kind(ErrorKind::Unsupported),
                 );
                 return true;
             }
-            Command::SetPositionMode {
-                command,
-                hedged,
-                symbol: _,
-            } => {
+            Command::SetPositionMode { hedged, .. } => {
                 if *hedged {
-                    cx.fail(
-                        *command,
+                    let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                        return true;
+                    };
+                    let _ = cx.fail_context(
+                        &context,
                         not_sent("Bitrue supports one-way positions only")
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.store.set_hedged(false);
-                    cx.done(*command, "[]".into());
+                    let _ = cx.done_local_setting("[]".into(), |store| store.set_hedged(false));
                 }
                 return true;
             }
             _ => return false,
         };
         if let Err(error) = self.trade_plan(cx, command.clone()) {
-            cx.fail(id, not_sent(error));
+            let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                return true;
+            };
+            let _ = cx.fail_context(&context, not_sent(error));
             return true;
         }
         self.trading.queue.push_back(command);
@@ -1151,6 +1163,22 @@ impl Bitrue {
         } else {
             self.trade_finish(cx, *request.plan, Some(error));
         }
+    }
+    pub(crate) fn trade_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+        prior_attempt: bool,
+    ) {
+        let prior_mutation = match request.credential_role() {
+            safe_cex_engine::credential_selection::CredentialRole::Mutation => prior_attempt,
+            _ => false,
+        };
+        if prior_mutation || request.plan.effective || !request.plan.ids.is_empty() {
+            error.outcome = Some(Outcome::Unknown);
+        }
+        self.trade_failed(cx, request, error);
     }
     /// A request that never answered. Reads precede a write that was never sent.
     pub(crate) fn trade_lost(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
@@ -1522,5 +1550,15 @@ fn answer_failure(response: &Response<'_>, message: String, documented: bool) ->
         }
         _ if documented => rejected(error, ErrorKind::Rejected),
         _ => error,
+    }
+}
+
+impl Request {
+    pub(crate) fn credential_role(&self) -> safe_cex_engine::credential_selection::CredentialRole {
+        use safe_cex_engine::credential_selection::CredentialRole;
+        match self.step.effect {
+            Effect::Inspect(_) | Effect::Verify(_) => CredentialRole::Read { scope: None },
+            _ => CredentialRole::Mutation,
+        }
     }
 }

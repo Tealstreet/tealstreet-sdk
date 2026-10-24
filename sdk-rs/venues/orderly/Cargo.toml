@@ -6,7 +6,7 @@ publish.workspace = true
 
 [dependencies]
 safe-cex-engine.workspace = true
-safe-cex-crypto.workspace = true
+safe-cex-crypto = { workspace = true, features = ["ed25519"] }
 serde.workspace = true
 serde_json.workspace = true
 base64.workspace = true

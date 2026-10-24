@@ -6,7 +6,7 @@ use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Cx, Fill, Method, TimerId, num};
+use safe_cex_engine::{Cx, Fill, Method, OrderSnapshotToken, TimerId, num};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -68,6 +68,7 @@ pub struct Account {
     pub count: u32,
     pub order_rows: Option<SnapshotBuilder<String, Order>>,
     pub order_revision: u64,
+    order_token: Option<OrderSnapshotToken>,
     order_versions: HashMap<String, u64>,
     position_versions: HashMap<String, u64>,
     symbol_closures: HashMap<String, (u64, f64)>,
@@ -489,6 +490,7 @@ impl Cryptocom {
             return;
         }
         self.account.order_rows = None;
+        self.account.order_token = None;
         cx.retried_failure("cryptocom.account:471", error);
         self.schedule_reconcile(cx);
     }
@@ -702,6 +704,16 @@ impl Cryptocom {
                     );
                 }
                 if self.account.count.is_multiple_of(4) {
+                    let Some(token) = cx.store.begin_orders_snapshot() else {
+                        cx.notice(
+                            Level::Error,
+                            code::SNAPSHOT_DISCARDED,
+                            "Crypto.com order snapshot authority exhausted; preserving orders",
+                        );
+                        self.schedule_reconcile(cx);
+                        return;
+                    };
+                    self.account.order_token = Some(token);
                     self.account.order_revision = self.account.revision;
                     self.read_account(cx, Read::Orders, 0);
                 } else {
@@ -714,61 +726,62 @@ impl Cryptocom {
                     self.account.order_rows = Some(rows);
                     self.read_account(cx, Read::AdvancedOrders, 0);
                 } else {
-                    if let Some(regular) = self.account.order_rows.take() {
-                        if regular.rejected() == 0 && rows.rejected() == 0 {
-                            self.account.order_skips.clear();
-                        }
-                        // Each list keeps only the stored copies of its own family that its
-                        // rejections protect.
-                        let (advanced_current, current): (Vec<_>, Vec<_>) = cx
-                            .store
-                            .orders()
-                            .iter()
-                            .cloned()
-                            .partition(|o| self.account.advanced_orders.contains(&o.id));
-                        let (mut regular, kept) = commit_split(regular, &current);
-                        let (advanced, advanced_kept) = commit_split(rows, &advanced_current);
-                        self.account
-                            .advanced_orders
-                            .extend(advanced.iter().chain(&advanced_kept).map(|o| o.id.clone()));
-                        regular.extend(advanced);
-                        for order in kept.into_iter().chain(advanced_kept) {
-                            if !regular.iter().any(|row| row.id == order.id) {
-                                regular.push(order);
+                    if let (Some(regular), Some(token)) = (
+                        self.account.order_rows.take(),
+                        self.account.order_token.take(),
+                    ) {
+                        cx.store.commit_orders_snapshot([token], |current| {
+                            if regular.rejected() == 0 && rows.rejected() == 0 {
+                                self.account.order_skips.clear();
                             }
-                        }
-                        regular.retain(|o| {
-                            !self.account.terminal.contains(&o.id)
-                                && self
-                                    .account
-                                    .order_versions
-                                    .get(&o.id)
-                                    .is_none_or(|v| *v <= self.account.order_revision)
-                        });
-                        regular.extend(
-                            cx.store
-                                .orders()
+                            // Each list keeps only the stored copies of its own family that its
+                            // rejections protect.
+                            let (advanced_current, regular_current): (Vec<_>, Vec<_>) = current
                                 .iter()
-                                .filter(|o| {
-                                    self.account
+                                .cloned()
+                                .partition(|o| self.account.advanced_orders.contains(&o.id));
+                            let (mut regular, kept) = commit_split(regular, &regular_current);
+                            let (advanced, advanced_kept) = commit_split(rows, &advanced_current);
+                            self.account.advanced_orders.extend(
+                                advanced.iter().chain(&advanced_kept).map(|o| o.id.clone()),
+                            );
+                            regular.extend(advanced);
+                            for order in kept.into_iter().chain(advanced_kept) {
+                                if !regular.iter().any(|row| row.id == order.id) {
+                                    regular.push(order);
+                                }
+                            }
+                            regular.retain(|o| {
+                                !self.account.terminal.contains(&o.id)
+                                    && self
+                                        .account
                                         .order_versions
                                         .get(&o.id)
-                                        .is_some_and(|v| *v > self.account.order_revision)
-                                })
-                                .cloned(),
-                        );
-                        for row in &mut regular {
-                            if let Some(live) = cx.store.order(&row.id)
-                                && live.last_update > row.last_update
-                            {
-                                *row = live.clone();
+                                        .is_none_or(|v| *v <= self.account.order_revision)
+                            });
+                            regular.extend(
+                                current
+                                    .iter()
+                                    .filter(|o| {
+                                        self.account
+                                            .order_versions
+                                            .get(&o.id)
+                                            .is_some_and(|v| *v > self.account.order_revision)
+                                    })
+                                    .cloned(),
+                            );
+                            for row in &mut regular {
+                                if let Some(live) = current.iter().find(|live| live.id == row.id)
+                                    && live.last_update > row.last_update
+                                {
+                                    *row = live.clone();
+                                }
                             }
-                        }
-                        cx.store.set_orders(regular);
-                        let store = &*cx.store;
-                        self.account
-                            .advanced_orders
-                            .retain(|id| store.order(id).is_some());
+                            self.account
+                                .advanced_orders
+                                .retain(|id| regular.iter().any(|row| row.id == *id));
+                            regular
+                        });
                     }
                     self.account.count += 1;
                     self.schedule_reconcile(cx);
