@@ -1431,6 +1431,9 @@ fn remote_actions(e: &mut TestEngine) -> Vec<Action> {
                     ));
                     out.push(Action::Http(request));
                 }
+                HttpAction::BindGroup { .. } => {
+                    panic!("ApeX fixture declares no Mutation barriers")
+                }
                 HttpAction::Cancel { .. } => {}
             },
             action => out.push(action),

@@ -472,6 +472,10 @@ pub enum HttpAction {
         permit: Permit,
         request: crate::HttpRequest,
     },
+    BindGroup {
+        permit: GroupPermit,
+        members: Vec<GroupPacket>,
+    },
     Cancel {
         preparation: Preparation,
         signing: Option<RequestId>,
@@ -685,6 +689,13 @@ pub enum Claim {
     WaitUntil(f64),
 }
 
+#[path = "request_context_group_protocol.rs"]
+mod group_protocol;
+pub use group_protocol::{GroupClaim, GroupPacket, GroupPermit, GroupRelease};
+
+#[path = "request_context_group_lifecycle.rs"]
+pub(crate) mod group_lifecycle;
+
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
@@ -816,10 +827,7 @@ impl Lifecycle {
         Ok(permit)
     }
 
-    /// Synchronous final claim, immediately followed by prepared transport
-    /// handoff. `admit` is called only after every other fallible check passes.
-    /// A denied/expired request consumes no pacing slot. There are no fallible
-    /// checks after admission commits; its lease must be validated beforehand.
+    /// Single requests retain their existing mutable admission hook.
     pub fn claim(
         &mut self,
         permit: Permit,
@@ -827,46 +835,18 @@ impl Lifecycle {
         pacing: &mut SendPacing,
         admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
     ) -> Result<Claim, Error> {
-        let State::Permitted(route, expected) = self.state else {
-            return Err(Error::State);
+        let draft = match self.prepare_claim(permit, time, pacing)? {
+            group_lifecycle::ClaimPreparation::WaitUntil(at) => return Ok(Claim::WaitUntil(at)),
+            group_lifecycle::ClaimPreparation::Ready(draft) => draft,
         };
-        if permit != expected {
-            return Err(Error::Revoked);
-        }
-        let mut release = HttpRelease::new(self.attempt, time, self.signature, self.deadline)?;
-        if route.expires_at.is_some_and(|at| time.raw_ms >= at)
-            || self.signed_revision.is_some_and(|rev| rev != time.revision)
-            || time.raw_ms >= self.fresh_until
-        {
-            return Err(Error::Stale);
-        }
-        if let Some(at) = pacing.check(self.context.pacing, time.raw_ms)? {
-            return if at >= self.deadline {
-                Err(Error::TimedOut)
-            } else {
-                Ok(Claim::WaitUntil(at))
-            };
-        }
-        let admission = match admit(&release) {
-            Ok(admission) => admission,
+        let ready = match admit(draft.release()).and_then(|admission| draft.admit(admission)) {
+            Ok(ready) => ready,
             Err(error) => {
                 self.state = State::Settled(None);
                 return Err(error);
             }
         };
-        match admission {
-            Admission::Unscheduled => {}
-            Admission::Scheduled(lease) => {
-                release.response_lease = Some(release.deadline.min(lease.0))
-            }
-            Admission::Denied => {
-                self.state = State::Settled(None);
-                return Err(Error::Revoked);
-            }
-        }
-        pacing.released(self.context.pacing, time.raw_ms);
-        self.state = State::Released(release);
-        Ok(Claim::Released(release))
+        Ok(Claim::Released(self.commit_claim(ready, pacing)))
     }
 
     /// Reprepare after stale route/signature metadata; the old permit becomes
@@ -1050,6 +1030,11 @@ impl SendPacing {
             sets: resolved_sets,
         })
     }
+    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "http-mutation-barriers")]
+    pub(crate) fn validate_mutation_group(&self, pacing: Option<Pacing>) -> Result<(), Error> {
+        self.validate_zero(pacing)
+    }
 
     /// Canonical expanded-floor validation for admission paths requiring no pacing.
     pub fn validate_zero(&self, pacing: Option<Pacing>) -> Result<(), Error> {
@@ -1194,6 +1179,8 @@ pub struct CommandWrites {
     report_bytes: usize,
     report_messages: usize,
     evidence: evidence::EvidenceBudget,
+    // An earlier attempt of this intent may have reached the venue.
+    inherited_uncertain: bool,
 }
 // Private synchronous terminal preparation. Never exposed as a venue grant.
 #[cfg(feature = "http-plans")]
@@ -1247,6 +1234,7 @@ impl CommandWrites {
             report_bytes: 0,
             report_messages: 0,
             evidence: evidence::EvidenceBudget::default(),
+            inherited_uncertain: false,
         })
     }
     pub fn register(&mut self, id: RequestId, leg: u64) -> Result<(), Error> {
@@ -1708,6 +1696,14 @@ impl CommandWrites {
     /// authority, including for evidence-only IDs on a failed native reply.
     #[cfg(feature = "http-plans")]
     pub(crate) fn validate_failed_attempt(&self, id: RequestId) -> Result<(), Error> {
+        if self.failed_attempt(id)?.id_overflow {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "http-plans")]
+    fn failed_attempt(&self, id: RequestId) -> Result<&WriteAttempt, Error> {
         if self.sealed {
             return Err(Error::State);
         }
@@ -1719,10 +1715,23 @@ impl CommandWrites {
         if self.superseded(attempt.leg) || self.latest(attempt.leg) != Some(id) {
             return Err(Error::Revoked);
         }
-        if attempt.id_overflow || !matches!(attempt.result, Some(WriteResult::Failed(_))) {
+        if !matches!(attempt.result, Some(WriteResult::Failed(_))) {
             return Err(Error::State);
         }
-        Ok(())
+        Ok(attempt)
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn failed_attempt_error(&self, id: RequestId) -> Result<VenueError, Error> {
+        let attempt = self.failed_attempt(id)?;
+        let Some(WriteResult::Failed(error)) = &attempt.result else {
+            return Err(Error::State);
+        };
+        let mut error = error.clone();
+        if attempt.id_overflow {
+            evidence::mark_id_overflow(&mut error);
+        }
+        Ok(error)
     }
 
     /// Seal success only when every terminal logical leg is proven accepted.
@@ -1749,6 +1758,13 @@ impl CommandWrites {
             return Err(Error::State);
         }
         Ok(())
+    }
+
+    /// Carry an owner's inherited maybe-sent fact; it can only raise a failure
+    /// projection to Unknown and never clears.
+    pub(crate) fn inheriting(mut self, uncertain: bool) -> Self {
+        self.inherited_uncertain |= uncertain;
+        self
     }
 
     /// Seal exactly once. A caller's fallback text never chooses the outcome;
@@ -1840,7 +1856,9 @@ impl CommandWrites {
                 error
             }
         };
-        error.outcome = if !any_released {
+        error.outcome = if self.inherited_uncertain {
+            Some(Outcome::Unknown)
+        } else if !any_released {
             Some(Outcome::NotSent)
         } else if uncertain || overflow {
             Some(Outcome::Unknown)

@@ -5,6 +5,7 @@ use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
     BuilderAuthorization, BuilderAuthorizationReason, Command, CommandId, Cx, ErrorKind, Outcome,
     Response, VenueError,
@@ -1237,16 +1238,33 @@ impl Grvt {
         match &command {
             Command::SetMarginType { .. } => {
                 let error = not_sent("GRVT margin mode cannot be changed through this integration");
-                cx.fail(id, error.kind(ErrorKind::Unsupported));
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Mutation,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return true;
+                };
+                let _ = cx.fail_context(&context, error.kind(ErrorKind::Unsupported));
                 return true;
             }
             Command::SetPositionMode { hedged, .. } => {
                 if *hedged {
                     let error = not_sent("GRVT supports one-way positions only");
-                    cx.fail(id, error.kind(ErrorKind::Unsupported));
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Mutation,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) else {
+                        return true;
+                    };
+                    let _ = cx.fail_context(&context, error.kind(ErrorKind::Unsupported));
                 } else {
-                    cx.store.set_hedged(false);
-                    cx.done(id, "[]".into());
+                    let _ = cx.done_local_setting("[]".into(), |store| store.set_hedged(false));
                 }
                 return true;
             }
