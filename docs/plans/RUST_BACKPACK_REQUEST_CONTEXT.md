@@ -706,7 +706,7 @@ reconnect/cache rules and recovery/backoff. No subscribe-frame/HTTP ordering
 change or socket migration; preserve current order as a working control.
 Retain raw startup/public-trade streaming path and every native row assertion.
 Existing depth public fixtures may use shared test_support::prepared_actions
-at protocol_now() for genuine route Prepare/Bind/Claim, without changing
+at the explicit native cause clock for genuine route Prepare/Bind/Claim, without changing
 economic assertions or inventing opens/clocks.
 
 Plan first, original controls next on unchanged production. Working controls
@@ -719,3 +719,8 @@ gated suffixes. Scoped Cargo jobs4, one local build; no broad local sweep.
 After bounded plan/original review CLEAR, standing authorization permits
 production then draft push/full CI parallel with exact source review. No
 prune or source edit belongs to this plan/original checkpoint.
+
+Book-seed control compile checkpoint: protocol_now belongs to Cx rather than
+the public Engine fixture API. Replace that mistaken helper lookup with an
+explicit clock argument equal to each native cause time; no runtime/API change
+or fabricated clock. Exclude this compile error from original RED evidence.

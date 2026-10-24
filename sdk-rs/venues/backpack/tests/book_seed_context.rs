@@ -8,12 +8,11 @@ type Driver = Engine<Backpack>;
 const SYMBOL: &str = "SOL_USDC_PERP";
 const SNAP: &str =
     r#"{"lastUpdateId":10,"bids":[["140","1"],["139","2"]],"asks":[["142","1"],["143","2"]]}"#;
-fn actions(e: &mut Driver) -> Vec<Action> {
-    let now = e.protocol_now();
+fn actions(e: &mut Driver, now: f64) -> Vec<Action> {
     safe_cex_engine::test_support::prepared_actions(e, now)
 }
-fn http(e: &mut Driver, needle: &str) -> HttpRequest {
-    actions(e)
+fn http(e: &mut Driver, needle: &str, now: f64) -> HttpRequest {
+    actions(e, now)
         .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.contains(needle) => Some(r),
@@ -43,7 +42,7 @@ fn seed() -> (Driver, SocketId) {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = http(&mut e, "markets");
+    let r = http(&mut e, "markets", 0.);
     reply(
         &mut e,
         &r,
@@ -95,14 +94,14 @@ fn subscribe(e: &mut Driver, now: f64) {
         }),
     );
 }
-fn request(e: &mut Driver) -> HttpRequest {
-    http(e, "/depth?")
+fn request(e: &mut Driver, now: f64) -> HttpRequest {
+    http(e, "/depth?", now)
 }
 #[test]
 fn native_wire_seed_book_and_subscription_order_working_control() {
     let (mut e, _) = seed();
     subscribe(&mut e, 0.);
-    let all = actions(&mut e);
+    let all = actions(&mut e, 0.);
     let frame = all
         .iter()
         .position(|a| matches!(a, Action::WsSend { .. }))
@@ -139,7 +138,7 @@ fn native_wire_seed_book_and_subscription_order_working_control() {
 fn native_buffered_bridge_updates_seed_working_control() {
     let (mut e, socket) = seed();
     subscribe(&mut e, 0.);
-    let r = request(&mut e);
+    let r = request(&mut e, 0.);
     e.handle(1., Event::WsMessage { socket, text: r#"{"stream":"depth.SOL_USDC_PERP","data":{"e":"depth","s":"SOL_USDC_PERP","U":9,"u":11,"b":[["140","5"]],"a":[["142","0"]]}}"# });
     reply_at(&mut e, &r, 2., SNAP);
     let book = e.venue().book(SYMBOL).unwrap();
@@ -150,7 +149,7 @@ fn native_buffered_bridge_updates_seed_working_control() {
 fn native_generation_rejects_unsubscribed_seed_working_control() {
     let (mut e, _) = seed();
     subscribe(&mut e, 0.);
-    let old = request(&mut e);
+    let old = request(&mut e, 0.);
     e.handle(
         1.,
         Event::Command(Command::UnsubscribeOrderBook {
@@ -159,7 +158,7 @@ fn native_generation_rejects_unsubscribed_seed_working_control() {
     );
     e.drain_actions().for_each(drop);
     subscribe(&mut e, 2.);
-    let current = request(&mut e);
+    let current = request(&mut e, 2.);
     reply_at(&mut e, &old, 3., SNAP);
     assert!(e.venue().book(SYMBOL).is_none());
     reply_at(&mut e, &current, 4., SNAP);
@@ -196,7 +195,7 @@ fn invalid_background_clock_cannot_start_seed_transport() {
 fn seed_data_after_new_admission_deadline_cannot_publish_a_book() {
     let (mut e, _) = seed();
     subscribe(&mut e, 0.);
-    let r = request(&mut e);
+    let r = request(&mut e, 0.);
     reply_at(&mut e, &r, 20_001., SNAP);
     assert!(
         e.venue().book(SYMBOL).is_none(),
