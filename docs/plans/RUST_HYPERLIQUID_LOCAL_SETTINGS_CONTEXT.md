@@ -59,7 +59,7 @@ must preserve the original owner and produce no replacement completion.
 Schedule validation remains: spot refusal first; perps deadline must be a finite,
 nonnegative safe integer UTC millisecond value and at least5000ms after native
 cx.now. None is a valid disarm request and remains on the signed path. Retain
-both exact validation messages and the <=/equality boundary, with no projected
+both exact validation messages: time < now+5000 refuses, equality is accepted, with no projected
 clock or synthesized signature expiry. The existing credential checks, including
 missing-key behavior and precedence, stay byte-exact and unconverted.
 
@@ -90,3 +90,41 @@ all-feature, WASM and replay/performance validation. Commit originals before
 source; request native/API reviews before production. The overseer's continuation
 ruling permits production after reviewed REDs, with draft PR and CI parallel to
 source review; no production is included in this checkpoint.
+
+
+## Original execution receipt
+
+Plan ffcb9d13b17 precedes the new request_context_local_settings target. Fe7's
+bounded API/native plan review is CLEAR, and9cz's native plan review is CLEAR.
+The exact native boundary is folded: time < now+5000 refuses, equality passes
+validation. A working control pins one millisecond below, exact equality and
+None disarm; the latter two reach the unchanged missing-key refusal, without
+performing or modifying key selection or a valid signed request.
+
+On unchanged actual9d344 production,25 compiled tests execute12 intended assertion
+REDs,13 GREEN and zero ignored. Ten separate full-capacity cases cover all nine
+lexical sites (the shared merged success has separate leverage and margin cases).
+Five success cases still complete [] in the full pool; five refusal cases still
+emit their native Unsupported/InvalidInput instead of the shared Capacity kind.
+Two invalid external-clock cases expose one-way success/projection or native spot
+schedule refusal instead of the shared InvalidInput. All ten native behavior
+controls, the exact duplicate-event/original-peer control, invalid caller-wait
+entry control and deadline-boundary control are GREEN.
+
+Capacity recovery, exact first-peer retirement and post-recovery native outcomes
+are suffix assertions behind each first Capacity RED. Store preservation under
+capacity/invalid clock is also gated after those first assertions: no executed
+proof of the future refusal projection is claimed. The working native tests do
+prove current exact [] results/messages/kind/NotSent, non-I/O behavior and the
+one-way Store change. No ignored tests, missing APIs or compilation failure are
+counted as REDs.
+
+Two fixture corrections precede this receipt: native metadata resets the hedged
+flag, so the explicit test-only seed is applied after metadata; the common
+engine duplicate diagnostic is Notice::Event(COMMAND_DUPLICATE), not a
+command-scoped CommandError. An unsuccessful text-patch assertion left the old
+fixture unchanged and its rerun was discarded. Only the final25-case target is
+evidence. No production, Cargo, existing fixture, checker or manifest changed.
+
+Scoped strict Clippy on the new target and scoped rustfmt/diff checks pass, with
+four cargo jobs and sequential local builds. No workspace or all-feature sweep.
