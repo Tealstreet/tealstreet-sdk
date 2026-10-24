@@ -1,7 +1,7 @@
 import type { LocalIdentityMetadata, LocalSignerMetadata, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions } from '../../types';
-import type { CredentialPresence, CredentialSetupPolicy, IdentitySetupPolicy } from './construction';
+import type { CredentialPresence, IdentitySetupPolicy, SignerSetupPolicy } from './construction';
 
 type LocalIdentity = LocalIdentityMetadata & {
   key?: string;
@@ -82,16 +82,25 @@ export class LocalSignerSetup {
   readonly hasSecondary: boolean;
   readonly primaryComplete: boolean;
   readonly credentialPresence: CredentialPresence;
+  /** A ValidateOnly family's read-key result (Rust `ReadCredentials::validate`); the key never leaves. */
+  readonly readCredentialsValid: boolean | undefined;
 
-  constructor(options: ExchangeOptions, policy: CredentialSetupPolicy = {}, secondarySigningFromPrimary = false) {
+  constructor(options: ExchangeOptions, policy: SignerSetupPolicy = {}, secondarySigningFromPrimary = false) {
     const setupMetadata = parseLocalSignerMetadata(options.localSigner);
     const primaryMetadata = effectiveIdentityMetadata(setupMetadata.primary, policy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(setupMetadata.secondary, policy.secondary);
-    const secondary =
+    const validateOnly = policy.readCredentials === 'validateOnly';
+    const readKey =
       options.secondary_key !== undefined ||
       options.secondary_secret !== undefined ||
-      options.secondary_passphrase !== undefined ||
-      setupMetadata.secondary !== undefined;
+      options.secondary_passphrase !== undefined;
+    if (validateOnly && setupMetadata.secondary !== undefined) invalidMetadata();
+    // The same rule as Rust: both fields nonempty, untrimmed.
+    this.readCredentialsValid = validateOnly && readKey
+      ? typeof options.secondary_key === 'string' && options.secondary_key.length > 0
+        && typeof options.secondary_secret === 'string' && options.secondary_secret.length > 0
+      : undefined;
+    const secondary = !validateOnly && (readKey || setupMetadata.secondary !== undefined);
     if (secondary && (!credentialPresent(options.secondary_key, secondaryMetadata?.trimCredential === true)
       || (!secondarySigningFromPrimary && !options.secondary_secret))) {
       const message = 'Rust engine secondary signing keys require a nonempty key and secret';
@@ -122,7 +131,7 @@ export class LocalSignerSetup {
     if (!credentials) throw new Error('Local signer setup has already been consumed or disposed');
     this.#credentials = undefined;
     try {
-      return new Constructor(venue, optionsJson, JSON.stringify(credentials));
+      return new Constructor(venue, withReadCredentialsValid(optionsJson, this.readCredentialsValid), JSON.stringify(credentials));
     } finally {
       if (credentials.primary) {
         credentials.primary.key = undefined;
@@ -141,6 +150,16 @@ export class LocalSignerSetup {
     this.#credentials = undefined;
   }
 }
+
+/** Splice the result in as text: re-parsing could round large numeric options.
+ * A caller-supplied duplicate key is refused by the Rust parser. */
+const withReadCredentialsValid = (optionsJson: string, valid: boolean | undefined): string => {
+  if (valid === undefined) return optionsJson;
+  const open = optionsJson.indexOf('{');
+  if (open < 0) return invalidMetadata();
+  const rest = optionsJson.slice(open + 1);
+  return `${optionsJson.slice(0, open)}{"readCredentialsValid":${valid}${/^\s*\}/.test(rest) ? '' : ','}${rest}`;
+};
 
 /** Caller-owned input is unchanged; the generic exchange receives no credentials. */
 export const withoutSigningCredentials = (options: ExchangeOptions): ExchangeOptions => {
