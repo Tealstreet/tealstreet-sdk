@@ -25,7 +25,9 @@ No staging row, shared engine edit, optional signer carrier or fabricated creden
 ## Native behavior and entry transaction
 
 Keep current validation order, exact native messages, Unsupported classification,
-NotSent on native Mutation refusals and no financial outcome on Read refusals.
+NotSent on all native refusals, including the existing Read refusals. New shared
+admission refusals keep the engine projection (Read outcome None, Mutation
+NotSent); this does not relabel a native NotSent as write evidence.
 The unsupported query subset is Read; unsupported controls/cancellation are
 Mutation. Missing-account FetchLeverage is Read; other missing-account commands
 are Mutation. Determine operation from the matched command before it is moved,

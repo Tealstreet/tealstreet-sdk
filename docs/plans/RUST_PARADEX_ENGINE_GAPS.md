@@ -37,6 +37,10 @@ sites are outside that private set and need separate fallback/poll composition.
    fallback or venue terminal authority. #2011 is a prerequisite, not a landed
    capability on this base; JWT wait/header composition remains separate.
 
+The JIT hook owner is claude-m26ps4; its plan is
+`docs/plans/RUST_SESSION_BEARER_HOOK.md` at `8f01fea61a0`. Retained wait
+composition needs Session/Plan review and must use the reviewed Session leg
+issuer (`session_leg_context` after #2028), never the old generic leg path.
 Assign the first two APIs to Session/signing-dispatch owners jointly; #2011 has
 its own Plan/history owner. Native geometry and original assertion REDs must
 be reviewed before adopting these APIs in Paradex.
