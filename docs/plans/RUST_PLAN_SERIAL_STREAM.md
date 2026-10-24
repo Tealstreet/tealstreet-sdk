@@ -137,17 +137,11 @@ call. A native job with nothing to send ends through the existing
   with every streamed accepted ID, plus Unknown when a released call is live,
   in which case the lock converts to the fence. These and `done_plan` or
   `fail_plan` are the only ways the lock and slot are released.
-- **Receipt capture for parking (shared change).** Today `begin_preflight`
-  leaves the receipt unbound, and `begin_preflight_with_command_wait` accepts
-  only ReadOnly. Bitget's 10 s Classic/UTA detection wait parks before
-  anything can be planned, so `begin_preflight_with_command_wait` also accepts
-  WriteAfterReads. It binds the exact caller receipt at genuine entry, with
-  the existing refusals: a missing receipt gets the shared typed refusal, and
-  expiry at entry gets Revoked with no effects. The bound cap bounds only the
-  Preflight's reads and parks, as for ReadOnly. Serial admission never takes it
-  as a root deadline, and never re-captures or rebases it. A Preflight admits
-  at most one Plan, so a second admission is State. Declared mutation Plans
-  keep refusing a bound receipt, as at the base.
+- **No receipt binding.** Nothing in a serial Plan consumes the caller
+  receipt, so the shared `begin_preflight_with_command_wait` stays ReadOnly
+  only and unchanged. Bitget's 10 s detection bound is a venue timer, not the
+  receipt (claude-dazzy3 R6). A Preflight admits at most one Plan, so a second
+  admission is State.
 - **Resend.** With `attempts: 2`, one resend is allowed. It comes only from the
   DATA custody of a definitive refusal that `classify_write` proves the venue
   may resend (Bitget 40009), never after Unknown, 408 or 5xx. It goes through
@@ -265,9 +259,11 @@ Invariants above.
   second-admission wording. Restoring Canceling rows and clearing venue state
   stay venue-side. Native promotes only while no IDs are acknowledged, and
   otherwise fails with them (`fail_plan`).
-- **Parking (D).** The 10 s detection wait runs before planning. It uses the
-  WriteAfterReads command wait with a 10 s venue bound that fails as native
-  does.
+- **Parking (D).** The 10 s detection wait runs before planning, from a
+  native venue timer. The caller receipt cannot provide that bound, so no
+  receipt binding is added. What the engine needs for it (holding a
+  WriteAfterReads Preflight across callbacks and failing it at 10 s) is open
+  with claude-4yjlw0, outside this primitive.
 - **Classic partial batch (E).** KnownPartial plus `fail_plan`, with the IDs
   kept.
 - Venue-side, no engine ask: the idempotent strategy-missing cancel is
@@ -313,9 +309,11 @@ fails at an assertion.
    with the flag true still fails. All-refused followed by `fail_plan` (OKX
    code 1) projects failure. With the flag false, all-refused projects the
    existing failure.
-8. Admission refusals spend nothing: a Read Preflight, a Read admission with
-   `refusals_complete`, no write credential, a zero timeout, a nonzero resolved
-   pacing floor, and outside genuine entry or ready custody.
+8. Admission refusals spend nothing (snapshot before and after each): a Read
+   Preflight, a Read admission with `refusals_complete`, no write credential,
+   a zero timeout, zero or three attempts, and a nonzero resolved pacing floor,
+   each Invalid. Outside genuine entry or ready custody is Revoked. A zero
+   pacing floor is admitted (positive control).
 9. A max-size control for CPU: 30,000 continued calls (one bracketed max input)
    with per-call work O(1). Time is reported on the PR as the CPU
    certification input, not asserted.
@@ -329,15 +327,8 @@ fails at an assertion.
     IDs in order and its refusals counted. Those refusals share the one
     `TEXT_BYTES` stream-and-retire budget and count. A PartialUnknown batch
     refuses continuation and projects Unknown.
-13. Receipt binding: WriteAfterReads `begin_preflight_with_command_wait` binds
-    the entry receipt. Controls: missing receipt; expired at entry; a
-    second admission from the same Preflight is State; a park in ready custody
-    keeps the original cap exactly; and admission after the cap has expired
-    still succeeds, with no root deadline taken from it. Expired at entry is
-    Revoked, the same kind the ReadOnly path returns today. ReadOnly
-    behaviour is unchanged: its existing tests stay green and untouched. A
-    declared mutation Plan admitted from a WriteAfterReads Preflight with a
-    bound receipt is still Invalid, as at the base.
+13. A Preflight admits at most one Plan: a second admission is State and
+    spends nothing. A caller wait of 100 ms never bounds the chain.
 14. A 60,000-call all-refused chain, with KnownPartial batches mixed in:
     retained refusal evidence from both stops growing at `TEXT_BYTES`, the
     count is exact, and `done_plan("[]")` succeeds.
@@ -345,22 +336,28 @@ fails at an assertion.
     or attempt.
 16. A KnownPartial batch, then `fail_plan`: failure projected with that batch's
     accepted IDs after all earlier ones.
-17. A two-attempt call resends once through `plan_resend_context`
-    and refuses a third. A Read call inside a mutation chain. A delayed
-    continuation fires from the Plan timer, refuses outside that callback, and
-    keeps one Context and one timer. An Unknown fact, then a resend, is
-    refused; so is a resend after 408 or 5xx. The resend signs fresh: a new
-    stamp and a new nonce at Bind, with no replayed bytes. A Read fact leaves the journal,
-    the IDs and the refusal count unchanged. A delayed continuation is refused
-    while uncertain and when it fires after an uncertain fact, and its
-    callback cannot be used twice. A Read failure (HttpFailed), then a 250 ms
-    Plan timer, then a fresh Read in `on_http_plan_ready`; the same from a
-    stale failure, from another call's failure, from a Mutation failure, from
-    a provider or local refusal, or with a Mutation `next` is refused,
-    spending nothing.
-18. Caller-wait expiry mid-chain: no terminal or Timeout at
-    expiry, later calls are still accepted, and the command's single terminal
-    is the Plan's.
+17. Resend, reads and delays:
+    - a two-attempt call resends once after a proven 40009, freshly
+      provider-signed (a different signing stamp, not just a new request id),
+      and a third attempt is refused;
+    - after a released 503, or a released transport failure, a resend is
+      refused and spends nothing, the fact is Unknown, the fence is armed and
+      `fail_plan` projects;
+    - a Read call inside a mutation chain leaves no attempt in the journal
+      (`command_writes`) and no refusal, and the IDs are the mutations' only;
+    - a delayed continuation arms the Plan timer at exactly `now + delay` and
+      issues from `on_http_plan_ready`;
+    - Read failures retry at 250, 500 and 750 ms, chained, and the third retry
+      succeeds. From each failure, a Mutation `next` and a second delayed
+      continuation are refused and spend nothing;
+    - a Read's physical timeout at equality still retries, with the accepted
+      prefix intact.
+    Source-stage additions, with the stops in RED19: an uncertain fact at fire
+    time, and stale, foreign, Mutation and provider or local failures.
+18. Caller-wait expiry mid-chain: no terminal or caller failure is delivered
+    after the 150 ms wait expires, later calls are still accepted, the lock
+    stays held through that window, and the command's single terminal is the
+    Plan's.
 19. Mid-chain stops: credential revoke, Session retirement, engine
     shutdown and caller cancel each stop at the next custody point and project
     the streamed IDs. With a released live call they project Unknown and arm
@@ -375,10 +372,8 @@ fails at an assertion.
 - RED19's stop cases (credential revoke, Session retirement, shutdown, caller
   cancel) are source-stage controls. Their engine entry points are fixed by
   the source, and they are added with it before review.
-- The source changes one existing control on purpose:
-  `plan_receipt_cap_tests` `Mode::RefuseWrite` asserts that a WriteAfterReads
-  command wait is Revoked. It becomes a binding control, and every ReadOnly
-  case stays untouched.
+- claude-dazzy3 reviews each RED19 stop as a RED first: each must fail
+  against the source minus its stop handling before it is GREEN.
 
 ## Gates
 

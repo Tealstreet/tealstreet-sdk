@@ -56,6 +56,7 @@ mod serial_plans {
         Resend,
         Read,
         Oversized,
+        ServerError,
     }
     fn parse(body: &str) -> Reply {
         let ids = |rest: &str| {
@@ -74,6 +75,7 @@ mod serial_plans {
                 "40009" => Reply::Resend,
                 "read" => Reply::Read,
                 "oversized" => Reply::Oversized,
+                "503" => Reply::ServerError,
                 other => panic!("fixture reply {other}"),
             },
         }
@@ -96,12 +98,13 @@ mod serial_plans {
         pacing: Option<crate::request_context::Pacing>,
         read_preflight: bool,
         no_credential: bool,
-        command_wait: bool,
         code1: bool,
         partial_terminal: bool,
         on_refused: OnRefusedContinue,
         delay_ms: Option<u32>,
         retry_failed_reads: bool,
+        forge_resend: bool,
+        read_failures: u32,
         probe_custody: bool,
         probe_second_admission: bool,
         // Native job state.
@@ -126,6 +129,9 @@ mod serial_plans {
         storage: Vec<(usize, usize, usize)>,
         #[cfg_attr(not(feature = "order-locks"), allow(dead_code))]
         lock_held: Vec<bool>,
+        refusal_spent_nothing: Option<bool>,
+        read_requests: Vec<RequestId>,
+        journal_at_done: Option<(bool, usize)>,
     }
 
     fn queue(cx: &mut Cx<'_, Context>, context: Context, signed: bool) {
@@ -181,12 +187,7 @@ mod serial_plans {
                 read_credential: None,
                 write_credential: (!self.read_preflight && !self.no_credential).then(credential),
             };
-            let preflight = if self.command_wait {
-                cx.begin_preflight_with_command_wait(policy)
-            } else {
-                cx.begin_preflight(policy)
-            };
-            let Ok(preflight) = preflight else {
+            let Ok(preflight) = cx.begin_preflight(policy) else {
                 self.admitted = Some(Err(Error::Revoked));
                 return;
             };
@@ -209,11 +210,7 @@ mod serial_plans {
                     self.issue(cx, first);
                 }
                 Err(error) => {
-                    assert_eq!(
-                        Self::snapshot(cx),
-                        before,
-                        "a refused admission spends nothing"
-                    );
+                    self.refusal_spent_nothing = Some(Self::snapshot(cx) == before);
                     self.admitted = Some(Err(error));
                 }
             }
@@ -246,11 +243,42 @@ mod serial_plans {
             let plan = self.plan.clone().unwrap();
             let slot = self.slot.clone().unwrap();
             cx.finish_plan_call(&plan, &slot, context).unwrap();
+            if done {
+                let writes = cx.io.request_contexts.command_writes(7).unwrap();
+                self.journal_at_done = Some((
+                    self.read_requests
+                        .iter()
+                        .any(|id| writes.holds_attempt(*id)),
+                    writes.rejections().count(),
+                ));
+            }
             self.terminal = Some(if done {
                 cx.done_plan(&plan, format!("[{}]", self.job_ids.join(",")))
             } else {
                 cx.fail_plan(&plan, "venue stopped")
             });
+        }
+        /// A resend without a proven-refusal grant: always refused.
+        fn forged_resend(&mut self, cx: &mut Cx<'_, Context>, context: &Context) {
+            let plan = self.plan.clone().unwrap();
+            let slot = self.slot.clone().unwrap();
+            let attempt = cx
+                .io
+                .http_delivery
+                .as_ref()
+                .map_or(RequestId(0), |delivery| delivery.attempt.request);
+            let before = Self::snapshot(cx);
+            let result = cx
+                .plan_resend_context(
+                    &plan,
+                    &slot,
+                    context,
+                    crate::request_context::ResendGrant { attempt },
+                )
+                .map(drop);
+            self.resends.push(result);
+            self.probes
+                .push(("forged resend", result, Self::snapshot(cx) == before));
         }
         fn advance(&mut self, cx: &mut Cx<'_, Context>, context: &Context) {
             let plan = self.plan.clone().unwrap();
@@ -319,6 +347,9 @@ mod serial_plans {
             let stop = match parse(response.body) {
                 Reply::Read => {
                     assert_eq!(self.current.unwrap().operation, Operation::Read);
+                    self.read_failures = 0;
+                    let request = cx.io.http_delivery.as_ref().unwrap().attempt.request;
+                    self.read_requests.push(request);
                     false
                 }
                 Reply::Accepted(ids) => {
@@ -385,6 +416,19 @@ mod serial_plans {
                     .unwrap();
                     true
                 }
+                Reply::ServerError => {
+                    use crate::classify::{CodeTable, Key, Verdict};
+                    const TABLE: CodeTable = CodeTable {
+                        rows: &[],
+                        success: &[Key::Int(0)],
+                        unlisted: Verdict::Unknown(None),
+                        status: &[],
+                    };
+                    cx.http_write_failure(&context, &TABLE, None, "503 Service Unavailable", None)
+                        .unwrap();
+                    self.forged_resend(cx, &context);
+                    true
+                }
                 Reply::Resend => {
                     use crate::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
                     const TABLE: CodeTable = CodeTable {
@@ -443,17 +487,31 @@ mod serial_plans {
             }
             let plan = self.plan.clone().unwrap();
             let slot = self.slot.clone().unwrap();
-            if self.retry_failed_reads {
+            if self.forge_resend {
+                self.forged_resend(cx, &context);
+            }
+            if self.retry_failed_reads && self.read_failures < 3 {
+                self.read_failures += 1;
+                let delay = 250 * self.read_failures;
                 let before = Self::snapshot(cx);
-                let result = cx.continue_serial_plan_after(&plan, &slot, &context, 250, mutation());
+                let result =
+                    cx.continue_serial_plan_after(&plan, &slot, &context, delay, mutation());
                 self.probes.push((
                     "mutation next after a read failure",
                     result,
                     Self::snapshot(cx) == before,
                 ));
-                let result = cx.continue_serial_plan_after(&plan, &slot, &context, 250, read());
+                let result = cx.continue_serial_plan_after(&plan, &slot, &context, delay, read());
                 self.continued.push(result);
                 if result.is_ok() {
+                    let before = Self::snapshot(cx);
+                    let again =
+                        cx.continue_serial_plan_after(&plan, &slot, &context, delay, read());
+                    self.probes.push((
+                        "second delayed continuation from one failure",
+                        again,
+                        Self::snapshot(cx) == before,
+                    ));
                     self.current = Some(read());
                     return;
                 }
@@ -514,7 +572,8 @@ mod serial_plans {
             _ => None,
         })
     }
-    fn release(engine: &mut Engine<Serial>, token: Preparation, now: f64) {
+    /// Returns the provider signing stamp when the call was signed.
+    fn release(engine: &mut Engine<Serial>, token: Preparation, now: f64) -> Option<f64> {
         engine.http_prepared(
             now,
             token,
@@ -524,8 +583,10 @@ mod serial_plans {
             },
         );
         let mut actions = engine.drain_actions().collect::<Vec<_>>();
+        let mut stamp = None;
         if actions.iter().any(|a| matches!(a, Action::Sign { .. })) {
             let (attempt, work) = work(&actions);
+            stamp = work.receipt.stamp_ms;
             engine.handle(
                 now,
                 Event::Signed {
@@ -552,6 +613,7 @@ mod serial_plans {
             engine.claim_http(now, permit),
             Ok(Claim::Released(_))
         ));
+        stamp
     }
     fn reply(engine: &mut Engine<Serial>, token: Preparation, now: f64, body: &str) {
         engine.handle(
@@ -570,10 +632,19 @@ mod serial_plans {
     /// after the last reply and the clock.
     fn drive<'a>(
         engine: &mut Engine<Serial>,
+        now: f64,
+        bodies: impl IntoIterator<Item = &'a str>,
+    ) -> (Vec<Action>, f64) {
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        drive_from(engine, actions, now, bodies)
+    }
+    /// As `drive`, starting from actions the caller already drained.
+    fn drive_from<'a>(
+        engine: &mut Engine<Serial>,
+        mut actions: Vec<Action>,
         mut now: f64,
         bodies: impl IntoIterator<Item = &'a str>,
     ) -> (Vec<Action>, f64) {
-        let mut actions = engine.drain_actions().collect::<Vec<_>>();
         for body in bodies {
             let token = prepared(&actions).expect("the next serial call is prepared");
             release(engine, token, now);
@@ -993,6 +1064,13 @@ mod serial_plans {
             },
             Serial {
                 first: Some(SerialCall {
+                    attempts: 0,
+                    ..mutation()
+                }),
+                ..Default::default()
+            },
+            Serial {
+                first: Some(SerialCall {
                     attempts: 3,
                     ..mutation()
                 }),
@@ -1008,28 +1086,47 @@ mod serial_plans {
         ] {
             let mut e = engine(Serial { total: 1, ..venue });
             command(&mut e, 0., None);
-            assert!(
-                matches!(e.venue.admitted, Some(Err(Error::Invalid))),
-                "{:?}",
-                e.venue.admitted
+            assert_eq!(e.venue.admitted, Some(Err(Error::Invalid)));
+            assert_eq!(
+                e.venue.refusal_spent_nothing,
+                Some(true),
+                "a refused admission spends nothing"
             );
         }
+        let mut e = engine(Serial {
+            total: 1,
+            pacing: Some(crate::request_context::Pacing {
+                group: 1,
+                minimum_gap_ms: 0.,
+            }),
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let (actions, _) = drive(&mut e, 0., ["ok:a"]);
+        assert_eq!(
+            done(&actions).as_deref(),
+            Some("[a]"),
+            "a zero pacing floor is admitted"
+        );
         let mut e = engine(Serial {
             total: 1,
             ..Default::default()
         });
         command(&mut e, 0., None);
         admitted(&e);
+        let preflight = e.venue.preflight.clone().unwrap();
+        let policy = e.venue.policy();
         let mut cx = Cx {
             now: 1.,
             store: &mut e.store,
             io: &mut e.io,
         };
-        let preflight = e.venue.preflight.clone().unwrap();
         let before = Serial::snapshot(&cx);
-        assert!(
-            cx.admit_serial_plan(&preflight, mutation(), e.venue.policy())
-                .is_err(),
+        assert_eq!(
+            cx.admit_serial_plan(&preflight, mutation(), policy)
+                .map(drop),
+            Err(Error::Revoked),
             "outside entry or ready custody"
         );
         assert_eq!(Serial::snapshot(&cx), before);
@@ -1110,29 +1207,20 @@ mod serial_plans {
     }
 
     #[test]
-    fn serial_13_write_after_reads_command_wait_binds_the_entry_receipt() {
+    fn serial_13_a_preflight_admits_at_most_one_plan() {
         let mut e = engine(Serial {
             total: 1,
-            command_wait: true,
             probe_second_admission: true,
             ..Default::default()
         });
         command(&mut e, 0., Some(100));
         admitted(&e);
-        let preflight = e.venue.preflight.clone().unwrap();
-        assert_eq!(
-            e.io.request_contexts
-                .preflight_receipt_cap(&preflight)
-                .unwrap()
-                .map(|cap| cap.1),
-            Some(100.)
-        );
         assert_eq!(e.venue.second_admission, Some(Err(Error::State)));
         let (actions, _) = drive(&mut e, 200., ["ok:a"]);
         assert_eq!(
             done(&actions).as_deref(),
             Some("[a]"),
-            "no root deadline taken from the receipt"
+            "no root deadline from the receipt"
         );
     }
 
@@ -1198,17 +1286,77 @@ mod serial_plans {
         admitted(&e);
         let actions = e.drain_actions().collect::<Vec<_>>();
         let first = prepared(&actions).unwrap();
-        release(&mut e, first, 0.);
-        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        let first_stamp = release(&mut e, first, 0.).expect("signed");
         reply(&mut e, first, STEP_MS, "40009");
-        actions.extend(e.drain_actions());
+        let actions = e.drain_actions().collect::<Vec<_>>();
         assert_eq!(e.venue.resends, [Ok(())]);
-        let second = prepared(&actions).expect("a fresh preparation, not replayed bytes");
-        assert_ne!(second.attempt().request, first.attempt().request);
-        release(&mut e, second, STEP_MS);
-        reply(&mut e, second, 2. * STEP_MS, "40009");
+        let second = prepared(&actions).expect("a fresh preparation");
+        let second_stamp =
+            release(&mut e, second, 2. * STEP_MS).expect("signed again by the provider");
+        assert_ne!(
+            second_stamp, first_stamp,
+            "fresh signing, not replayed bytes"
+        );
+        reply(&mut e, second, 3. * STEP_MS, "40009");
         assert_eq!(e.venue.resends.len(), 2);
         assert!(e.venue.resends[1].is_err(), "a third attempt is refused");
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn serial_17_no_resend_after_a_5xx_or_transport_failure() {
+        let mut e = engine(Serial {
+            total: 3,
+            first: Some(SerialCall {
+                attempts: 2,
+                ..mutation()
+            }),
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let (actions, _) = drive(&mut e, 0., ["503"]);
+        assert!(e.venue.resends[0].is_err(), "no grant after a 5xx");
+        let error = failed(&actions).expect("fail_plan projects");
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
+        assert!(e.io.order_locks.uncertain("BTCUSD"));
+        let mut e = engine(Serial {
+            total: 3,
+            first: Some(SerialCall {
+                attempts: 2,
+                ..mutation()
+            }),
+            forge_resend: true,
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let token = prepared(&actions).unwrap();
+        release(&mut e, token, 0.);
+        e.handle(
+            STEP_MS,
+            Event::HttpFailed {
+                request: token.attempt().request,
+                error: "reset",
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let (_, result, unchanged) = e
+            .venue
+            .probes
+            .iter()
+            .find(|(name, ..)| *name == "forged resend")
+            .unwrap();
+        assert!(
+            result.is_err() && *unchanged,
+            "no grant after a released transport failure"
+        );
+        assert_eq!(
+            failed(&actions).unwrap().outcome,
+            Some(crate::Outcome::Unknown)
+        );
+        assert!(e.io.order_locks.uncertain("BTCUSD"));
     }
 
     #[test]
@@ -1227,18 +1375,24 @@ mod serial_plans {
             e.io.request_contexts
                 .plan_timer(7)
                 .expect("the Plan's one timer");
+        assert!(actions.iter().any(|a| matches!(a, Action::SetTimer { timer: t, at_ms } if *t == timer && *at_ms == now + 250.)));
         e.handle(now + 250., Event::TimerFired { timer });
         assert_eq!(e.venue.ready, 1);
-        let (actions, now) = drive(&mut e, now + 250., ["read"]);
+        let (_, now) = drive(&mut e, now + 250., ["read"]);
         let timer = e.io.request_contexts.plan_timer(7).unwrap();
         e.handle(now + 250., Event::TimerFired { timer });
-        let _ = actions;
         let (actions, _) = drive(&mut e, now + 250., ["ok:b"]);
         assert_eq!(done(&actions).as_deref(), Some("[a,b]"));
+        assert_eq!(e.venue.read_requests.len(), 1);
+        assert_eq!(
+            e.venue.journal_at_done,
+            Some((false, 0)),
+            "no Read fact and no refusal in the journal"
+        );
     }
 
     #[test]
-    fn serial_17_a_read_failure_retries_once_through_the_plan_timer() {
+    fn serial_17_read_failures_retry_at_250_500_750_then_succeed() {
         let mut e = engine(Serial {
             total: 2,
             first: Some(read()),
@@ -1247,24 +1401,39 @@ mod serial_plans {
         });
         command(&mut e, 0., None);
         admitted(&e);
-        let actions = e.drain_actions().collect::<Vec<_>>();
-        let token = prepared(&actions).unwrap();
-        release(&mut e, token, 0.);
-        e.handle(
-            STEP_MS,
-            Event::HttpFailed {
-                request: token.attempt().request,
-                error: "reset",
-            },
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        let mut now = 0.;
+        for n in 1..=3 {
+            let token = prepared(&actions).expect("a fresh Read");
+            release(&mut e, token, now);
+            now += STEP_MS;
+            e.handle(
+                now,
+                Event::HttpFailed {
+                    request: token.attempt().request,
+                    error: "reset",
+                },
+            );
+            let set = e.drain_actions().collect::<Vec<_>>();
+            let timer = e.io.request_contexts.plan_timer(7).unwrap();
+            let delay = 250. * f64::from(n);
+            assert!(set.iter().any(|a| matches!(a, Action::SetTimer { timer: t, at_ms } if *t == timer && *at_ms == now + delay)));
+            now += delay;
+            e.handle(now, Event::TimerFired { timer });
+            actions = e.drain_actions().collect();
+        }
+        assert_eq!(e.venue.ready, 3);
+        assert_eq!(e.venue.continued, [Ok(()), Ok(()), Ok(())]);
+        for (name, result, unchanged) in &e.venue.probes {
+            assert!(result.is_err() && *unchanged, "{name}: {result:?}");
+        }
+        assert_eq!(
+            e.venue.probes.len(),
+            6,
+            "a Mutation next and a second delay, per failure"
         );
-        assert_eq!(e.venue.continued, [Ok(())]);
-        let (name, result, unchanged) = &e.venue.probes[0];
-        assert!(result.is_err() && *unchanged, "{name}");
-        let timer = e.io.request_contexts.plan_timer(7).unwrap();
-        e.handle(STEP_MS + 250., Event::TimerFired { timer });
-        let (actions, _) = drive(&mut e, STEP_MS + 250., ["read"]);
-        let _ = actions;
-        assert_eq!(e.venue.ready, 1);
+        let (actions, _) = drive_from(&mut e, actions, now, ["read", "ok:a"]);
+        assert_eq!(done(&actions).as_deref(), Some("[a]"));
     }
 
     #[test]
@@ -1354,7 +1523,27 @@ mod serial_plans {
         });
         command(&mut e, 0., Some(150));
         admitted(&e);
-        let (actions, _) = drive(&mut e, 0., ["ok:a", "ok:b", "ok:c", "ok:d"]);
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        let mut now = 0.;
+        for (index, body) in ["ok:a", "ok:b", "ok:c", "ok:d"].into_iter().enumerate() {
+            let token = prepared(&actions).unwrap();
+            release(&mut e, token, now);
+            now += STEP_MS;
+            reply(&mut e, token, now, body);
+            actions = e.drain_actions().collect();
+            if index < 3 {
+                assert!(
+                    failed(&actions).is_none() && done(&actions).is_none(),
+                    "no terminal at {now}"
+                );
+            }
+        }
+        assert!(now > 150.);
         assert_eq!(done(&actions).as_deref(), Some("[a,b,c,d]"));
+        #[cfg(feature = "order-locks")]
+        assert!(
+            e.venue.lock_held.iter().all(|held| *held),
+            "lock held across the expired wait"
+        );
     }
 }

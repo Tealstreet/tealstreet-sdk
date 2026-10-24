@@ -1928,6 +1928,11 @@ impl CommandWrites {
         prepared.failure
     }
 
+    #[cfg(test)]
+    pub(crate) fn holds_attempt(&self, id: RequestId) -> bool {
+        self.attempts.iter().any(|attempt| attempt.id == id)
+    }
+
     /// Retain each terminal logical-leg refusal for the existing reporting path.
     /// A refusal recovered by a later attempt is history, not a rejected leg.
     /// Reading evidence never reopens a sealed command or emits another result.
