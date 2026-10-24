@@ -2,7 +2,8 @@
 use crate::wire::{Envelope, Identifier, Number};
 use crate::{BitgetFutures, Pending, sign};
 use safe_cex_engine::paging::{self, WindowOrder};
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, json::ArrayAt, num};
+use safe_cex_engine::request_context::{CommandEntryError, Context, Operation, Owner};
+use safe_cex_engine::{CommandWait, Cx, Method, Query, Response, TimerId, json::ArrayAt, num};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::collections::{HashSet, VecDeque};
 
@@ -22,7 +23,10 @@ pub struct History {
 }
 
 pub struct Request {
-    pub(crate) command: CommandId,
+    /// The command's original caller-wait Read root; the engine expires it.
+    root: Context,
+    /// The physical page in flight, retired once its page is settled.
+    leg: Option<Context>,
     detect_deadline: f64,
     query: Query,
     uta: bool,
@@ -233,20 +237,31 @@ struct UtaBill<'a> {
 }
 
 impl BitgetFutures {
-    pub(crate) fn start_query(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        query: Query,
-    ) {
+    pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, query: Query) {
         let public = matches!(query, Query::PublicTrades { .. });
-        if !public && !self.private_enabled() {
-            cx.fail(command, "Bitget credentials are required");
+        let private = !public && self.private_enabled();
+        // History is never the degraded balance read, so the read key applies.
+        let credential = private.then(|| self.read_credential("")).flatten();
+        let root = match cx.admit_caller_read_root(credential, None) {
+            Ok(root) => root,
+            // An unstamped receipt or admission refusal already published its failure.
+            Err(CommandEntryError::Rejected(_)) => return,
+            // Nothing here touches ids before admission, so the genuine entry is
+            // still Fresh and Revoked can only mean an expired wait.
+            Err(CommandEntryError::Revoked) => {
+                if cx.command_wait() == Some(CommandWait::Expired) {
+                    let _ = cx.reject_expired_command(Operation::Read);
+                }
+                return;
+            }
+        };
+        if !public && !private {
+            let _ = cx.fail_context(&root, "Bitget credentials are required");
             return;
         }
         let (from, to) = match &query {
             Query::OrderByClientId { .. } => {
-                cx.fail(command, "Bitget client-order-id query is not supported");
+                let _ = cx.fail_context(&root, "Bitget client-order-id query is not supported");
                 return;
             }
             Query::Fills { from_ms, to_ms, .. }
@@ -260,7 +275,7 @@ impl BitgetFutures {
             .any(|n| !n.is_finite() || n < 0.0)
             || matches!((from,to),(Some(a),Some(b)) if a>b)
         {
-            cx.fail(command, "invalid Bitget history range");
+            let _ = cx.fail_context(&root, "invalid Bitget history range");
             return;
         }
         // Supplying one boundary still produces a bounded native request.
@@ -278,7 +293,7 @@ impl BitgetFutures {
             to
         };
         if matches!((from,to),(Some(a),Some(b)) if a>b) {
-            cx.fail(command, "invalid Bitget history range");
+            let _ = cx.fail_context(&root, "invalid Bitget history range");
             return;
         }
         let mut windows: VecDeque<_> = if let (Some(a), Some(b)) = (from, to) {
@@ -288,7 +303,7 @@ impl BitgetFutures {
                     .map(|(a, b)| (Some(a), Some(b)))
                     .collect(),
                 None => {
-                    cx.fail(command, "Bitget history range exceeds 1000 windows");
+                    let _ = cx.fail_context(&root, "Bitget history range exceeds 1000 windows");
                     return;
                 }
             }
@@ -297,7 +312,8 @@ impl BitgetFutures {
         };
         let window = windows.pop_front().expect("one window");
         let request = Request {
-            command,
+            root,
+            leg: None,
             detect_deadline: cx.now + 10_000.0,
             query,
             uta: self.account.uta,
@@ -323,10 +339,7 @@ impl BitgetFutures {
         let public = matches!(r.query, Query::PublicTrades { .. });
         r.uta = self.account.uta;
         let (endpoint, symbol, order, limit) = match &r.query {
-            Query::OrderByClientId { .. } => {
-                cx.fail(r.command, "Bitget client-order-id query is not supported");
-                return;
-            }
+            Query::OrderByClientId { .. } => unreachable!("start_query refuses client-ID lookups"),
             Query::Fills {
                 symbol,
                 order_id,
@@ -414,15 +427,37 @@ impl BitgetFutures {
         } else {
             ArrayAt::Envelope(ARRAYS)
         };
-        let pending = Pending::History(Box::new(r));
-        self.send(
-            cx,
-            Method::Get,
-            &path,
-            crate::Payload::Stream(at),
-            !public,
-            pending,
-        );
+        // Each physical page is minted at its own dequeue, capped by the root.
+        let leg =
+            match cx.http_leg_context(&r.root, crate::read_policy(r.root.credential().cloned())) {
+                Ok(leg) => leg,
+                Err(error) => {
+                    let _ = cx.fail_context(&r.root, error.read_venue_error());
+                    return;
+                }
+            };
+        r.leg = Some(leg.clone());
+        let url = format!("{}{path}", crate::paths::REST);
+        let queued = if public {
+            cx.request_managed(leg, Method::Get, url, None, Pending::History(Box::new(r)))
+        } else {
+            let recipe = sign::Http::new(self.credential_identity(r.root.credential()), path);
+            cx.request_signed_managed(
+                leg,
+                Method::Get,
+                url,
+                None,
+                Box::new(recipe),
+                Pending::History(Box::new(r)),
+            )
+        };
+        match queued {
+            Ok(id) => cx.stream_response(id, at),
+            Err((Pending::History(r), error)) => {
+                self.history_sign_failed(cx, *r, error.venue_error())
+            }
+            Err(_) => unreachable!("history queues only its own continuation"),
+        }
     }
     pub(crate) fn query_item(&self, cx: &Cx<'_, Pending>, r: &mut Request, item: &str) {
         if r.uta && matches!(r.query, Query::Income { .. }) {
@@ -765,6 +800,13 @@ impl BitgetFutures {
         mut r: Request,
         response: Response<'_>,
     ) {
+        let leg = r.leg.take().expect("a delivered page has its leg");
+        let delivered = cx.validate_read_http_delivery(&r.root, &leg);
+        let _ = cx.finish_http_context(&leg);
+        if let Err(error) = delivered {
+            let _ = cx.fail_context(&r.root, error.read_venue_error());
+            return;
+        }
         if serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
             .ok()
             .is_some_and(|e| e.code.0 == Some(40085.0))
@@ -817,15 +859,15 @@ impl BitgetFutures {
         r.pages += 1;
         if let Some(cursor) = cursor {
             if !r.cursors.insert(cursor.clone()) {
-                cx.fail(
-                    r.command,
+                let _ = cx.fail_context(
+                    &r.root,
                     "Bitget history cursor did not advance; result incomplete",
                 );
                 return;
             }
             if r.pages >= MAX_PAGES {
-                cx.fail(
-                    r.command,
+                let _ = cx.fail_context(
+                    &r.root,
                     "Bitget history page cap reached; result incomplete",
                 );
                 return;
@@ -843,14 +885,17 @@ impl BitgetFutures {
         }
         r.rows
             .sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
-        match serde_json::to_string(&r.rows).map_err(|e| e.to_string()) {
-            Ok(data) => cx.done(r.command, data),
-            Err(error) => cx.fail(r.command, error),
+        let _ = match serde_json::to_string(&r.rows).map_err(|e| e.to_string()) {
+            Ok(data) => cx.done_context(&r.root, data),
+            Err(error) => cx.fail_context(&r.root, error),
         };
     }
     pub(crate) fn query_failed(&mut self, cx: &mut Cx<'_, Pending>, mut r: Request, error: &str) {
+        if let Some(leg) = r.leg.take() {
+            let _ = cx.finish_http_context(&leg);
+        }
         if r.retries >= 3 {
-            cx.fail(r.command, format!("Bitget history incomplete: {error}"));
+            let _ = cx.fail_context(&r.root, format!("Bitget history incomplete: {error}"));
             return;
         }
         r.retries += 1;
@@ -866,7 +911,7 @@ impl BitgetFutures {
             let (_, r) = self.history.waiting.swap_remove(i);
             if !matches!(r.query, Query::PublicTrades { .. }) && !self.account.detected {
                 if cx.now >= r.detect_deadline {
-                    cx.fail(r.command, "Bitget account detection did not complete");
+                    let _ = cx.fail_context(&r.root, "Bitget account detection did not complete");
                     return;
                 }
                 self.history.waiting.push((cx.set_timer(100.0), r));
@@ -874,6 +919,25 @@ impl BitgetFutures {
                 self.query_request(cx, r);
             }
         }
+    }
+    /// A provider or queue refusal before the page left: strict, typed, no retry.
+    pub(crate) fn history_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut r: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Some(leg) = r.leg.take() {
+            let _ = cx.finish_http_context(&leg);
+        }
+        let _ = cx.fail_context(&r.root, error);
+    }
+    /// The engine expired this root and sealed its command; drop every parked
+    /// page of it. Their timers fire later and find nothing.
+    pub(crate) fn history_root_retired(&mut self, owner: Owner) {
+        self.history
+            .waiting
+            .retain(|(_, r)| r.root.owner() != owner);
     }
 }
 fn side(s: &str) -> Option<&'static str> {

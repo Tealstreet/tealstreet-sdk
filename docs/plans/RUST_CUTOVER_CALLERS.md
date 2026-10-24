@@ -6177,6 +6177,97 @@ example for WOO or TxFlow entry. The additive seam (explicit egress on
 Plan/preflight issuance) is owned by claude-m26ps4, plan first after #1833
 lands, with codex-uufub4 reviewing API fit.
 
+## Bitget native dispatch signer checkpoint (draft; hosted prerequisite pending)
+
+This proposed change covers `bitget`, `bitgetusdc` and `bitgetinverse` native
+execution through the existing engine signer/provider. Production venue options
+contain only opaque primary/secondary identities. Trusted #1738 setup consumes
+material once: private primary passphrase required, missing secondary passphrase
+inherits the primary reference, and explicit empty rejects before startup.
+Ordinary private GETs (identity, metadata, resolve-amend and history included)
+select secondary when configured; degraded balance recovery retains its existing
+primary identity/egress exception. Writes and Classic/UTA private WS use primary.
+Public requests stay unsigned; product, inverse sizing and UTA admission remain.
+
+#1714/#1728 provider bootstrap requirements extend to these aliases: provision
+and rotate/dispose the provider in the engine-owning worker/host, rather than
+copying sanitized exchange options. Use construction/readiness metadata instead
+of `options.key`. No new persisted account-ID mapping is introduced. Missing
+passphrases now fail trusted setup synchronously rather than a later startup
+callback. Native provider refusal does not prove Classic account type or native
+auth rejection. Strict identity/history reads cannot report successful absence;
+a wholly unsent write remains notSent, while existing accepted/resent/rollback
+financial evidence is preserved.
+
+Hosted and keyless admission now builds on the landed shared presentation
+extension; see the next subsection. Passphrase custody stays with the trusted
+provider; no SDK receiver secret, new required external wire field or
+venue-local crypto fallback is authorized.
+[Family plan and proof gates](RUST_BITGET_DISPATCH_SIGNER.md).
+
+### Bitget hosted and keyless remote signing (draft; actual-WASM CI pending)
+
+Browser `signHttpRequest`/`signWsAuth` for `bitget`, `bitgetusdc` and
+`bitgetinverse` use the shared owned provider without constructing a TS Bitget
+venue. Hosted HTTP formatting lives in the standalone `bitget/bitget.signing.ts`
+codec, which the TS interceptor also uses, so it survives deletion of the TS
+venue classes. Hosted capture signs with primary custody even when a secondary
+is configured; without a complete primary the request returns unsigned, as the
+legacy interceptor did. MACs are Base64; the provider presents
+`ACCESS-PASSPHRASE` and the codec sets `ACCESS-KEY`, `ACCESS-SIGN`,
+`ACCESS-TIMESTAMP`, `ACCESS-PASSPHRASE` over the request's broker headers.
+
+Keyless `remoteSigner` is declared for all three aliases on the existing
+external wire: WS login requests keep the hard-coded `exchangeName: 'bitget'`
+label, `outputFormat: 'base64'` and integer-seconds `extraData.timestamp`
+derived from prepared work; signed HTTP preimages keep the alias label. Native
+login JSON keeps its string timestamp. The primary-only wire refuses work
+needing the secondary identity before callback/I/O, never silently using
+primary. Private `PayloadSigner` stays typed `unsupported`/`notSent`: the TS
+Bitget interceptor never invokes it. RemoteSigner wins with no local or payload
+fallback.
+
+The WS-seconds codec is now construction-declared and shared with OKX:
+`wire.extraData: "secondsTimestamp"` requires `wire.secondsSuffix`
+(`{method, path}`; OKX `GET` + `/users/self/verify`, Bitget `GET` +
+`/user/verify`). Native login work is three typed byte parts (seconds, method,
+path) from the engine `seconds_suffix_payload` helper; the remote bridge decodes
+it only against its own family's declaration. OKX keeps its exact concatenation,
+MAC, receipt and external wire. Per-alias actual-WASM hosted and native-login
+tests run in CI only; no live capture is claimed.
+
+### Bitget caller adoption: candles, identity, account reads and trade entry (slice 1)
+
+This covers `bitget`, `bitgetusdc` and `bitgetinverse`.
+[Plan](RUST_BITGET_CALLER_ADOPTION.md).
+
+- **`fetchCandles`** is admitted as one command Read before the interval
+  check. It sends one unsigned managed GET with only `X-CHANNEL-API-CODE:
+  Tealstreet`, prepared with the Public routing intent. The URL, limits and
+  rows are unchanged. Unsupported intervals and post-send failures keep their
+  text with kind and outcome absent and no diagnostic.
+- **`fetchAccount`** is admitted as one command Read. Public-only and invalid
+  read-key refusals happen before any HTTP with the same text and diagnostic.
+  It sends one managed signed GET with the read key when configured, else the
+  primary key. Failure texts and the equal diagnostic are unchanged.
+- An unanswered candle or identity read fails once with kind `timeout` at the
+  shared 20 s deadline; a late reply adds nothing. More than 256 outstanding
+  managed reads, Background account reads included, give one typed capacity
+  failure before any HTTP.
+- **Account reads** (settings probe, positions, balance and order pages) are
+  Background managed Reads with no retry. The degraded balance read keeps the
+  primary key and prepares with the Primary routing intent. An unanswered
+  probe ends at 20 s and takes the existing transport route into Classic
+  detection, unless UTA is confirmed. A probe that was never released
+  (signing or host preparation did not finish) backs off instead and is not
+  Classic evidence. An unanswered balance, position or order
+  read ends at 20 s and the next poll reads again. It no longer latches the
+  poll forever. Classic/UTA routes, backoff, 40009 and rate-limit pauses are
+  unchanged.
+- **Trade entry refusals** keep their text, no kind and `notSent` through a
+  terminal-only Mutation owner, with no lock or queued job left behind.
+- History, writes, discovery and the private socket are unchanged.
+
 ## Caller command wait in the engine (#1945)
 
 The WASM host now adds the effective caller wait to every reply command's
@@ -6418,65 +6509,6 @@ completion behavior remain unchanged. Uncached public-only identity refusals now
 obey caller-root capacity before their native message; admitted local refusals
 immediately clear their root timer and publish exactly one terminal.
 
-## Bitget native dispatch signer checkpoint (draft; hosted prerequisite pending)
-
-This proposed change covers `bitget`, `bitgetusdc` and `bitgetinverse` native
-execution through the existing engine signer/provider. Production venue options
-contain only opaque primary/secondary identities. Trusted #1738 setup consumes
-material once: private primary passphrase required, missing secondary passphrase
-inherits the primary reference, and explicit empty rejects before startup.
-Ordinary private GETs (identity, metadata, resolve-amend and history included)
-select secondary when configured; degraded balance recovery retains its existing
-primary identity/egress exception. Writes and Classic/UTA private WS use primary.
-Public requests stay unsigned; product, inverse sizing and UTA admission remain.
-
-#1714/#1728 provider bootstrap requirements extend to these aliases: provision
-and rotate/dispose the provider in the engine-owning worker/host, rather than
-copying sanitized exchange options. Use construction/readiness metadata instead
-of `options.key`. No new persisted account-ID mapping is introduced. Missing
-passphrases now fail trusted setup synchronously rather than a later startup
-callback. Native provider refusal does not prove Classic account type or native
-auth rejection. Strict identity/history reads cannot report successful absence;
-a wholly unsent write remains notSent, while existing accepted/resent/rollback
-financial evidence is preserved.
-
-Hosted and keyless admission now builds on the landed shared presentation
-extension; see the next subsection. Passphrase custody stays with the trusted
-provider; no SDK receiver secret, new required external wire field or
-venue-local crypto fallback is authorized.
-[Family plan and proof gates](RUST_BITGET_DISPATCH_SIGNER.md).
-
-### Bitget hosted and keyless remote signing (draft; actual-WASM CI pending)
-
-Browser `signHttpRequest`/`signWsAuth` for `bitget`, `bitgetusdc` and
-`bitgetinverse` use the shared owned provider without constructing a TS Bitget
-venue. Hosted HTTP formatting lives in the standalone `bitget/bitget.signing.ts`
-codec, which the TS interceptor also uses, so it survives deletion of the TS
-venue classes. Hosted capture signs with primary custody even when a secondary
-is configured; without a complete primary the request returns unsigned, as the
-legacy interceptor did. MACs are Base64; the provider presents
-`ACCESS-PASSPHRASE` and the codec sets `ACCESS-KEY`, `ACCESS-SIGN`,
-`ACCESS-TIMESTAMP`, `ACCESS-PASSPHRASE` over the request's broker headers.
-
-Keyless `remoteSigner` is declared for all three aliases on the existing
-external wire: WS login requests keep the hard-coded `exchangeName: 'bitget'`
-label, `outputFormat: 'base64'` and integer-seconds `extraData.timestamp`
-derived from prepared work; signed HTTP preimages keep the alias label. Native
-login JSON keeps its string timestamp. The primary-only wire refuses work
-needing the secondary identity before callback/I/O, never silently using
-primary. Private `PayloadSigner` stays typed `unsupported`/`notSent`: the TS
-Bitget interceptor never invokes it. RemoteSigner wins with no local or payload
-fallback.
-
-The WS-seconds codec is now construction-declared and shared with OKX:
-`wire.extraData: "secondsTimestamp"` requires `wire.secondsSuffix`
-(`{method, path}`; OKX `GET` + `/users/self/verify`, Bitget `GET` +
-`/user/verify`). Native login work is three typed byte parts (seconds, method,
-path) from the engine `seconds_suffix_payload` helper; the remote bridge decodes
-it only against its own family's declaration. OKX keeps its exact concatenation,
-MAC, receipt and external wire. Per-alias actual-WASM hosted and native-login
-tests run in CI only; no live capture is claimed.
-
 ## OKX history caller-root custody
 
 All four OKX aliases admit history, income, public trades and client-ID lookup
@@ -6548,34 +6580,27 @@ is explicitly a new admission-through-preparation/response whole-command bound,
 distinct from the old host's physical HTTP timeout fallback. Raw candle t/order
 and malformed numeric-string-to-zero coercion remain unchanged.
 
-### Bitget caller adoption: candles, identity, account reads and trade entry (slice 1)
+### Bitget history under the caller-wait root
 
-This covers `bitget`, `bitgetusdc` and `bitgetinverse`.
-[Plan](RUST_BITGET_CALLER_ADOPTION.md).
+This covers `bitget`, `bitgetusdc` and `bitgetinverse`: fetchHistoricalFills,
+fetchHistoricalOrders, fetchIncomeHistory, fetchIncomeHistoryRange and
+fetchPublicTrades. [Plan](RUST_BITGET_HISTORY_CONTEXT.md).
 
-- **`fetchCandles`** is admitted as one command Read before the interval
-  check. It sends one unsigned managed GET with only `X-CHANNEL-API-CODE:
-  Tealstreet`, prepared with the Public routing intent. The URL, limits and
-  rows are unchanged. Unsupported intervals and post-send failures keep their
-  text with kind and outcome absent and no diagnostic.
-- **`fetchAccount`** is admitted as one command Read. Public-only and invalid
-  read-key refusals happen before any HTTP with the same text and diagnostic.
-  It sends one managed signed GET with the read key when configured, else the
-  primary key. Failure texts and the equal diagnostic are unchanged.
-- An unanswered candle or identity read fails once with kind `timeout` at the
-  shared 20 s deadline; a late reply adds nothing. More than 256 outstanding
-  managed reads, Background account reads included, give one typed capacity
-  failure before any HTTP.
-- **Account reads** (settings probe, positions, balance and order pages) are
-  Background managed Reads with no retry. The degraded balance read keeps the
-  primary key and prepares with the Primary routing intent. An unanswered
-  probe ends at 20 s and takes the existing transport route into Classic
-  detection, unless UTA is confirmed. A probe that was never released
-  (signing or host preparation did not finish) backs off instead and is not
-  Classic evidence. An unanswered balance, position or order
-  read ends at 20 s and the next poll reads again. It no longer latches the
-  poll forever. Classic/UTA routes, backoff, 40009 and rate-limit pauses are
-  unchanged.
-- **Trade entry refusals** keep their text, no kind and `notSent` through a
-  terminal-only Mutation owner, with no lock or queued job left behind.
-- History, writes, discovery and the private socket are unchanged.
+- **The whole query is bounded by the caller's wait.** That is the configured
+  `rustCommandTimeoutMs`, a per-call override, or the 120 s default stamped at
+  receipt. At that absolute deadline the engine retires the query. It ends
+  once with kind `timeout` and no outcome, publishes no partial rows, and
+  sends no further page. That holds whether the query is in a page, the
+  account-detection wait, page spacing or a retry delay.
+- **A command whose receipt was never stamped** fails at once with the typed
+  Read refusal and no outcome. It never falls back to a default wait.
+- **Each page has its own 20 s bound**, starting when the page is actually
+  sent, not when it was queued. An unanswered page counts as a page failure
+  and takes the native 250/500/750 ms retries, then
+  `Bitget history incomplete: ...`.
+- **A signing refusal** ends the query once, with its typed error and
+  `notSent`, and no retry.
+- **Unchanged:** entry refusal texts and order (credentials first), windows,
+  cursors, dedup, sorting, the 10 s detection text, 40085 re-detection, page
+  cap and cursor-stall texts, and unsigned public trades. Client-order-id
+  lookup is still unsupported.

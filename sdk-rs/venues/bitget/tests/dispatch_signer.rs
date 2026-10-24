@@ -153,8 +153,10 @@ fn unsent_identity_provider_refusal_is_typed_and_not_an_empty_success() {
 }
 #[test]
 fn history_provider_refusal_is_strict_without_transport_retry_timer() {
-    let (mut h, parked) = classic();
-    parked.store(true, Ordering::SeqCst);
+    let refuse = Arc::new(AtomicBool::new(false));
+    let mut h = refusing(refuse.clone());
+    load_classic(&mut h);
+    refuse.store(true, Ordering::SeqCst);
     h.engine.handle(
         h.now,
         Event::Command(Command::Query {
@@ -168,15 +170,20 @@ fn history_provider_refusal_is_strict_without_transport_retry_timer() {
             },
         }),
     );
-    let id = staged(&h.engine.drain_actions().collect::<Vec<_>>());
-    let out = refuse(&mut h, id);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
     assert!(out.iter().any(|a| matches!(a,Action::Notice(Notice::CommandFailed {command:44,error}) if error.outcome==Some(Outcome::NotSent))));
+    // The root and page timers are cleared with the refusal; nothing native re-arms.
+    let cleared: Vec<_> = out
+        .iter()
+        .filter_map(|a| match a {
+            Action::ClearTimer { timer } => Some(*timer),
+            _ => None,
+        })
+        .collect();
     assert!(!out.iter().any(|a| matches!(
         a,
-        Action::Http(_)
-            | Action::SetTimer { .. }
-            | Action::Notice(Notice::CommandDone { command: 44, .. })
-    )));
+        Action::Http(_) | Action::Notice(Notice::CommandDone { command: 44, .. })
+    ) || matches!(a, Action::SetTimer { timer, .. } if !cleared.contains(timer))));
 }
 
 fn place(h: &mut Harness, command: u32) {
