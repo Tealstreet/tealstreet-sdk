@@ -122,6 +122,14 @@ impl Session {
     }
 }
 
+/// A continuation parked behind a session, returned when the venue drains it.
+#[derive(Debug)]
+pub enum Waiter<P> {
+    Ready(Context, P),
+    /// Nothing was sent for this owner; the error's outcome is NotSent.
+    Failed(Context, P, VenueError),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionPolicy {
     /// Every context issued for the session must use exactly this credential.
@@ -145,6 +153,17 @@ pub enum RoutingIntent {
     Public,
     Primary,
     Secondary,
+}
+
+/// Egress declared at trusted issuance, independent of HTTP method.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Egress {
+    /// Primary account egress: keyless reads, or confirming a primary credential.
+    Primary,
+    /// Unsigned public reads through the host's public CORS egress.
+    PublicCors,
+    /// Unsigned public reads sent directly, bypassing account proxies.
+    Direct,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -210,6 +229,8 @@ pub struct Context {
     leg: u64,
     operation: Operation,
     credential: Option<Credential>,
+    /// Egress declared at issuance; it may only confirm a credential's intent.
+    egress: Option<Egress>,
     deadline: f64,
     pacing: Option<Pacing>,
     retry: RetryPolicy,
@@ -260,10 +281,53 @@ impl Context {
             leg,
             operation,
             credential,
+            egress: None,
             deadline,
             pacing,
             retry: RetryPolicy::Never,
         })
+    }
+
+    /// Capture egress before issuer binding: unsigned reads declare it, a
+    /// credentialed context may only confirm a primary slot. Descendants keep it;
+    /// it never grants credential, nonce or identity authority.
+    pub(crate) fn with_egress(mut self, egress: Option<Egress>) -> Result<Self, Error> {
+        let Some(egress) = egress else {
+            return Ok(self);
+        };
+        let valid = match self.credential.as_ref() {
+            Some(credential) => {
+                egress == Egress::Primary && credential.slot == CredentialSlot::Primary
+            }
+            None => self.operation == Operation::Read,
+        };
+        if !valid {
+            return Err(Error::Invalid);
+        }
+        self.egress = Some(egress);
+        Ok(self)
+    }
+
+    pub(crate) fn egress(&self) -> Option<Egress> {
+        self.egress
+    }
+
+    /// Explicit host route for the managed Prepare packet; None keeps the
+    /// host's intent-based routing.
+    pub fn route(&self) -> Option<crate::RequestRoute> {
+        match self.egress? {
+            Egress::Primary => None,
+            Egress::PublicCors => Some(crate::RequestRoute::PublicCors),
+            Egress::Direct => Some(crate::RequestRoute::Direct),
+        }
+    }
+
+    fn credential_intent(&self) -> RoutingIntent {
+        match self.credential.as_ref().map(|credential| credential.slot) {
+            None => RoutingIntent::Public,
+            Some(CredentialSlot::Primary) => RoutingIntent::Primary,
+            Some(CredentialSlot::Secondary) => RoutingIntent::Secondary,
+        }
     }
 
     pub fn owner(&self) -> Owner {
@@ -293,10 +357,10 @@ impl Context {
         self.credential.as_ref()
     }
     pub fn routing_intent(&self) -> RoutingIntent {
-        match self.credential.as_ref().map(|credential| credential.slot) {
-            None => RoutingIntent::Public,
-            Some(CredentialSlot::Primary) => RoutingIntent::Primary,
-            Some(CredentialSlot::Secondary) => RoutingIntent::Secondary,
+        match self.egress {
+            Some(Egress::Primary) => RoutingIntent::Primary,
+            Some(Egress::PublicCors | Egress::Direct) => RoutingIntent::Public,
+            None => self.credential_intent(),
         }
     }
     pub fn deadline(&self) -> f64 {
@@ -432,20 +496,9 @@ impl HttpRelease {
         if time.raw_ms >= deadline {
             return Err(Error::TimedOut);
         }
-        signature.validate().map_err(|_| Error::Invalid)?;
-        let signature_valid_until = if let Some(expiry) = signature.expiry_ms {
-            let remaining = expiry - time.protocol_ms;
-            let projected = time.raw_ms + remaining;
-            if !remaining.is_finite() || !projected.is_finite() {
-                return Err(Error::Invalid);
-            }
-            if remaining <= 0. {
-                return Err(Error::Stale);
-            }
-            Some(deadline.min(projected))
-        } else {
-            None
-        };
+        let signature_valid_until = crate::SigningRelease::new(signature, time)?
+            .raw_expiry_ms()
+            .map(|projected| deadline.min(projected));
         if !deadline.is_finite() || deadline <= time.raw_ms {
             return Err(Error::Invalid);
         }
@@ -997,6 +1050,10 @@ impl PreparedWriteSeal {
     pub(crate) fn is_failure(&self) -> bool {
         self.failure.is_some()
     }
+
+    pub(crate) fn failure(&self) -> Option<&VenueError> {
+        self.failure.as_ref()
+    }
 }
 impl CommandWrites {
     /// Prepare the full declared journal before plan admission. Logical legs
@@ -1073,30 +1130,10 @@ impl CommandWrites {
     /// Only a typed definitive refusal may authorize another write attempt.
     /// The request context's policy/deadline must also authorize this retry.
     pub fn retry(&mut self, previous: RequestId, id: RequestId) -> Result<(), Error> {
-        if self.sealed {
-            return Err(Error::State);
-        }
-        if self.attempts.iter().any(|a| a.id == id) {
+        if self.attempts.iter().any(|a| a.id == id) && !self.sealed {
             return Err(Error::Duplicate);
         }
-        if self.occupied() >= self.capacity {
-            return Err(Error::Capacity);
-        }
-        let old = self
-            .attempts
-            .iter()
-            .find(|a| a.id == previous)
-            .ok_or(Error::Invalid)?;
-        if !self.active(old.leg)
-            || old.id_overflow
-            || !old.resend_granted
-            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
-            || self.attempts.iter().rposition(|a| a.leg == old.leg)
-                != self.attempts.iter().position(|a| a.id == previous)
-        {
-            return Err(Error::RetryForbidden);
-        }
-        let leg = old.leg;
+        let leg = self.retry_admissible(previous)?;
         // Each grant authorizes exactly one resend.
         if let Some(old) = self.attempts.iter_mut().find(|a| a.id == previous) {
             old.resend_granted = false;
@@ -1277,6 +1314,37 @@ impl CommandWrites {
                 None => return false,
             }
         }
+    }
+
+    /// Journal side of `retry`, without allocating the new attempt.
+    fn retry_admissible(&self, previous: RequestId) -> Result<u64, Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        if self.occupied() >= self.capacity {
+            return Err(Error::Capacity);
+        }
+        let old = self
+            .attempts
+            .iter()
+            .find(|a| a.id == previous)
+            .ok_or(Error::Invalid)?;
+        if !self.active(old.leg)
+            || old.id_overflow
+            || !old.resend_granted
+            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+            || self.attempts.iter().rposition(|a| a.leg == old.leg)
+                != self.attempts.iter().position(|a| a.id == previous)
+        {
+            return Err(Error::RetryForbidden);
+        }
+        Ok(old.leg)
+    }
+
+    /// An owner may park for a re-send only when `retry` would accept it.
+    pub(crate) fn resend_blocked(&self, leg: u64) -> bool {
+        self.latest(leg)
+            .is_some_and(|latest| self.retry_admissible(latest).is_err())
     }
 
     pub(crate) fn leg_attempts(&self, leg: u64) -> usize {

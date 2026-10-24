@@ -81,7 +81,7 @@ fn passphrase_venues_refuse_private_accounts_without_one() {
         ),
         (
             &["okx", "okxeu", "okxdemo", "okxeudemo"][..],
-            "OKX requires a passphrase",
+            "Invalid local signer setup",
         ),
     ] {
         for venue in venues {
@@ -701,7 +701,8 @@ fn bitunix_secondary_reads_reach_the_native_signer() {
             engine.start(1700000000000.0);
             let mut private = Vec::new();
             loop {
-                let actions: Vec<_> = engine.drain_actions().collect();
+                let actions =
+                    safe_cex_engine::test_support::prepared_actions(&mut engine, 1700000000000.0);
                 if actions.is_empty() {
                     break;
                 }
@@ -752,7 +753,7 @@ fn bitunix_secondary_reads_reach_the_native_signer() {
 
 #[test]
 fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
-    for venue in ["okx", "hyperliquid", "orderly"] {
+    for venue in ["hyperliquid", "orderly"] {
         assert_eq!(
             rejected(
                 venue,
@@ -766,6 +767,10 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
 #[test]
 fn migrated_opaque_refs_require_an_injected_provider_before_construction() {
     for venue in [
+        "okx",
+        "okxeu",
+        "okxdemo",
+        "okxeudemo",
         "binance",
         "binancepm",
         "binanceinverse",
@@ -778,7 +783,7 @@ fn migrated_opaque_refs_require_an_injected_provider_before_construction() {
     ] {
         let error = rejected(
             venue,
-            r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}}}"#,
+            r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing","passphrase":"primary.passphrase"}}}"#,
         );
         assert!(
             error.to_lowercase().contains("provider"),
