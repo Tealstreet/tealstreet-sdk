@@ -114,3 +114,12 @@ but the later blanket prohibition is withdrawn. The corrected suffix permits
 shared cancellation and requires the exact next batch plus the original
 failed-offset backoff/retry. A separate native102-token transport-failure
 working control pins that sequence. Production and all maps remain unchanged.
+
+Corrected failure-progress checkpoint at14ac4ad8067 executes nine tests on
+unchanged production:3 assertion RED/6 GREEN/0ignored. The added102-token
+transport-failure control passes, proving immediate next-batch progress with
+independent failed-offset backoff and successful retry. The same three early
+custody assertions still fail. Log:
+`/tmp/codex-hcmq3f-polymarket-midpoint-original-failure-progress.log`.
+The expiry control name now explicitly distinguishes forbidden expired-DATA
+publication from preserved failure-owned progression.

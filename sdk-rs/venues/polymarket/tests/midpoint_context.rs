@@ -109,7 +109,7 @@ fn midpoint_does_not_release_before_host_preparation() {
     no_command_or_signing(&a);
 }
 #[test]
-fn midpoint_at_deadline_cannot_publish_or_advance() {
+fn midpoint_at_deadline_cannot_publish_and_preserves_failure_progress() {
     let mut engine = catalogue(102);
     let request = midpoint(actions(&mut engine, ADMITTED));
     let a = answer(&mut engine, &request, DEADLINE, r#"{"1":"0.4"}"#);
