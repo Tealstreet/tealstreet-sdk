@@ -1,7 +1,8 @@
 # Coinbase local command custody
 
 Plan first, 2026-10-24. Owner codex-hcmq3f; fresh branch
-feat/rust-coinbase-public-local-context on actual ba3d7da1d3a. This follows
+feat/rust-coinbase-public-local-context, refreshed by plain merge of actual
+77f124089477a6aed502d9b02aa7f08752b7bfa5. This follows
 Polymarket #1995 and Kraken #2000; only independently unblocked local paths are
 selected. No capability, signing, account, queue or shared engine edits.
 
@@ -53,7 +54,8 @@ Revoked grants no terminal or numeric fallback. Existing native local errors,
 including NotSent fields on pre-I/O refusals, are passed intact.
 
 No successful keyless Mutation appears in this selected set. If one is found,
-retain it on #1989 rather than Read-casting or fake write evidence. The frozen
+use landed #1989 only for a genuine Setting rather than Read-casting or fake
+write evidence. The frozen
 #1896 branch is not consumed by this independent local adoption.
 
 ## Original controls and verification

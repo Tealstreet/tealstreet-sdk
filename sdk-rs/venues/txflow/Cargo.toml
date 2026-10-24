@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["order-locks"] }
+safe-cex-engine = { workspace = true, features = ["order-locks", "managed-sockets"] }
 safe-cex-crypto.workspace = true
 safe-cex-venue-hyperliquid.workspace = true
 serde.workspace = true
