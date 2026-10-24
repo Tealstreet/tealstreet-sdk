@@ -137,6 +137,20 @@ pub struct SessionPolicy {
     /// The venue contract makes a new create/keepalive harmless while an
     /// earlier one is unresolved (cite it at the declaration site).
     pub repeat_safe: bool,
+    /// Unsigned requests that carry the primary key's login or session token
+    /// in their body or headers. Only a keyless session may declare it.
+    pub private_egress: Option<PrivateEgress>,
+}
+
+/// Granted only by a `SessionAuth` credential selection
+/// (`Selection::session_egress`); a venue cannot construct it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrivateEgress(());
+
+impl PrivateEgress {
+    pub(crate) fn granted() -> Self {
+        Self(())
+    }
 }
 
 /// Independent of HTTP method: private POST snapshots are still reads.
@@ -164,6 +178,25 @@ pub enum Egress {
     PublicCors,
     /// Unsigned public reads sent directly, bypassing account proxies.
     Direct,
+    /// Primary private egress for unsigned requests carrying a session's
+    /// login or token. Minted only by the session core; routing only.
+    Session(SessionEgress),
+}
+
+/// Opaque: no constructor outside the engine, so a venue cannot forge it.
+/// It names no key and grants no write, signing or session authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionEgress {
+    generation: u64,
+}
+
+impl SessionEgress {
+    pub(crate) fn new(generation: u64) -> Self {
+        Self { generation }
+    }
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -295,11 +328,13 @@ impl Context {
         let Some(egress) = egress else {
             return Ok(self);
         };
-        let valid = match self.credential.as_ref() {
-            Some(credential) => {
+        let valid = match (self.credential.as_ref(), egress) {
+            (Some(_), Egress::Session(_)) => false,
+            (Some(credential), egress) => {
                 egress == Egress::Primary && credential.slot == CredentialSlot::Primary
             }
-            None => self.operation == Operation::Read,
+            (None, Egress::Session(_)) => true,
+            (None, _) => self.operation == Operation::Read,
         };
         if !valid {
             return Err(Error::Invalid);
@@ -316,7 +351,7 @@ impl Context {
     /// host's intent-based routing.
     pub fn route(&self) -> Option<crate::RequestRoute> {
         match self.egress? {
-            Egress::Primary => None,
+            Egress::Primary | Egress::Session(_) => None,
             Egress::PublicCors => Some(crate::RequestRoute::PublicCors),
             Egress::Direct => Some(crate::RequestRoute::Direct),
         }
@@ -358,7 +393,7 @@ impl Context {
     }
     pub fn routing_intent(&self) -> RoutingIntent {
         match self.egress {
-            Some(Egress::Primary) => RoutingIntent::Primary,
+            Some(Egress::Primary | Egress::Session(_)) => RoutingIntent::Primary,
             Some(Egress::PublicCors | Egress::Direct) => RoutingIntent::Public,
             None => self.credential_intent(),
         }
@@ -1049,6 +1084,10 @@ pub(crate) struct PreparedWriteSeal {
 impl PreparedWriteSeal {
     pub(crate) fn is_failure(&self) -> bool {
         self.failure.is_some()
+    }
+
+    pub(crate) fn failure(&self) -> Option<&VenueError> {
+        self.failure.as_ref()
     }
 }
 impl CommandWrites {
