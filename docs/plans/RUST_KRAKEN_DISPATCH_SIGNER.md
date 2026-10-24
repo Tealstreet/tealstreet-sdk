@@ -332,3 +332,8 @@ Scoped spot-filter execution: 7 tests, 3 assertion RED / 4 GREEN, zero ignored
 (16 unrelated originals filtered). The three new controls are 1 NEW-CONTRACT
 RED / 2 native GREEN; the other two REDs remain the original Spot provider
 bypass/refusal assertions. No production, Cargo, maps or existing fixtures change.
+
+Full post-extension target execution:23 controls compile/run,10 intended assertion
+REDs /13 GREEN /zero ignored. The first20 test bytes remain exactd3d30; only the
+three retirement controls are appended. Scoped target strict Clippy passes. No
+push or CI dispatch; the four frozen PR heads are untouched.
