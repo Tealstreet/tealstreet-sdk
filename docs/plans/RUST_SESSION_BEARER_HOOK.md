@@ -602,9 +602,14 @@ fix belongs at Bind, once, for every owner kind.
 1. Park. A managed, unreleased call whose Bind read answers NotReady, at
    either Bind site (unsigned at route readiness, signed after signing), does
    not fail. It parks on its own live Session generation, inside its existing
-   call window, and is not handed to the host. It records `seen`: the latest
-   revision it read at Bind (None if it never read Ready). `seen` survives the
-   Stale reprepare that today clears `bearer.revision`.
+   call window, and is not handed to the host. Its wake condition is a
+   `floor`: the highest revision it must not bind again. Only the claim fence
+   raises it (to the bound revision, when it finds the bundle moved or
+   cleared), as does an owner's seed. Any other Stale (route expiry, signing
+   freshness, clock revision) leaves it, so the call re-binds at the unchanged
+   revision. (Review P1, from the independent reviewer, zs5e83 and fe7lgm: a
+   draft raised it on every Bind read, which parked ordinary Stale reprepares
+   until they timed out.)
 2. Claim. A packet whose claim-time revision is None or moved stays on the
    existing Stale path (no release, reprepare); its next Bind read parks it if
    NotReady. Nothing claims or releases a parked call.
@@ -612,10 +617,13 @@ fix belongs at Bind, once, for every owner kind.
    call is valid on an already-Ready Session purely to announce a new revision,
    and is a no-op when nothing waits on that generation. It queues a wake that
    the engine drains after the venue callback returns (the `bearer_fenced`
-   pattern). For each parked call of that generation in park (FIFO) order, the
-   engine reads `session_bearer_revision`. It re-prepares the call through the
-   existing `reprepare_http` when that is Some(r) and either `seen` is None or
-   r > `seen`; otherwise the call stays parked. Re-prepare spends no attempt,
+   pattern). In park (FIFO) order, one at a time, the engine re-reads
+   `session_bearer_revision` and re-prepares through the existing
+   `reprepare_http` the first parked call whose revision is Some(r) above its
+   `floor` (any Some when it has none); the rest stay parked. Each re-prepare
+   may run callbacks, so membership and the revision are re-checked every
+   step, and any re-prepare, however reached, removes the call's park entry.
+   Re-prepare spends no attempt,
    needs no ResendGrant, touches no auth ledger, opens no login and resets no
    attempt counter. Order is FIFO among parked calls only (zs5e83 P2). The
    wake drains after the venue callback returns, so a waiter that same
@@ -627,8 +635,8 @@ fix belongs at Bind, once, for every owner kind.
    needs the host's `http_prepared` event, so a call the venue issues in that
    callback, like a woken one, binds only after its own Prepare completes
    (dazzy3 B1: documented, not held).
-   A woken call that reads NotReady again re-parks with `seen` unchanged
-   (NotReady never advances `seen`) and needs a newer announce (dazzy3 B4).
+   A woken call that reads NotReady again re-parks with its `floor` unchanged
+   and needs a newer announce (dazzy3 B4).
    Pacing: the wake re-prepare keeps the call's pacing position exactly as
    the Stale reprepare does, with no fresh slot and no double count (dazzy3 B2).
 4. Bind side effects. Re-prepare is today's Stale reprepare. The old signing
@@ -645,17 +653,20 @@ fix belongs at Bind, once, for every owner kind.
    health unchanged. The park entry is removed with the call.
 7. Groups. With `http-mutation-barriers`, a Bearer-bound request that would
    join a mutation group is already refused at issue (until R11), so no group
-   member can park. A RED pins that no parked call carries a group.
-8. Capacity. Parked calls stay in the managed-call table, so they need no new
-   capacity. The park list is bounded by it and is reserved before the venue
-   callback, so the drain never allocates.
+   member can park. Its test needs a barrier Mutation Plan and moves to the
+   R11 refresh after #2037, which owns group-claim custody.
+8. Capacity. Parked calls stay in the managed-call table; the park list is
+   bounded by it. A park reserves its entry with `try_reserve` and, if it
+   cannot, fails the call NotSent (Capacity). An announce records its
+   generation with `try_reserve`; without room, parked calls stay parked to
+   their window. The wake walks the list in place and never allocates.
 9. Typed cause. None is added. NotReady never reaches the venue. Retired and
    header refusals keep their existing non-auth kinds (InvalidInput). No
    `VenueError` field and no accessor.
-10. Serial composition (fe7lgm P2). One counter: a call's `seen` is the
-    latest revision it read at Bind. A pub(crate) minimum-revision seed lets an
-    engine owner issue a call with `seen` preset. At Bind, a Ready read whose
-    revision is <= `seen` parks exactly like NotReady, with the same wake rule.
+10. Serial composition (fe7lgm P2). One counter: the call's `floor`. A
+    pub(crate) seed lets an engine owner issue a call with `floor` preset. At
+    Bind, a Ready read whose revision is <= `floor` parks exactly like
+    NotReady, with the same wake rule.
     The serial resend issues attempt 2 at once, seeded with the refused
     attempt's revision r. If the venue has not yet cleared its cache, attempt 2
     parks instead of leaving with the stale bundle, which closes the race. This
@@ -697,7 +708,7 @@ per-recipe proposal):
   cleared) before claim, then `session_ready` at r+1. Each re-prepares and binds
   the r+1 bundle; the attempt count is unchanged and no failure is delivered.
 - P3 first call: issued while NotReady, it parks; `session_ready` at r binds it.
-- P4 no wake: `session_ready` with the revision still at `seen` leaves it
+- P4 no wake: `session_ready` with the revision still at its `floor` leaves it
   parked, and a later newer revision wakes it.
 - P5 FIFO: two parked calls re-prepare in park order.
 - P6 expiry: a parked call fails Timeout, NotSent, at its window, with health
@@ -709,7 +720,7 @@ per-recipe proposal):
 - P10 still-Ready announce: `session_ready` on a Ready Session with no parked
   calls and no waiters is a no-op; one announcing the SAME revision
   re-prepares nothing.
-- P11 seeded (fe7lgm): a call seeded with `seen` = r that binds while the hook
+- P11 seeded (fe7lgm): a call seeded with `floor` = r that binds while the hook
   is still Ready at r parks, then wakes and binds at r+1. No attempt is spent
   beyond the seeded call itself. Variant: a refresh with an unchanged cookie
   still announces r+1 and wakes the seeded call.
@@ -725,7 +736,7 @@ per-recipe proposal):
   NotReady expectation to park-then-Timeout. Parity: native waits with no
   timeout, so the call window is a new bound, disclosed per venue in CALLERS
   (GRVT's 20 s is ruled).
-- P4 also: a woken call that reads NotReady again re-parks with `seen`
+- P4 also: a woken call that reads NotReady again re-parks with its `floor`
   unchanged and wakes only on a newer announce.
 - P1 runs with a paced policy and asserts the wake keeps the pacing position
   (no fresh slot, no double count).
@@ -742,27 +753,53 @@ per-recipe proposal):
 
 ### Phase 3 source (local, unpushed)
 
-- `Bearer.seen` holds the latest revision read at Bind; a Stale reprepare
-  keeps it. `admit(seen, answer)` binds only a Ready answer newer than `seen`;
-  anything else parks. The pub(crate) seed setter is fe7lgm's: it lands with
+- `Bearer.floor` is raised only by the claim fence (bundle moved or cleared)
+  and kept across reprepares. `admit(floor, answer)` binds a Ready answer
+  above `floor` (any when None); anything else parks. The pub(crate) seed setter is fe7lgm's: it lands with
   its only consumer (`serial_plan_session_resend`, plan 92f1ff3dcd9), so no
   caller-less API ships here.
 - All three NotReady sites park instead of failing: the unsigned Bind, the
   signed pre-signing check (before any provider work) and the signed Bind
   (packet wiped, recipe kept for the re-sign). `park_bearer` re-arms the call
   timer at its deadline and appends to `bearer_parked` in park order.
-- `session_ready` records the generation in `bearer_woken`.
+- `session_ready` records the generation in `bearer_woken` (try_reserve).
   `flush_bearer_fences`, which already runs at every post-callback point, now
-  drains fences and wakes until both are empty. A wake re-prepares, through
-  `reprepare_http`, each parked call whose revision `wakes` (Some and newer
-  than `seen`).
+  drains fences and wakes until both are empty. A wake walks `bearer_parked`
+  in place, one re-prepare at a time, re-reading the revision each step.
+  `reprepare_http` removes the park entry on every path.
 - `attach_session_headers` inserts at `SessionPlacement` (`First`, or right
   after the first matching header, else first). Overflow wipes exactly the
   inserted range.
 
-Results: session_bearer 47 default / 53 with barriers; engine lib 871 / 1076;
-clippy `-D warnings` clean in default, barrier and lib-only modes. Mutations:
-admit ignoring `seen` fails P11; a wake ignoring the revision fails P4; a wake
-that never re-prepares fails eight P tests; ignoring placement fails O1.
-Removing park cleanup on call removal changes no behaviour (a stale entry is
-skipped at the wake), so no test pins it: it keeps the list from growing.
+Review fixes (independent reviewer, zs5e83 and fe7lgm were NOT CLEAR on
+a3162839b0b):
+- the floor split (P1);
+- the in-place wake walk with reserved entries (P2);
+- park-entry removal on every reprepare (fe7lgm P2b);
+- tests:
+  - an ordinary Stale re-binds at the same revision (unsigned and signed);
+  - a nested announce does not re-prepare a woken call twice;
+  - the signed-Bind park re-signs with a fresh attempt (P8b);
+  - an announce at the fenced revision stays parked (P4b);
+  - a call that left the park by a host Stale is not woken again;
+  - P5 parks in reverse issue order.
+
+Deferred:
+- P9 (above).
+- P11 is an `admit` unit test until fe7lgm's seed setter lands with
+  `serial_plan_session_resend`.
+- The default `session_bearer` answers NotReady, so a Session-bound call on a
+  venue without the hook now waits out its window instead of failing at once.
+  No venue binds a Session yet; CALLERS gets this note at the freeze.
+
+Results: session_bearer 52 default / 58 with barriers; engine lib 871 / 1076;
+clippy `-D warnings` clean in default, barrier and lib-only modes.
+
+Mutations:
+- the claim fence not raising the floor fails P4b;
+- the Bind read raising it (the old bug) fails the ordinary-Stale test;
+- admit ignoring the floor fails P11;
+- a wake ignoring the revision fails P4;
+- a wake that never re-prepares fails eight P tests;
+- no removal in reprepare fails the host-Stale test;
+- ignoring placement fails O1.

@@ -35,13 +35,15 @@ pub(super) struct Managed {
 }
 
 /// A Session-bound packet's generation and the revision its header carries.
-/// The engine keeps no token: only the Bind packet holds a copy. `seen` is the
-/// latest revision read at Bind (or an owner's seed); a Stale reprepare keeps it.
+/// The engine keeps no token: only the Bind packet holds a copy. `floor` is the
+/// highest revision this call must not bind again: raised only when the claim
+/// fence finds the bundle moved or cleared (or by an owner's seed), so an
+/// ordinary Stale reprepare re-binds at the unchanged revision.
 #[derive(Clone, Copy)]
 struct Bearer {
     generation: u64,
     revision: Option<u64>,
-    seen: Option<u64>,
+    floor: Option<u64>,
 }
 
 impl Bearer {
@@ -68,9 +70,8 @@ impl Bearer {
             return Err(Error::Revoked);
         }
         Ok(
-            admit(self.seen, venue.session_bearer(self.generation)).map(|(headers, revision)| {
+            admit(self.floor, venue.session_bearer(self.generation)).map(|(headers, revision)| {
                 self.revision = Some(revision);
-                self.seen = Some(revision);
                 headers
             }),
         )
@@ -78,16 +79,18 @@ impl Bearer {
 
     /// Whether a revision the venue reports would bind rather than park.
     fn wakes(&self, revision: Option<u64>) -> bool {
-        revision.is_some_and(|revision| self.seen.is_none_or(|seen| revision > seen))
+        revision.is_some_and(|revision| self.floor.is_none_or(|floor| revision > floor))
     }
 }
 
 /// The Bind-time decision for one hook answer: bind these headers at this
-/// revision, or park (None) until a newer revision than `seen` is announced.
+/// revision, or park (None) until a revision above `floor` is announced.
 /// Refused headers drop here and wipe themselves.
-fn admit(seen: Option<u64>, answer: SessionBearer) -> Option<(SessionHeaders, u64)> {
+fn admit(floor: Option<u64>, answer: SessionBearer) -> Option<(SessionHeaders, u64)> {
     match answer {
-        SessionBearer::Ready { headers, revision } if seen.is_none_or(|seen| revision > seen) => {
+        SessionBearer::Ready { headers, revision }
+            if floor.is_none_or(|floor| revision > floor) =>
+        {
             Some((headers, revision))
         }
         _ => None,
@@ -513,7 +516,7 @@ impl<P> Cx<'_, P> {
                 recipe: None,
                 intent,
                 bearer: bearer.map(|generation| Bearer {
-                    seen: None,
+                    floor: None,
                     generation,
                     revision: None,
                 }),
@@ -879,7 +882,7 @@ impl<V: Venue> Engine<V> {
                         }) {
                         Ok(Some(())) => {}
                         Ok(None) => {
-                            self.park_bearer(request.id);
+                            self.park_bearer(now, token, request.id);
                             return;
                         }
                         Err(reason) => {
@@ -967,7 +970,7 @@ impl<V: Venue> Engine<V> {
             match bearer.current(&self.venue, &self.io.request_contexts) {
                 Ok(revision) if bearer.wakes(revision) => {}
                 Ok(_) => {
-                    self.park_bearer(request);
+                    self.park_bearer(now, token, request);
                     return;
                 }
                 Err(reason) => {
@@ -1080,7 +1083,7 @@ impl<V: Venue> Engine<V> {
                             // Re-signed on wake, exactly as a Stale reprepare.
                             crate::signing_dispatch::wipe(&mut Action::Http(packet));
                             managed.recipe = Some(pending);
-                            self.park_bearer(request);
+                            self.park_bearer(now, token, request);
                             return;
                         }
                         Err(reason) => {
@@ -1236,9 +1239,10 @@ impl<V: Venue> Engine<V> {
         }
     }
 
-    /// Hold an unreleased call whose bundle is NotReady (or not newer than its
-    /// `seen`) inside its own window. Its timer stays at the call deadline.
-    fn park_bearer(&mut self, request: RequestId) {
+    /// Hold an unreleased call whose bundle is NotReady (or not above its
+    /// `floor`) inside its own window. Its timer stays at the call deadline.
+    /// A park that cannot reserve its entry fails the call NotSent.
+    fn park_bearer(&mut self, now: f64, token: Preparation, request: RequestId) {
         let Some(managed) = self.io.managed_http.get_mut(&request) else {
             return;
         };
@@ -1246,42 +1250,59 @@ impl<V: Venue> Engine<V> {
             return;
         };
         managed.waiting_route = None;
-        self.io.actions.push(Action::SetTimer {
-            timer: managed.timer,
-            at_ms: managed.lifecycle.deadline(),
-        });
-        if !self
+        let timer = managed.timer;
+        let deadline = managed.lifecycle.deadline();
+        if self
             .io
             .bearer_parked
             .iter()
             .any(|(_, parked)| *parked == request)
         {
-            self.io.bearer_parked.push((bearer.generation, request));
+            return;
         }
+        if self.io.bearer_parked.try_reserve(1).is_err() {
+            self.http_preparation_failed(
+                now,
+                token,
+                Error::Capacity,
+                VenueError::new("Session bearer park capacity exhausted"),
+            );
+            return;
+        }
+        self.io.actions.push(Action::SetTimer {
+            timer,
+            at_ms: deadline,
+        });
+        self.io.bearer_parked.push((bearer.generation, request));
     }
 
-    /// In park order, re-prepare each parked call of `generation` whose
-    /// revision is now newer than its `seen`; the rest stay parked.
+    /// In park order, re-prepare the first parked call of `generation` whose
+    /// current revision is above its `floor`, one at a time: each re-prepare
+    /// may run venue callbacks that change the list or the revision.
     fn wake_bearer_parks(&mut self, now: f64, generation: u64) {
-        let parked: Vec<RequestId> = self
-            .io
-            .bearer_parked
-            .iter()
-            .filter(|(parked, _)| *parked == generation)
-            .map(|(_, request)| *request)
-            .collect();
-        let revision = self.venue.session_bearer_revision(generation);
-        for request in parked {
-            let Some(managed) = self.io.managed_http.get(&request) else {
+        loop {
+            let revision = self.venue.session_bearer_revision(generation);
+            let next = self.io.bearer_parked.iter().position(|(parked, request)| {
+                *parked == generation
+                    && self
+                        .io
+                        .managed_http
+                        .get(request)
+                        .and_then(|managed| managed.bearer)
+                        .is_some_and(|bearer| bearer.wakes(revision))
+            });
+            let Some(index) = next else {
+                return;
+            };
+            let (_, request) = self.io.bearer_parked.remove(index);
+            let Some(token) = self
+                .io
+                .managed_http
+                .get(&request)
+                .map(|managed| managed.lifecycle.preparation())
+            else {
                 continue;
             };
-            if !managed.bearer.is_some_and(|bearer| bearer.wakes(revision)) {
-                continue;
-            }
-            let token = managed.lifecycle.preparation();
-            self.io
-                .bearer_parked
-                .retain(|(_, parked)| *parked != request);
             self.reprepare_http(now, token);
         }
     }
@@ -1327,6 +1348,15 @@ impl<V: Venue> Engine<V> {
                     return Err(reason);
                 }
                 Ok(revision) if revision.is_none() || revision != bearer.revision => {
+                    // The bound bundle is gone: never bind its revision again.
+                    if let Some(fenced) = self
+                        .io
+                        .managed_http
+                        .get_mut(&request)
+                        .and_then(|managed| managed.bearer.as_mut())
+                    {
+                        fenced.floor = fenced.floor.max(bearer.revision);
+                    }
                     self.http_preparation_failed(
                         now,
                         preparation,
@@ -1470,6 +1500,10 @@ impl<V: Venue> Engine<V> {
         if managed.lifecycle.preparation() != token || managed.lifecycle.release().is_some() {
             return;
         }
+        // However it leaves, a re-prepared call is no longer parked.
+        self.io
+            .bearer_parked
+            .retain(|(_, parked)| *parked != request);
         if let Err(error) = managed.validate_send(&self.io.request_contexts, now) {
             self.http_preparation_failed(
                 now,
@@ -2051,7 +2085,7 @@ mod tests {
         }
     }
 
-    /// P11 (fe7lgm seed): a call seeded with `seen` = r parks on a Ready read
+    /// P11 (fe7lgm seed): a call seeded with `floor` = r parks on a Ready read
     /// at or below r, and binds at r+1, even when the re-login returned an
     /// identical cookie (dazzy3: the revision moves on every refresh).
     #[test]

@@ -2565,3 +2565,39 @@ fn p8b_a_bundle_cleared_during_signing_parks_and_re_signs_on_wake() {
     let (_, packet) = bind(e.drain_actions().collect()).expect("bound packet");
     assert_eq!(authorization(&packet), Some("Bearer B"));
 }
+
+/// Review P2 (fe7lgm): a parked call that leaves the park through a host
+/// Stale re-prepares and binds; a later announce must not re-prepare it again
+/// (its park entry is gone), so its bound permit still releases.
+#[test]
+fn a_call_that_left_the_park_by_a_host_stale_is_not_woken_again() {
+    let (mut e, shared) = engine(|shared| shared.token = None);
+    let issued = ask(&mut e, 1);
+    parks(&mut e, &shared, NOW + 1., issued[0].0);
+    shared.borrow_mut().refresh(Some("A"));
+    e.http_preparation_failed(
+        NOW + 2.,
+        issued[0].0,
+        Error::Stale,
+        VenueError::new("host route stale"),
+    );
+    let reprepared = prepares(&mut e);
+    assert_eq!(reprepared.len(), 1);
+    let (permit, packet) = prepared(&mut e, NOW + 3., reprepared[0].0).expect("bound packet");
+    assert_eq!(authorization(&packet), Some("Bearer A"));
+    // The same revision would wake a leftover entry (its floor is None).
+
+    assert!(
+        prepare_actions(announce(&mut e, &shared, NOW + 4.)).is_empty(),
+        "a stale park entry re-prepared a bound call"
+    );
+    assert!(matches!(
+        e.claim_http(NOW + 5., permit),
+        Ok(Claim::Released(_))
+    ));
+    assert!(
+        shared.borrow().failures.is_empty(),
+        "{:?}",
+        shared.borrow().failures
+    );
+}

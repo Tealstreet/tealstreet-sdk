@@ -621,8 +621,11 @@ impl<P> Cx<'_, P> {
         let Ok(generation) = self.io.request_contexts.validate_session(session) else {
             return vec![];
         };
-        // Also announces the bundle: parked Bind calls re-check after the callback.
-        if !self.io.bearer_woken.contains(&generation) {
+        // Also announces the bundle: parked Bind calls re-check after the
+        // callback. Without room to record it they stay parked to their window.
+        if !self.io.bearer_woken.contains(&generation)
+            && self.io.bearer_woken.try_reserve(1).is_ok()
+        {
             self.io.bearer_woken.push(generation);
         }
         // A Ready owner is live by its own deadline; a Failed one keeps its
