@@ -75,6 +75,36 @@ pub enum SessionResend {
 - **Exclusive.** It excludes a delayed continuation and a condition wait: one
   park per Plan at a time.
 
+## Review pins (claude-dazzy3)
+
+- **Read with two attempts (changes the serial source on this branch).**
+  `validate_call` today refuses `attempts > 1` for a Read, and
+  `retry_policy` maps 2 attempts to DefinitiveRefusal. Here a Read may declare
+  `attempts: 2` with RetryPolicy Never. Its second attempt is reachable only
+  through `serial_plan_session_resend`. `plan_resend_context` needs a write
+  grant, so it refuses a Read. The Read-failure retry through
+  `continue_serial_plan_after` admits a new call, never attempt 2.
+- **One second attempt per call.** Attempt 2 is spent by either the immediate
+  resend (Bitget 40009) or the Session resend, never both. After either, the
+  other is RetryForbidden.
+- **Write proof.** The engine trusts only the RefusedResend grant, so the
+  venue codec must classify GRVT code 1000 through `classify_write` as a
+  definitive refusal with nothing executed. When attempt 2 succeeds, attempt
+  1's refusal is history: absent from `rejections()` and from the
+  `refusals_complete` accounting.
+- **Credential generation.** The resumed attempt binds to the Session's
+  post-login generation, so it cannot reuse a stale cookie or account ID. A
+  ready from an older Session generation is refused.
+- **Session state at park.** The Session must be login-pending or ready when
+  parking; an idle Session that never started is Invalid. Parking on a ready
+  Session resumes in the same flush, after the current callback returns
+  (no re-entry).
+- **Existing guards.** `plan_session_wait` and `plan_retry_session_wait` on a
+  serial slot stay State (serial RED19b). This API is the only exception.
+- **Cleanup.** After a stop or a login failure while parked, the Session's
+  waiters hold nothing for the Plan, and the parked Pending is handed back
+  exactly once.
+
 ## REDs (before source)
 
 1. A Mutation refused with code 1000 (a RefusedResend grant) parks on a
@@ -95,6 +125,24 @@ pub enum SessionResend {
 6. A stop while parked ends the Plan with one terminal, the streamed IDs and
    no fence (nothing is live).
 7. The order lock is held through the park.
+8. A Read with `attempts: 2` is admitted. Its second attempt cannot come from
+   `plan_resend_context` or from a `continue_serial_plan_after` failure
+   retry; only the Session resend reaches it.
+9. One second attempt per call: after an immediate resend, a Session resend
+   is RetryForbidden, and after a Session resend, an immediate resend is
+   RetryForbidden.
+10. The resumed attempt carries the Session's post-login generation, and a
+    ready from an older generation is refused.
+11. Parking on an idle Session is Invalid. Parking on a ready Session resumes
+    in the same flush, after the parking callback returns.
+12. Control: `plan_session_wait` and `plan_retry_session_wait` on a serial slot
+    stay State.
+13. After a stop or a login failure while parked, the Session holds no waiter
+    for the Plan, and the Pending is handed back exactly once.
+
+RED1 also asserts that attempt 1's fact is a definitive refusal (not Unknown)
+and that, once attempt 2 succeeds, it is absent from `rejections()` and the
+`refusals_complete` accounting.
 
 ## Gates
 
