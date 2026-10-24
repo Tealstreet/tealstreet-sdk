@@ -608,6 +608,9 @@ fn released_with_intents(
                     actions.push(Action::Http(request));
                 }
             }
+            HttpAction::BindGroup { .. } => {
+                panic!("Bitget fixture declares no Mutation barriers")
+            }
             HttpAction::Cancel { .. } => {}
         }
         for action in engine.drain_actions().collect::<Vec<_>>().into_iter().rev() {
