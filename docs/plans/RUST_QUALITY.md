@@ -1655,3 +1655,21 @@ reference tests across26 targets pass (target counts include empty doc tests).
 Strict Clippy/fmt, bans and both inventory checks pass after the fix. Independent
 source/adversarial, caller and full-map delta reviews are CLEAR atbec93dd562a;
 architecture gate No. CI family size/CPU and other CI gates remain pending.
+
+
+## Crypto.com public discovery managed controls
+
+Plan preceded original compiling controls: 8 assertion RED/7 GREEN, then a
+caller-review live-prefix/expired-stream-end RED produced 9 RED/7 GREEN.
+All 16 now pass, covering Public preparation, parked expiry and late readiness,
+exact deadline in both ingress orders, cached quote preservation, genuine owner
+capacity/recovery, catalogue-to-ticker slot handoff, native wire/values/backoff,
+private startup ordering and expired-metadata sibling recovery.
+
+Two no-I/O assertions were corrected to permit only shared ManagedHttp::Cancel
+cleanup, after a diagnostic proved Cancel was their sole unexpected action;
+Http/Prepare/Bind/WsConnect remain forbidden, and Store assertions stay exact.
+Existing financial and signing assertions remain. Fixture preparation uses
+existing event times; cancelled deadlines are removed from the fixture's active
+timer list as a host would. Signer probes gain a genuine unused carrier Context,
+with no new managed-signing claim. Broad CI gates remain pending.

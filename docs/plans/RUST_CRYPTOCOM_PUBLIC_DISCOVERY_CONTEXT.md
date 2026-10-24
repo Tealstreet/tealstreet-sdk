@@ -138,3 +138,27 @@ private reads, while ticker success remains pending. Earlier 15 assertion bodies
 remain intact; new fixture code uses the actual HttpChunk data field, corrected
 before the executed receipt. Plan source/custody and full-map review were CLEAR
 at 97ee7fe30ca; caller delta closure is required for this successor.
+
+
+## Managed implementation and fixture checkpoint
+
+Production changes only lib.rs discovery issuance and its Markets/Tickers
+continuations. The single opaque sender is gone; exact Background Read DATA
+admission precedes parsing/publication. Context cleanup is best effort on actual
+failure, and accepted catalogue retires before ticker/private follow-ups. No
+key-selection term changes, private signing/reducer edits or engine changes.
+
+All 16 original controls pass. The two assertions that prohibited every managed
+action also rejected the required route Cancel cleanup; diagnostics proved only
+Cancel was present. They now permit Cancel alone while still rejecting all new
+HTTP/preparation/bind/socket work and retaining financial nonpublication checks.
+Existing sign-only probes needed a genuine unused carrier Context field (their
+callbacks are inert); their legacy wire and all assertions remain unchanged.
+Existing fixtures now prepare discovery at native times and honor ClearTimer
+in the active timer list, preventing selection of cancelled Context deadlines
+as reconciliation timers. No financial assertion was deleted or relaxed.
+The full scoped Crypto.com suite passes 164 tests across 16 targets; strict
+all-target Clippy passes. Request inventory tests pass; the full bans check
+currently fails only on foreign stale-base BingX history and Hyperliquid lib
+entries because landing advanced during work. Genuinely integrate that landing
+and rerun the checks before push; no waiver or foreign edit is applied.

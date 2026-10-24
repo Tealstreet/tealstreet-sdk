@@ -3010,3 +3010,14 @@ current cleanup without DATA or newer-owner authority. The exact removal-only
 manifest delta is two MEXC lib fingerprints/occurrences,18 to16 in the venue.
 No private signer, account/history/trading reducer, scheduler or engine code
 changes in this slice. Family performance/size evidence remains a CI gate.
+
+
+## Crypto.com public discovery delivery ownership
+
+Markets/Tickers now carry their original Background Read Context through
+streaming and publication. Actual shared delivery validation precedes row
+parsing/staging and response handling; expiry equality cannot commit a live
+prefix. Shared Context cleanup is separate from DATA admission: already-admitted
+failure keeps its native retry even after sibling issuance prunes expired
+retirement metadata. Completed catalogue retires before successor admission so
+capacity cannot strand ticker startup. No local issuer/timer/selection algorithm.

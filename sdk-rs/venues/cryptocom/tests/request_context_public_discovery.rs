@@ -236,10 +236,12 @@ fn catalogue_at_deadline_cannot_publish_without_timer_ingress() {
     reply(&mut e, 20_000., &read, 200, INSTRUMENTS);
     assert!(!e.store().loaded().markets, "DATA expires at equality");
     let output: Vec<_> = e.drain_actions().collect();
-    assert!(!output.iter().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::ManagedHttp(_) | Action::WsConnect { .. }
-    )));
+    // Shared cancellation retires the released route; it grants no new I/O.
+    assert!(!output.iter().any(|a| match a {
+        Action::Http(_) | Action::WsConnect { .. } => true,
+        Action::ManagedHttp(a) => !matches!(a.as_ref(), HttpAction::Cancel { .. }),
+        _ => false,
+    }));
     no_command_or_auth(&output);
 }
 #[test]
@@ -268,10 +270,12 @@ fn live_catalogue_prefix_followed_by_expired_stream_end_cannot_publish() {
         "a live streamed prefix cannot cross the expiry boundary"
     );
     let output: Vec<_> = e.drain_actions().collect();
-    assert!(!output.iter().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::ManagedHttp(_) | Action::WsConnect { .. }
-    )));
+    // Shared cancellation retires the released route; it grants no new I/O.
+    assert!(!output.iter().any(|a| match a {
+        Action::Http(_) | Action::WsConnect { .. } => true,
+        Action::ManagedHttp(a) => !matches!(a.as_ref(), HttpAction::Cancel { .. }),
+        _ => false,
+    }));
     no_command_or_auth(&output);
 }
 #[test]
