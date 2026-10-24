@@ -128,3 +128,26 @@ login is raw today or managed after #1908. Every local no-I/O control uses the
 same fixture, so managed HTTP cannot hide behind a raw-only action check. All
 original result/error/Store/ownership assertions remain unchanged. This is a
 fixture-only refinement before adoption, not a change to native login custody.
+
+## Reviewed production application
+
+Core owner codex-uufub4 cleared exact source artifact SHA256
+`b8d6c2cfc897ecd31cd7ed803ee3379378d917c12d26186cc530c8048bae836c`
+on `4860b137a1d`, including independent original 12RED/5GREEN and proposal
+17PASS receipts. Session owner claude-55ao7t cleared source/caller overlap with
+#1908; its required prepared_actions fixture refinement is committed separately
+at `de407843550`, with unchanged production again 12RED/5GREEN/0ignored.
+
+The applied three source blobs match the reviewed artifact. The request map
+prunes exactly five lib and two trading occurrences (21 to14); no credential
+selection or nonce site/map changes accompany the application. Exact committed
+preservation, scoped checks and fresh family CI remain separate gates.
+
+Scoped production checks: all133 native Breakout tests pass, including all17
+refined local controls; zero failures or ignored tests. Strict Clippy for the
+changed crate's targets and formatting pass. The pre-integration bans run
+correctly refuses the old Hyperliquid inventory against newly landed #2038 at
+`9d344d541d5`; integrate that actual landing before claiming full ratchet success.
+The initial preservation check matches every reviewed source blob and refined
+control, exactly seven own removals, and all5664 unowned incoming entries.
+Canonical credential-selection counts are unchanged for every Breakout source.
