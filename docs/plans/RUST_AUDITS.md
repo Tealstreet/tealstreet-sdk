@@ -3228,3 +3228,16 @@ commands before venue entry; the fallback unsupported arm only supplies match
 exhaustiveness. Foreign inventory bytes/order and signing/selection stay exact.
 Scoped123 controls and strict Clippy pass; independent source and exact-head CI
 remain separate gates.
+
+
+## GRVT remaining local refusal custody
+
+Planbc293 precedes originals216142 (8assertion RED/10GREEN). Execution pinned
+native absent Mutation outcome; the overseer approved shared NotSent, explicitly
+superseding only that outcome assertion at7e39 (12assertion RED/6GREEN). Core
+and native original reviews CLEAR. Production admits keyless Read or Mutation
+in genuine command entry, returns on shared rejection and uses fail_context
+with unchanged native text/kind. The provably dead private-phase arm is deleted;
+all earlier handlers and pre-entry refusals remain. Exactly two lib singleton
+hashes disappear; no catalog, account, trading, queue or signer adoption.
+All18 originals, library7 and trading42 pass; source reviews/CI remain separate.
