@@ -405,3 +405,32 @@ and signing14->2 (only EraseSecrets). No foreign inventory or checker changes.
 Per the overseer's current instruction, push a draft once and run its one
 PR-triggered Rust workflow in parallel with bounded source reviews. Keep the
 two Aster runs unchanged; full custody/size/CPU/READY are not claimed here.
+
+## Typed private-read integrity correction
+
+Core review of `c1219ffe711` reproduced three real assertion REDs: invalid UTF-8
+at released HttpStart/Chunk/End caused Identity/Account to resend and History to
+park a retry. The original patch is committed at `c32db1a7973` before runtime
+changes. As in ApeX #2066 (`dcec90863d5`, carried by `daa3f0995cc`), failure
+callbacks keep the engine's typed cause and retire old contexts before successors.
+
+Private Identity retries only genuine Network/physical Timeout callbacks, with
+its unchanged shared counter. History and Account distinguish strict failures,
+native response compatibility, and released transport failure. Typed Internal
+and other nontransport callbacks cannot become transport retries, even if their
+message contains40101. History rejects strictly without accepted-prefix recovery;
+Account retires its exact Background custody and schedules one native poll.
+Provider, preparation, queue and failed DATA gates use strict recovery. Genuine
+released transport and physical Timeout retain native retry counts, failed-page
+rollback and prior accepted-page recovery. Actual native40101 response/list-error
+compatibility keeps the disclosed minimal message check and existing one-retry
+counter; it grants no retry to a typed integrity callback.
+
+The three reviewer controls retain their original bodies. Additional controls
+pin Identity/History/Account physical timeout recovery, late old delivery fencing,
+one account poll followed by fresh positions/balance, and strict integrity failure
+after a complete accepted page. The latter pins the actual missing-list Internal
+message with its replacement character; an initial UTF-8-wording expectation was
+incorrect and was corrected from the observed engine callback, not from a venue
+projection. Existing mixed counters and accepted-page rollback controls remain
+unchanged. Exact source re-review and one replacement PR run follow verification.

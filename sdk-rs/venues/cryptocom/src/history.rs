@@ -613,18 +613,17 @@ impl Cryptocom {
         cx: &mut Cx<'_, Pending>,
         mut request: Request,
         error: VenueError,
-        transport: bool,
+        recovery: crate::reads::FailureRecovery,
     ) {
         request.retire_leg(cx);
         if cx.validate_read_root_context(request.root()).is_err() {
             return;
         }
-        let retry = if error.message.contains("40101") {
-            request.retries < 1
-        } else {
-            transport && request.retries < 3
-        };
-        if retry {
+        if matches!(recovery, crate::reads::FailureRecovery::Strict) {
+            let _ = request.history.reject(cx, error);
+            return;
+        }
+        if recovery.retry(&error.message, request.retries) {
             // A failed page is never appended; preserve earlier complete pages.
             if !request.history.discard_staged_page() {
                 let _ = request

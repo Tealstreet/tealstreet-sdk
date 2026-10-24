@@ -1239,3 +1239,160 @@ fn review_account_integrity_recovers_once_without_inline_transport_retry() {
         1
     );
 }
+
+fn physical_timer(out: &[Action], at: f64) -> safe_cex_engine::TimerId {
+    out.iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+            _ => None,
+        })
+        .expect("real physical request timer")
+}
+
+#[test]
+fn identity_physical_timeout_keeps_native_retry_budget_and_retires_old_delivery() {
+    let mut e = engine(options());
+    let first = ask(&mut e, NOW);
+    let old = http(&first, "private/get-accounts");
+    let timer = physical_timer(&first, NOW + 20_000.);
+    e.handle(NOW + 20_000., Event::TimerFired { timer });
+    let out = actions(&mut e, NOW + 20_000.);
+    let retry = http(&out, "private/get-accounts");
+    assert_ne!(retry.id, old.id);
+    assert!(terminals(&out).is_empty());
+    let stale = respond(&mut e, NOW + 20_001., &old, 200, IDENTITY);
+    assert!(terminals(&stale).is_empty());
+    let out = respond(&mut e, NOW + 20_002., &retry, 200, IDENTITY);
+    assert_eq!(terminals(&out).len(), 1);
+    assert!(terminals(&out)[0].is_ok());
+    no_private_http(&out);
+}
+
+fn private_fills(h: &mut Harness, limit: u32) -> HttpRequest {
+    h.engine
+        .handle_command(
+            h.now,
+            Command::Query {
+                command: OWNER,
+                query: Query::Fills {
+                    symbol: Some("BTCUSD-PERP".into()),
+                    order_id: None,
+                    from_ms: Some(h.now - 1000.),
+                    to_ms: Some(h.now + 1000.),
+                    limit: Some(limit),
+                },
+            },
+            None,
+        )
+        .unwrap();
+    h.collect();
+    h.http("private/get-trades")
+}
+
+#[test]
+fn history_physical_timeout_waits_once_then_sends_a_fresh_leg() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    let old = private_fills(&mut h, 1);
+    let timer = physical_timer(&h.actions, h.now + 20_000.);
+    h.actions.clear();
+    h.now += 20_000.;
+    h.event(Event::TimerFired { timer });
+    no_private_http(&h.actions);
+    assert!(terminals(&h.actions).is_empty());
+    let retry_timer = physical_timer(&h.actions, h.now + 1000.);
+    h.actions.clear();
+    h.now += 1000.;
+    h.event(Event::TimerFired { timer: retry_timer });
+    let fresh = h.http("private/get-trades");
+    assert_ne!(fresh.id, old.id);
+    h.respond(&fresh, support::EMPTY);
+    assert_eq!(terminals(&h.actions), vec![Ok("[]".into())]);
+}
+
+#[test]
+fn account_integrity_retires_once_and_the_native_poll_restarts_from_positions() {
+    let mut h = Harness::new();
+    let old = h.http("private/get-positions");
+    h.actions.clear();
+    let out = review_integrity(&mut h.engine, h.now + 1., &old);
+    no_private_http(&out);
+    let poll = physical_timer(&out, h.now + 10_001.);
+    h.now += 2.;
+    h.respond(&old, support::EMPTY);
+    assert!(
+        !h.actions
+            .iter()
+            .any(|action| matches!(action, Action::SetTimer { .. }))
+    );
+    no_private_http(&h.actions);
+    h.now += 9999.;
+    h.event(Event::TimerFired { timer: poll });
+    let fresh = h.http("private/get-positions");
+    assert_ne!(fresh.id, old.id);
+    h.respond(&fresh, support::EMPTY);
+    let _ = h.http("private/user-balance");
+}
+
+#[test]
+fn history_integrity_after_an_accepted_page_strictly_discards_the_prefix() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    let first = private_fills(&mut h, 101);
+    let rows: Vec<_> = (1..=100)
+        .map(|id| format!(
+            r#"{{"trade_id":{id},"order_id":9007199254740993,"instrument_name":"BTCUSD-PERP","side":"BUY","traded_price":"100","traded_quantity":"0.1","fees":"-0.02","fee_instrument_name":"USD","taker_side":"MAKER","create_time":1610000000000,"create_time_ns":{}}}"#,
+            1_610_000_000_000_000_000_u64 + id
+        ))
+        .collect();
+    h.respond(
+        &first,
+        &format!(r#"{{"code":0,"result":{{"data":[{}]}}}}"#, rows.join(",")),
+    );
+    assert!(terminals(&h.actions).is_empty());
+    let timer = physical_timer(&h.actions, h.now + 1000.);
+    h.actions.clear();
+    h.now += 1000.;
+    h.event(Event::TimerFired { timer });
+    let second = h.http("private/get-trades");
+    h.actions.clear();
+    let out = review_integrity(&mut h.engine, h.now + 1., &second);
+    no_private_http(&out);
+    let failures = terminals(&out);
+    assert_eq!(failures.len(), 1);
+    let error = failures[0]
+        .as_ref()
+        .expect_err("no prefix recovery for integrity failures");
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(error.outcome, None);
+    assert_eq!(
+        error.message,
+        "response did not contain the expected list: \u{fffd}"
+    );
+    assert!(
+        !out.iter().any(
+            |action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 1001.)
+        )
+    );
+}
+
+#[test]
+fn account_physical_timeout_retries_after_retiring_the_old_background_read() {
+    let mut h = Harness::new();
+    let old = h.http("private/get-positions");
+    let timer = physical_timer(&h.actions, h.now + 20_000.);
+    h.actions.clear();
+    h.now += 20_000.;
+    h.event(Event::TimerFired { timer });
+    let fresh = h.http("private/get-positions");
+    assert_ne!(fresh.id, old.id);
+    assert!(!h.actions.iter().any(
+        |action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 10_000.)
+    ));
+    h.respond(&old, support::EMPTY);
+    no_private_http(&h.actions);
+    h.respond(&fresh, support::EMPTY);
+    let _ = h.http("private/user-balance");
+}

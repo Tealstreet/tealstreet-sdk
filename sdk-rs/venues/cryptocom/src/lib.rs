@@ -718,7 +718,12 @@ impl Venue for Cryptocom {
         };
         if let Err(error) = private_delivery {
             if let Pending::Account(request) = pending {
-                self.account_failed(cx, request, &error.read_venue_error().message, true);
+                self.account_failed(
+                    cx,
+                    request,
+                    &error.read_venue_error().message,
+                    reads::FailureRecovery::Strict,
+                );
             }
             return;
         }
@@ -760,12 +765,14 @@ impl Venue for Cryptocom {
         };
         if let Some(error) = error {
             match pending {
-                Pending::Account(request) => self.account_failed(cx, request, &error, false),
+                Pending::Account(request) => {
+                    self.account_failed(cx, request, &error, reads::FailureRecovery::Response)
+                }
                 Pending::History(request) => self.history_failed(
                     cx,
                     request,
                     reads::response_failure(response, error),
-                    false,
+                    reads::FailureRecovery::Response,
                 ),
                 Pending::PublicTrades(trade) => {
                     self.public_trades_response(cx, *trade, response, Some(error))
@@ -891,7 +898,24 @@ impl Venue for Cryptocom {
         pending: Pending,
         response: Response<'_>,
     ) {
+        let missing_list = || {
+            safe_cex_engine::VenueError::new(format!(
+                "response did not contain the expected list: {}",
+                response.body
+            ))
+            .kind(safe_cex_engine::ErrorKind::Internal)
+        };
+        let recovery = if response.body.contains("40101") {
+            reads::FailureRecovery::Response
+        } else {
+            reads::FailureRecovery::Strict
+        };
         match pending {
+            Pending::Identity(request) => self.identity_reject(cx, request, missing_list()),
+            Pending::History(request) => self.history_failed(cx, request, missing_list(), recovery),
+            Pending::Account(request) => {
+                self.account_failed(cx, request, &missing_list().message, recovery)
+            }
             Pending::PublicTrades(trade) => self.public_trades_stream_failed(cx, *trade, response),
             pending => self.on_request_failed(
                 cx,
@@ -913,7 +937,9 @@ impl Venue for Cryptocom {
             Pending::Identity(request) => self.identity_reject(cx, request, error),
             Pending::History(request) => self.history_reject(cx, request, error),
             Pending::Trade(request) => self.trade_reject(cx, request, error),
-            Pending::Account(request) => self.account_failed(cx, request, &error.message, false),
+            Pending::Account(request) => {
+                self.account_failed(cx, request, &error.message, reads::FailureRecovery::Strict)
+            }
             Pending::PublicTrades(trade) => Self::public_trades_reject(cx, *trade, error),
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
@@ -933,7 +959,14 @@ impl Venue for Cryptocom {
         match pending {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Identity(request) => self.identity_failed(cx, request, error),
-            Pending::History(request) => self.history_failed(cx, request, error, true),
+            Pending::History(request) => {
+                let recovery = reads::FailureRecovery::released(&error);
+                self.history_failed(cx, request, error, recovery);
+            }
+            Pending::Account(request) => {
+                let recovery = reads::FailureRecovery::released(&error);
+                self.account_failed(cx, request, &error.message, recovery);
+            }
             Pending::PublicTrades(trade) => self.public_trades_failed(cx, *trade, error, true),
             Pending::BookQuery { context } | Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
@@ -954,21 +987,20 @@ impl Venue for Cryptocom {
                     depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
                 );
             }
-            Pending::Identity(request) => self.identity_failed(
+            Pending::Identity(request) => self.identity_reject(
                 cx,
                 request,
-                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Internal),
             ),
             Pending::Trade(request) => self.trade_failed(
                 cx,
                 request,
                 safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
             ),
-            Pending::History(request) => self.history_failed(
+            Pending::History(request) => self.history_reject(
                 cx,
                 request,
-                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
-                true,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Internal),
             ),
             Pending::PublicTrades(trade) => self.public_trades_failed(
                 cx,
@@ -976,7 +1008,9 @@ impl Venue for Cryptocom {
                 safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
                 true,
             ),
-            Pending::Account(request) => self.account_failed(cx, request, error, true),
+            Pending::Account(request) => {
+                self.account_failed(cx, request, error, reads::FailureRecovery::Strict)
+            }
             Pending::Candles { context, .. } => {
                 if cx.validate_read_http_delivery(&context, &context).is_ok() {
                     let _ = cx.fail_context(&context, error);

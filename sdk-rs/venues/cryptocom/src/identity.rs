@@ -220,7 +220,11 @@ impl Cryptocom {
         {
             return;
         }
-        if request.retries < 3 {
+        if matches!(
+            crate::reads::FailureRecovery::released(&error),
+            crate::reads::FailureRecovery::Transport
+        ) && request.retries < 3
+        {
             request.retries += 1;
             self.identity_request(cx, request);
         } else {

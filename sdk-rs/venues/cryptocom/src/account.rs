@@ -459,7 +459,7 @@ impl Cryptocom {
                     cx,
                     request,
                     "Crypto.com account read admission failed",
-                    false,
+                    crate::reads::FailureRecovery::Strict,
                 );
                 return;
             }
@@ -490,7 +490,12 @@ impl Cryptocom {
             },
         );
         if let Err((Pending::Account(request), error)) = queued {
-            self.account_failed(cx, request, &error.read_venue_error().message, false);
+            self.account_failed(
+                cx,
+                request,
+                &error.read_venue_error().message,
+                crate::reads::FailureRecovery::Strict,
+            );
         }
     }
     pub(crate) fn account_delivery(
@@ -530,14 +535,12 @@ impl Cryptocom {
         cx: &mut Cx<'_, Pending>,
         mut request: Request,
         error: &str,
-        transport: bool,
+        recovery: crate::reads::FailureRecovery,
     ) {
         if !self.retire_account_read(cx, &mut request) {
             return;
         }
-        if (error.contains("40101") && request.retries < 1)
-            || (transport && !error.contains("40101") && request.retries < 3)
-        {
+        if recovery.retry(error, request.retries) {
             self.read_account(cx, request.read, request.retries + 1);
             return;
         }
@@ -640,7 +643,12 @@ impl Cryptocom {
             return;
         }
         if request.invalid {
-            self.account_failed(cx, request, "invalid account row", false);
+            self.account_failed(
+                cx,
+                request,
+                "invalid account row",
+                crate::reads::FailureRecovery::Strict,
+            );
             return;
         }
         let fresh_balance = request.revision >= self.account.balance_revision;

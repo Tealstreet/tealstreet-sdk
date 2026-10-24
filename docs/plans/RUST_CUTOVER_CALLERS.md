@@ -7804,3 +7804,11 @@ Prepare tokens. The parked-WS provider control completes prior HTTP setup so
 it tests the WS provider boundary independently of the shared signing barrier.
 Existing financial assertions remain in place; eager-signing comparisons are
 replaced by independent literal envelopes, including the WS HMAC vector.
+
+Private read integrity failures retain the engine's typed cause. Identity and
+History fail strictly without retry or partial history; Account retires the
+exact active read and schedules one native poll, without an inline resend.
+Only genuine Network/physical Timeout callbacks spend native transport budgets.
+The separately documented native40101 response/list-error compatibility retains
+its minimal text check and shared counters; typed integrity failures never enter
+that compatibility path. Old contexts retire before successor reads are minted.
