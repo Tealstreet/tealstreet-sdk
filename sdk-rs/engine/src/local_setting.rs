@@ -32,6 +32,10 @@ impl ContextRegistry {
         let previous = self.commands.insert(
             command,
             CommandOwner {
+                #[cfg(feature = "http-plans")]
+                physical: None,
+                #[cfg(feature = "http-plans")]
+                background_task: None,
                 generation,
                 phase: CommandPhase::LocalSetting,
                 last_deadline: now,

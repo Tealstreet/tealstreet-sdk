@@ -8,8 +8,9 @@ pub(in super::super) struct State {
     pub(super) policy: PreflightPolicy,
     pub(super) receipt_cap: Option<(u64, f64)>,
     // At most one entry; storage is reserved fallibly before ID admission.
-    call: Vec<Call>,
-    handoff: Option<Delivery>,
+    pub(super) call: Vec<Call>,
+    pub(super) handoff: Option<Delivery>,
+    pub(super) activation: super::ready::Activation,
 }
 
 impl State {
@@ -19,6 +20,7 @@ impl State {
             receipt_cap: None,
             call: Vec::new(),
             handoff: None,
+            activation: super::ready::Activation::Initial,
         }
     }
 
@@ -64,7 +66,7 @@ impl State {
 }
 
 impl ContextRegistry {
-    pub(in super::super) fn preflight_receipt_cap(
+    pub(in crate::engine) fn preflight_receipt_cap(
         &self,
         preflight: &Preflight,
     ) -> Result<Option<(u64, f64)>, Error> {
@@ -80,7 +82,7 @@ impl ContextRegistry {
         Ok(())
     }
 
-    fn owner_from_context(&self, context: &Context) -> Result<Preflight, Error> {
+    pub(super) fn owner_from_context(&self, context: &Context) -> Result<Preflight, Error> {
         let Owner::Command { id, generation } = context.owner() else {
             return Err(Error::Invalid);
         };
@@ -104,12 +106,10 @@ impl ContextRegistry {
         &mut self,
         delivery: &Delivery,
     ) -> bool {
-        if let Owner::Command { id, generation } = delivery.context.owner()
+        if (matches!(delivery.context.owner(), Owner::Command { .. })
+            || self.physical_owner(delivery.context.owner()))
             && delivery.context.issued_by(&self.issuer)
-            && let Some(owner) = self
-                .commands
-                .get_mut(&id)
-                .filter(|owner| owner.generation == generation)
+            && let Some(owner) = self.owner_entry_mut(delivery.context.owner())
             && let CommandPhase::Planned(state) = &mut owner.phase
         {
             return state.record_failure(delivery);
@@ -157,10 +157,16 @@ impl ContextRegistry {
         &self,
         context: &Context,
     ) -> Result<(), Error> {
-        let Owner::Command { id, .. } = context.owner() else {
-            return Ok(());
+        let phase = match context.owner() {
+            Owner::Command { id, .. } => self.commands.get(&id).map(|owner| &owner.phase),
+            // The execution root shares its physical owner but is no Plan call.
+            Owner::Execution { generation } if context.leg() == generation => return Ok(()),
+            owner if self.physical_owner(owner) => {
+                self.owner_entry(owner).map(|owner| &owner.phase)
+            }
+            _ => return Ok(()),
         };
-        match self.commands.get(&id).map(|owner| &owner.phase) {
+        match phase {
             Some(CommandPhase::Preflight(state)) => {
                 if state
                     .call
@@ -184,7 +190,7 @@ impl ContextRegistry {
         }
     }
 
-    fn preflight_state(&self, handle: &Preflight) -> Result<&State, Error> {
+    pub(super) fn preflight_state(&self, handle: &Preflight) -> Result<&State, Error> {
         let owner = self.preflight_owner(handle)?;
         let CommandPhase::Preflight(state) = &owner.phase else {
             unreachable!()
@@ -192,7 +198,7 @@ impl ContextRegistry {
         Ok(state)
     }
 
-    fn preflight_state_mut(&mut self, handle: &Preflight) -> Result<&mut State, Error> {
+    pub(super) fn preflight_state_mut(&mut self, handle: &Preflight) -> Result<&mut State, Error> {
         self.preflight_owner(handle)?;
         let Owner::Command { id, .. } = handle.owner() else {
             unreachable!()
@@ -208,6 +214,16 @@ impl ContextRegistry {
         context: &Context,
         delivery: Option<&Delivery>,
     ) -> Result<Option<Admission>, Error> {
+        if self.physical_owner(context.owner()) {
+            let owner = self.owner_entry(context.owner()).expect("physical owner");
+            let CommandPhase::Planned(state) = &owner.phase else {
+                return Err(Error::Revoked);
+            };
+            if !context.issued_by(&self.issuer) {
+                return Err(Error::Revoked);
+            }
+            return state.admission(context, delivery);
+        }
         let Owner::Command { id, .. } = context.owner() else {
             return Ok(None);
         };
@@ -253,10 +269,10 @@ impl ContextRegistry {
     }
 
     pub(in super::super::super) fn commit_owned_admission(&mut self, admission: &Admission) {
-        let Owner::Command { id, .. } = admission.context.owner() else {
-            unreachable!()
-        };
-        let phase = &mut self.commands.get_mut(&id).unwrap().phase;
+        let phase = &mut self
+            .owner_entry_mut(admission.context.owner())
+            .expect("validated owned admission")
+            .phase;
         if let CommandPhase::Planned(state) = phase {
             state.commit(admission);
             return;
@@ -275,6 +291,7 @@ impl<P> Cx<'_, P> {
         &self,
         handle: &Preflight,
     ) -> Result<(PreflightPolicy, Option<Context>), Error> {
+        self.validate_preflight_activation(handle)?;
         let state = self.io.request_contexts.preflight_state(handle)?;
         if let Some(call) = state.call.first() {
             self.validate_preflight_delivery(handle, &call.context)?;
@@ -322,11 +339,7 @@ impl<P> Cx<'_, P> {
         admission: &Admission,
         reason: Error,
     ) {
-        let Ok(Some(current)) = self
-            .io
-            .request_contexts
-            .owned_admission(&admission.context, self.io.http_delivery.as_ref())
-        else {
+        let Ok(Some(current)) = self.owned_http_admission(&admission.context) else {
             return;
         };
         if current.attempt != admission.attempt {
@@ -509,6 +522,7 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         terms: CallTerms,
     ) -> Result<Context, Error> {
+        self.validate_preflight_activation(handle)?;
         let state = self.io.request_contexts.preflight_state(handle)?;
         if !state.call.is_empty() || !state.admits_handoff(self.io.http_delivery.as_ref()) {
             return Err(Error::Revoked);
@@ -532,12 +546,23 @@ impl<P> Cx<'_, P> {
             policy.pacing,
         )?
         .with_retry(policy.retry)?;
-        self.io.request_contexts.prune(self.now);
-        if self.io.request_contexts.contexts.len() + self.io.request_contexts.reserved_contexts
-            >= CAPACITY
+        let count = u64::from(terms.attempts);
+        let signed = policy.credential.is_some();
+        if !self.io.next_id.available(1 + 3 * count)
+            || (signed && !self.io.signing.available_ids(count))
         {
             return Err(Error::Capacity);
         }
+        self.io.request_contexts.prune(self.now);
+        self.io.request_contexts.check_context_capacity(
+            self.io
+                .request_contexts
+                .contexts
+                .len()
+                .checked_add(self.io.request_contexts.reserved_contexts)
+                .and_then(|n| n.checked_add(1)),
+            None,
+        )?;
         self.io
             .request_contexts
             .contexts
@@ -549,13 +574,6 @@ impl<P> Cx<'_, P> {
             .call
             .try_reserve_exact(1)
             .map_err(|_| Error::Capacity)?;
-        let count = u64::from(terms.attempts);
-        let signed = policy.credential.is_some();
-        if !self.io.next_id.available(1 + 3 * count)
-            || (signed && !self.io.signing.available_ids(count))
-        {
-            return Err(Error::Capacity);
-        }
         let mut ids = self
             .io
             .reserve_ids(1 + 3 * count)

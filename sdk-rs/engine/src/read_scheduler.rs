@@ -124,6 +124,39 @@ struct Active {
     token: Attempt,
     deadline: f64,
     issued: bool,
+    #[cfg(feature = "http-plans")]
+    state: ActiveState,
+}
+
+impl Active {
+    fn live(&self) -> bool {
+        #[cfg(feature = "http-plans")]
+        {
+            self.state == ActiveState::Live
+        }
+        #[cfg(not(feature = "http-plans"))]
+        {
+            true
+        }
+    }
+}
+
+#[cfg(feature = "http-plans")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActiveState {
+    Live,
+    Retiring(AfterRetirement),
+}
+
+#[cfg(feature = "http-plans")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AfterRetirement {
+    Pause,
+    Cancel,
+    Remove,
+    Superseded,
+    Finished(bool),
+    Expired(bool),
 }
 
 struct Read<K> {
@@ -138,6 +171,8 @@ struct Read<K> {
     invalidation_due: Option<f64>,
     active: Option<Active>,
     retry: RetryState,
+    #[cfg(feature = "http-plans")]
+    retain_until_retired: bool,
 }
 
 impl<K> Read<K> {
@@ -216,6 +251,23 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
     }
 
     pub fn register(&mut self, key: K, group: &G, policy: Policy) -> Result<(), Error> {
+        self.register_inner(key, group, policy, false)
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn register_task(&mut self, key: K, group: &G, policy: Policy) -> Result<(), Error> {
+        self.register_inner(key, group, policy, true)
+    }
+
+    fn register_inner(
+        &mut self,
+        key: K,
+        group: &G,
+        policy: Policy,
+        retain_until_retired: bool,
+    ) -> Result<(), Error> {
+        #[cfg(not(feature = "http-plans"))]
+        let _ = retain_until_retired;
         if !policy.valid() {
             return Err(Error::InvalidPolicy);
         }
@@ -230,6 +282,10 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             .iter()
             .position(|candidate| &candidate.key == group)
             .ok_or(Error::UnknownGroup)?;
+        #[cfg(feature = "http-plans")]
+        if retain_until_retired {
+            self.reads.try_reserve(1).map_err(|_| Error::Capacity)?;
+        }
         self.reads.push(Read {
             key,
             group,
@@ -239,6 +295,8 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             invalidation_due: None,
             active: None,
             retry: RetryState::default(),
+            #[cfg(feature = "http-plans")]
+            retain_until_retired,
         });
         Ok(())
     }
@@ -273,7 +331,8 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
     }
 
     /// Extend one explicit budget's pause. Unsent reservations are invalidated;
-    /// already issued reads retain their original response deadlines.
+    /// already issued ordinary reads retain their response deadlines. Task-bound
+    /// reads retain cleanup custody and retire before replacement.
     pub fn pause(&mut self, group: &G, until: f64) -> Result<(), Error> {
         time(until)?;
         let index = self
@@ -286,7 +345,19 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
         }
         self.groups[index].until = until;
         for read in &mut self.reads {
-            if read.group == index && read.active.is_some_and(|active| !active.issued) {
+            if read.group != index {
+                continue;
+            }
+            #[cfg(feature = "http-plans")]
+            if read.retain_until_retired
+                && let Some(active) = read.active.as_mut()
+            {
+                if active.state == ActiveState::Live {
+                    active.state = ActiveState::Retiring(AfterRetirement::Pause);
+                }
+                continue;
+            }
+            if read.active.is_some_and(|active| !active.issued) {
                 read.active = None;
                 read.pending = Some(until);
                 // The replacement has not been prepared, so it covers dirty
@@ -304,7 +375,7 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             .iter()
             .filter_map(|read| {
                 if let Some(active) = read.active {
-                    Some(active.deadline)
+                    active.live().then_some(active.deadline)
                 } else {
                     read.due(self.groups[read.group].until)
                 }
@@ -326,7 +397,7 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
         for read in &self.reads {
             let eligible = self.groups[read.group].until <= now
                 && if let Some(active) = read.active {
-                    active.deadline <= now
+                    active.live() && active.deadline <= now
                 } else {
                     read.due(self.groups[read.group].until)
                         .is_some_and(|due| due <= now)
@@ -337,8 +408,16 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
         }
         for read in &mut self.reads {
             if let Some(active) = read.active
+                && active.live()
                 && active.deadline <= now
             {
+                #[cfg(feature = "http-plans")]
+                if read.retain_until_retired {
+                    let retry = active.issued && read.policy.response_expiry == ExpiryPolicy::Retry;
+                    read.active.as_mut().expect("checked active token").state =
+                        ActiveState::Retiring(AfterRetirement::Expired(retry));
+                    continue;
+                }
                 read.active = None;
                 let retry = active.issued && read.policy.response_expiry == ExpiryPolicy::Retry;
                 let delay = if retry {
@@ -383,6 +462,8 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             token,
             deadline: lease_deadline(now, read.policy.admission_timeout_ms)?,
             issued: false,
+            #[cfg(feature = "http-plans")]
+            state: ActiveState::Live,
         });
         Ok(Some((&read.key, token)))
     }
@@ -431,7 +512,8 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             if let Some(active) = &mut read.active
                 && active.token == token
             {
-                if (!allow_issued && active.issued)
+                if !active.live()
+                    || (!allow_issued && active.issued)
                     || now >= active.deadline
                     || now < self.groups[read.group].until
                 {
@@ -456,7 +538,7 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             if let Some(active) = &mut read.active
                 && active.token == token
             {
-                if !active.issued || now >= active.deadline {
+                if !active.live() || !active.issued || now >= active.deadline {
                     return Ok(false);
                 }
                 active.deadline = lease_deadline(now, read.policy.response_timeout_ms)?;
@@ -485,8 +567,14 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             return Ok(false);
         };
         let active = read.active.expect("matching active attempt");
-        if now >= active.deadline || (success && !active.issued) {
+        if !active.live() || now >= active.deadline || (success && !active.issued) {
             return Ok(false);
+        }
+        #[cfg(feature = "http-plans")]
+        if read.retain_until_retired {
+            read.active.as_mut().expect("checked active token").state =
+                ActiveState::Retiring(AfterRetirement::Finished(success));
+            return Ok(true);
         }
         read.active = None;
         if success {
@@ -509,11 +597,17 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
         time(now)?;
         let Some(read) = self.reads.iter_mut().find(|read| {
             read.active.is_some_and(|active| {
-                active.token == token && active.issued && now < active.deadline
+                active.token == token && active.live() && active.issued && now < active.deadline
             })
         }) else {
             return Ok(false);
         };
+        #[cfg(feature = "http-plans")]
+        if read.retain_until_retired {
+            read.active.as_mut().expect("checked active token").state =
+                ActiveState::Retiring(AfterRetirement::Superseded);
+            return Ok(true);
+        }
         read.active = None;
         read.invalidation_due
             .get_or_insert_with(|| after(now, read.policy.debounce_ms));
@@ -527,6 +621,15 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             .iter_mut()
             .find(|read| &read.key == key)
             .ok_or(Error::UnknownKey)?;
+        #[cfg(feature = "http-plans")]
+        if read.retain_until_retired
+            && let Some(active) = &mut read.active
+        {
+            if active.state != ActiveState::Retiring(AfterRetirement::Remove) {
+                active.state = ActiveState::Retiring(AfterRetirement::Cancel);
+            }
+            return Ok(());
+        }
         read.active = None;
         read.pending = None;
         read.retry_not_before = f64::NEG_INFINITY;
@@ -541,8 +644,102 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             .iter()
             .position(|read| &read.key == key)
             .ok_or(Error::UnknownKey)?;
+        #[cfg(feature = "http-plans")]
+        if self.reads[index].retain_until_retired
+            && let Some(active) = &mut self.reads[index].active
+        {
+            active.state = ActiveState::Retiring(AfterRetirement::Remove);
+            return Ok(());
+        }
         self.reads.remove(index);
         Ok(())
+    }
+
+    /// Exact task settlement after the Plan terminal proof. Expiry cannot
+    /// release its replacement before the separate cleanup acknowledgement.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn finish_task(
+        &mut self,
+        token: Attempt,
+        now: f64,
+        success: bool,
+    ) -> Result<bool, Error> {
+        time(now)?;
+        let Some(read) = self.reads.iter_mut().find(|read| {
+            read.retain_until_retired
+                && read
+                    .active
+                    .is_some_and(|active| active.token == token && active.issued)
+        }) else {
+            return Ok(false);
+        };
+        let active = read.active.as_mut().expect("exact task token");
+        if active.live() {
+            active.state = ActiveState::Retiring(AfterRetirement::Finished(success));
+        }
+        Ok(true)
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn retiring(&self, key: &K) -> Option<Attempt> {
+        self.reads
+            .iter()
+            .find(|read| &read.key == key)?
+            .active
+            .filter(|active| matches!(active.state, ActiveState::Retiring(_)))
+            .map(|active| active.token)
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn ack_retired(
+        &mut self,
+        token: Attempt,
+        now: f64,
+        jitter: impl FnOnce(f64) -> f64,
+    ) -> Result<bool, Error> {
+        time(now)?;
+        let Some(index) = self.reads.iter().position(|read| {
+            read.retain_until_retired
+                && read.active.is_some_and(|active| {
+                    active.token == token && matches!(active.state, ActiveState::Retiring(_))
+                })
+        }) else {
+            return Ok(false);
+        };
+        let read = &mut self.reads[index];
+        let ActiveState::Retiring(disposition) = read.active.expect("exact retiring token").state
+        else {
+            unreachable!()
+        };
+        read.active = None;
+        match disposition {
+            AfterRetirement::Remove => {
+                self.reads.remove(index);
+            }
+            AfterRetirement::Cancel => {
+                read.pending = None;
+                read.retry_not_before = f64::NEG_INFINITY;
+                read.invalidation_due = None;
+                read.retry.reset();
+            }
+            AfterRetirement::Finished(true) => read.retry.reset(),
+            AfterRetirement::Finished(false) | AfterRetirement::Expired(true) => {
+                let delay = read.retry.failed_with(read.policy.retry, jitter);
+                read.pending = Some(after(now, delay));
+                read.retry_not_before = after(now, delay);
+                read.invalidation_due = None;
+            }
+            AfterRetirement::Pause | AfterRetirement::Expired(false) => {
+                read.pending = Some(now.max(self.groups[read.group].until));
+                read.retry_not_before = f64::NEG_INFINITY;
+                read.invalidation_due = None;
+            }
+            AfterRetirement::Superseded => {
+                read.invalidation_due
+                    .get_or_insert_with(|| after(now, read.policy.debounce_ms));
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -591,6 +788,172 @@ mod tests {
         let mut scheduler = Scheduler::new(1, vec!["private"]).unwrap();
         scheduler.register("balance", &"private", policy).unwrap();
         scheduler
+    }
+
+    #[cfg(feature = "http-plans")]
+    fn retained() -> Scheduler<&'static str, &'static str> {
+        let mut scheduler = Scheduler::new(1, vec!["private"]).unwrap();
+        let mut terms = policy();
+        terms.refresh_debounce_ms = 0.;
+        scheduler
+            .register_task("orders", &"private", terms)
+            .unwrap();
+        scheduler.request(&"orders", 0., Demand::Refresh).unwrap();
+        scheduler
+    }
+
+    #[cfg(feature = "http-plans")]
+    #[test]
+    fn retained_pause_cannot_replace_an_unsent_token_before_exact_cleanup_ack() {
+        let mut scheduler = retained();
+        let first = ready(&mut scheduler, 0.);
+        scheduler.pause(&"private", 100.).unwrap();
+        assert!(scheduler.retiring(&"orders") == Some(first));
+        assert!(scheduler.next_deadline().is_none());
+        assert!(
+            scheduler
+                .take_ready(200., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
+        assert!(scheduler.admit(first, 10.).unwrap().is_none());
+        assert!(
+            !scheduler
+                .finish(first, 10., false, |_| unreachable!())
+                .unwrap()
+        );
+        assert!(!scheduler.progress(first, 10.).unwrap());
+        assert!(
+            scheduler
+                .ack_retired(first, 500., |_| unreachable!())
+                .unwrap()
+        );
+        assert!(
+            !scheduler
+                .ack_retired(first, 500., |_| unreachable!())
+                .unwrap()
+        );
+        let next = ready(&mut scheduler, 500.);
+        assert!(next != first);
+        assert!(!scheduler.mark_issued(first, 500.).unwrap());
+        assert!(scheduler.mark_issued(next, 500.).unwrap());
+    }
+
+    #[cfg(feature = "http-plans")]
+    #[test]
+    fn retained_pause_retires_an_admitted_child_before_further_release() {
+        let mut scheduler = retained();
+        let first = ready(&mut scheduler, 0.);
+        assert!(scheduler.mark_issued(first, 0.).unwrap());
+        scheduler.pause(&"private", 100.).unwrap();
+        assert!(scheduler.retiring(&"orders") == Some(first));
+        assert!(scheduler.admit(first, 101.).unwrap().is_none());
+        assert!(
+            scheduler
+                .take_ready(101., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            scheduler
+                .ack_retired(first, 200., |_| unreachable!())
+                .unwrap()
+        );
+        assert!(ready(&mut scheduler, 200.) != first);
+    }
+
+    #[cfg(feature = "http-plans")]
+    #[test]
+    fn retained_expiry_starts_backoff_after_cleanup_even_past_its_deadline() {
+        let mut scheduler = retained();
+        let first = ready(&mut scheduler, 0.);
+        assert!(scheduler.mark_issued(first, 0.).unwrap());
+        assert!(
+            scheduler
+                .take_ready(100., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
+        assert!(scheduler.retiring(&"orders") == Some(first));
+        assert!(scheduler.next_deadline().is_none());
+        assert!(
+            !scheduler
+                .finish(first, 101., true, |_| unreachable!())
+                .unwrap()
+        );
+        assert!(scheduler.ack_retired(first, 150., |delay| delay).unwrap());
+        assert!(scheduler.next_deadline() == Some(1_150.));
+        assert!(
+            scheduler
+                .take_ready(1_149., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
+        assert!(ready(&mut scheduler, 1_150.) != first);
+    }
+
+    #[cfg(feature = "http-plans")]
+    #[test]
+    fn retained_cancel_and_removal_hold_the_registration_until_cleanup() {
+        for remove in [false, true] {
+            let mut scheduler = retained();
+            let first = ready(&mut scheduler, 0.);
+            assert!(scheduler.mark_issued(first, 0.).unwrap());
+            if remove {
+                scheduler.retire(&"orders").unwrap();
+            } else {
+                scheduler.cancel(&"orders").unwrap();
+            }
+            assert!(scheduler.retiring(&"orders") == Some(first));
+            assert!(scheduler.register("new", &"private", policy()) == Err(Error::Capacity));
+            assert!(
+                scheduler
+                    .take_ready(1_000., |_| unreachable!())
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                scheduler
+                    .ack_retired(first, 1_000., |_| unreachable!())
+                    .unwrap()
+            );
+            assert!(scheduler.next_deadline().is_none());
+            if remove {
+                scheduler.register("new", &"private", policy()).unwrap();
+            } else {
+                scheduler
+                    .request(&"orders", 1_000., Demand::Refresh)
+                    .unwrap();
+            }
+        }
+    }
+
+    #[cfg(feature = "http-plans")]
+    #[test]
+    fn retained_completion_and_supersession_never_release_a_live_child_early() {
+        for superseded in [false, true] {
+            let mut scheduler = retained();
+            let first = ready(&mut scheduler, 0.);
+            assert!(scheduler.mark_issued(first, 0.).unwrap());
+            if superseded {
+                assert!(scheduler.superseded(first, 10.).unwrap());
+            } else {
+                assert!(
+                    scheduler
+                        .finish(first, 10., false, |_| unreachable!())
+                        .unwrap()
+                );
+            }
+            assert!(scheduler.retiring(&"orders") == Some(first));
+            assert!(
+                scheduler
+                    .take_ready(200., |_| unreachable!())
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(scheduler.ack_retired(first, 500., |delay| delay).unwrap());
+            assert!(scheduler.next_deadline() == Some(if superseded { 510. } else { 1_500. }));
+        }
     }
 
     #[test]

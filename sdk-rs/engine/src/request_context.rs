@@ -19,6 +19,12 @@ pub use ownership::{
     HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
 };
 
+#[cfg(feature = "http-plans")]
+#[path = "request_context_background.rs"]
+mod background;
+#[cfg(feature = "http-plans")]
+pub use background::{BackgroundActivation, BackgroundTask, BackgroundTaskPolicy};
+
 #[path = "http_evidence.rs"]
 mod evidence;
 pub(crate) use evidence::ResponseProof;
@@ -240,6 +246,12 @@ pub struct Context {
 pub enum Error {
     Invalid,
     Capacity,
+    /// Foreground pool pressure caused only by active Background Plans.
+    #[cfg(feature = "http-plans")]
+    CapacityDeferred,
+    /// A declared Background traversal cannot fit the shared Background cap.
+    #[cfg(feature = "http-plans")]
+    BackgroundShareBusy,
     Duplicate,
     State,
     TimedOut,
@@ -1049,6 +1061,10 @@ pub(crate) struct PreparedWriteSeal {
 impl PreparedWriteSeal {
     pub(crate) fn is_failure(&self) -> bool {
         self.failure.is_some()
+    }
+
+    pub(crate) fn failure(&self) -> Option<&VenueError> {
+        self.failure.as_ref()
     }
 }
 impl CommandWrites {

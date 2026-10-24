@@ -4880,8 +4880,10 @@ authority. The call shape and success value (`null`) are unchanged.
 Engine capacity refusal text: every engine request-context capacity refusal
 (execution-group joins above, Binance command entry, Hyperliquid candle reads
 and any other `Capacity` refusal) now reads `Engine request capacity reached`
-instead of `Too many requests in flight`; kind `internal` and outcome
-`notSent` are unchanged. The old text matched the `rate_limit` health
+instead of `Too many requests in flight`. Kind `internal` and each site's
+outcome are unchanged: a refusal keeps whatever outcome it already carried,
+for example none on a Read command-admission refusal (engine control
+`unissued_read_command_is_rejected_once_without_a_numeric_fallback`). The old text matched the `rate_limit` health
 pattern (`/too.*many.*request/i`), so NX showed a rate-limit toast and a false
 rate-limit health signal for a local engine bound. The new text matches no
 `errorPatterns.ts` category.
@@ -6735,3 +6737,73 @@ other callers; this semantic caller conversion has zero lexical inventory delta.
 | Change | Command outcome | NX handling |
 | --- | --- | --- |
 | `cancelOrdersWithSymbols` on any Bybit variant | Typed `NotSent` `unsupported` before any request (was accepted and never finished) | Use `cancelOrders` with order ids. |
+## Retained command readiness
+
+With the engine's `http-plans` feature, native FIFO commands can park their own
+Preflight during genuine entry and activate it once after a predecessor physically
+retires. They keep their original command generation; waiting creates no request,
+timer or artificial deadline. Final native Plan admission establishes its bound.
+A predecessor's HTTP DATA cannot donate command-entry or response authority to
+the next command. Cleanup returns only an already-parked handle; actual activation
+runs after cleanup, callback exit and the execution sweep.
+
+A ready callback must finish, submit a bounded prerequisite read or admit its Plan.
+An unhandled callback or a selected read with no submitted HTTP fails once with
+Internal. ReadOnly has no write outcome; a truly unissued mutation is NotSent.
+NX consumes that one terminal and keeps any prior uncertain effects for ordinary
+reconciliation. Ready custody cannot submit or retire another command's work.
+Root expiry and preparation refusal wake the successor in the same engine event;
+no unrelated feed event is needed. No host wire or signer capability is added.
+
+While either retained-Preflight readiness or Plan readiness owns the callback,
+Session creation, derived legs, retirement and waiter changes refuse with State
+before reserving IDs or consuming timers/continuations. Session-ready/failed
+drains return empty; session_wait returns its pending unchanged. Read-only
+session_live and the active Plan's own APIs remain available. Ordinary Session,
+socket, timer and startup callbacks retain their existing Session authority.
+
+## Finite background Read Plans and shared admission capacity
+
+With `http-plans`, registered background Read Plans share an aggregate limit
+of 150 active plus unissued Context slots inside the engine's existing 256-slot
+pool. This is one limit across tasks, parents and venue families. Registration
+reserves no Plan slots; without an active child the full 256 remain available.
+Activation checks the share and the shared pool before
+consuming its demand or IDs. A second child that does not fit is refused.
+
+At full background occupancy, all other owners share 106 slots: command
+Contexts, command and physical execution Plan reservations, Session operations
+and plain Background work. When Background occupancy causes a foreground
+admission refusal, that refusal is typed as retryable, with NotSent for an
+initial Mutation and no financial outcome for a Read. Foreground-only saturation
+keeps the existing Capacity failure (Internal).
+Capacity returns as the corresponding work retires; background work does not
+borrow the remaining share or reset command evidence. This can refuse a
+command that would have fit without the active background child.
+
+
+### Physical Read Plans do not park in Session waiters
+
+Background Plan children and planned-execution legs retain their own Plan/Slot
+sequencing. `session_wait` refuses those physical owners with State before any
+wait hold or timer is installed, matching command-owned Plan refusal. Plain
+Background Context waiting is unchanged. Session retirement revokes child send
+and delivery immediately and finishes their managed resource/timer cleanup at
+the same event boundary; the task replacement stays blocked until exact native
+owner cleanup is acknowledged.
+
+The Background task's cap counts successful Plan admissions, including a
+traversal later interrupted by pause/supersession. Interruption at admission three
+returns typed InvalidInput budget exhaustion with no financial outcome; it
+creates neither a fourth admission nor an automatic fresh cycle.
+
+
+### Background share saturation requires caller retry
+
+When another Background traversal occupies the aggregate 150-slot cap, the
+refused task receives RateLimited (`BackgroundShareBusy`) with advisory 1000ms
+and no financial outcome. Its demand is cancelled after exact unissued-token
+cleanup; freeing the share does not reactivate it. The caller must explicitly
+request again, with no availability guarantee at 1000ms. No hidden queue, deferred
+admission or new per-refusal timer is installed. IO/signing namespace and task
+storage exhaustion remain hard Internal Capacity without a retry hint.
