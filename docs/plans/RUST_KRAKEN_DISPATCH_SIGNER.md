@@ -356,3 +356,40 @@ retain the original pending/selection/queue position without re-emitting progres
 or advancing a step. Default Unsupported for unreviewed nonce consumers is safe.
 This is consumer-direction fit only; exact pure-hook and global-floor/Claim
 composition remain core source-review gates, with no callback under the lock.
+
+## Remaining socket and hosted-nonce prerequisites
+
+Shared socket owner5c57jl's bounded fit at facd9e4c53e is HOLD for exact native
+Futures challenge timing. Native CONNECT starts no auth deadline; OPEN starts
+15s, and acceptance of a nonempty current challenge resets another15s while
+subscription ACKs remain pending. The separate180s payload watchdog is retained.
+Current AuthEvidence::Accepted clears auth and permits normal interests, so it
+cannot stand for challenge progress. Supervisor has no current-message progress
+reset hook; the CONNECT-origin #1970 snapshot policy is not this native bound.
+A narrow shared prerequisite or explicit owner behavior ruling is required.
+No fake Session/issuer, venue auth timer or early full-auth classification.
+
+An immutable once-per-epoch challenge plus the actual FeedId/socket_epoch can
+bind signing; current managed-socket completion/final dispatch fence retirement.
+That alone does not settle the deadline gap. Whole-family socket geometry also
+needs review: a managed private feed alongside legacy public sockets repeats
+the mixed-dispatch hazard. The combined signer must not imply that either gap
+is closed by provider custody or the existing Spot token Session fit.
+
+Nonce owneruufub4 reports local receipt schema d5743f48f2f and exclusive-release
+registration ff6c2e127c0 after bounded source reviews. Neither is pushed/landed,
+and full dispatcher/provider/Claim composition remains unapplied. These are
+prerequisite artifacts, not an API/runtime clearance for this venue.
+
+The distinct hosted-forward gate is recorded in shared plan dbca148f90e. A
+captured SignRequest and provider/hosted results must carry the exact original
+engine-reserved canonical decimal u64 nonce end-to-end. Stamp-only Input::Http
+or hostedSigningClock is not nonce support. The server must not allocate a
+second nonce. An unsupported compatibility adapter refuses before private I/O,
+rather than returning a late InvalidResult. This stays separate from proving
+continuity between the old secret-digest and new trusted-stable-id namespaces.
+
+This update changes only the plan. No original control, production, Cargo,
+manifest or provider code changes; no new local build or execution claim. Full
+nonce release-fence/repair source, hosted forwarding, namespace continuity and
+Futures socket progress fit remain gates before the combined production cutover.
