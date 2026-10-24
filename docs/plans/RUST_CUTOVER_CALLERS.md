@@ -6904,3 +6904,23 @@ Supported `FetchCandles` uses genuine engine Read admission and managed unsigned
 Bounds remain floor-seconds in startTime/endTime, while native candle response timestamps remain milliseconds. Limit is ignored and no local bound filtering is added. Server order, duplicate timestamps, accepted finite negative/zero values, empty-list success and whole-list failure after a malformed row are preserved, together with the native malformed-row diagnostic. Unsupported interval, startup, WS candles, subscribed books, private sessions and history retain their existing behavior.
 
 Initial Read admission rejection emits one typed engine failure without an outcome. Preparation refusal and parked expiry preserve the engine's local pre-release NotSent fact and typed/native metadata; this is an attempt fact, not proof about a whole command's money effects. Released transport/deadline/integrity failures retain their engine kind without a financial outcome; malformed streamed envelopes receive the shared typed Internal failure. Native row/non-2xx error messages retain their existing fields, with no partial successful list. The separate public depth-query NotSent compatibility contract stays in place. SDK worker/hosted error receivers continue to consume the existing structured fields; no upstream deployment is claimed.
+
+
+## Crypto.com immediate trading command custody
+
+Seven immediate trading refusals now require genuine credential-free Mutation
+admission before publishing the native NotSent error. Invalid clocks, missing
+receipts or full owner capacity instead receive the shared typed refusal once;
+duplicate live ownership publishes no replacement native terminal. No native
+warning or command_error is emitted for denied admission. Finite business
+messages, error kinds, validation/key precedence and unchanged Store are retained.
+Local missing-key refusal carries no remote credential-health evidence.
+
+The fixed SetPositionMode acknowledgement uses shared LocalSetting admission
+without a Store projection: both initial hedged values remain unchanged. Its
+warning is emitted after successful completion, rather than before completion;
+failed/revoked admission emits no warning. Callers receive the same [] payload
+for admitted success. No arguments, signed wire bytes or remote write flow change.
+Empty order/cancel jobs and the asynchronous legacy trade terminals remain for
+the later managed-write conversion. Exactly eight request inventory occurrences
+are removed (Crypto.com 21 to 13); credential-selection inventory is unchanged.
