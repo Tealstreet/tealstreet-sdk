@@ -1,0 +1,71 @@
+# Rust Preflight Inherited Uncertainty
+
+Owner: claude-fe7lgm. Reviewers: claude-uufub4, claude-dazzy3. Source: dazzy3's
+H2 plan, follow-up 3; `RUST_PREFLIGHT_READY.md` ("local no-I/O activation alone
+cannot label the whole recovered intent NotSent").
+
+## Problem
+
+A WriteAfterReads Preflight that fails seals through a fresh, empty
+`CommandWrites` (`request_context_preflight.rs` `seal_preflight`, and the
+admission-failure path in `request_context_preflight_call.rs`). That journal has no
+released attempt, so `failure_projection` returns `NotSent`. When the command
+is a retry of an intent whose earlier attempt may have reached the venue
+(released with no terminal answer, or imported maybe-sent facts), a retry that
+re-reads and then sends nothing reports `NotSent` for the whole intent.
+That is false: the earlier attempt may have landed.
+
+## Design
+
+One monotonic owner fact, `inherited_uncertain`, on the command owner:
+
+- `Cx::inherit_preflight_uncertainty(&Preflight) -> Result<(), Error>`.
+  - It requires genuine custody (`preflight_owner`) and
+    `PreflightPurpose::WriteAfterReads`. A ReadOnly Preflight gets `Invalid`;
+    a stale, revoked or foreign handle gets `Revoked`.
+  - Repeating it is idempotent. There is no way to clear it.
+- The flag lives on `CommandOwner`, not on Preflight `State`, so it survives
+  the Preflight -> Plan phase change.
+- Every `CommandWrites` created for that owner carries it: the Preflight seal,
+  the admission failure, first registration and the declared-mutation seal.
+- In `failure_projection`, an inherited fact counts as uncertainty:
+  `!any_released && !inherited` gives NotSent; `uncertain || overflow ||
+  inherited` gives Unknown. Rejected and partial projections cannot hide it.
+- Success is unchanged. A retry that proves the outcome by a successful
+  terminal seals Success.
+- The fact grants nothing. It never grants a resend, resolves uncertainty,
+  imports facts, renews a deadline or changes a budget. It can only make a
+  failure projection more conservative, so a caller cannot misuse it to hide
+  sent effects.
+
+Out of scope: the planned-execution founder path (#1919). A Preflight carrying
+the fact that is offered to `begin_planned_execution` is refused (`Invalid`)
+before any ID, group, credit or phase work. Carrying the fact into an execution
+journal is a separate item, opened only when a consumer needs it.
+
+## Original REDs (committed before the implementation)
+
+1. A WriteAfterReads Preflight with an inherited fact whose read fails seals
+   `Failure` with `Outcome::Unknown`. Control: the same Preflight without the
+   fact seals NotSent.
+2. The admission-failure path (a capped or refused read) with an inherited fact
+   gives Unknown. Control: the same path without the fact gives NotSent.
+3. The fact survives Plan admission: a Plan that is refused all of its legs
+   (effects-free Rejected) still gives Unknown, not Rejected. Another Plan with
+   no released attempt gives Unknown, not NotSent.
+4. A successful Plan with the fact seals Success (no Unknown on success).
+5. Custody: a ReadOnly Preflight gives `Invalid`. A stale-generation, retired or
+   foreign-issuer handle gives `Revoked`. Each refusal leaves the owner,
+   journal and seal unchanged.
+6. Idempotent and monotonic: calling it twice does not change the projection,
+   and no API clears it.
+7. `begin_planned_execution` refuses an inherited-fact Preflight before
+   spending IDs (a mirror of the capped-Preflight control).
+
+dazzy3's H2 RED1 and RED2 are linked here once confirmed against this API.
+
+## Gates
+
+Engine focused tests (`request_context_preflight*`, `request_context_planned*`),
+clippy in every feature mode, including `--no-default-features`, then fmt. Fresh
+CI. No venue adoption is in this PR.
