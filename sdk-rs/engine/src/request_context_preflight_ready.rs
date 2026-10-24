@@ -79,12 +79,10 @@ impl<P> Cx<'_, P> {
         &self,
         owner: Owner,
     ) -> Result<(), Error> {
-        if self
-            .io
-            .http_preflight_ready
-            .as_ref()
-            .is_some_and(|ready| ready.owner() != owner)
-        {
+        // A ready founder's own physical Plan (#1919) is its same admission.
+        if self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
+            ready.owner() != owner && !self.io.request_contexts.founded_by(owner, ready.owner())
+        }) {
             Err(Error::Revoked)
         } else {
             Ok(())
@@ -297,6 +295,9 @@ impl<V: Venue> Engine<V> {
     }
 }
 
+#[cfg(test)]
+#[path = "request_context_planned_ready_tests.rs"]
+mod planned_ready_tests;
 #[cfg(test)]
 #[path = "request_context_preflight_ready_tests.rs"]
 mod tests;
