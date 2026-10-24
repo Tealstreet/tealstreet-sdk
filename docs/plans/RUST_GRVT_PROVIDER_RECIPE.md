@@ -98,6 +98,18 @@ for representing these facts without a synthetic signing ref or raw key holder.
 Any refused legacy configuration that changes its failure boundary needs an
 explicit behavior ruling; this plan does not silently collapse those cases.
 
+m26ps4 confirmed this is a missing shared seam: key-only setup currently uses
+an empty signing-ref sentinel that Identity::validate rejects, and refs lose
+the native credential-presence distinctions. He owns the proposed
+RUST_CREDENTIAL_ONLY_SETUP.md plan: optional signing material represented as
+explicit absence, plus trusted Absent/Empty/Blank/Nonblank credential facts.
+That proposal is not yet an installed API or a complete consumer CLEAR.
+In particular, do not reject every Mutation solely for missing signing material:
+native CancelOrders, CancelSymbolOrders and SetLeverage use Session-authenticated
+unsigned calls without the scalar. Placement needs the Secp256k1Digest capability;
+unsigned native effects do not acquire that requirement. The shared plan must
+also define empty-value login presentation and egress without fabricating a ref.
+
 Adoption will enable dispatch-signing for the GRVT registry family, declare its
 setup policy in the existing shared construction table, and use the existing
 native/WASM provider bootstrap. A public address can be fetched through trusted
@@ -182,13 +194,16 @@ order even if the serial root is live. Exact receipt and freshness integration
 is reviewed against the actual feature pins before source, without a timer or
 clock policy hidden in the recipe.
 
-The native local signer is deterministic. Native auth resend preserves the
-entire signed Step.body, so fresh provider work for the same digest/key must
-reproduce that body, not just a semantically equivalent signature. Original
-vectors must prove this with the normal provider and the supported external
-fixture. The generic algorithm's structural length check alone does not prove
-determinism: any provider compatibility gap is an explicit review/behavior gate,
-not permission to cache/replay signed bytes or silently change a client order.
+The native local signer is RFC6979-deterministic and low-s: preserve complete
+wire-byte parity locally, including on auth resend. Supported Secp256k1Digest
+does not promise a deterministic external signer. Proposed external acceptance
+is the same digest, actual signer and every frozen unsigned/order field, with
+a verified low-s signature; randomized-k signatures may differ in r/s/v.
+Whether full signed-body identity is required externally is OPEN for the
+overseer's disposition and 9czdjh/fe7lgm fit. Native body-identical originals
+remain unchanged evidence for the local path. Test a real external fixture,
+not only LocalSigner, and neither cache signed bytes nor silently claim that
+structural length checks prove signature validity or determinism.
 
 ## Session headers, unsigned calls and same-call resend
 
@@ -227,22 +242,35 @@ or R11 group-claim revision check. #2069's issue-time group refusal is compatibl
 
 ## Feature opt-in and adoption gates
 
-All three pending engine features are non-default. When GRVT adopts the funnel,
-its safe-cex-engine dependency will explicitly enable **serial-plans** (#2092),
-**condition-waits** (#2094) and **session-bearer** (#2069), along with existing
-required features. Do not enable these globally or for unrelated venue families.
-The GRVT registry family also opts into shared dispatch-signing; local crypto
-uses the existing secp256k1 feature. Exact Cargo spellings/transitive edges and
-refrozen source pins are rechecked against the owner branches at adoption.
+serial-plans (#2092) and condition-waits (#2094) exist as non-default features
+at 201e169d286. **session-bearer is still a proposed non-default feature**:
+m26ps4 owns the OPEN #2069 phase-5 plan at 6945dbbb73c; no Cargo declaration
+exists at that plan pin. Its off-mode contract refuses Some(session) with
+Invalid at issue, so GRVT cannot adopt a bound call before that source lands.
+When the funnel adopts, its engine dependency will explicitly enable all three
+features after their exact source/refreeze checks. No global or unrelated-family
+opt-in. The GRVT registry family also opts into shared dispatch-signing; local
+crypto uses the existing secp256k1 feature.
+
+condition-waits is required specifically for a woken front command that must
+re-park from on_http_preflight_ready when the native builder/prerequisite is
+still unready: park_preflight_for(preflight, None) retains that command's ready
+custody without issuing or failing. Initial entry uses ordinary park_preflight,
+and native callbacks use request_preflight_ready; those alone are ungated.
+The later control ready_front_reparks_without_issue_when_builder_is_unready
+must prove the ready-scope re-park and eventual wake. No bounded wait/timer is
+added to the native builder check. If final adoption eliminates this re-park,
+drop condition-waits rather than paying for an unused feature.
 
 | Gate | Owner / review needed |
 | --- | --- |
 | Serial calls, condition waits, immediate Read continuation and seeded auth resend | fe7lgm; #2092/#2094 and the actual resend source, including status-exempt parsed 1000 |
-| Bundle placement, floor-preserving park/reprepare and wake after refresh | m26ps4; #2069 actual feature source and its revised floor tests |
+| Bundle placement, floor-preserving park/reprepare and wake after refresh | m26ps4; #2069 feature PLAN 6945dbbb73c is OPEN, then actual session-bearer source and revised floor tests |
 | EIP712/Create and login recipes, trusted setup, installed registry/native/WASM path | zs5e83; 9czdjh native/construction review and fe7lgm resend fit |
 | Existing login lifecycle and callback composition | zs5e83 with 55ao7t's login contract; exact real login preparation-failure control retained |
-| API-key-only and identity eligibility without raw key retention | Shared construction/credential owner proposal m26ps4, consumer zs5e83; exact existing seam or named shared gap before source |
-| External provider deterministic same-body resend | 9czdjh/fe7lgm confirm exact primitive/provider contract; no generic API widening assumed |
+| API-key-only and identity eligibility without raw key retention | m26ps4 confirmed shared gap; proposed credential-only setup plan, consumer zs5e83. Explicit absent signing plus trusted presence facts; preserve unsigned Mutation eligibility and define empty-key login before source. |
+| External provider signature criterion on resend | Overseer disposition plus 9czdjh/fe7lgm fit: local complete byte parity, proposed external same digest/signer/frozen fields with verified low-s; full external body identity remains OPEN |
+| GRVT adoption WASM budget and size review | Adopter zs5e83 and overseer: review the actual GRVT build with serial-plans, needed condition-waits, session-bearer, dispatch-signing and secp256k1 enabled; measured release/CI size and unchanged replay/budget gates before adoption. No assumed headroom or budget increase. No builds at this plan checkpoint. |
 
 ## Later originals and preservation proof
 
@@ -250,16 +278,19 @@ These are requested next-phase tests, not compiled controls or claimed REDs:
 
 1. Native order and builder EIP712 vectors for both chains, exact wire body and
    checksum signer; 65-byte provider parity conversion and signature recovery.
-2. Installed local versus async external provider produces identical placement
-   bytes through real Prepare/Sign/Bind/Claim. Capture SignRequest: exactly the
-   two order operations, no API key/scalar or extra material in venue state.
+2. Installed local provider preserves native placement bytes through real
+   Prepare/Sign/Bind/Claim. An async external fixture must prove the same
+   digest/signer/frozen fields and verified low-s signature; exact external
+   signed-body parity is subject to the named OPEN disposition. Capture
+   SignRequest: exactly two order operations, no API key/scalar in venue state.
 3. Provider login Present produces the exact native edge POST/header/body;
    no scalar/payload operation, no private bundle on login. Missing provider,
    undeclared/wrong algorithm, bad scalar, wrong receipt/result/signature and
    delayed provider expiry each fail once, with no raw fallback or provisional
    order. Include public-only and API-key-only constructor controls.
 4. Parsed-1000 single resend through actual serial DATA custody preserves the
-   full order body and two independent auth/network ledgers. Second 1000 has
+   full local-provider order body and two independent auth/network ledgers;
+   external signature acceptance follows the named disposition. Second 1000 has
    no third send. Cover 401/408/503 x parsed/nonparsed bodies and shared outcome
    disclosures already pinned by bf61; no 408/5xx-wide resend permission.
 5. Stale reprepare, account-ID-only rotation and identical-value refresh keep

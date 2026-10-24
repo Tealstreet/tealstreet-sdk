@@ -370,7 +370,13 @@ installed constructor, with exactly the API login key and order-signing scalar
 as the hosted/local secret inputs. Reviewers are 9czdjh for native recipe and
 construction, and fe7lgm for same-call resend. This is plan-only authorization;
 bf61 originals remain byte-exact and no builds are permitted during size builds.
-GRVT will explicitly enable the non-default serial-plans (#2092),
-condition-waits (#2094) and session-bearer (#2069) engine features at adoption.
-Exact feature/source pins, credential-only construction fit and deterministic
-provider same-body resend remain named source gates in the recipe plan.
+GRVT will explicitly enable non-default serial-plans (#2092), condition-waits
+(#2094, for re-parking a woken command from ready custody) and session-bearer
+at adoption. The first two exist at 201e169d286; session-bearer remains m26ps4's
+OPEN #2069 feature proposal at 6945dbbb73c, not an existing Cargo declaration.
+The adopter gets its own measured WASM budget review for these features plus
+dispatch-signing and secp256k1. Exact source pins, credential-only construction
+and external signature acceptance remain named gates in the recipe plan.
+bf61's native full-body resend evidence is local-provider parity; the proposed
+external same-digest/signer/frozen-fields plus verified low-s criterion needs
+explicit disposition before replacing a full signed-body requirement.
