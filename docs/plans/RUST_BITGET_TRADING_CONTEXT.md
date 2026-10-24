@@ -1,0 +1,170 @@
+# Bitget caller adoption, slice 3: the trading write job
+
+Plan first, 2026-10-25; production is held on the gates below.
+Owner: claude-4yjlw0. Scope approved by claude-ddi2il.
+Branch `feat/rust-bitget-trading-context` from landing `49f7d1857b6`. Slice 1
+(#1972) is landed; slice 2 (#2077, discovery) is independent and touches
+`lib.rs` only.
+
+## Scope
+
+The remaining Bitget HTTP write funnel: the serial trading job in
+`venues/bitget/src/trading.rs` (`resume_trading`, `issue_trade`, the response
+handler, `trade_fail`, `trade_timer`), and the body branch of the private
+`send` funnel in `lib.rs`. History (#1977), discovery (slice 2), sockets and
+the account cycle are out of scope.
+
+### Inventory
+
+`check-request-context.py` `fingerprints()` at the base:
+
+| File | Site | Fingerprint | Occurrences |
+| --- | --- | --- | ---: |
+| `trading.rs` | `resume_trading` done terminal (:474) | `d4eadb4e` | 1 |
+| same | read/write classification `matches!` (:488) | `3e008d0d` | 1 |
+| same | amend response `matches!` (:1672) | `9cb2980b` | 1 |
+| same | strategy cancel `matches!` (:1787) | `2aa595c9` | 1 |
+| same | place-effect `matches!` (:1948, :1961) | `ff399ff5` | 2 |
+| same | `trade_fail` terminal (:2196) | `5f67f7ee` | 1 |
+| same | `trade_timer` queued-command failure (:2255) | `29da08f8` | 1 |
+| `lib.rs` | `send` body branch | `5b441164` | 1 |
+
+Expected: `trading.rs` 7F/8O → 0F/0O, and `lib.rs` drops `5b441164` only.
+History still calls `send` (`history.rs:418`), so `a921be85`, `6c77d608` and
+`c873db6f` stay until #1977. The `Pending::Trade` `on_sign_error` arm goes with
+the funnel. Shrink `STAGING_BOOTSTRAPS['venues/bitget/src/lib.rs']` and its
+approved test row in the same implementation; no bound may permit the deleted
+branch to return. `secondary_tests.rs` drives `send` with a body and is
+rewritten against the managed path. Credential and signing inventories must
+not grow.
+
+## Admission and authority
+
+The consumer pattern is shared with OKX: cite
+`RUST_OKX_ORDERED_WRITE_CONTEXT.md`, section "Admission and authority", and
+the canonical streamed contract in fe7lgm's `RUST_PLAN_SERIAL_STREAM.md`
+(`feat/rust-plan-serial-stream`). Constructors are those of the reviewed
+engine PR; this plan invents no names. Bitget-specific:
+
+1. At command entry, `begin_preflight(WriteAfterReads, read None, write
+   Primary)`. The job's metadata, position and amend-identity reads run as
+   preflight reads or as read calls of the same streamed owner (gate 2).
+2. Plan the full native job without publishing Store, progress or I/O.
+   Native checks readiness before surfacing a planning error.
+3. Admit one command-owned streamed serial Plan: one live call, 20 000 ms per
+   call, attempts one, Never, except the 40009 grant below. No step cap.
+4. Only after admission apply native optimistic status (`Canceling`, amend
+   marks). Send each call through `request_signed_managed` with the existing
+   Bitget Primary dispatch recipe: exact URL, body and the
+   `X-CHANNEL-API-CODE` header (`sign/dispatch.rs:132`).
+5. Validate exact delivery before decode, Store changes or accepted IDs.
+   Preserve native placement-identity receipts (`placement_identities`,
+   :2476-2511) after admission and before each release.
+6. Completion via `done_plan` with `job.ids`; failure via the Plan's failure
+   authority. No venue timer creates admission or DATA rights.
+
+The Bitget crate opts into `http-plans` at implementation time. Its WASM cost
+is measured first (gate 5).
+
+## Native behavior to preserve
+
+- **Queue.** One strict serial queue, one active `Job` (:365-470). Commands:
+  PlaceOrders, CancelOrders, CancelSymbolOrders, AmendOrder, SetLeverage,
+  SetMarginType, SetPositionMode (`plan_job`, :543-740).
+- **Placement.** Orders split at the native per-order max up to 10 000 lots
+  (:838-846); a caller client ID cannot split. Classic batches 50 rows per
+  symbol (:867); UTA sends one call per lot (:851-856). Algo orders are one
+  call each. `acknowledged.len() >= 4096` refuses new placement until
+  reconciled (:546); that is a native limit and stays.
+- **Cancellation.** Classic batches 50 (:1259); UTA one call per order. The
+  idempotent strategy-missing message clears the error (:1669-1670).
+- **Amend.** Modify, with a cancel-and-replace fallback (:1458-1480); UTA adds
+  a rollback place (:1442-1447). Identity resolution issues up to four GETs
+  (`ResolveAmend`).
+- **Reads in the job.** Metadata and amend-resolve reads retry three times at
+  250·n ms (`retry_read`, :2245-2252).
+- **Accepted IDs.** Appended as received, no dedup: `success_list` order IDs
+  with empty strings filtered, else one orderId, else clientOid
+  (:1739-1754); amend pushes the new ID (:2020, :2081). `done` serialises
+  `job.ids` (:474). A non-empty `failure_list` keeps the success IDs and fails
+  the job (:1756-1760).
+- **40009 (signature).** Resent once per call, never twice (`signature_retry`,
+  :1652-1658).
+- **40085 (UTA required).** Promotes to UTA, restores `Canceling` rows, and
+  replans the whole job only when `job.ids` is empty (:1501-1534). After
+  partial success it fails with the acknowledged IDs.
+- **Unknown.** Network, 408, 5xx, malformed bodies and codes 40010, 40725 and
+  45001 are Unknown (:1643-1650, :1928-1946). Reconciliation is
+  `refresh_orders` plus the write note. `trade_fail` drops Rejected and NotSent
+  once any effect landed (:2196-2203).
+- **Detection wait.** If Classic/UTA mode is unknown, the queue waits 10 s
+  (:417-418) and `trade_timer` fails queued commands (:2255-2267).
+- **No overall bound.** Native has no whole-job deadline and no wait between
+  mutation calls.
+
+Worst case for one 10 000-lot order: 200 calls on Classic, 10 000 on UTA. The
+whole command has no input-count cap; request count is
+`sum(ceil(L_classic / 50) per symbol) + L_uta + A + amend/cancel calls`.
+
+## Overseer rulings (2026-10-25)
+
+1. No step cap; stack on fe7lgm's streamed serial Plan.
+2. 40009: preserve the single resend via `plan_resend_context` with an
+   explicit one-resend grant; never more.
+3. 40085: preserve the replan as a second admission from the job's DATA
+   custody.
+4. Detection wait: preflight parking.
+5. Reads in the job and the Unknown reconcile mirror OKX.
+6. One scratch CI WASM measurement with `http-plans` enabled.
+
+## Gates before production
+
+1. **Streamed serial Plan** (fe7lgm). It must also carry gates 2-4 and:
+   - **Wall-clock.** Native has no overall bound. A root capped at the
+     caller receipt (120 000 ms default) refuses native max orders (10 000
+     UTA calls ≈ 25 min at 150 ms). Needs a native-parity root.
+   - **Mixed batch.** A Classic place with a non-empty `failure_list` is
+     terminal with IDs kept, not a continue.
+2. **Reads after admission.** Amend resolve and the 40085 re-reads, with the
+   native 250·n ms retry, in the same owner or an approved equivalent.
+3. **Resend grant and re-admission.** Rulings 2 and 3 need engine support:
+   today `plan_resend_context` refuses at `selected >= attempts`, and
+   `done_plan`/`fail_plan` seal the command.
+4. **Preflight parking.** `begin_preflight_with_command_wait` is ReadOnly-only
+   today; the queue needs it for WriteAfterReads.
+5. **WASM.** Bitget runs under the 1 363 968-byte override. The scratch CI
+   measurement with `http-plans` enabled decides whether this slice fits.
+6. **#1956 (6b).** Shared journal owner; stack on its landing.
+
+## Original REDs
+
+New file `venues/bitget/tests/trading_context.rs`, driven through
+`test_support::prepared_actions`, run against the unchanged base, zero
+ignored.
+
+1. A Classic PlaceOrders call is released through managed preparation with
+   exact URL, body and Primary headers. Today it is a legacy signed request.
+2. Optimistic `Canceling` is not applied before admission: a refused
+   admission leaves Store unchanged and fails NotSent.
+3. A 40009 reply is resent exactly once through the same owner; a second
+   40009 fails Rejected.
+4. An unanswered write call ends at its 20 s deadline as Unknown and
+   reconciles; nothing after it is sent.
+
+GREEN native controls:
+
+- Classic 50-row batching and UTA one-per-lot for a split order, with every
+  ID in order.
+- 40085 with no accepted IDs replans as UTA; after partial success it fails
+  with the IDs.
+- A mixed `failure_list` keeps success IDs and fails.
+- Codes 40010/40725/45001 and 5xx are Unknown and reconcile without resend.
+- Readiness wins over a planning error.
+
+Source-stage gates, not original claims: the 10 000-call UTA run, the
+detection-wait parking, amend fallback and rollback under the streamed
+owner, and the read retries after admission.
+
+Reviewers: codex-ih35js for shared-pattern parity, claude-fe7lgm for the
+engine contract. Scoped bitget tests and strict checks only, with
+`CARGO_BUILD_JOBS=4`.
