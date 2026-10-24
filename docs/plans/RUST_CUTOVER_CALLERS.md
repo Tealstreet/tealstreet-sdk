@@ -6350,3 +6350,14 @@ fetchPublicTrades and findOrderByClientOrderId consumers retain all successful
 native history signing/pagination/coverage paths. Explicitly bounded income
 with caller limit0 still dispatches native HTTP. This is not managed network
 history or signer adoption.
+
+### Crypto.com current shared failure contract
+
+Managed delivered text without the expected list at HTTP200 retains the native
+message and now carries the shared engine Internal kind, with the established
+public-read NotSent outcome. HTTP500 retains its native HTTP-error string.
+This follows the existing typed undecodable-response seam; the adapter does not
+demote the kind to mimic legacy string-only callbacks. The20s Context lifetime
+is explicitly a new admission-through-preparation/response whole-command bound,
+distinct from the old host's physical HTTP timeout fallback. Raw candle t/order
+and malformed numeric-string-to-zero coercion remain unchanged.

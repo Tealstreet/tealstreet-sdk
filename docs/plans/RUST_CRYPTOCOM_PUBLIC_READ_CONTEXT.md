@@ -153,3 +153,25 @@ targets execute23 controls:16 behavioral assertion REDs plus seven native workin
 positives, zero ignored. Both targets run with --no-fail-fast so neither is
 omitted after the first target's expected failure. This checkpoint changes only
 the plan and tests, not source or manifest.
+
+## Managed checkpoint
+
+After all three plan gates cleared, source7d2a5b2eb60 was genuinely plain-merged
+at4c429259ceb. Only shared append conflicts occurred and were resolved as the
+complete actual landing plus exact historical own suffix; unowned inventory maps
+were verified exact. The five history branches now directly admit and settle
+their own Context, replacing the old venue issuer wrapper. The original auth-health
+control from27b051a8907 is retained verbatim; it passes on the actual shared fix.
+
+The24 managed controls pass. One original native-positive expectation has an
+explicit adoption change: engine-delivered undecodable HTTP200 text now retains
+shared Internal/NotSent with the same message; legacy used its string callback.
+The native HTTP500 error stays untyped with its exact original message. This is
+shared typed failure propagation, not a local classifier/demotion. Full native
+checks and independent runtime reviews follow; no CI/readiness claim yet.
+
+Local verification:448 Crypto.com + Binance tests across41 targets pass, scoped
+all-target/all-feature strict Clippy and fmt pass, both request-context checks
+(15 dedicated checker tests) and full bans pass. Independent runtime reviews
+are requested on the committed checkpoint; CI remains the replay/size/CPU/memory
+authority. No merge without the overseer's explicit window.

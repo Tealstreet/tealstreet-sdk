@@ -2769,3 +2769,13 @@ native history remains untouched. Exactly nine occurrences/seven entries are
 removed,30/27 becomes21/20. No background discovery, private signer, account,
 trading or shared-policy migration is implied. Architecture gate No: all
 release, lifetime, root-validation and finalization authority stays in the engine.
+
+### Crypto.com Read adoption on actual shared seams
+
+The five local history branches now invoke genuine entry directly; the historical
+finish_local_history issuer/finalizer wrapper is removed. One pure policy serves
+local terminals and unsigned candles. The shared public-auth-health fix is actual:
+the original public_typed_route_auth_errors_keep_metadata_without_auth_health_evidence
+control preserves AuthInvalid/Expired/Permission metadata while health stays0,
+without any venue workaround. Exact seven-fingerprint/nine-occurrence prune is
+unchanged; discovery's shared get sender and every private/retrying site remain.

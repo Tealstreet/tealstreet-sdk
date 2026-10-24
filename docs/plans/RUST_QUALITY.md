@@ -1393,3 +1393,21 @@ Clippy/fmt and fifteen ratchet controls. A later independent-review callback
 control exposes the engine's credential-free public typed-error auth-health
 accounting defect (health1 versus0); shared-owner closure remains required.
 The adapter preserves kind/metadata and adds no local demotion or exemption.
+
+### Crypto.com refreshed original and managed controls
+
+The test-only original branch is genuinely merged onto actual6a6845c4491; its
+expanded checkpoint1d576566cb4 runs both targets with --no-fail-fast and proves
+16 behavioral assertion REDs plus seven native positives, zero ignored. Seven
+added controls pin private range/nanosecond and unsupported-interval admission
+at bad clock/full capacity, retained genuine peers and real settlement recovery,
+and stale bind/item/failure/timer isolation with a distinct exact replacement row.
+The original public-auth-health regression from27b051a8907 is retained verbatim
+and passes against the actual shared fix. Managed targets pass24 controls.
+
+One original working expectation is intentionally updated: malformed delivered
+text at200 keeps its exact message but now carries shared Internal/NotSent. The
+unchanged native baseline is preserved in the original checkpoint; this change
+is declared in CALLERS rather than hidden by stripping the engine's typed cause.
+HTTP500 still returns its native string-only error. Existing financial assertions
+remain; tests/public.rs only drives the genuine prepared executor at its old clocks.

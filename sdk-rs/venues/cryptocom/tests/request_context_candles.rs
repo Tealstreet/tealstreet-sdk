@@ -456,7 +456,7 @@ fn unsupported_interval_is_local_and_original_root_bound_still_applies() {
 }
 
 #[test]
-fn finite_native_undecodable_stream_body_keeps_string_failure() {
+fn undecodable_stream_body_keeps_message_and_shared_typed_failure() {
     for status in [200, 500] {
         let mut e = engine(Options::default());
         let packet = release(&mut e, NOW, 16);
@@ -465,11 +465,13 @@ fn finite_native_undecodable_stream_body_keeps_string_failure() {
         assert_eq!(result.len(), 1);
         assert_eq!(
             *result[0].as_ref().unwrap_err(),
-            VenueError::new(if status == 500 {
-                "Crypto.com HTTP error 500"
+            if status == 500 {
+                VenueError::new("Crypto.com HTTP error 500")
             } else {
-                "response did not contain the expected list: unavailable"
-            })
+                VenueError::new("response did not contain the expected list: unavailable")
+                    .kind(ErrorKind::Internal)
+                    .outcome(Outcome::NotSent)
+            }
         );
         no_io_auth(&actions);
         assert_eq!(e.health().auth_failures, 0);
@@ -595,4 +597,39 @@ fn original_retired_bind_item_failure_and_timer_do_not_touch_reused_owner() {
     );
     assert!(e.take_frame(NOW + 20_007.).is_none());
     assert_eq!(e.health().auth_failures, 0);
+}
+
+#[test]
+fn public_typed_route_auth_errors_keep_metadata_without_auth_health_evidence() {
+    for kind in [
+        ErrorKind::AuthInvalid,
+        ErrorKind::AuthExpired,
+        ErrorKind::AuthPermission,
+    ] {
+        let mut e = engine(Options::default());
+        let (preparation, _, _) = parked(&mut e, NOW, 17);
+        e.http_preparation_failed(
+            NOW + 1.,
+            preparation,
+            Error::State,
+            VenueError::new("public route setup refused")
+                .kind(kind)
+                .venue_code("route"),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        failure(&actions, 17, kind, Some(Outcome::NotSent));
+        assert_eq!(
+            terminals(&actions, 17)[0]
+                .as_ref()
+                .unwrap_err()
+                .venue_code
+                .as_deref(),
+            Some("route")
+        );
+        assert_eq!(
+            e.health().auth_failures,
+            0,
+            "a credential-free public route failure is not account-auth evidence"
+        );
+    }
 }

@@ -21,6 +21,16 @@ use safe_cex_engine::{
 use std::collections::{BTreeMap, HashMap, HashSet};
 use wire::*;
 
+fn read_policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
@@ -923,13 +933,7 @@ impl Venue for Cryptocom {
                 to_ms,
                 ..
             } => {
-                let Ok(context) = cx.admit_http_command(Policy {
-                    operation: Operation::Read,
-                    credential: None,
-                    timeout_ms: 20_000,
-                    pacing: None,
-                    retry: RetryPolicy::Never,
-                }) else {
+                let Ok(context) = cx.admit_http_command(read_policy()) else {
                     return;
                 };
                 match interval(timeframe) {
