@@ -51,7 +51,7 @@ bounds the root exactly; each child is capped by it. Do not reconstruct a wait
 or use a default deadline when its genuine stamp is absent.
 
 Pending::Candles retains the exact root and child. Queue with the landed
-`request_managed_with_headers` API and `stream_http` data selector. Every
+`request_managed_with_headers` API and `stream_response(request, ArrayAt::Field("data"))`. Every
 streamed row and whole response must pass exact `validate_read_http_delivery`
 BEFORE codec/envelope/body work. Success and codec failure use contextual
 completion of the original root, and retire its exact child. A queue refusal
@@ -71,7 +71,7 @@ is invented for the public Read.
 New isolated `tests/candle_context.rs` must compile against unchanged production.
 Expected assertion REDs cover eager raw release, missing unprepared deadline,
 late DATA at the new physical bound, exact shorter caller bound, invalid clock,
-shared capacity, duplicate owner and typed released transport failure. Native
+shared capacity, host preparation custody and typed released transport failure. Native
 wire/financial codec, empty/error envelopes, zero retries, local precedence and
 engine duplicate-response suppression are working controls. Every RED is a
 new-contract adoption boundary, not evidence that a pre-existing managed path
@@ -86,3 +86,48 @@ and credit-recovery controls, stale-generation recovery, and actual #2040
 composition as required by landing order. Reuse the existing family CI/size gates
 without budget/profile changes; only push a head intended to freeze and never
 dispatch a duplicate explicit run when a PR-triggered run covers that head.
+
+## Executed original receipt
+
+Plan commit: `337b9c9c7ef`. Original controls: `9e85259220e`.
+Scoped unchanged-source execution: **14 tests, 8 assertion REDs, 6 GREENs,
+zero ignored**. Strict Clippy for only the new target passes. No source, old
+fixture, Cargo, map or key-selection change is included.
+
+The eight first failures are: eager raw HTTP; missing pre-Prepare 20s timer;
+raw HTTP on NaN; no shared capacity terminal after 128 parked requests; missing
+Timeout at the physical deadline; missing Timeout at the 37ms caller receipt;
+zero managed preparations for a preparation-refusal control; and released
+Network losing its kind. Capacity recovery, stale late Bind and typed precommit
+outcome assertions after those failures remain unexecuted adoption gates.
+
+The six GREENs pin exact URL/method/header order/PublicCors/body and all OHLCV
+fields, native fractional flooring plus empty success, strict malformed/status/
+envelope errors without retries, initial validation precedence, duplicate-entry
+preservation of a real first request, and duplicate-response suppression.
+All fixtures use native metadata/ticker startup at explicit event clocks;
+managed cases use genuine prepare/bind/claim via `prepared_actions`.
+Absence-of-new-HTTP assertions explicitly permit cleanup Cancel actions.
+
+An initial test-only CommandId-width compile error was corrected before this
+executable checkpoint and is excluded from RED evidence. The first post-build
+collector refinement allowed cleanup Cancel; the final immutable control file
+was rerun with the same 8 RED/6 GREEN result.
+
+## PublicCors source gate
+
+Actual `admit_caller_read_root(None,None)` has no egress argument, while
+`http_leg_context` only inherits its parent's egress. `route_request` does not
+rewrite a queued ManagedHttp Prepare. Therefore the straightforward child API
+above does not yet prove preservation of native explicit PublicCors.
+
+Core-owner fit review is requested for an existing-API composition: after the
+real retained root, issue a same-command physical Read with
+`http_context_with_egress(Scope::Command(actual_command), policy,
+Egress::PublicCors)`, its timeout capped by min(20,000, genuine Remaining).
+The engine enforces the retained root's upper bound and exact DATA validation
+checks real root/current context/same owner. This is a proposal, not source
+clearance: no admission, fake identity, raw transport fallback, fresh numeric
+completion or recreated caller receipt may replace the original root. If this
+shape is not supported, the scope waits for a separate owner-reviewed egress
+entry hook. No shared runtime edit is authorized by this plan checkpoint.
