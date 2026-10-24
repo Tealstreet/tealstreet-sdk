@@ -1648,6 +1648,20 @@ impl<P> Default for Io<P> {
     }
 }
 
+/// The delivery that may authorize or forbid a command's completion. A
+/// session delivery is no command's, so its callbacks settle like a
+/// delivery-less (socket or timer) callback; it does not bind waiters.
+fn completion_delivery(
+    delivery: &Option<request_context_registry::Delivery>,
+) -> Option<&request_context_registry::Delivery> {
+    delivery.as_ref().filter(|delivery| {
+        !matches!(
+            delivery.context.owner(),
+            crate::request_context::Owner::Session { .. }
+        )
+    })
+}
+
 impl<P> Io<P> {
     /// Bounded: past the cap, coalesce into one full read that waits for the
     /// latest merged deadline, so no rate or credential wait is cut short.
@@ -2402,7 +2416,7 @@ impl<P> Cx<'_, P> {
         let delivery = if observer {
             None
         } else {
-            self.io.http_delivery.as_ref()
+            completion_delivery(&self.io.http_delivery)
         };
         let seal = self
             .io
