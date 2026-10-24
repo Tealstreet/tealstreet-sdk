@@ -595,18 +595,28 @@ fn prepare_local_signer_with_policy(
     // A public-only PublicRead provider holds no primary, so only Read roles select.
     let primary =
         primary.filter(|_| !(public_data_only && read_policy == ReadCredentialsPolicy::PublicRead));
+    // Trusted setup computes the result; a caller-supplied one is refused, with
+    // any read material wiped first.
+    if read_policy == ReadCredentialsPolicy::ValidateOnly
+        && options.read_credentials_valid.is_some()
+    {
+        if let Some(read) = options.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+        return Err(invalid("Unexpected read credential validation result"));
+    }
     let read = options.read_credentials.take();
     let secondary = if read_policy == ReadCredentialsPolicy::ValidateOnly {
-        // Trusted setup computes the result; a caller-supplied one is refused.
-        if options.read_credentials_valid.is_some() {
-            return Err(invalid("Unexpected read credential validation result"));
-        }
         // Validated once here; the material is wiped and never installed.
         options.read_credentials_valid = read.map(|mut read| {
             let valid = read.validate().is_ok();
             read.erase_secrets();
             valid
         });
+        // Native order: the read-key refusal precedes any fallible primary decode.
+        if let Some(valid) = options.read_credentials_valid {
+            safe_cex_engine::ReadCredentials::status(valid).map_err(invalid)?;
+        }
         None
     } else {
         read.map(|mut read| LocalIdentity {
@@ -807,19 +817,46 @@ pub fn build<T: Visit>(
 
 /// The validation result travels only for a ValidateOnly family, never with
 /// the material, and a false result keeps the native construction refusal.
-/// Every path, dispatch-signing or not: an already validated ValidateOnly key
-/// is wiped and replaced by its result before any venue sees options.
-fn take_validate_only_read_key(
+/// Host-side setup (the WASM constructor's JSON provider setup) runs this before
+/// building a provider, so a false read-key result keeps native precedence over
+/// any primary decode failure.
+pub fn read_key_preflight(venue: &str, options: &EngineOptions) -> Result<(), VenueError> {
+    match options.read_credentials_valid {
+        Some(false)
+            if construction::read_credentials_policy(venue)
+                == construction::ReadCredentialsPolicy::ValidateOnly =>
+        {
+            safe_cex_engine::ReadCredentials::status(false).map_err(invalid)
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The one construction-time read-key validation, on every path. An invalid
+/// key keeps the native refusal; a ValidateOnly key is replaced by its result.
+/// Refused or replaced material is wiped before it is dropped.
+fn validate_read_key(
     policy: construction::ReadCredentialsPolicy,
     options: &mut EngineOptions,
-) {
-    if policy == construction::ReadCredentialsPolicy::ValidateOnly
-        && let Some(mut read) = options.read_credentials.take()
-    {
-        let valid = read.validate().is_ok();
+) -> Result<(), VenueError> {
+    let Some(mut read) = options.read_credentials.take() else {
+        return Ok(());
+    };
+    if options.read_credentials_valid.is_some() {
         read.erase_secrets();
-        options.read_credentials_valid = Some(valid);
+        return Err(invalid("Unexpected read credential validation result"));
     }
+    let result = read.validate();
+    let validate_only = policy == construction::ReadCredentialsPolicy::ValidateOnly;
+    if validate_only || result.is_err() {
+        read.erase_secrets();
+    } else {
+        options.read_credentials = Some(read);
+    }
+    if validate_only {
+        options.read_credentials_valid = Some(result.is_ok());
+    }
+    result.map_err(invalid)
 }
 
 fn read_key_options(
@@ -916,13 +953,7 @@ pub fn build_with_signer<T: Visit>(
     ))]
     local_signing_rules(venue, &options)?;
     let read_policy = construction::read_credentials_policy(venue);
-    if options.read_credentials.is_some() && options.read_credentials_valid.is_some() {
-        return Err(invalid("Unexpected read credential validation result"));
-    }
-    if let Some(read) = &options.read_credentials {
-        read.validate().map_err(invalid)?;
-    }
-    take_validate_only_read_key(read_policy, &mut options);
+    validate_read_key(read_policy, &mut options)?;
     read_key_options(read_policy, &options)?;
     #[cfg(feature = "kraken")]
     if matches!(venue, "kraken" | "krakenspot")
