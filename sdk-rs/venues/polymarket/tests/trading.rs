@@ -1247,3 +1247,58 @@ fn failures_after_an_effective_step_are_never_rejected_or_not_sent() {
     assert_eq!(error.outcome, None);
     assert_ne!(error.outcome, Some(Outcome::Unknown));
 }
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for signer/import and Plan seams"]
+fn p0_write_bare_4xx_is_not_execution_refusal() {
+    let mut h = H::new();
+    h.command(Command::PlaceOrders {
+        command: 731,
+        orders: vec![order()],
+    });
+    let request = h.take("/order");
+    h.respond(request, 400, "{}");
+    let [error] = h.failures.as_slice() else {
+        panic!("one terminal failure: {:?}", h.failures);
+    };
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(h.done.len(), 1);
+    assert!(matches!(&h.done[0], (731, Err(_))));
+    assert!(
+        !h.http
+            .iter()
+            .any(|request| request.url.ends_with("/order") && request.method == Method::Post)
+    );
+}
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for signer/import and Plan seams"]
+fn p0_write_unmatched_error_message_is_unknown_internal() {
+    let mut h = H::new();
+    h.command(Command::PlaceOrders {
+        command: 732,
+        orders: vec![order()],
+    });
+    let request = h.take("/order");
+    h.respond(
+        request,
+        200,
+        r#"{"success":false,"orderID":"","errorMsg":"not enough balance","status":""}"#,
+    );
+    let [error] = h.failures.as_slice() else {
+        panic!("one terminal failure: {:?}", h.failures);
+    };
+    assert_eq!(
+        error.message,
+        "Polymarket placement rejected: not enough balance"
+    );
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
+    assert_eq!(h.done.len(), 1);
+    assert!(matches!(&h.done[0], (732, Err(_))));
+    assert!(
+        !h.http
+            .iter()
+            .any(|request| request.url.ends_with("/order") && request.method == Method::Post)
+    );
+}

@@ -130,3 +130,111 @@ Source SHA256: `50b40c457be9e31962a274a1a4ff5900122d1ec566e5a7438ffc887e7db11d4f
 | `81a211396ad294f6b186e78e613ecfa112d1b4452823ff28eadb89ec37be690f` | 1 | 435 `trading_command` → WRITE + LOCAL | `cx.fail(command_id, "Polymarket command is already pending")` |
 | `6c356bc987bef30ec8929663a2849ca69e0f04b910a2e4838a3d947c8a96b3ec` | 2 | 439 `trading_command` → WRITE + LOCAL; 443 `trading_command` → WRITE + LOCAL | `cx.done(command_id, "[]".into())` |
 | `5b02bb983a5e994687c385c6cbe7676982daf9cf00a067f01bf5aa35a2a29067` | 1 | 632 `trading_command` → WRITE + LOCAL | `cx.fail(command_id, not_sent(error))` |
+
+
+## P0 write adoption, classifier pin 2026-10-23
+
+Reverified against actual `258c880656f9714f14b498e046b8ee52658e702a`
+(the venue production source matches the earlier 6741c1c audit). Plans and
+regressions only; no runtime, inventory or capability change.
+
+| Audit row | Reverified source | Required caller contract |
+| --- | --- | --- |
+| P1 native refusal kind | `trading.rs::trading_response` turns a decoded placement errorMsg refusal into a plain VenueError. Existing tests pin no kind/outcome. | Only an evidence-backed exact native message row may prove refusal and its kind; unsupported messages remain uncertain. |
+| P1 bare 4xx | `trading.rs::http_failure` turns every bare 4xx except 408 into Rejected, with status-specific auth/rate-limit kinds. | Status kind may survive, but status alone cannot prove a write refused; unresolved execution remains Unknown with no resend. |
+
+Classifier owner claude-dazzy3 adjudicated the representation on this date:
+`success:false` is a decoded error envelope, not a native code. Supply
+`Native { code: NativeCode::None, message: errorMsg }` exactly as decoded to
+`Cx::classify_write`. Only exact `Key::Message` rows can match; each refusal row
+must cite docs or a tape proving pre-execution refusal. No contains/prefix
+matching; normalize only documented suffix grammar in the native codec.
+Keep unlisted Unknown(None), success codes empty for this code-less envelope,
+and no undocumented status rows. An unmatched 2xx error envelope classifies
+Unknown(Internal); a bare 4xx is Unknown with the engine status kind. Do not
+invent a refusal meaning for the fixture text `not enough balance`.
+The P1 typed-refusal row remains evidence-gated until a real exact row is
+reviewed; this plan does not claim the conservative fallback closes it.
+
+### Landed classifier and write-journal boundary
+
+Use actual #1837 (`e0322577e354739dde6d7e5011e74ab660145885`), not the
+older draft signatures. Declare one family `classify::CodeTable` with `rows`,
+`success`, explicit `unlisted: Verdict::Unknown(None)` and evidence-backed
+`status` entries only. `Key::Message` is exact and code-less; never mix message
+and code rows or introduce substring/prefix inference. Decode integer codes
+strictly via the native codec / `classify::decode_int`, never through f64.
+Engine precedence owns transport, 408/5xx, native evidence, status and malformed
+success. A native code or 2xx alone never proves successful execution.
+
+A genuine command Context uses the actual command entry and real credential;
+managed signed HTTP carries it through Pending. At the exact delivered attempt,
+`classify_write(&ctx, &TABLE, native, message)` creates the failure Fact.
+`http_write_fact(&ctx, WriteFact::Failed { fact, known_effects }, reports)`
+records it; `http_write_failure` is the whole-failure shortcut. Complete native
+success reports `WriteFact::Accepted { order_ids }`; malformed success uses
+`http_write_unproven`. A real batch acknowledgement uses `http_write_batch`
+with caller-ordered items and the native expected count. The codec proves
+identity/uniqueness and correlation; preserve individually known IDs as
+reconciliation evidence without invented caller counts on an incomplete reply.
+
+Only the engine's opaque resend grant may feed `http_resend_context`, retaining
+the original root, deadline and one-shot budget. Use `http_write_leg_intent`
+only for permitted intent narrowing before release. Finish once through
+`done_context`/`fail_context`; CommandWrites owns aggregation, partial IDs and
+whole-command demotion. Do not use private engine-test-only `http_write_result`,
+transitional unmanaged `classify::write`, local status/outcome ladders or a
+numeric completion fallback. A preparation refusal's local NotSent fact is
+valid, but prior released siblings still determine the whole-command outcome.
+
+No runtime conversion is authorized in this plan/tests slice. Missing reusable
+signing, session, Plan/CallWindow or reconciliation ownership remains a shared
+prerequisite; no per-venue replacement. On adoption, reverify actual seam pins,
+remove RED ignore markers while retaining behavior assertions, prune only the
+venue's genuinely removed legacy fingerprints, and add a landed CALLERS
+appendix. Plan/tests preparation neither prunes inventory nor closes P0 rows.
+
+### Phases, authority and original RED controls
+
+After the provider-held signer/import prerequisites, adopt a single CLOB
+placement/cancel with genuine Mutation authority; then cancel batches,
+placement fan-out and cancel/replace under shared Plan admission. Keep L1
+wallet, session-derived L2 credential, funder/signer type and order EIP-712
+domains distinct. The signer owner supplies release-time recipes and the
+credential-import primitive; the venue invokes managed time/derive continuation
+but receives only import status/non-secret metadata, never the returned secret
+body. Keyless operation stays unsupported until separately reviewed device
+import/HTTP ownership exists (#1850). No empty-key HMAC or local key custody.
+Session generation/retirement belongs to claude-55ao7t, not a command workaround.
+
+#1800 currently owns lib.rs and history tests; capability files remain held.
+Append two ignored original-source controls only to unoccupied
+`tests/trading.rs` using its existing private H fixture: a bare HTTP 400 `{}`
+placement reply is Unknown; an unmatched 200 success:false/errorMsg reply is
+Unknown(Internal) while preserving the existing native error text and avoiding
+replay. Run `cargo test -p safe-cex-venue-polymarket --test trading p0_write_
+-- --ignored --nocapture`; both must compile and fail behavior assertions.
+Existing classification oracles remain unchanged in this preparation slice;
+reconcile their adjudicated expectations only with actual runtime adoption.
+
+Future acceptance: a reviewed exact refusal message produces the intended kind
+and refusal fact; a near-match/unlisted message does not; 408/5xx overrides even
+a known row; per-order cancellation proof preserves accepted IDs and native
+not_canceled entries; missing/reordered/duplicate rows are not fabricated
+successes. Preserve tick/size constraints, integer token rounding, deterministic
+order identity, authoritative fill proof, replacement IDs and known partial
+effects. Shared journal finalization replaces local `effective` demotion.
+Recheck all write fingerprints in the inventory above when implementing and
+prune only genuinely removed sites; no CALLERS landed claim now. Future gates:
+venue + Binance, scoped strict Clippy/fmt, bans, both ratchets, independent
+source/caller/full-map reviews and exact-head CI.
+
+Architecture gate: No. Native codec evidence is venue-owned; classification,
+retry, secret import, session authority, admission and aggregation stay shared.
+
+Local plan/test evidence: 2 original-source controls compile and fail
+by the intended behavior assertions; normal venue suites pass
+(126 tests, 2 explicit ignored RED controls).
+Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
+pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
+controls expose defects; they are not GREEN adoption or P0 closure evidence.
