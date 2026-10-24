@@ -29,6 +29,10 @@ fn engine(testnet: bool, private: bool) -> Engine<Paradex> {
     });
     h.reply("/markets", MARKETS);
     h.reply("summary", TICKERS);
+    if private {
+        // Settle the startup root while retaining the fixture's uninitialized auth.
+        h.reply("/system/config", "{}");
+    }
     h.e.take_frame(NOW);
     h.e
 }

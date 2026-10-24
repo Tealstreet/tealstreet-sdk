@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { WASM_BUDGETS, wasmBudgetError } from './wasm-budget.mjs';
+import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
   assert.equal(WASM_BUDGETS.venue, 1_343_488);
@@ -11,6 +11,25 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
     assert.match(wasmBudgetError(WASM_BUDGETS[profile] + 1, profile), /exceeds/);
   }
   for (const value of [0, -1, Infinity, NaN]) assert.match(wasmBudgetError(value, 'combined'), /invalid/);
+});
+
+test('only Bitget carries the one-time venue allowance, and only for the venue profile', () => {
+  assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['bitget', 'bitgetusdc']);
+  for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1_343_488 + 20_480);
+    assert.equal(wasmBudgetError(1_363_968, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_363_969, 'venue', venue), /exceeds 1363968/);
+  }
+  assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue', 'okx'), /exceeds 1343488/);
+  assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue'), /exceeds 1343488/);
+  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bitget'), /exceeds 14155776/);
+});
+
+test('CI budgets each standalone venue build under its own venue name', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+  const step = workflow.indexOf('name: Check the wasm size budget');
+  assert.ok(step >= 0);
+  assert.match(workflow.slice(step, step + 200), /rust:wasm-budget --venue '\$\{\{ matrix\.venue \}\}'/);
 });
 
 test('CI budgets the combined artifact immediately after its build before standalone overwrite', () => {
