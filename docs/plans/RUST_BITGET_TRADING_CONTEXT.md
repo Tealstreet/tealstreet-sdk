@@ -46,8 +46,12 @@ the canonical streamed contract in fe7lgm's `RUST_PLAN_SERIAL_STREAM.md`
 (`feat/rust-plan-serial-stream`). Constructors are those of the reviewed
 engine PR; this plan invents no names. Bitget-specific:
 
-1. At command entry, `begin_preflight(WriteAfterReads, read None, write
-   Primary)`. The job's metadata, position and amend-identity reads run as
+1. At command entry, `begin_preflight(WriteAfterReads, read <Read-role
+   selection>, write Primary)`. Native signs every in-job GET (Metadata,
+   ResolveAmend) with the Read role, the Secondary read key when configured
+   (`signing_identity`, account.rs:181-202), and mutations with Primary.
+   In-job reads must keep that key; signing them under the mutation
+   credential would move read traffic onto Primary (asked of fe7lgm). The job's metadata, position and amend-identity reads run as
    preflight reads or as read calls of the same streamed owner (gate 2).
 2. Keep native entry precedence (`trade_command`, :247-277): missing
    credentials refuse first, then input validation (`preflight`) refuses,
@@ -85,6 +89,10 @@ is measured first (gate 5).
 - **Amend.** Modify, with a cancel-and-replace fallback (:1458-1480); UTA adds
   a rollback place (:1442-1447). Identity resolution issues up to four GETs
   (`ResolveAmend`).
+- **Position read.** Not a job call: the job calls the account cycle's
+  `refresh_positions` and parks (`waiting_positions`, :450-457) until that
+  borrowed Background read lands, with no native bound (:426-433). It maps to
+  an unbounded condition wait before admission.
 - **Reads in the job.** Both retry at most three times at 250·n ms
   (`retry_read`, :2245-2252), with different triggers:
   - Metadata retries a transport failure only (:1536-1544). An HTTP non-200
