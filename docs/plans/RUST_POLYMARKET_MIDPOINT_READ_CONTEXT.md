@@ -84,3 +84,20 @@ batches. Native flush_midpoints publishes accepted partial batches through
 set_tickers, which marks them loaded. The working control now asserts that
 existing incremental publication explicitly; no production behavior changes.
 That fixture mistake is excluded from original custody RED evidence.
+
+## Original executed checkpoint
+
+Plan `8170f608e03` precedes original controls `ca7e4de4183` and the native
+incremental-publication correction `da143d47204`. Unchanged production compiles
+and executes eight controls: three assertion REDs, five GREEN, zero ignored.
+The failures are actual eager raw midpoint HTTP before Prepare, valid late DATA
+still publishing at the proposed20-second bound, and absence of the admission
+expiry timer before host preparation. Later assertions in each failed control
+are mandatory adoption checks, not separately executed original evidence.
+
+Exact unsigned wire, subset/bookless publication, native transport retry and
+recovery, hundred-token partition/cross-batch filtering and malformed-response
+backoff all pass. The corrected receipt is
+`/tmp/codex-hcmq3f-polymarket-midpoint-original-corrected.log`.
+Only this plan, README index and new test differ from the exact557de base;
+production, every inventory, selection/nonce sites and5b source remain unchanged.
