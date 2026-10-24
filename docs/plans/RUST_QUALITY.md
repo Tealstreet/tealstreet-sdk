@@ -1945,6 +1945,19 @@ Family size and replay certification are left to fresh CI; the downloaded
 1,321,596-byte baseline excludes lean #1987/#2006 and is not an adoption result.
 
 
+## GRVT local command tail controls
+
+The revised18 compiling original controls pass after production, including
+all previously gated capacity recovery suffixes: retire the exact first of256
+genuine Command Read peers, repeat the native refusal and validate255 survivors.
+Read None / approved Mutation NotSent, raw text and absent kind/code/hint,
+configured/public-only precedence, external NaN, zero caller wait and duplicate
+ownership are pinned. Actual engine symbol-amend rejection counts zero forwarded
+entries, followed by a reachable positive. Nine safe real commands prove earlier
+dispatch before the deleted private-phase diagnostic. Library7 and trading42
+also pass, for67 scoped tests with no ignored controls. Strict GRVT all-target
+Clippy/fmt and full ratchets PASS; broad workspace/WASM/performance stay in CI.
+
 ## Paradex command candle controls
 
 The unchanged-source originals execute 24 controls (16 assertion RED/8 GREEN).
