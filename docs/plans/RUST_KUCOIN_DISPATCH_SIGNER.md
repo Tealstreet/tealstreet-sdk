@@ -528,3 +528,21 @@ kept incoming text followed by each unchanged approved composition suffix. Own
 exact inventories and all 15 request checker controls pass. Foreign credential
 selection drift already present in combo-5b remains with its owners; no foreign
 map update is authorized by that drift.
+
+## Wrapper CI correction on the reviewed 63dc line
+
+Ordinary CI 40100969710 failed on three wrapper fixtures, independently
+reproduced locally as 3 failures and 64 working tests. The Aster STP matrix's
+KuCoin case and the KuCoinSpot SETTINGS-frame fixture omitted the now-required
+native passphrase. They now supply a placeholder passphrase without changing
+any command, STP, account or Store assertion. Aster cases remain unchanged.
+
+The KuCoinSpot constructor fixture expected raw material in engine-options JSON.
+It now records the private setup argument and pins key/secret/passphrase absence
+from both engine options and retained exchange.options, with the same material
+present only in the trusted signer capsule. No production or shared setup rule
+changes. All 67 tests across these three files pass from the safe-cex package,
+with one Vitest worker. ESLint deliberately ignores these test files; no lint
+execution is claimed for them. An initial unsupported Vitest --minWorkers flag
+stopped before tests and is excluded from the RED receipt. Fresh CI is required;
+actual #1990 landing order remains held, and 78758 remains unpushed.

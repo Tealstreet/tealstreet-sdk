@@ -49,7 +49,7 @@ describe('KuCoin spot Rust SDK boundary', () => {
       wsOpen: noActions, wsMessage: noActions, wsClose: noActions,
       httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,
     };
-    const construct = vi.fn(function (_venue: string, _options: string) { return engine; });
+    const construct = vi.fn(function (_venue: string, _options: string, _setup?: string) { return engine; });
     setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
     const store = new DefaultStore();
     installNativeStartupFrames(engine, store, () => (rails ? { fetchedLeverage: rails } : {}));
@@ -68,7 +68,16 @@ describe('KuCoin spot Rust SDK boundary', () => {
     await exchange.start();
     expect(construct).toHaveBeenCalledOnce();
     expect(construct.mock.calls[0][0]).toBe('kucoinspot');
-    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ key: 'key', secret: 'secret', passphrase: 'passphrase' });
+    const options = JSON.parse(construct.mock.calls[0][1]);
+    expect(options).not.toHaveProperty('key');
+    expect(options).not.toHaveProperty('secret');
+    expect(options).not.toHaveProperty('passphrase');
+    expect(JSON.parse(construct.mock.calls[0][2] ?? 'null')).toMatchObject({
+      primary: { key: 'key', secret: 'secret', passphrase: 'passphrase' },
+    });
+    expect(exchange.options).not.toHaveProperty('key');
+    expect(exchange.options).not.toHaveProperty('secret');
+    expect(exchange.options).not.toHaveProperty('passphrase');
   });
 
   it('preserves caller IDs, rejects invalid IDs and marks open-only misses', async () => {
