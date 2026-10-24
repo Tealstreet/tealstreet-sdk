@@ -198,56 +198,112 @@ fn native_split_bound_applies_per_input_not_to_whole_command() {
     )));
 }
 
-fn regular_request_boundary(engine: &mut Engine<Okx>, last_amount: u32) {
-    small_lots(engine);
-    place(
-        engine,
-        vec![
-            order(10_000),
-            order(10_000),
-            order(10_000),
-            order(10_000),
-            order(last_amount),
-        ],
-    );
-}
-
-#[test]
-fn ruled_2048_call_boundary_remains_native_admissible() {
+fn complete_max_bracketed_inputs(input_count: u32) {
     let mut engine = trading_engine();
-    regular_request_boundary(&mut engine, 960);
-    let output = prepared(&mut engine, 5.);
-    post(&output);
-    assert!(!output.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandFailed { command: OWNER, .. })
-    )));
-}
-
-#[test]
-fn ruled_2049_call_boundary_refuses_before_any_progress_or_release() {
-    let mut engine = trading_engine();
-    regular_request_boundary(&mut engine, 980);
-    let output: Vec<_> = engine.drain_actions().collect();
-    assert_eq!(
-        output
+    small_lots(&mut engine);
+    let orders = (0..input_count)
+        .map(|_| {
+            let mut input = order(10_000);
+            input.stop_loss = Some(36000.);
+            input.take_profit = Some(42000.);
+            input
+        })
+        .collect();
+    place(&mut engine, orders);
+    let count = input_count * 30_000;
+    let mut output = prepared(&mut engine, 5.);
+    for step in 0..count {
+        let write = output
             .iter()
-            .filter(|a| matches!(a,
-                Action::Notice(Notice::CommandFailed { command: OWNER, error })
-                    if error.kind == Some(ErrorKind::Internal)
-                        && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-            ))
-            .count(),
-        1,
-        "2049 calls must refuse atomically under the ruled contract"
-    );
-    assert!(!output.iter().any(|a| matches!(
-        a,
-        Action::Http(_)
-            | Action::Sign { .. }
-            | Action::Notice(Notice::CommandProgress { command: OWNER, .. })
-    )));
-    assert!(engine.store().orders().is_empty());
+            .position(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post))
+            .expect("next native protective write");
+        let Action::Http(request) = &output[write] else {
+            unreachable!()
+        };
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(name, value)| *name == "OK-ACCESS-KEY" && value == "test-key")
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        let identity = match step % 3 {
+            0 => {
+                assert!(request.url.ends_with("/batch-orders"));
+                assert_eq!(body.as_array().unwrap().len(), 1);
+                assert_eq!(body[0]["sz"], "1");
+                body[0]["clOrdId"].as_str().unwrap()
+            }
+            index => {
+                assert!(request.url.ends_with("/order-algo"));
+                assert_eq!(body["sz"], "1");
+                assert_eq!(body["reduceOnly"], true);
+                let price = if index == 1 {
+                    "slTriggerPx"
+                } else {
+                    "tpTriggerPx"
+                };
+                assert_eq!(body[price], if index == 1 { "36000" } else { "42000" });
+                body["algoClOrdId"].as_str().unwrap()
+            }
+        };
+        let receipts: Vec<_> = output[..write]
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandProgress {
+                    command: OWNER,
+                    receipts,
+                }) => Some(receipts),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].symbol, "BTCUSDT");
+        assert_eq!(receipts[0].identity, identity);
+        let field = if step % 3 == 0 { "ordId" } else { "algoId" };
+        let response =
+            format!(r#"{{"code":"0","data":[{{"{field}":"{step}","sCode":"0","sMsg":""}}]}}"#);
+        let now = 6. + f64::from(step);
+        reply(&mut engine, &output[write], &response, now);
+        output = prepared(&mut engine, now);
+        assert!(!output.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+        )));
+        if step + 1 != count {
+            assert!(!output.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { command: OWNER, .. })
+            )));
+        }
+    }
+    let results: Vec<_> = output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandDone {
+                command: OWNER,
+                result,
+            }) => Some(result),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(results.len(), 1);
+    let ids: Vec<String> = serde_json::from_str(results[0]).unwrap();
+    assert_eq!(ids.len(), count as usize);
+    assert!(ids.iter().enumerate().all(|(i, id)| *id == i.to_string()));
+    assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
+}
+
+#[test]
+fn native_max_bracketed_input_completes_all_thirty_thousand_steps() {
+    complete_max_bracketed_inputs(1);
+}
+
+#[test]
+fn native_two_max_bracketed_inputs_complete_all_sixty_thousand_steps() {
+    complete_max_bracketed_inputs(2);
 }
 
 #[test]
@@ -297,7 +353,7 @@ fn native_maximum_plain_split_returns_all_ten_thousand_accepted_ids() {
 }
 
 #[test]
-fn native_all_refused_cancels_report_each_row_continue_then_finish_empty() {
+fn native_code_two_all_refused_cancels_report_each_row_continue_then_finish_empty() {
     let mut engine = trading_engine();
     let ids: Vec<_> = (1..=21).map(|i| i.to_string()).collect();
     for id in &ids {
@@ -352,6 +408,90 @@ fn native_all_refused_cancels_report_each_row_continue_then_finish_empty() {
         a,
         Action::Notice(Notice::CommandFailed { command: OWNER, .. })
     )));
+}
+
+#[test]
+fn native_code_one_all_refused_cancel_stops_and_restores_optimistic_status() {
+    let mut engine = trading_engine();
+    let ids: Vec<_> = (1..=21).map(|i| i.to_string()).collect();
+    for id in &ids {
+        engine.store_mut().upsert_order(stored(id));
+    }
+    engine.handle(
+        5.,
+        Event::Command(Command::CancelOrders {
+            command: OWNER,
+            ids: ids.clone(),
+        }),
+    );
+    let first = prepared(&mut engine, 5.);
+    assert!(
+        ids.iter()
+            .all(|id| engine.store().order(id).unwrap().status == OrderStatus::Canceling)
+    );
+    let rows = [r#"{"sCode":"51400","sMsg":"Order does not exist"}"#; 20].join(",");
+    reply(
+        &mut engine,
+        post(&first),
+        &format!(r#"{{"code":"1","msg":"All operations failed","data":[{rows}]}}"#),
+        6.,
+    );
+    let output = prepared(&mut engine, 6.);
+    assert!(
+        ids.iter()
+            .all(|id| engine.store().order(id).unwrap().status == OrderStatus::Open)
+    );
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
+    );
+    let errors: Vec<_> = output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: OWNER,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert!(!output.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { command: OWNER, .. })
+    )));
+}
+
+#[test]
+fn native_not_ready_refusal_precedes_invalid_planning_result() {
+    let mut engine = support::engine(support::FixtureOptions {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Default::default()
+    });
+    place(&mut engine, vec![order(1)]);
+    let output = prepared(&mut engine, 5.);
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
+    );
+    let errors: Vec<_> = output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: OWNER,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "OKX account is not ready");
+    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
 }
 
 #[test]

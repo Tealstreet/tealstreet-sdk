@@ -27,27 +27,35 @@ contains `2e921890` and the already-retired `b1761cde`.
 
 ## Admission and authority
 
-The Plan owner's API direction is command-owned admission:
+This section is the interim shared consumer pattern for OKX and Bitget. The
+canonical streamed engine contract will be fe7lgm's plan on
+`feat/rust-plan-serial-stream`; its constructor names and source pin are pending.
+Earlier bounded `admit_plan(&preflight, &steps, ...)` clearance does not grant
+clearance for that new primitive. The current direction is:
 
 1. At genuine command entry, `begin_preflight(PreflightPolicy { purpose:
    WriteAfterReads, read_credential: None, write_credential: Some(primary) })`.
 2. Compute the complete deterministic native job without publishing Store,
-   progress, command output or I/O. Existing readiness/error precedence stays
-   explicit. A retained queue owner uses the existing preflight parking and
+   progress, command output or I/O. Native computes planning results first but
+   checks readiness before surfacing a planning error: not-ready NotSent wins
+   over an invalid planning result. A retained queue owner uses preflight parking and
    ready callback, never a replayed numeric command.
-3. `admit_plan(&preflight, &steps, PlanPolicy { operation: Mutation,
-   credential: Some(primary), pacing: None, retry: Never })` atomically admits
-   the complete job. One serial `StepBound` per physical request, wait zero;
-   one `CallBound`, timeout 20000, attempts one, `RetryWindow::Shared`, no
-   refusal fallback. The declared span is 20000 times the physical call count.
+3. Admit one command-owned streamed serial Plan. It has no declared step count
+   or step cap: the engine owns a receipt-capped root and one active call at a
+   time. Each call has a 20000 ms window, attempts one, Never, and no refusal
+   fallback or added wait. Continue only from the previous step's exact DATA
+   custody, under the same root. Do not simulate streaming with repeated Plan
+   admission. Exact constructors await the shared owner; do not invent names.
 4. Only after successful admission apply native optimistic status changes.
-   Obtain each call from `plan_slots` / `plan_leg_context`, then send through
+   Obtain each call from the reviewed streamed engine API, then send through
    `request_signed_managed` with the existing OKX Primary dispatch recipe.
    Preserve exact URL, body, demo header and Primary role; no local remapping.
-5. Validate exact Plan delivery before decoding or changing the job, Store,
-   accepted IDs or progress. Record shared classified write facts and settle
-   the exact call. Progress reflects accepted native identities, not speculative
-   receipt declarations before dispatch.
+5. Validate exact Plan delivery before decoding, response-driven Store/job
+   changes or accepting IDs. Record classified facts and settle the exact call.
+   Preserve native pre-release client-ID progress receipts, which identify an
+   order after an Unknown result: publish after admission and before physical
+   release, including the first call. They are not accepted-ID evidence. A
+   subsequent call's receipts follow its successful continuation admission.
 6. Final completion uses `done_plan`; failure uses the exact Plan authority.
    No numeric fallback, dummy call, per-page root, renewed plan, or venue timer
    creates admission or DATA rights. Retirement removes only the exact owner.
@@ -65,53 +73,49 @@ The OKX crate must opt into `http-plans` explicitly at implementation time.
 - No retries. Network loss, HTTP 408/5xx, code 50004, malformed body or wrong
   row count stop the remaining chain and retain the native reconciliation
   fence. No failed body supplies definitive acceptance or resend proof.
-- Standalone cancellation may report each definitive row refusal and continue
-  later regular/algo batches. A dependent replacement never runs after its
+- Standalone cancellation with code `2` may report definitive row refusals and
+  continue later regular/algo batches. Code `1` (All operations failed) rejects,
+  stops before siblings and restores native optimistic status. A dependent replacement never runs after its
   prerequisite cancellation refusal. Mixed accepted/refused results retain
   accepted identities; uncertain rows never authorize sibling continuation.
 - Preparation/provider/local submission refusals retain exact cause and
   NotSent where nothing released. A later refusal cannot erase earlier effects.
-- The current native all-refused standalone cancellation path emits row
-  diagnostics and can finish `[]`. Pin that original behavior separately from
-  any shared journal correction; do not silently promise terminal parity.
+- The all-refused code-`2` fixture is an edge-envelope witness, not the usual
+  OKX all-failed response. Native emits diagnostics and can finish `[]` on that
+  envelope; preserve it separately from the realistic code-`1` Rejected path.
 
 ## Shared and behavior gates before production
 
-1. **Physical-credit bound:** `PlanBound::from_steps` enforces 256 attempts.
-   The latest overseer ruling authorizes **2048 attempts per command**, refusing
-   larger jobs before send. This supersedes the earlier no-new-limit direction.
-   fe7lgm owns the shared increase and memory/WASM/CPU cost. The consumer must
-   record this new caller-visible bound in CALLERS and pin 2048/2049 controls.
+1. **Streamed serial primitive:** the current ruling is **no step cap**.
+   The earlier 2048/2049 ruling and tests are superseded and removed. fe7lgm
+   owns the shared primitive: exact-DATA continuation, O(1) resources per active
+   step, one Context, receipt-capped elapsed time, and incremental full IDs.
    One plain input order permits 10000 split lots, or 500 twenty-row calls;
    both protections make 30000 calls (entry, stop, take-profit per lot).
    Important: that bound is per input order. `CommandIn::PlaceOrders.orders`
    is a Vec decoded directly by serde, and `plan_place` has no input-count cap.
    Thus 30000 is not a finite whole-command maximum. Report this distinction
    to the shared owner when sizing retention. No chunking, renewed authority
-   or additional private limit is authorized.
+   or private step limit is authorized. Stack the consumer on the reviewed
+   engine PR before production and re-review this section against its real API.
 2. **Independent cancellation:** at this actual base `PlanPolicy` has no
    `independent_calls` field. The prerequisite is #1956 landing (combo-6b),
    carrying #1939; its non-landing frozen pin is `3745a230887`. Obtain its
    actual source and disposition for mixed/all-refused cancellation before implementation.
    Do not copy a proposed flag or simulate journal success in the venue.
-3. **Terminal projection:** the overseer rules native all-refused cancellation
-   must retain per-row diagnostics and `done[]`. Record every refusal in the
-   shared journal, then override only this cancellation terminal through a
-   reviewed shared completion API. The current G2b journal projects failure;
-   the exact supported completion path is a source gate with the Plan owner.
-   No numeric completion fallback or fabricated accepted write is authorized.
-4. **Context reservation:** the actual registry reserves one Context per
-   logical call against global capacity 256, independently of the journal's
-   attempt cap. Raising the attempt constant alone cannot admit 500 calls.
-   The overseer assigns the engine owner checked peak-concurrency reservation:
-   one for this serial chain, held until completion, with settlement returning
-   each slot to that Plan reservation. This is shared admission/issue/settle
-   work requiring its own original controls; no venue implementation here.
-5. **Accepted-ID retention:** the shared evidence budget retains at most 4096
-   IDs and 256 KiB of ID storage, whereas one native maximum plain split can
-   return 10000 accepted IDs. Raising call capacity alone changes the caller
-   result by truncating the native output. The latest overseer ruling requires
-   full ID evidence in fe7lgm's shared prerequisite; no truncation is authorized.
+3. **Terminal projection:** preserve native code-`1` rejection and code-`2`
+   continuation as separate paths. The code-`2` all-refused edge retains its
+   diagnostics then `done[]`. The shared owner proposes an admission-declared
+   terminal policy: only when all released facts are definitive, with no Unknown
+   or unreleased fact, `done_plan` may return the consumer result while retaining
+   refusals. Defaults retain current projection. Exact API names are pending;
+   no consumer fallback or fabricated acceptance is authorized. Code `1` still
+   terminates via failure, never that success projection.
+4. **Accepted-ID retention:** current fixed evidence limits cannot reproduce
+   native output. The new primitive must retain and report every accepted ID
+   incrementally, without truncation. The originals complete 30000 and 60000
+   serial calls with every ID in native order. This shared evidence change
+   belongs to the engine owner, not an extra venue journal.
 
 For sizing, if plain inputs yield P unprotected lots, protected inputs yield
 L_i lots with b_i enabled protections (one or two), and there are A standalone
@@ -133,16 +137,23 @@ Record actual assertion failures independently from working native witnesses.
 - Real managed route preparation before signing or a physical write.
 - Genuine full-capacity refusal before optimistic status/progress, with every
   unrelated live preparation still pending.
-- Duplicate live legacy ID cannot replace a retained job or its terminal.
 - Native per-input-order split maximum (10000 lots) and maximum plus one,
   plus two maximum inputs proving that the cap is not whole-command scope.
-- The ruled whole-command limit: 2048 physical requests admit when resources
-  permit; 2049 refuses once, NotSent, before Store/progress/provider or I/O.
-- Native bracket entry/stop/take-profit order and Primary signed bytes.
-- Native all-refused cancellation diagnostics, final output and later sibling
-  continuation, plus mixed rows and dependent replacement refusal.
-- Network/408/5xx/50004/malformed and wrong row count: no resend or next write;
-  native reconciliation still starts. Later accepted IDs survive uncertainty.
+- One maximum bracketed input completes 30000 calls; two complete 60000.
+  Every call pins entry/stop/take-profit order, Primary key, native size/protection
+  fields and client-ID progress before release; every final accepted ID survives.
+- Code-`1` cancellation stops/rejects/restores; code-`2` all-refused edge reports
+  diagnostics, continues and finishes empty. Not-ready wins over planning errors.
+- Code 50004 stops/reconciles without resend. The dedicated target does not yet
+  execute network/408/5xx/malformed/row-count cases.
+
+The following remain source-stage gates, not executed claims for this target:
+
+- Duplicate live legacy ID cannot replace a retained job or terminal; independent
+  cryptographic signed-byte vectors (the bracket controls pin headers/body/order).
+- Mixed cancellation rows, dependent replacement refusal, and network/408/5xx/
+  malformed/row-count failures: no unauthorized next write or resend, preserve
+  earlier accepted IDs and the native reconciliation behavior.
 - Delayed provider and route preparation, final Claim at deadline equality,
   both timer/response orders, reused command ID plus stale old delivery, exact
   cleanup, and an unrelated live peer. These are source-stage gates, not claims
@@ -166,10 +177,10 @@ all-refused cancellation diagnostics/continuation/`done[]`, and code 50004
 stopping the protective chain while reconciliation starts without write retry.
 These are original-source receipts, not managed implementation proof.
 
-After the 2048-attempt ruling, the expanded target executes nine controls:
-**three assertion REDs, six GREEN, zero ignored**. Original six control bodies
-are unchanged. The additive RED pins the newly ruled 2049-call refusal; native
-2048-call admission is a working positive. Another working control drives all
-500 native plain-order requests and requires the complete 10000-ID result in
-native order, without truncation. The full target runs in 0.32 seconds locally;
-this is a native fixture receipt, not a managed Plan CPU certification.
+The current streamed-direction checkpoint removes both capacity pins and runs
+eleven controls: **two assertion REDs, nine GREEN, zero ignored**. New positives
+complete 30000 and 60000 calls with all IDs, pin pre-release progress and wire
+order, realistic code-`1` rejection/status restoration and readiness precedence.
+The 500-request/10000-ID positive remains. Runtime is 6.15 seconds locally with
+one test thread; this is not a managed Plan CPU certification. No production,
+existing fixture, Cargo or checker source has changed.
