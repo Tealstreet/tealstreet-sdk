@@ -1378,3 +1378,16 @@ discard/requeue, streamed order, stale staged rows, typed root retirement and
 physical-timeout recovery. Existing single-leg controls remain unchanged. API
 privacy doctests distinguish original roots from children without claiming that
 borrowed Contexts lose generic core authority. Native consumers remain separate.
+
+
+### Replay audit finalization controls
+
+The behavior-preserving extraction has four working controls and two assertion
+REDs matching the historical WOO false protocol diagnostics. After final-only
+aggregation, all 31 focused audit/finalization/checkpoint/WOO protocol controls
+pass. Genuine late private violations remain visible; audit exceptions propagate.
+Both real replay callers and forgotten-final-flag mutations are checked.
+
+Native accepted-write snapshot races are separately reproduced by four REDs
+and two working controls; the identical six controls pass against queued #1788.
+Those venue changes and their tests are outside this standalone harness scope.
