@@ -50,12 +50,13 @@ pub fn http_requests<V: Venue>(engine: &mut Engine<V>) -> Vec<HttpRequest> {
 /// only after prepare, bind and the engine's final synchronous release claim.
 /// Delayed pacing/routes and delegated signing deliberately remain unsupported.
 pub fn prepared_actions<V: Venue>(engine: &mut Engine<V>, now: f64) -> Vec<Action> {
-    use crate::request_context::{Claim, HttpAction, Prepared};
+    use crate::request_context::{Claim, GroupClaim, GroupPacket, HttpAction, Prepared};
     use std::collections::{HashMap, VecDeque};
 
     engine.prepare_dispatch(now);
     let mut queue = VecDeque::from(engine.drain_actions().collect::<Vec<_>>());
     let mut resources = HashMap::new();
+    let mut groups: HashMap<crate::RequestId, GroupPacket> = HashMap::new();
     let mut actions = Vec::new();
     let mut count = 0;
     while let Some(action) = queue.pop_front() {
@@ -110,6 +111,58 @@ pub fn prepared_actions<V: Venue>(engine: &mut Engine<V>, now: f64) -> Vec<Actio
                     Err(_) => {} // Engine publishes the typed preparation failure/reprepare.
                 }
             }
+            HttpAction::BindGroup { permit, members } => {
+                if !engine.http_group_pending(&permit) {
+                    continue;
+                }
+                for mut member in members {
+                    let request = member.preparation.attempt().request;
+                    let current = permit
+                        .members()
+                        .iter()
+                        .find(|p| p.attempt().request == request)
+                        .unwrap();
+                    assert_eq!(
+                        resources.get(&request),
+                        Some(&(member.preparation, current.prepared_id()))
+                    );
+                    if let Some(packet) = member.request.take() {
+                        assert_eq!(packet.id, request);
+                        assert!(
+                            groups
+                                .insert(
+                                    request,
+                                    GroupPacket {
+                                        preparation: member.preparation,
+                                        request: Some(packet)
+                                    }
+                                )
+                                .is_none()
+                        );
+                    } else {
+                        assert!(
+                            groups
+                                .get(&request)
+                                .is_some_and(|packet| packet.preparation == member.preparation
+                                    && packet.request.is_some())
+                        );
+                    }
+                }
+                match engine.claim_http_group(now, permit.clone()) {
+                    Ok(GroupClaim::Released(_)) => {
+                        for token in permit.members() {
+                            let request = token.attempt().request;
+                            let mut member = groups.remove(&request).unwrap();
+                            resources.remove(&request);
+                            actions.push(Action::Http(member.request.take().unwrap()));
+                        }
+                    }
+                    Ok(GroupClaim::WaitUntil(_)) => {
+                        panic!("delayed group fixture pacing is unsupported")
+                    }
+                    Err(_) => {}
+                }
+            }
             HttpAction::Cancel { preparation, .. } => {
                 let request = preparation.attempt().request;
                 if resources
@@ -117,6 +170,7 @@ pub fn prepared_actions<V: Venue>(engine: &mut Engine<V>, now: f64) -> Vec<Actio
                     .is_some_and(|(token, _)| *token == preparation)
                 {
                     resources.remove(&request);
+                    groups.remove(&request);
                 }
             }
         }

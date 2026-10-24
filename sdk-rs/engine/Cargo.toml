@@ -7,6 +7,8 @@ publish.workspace = true
 [features]
 # Whole-plan HTTP admission is linked only by adopting venue families.
 http-plans = []
+# Adopters explicitly include parallel Mutation prepare/sign/release custody.
+http-mutation-barriers = ["http-plans"]
 # Temporary migration boundary; remove after all legacy socket families adopt.
 managed-sockets = []
 order-locks = []
