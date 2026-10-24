@@ -51,8 +51,8 @@ tests. Preserve all existing history financial/geometry assertions.
    or early physical leg. Resume only the exact Session generation, current
    owner and retained cap. Waiting before activation spends no physical window.
    Phase-1 #2037 alone does not supply retained Preflight wait or retry. Its
-   a2c54 review also found early ordinary readiness and missing outer flush
-   paths, which must close on a reviewed pin before consumption.
+   a2c54 readiness/outer-flush findings are closed by bounded source review of
+   b44c9cebc10 (42 scoped controls PASS); that pin is not an actual landing.
 3. m26ps4's Session-fenced JIT Bearer hook must actually land. JWT remains owned
    by Account and is read at actual prepare and every reprepare/new attempt,
    behind exact target/attempt/Session validation. Do not bake Authorization into
