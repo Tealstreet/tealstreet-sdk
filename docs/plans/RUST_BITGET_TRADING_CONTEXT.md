@@ -125,7 +125,9 @@ whole command has no input-count cap; request count is
 ## Overseer rulings (2026-10-25)
 
 1. No step cap, and no root wall-clock: stack on fe7lgm's streamed serial
-   Plan (`RUST_PLAN_SERIAL_STREAM.md` at `5eab0dc0b3a`). Each call is bounded
+   Plan (`RUST_PLAN_SERIAL_STREAM.md`, canonical pin `34b0eb6233c`, which adds
+   successful-Read and failure-only delayed Read custody; consume the eventual
+   reviewed source). Each call is bounded
    by `now + timeout_ms`; the chain advances only from DATA. Native has no
    whole-job bound, so a 10 000-call UTA order stays native.
 2. 40009: `SerialCall.attempts` 2 for mutations; the one resend goes through
@@ -202,3 +204,28 @@ owner, and the read retries after admission.
 Reviewers: codex-ih35js for shared-pattern parity, claude-fe7lgm for the
 engine contract. Scoped bitget tests and strict checks only, with
 `CARGO_BUILD_JOBS=4`.
+
+## Executed original checkpoint
+
+`venues/bitget/tests/trading_context.rs` against the unchanged production
+base: 4 assertion REDs, 6 GREEN, 0 ignored. Strict scoped Clippy and fmt
+pass (`CARGO_BUILD_JOBS=4`).
+
+- REDs, each failing for its intended reason:
+  - `classic_place_is_released_through_managed_preparation`: no managed
+    Primary preparation (legacy signed request).
+  - `cancel_beyond_shared_capacity_is_refused_before_canceling_status`: with
+    the registry saturated, native still sends the cancel.
+  - `a_signature_rejection_is_resent_once_through_managed_custody`: the
+    native resend is a legacy request.
+  - `an_unanswered_write_ends_at_the_shared_deadline_as_unknown`: native has
+    no deadline, so no terminal by 20 s.
+- GREEN native controls: credentials before input validation; invalid input
+  refused with no detection wait while the mode is undetected; a second 40009
+  is Rejected; HTTP 500 carrying 40009 resends once; a mixed `failure_list`
+  keeps accepted IDs and fails (not NotSent or Rejected); 40010/40725/45001
+  are Unknown with no resend.
+- Still source-stage, not executed here: the 40085 promotion corners (HTTP
+  200 and 500), the resend preparation-failure Unknown, the metadata and
+  ResolveAmend retry tables, UTA one-call-per-lot at 10 000 calls, the amend
+  fallback and rollback, and the detection-wait parking.
