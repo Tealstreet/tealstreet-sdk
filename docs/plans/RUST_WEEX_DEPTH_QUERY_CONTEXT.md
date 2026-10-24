@@ -1,6 +1,6 @@
 # WEEX public order-book query custody
 
-Status: plan and original compiling assertion evidence; no production conversion.
+Status: original assertion evidence reviewed; production conversion under source review.
 Base: actual `77f124089477a6aed502d9b02aa7f08752b7bfa5`.
 
 ## Scope and exact inventory
@@ -12,7 +12,7 @@ The current semantic slice has four numeric completion occurrences:
 | --- | --- | --- | --- |
 | venues/weex/src/depth_query.rs | 7277348e8c2d96d515028483928e715a3e9c014072f494e18fd2e527dc2f360b | 1 | success `cx.done` |
 | venues/weex/src/depth_query.rs | c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa | 2 | HTTP/native and codec `cx.fail` |
-| venues/weex/src/lib.rs | c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa | 1 selected occurrence | BookQuery transport `cx.fail` |
+| venues/weex/src/lib.rs | 0d6bbb8e01da4f9bc9a177c0e8ca9d0d015c922780050cfeda6b33807cac8e78 | 1 | BookQuery transport `cx.fail` |
 
 The two shared `get` request sites remain for unrelated discovery/subscription
 callers. Bypassing them for this command does not remove their fingerprints.
@@ -38,7 +38,7 @@ uses no SelectedRead because the native request is public and unsigned.
   are not silently normalized by this slice. Genuine Read entry/Context admission
   uses its canonical outcome None; managed pre-release preparation/provider
   refusals retain their exact typed NotSent fields. Released Network failures,
-  engine physical Timeout and root expiry use Read outcome None. The native
+  engine physical Timeout/integrity failure and root expiry use Read outcome None. The native
   transport wrapper classified even host timeout as Network/NotSent; the new
   typed Network/Timeout distinction is an intentional CALLERS change. A query
   parked behind a pause previously waited without a venue whole-query bound; it
@@ -135,3 +135,44 @@ follow each test's original first RED; they are readiness gates, not claimed
 originally executed. The driver deliberately expects successful Claim and does
 not yet exercise typed held-claim refusal. Production, manifest, checker and
 STAGING are byte-identical to the base; only plan/index/new test differ.
+
+
+## Production checkpoint
+
+The original eight assertion bodies are unchanged and now all pass. The new
+request stores only its original ReadCompletion and optional physical Context;
+there is no numeric terminal list, account/subscription coupling or new registry.
+Delivery admission precedes both the native 429 pause and unchanged decoder.
+Success finishes the root before physical retirement; failure/preparation and
+queue/mint refusal retire the child first and finish through the root. The
+no-Cx hook removes only the exact owner's parked query; old timers are inert.
+
+The native decoder/output structs and helpers are byte-identical to the base.
+Existing depth-query fixtures now drive real managed preparation, select the
+native pause timer by its deadline, and use monotonic response timestamps.
+Their financial/alias/version expectations remain. The public subscription
+isolation fixture likewise uses managed drain and a live clock; it still proves
+all Store/account/ticker/depth state unchanged and normal stream progress.
+Native released Network expectation is updated only for the declared outcome
+change. The scanner corrects the initial table's lib fingerprint to its actual
+`0d6bbb8e...` identity; scope remains four occurrences, three fingerprints.
+
+Local receipts: WEEX all-target run **263 passed, 0 failed/ignored**; strict
+all-target/all-feature Clippy, fmt and bans plus signing/request/socket ratchets
+pass. A subsequent custody-only capacity control gives **14/14 GREEN**, with
+strict all-feature target Clippy passing. It uses 256 genuine paused Read roots,
+captures the 257th admission Capacity terminal, then compares the child-mint
+refusal to that full value, verifies a live peer releases, and completes fresh
+same-ID work. Physical Timeout, held final claim at expiry, typed preparation
+NotSent without auth evidence, real non-UTF8 integrity failure, old-generation
+DATA/429 with a same-ID successor and unrelated live peer also pass. The original
+post-RED stale-timer/late-429 suffix assertions are now executed GREEN.
+
+The first source compile had an empty-header Vec/slice mismatch and was fixed;
+the first full venue run found the old raw-HTTP/response-clock fixture and was
+fixed without weakening its publication assertions. These are not original RED
+claims. Native synchronous post-child queue refusal remains source/shared-helper
+evidence, not a separately injected native transport control. No CI/size/CPU,
+production source-review or landing approval is claimed by this checkpoint.
+Engine, signing recipes, checker policy, STAGING and legacy TS/AWS runtime are
+unchanged. Fresh source/native reviews are the next gate.

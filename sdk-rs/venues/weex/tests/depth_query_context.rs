@@ -249,3 +249,255 @@ fn expired_429_cannot_park_an_unrelated_live_query() {
     );
     strict_timeout(&late.actions, 7);
 }
+
+#[test]
+fn released_physical_timeout_retires_the_child_and_allows_same_id_reuse() {
+    let mut e = engine();
+    let out = ask(&mut e, 1000., 7, 120_000);
+    assert_eq!(out.requests.len(), 1);
+    let timer = out
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == 21_000. => Some(*timer),
+            _ => None,
+        })
+        .expect("exact physical child deadline");
+    e.handle(21_000., Event::TimerFired { timer });
+    let expired = drain(&mut e, 21_000.);
+    strict_timeout(&expired.actions, 7);
+    assert!(expired.requests.is_empty());
+    let fresh = ask(&mut e, 21_001., 7, 1000);
+    assert_eq!((fresh.legacy, fresh.prepared, fresh.claimed), (0, 1, 1));
+    let response = reply(&mut e, &fresh.requests[0], 21_002., 200, "", BOOK);
+    assert_success(&response.actions, 7);
+}
+#[test]
+fn a_held_final_claim_at_receipt_expiry_releases_nothing() {
+    let mut e = engine();
+    e.handle_command(
+        1000.,
+        Command::FetchOrderBook {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            limit: None,
+        },
+        Some(100),
+    )
+    .unwrap();
+    let preparation = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("real managed preparation");
+    e.http_prepared(
+        1000.,
+        preparation,
+        Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let permit = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("real final claim held across root deadline");
+    assert!(!matches!(
+        e.claim_http(1100., permit),
+        Ok(Claim::Released(_))
+    ));
+    let expired = drain(&mut e, 1100.);
+    strict_timeout(&expired.actions, 7);
+    assert!(expired.requests.is_empty());
+    assert_eq!(expired.claimed, 0);
+}
+
+#[test]
+fn preparation_refusal_preserves_typed_not_sent_without_auth_evidence() {
+    let mut e = engine();
+    e.handle_command(
+        1000.,
+        Command::FetchOrderBook {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            limit: None,
+        },
+        Some(1000),
+    )
+    .unwrap();
+    let preparation = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("real managed preparation");
+    let cause = safe_cex_engine::VenueError::new("public preparation refused")
+        .kind(ErrorKind::AuthInvalid)
+        .venue_code("route-refused")
+        .venue_message("host route unavailable")
+        .outcome(safe_cex_engine::Outcome::NotSent);
+    e.http_preparation_failed(
+        1001.,
+        preparation,
+        safe_cex_engine::request_context::Error::Invalid,
+        cause.clone(),
+    );
+    let out = drain(&mut e, 1001.);
+    let errors: Vec<_> = out
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors, vec![&cause]);
+    assert_eq!(
+        out.actions
+            .iter()
+            .filter(|action| terminal(action, 7))
+            .count(),
+        1
+    );
+    assert!(out.requests.is_empty());
+    assert_eq!(out.claimed, 0);
+    assert_eq!(e.health().auth_failures, 0);
+    assert!(!out.actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::Deactivate | Notice::AccountAuth { .. })
+    )));
+}
+
+#[test]
+fn old_generation_data_cannot_complete_or_pause_same_id_and_live_peer() {
+    let mut e = engine();
+    let old = ask(&mut e, 1000., 7, 100).requests.remove(0);
+    let fresh = ask(&mut e, 1100., 7, 1000);
+    strict_timeout(&fresh.actions, 7);
+    assert_eq!(fresh.requests.len(), 1);
+    let peer = ask(&mut e, 1100.5, 8, 1000);
+    assert_eq!(peer.requests.len(), 1);
+    let late = reply(&mut e, &old, 1101., 429, "Retry-After: 3", "malformed");
+    assert!(
+        !late
+            .actions
+            .iter()
+            .any(|action| terminal(action, 7) || terminal(action, 8))
+    );
+    assert!(late.requests.is_empty());
+    assert_success(
+        &reply(&mut e, &fresh.requests[0], 1102., 200, "", BOOK).actions,
+        7,
+    );
+    assert_success(
+        &reply(&mut e, &peer.requests[0], 1103., 200, "", BOOK).actions,
+        8,
+    );
+}
+
+#[test]
+fn delivered_non_utf8_failure_keeps_internal_read_cause_without_auth() {
+    let mut e = engine();
+    let request = ask(&mut e, 1000., 7, 1000).requests.remove(0);
+    e.handle(
+        1001.,
+        Event::HttpStart {
+            request: request.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        1001.,
+        Event::HttpChunk {
+            request: request.id,
+            data: b"\xff",
+        },
+    );
+    e.handle(
+        1002.,
+        Event::HttpEnd {
+            request: request.id,
+        },
+    );
+    let out = drain(&mut e, 1002.);
+    assert_eq!(
+        out.actions
+            .iter()
+            .filter(|action| terminal(action, 7))
+            .count(),
+        1
+    );
+    assert!(out.actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.kind == Some(ErrorKind::Internal) && error.outcome.is_none())));
+    assert!(out.requests.is_empty());
+    assert_eq!(e.health().auth_failures, 0);
+}
+
+#[test]
+fn child_capacity_refusal_matches_real_admission_and_releases_its_root() {
+    let mut e = engine();
+    pause(&mut e);
+    let mut timers = Vec::new();
+    for id in 8..264 {
+        let parked = ask(&mut e, 1002., id, 5000);
+        assert!(parked.requests.is_empty());
+        assert!(!parked.actions.iter().any(|action| terminal(action, id)));
+        timers.push(pause_timer(&parked));
+    }
+    assert_eq!(timers.len(), 256);
+    let control = ask(&mut e, 1002., 264, 5000);
+    assert!(control.requests.is_empty());
+    let expected = control
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 264,
+                error,
+            }) => Some(error.clone()),
+            _ => None,
+        })
+        .expect("genuine full-capacity admission control");
+    assert!(expected.outcome.is_none());
+    e.handle(4001., Event::TimerFired { timer: timers[0] });
+    let refused = drain(&mut e, 4001.);
+    assert!(refused.requests.is_empty());
+    assert_eq!(refused.prepared, 0);
+    let errors: Vec<_> = refused
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 8, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors, vec![&expected]);
+    e.handle(4001., Event::TimerFired { timer: timers[1] });
+    let peer = drain(&mut e, 4001.);
+    assert_eq!((peer.legacy, peer.prepared, peer.claimed), (0, 1, 1));
+    assert_success(
+        &reply(&mut e, &peer.requests[0], 4002., 200, "", BOOK).actions,
+        9,
+    );
+    let fresh = ask(&mut e, 4003., 8, 1000);
+    assert_eq!((fresh.legacy, fresh.prepared, fresh.claimed), (0, 1, 1));
+    assert_success(
+        &reply(&mut e, &fresh.requests[0], 4004., 200, "", BOOK).actions,
+        8,
+    );
+}
