@@ -1943,3 +1943,19 @@ before Engine construction in an explicit cfg(test) child, not presented as a
 provider or physical-release receipt. Existing financial tests are unchanged.
 Family size and replay certification are left to fresh CI; the downloaded
 1,321,596-byte baseline excludes lean #1987/#2006 and is not an adoption result.
+
+
+## Paradex command candle controls
+
+The unchanged-source originals execute 24 controls (16 assertion RED/8 GREEN).
+All 24 bodies are retained after adoption; six appended controls cover zero wait,
+stream integrity, late Bind, retired generation, post-success 254-peer liveness
+and a positive fractional remainder. All 30 pass. The scoped crate passes 281,
+with strict all-target Clippy and formatting checked. One prior raw-at-capacity
+transport expectation is replaced with managed Capacity and two-slot recovery;
+its exact URL/method/headers/body assertions are retained.
+
+Optimized Node/web before 1,331,336 and after 1,339,096 bytes (+7,760) fit the unchanged
+1,343,488-byte venue budget, using wasm-bindgen 0.2.129 and Binaryen 132. Profiles,
+budgets and build inputs are unchanged. Local controls/measurements do not certify
+replay, CPU, memory, final integration or CI readiness.

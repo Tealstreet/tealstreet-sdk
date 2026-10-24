@@ -3255,3 +3255,19 @@ Selected remote jobs retain native custody without an abandoned managed owner.
 Exact removal is3F/3O; no engine, signer, callback, checker or staging exception
 changes. Native state pruning is endpoint policy; lifetime, rejection, terminal
 and credential-evidence authority stay in the engine.
+
+
+## Paradex command candle custody
+
+One original caller Read root owns at most two native unsigned routes. Fresh
+20s/Never children use exact delivery guards before item/envelope parsing;
+released failures bind through managed dispatch and retained child ownership,
+then validate the original root before native fallback. Preparation refusals are
+strict. Native wire, financial codecs, limit behavior, row order and poll paths
+are retained. Two numeric terminal occurrences are removed (public 5->3,
+family 41->39); retained raw calls are subscription polling only.
+
+Architecture gate: No. The venue consumes shared root/child admission, delivery,
+retirement and typed failure APIs; it adds no issuer, local timer or authority map.
+The old saturated-candles raw-send expectation is explicitly superseded by shared
+Capacity; its literal native wire assertions remain after genuine recovery.

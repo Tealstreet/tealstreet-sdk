@@ -127,6 +127,11 @@ impl Venue for Probe {
                     cx.validate_read_root_context(peer).unwrap();
                 }
             }
+            Command::SetTickerSymbols { symbols } if symbols.as_slice() == ["__validate"] => {
+                for peer in &self.peers {
+                    cx.validate_read_root_context(peer).unwrap();
+                }
+            }
             _ => self.inner.on_command(cx, command),
         }
     }
@@ -815,4 +820,196 @@ fn streamed_prefix_at_original_deadline_cannot_publish() {
     );
     assert_eq!(result.unwrap_err().kind, Some(ErrorKind::Timeout));
     no_next(&out);
+}
+
+fn no_bind(actions: &[Action]) {
+    assert!(!actions.iter().any(|a|matches!(a,Action::ManagedHttp(a) if matches!(&**a,HttpAction::Bind{..}|HttpAction::BindGroup{..}))), "retired preparation cannot bind: {actions:?}");
+}
+
+#[test]
+fn zero_wait_rejects_without_creating_remote_work() {
+    let mut e = boot(false);
+    assert!(
+        e.handle_command(NOW, command(Interval::M1), Some(0))
+            .is_err()
+    );
+    let out = e.drain_actions().collect::<Vec<_>>();
+    no_next(&out);
+    no_bind(&out);
+    no_terminal(&out);
+}
+
+#[test]
+fn broken_first_stream_falls_back_once_and_broken_legacy_stays_typed() {
+    for bytes in [
+        b"{\"results\":[[120000,1,3,0.5,2,4]],".as_slice(),
+        b"\xff".as_slice(),
+    ] {
+        let mut e = boot(false);
+        let a = ask(&mut e, NOW, Interval::M1, 60000);
+        let first = native_packet(&mut e, NOW, a);
+        e.handle(
+            NOW + 1.,
+            Event::HttpStart {
+                request: first.id,
+                status: 200,
+                headers: "",
+            },
+        );
+        e.handle(
+            NOW + 1.,
+            Event::HttpChunk {
+                request: first.id,
+                data: bytes,
+            },
+        );
+        e.handle(NOW + 1., Event::HttpEnd { request: first.id });
+        let out = e.drain_actions().collect::<Vec<_>>();
+        no_terminal(&out);
+        let second = native_packet(&mut e, NOW + 1., out);
+        assert!(second.url.contains("tradingview"));
+        e.handle(
+            NOW + 2.,
+            Event::HttpStart {
+                request: second.id,
+                status: 200,
+                headers: "",
+            },
+        );
+        e.handle(
+            NOW + 2.,
+            Event::HttpChunk {
+                request: second.id,
+                data: b"\xff",
+            },
+        );
+        e.handle(NOW + 2., Event::HttpEnd { request: second.id });
+        let out = e.drain_actions().collect::<Vec<_>>();
+        let error = terminal(&out).unwrap_err();
+        assert_eq!(error.kind, Some(ErrorKind::Internal));
+        assert_eq!(error.outcome, None);
+        no_next(&out);
+    }
+}
+
+#[test]
+fn late_prepared_after_strict_refusal_cannot_emit_a_bind() {
+    let mut e = boot(false);
+    let a = ask(&mut e, NOW, Interval::M1, 60000);
+    let (token, _) = preparation(&a);
+    e.http_preparation_failed(
+        NOW + 1.,
+        token,
+        Error::Invalid,
+        VenueError::new("fixture refused"),
+    );
+    let out = e.drain_actions().collect::<Vec<_>>();
+    assert!(terminal(&out).is_err());
+    no_next(&out);
+    no_bind(&out);
+    e.http_prepared(
+        NOW + 2.,
+        token,
+        Prepared {
+            id: token.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let out = e.drain_actions().collect::<Vec<_>>();
+    no_next(&out);
+    no_bind(&out);
+    no_terminal(&out);
+}
+
+#[test]
+fn retired_generation_cannot_finish_or_bind_over_new_command() {
+    let mut e = boot(false);
+    let a = ask(&mut e, NOW, Interval::M1, 60000);
+    let (old_token, _) = preparation(&a);
+    let first = release(&mut e, NOW, old_token);
+    assert_eq!(
+        terminal(&reply(&mut e, NOW + 1., &first, 200, KLINES)).unwrap(),
+        expected()
+    );
+    let a = ask(&mut e, NOW + 2., Interval::M1, 60000);
+    let (new_token, _) = preparation(&a);
+    let late = reply(&mut e, NOW + 3., &first, 503, "{}");
+    no_next(&late);
+    no_terminal(&late);
+    e.http_prepared(
+        NOW + 3.,
+        old_token,
+        Prepared {
+            id: old_token.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let late = e.drain_actions().collect::<Vec<_>>();
+    no_next(&late);
+    no_bind(&late);
+    no_terminal(&late);
+    let second = release(&mut e, NOW + 4., new_token);
+    assert_ne!(first.id, second.id);
+    assert_eq!(
+        terminal(&reply(&mut e, NOW + 5., &second, 200, KLINES)).unwrap(),
+        expected()
+    );
+}
+
+#[test]
+fn successful_command_leaves_all_254_other_owners_valid() {
+    let mut e = boot(false);
+    for id in 1000..1256 {
+        e.handle_command(
+            NOW,
+            Command::FetchCandles {
+                command: id,
+                symbol: "__hold".into(),
+                interval: Interval::M1,
+                limit: None,
+                from_ms: None,
+                to_ms: None,
+            },
+            Some(120000),
+        )
+        .unwrap();
+        assert!(e.drain_actions().next().is_none());
+    }
+    for _ in 0..2 {
+        e.handle(
+            NOW,
+            Event::Command(Command::SetTickerSymbols {
+                symbols: vec!["__retire".into()],
+            }),
+        );
+        e.drain_actions().for_each(drop);
+    }
+    assert_eq!(e.venue().peers.len(), 254);
+    let a = ask(&mut e, NOW, Interval::M1, 60000);
+    let r = native_packet(&mut e, NOW, a);
+    assert_eq!(
+        terminal(&reply(&mut e, NOW + 1., &r, 200, KLINES)).unwrap(),
+        expected()
+    );
+    e.handle(
+        NOW + 2.,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["__validate".into()],
+        }),
+    );
+    assert!(e.drain_actions().next().is_none());
+    assert_eq!(e.venue().peers.len(), 254);
+}
+
+#[test]
+fn submillisecond_live_receipt_rounds_host_timeout_without_extending_root() {
+    let mut e = boot(false);
+    let a = ask(&mut e, NOW, Interval::M1, 1000);
+    let (token, _) = preparation(&a);
+    let r = release(&mut e, NOW + 999.5, token);
+    assert_eq!(r.timeout_ms, Some(1));
+    assert_eq!(
+        terminal(&reply(&mut e, NOW + 999.75, &r, 200, KLINES)).unwrap(),
+        expected()
+    );
 }

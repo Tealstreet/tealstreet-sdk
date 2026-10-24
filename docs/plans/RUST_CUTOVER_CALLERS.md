@@ -8003,3 +8003,20 @@ Both original and renewed equality fences run before native codec/publication
 or final signed send; independent CONNECT snapshot and payload bounds remain.
 The Supervisor allocates its prospective replacement watch before changing the
 old watch or origin, and existing fatal exhaustion prevents partial output.
+
+
+## Paradex command candle Read ownership
+
+FetchCandles retains the original caller Read root across documented klines and
+its native once-only TradingView fallback. Wide intervals still start directly
+with TradingView. Each physical call gets a fresh Never child clipped to that
+root. **NEW policy:** its 20s admission-to-expiry bound includes Prepare, Bind,
+route waits and transport; it is not a 20s cap on the entire two-call walk.
+Exact root/child DATA validation precedes streamed rows, envelope and codec.
+A released first-call failure or physical timeout may fall back only while the
+original root lives; typed preparation/queue refusal is strict. Original root
+expiry owns one terminal and discards every staged prefix without fallback.
+Shared typed fields are retained, including local pre-release NotSent, while
+native string failures keep their absent optional metadata. Full capacity now
+refuses before HTTP; root plus one child need two slots. Subscription polls, discovery,
+account-start delegation, private history and signing keep their existing paths.

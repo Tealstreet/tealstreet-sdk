@@ -251,3 +251,42 @@ Only this plan and the new test target differ from the plan-first tree. Existing
 fixtures, runtime, Cargo, inventories and shared files remain base-exact. Logs:
 `/tmp/codex-paradex-candle-originals.log` and
 `/tmp/codex-paradex-candle-original-clippy.log`. No push/CI or production claim.
+
+
+## Local source checkpoint
+
+The original 24 control bodies at 1920d90b9e1 are retained. Six appended controls
+pin zero wait, broken stream/nonUTF8 fallback, no late Bind after refusal,
+retired-generation isolation, validation of all 254 peers after successful
+recovery, and a positive 0.5ms remainder (host timeout rounds to 1ms while the
+original root equality fence stays strict). All 30 now pass, including every
+previously gated preparation, binding, physical-timeout and capacity suffix.
+
+The scoped Paradex crate passes 281 tests, zero failures/ignored. Strict all-target
+Clippy passes with CARGO_BUILD_JOBS=4; rustfmt ran on the changed Rust files.
+An initial compile error used the wrong CommandEntryError module path and was
+corrected before execution; it is not part of the original RED evidence.
+
+One existing control is deliberately superseded:
+`saturated_remote_candles_keep_native_legacy_bytes_without_unused_root` asserted
+raw HTTP despite 256 retained peers. Its replacement requires one typed Capacity
+terminal before I/O, frees exactly two peers for root+child, then executes all
+original literal URL/method/header/body assertions on the recovered real HTTP.
+This is an authorized managed-admission behavior change, not merely a collector
+adaptation. No other old test assertion changes.
+
+Production changes are confined to public.rs command candle ownership and narrow
+lib.rs callbacks. Subscription polls retain both original raw send sites and
+their timers/generation behavior; discovery and account-start delegation remain.
+Only command fail/done fingerprints are removed: public 5->3/family 41->39. No
+signing, selection, private history, engine, host, Cargo or profile change.
+
+Paired optimized measurements use identical wasm-bindgen 0.2.129/Binaryen 132 and
+unchanged build/profile inputs. Baseline 1920/runtime 581 Node/web 1,331,336 bytes,
+SHA256 1f998bc14140cf923c3e27dab5e7261963902a7c3f6ca56fd38ff5ae2cd04157;
+source Node/web 1,339,096 bytes, +7,760, SHA256
+4ef7d840eca97df535afd7b72289dae9cedeef2861672a5155bcc02b0f674bc3.
+Both fit the unchanged 1,343,488 venue budget. Build completed before the shared
+combined-WASM size hold; no further size build starts during that hold.
+Logs/receipts are local under /tmp/codex-paradex-candle-{crate,clippy,wasm-*}.
+Source review, actual-tip preservation and CI remain separate gates; no push yet.
