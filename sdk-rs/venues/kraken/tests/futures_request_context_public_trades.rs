@@ -640,7 +640,8 @@ fn duplicate_id_keeps_original_held_read_and_never_reissues() {
 #[test]
 fn invalid_external_clock_refuses_without_public_http() {
     let (mut e, _) = boot();
-    let a = fetch(&mut e, f64::NAN, 60_000);
+    e.handle(f64::NAN, Event::Command(command(COMMAND)));
+    let a = e.drain_actions().collect::<Vec<_>>();
     no_next(&a);
     let error = terminal(&a).unwrap_err();
     assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
@@ -936,4 +937,14 @@ fn native_transport_failure_discards_unaccepted_streamed_second_page_rows() {
             .to_string()
             .contains("unaccepted-streamed")
     );
+}
+
+#[test]
+fn invalid_host_receipt_is_refused_before_dispatch() {
+    let (mut e, _) = boot();
+    assert_eq!(
+        e.handle_command(f64::NAN, command(COMMAND), Some(60_000)),
+        Err(Error::Invalid)
+    );
+    assert!(e.drain_actions().next().is_none());
 }

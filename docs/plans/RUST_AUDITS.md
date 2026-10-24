@@ -3066,3 +3066,14 @@ Source-stage recovery suffix correction records the required root+child two-slot
 geometry without altering the original initial-capacity assertions. The28 now
 pass, plus47 existing public/startup/socket/local-context controls. Architecture
 gate No; bounded source review and full family CI remain pending.
+
+### Kraken Futures unsigned PublicTrades custody
+
+One raw history request is replaced by managed unsigned physical pages under a
+single caller-receipt Read root. The public walk has its own carrier/module;
+private history and actual #2058 candle handling remain intact. Shared history
+admission guards exact delivery before identities/rows/progress; preparation
+refusal/root expiry stay strict, while native later transport/503/codec failure
+recovers only previously accepted rows. The new 20s child policy and typed first
+released failure are disclosed in CALLERS. Sole intended request inventory
+change: history.rs 6->5, family23->22. Bounded source review/CI remain separate.

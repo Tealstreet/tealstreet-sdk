@@ -201,3 +201,39 @@ Only this new plan and new target differ; no source, inventory, selection or
 existing fixture change. Original/native review remains separate from these
 owner execution receipts. Actual2058 composition is still required before
 production callback wiring; do not merge its frozen head into this checkpoint.
+
+## Production composition and executed-control adjustments
+
+Actual #2058 is now landed at 883c5c8deb8 and plain-merged into this branch.
+Production separates only unsigned PublicTrades into public_trades.rs, with an
+explicit pending carrying the current child beside the owned history. The
+private history codec helpers Atom/side/ISO/stall text are shared without a codec
+change; the public-only Trade/TradeWire definitions move unchanged. Existing
+candle functions remain unchanged; typed callbacks add only PublicTrades arms.
+
+Released Network/Timeout callbacks bind the pending's exact current child and
+validate the original root without applying the DATA validator to an expired
+physical child. DATA and integrity failures validate delivery before processing.
+Both discard the unaccepted page before native accepted-prefix recovery. Typed
+preparation and queue refusal remain strict through ReadCursorHistory::reject.
+Root-only history authority owns markers and completion; no numeric fallback.
+
+After composition, the first scoped run passed 28/29 controls. The NaN control
+stopped in its helper because the landed host handle_command now rejects a
+non-finite receipt before dispatch. It now uses the existing external Event
+entry as the landed candle control does, preserving no-next/typed-terminal
+assertions. An additional control pins handle_command -> Err(Invalid) with no
+engine actions. No compiler or fixture panic is counted as adoption proof.
+
+The existing mixed public/private history failure control expected Internal for
+all transport failures. The reviewed shared-cause contract now preserves Network
+for PublicTrades only. That one case gains an exact Network/native-message
+assertion; every private transport, HTTP and malformed-DATA Internal assertion
+is retained. The initial original 29-test checkpoint and its 16 RED/13 GREEN
+receipt remain historical evidence, distinct from these disclosed adaptations.
+
+The complete changed Kraken crate now passes 320 tests (zero failed/ignored),
+including 30 PublicTrades controls, 29 history controls, 28 candle controls and
+all in-crate carrier matches. The first rerun hit disk exhaustion writing Cargo
+incremental cache; only this worktree's disposable incremental cache was cleared,
+then the same scoped crate run passed. No source/test failure was masked.

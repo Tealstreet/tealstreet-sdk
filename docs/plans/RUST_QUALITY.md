@@ -1737,3 +1737,14 @@ checks are scoped locally, with full workspace/WASM/replay proof delegated to CI
 The CI unit-fixture correction changes only the secondary probe's pending
 constructor fields, preserving every original assertion. Scoped unit tests and
 all-target Clippy now cover this constructor as well as integration targets.
+
+### Kraken Futures PublicTrades custody controls
+
+Plan/original checkpoint f24c1588e45 was independently CLEAR (16 assertion REDs,
+13 native GREENs). Source composition uses actual #2058 883c5c8deb8. Controls
+cover exact caller/child bounds, held Prepare/Bind, strict typed preparation,
+capacity with two-slot/no-leak recovery, duplicate/clock/late work fences and
+accepted-only later transport/503/codec/physical-timeout recovery. The external
+NaN fixture adaptation and narrow first PublicTrades Network expectation are
+disclosed in the plan; private failure assertions remain unchanged. Full Rust,
+WASM and workspace checks belong to the one PR-triggered CI run.
