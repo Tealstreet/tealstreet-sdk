@@ -152,13 +152,16 @@ impl ApexOmni {
         legacy: bool,
         retries: u8,
     ) -> Result<RequestId, (String, Box<Pending>)> {
-        // Klines and public symbols carry no authentication, so public
-        // discovery never depends on signing material. Everything else does.
-        let identity = if sign::is_unsigned(&request) || request.path == "/v3/symbols" {
+        // Klines carry no authentication. Symbols are signed with a complete
+        // identity, as legacy did; without one it stays public discovery.
+        let symbols = request.path == "/v3/symbols";
+        let identity = if sign::is_unsigned(&request) {
             None
         } else {
             match self.options.identity.clone() {
+                Some(identity) if symbols && identity.passphrase.is_none() => None,
                 Some(identity) => Some(identity),
+                None if symbols => None,
                 // A signing failure hands the pending request back so its caller can complete it.
                 None => {
                     return Err((
