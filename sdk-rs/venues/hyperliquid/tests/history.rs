@@ -5,24 +5,57 @@ use safe_cex_venue_hyperliquid::Hyperliquid;
 use serde_json::Value;
 use support::*;
 fn query(e: &mut Engine<Hyperliquid>, q: Query) {
-    e.handle(
-        5000.0,
-        Event::Command(Command::Query {
+    e.handle_command(
+        5000.,
+        Command::Query {
             command: 1,
             query: q,
-        }),
-    );
+        },
+        Some(safe_cex_engine::MAX_COMMAND_WAIT_MS),
+    )
+    .unwrap();
 }
 fn read(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    e.drain_actions()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .unwrap()
+    read_at(e, &mut 5000.)
+}
+fn read_at(e: &mut Engine<Hyperliquid>, now: &mut f64) -> HttpRequest {
+    loop {
+        let output = safe_cex_engine::test_support::prepared_actions(e, *now);
+        if let Some(request) = output.iter().find_map(|a| match a {
+            Action::Http(request) => Some(request.clone()),
+            _ => None,
+        }) {
+            return request;
+        }
+        let (timer, at) = output
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms > *now && *at_ms <= *now + 60_000. => {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("native read-budget wake");
+        *now = at;
+        e.handle(at, Event::TimerFired { timer });
+    }
+}
+fn reply(e: &mut Engine<Hyperliquid>, r: &HttpRequest, status: u16, body: &str) {
+    reply_at(e, 5000., r, status, body)
+}
+fn reply_at(e: &mut Engine<Hyperliquid>, now: f64, r: &HttpRequest, status: u16, body: &str) {
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status,
+                headers: "",
+                body,
+            },
+        },
+    );
 }
 fn result(e: &mut Engine<Hyperliquid>) -> Value {
     let result = e
@@ -372,10 +405,11 @@ fn concurrent_heavy_reads_reserve_response_weight_before_dispatch() {
             }),
         );
     }
-    let requests = e
-        .drain_actions()
+    let requests = safe_cex_engine::test_support::prepared_actions(&mut e, 5000.)
+        .iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .count();
+    assert!(requests > 0, "budget control must release physical reads");
     assert!(
         requests <= 8,
         "must reserve the 120-weight maximum per heavy response"
@@ -477,7 +511,7 @@ fn owned_history_later_failures_keep_only_validated_pages() {
             "malformed" => reply(&mut e, &request, 200, &format!("[{},{{}}]", fill(2))),
             _ => {
                 e.handle(
-                    1000.0,
+                    5000.0,
                     Event::HttpStart {
                         request: request.id,
                         status: 200,
@@ -486,14 +520,14 @@ fn owned_history_later_failures_keep_only_validated_pages() {
                 );
                 let prefix = format!("[{},", fill(2));
                 e.handle(
-                    1000.0,
+                    5000.0,
                     Event::HttpChunk {
                         request: request.id,
                         data: prefix.as_bytes(),
                     },
                 );
                 e.handle(
-                    1000.0,
+                    5000.0,
                     Event::HttpFailed {
                         request: request.id,
                         error: "lost partial page",
@@ -591,11 +625,13 @@ fn owned_history_page_cap_keeps_page_200_but_no_request_201() {
         let (mut e, _) = ready("disabled");
         e.set_log_level(safe_cex_engine::Level::Error);
         query(&mut e, owned_fills_query(None));
-        let mut request = read(&mut e);
+        let mut now = 5000.;
+        let mut request = read_at(&mut e, &mut now);
         for page in 1..=positive_pages {
             let body = format!("[{}]", fill(u64::from(page)));
+            now += 1.;
             e.handle(
-                f64::from(page) * 60_000.0,
+                now,
                 Event::HttpResponse {
                     request: request.id,
                     response: safe_cex_engine::Response {
@@ -608,7 +644,7 @@ fn owned_history_page_cap_keeps_page_200_but_no_request_201() {
             if page == 200 {
                 break;
             }
-            request = read(&mut e);
+            request = read_at(&mut e, &mut now);
             let sent: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
             assert_eq!(
                 sent["startTime"], 1000,
@@ -616,7 +652,7 @@ fn owned_history_page_cap_keeps_page_200_but_no_request_201() {
             );
         }
         if positive_pages == 199 {
-            reply(&mut e, &request, 200, "[]");
+            reply_at(&mut e, now, &request, 200, "[]");
             let actions = e.drain_actions().collect::<Vec<_>>();
             assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
             let data = actions
@@ -682,11 +718,13 @@ fn owned_history_income_keeps_the_first_gap_through_funding_failure() {
             limit: None,
         },
     );
-    let mut request = read(&mut e);
+    let mut now = 5000.;
+    let mut request = read_at(&mut e, &mut now);
     for page in 1..=200_u32 {
         let body = format!("[{}]", fill(u64::from(page)));
+        now += 1.;
         e.handle(
-            f64::from(page) * 60_000.0,
+            now,
             Event::HttpResponse {
                 request: request.id,
                 response: safe_cex_engine::Response {
@@ -696,7 +734,7 @@ fn owned_history_income_keeps_the_first_gap_through_funding_failure() {
                 },
             },
         );
-        request = read(&mut e);
+        request = read_at(&mut e, &mut now);
         assert_eq!(
             kind(&request),
             if page == 200 {
@@ -706,7 +744,7 @@ fn owned_history_income_keeps_the_first_gap_through_funding_failure() {
             }
         );
     }
-    reply(&mut e, &request, 503, "later funding failure");
+    reply_at(&mut e, now, &request, 503, "later funding failure");
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert_eq!(owned_partial(&actions, 1).as_array().unwrap().len(), 400);
     let message = actions

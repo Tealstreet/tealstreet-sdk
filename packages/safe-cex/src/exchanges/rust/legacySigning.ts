@@ -8,6 +8,8 @@ import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { signHttpCapture } from '../../utils/signHttpCapture';
 import { createAsterDEXV1RequestInterceptor, isAsterDEXPublicEndpoint } from '../asterdex/asterdex.signing';
 import { createBinanceRequestInterceptor, isBinancePublicSigningRequest } from '../binance/binance.signing';
+import { finishBitgetRequest, prepareBitgetRequest } from '../bitget/bitget.signing';
+import { BROKER_ID as BITGET_BROKER_ID } from '../bitget/bitget.types';
 import { createBybitRequestInterceptor, isBybitUnsignedSigningRequest } from '../bybit/bybit.signing';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../bybit/bybit.site';
 import { BROKER_ID, RECV_WINDOW } from '../bybit/bybit.types';
@@ -16,6 +18,7 @@ import { finishOkxRequest, isOkxPublicSigningRequest, isOkxUnsignedSigningReques
 const BINANCE = new Set<ExchangeName>(['binance', 'binancepm', 'binanceinverse', 'binancespot']);
 const BYBIT = new Set<ExchangeName>(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader']);
 const OKX = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
+const BITGET = new Set<ExchangeName>(['bitget', 'bitgetusdc', 'bitgetinverse']);
 
 /** The surviving hosted wire adapter uses standalone codecs, never a TS venue.
  * It cannot fall back to options.secret: the callback always uses owned refs.
@@ -31,13 +34,15 @@ export const signHostedHttp = async (
   // Other dispatch families have no request codec here.
   const aster = name === 'asterdex';
   const okx = OKX.has(name);
-  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !aster)
+  const bitget = BITGET.has(name);
+  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !aster)
     return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
   const binance = BINANCE.has(name);
+  // The legacy Bitget interceptor signs every request once credentials exist.
   const unsigned = binance ? isBinancePublicSigningRequest(name, request.config.url)
     : okx ? isOkxUnsignedSigningRequest(request.config.url)
     : aster ? isAsterDEXPublicEndpoint(request.config.url)
-      : isBybitUnsignedSigningRequest(request.config.method?.toLowerCase() ?? 'get', request.config.url);
+      : !bitget && isBybitUnsignedSigningRequest(request.config.method?.toLowerCase() ?? 'get', request.config.url);
   const needsCredential = primaryComplete && !unsigned;
   const credential = needsCredential ? (await host.hostedSigning({ kind: 'credential' })).credential : undefined;
   if (needsCredential && !credential) throw new Error('Signing credential is unavailable');
@@ -75,6 +80,9 @@ export const signHostedHttp = async (
     headers: okx ? {
       'Content-Type': 'application/json',
       ...(options.testnet || name.endsWith('demo') ? { 'x-simulated-trading': 1 } : {}),
+    } : bitget ? {
+      'X-CHANNEL-API-CODE': BITGET_BROKER_ID,
+      'Content-Type': 'application/json',
     } : binance ? {
       'X-MBX-APIKEY': credential,
       'Content-Type': 'application/json, charset=utf-8',
@@ -97,6 +105,13 @@ export const signHostedHttp = async (
     const passphrase = output.headers?.find(([key]) => key.toLowerCase() === 'ok-access-passphrase')?.[1];
     if (output.credential !== credential || !output.signature || !passphrase) throw new Error('Signing identity changed');
     return finishOkxRequest(prepared, credential, output.signature, passphrase);
+  } : bitget ? async (config) => {
+    if (!credential) return config;
+    const prepared = prepareBitgetRequest(config, now());
+    const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
+    const passphrase = output.headers?.find(([key]) => key.toLowerCase() === 'access-passphrase')?.[1];
+    if (output.credential !== credential || !output.signature || !passphrase) throw new Error('Signing identity changed');
+    return finishBitgetRequest(prepared, credential, output.signature, passphrase);
   } : binance
     ? createBinanceRequestInterceptor(signingOptions, name, now)
     : createBybitRequestInterceptor(signingOptions, name, now, siteHeaders));

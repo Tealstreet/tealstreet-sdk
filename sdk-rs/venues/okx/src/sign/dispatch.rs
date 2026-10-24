@@ -1,4 +1,5 @@
 //! Canonical OKX work. The injected provider owns all credential material.
+use safe_cex_engine::signing::seconds_suffix_payload;
 use safe_cex_engine::signing::{
     Context, Identity, Operation, PayloadPart, SignError, SignReceipt, SignRequest, SignResult,
     hmac_sha256_work,
@@ -177,19 +178,7 @@ impl SignStep for WsLogin {
         self.stamp = num::format(seconds);
         work(
             &self.identity,
-            // Typed WS grammar distinguishes this prepared work from a hosted
-            // HTTP capture of an otherwise identical opaque string.
-            vec![
-                PayloadPart::Bytes {
-                    bytes: self.stamp.as_bytes().to_vec(),
-                },
-                PayloadPart::Bytes {
-                    bytes: b"GET".to_vec(),
-                },
-                PayloadPart::Bytes {
-                    bytes: b"/users/self/verify".to_vec(),
-                },
-            ],
+            seconds_suffix_payload(&self.stamp, "GET", "/users/self/verify"),
             context(&self.origin, "WS", "/users/self/verify"),
             seconds * 1000.,
         )
