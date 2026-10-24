@@ -123,8 +123,11 @@ negative/overflow must refuse before I/O, with no partial raw fallback.
 
 Futures private open sends a PRIMARY key-only challenge request, then signs
 SHA256(challenge) with HMAC-SHA512 for each private feed subscription. Keep the
-same native challenge field/feed order,15s challenge/auth deadline, native socket
-supervision and ACK behavior. Current cached signed_challenge material must not
+same native challenge field/feed order and two deadline phases: OPEN sets
+now+15000, then accepting a nonempty current challenge resets now+15000 for
+all subscription ACKs. CONNECT does not start this auth deadline. Preserve
+existing supervisor-tick enforcement and the separate180s initial-payload guard;
+no snapshot opt-in or new local auth timer is inferred. Current cached signed_challenge material must not
 become a credential-bearing replay carrier. Exact managed-socket recipe fit is
 OPEN: each re-sign binds the active socket generation and current
 challenge; a late result for retired challenge/socket cannot subscribe or publish.
@@ -309,3 +312,23 @@ issuer to compile it. A nonce claim supplies no socket/session authority.
 Only genuine Context-phase command owners may session_wait. WS subscriptions
 stay venue-driven. These are plan/original controls, not a token/session native
 migration receipt; no runtime is changed by this checkpoint.
+
+
+### Token-retirement original extension
+
+Three additive controls retain every earlier original assertion. A thin venue
+wrapper only counts real on_response deliveries and forwards startup, streaming,
+open/close, command, timer and typed failure callbacks. The genuine Spot token
+POST is released through the existing fixture, held, then replied on the same
+or a closed socket. No Session/Context or successful provider batch is invented.
+The live twin receives one callback and exactly native executions then balances
+subscriptions with the token. The closed native twin emits no WS subscription.
+The NEW-CONTRACT retirement RED counts a late callback (5 vs4), proving current
+native socket suppression does not yet provide engine Session retirement. It
+claims no pre-existing wrong-socket token disclosure. Session retirement after
+adoption must deny that callback as the owner requires.
+
+Scoped spot-filter execution: 7 tests, 3 assertion RED / 4 GREEN, zero ignored
+(16 unrelated originals filtered). The three new controls are 1 NEW-CONTRACT
+RED / 2 native GREEN; the other two REDs remain the original Spot provider
+bypass/refusal assertions. No production, Cargo, maps or existing fixtures change.

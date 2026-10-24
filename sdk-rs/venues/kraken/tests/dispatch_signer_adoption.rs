@@ -485,3 +485,237 @@ fn native_public_only_futures_provider_and_auth_unused() {
             .any(|r| r.headers.iter().any(|(k, _)| *k == "Authent"))
     );
 }
+
+struct SpotDeliveryProbe {
+    venue: KrakenSpot,
+    delivered: usize,
+}
+impl Venue for SpotDeliveryProbe {
+    type Pending = <KrakenSpot as Venue>::Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        self.venue.capabilities()
+    }
+    fn start(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>) {
+        self.venue.start(cx);
+    }
+    fn on_open(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>, socket: SocketId) {
+        self.venue.on_open(cx, socket);
+    }
+    fn on_message(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        socket: SocketId,
+        text: &str,
+    ) {
+        self.venue.on_message(cx, socket, text);
+    }
+    fn on_close(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        socket: SocketId,
+        code: u16,
+    ) {
+        self.venue.on_close(cx, socket, code);
+    }
+    fn on_response(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        response: Response<'_>,
+    ) {
+        self.delivered += 1;
+        self.venue.on_response(cx, pending, response);
+    }
+    fn on_item(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        pending: &mut Self::Pending,
+        item: &str,
+    ) {
+        self.venue.on_item(cx, pending, item);
+    }
+    fn on_request_failed(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: &str,
+    ) {
+        self.venue.on_request_failed(cx, pending, error);
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        self.venue.on_http_failed(cx, pending, error);
+    }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        self.venue.on_sign_error(cx, pending, error);
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        self.venue
+            .on_http_preparation_failed(cx, pending, reason, error);
+    }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        response: Response<'_>,
+    ) {
+        self.venue.on_stream_error(cx, pending, response);
+    }
+    fn on_timer(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        timer: safe_cex_engine::TimerId,
+    ) {
+        self.venue.on_timer(cx, timer);
+    }
+    fn on_command(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>, command: Command) {
+        self.venue.on_command(cx, command);
+    }
+    fn book(&self, symbol: &str) -> Option<&safe_cex_engine::book::Book> {
+        self.venue.book(symbol)
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+        self.venue.books()
+    }
+}
+fn held_spot_token() -> (Engine<SpotDeliveryProbe>, HttpRequest, SocketId) {
+    let opts = options(false);
+    let (p, ids) = provider(&opts, Some("fixture-spot-token-retirement"), false);
+    let mut e = engine(
+        SpotDeliveryProbe {
+            venue: KrakenSpot::new(opts),
+            delivered: 0,
+        },
+        &p,
+        ids,
+    );
+    let mut token = None;
+    let mut private = None;
+    for _ in 0..16 {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            match action {
+                Action::Http(r) if r.url.ends_with("GetWebSocketsToken") => {
+                    assert!(token.replace(r).is_none(), "exactly one current token call");
+                }
+                Action::Http(r) => {
+                    let body = if r.url.ends_with("AssetPairs") {
+                        spot_support::META
+                    } else if r.url.ends_with("Ticker") {
+                        spot_support::TICKERS
+                    } else if r.url.ends_with("Balance") {
+                        spot_support::BALANCE
+                    } else if r.url.ends_with("OpenOrders") {
+                        spot_support::OPEN
+                    } else {
+                        panic!("unexpected token bootstrap {}", r.url)
+                    };
+                    e.handle(
+                        NOW,
+                        Event::HttpResponse {
+                            request: r.id,
+                            response: Response {
+                                status: 200,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                }
+                Action::WsConnect {
+                    socket,
+                    channel: Some(SocketChannel::Private),
+                    ..
+                } => {
+                    assert!(private.replace(socket).is_none());
+                    e.handle(NOW, Event::WsOpened { socket });
+                }
+                _ => {}
+            }
+        }
+    }
+    let token = token.expect("genuine signed token request");
+    assert_eq!(header(&token, "API-Key"), KEY);
+    assert_eq!(token.method, Method::Post);
+    (e, token, private.expect("genuine private socket"))
+}
+fn token_response(e: &mut Engine<SpotDeliveryProbe>, r: &HttpRequest) -> Vec<Action> {
+    e.handle(
+        NOW + 2.,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"error":[],"result":{"token":"fixture-held-token","expires":900}}"#,
+            },
+        },
+    );
+    e.drain_actions().collect()
+}
+#[test]
+fn native_live_spot_token_subscribes_both_channels() {
+    let (mut e, token, socket) = held_spot_token();
+    let before = e.venue().delivered;
+    let actions = token_response(&mut e, &token);
+    assert_eq!(e.venue().delivered, before + 1);
+    let frames: Vec<serde_json::Value> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsSend {
+                socket: current,
+                text,
+            } if *current == socket => Some(serde_json::from_str(text).unwrap()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[0]["params"]["channel"], "executions");
+    assert_eq!(frames[1]["params"]["channel"], "balances");
+    for frame in frames {
+        assert_eq!(frame["params"]["token"], "fixture-held-token");
+    }
+}
+#[test]
+fn native_closed_spot_socket_never_sends_late_token_subscriptions() {
+    let (mut e, token, socket) = held_spot_token();
+    e.handle(NOW + 1., Event::WsClosed { socket, code: 1000 });
+    e.drain_actions().for_each(drop);
+    assert!(
+        !token_response(&mut e, &token)
+            .iter()
+            .any(|a| matches!(a, Action::WsSend { .. }))
+    );
+}
+#[test]
+fn new_contract_closed_spot_socket_retires_token_callback_authority() {
+    let (mut e, token, socket) = held_spot_token();
+    e.handle(NOW + 1., Event::WsClosed { socket, code: 1000 });
+    e.drain_actions().for_each(drop);
+    let before = e.venue().delivered;
+    let actions = token_response(&mut e, &token);
+    assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+    assert_eq!(
+        e.venue().delivered,
+        before,
+        "a retired token Session must fence delivery before the venue callback"
+    );
+}
