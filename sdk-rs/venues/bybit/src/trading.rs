@@ -9,15 +9,13 @@ pub(crate) mod ordinary;
 
 use crate::sign::Body;
 use crate::wire::*;
-use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};
+use crate::{BybitLinear, Category, Pending};
 use safe_cex_engine::model::{
-    MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
+    Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
-use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Outcome, Response, SocketId, TimerId, VenueError, num,
-};
+use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Outcome, SocketId, VenueError, num};
 use std::collections::{HashMap, VecDeque};
 
 /// Orders per `create-batch` request (Bybit's non-VIP limit).
@@ -26,17 +24,9 @@ const BATCH_LIMIT: usize = 10;
 const PLACE_BATCH_DELAY_MS: f64 = 1_200.0;
 const CANCEL_BATCH_DELAY_MS: f64 = 1_000.0;
 const CANCEL_BATCH_LIMIT: usize = 10;
-const LEVERAGE_NOT_MODIFIED: i64 = 110_043;
-const POSITION_MODE_NOT_MODIFIED: i64 = 110_025;
 const AGREEMENT_CODES: [i64; 2] = [110_123, 110_125];
 const STOP_LOSS_SUFFIX: &str = "__stop_loss";
 const TAKE_PROFIT_SUFFIX: &str = "__take_profit";
-
-pub struct Request {
-    command: CommandId,
-    call: Call,
-    local: Option<LocalWrite>,
-}
 
 struct LocalWrite {
     path: &'static str,
@@ -48,13 +38,6 @@ struct LocalWrite {
 
 /// What a response means for its job.
 enum Call {
-    /// A Hyro link-filtered reconcile read.
-    Hyro(crate::hyro::Lookup),
-    ResolveMode {
-        symbol: String,
-        command: Box<Command>,
-        version: u64,
-    },
     PlaceOne,
     /// Single-order bodies to place one by one if the venue refuses the
     /// whole batch (a refusal places nothing, so this cannot double-place).
@@ -102,26 +85,12 @@ struct Step {
 #[derive(Default)]
 struct Job {
     steps: VecDeque<Step>,
-    outstanding: usize,
     /// Run every step even after a failure (independent orders of one batch).
     continue_on_error: bool,
-    ids: Vec<String>,
-    error: Option<String>,
-    signing_error: Option<VenueError>,
-    /// A write may have taken effect without a definitive answer.
-    unknown: bool,
-    /// The unknown answer was a lost request.
-    network: bool,
-    /// Bybit explicitly refused a write; its retCode when it gave one.
-    refused: Option<Option<i64>>,
-    /// A write took effect, so a later failure cannot mean nothing happened.
-    effective: bool,
-    delay: Option<TimerId>,
 }
 
 #[derive(Default)]
 pub struct TradingState {
-    jobs: HashMap<CommandId, Job>,
     ordinary: HashMap<CommandId, ordinary::Ordinary>,
     mode_version: u64,
     pub(crate) hyro: crate::hyro::State,
@@ -211,14 +180,6 @@ fn tp_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
     }
 }
 
-const CANCEL_ALL_NOT_SUCCESSFUL: &str = "Bybit cancel-all was not successful";
-
-/// No definitive answer: transport failure (0), HTTP 408/5xx without a Bybit
-/// envelope, or retCode 10000 (server timeout) / 10016 (internal error).
-fn outcome_unknown(code: i64) -> bool {
-    matches!(code, 0 | 408 | 500..=599 | 10000 | 10016 | 170001 | 170007)
-}
-
 /// Bybit's message, with the Trading Terms refusal made actionable.
 fn describe((code, message): (i64, String)) -> String {
     if !AGREEMENT_CODES.contains(&code) {
@@ -230,99 +191,8 @@ fn describe((code, message): (i64, String)) -> String {
     )
 }
 
-fn not_modified(message: &str) -> bool {
-    message.to_ascii_lowercase().contains("not modified")
-}
-
-/// A cancel that raced a fill or another cancel: the order is gone either way.
-fn already_gone(message: &str) -> bool {
-    let message = message.to_ascii_lowercase();
-    message.contains("order not exists") || message.contains("too late to cancel")
-}
-
-fn partial_stop_cancel_accepted(body: &str, id: &str, batch: bool) -> Result<(), String> {
-    let malformed = || {
-        "Partial stop cancellation was not confirmed: malformed or mismatched acknowledgement"
-            .to_owned()
-    };
-    if batch {
-        #[derive(serde::Deserialize)]
-        struct Reply {
-            #[serde(rename = "retExtInfo")]
-            statuses: Statuses,
-        }
-        #[derive(serde::Deserialize)]
-        struct Statuses {
-            list: Vec<Status>,
-        }
-        #[derive(serde::Deserialize)]
-        struct Status {
-            code: i64,
-            msg: Option<String>,
-        }
-        let reply: Reply = serde_json::from_str(body).map_err(|_| malformed())?;
-        let [status] = reply.statuses.list.as_slice() else {
-            return Err(malformed());
-        };
-        if status.code != 0 && !already_gone(status.msg.as_deref().unwrap_or_default()) {
-            return Err(status
-                .msg
-                .clone()
-                .unwrap_or_else(|| "Partial stop cancellation was rejected".into()));
-        }
-    } else {
-        #[derive(serde::Deserialize)]
-        struct Reply {
-            result: Identity,
-        }
-        #[derive(serde::Deserialize)]
-        struct Identity {
-            #[serde(rename = "orderId")]
-            id: String,
-        }
-        let reply: Reply = serde_json::from_str(body).map_err(|_| malformed())?;
-        if reply.result.id != id {
-            return Err(malformed());
-        }
-    }
-    Ok(())
-}
-
 fn is_virtual(id: &str) -> bool {
     id.ends_with(STOP_LOSS_SUFFIX) || id.ends_with(TAKE_PROFIT_SUFFIX)
-}
-
-fn cancel_all_affected(body: &str) -> Result<Vec<String>, &'static str> {
-    #[derive(serde::Deserialize)]
-    struct Reply {
-        result: Affected,
-    }
-    #[derive(serde::Deserialize)]
-    struct Affected {
-        list: Vec<Identity>,
-        success: Option<String>,
-    }
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Identity {
-        order_id: String,
-    }
-    let reply = serde_json::from_str::<Reply>(body).map_err(
-        |_| "Bybit cancel-all outcome is unknown: missing or malformed affected-order list",
-    )?;
-    if reply.result.success.is_some_and(|success| success != "1") {
-        return Err(CANCEL_ALL_NOT_SUCCESSFUL);
-    }
-    let mut ids = Vec::with_capacity(reply.result.list.len());
-    for row in reply.result.list {
-        if row.order_id.trim().is_empty() || is_virtual(&row.order_id) {
-            return Err("Bybit cancel-all outcome is unknown: invalid affected native order ID");
-        }
-        ids.push(row.order_id);
-    }
-    ids.sort_unstable();
-    ids.dedup();
-    Ok(ids)
 }
 
 fn single(path: &'static str, body: String, call: Call) -> Job {
@@ -413,24 +283,6 @@ impl BybitLinear {
         check_client_order_ids(cx, orders)
     }
 
-    /// A Hyro reconcile read on its own Background authority.
-    pub(crate) fn hyro_read(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        rest: Rest,
-        lookup: crate::hyro::Lookup,
-    ) {
-        self.send_read(
-            cx,
-            rest,
-            Then::Trade(Request {
-                command: 0,
-                call: Call::Hyro(lookup),
-                local: None,
-            }),
-        );
-    }
-
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         // Bybit cancels by order id only; refuse rather than leave it open.
         if matches!(command, Command::CancelOrdersWithSymbols { .. }) {
@@ -450,152 +302,6 @@ impl BybitLinear {
         }
         if self.ordinary_command(&command) {
             self.start_ordinary(cx, command);
-            return;
-        }
-        // `send` drops requests while the options are invalid; fail instead of hanging.
-        if let Some(error) = self.config_error.clone()
-            && let Some(id) = trade_command_id(&command)
-        {
-            cx.fail(id, not_sent(error));
-            return;
-        }
-        if let Command::PlaceOrders { command, orders } = &command {
-            for order in orders {
-                let category = self.category_for(&order.symbol);
-                let valid = if !self.category_enabled(category) {
-                    Err("Bybit product is not enabled".into())
-                } else if category != Category::Option && order.implied_volatility.is_some() {
-                    Err("impliedVolatility is supported only on Bybit options".into())
-                } else if category == Category::Option {
-                    self.format_option(cx, order).map(|_| ())
-                } else {
-                    Ok(())
-                };
-                if let Err(error) = valid {
-                    cx.fail(*command, not_sent(error));
-                    return;
-                }
-            }
-        }
-        // Validate the whole batch before mode reads or writes: an unpriced
-        // protective order must never become an ordinary market order.
-        if let Command::PlaceOrders { command, orders } = &command
-            && let Err(error) = validate_stop_triggers(cx, orders)
-        {
-            cx.fail(*command, not_sent(error));
-            return;
-        }
-        if self.variant.is_hyro() && !self.private_ready() {
-            let id = match &command {
-                Command::PlaceOrders { command, .. }
-                | Command::CancelOrders { command, .. }
-                | Command::AmendOrder { command, .. }
-                | Command::CancelSymbolOrders { command, .. }
-                | Command::SetLeverage { command, .. }
-                | Command::SetMarginType { command, .. }
-                | Command::SetPositionMode { command, .. } => *command,
-                _ => return,
-            };
-            cx.fail(
-                id,
-                not_sent(
-                    "HyroTrader account is reconnecting; wait for private state reconciliation",
-                ),
-            );
-            return;
-        }
-        if let Some((id, result)) = self.variant_control(&command) {
-            match result {
-                Ok(()) => cx.done(id, "[]".to_owned()),
-                Err(error) => cx.fail(id, not_sent(error).kind(ErrorKind::Unsupported)),
-            }
-            return;
-        }
-        // `send` drops signed writes without a key; every plan below writes.
-        if self.credentials.is_none()
-            && let Some(id) = trade_command_id(&command)
-        {
-            cx.fail(
-                id,
-                not_sent("Bybit trading needs an API key").kind(ErrorKind::AuthInvalid),
-            );
-            return;
-        }
-        // A settle-coin snapshot omits flat symbols. Resolve their mode before
-        // planning any writes, since Bybit modes can differ by symbol.
-        let unresolved = if self.variant.is_spot() || self.variant.is_hyro() {
-            None
-        } else {
-            match &command {
-                Command::PlaceOrders { command, orders } => orders
-                    .iter()
-                    .find(|o| self.symbol_mode(&o.symbol).is_none())
-                    .map(|o| (*command, o.symbol.clone())),
-                Command::AmendOrder { command, id, .. } => cx
-                    .store
-                    .order(id)
-                    .filter(|o| self.symbol_mode(&o.symbol).is_none())
-                    .map(|o| (*command, o.symbol.clone())),
-                _ => None,
-            }
-        };
-        if let Some((id, symbol)) = unresolved {
-            let category = self.category_for(&symbol);
-            if !self.category_enabled(category) {
-                cx.fail(id, not_sent("Bybit product is not enabled"));
-                return;
-            }
-            self.select_category(category);
-            if self.credentials.is_none() {
-                cx.fail(id, not_sent("Bybit trading needs an API key"));
-                return;
-            }
-            if let Command::PlaceOrders { orders, .. } = &command
-                && let Err(message) = check_client_order_ids(cx, orders)
-            {
-                cx.fail(id, not_sent(message));
-                return;
-            }
-            self.send(
-                cx,
-                Rest::get(
-                    "/v5/position/list",
-                    crate::sign::Query::new()
-                        .str("category", self.paths.category)
-                        .str("symbol", &symbol),
-                )
-                .signed(),
-                Then::Trade(Request {
-                    command: id,
-                    local: None,
-                    call: Call::ResolveMode {
-                        symbol,
-                        command: Box::new(command),
-                        version: self.trading.mode_version,
-                    },
-                }),
-            );
-            return;
-        }
-        let Some(id) = trade_command_id(&command) else {
-            return;
-        };
-        let Some(plan) = self.plan_job(cx, &command) else {
-            return;
-        };
-        if self.credentials.is_none() {
-            cx.fail(id, not_sent("Bybit trading needs an API key"));
-            return;
-        }
-        match plan {
-            Ok(job) => {
-                self.trading.jobs.insert(id, job);
-                self.advance(cx, id);
-            }
-            Err(message) => {
-                cx.command_error(id, message.clone());
-                cx.fail(id, not_sent(message));
-            }
         }
     }
 
@@ -740,568 +446,6 @@ impl BybitLinear {
             }
             _ => return None,
         })
-    }
-
-    /// Send the job's next step, or finish it.
-    fn advance(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        let Some(job) = self.trading.jobs.get_mut(&command) else {
-            return;
-        };
-        let stop = job.error.is_some() && !job.continue_on_error;
-        let next = if stop { None } else { job.steps.front() };
-        match next {
-            Some(step) if step.delay_ms > 0.0 => {
-                let delay = step.delay_ms;
-                job.steps[0].delay_ms = 0.0;
-                job.delay = Some(cx.set_timer(delay));
-            }
-            Some(_) => {
-                let step = job.steps.pop_front().expect("checked above");
-                job.outstanding = step.requests.len();
-                for planned in step.requests {
-                    #[derive(serde::Deserialize)]
-                    struct Routing<'a> {
-                        #[serde(borrow)]
-                        category: Option<&'a str>,
-                    }
-                    if let Ok(route) = serde_json::from_str::<Routing>(&planned.body)
-                        && let Some(category) = route.category.and_then(|value| {
-                            self.categories()
-                                .into_iter()
-                                .find(|category| category.as_str() == value)
-                        })
-                    {
-                        self.select_category(category);
-                    }
-                    let local = self.local_order_lifecycle().then(|| LocalWrite {
-                        path: planned.path,
-                        body: planned.body.clone(),
-                        before: cx.store.orders().to_vec(),
-                        socket: self.private.socket,
-                        snapshot: self.account.orders_snapshot_version,
-                    });
-                    let request = Request {
-                        command,
-                        call: planned.call,
-                        local,
-                    };
-                    if self.variant.is_hyro() {
-                        if !self.private_ready() {
-                            if let Some(job) = self.trading.jobs.get_mut(&command) {
-                                job.error = Some("HyroTrader private state is recovering".into());
-                                job.outstanding = job.outstanding.saturating_sub(1);
-                            }
-                            continue;
-                        }
-                        self.note_hyro_write();
-                    }
-                    cx.command_progress(command, planned.receipts);
-                    self.send(
-                        cx,
-                        Rest::post(planned.path, planned.body),
-                        Then::Trade(request),
-                    );
-                }
-                if self
-                    .trading
-                    .jobs
-                    .get(&command)
-                    .is_some_and(|job| job.outstanding == 0)
-                {
-                    self.advance(cx, command);
-                }
-            }
-            None => {
-                let job = self.trading.jobs.remove(&command).expect("present");
-                // A batch reports its failures as logs; it fails only when nothing went through.
-                match job.error {
-                    Some(error) if job.ids.is_empty() || !job.continue_on_error => {
-                        let error = VenueError::new(error);
-                        let error = if job.unknown {
-                            let error = error.outcome(Outcome::Unknown);
-                            if job.network {
-                                error.kind(ErrorKind::Network)
-                            } else {
-                                error
-                            }
-                        } else if let Some(code) = job.refused
-                            && !job.effective
-                            && job.ids.is_empty()
-                        {
-                            let error = error.kind(ErrorKind::Rejected).outcome(Outcome::Rejected);
-                            match code {
-                                Some(code) => error.venue_code(code.to_string()),
-                                None => error,
-                            }
-                        } else if !job.effective && job.ids.is_empty() {
-                            job.signing_error.unwrap_or(error)
-                        } else {
-                            error
-                        };
-                        cx.fail(command, error)
-                    }
-                    _ => cx.done(command, serde_json::to_string(&job.ids).unwrap_or_default()),
-                }
-            }
-        }
-    }
-
-    pub(crate) fn on_trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        let due = self
-            .trading
-            .jobs
-            .iter_mut()
-            .find(|(_, job)| job.delay == Some(timer))
-            .map(|(command, job)| {
-                job.delay = None;
-                *command
-            });
-        if let Some(command) = due {
-            self.advance(cx, command);
-        }
-    }
-
-    /// The failed request never left dispatch. Retain earlier ACK/ambiguity evidence.
-    pub(crate) fn on_trade_sign_failed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        request: Request,
-        error: VenueError,
-    ) {
-        let Request { command, call, .. } = request;
-        match call {
-            Call::Hyro(read) => {
-                self.on_hyro_response(cx, read, Err(&error.message));
-                return;
-            }
-            Call::ResolveMode { .. } => {
-                cx.command_error(command, error.message.clone());
-                cx.fail(command, error);
-                return;
-            }
-            _ => {}
-        }
-        let Some(job) = self.trading.jobs.get_mut(&command) else {
-            return;
-        };
-        cx.command_error(command, error.message.clone());
-        if job.error.is_none() {
-            job.error = Some(error.message.clone());
-            job.signing_error = Some(error);
-        }
-        job.outstanding = job.outstanding.saturating_sub(1);
-        if job.outstanding == 0 {
-            self.advance(cx, command);
-        }
-    }
-
-    pub(crate) fn on_trade_response(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        request: Request,
-        response: Result<Response<'_>, &str>,
-    ) {
-        let Request {
-            command,
-            call,
-            local,
-        } = request;
-        if let (Some(local), Ok(response)) = (&local, &response)
-            && venue_error(response).is_none()
-        {
-            self.apply_local_write(cx, local, response.body);
-        }
-        let call = match call {
-            Call::Hyro(request) => {
-                self.on_hyro_response(cx, request, response);
-                return;
-            }
-            call => call,
-        };
-        let call = match call {
-            Call::ResolveMode {
-                symbol,
-                command: deferred,
-                version,
-            } => {
-                if version != self.trading.mode_version {
-                    self.on_trade_command(cx, *deferred);
-                    return;
-                }
-                let mode = response
-                    .as_ref()
-                    .map_err(|e| (*e).to_owned())
-                    .and_then(|response| {
-                        if let Some(error) = venue_error(response) {
-                            return Err(describe(error));
-                        }
-                        let page: Listed<PositionRow<'_>> =
-                            serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                        let rows = page.result.ok_or("Missing position mode result")?.list;
-                        let mut mode = None;
-                        for row in rows.iter().filter(|row| row.symbol == symbol) {
-                            let next = match row.position_idx {
-                                Some(0) => false,
-                                Some(1 | 2) => true,
-                                _ => return Err("Invalid position mode".into()),
-                            };
-                            if mode.is_some_and(|current| current != next) {
-                                return Err("Conflicting position modes".into());
-                            }
-                            mode = Some(next);
-                        }
-                        mode.ok_or_else(|| format!("Position mode missing for {symbol}"))
-                    });
-                match mode {
-                    Ok(mode) => {
-                        self.account.position_modes.entry(symbol).or_insert(mode);
-                        self.on_trade_command(cx, *deferred);
-                    }
-                    Err(message) => {
-                        cx.command_error(command, message.clone());
-                        // A read before any write: nothing was sent.
-                        cx.fail(command, not_sent(message));
-                    }
-                }
-                return;
-            }
-            call => call,
-        };
-        let rejected_before_acceptance = response.as_ref().ok().is_some_and(|response| {
-            (200..300).contains(&response.status)
-                && serde_json::from_str::<Status>(response.body)
-                    .ok()
-                    .and_then(|s| s.ret_code)
-                    .is_some_and(|code| code == 10001)
-        });
-        // A gateway failure is unproven whatever body it carries.
-        let http_unknown = response
-            .as_ref()
-            .is_ok_and(|r| r.status == 408 || r.status >= 500);
-        let outcome = match &response {
-            Ok(response) => match venue_error(response) {
-                None => Ok(response.body),
-                Some(error) => Err(error),
-            },
-            Err(error) => Err((0, (*error).to_owned())),
-        };
-        let mut ids = Vec::new();
-        let mut errors = Vec::new();
-        let mut unknown = false;
-        let network = response.is_err();
-        // An explicit venue retCode that proves this write was refused.
-        // Without a parsed retCode the code is the HTTP status, which proves nothing.
-        let ret_code_parsed = response.as_ref().is_ok_and(|r| {
-            serde_json::from_str::<Status>(r.body)
-                .ok()
-                .and_then(|s| s.ret_code)
-                .is_some()
-        });
-        let refused = match &outcome {
-            Err((code, _)) if ret_code_parsed && !outcome_unknown(*code) && !http_unknown => {
-                Some(Some(*code))
-            }
-            _ => None,
-        };
-        let no_envelope = succeeded_without_envelope(&response, &outcome);
-        // Set when a 2xx answer carries per-item refusals with explicit codes.
-        let mut item_refusals = false;
-        let mut took_effect = false;
-        let succeeded = outcome.is_ok();
-        let mut fallback_steps = Vec::new();
-        match (call, outcome) {
-            (Call::PlaceOne, Ok(body)) => {
-                match serde_json::from_str::<Placed>(body)
-                    .ok()
-                    .and_then(|p| p.result)
-                    .and_then(|r| r.order_id)
-                    .filter(|id| !id.is_empty())
-                {
-                    Some(id) => ids.push(id.into_owned()),
-                    None => {
-                        unknown = true;
-                        errors.push("Bybit order outcome is unknown: create acknowledgement has no order ID; reconcile before replacing".into());
-                    }
-                }
-            }
-            (Call::Amend, Ok(body)) => {
-                if let Ok(placed) = serde_json::from_str::<Placed>(body) {
-                    ids.extend(
-                        placed
-                            .result
-                            .and_then(|r| r.order_id)
-                            .filter(|id| !id.is_empty())
-                            .map(|id| id.into_owned()),
-                    );
-                }
-            }
-            (Call::Amend | Call::TradingStop, Err((_, message))) if not_modified(&message) => {}
-            (Call::PartialStop, Ok(_)) => self.schedule_partial_stop_refresh(cx),
-            (Call::PartialStop, Err((_, message))) if not_modified(&message) => {
-                self.schedule_partial_stop_refresh(cx);
-            }
-            (Call::TradingStop, Ok(_)) => {
-                // No order id comes back; the stop's row arrives on the stream.
-            }
-            (Call::PlaceBatch { .. }, Ok(body)) => {
-                let batch = serde_json::from_str::<Batch>(body).ok();
-                let (results, statuses) = batch
-                    .map(|b| {
-                        (
-                            b.result.map(|r| r.list).unwrap_or_default(),
-                            b.ret_ext_info.map(|s| s.list).unwrap_or_default(),
-                        )
-                    })
-                    .unwrap_or_default();
-                for (index, status) in statuses.iter().enumerate() {
-                    if status.code != 0 {
-                        if outcome_unknown(status.code) {
-                            unknown = true;
-                        } else {
-                            item_refusals = true;
-                        }
-                        let message = status.msg.as_deref().unwrap_or("batch order rejected");
-                        errors.push(format!(
-                            "Order {}: {}",
-                            index + 1,
-                            describe((status.code, message.to_owned()))
-                        ));
-                    }
-                }
-                ids.extend(
-                    results
-                        .into_iter()
-                        .filter_map(|r| r.order_id)
-                        .filter(|id| !id.is_empty())
-                        .map(|id| id.into_owned()),
-                );
-            }
-            (Call::PlaceBatch { fallback }, Err(error)) if rejected_before_acceptance => {
-                // Refused whole: nothing was placed, so each order may go alone.
-                errors.push(format!("Failed to place batch orders: {}", describe(error)));
-                fallback_steps = fallback;
-            }
-            (Call::CancelPartialStop { id, batch }, Ok(body)) => {
-                match partial_stop_cancel_accepted(body, &id, batch) {
-                    Ok(()) => {
-                        self.note_partial_stop_canceled(&id);
-                        mark_canceled(cx, &[id], self.local_order_lifecycle());
-                    }
-                    Err(message) => {
-                        // A retCode-0 ack that does not confirm the cancel proves nothing.
-                        unknown = true;
-                        errors.push(message);
-                    }
-                }
-            }
-            (Call::CancelPartialStop { id, .. }, Err((_, message))) if already_gone(&message) => {
-                self.note_partial_stop_canceled(&id);
-                mark_canceled(cx, &[id], self.local_order_lifecycle());
-            }
-            (Call::Cancel { ids: requested }, Ok(body)) => {
-                let statuses = serde_json::from_str::<Batch>(body)
-                    .ok()
-                    .and_then(|b| b.ret_ext_info)
-                    .map(|s| s.list)
-                    .unwrap_or_default();
-                let mut canceled = Vec::new();
-                for (index, id) in requested.iter().enumerate() {
-                    match statuses.get(index) {
-                        Some(status)
-                            if status.code != 0
-                                && !already_gone(status.msg.as_deref().unwrap_or_default()) =>
-                        {
-                            if outcome_unknown(status.code) {
-                                unknown = true;
-                            } else {
-                                item_refusals = true;
-                            }
-                            errors.push(
-                                status
-                                    .msg
-                                    .as_deref()
-                                    .unwrap_or("cancel rejected")
-                                    .to_owned(),
-                            );
-                        }
-                        _ => canceled.push(id.clone()),
-                    }
-                }
-                if !canceled.is_empty() {
-                    took_effect = true;
-                    self.note_order_terminal(&canceled);
-                }
-                mark_canceled(cx, &canceled, self.local_order_lifecycle());
-            }
-            (Call::Cancel { ids }, Err((_, message))) if already_gone(&message) => {
-                self.note_order_terminal(&ids);
-                mark_canceled(cx, &ids, self.local_order_lifecycle());
-            }
-            (Call::CancelAll { ids }, Ok(body)) => {
-                match cancel_all_affected(body) {
-                    Ok(affected) => {
-                        // Futures select at most 500 native orders. The affected
-                        // list, including uncaptured arrivals, is the only proof.
-                        let omitted = ids
-                            .iter()
-                            .filter(|id| {
-                                !affected.contains(id)
-                                    && cx.store.order(id).is_some_and(|order| {
-                                        !matches!(
-                                            order.status,
-                                            OrderStatus::Closed | OrderStatus::Canceled
-                                        )
-                                    })
-                            })
-                            .count();
-                        if !affected.is_empty() {
-                            self.note_order_terminal(&affected);
-                            mark_canceled(cx, &affected, self.local_order_lifecycle());
-                        }
-                        if self.local_order_lifecycle() {
-                            // Clean up captured terminal rows without inventing native cancel proof.
-                            let terminal: Vec<_> = ids
-                                .iter()
-                                .filter(|id| {
-                                    cx.store.order(id).is_some_and(|order| {
-                                        matches!(
-                                            order.status,
-                                            OrderStatus::Closed | OrderStatus::Canceled
-                                        )
-                                    })
-                                })
-                                .cloned()
-                                .collect();
-                            mark_canceled(cx, &terminal, true);
-                        }
-                        if omitted != 0 {
-                            unknown = true;
-                            errors.push(format!("Bybit cancel-all left {omitted} live order(s) unconfirmed; reconcile before retrying"));
-                        }
-                    }
-                    Err(message) => {
-                        unknown |= message != CANCEL_ALL_NOT_SUCCESSFUL;
-                        errors.push(message.into());
-                    }
-                }
-            }
-            (Call::Leverage { symbol, leverage }, outcome)
-                if outcome
-                    .as_ref()
-                    .map_or_else(|(code, _)| *code == LEVERAGE_NOT_MODIFIED, |_| true) =>
-            {
-                self.note_leverage_ack();
-                cx.store.update_setting(&symbol, |s| s.leverage = leverage);
-                cx.store.update_positions(|p| {
-                    if p.symbol == symbol {
-                        p.leverage = leverage;
-                    }
-                });
-            }
-            (Call::MarginMode { isolated }, outcome) => {
-                let body = match &outcome {
-                    Ok(body) => *body,
-                    Err(_) => response.as_ref().map_or("", |r| r.body),
-                };
-                let reasons: Vec<String> = serde_json::from_str::<MarginModeResult>(body)
-                    .ok()
-                    .and_then(|r| r.result)
-                    .map(|r| r.reasons)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|r| r.reason_msg.map(|m| m.into_owned()))
-                    .filter(|m| !m.is_empty())
-                    .collect();
-                // Success is retCode 0 with no reasons; the message is not "OK".
-                match (outcome, reasons.is_empty()) {
-                    (Ok(_), true) => {
-                        let margin = if isolated {
-                            MarginType::Isolated
-                        } else {
-                            MarginType::Cross
-                        };
-                        self.account.margin_type = Some(margin);
-                        for state in &mut self.products {
-                            state.account.margin_type = Some(margin);
-                        }
-                        cx.store.update_positions(|p| p.margin_type = Some(margin));
-                        self.fetch_positions(cx);
-                    }
-                    (outcome, _) if !reasons.is_empty() || outcome.is_ok() => {
-                        item_refusals = true;
-                        errors.push(reasons.join(", "));
-                    }
-                    (Err(error), _) => {
-                        unknown |= outcome_unknown(error.0);
-                        errors.push(describe(error));
-                    }
-                    (Ok(_), _) => {}
-                }
-            }
-            (Call::PositionMode { hedged }, outcome)
-                if outcome
-                    .as_ref()
-                    .map_or_else(|(code, _)| *code == POSITION_MODE_NOT_MODIFIED, |_| true) =>
-            {
-                cx.store.set_hedged(hedged);
-                self.trading.mode_version += 1;
-                self.refresh_after_mode_change(cx);
-            }
-            (_, Err(error)) => {
-                unknown |= outcome_unknown(error.0);
-                errors.push(describe(error));
-            }
-            (_, Ok(_)) => {}
-        }
-        unknown |= http_unknown && !errors.is_empty();
-        // A 2xx without a retCode does not prove the write was refused.
-        unknown |= no_envelope && !errors.is_empty();
-        for message in &errors {
-            cx.command_error(command, message.clone());
-        }
-        let Some(job) = self.trading.jobs.get_mut(&command) else {
-            return;
-        };
-        // A native response retires provider-only NotSent metadata even when
-        // its HTTP failure has no native refusal envelope.
-        job.signing_error = None;
-        if let Some(first) = errors.into_iter().next() {
-            // Aggregate venue evidence is independent of the first diagnostic:
-            // a later native refusal disproves an earlier provider-only NotSent.
-            // Per-order refusals in a 2xx answer carry no single retCode.
-            job.refused = job.refused.or(refused.or(item_refusals.then_some(None)));
-            job.error.get_or_insert(first);
-        } else if succeeded {
-            job.effective = true;
-        }
-        job.effective |= took_effect;
-        if !ids.is_empty() {
-            job.effective = true;
-        }
-        job.unknown |= unknown;
-        job.network |= unknown && network;
-        job.ids.extend(ids);
-        if !fallback_steps.is_empty() {
-            let steps = fallback_steps
-                .into_iter()
-                .rev()
-                .map(|(body, receipts)| Step {
-                    delay_ms: 0.0,
-                    requests: vec![Planned {
-                        receipts,
-                        path: "/v5/order/create",
-                        body,
-                        call: Call::PlaceOne,
-                    }],
-                });
-            for step in steps {
-                job.steps.push_front(step);
-            }
-        }
-        job.outstanding = job.outstanding.saturating_sub(1);
-        if job.outstanding == 0 {
-            self.advance(cx, command);
-        }
     }
 
     /// `0` in one-way mode; in hedge mode the leg the order opens, or for a
@@ -2410,14 +1554,15 @@ impl BybitLinear {
             "/v5/order/create-batch" => {
                 #[derive(serde::Deserialize)]
                 struct Inputs {
-                    request: Vec<LocalOrder>,
+                    #[serde(rename = "request")]
+                    orders: Vec<LocalOrder>,
                 }
                 if let (Ok(inputs), Ok(reply)) = (
                     serde_json::from_str::<Inputs>(&local.body),
                     serde_json::from_str::<Batch>(response),
                 ) && let Some(results) = reply.result
                 {
-                    for (input, result) in inputs.request.iter().zip(results.list) {
+                    for (input, result) in inputs.orders.iter().zip(results.list) {
                         if let Some(id) = result.order_id {
                             self.publish_local_create(cx, input, &id);
                         }
@@ -2553,19 +1698,4 @@ fn trade_command_id(command: &Command) -> Option<CommandId> {
         | Command::SetPositionMode { command, .. } => Some(*command),
         _ => None,
     }
-}
-
-/// A 2xx answer whose body has no Bybit envelope.
-fn succeeded_without_envelope(
-    response: &Result<Response<'_>, &str>,
-    outcome: &Result<&str, (i64, String)>,
-) -> bool {
-    outcome.is_err()
-        && response.as_ref().is_ok_and(|r| {
-            (200..300).contains(&r.status)
-                && serde_json::from_str::<Status>(r.body)
-                    .ok()
-                    .and_then(|s| s.ret_code)
-                    .is_none()
-        })
 }
