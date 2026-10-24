@@ -783,7 +783,56 @@ fn corpus() -> Vec<String> {
         }
     }
     out.extend(nested_corpus(&VALUES));
+    out.extend(precedence_corpus());
     out.extend(sequence_corpus());
+    out
+}
+
+/// Error precedence when a tag fault coexists with a later fault: the tag
+/// first, in the middle and last, against reader faults and payload faults,
+/// plus decoded-equivalent duplicate tag keys (codex-uufub4).
+fn precedence_corpus() -> Vec<String> {
+    let tags = [r#""fetchAccount""#, r#""nope""#, "1", "null"];
+    let faults = [
+        ("command", r#""x""#),
+        ("command", "1e999"),
+        ("zz", "1e400"),
+        ("zz", r#""\ud800""#),
+        ("zz", r#"{"a":[1e999]}"#),
+    ];
+    let mut out = Vec::new();
+    for tag in tags {
+        for (key, value) in faults {
+            let fields = [
+                ("op", tag.to_owned()),
+                (key, value.to_owned()),
+                ("command", "1".to_owned()),
+            ];
+            for order in [[0, 1, 2], [1, 0, 2], [1, 2, 0]] {
+                let ordered: Vec<(&str, String)> = order
+                    .iter()
+                    .map(|i| (fields[*i].0, fields[*i].1.clone()))
+                    .collect();
+                out.push(render(&ordered));
+            }
+        }
+        // A duplicate tag, before and after a fault.
+        out.push(format!(r#"{{"op":{tag},"op":"fetchAccount","command":1}}"#));
+        out.push(format!(
+            r#"{{"op":{tag},"zz":1e999,"op":"fetchAccount","command":1}}"#
+        ));
+        out.push(format!(
+            r#"{{"op":{tag},"command":"x","op":"fetchAccount"}}"#
+        ));
+    }
+    // Decoded-equivalent tag keys.
+    out.push(r#"{"op":"fetchAccount","o\u0070":"fetchAccount","command":1}"#.to_owned());
+    out.push(r#"{"\u006f\u0070":"fetchAccount","command":1}"#.to_owned());
+    out.push(r#"{"o\u0070":"nope","op":"fetchAccount","command":1}"#.to_owned());
+    // Bad payload in an order with a bad tag later or earlier.
+    out.push(r#"{"orders":[{"side":1}],"op":"placeOrders","command":2}"#.to_owned());
+    out.push(r#"{"orders":[{"side":1}],"op":"nope","command":2}"#.to_owned());
+    out.push(r#"{"op":"nope","orders":[{"side":1e999}],"command":2}"#.to_owned());
     out
 }
 
