@@ -562,6 +562,107 @@ Formatting and bans (including inventory scanner/ratchet controls) pass. Fresh
 full CI and exact committed preservation review remain readiness gates; no
 merge window or source-equivalent CI claim is inferred from old evidence.
 
+## Next slice: fixed-setting refusal ownership, 2026-10-24
+
+Owner mxb4mq, fresh branch `fix/rust-backpack-fixed-setting-refusals`, exact
+landing base `a73afa6a27dc57b53bded8d7b790f93203a550b9`. #1870 remains frozen
+and watched on its separate candle branch. The open-PR file map and the actual
+`be710b3f2d7..train/combo-5b-be71` diff show no Backpack runtime path in combo-5b;
+its shared engine/registry files remain untouched. Auditor confirmation of that
+map is requested before source application. No engine or registry edit is part
+of this slice, and no reviewed seam stack is required.
+
+The only production sites are the unconditional native SetMarginType and
+SetPositionMode refusal arms in `backpack/src/trading.rs`. They are two lexical
+occurrences of fingerprint
+`bcd45e2e77893c71604dfc34d2a327ce254b90adc4e9178be8643e022a6f4219`.
+After genuine Context adoption, remove that one map entry with count two; retain
+its other trading entry and every other map byte-for-byte. Base Backpack totals
+are six paths, 19 fingerprints and 20 occurrences; this slice alone yields six
+paths, 18 fingerprints and 18 occurrences. The three candle removals in #1870
+are separate, not copied into this branch.
+
+Preserve the exact messages "Backpack only supports cross margin" and "Backpack
+position mode is fixed", ErrorKind::Unsupported and Outcome::NotSent on valid
+entry, for either requested value and without requiring credentials. No success,
+Store update, signing job, HTTP, socket, retry, venue capability or native wire
+behavior is added. Existing raw/managed signing custody is out of scope.
+
+Proposed implementation is one thin native refusal helper called by those two
+arms. It admits the genuine command through existing admit_http_command with
+Operation::Mutation, no credential, timeout 20,000ms, no pacing and Never retry;
+then calls fail_context with the original not_sent(message).kind(Unsupported).
+Before admission, use the complete shared receipt gate: command_wait None calls
+reject_unstamped_command(Mutation), Expired calls reject_expired_command(Mutation),
+and only Remaining reaches admission. No missing/expired receipt mints a fresh
+20-second root. Rejected already emitted its refusal; Revoked grants no terminal
+or numeric fallback. This corrects the initial helper proposal per owner review.
+This is the existing shared local-refusal pattern, with no venue issuer, numeric
+completion fallback, owner table, scheduler or local classification policy.
+Only CommandEntryError::Rejected is already terminal; no admission error permits a second finalizer.
+Production waits for independent plan/exact-hook review.
+
+Commit this plan first, then separate assertion RED controls on unchanged native
+source. Working controls pin both messages/fields for public and private keyless
+setup, both setting values, one terminal, unchanged financial/settings Store and
+no physical work; immediate command reuse must remain possible. Hostile controls
+pin InvalidInput/NotSent for invalid command clocks and the shared Internal/NotSent capacity error at the
+shared 256-owner bound. Duplicate IDs must preserve the parked prior owner and
+its later successful delivery; this may already be a working engine guard and
+must not be labeled an original failure unless reproduced. No missing-API or
+compile-error RED, fixture change or relaxed assertion is allowed.
+
+After reviewed implementation, execute only the new focused test and scoped
+Backpack tests/strict Clippy with CARGO_BUILD_JOBS=4, one build at a time; fmt,
+bans and both inventory checks follow. Update CALLERS with resulting behavior,
+not proof status. Obtain source/caller/map review, push a draft and run fresh
+Rust CI with one watcher at least 120 seconds apart. No merge without its window.
+
+
+Test compile correction before any original RED claim: the initial control used
+nonexistent ErrorKind::Capacity. Capacity is a Context admission cause projected
+as existing ErrorKind::Internal; the test now pins that actual shared contract.
+The failed compile is not assertion-RED evidence and no production changed.
+
+Original-source execution on `26deb9e7477` compiles and runs seven controls:
+three GREEN (native messages/fields and no work/Store change, duplicate prior
+owner delivery, immediate reuse), four assertion RED (both settings at an
+invalid clock and at the 256-owner capacity bound). All four fail only because
+the old numeric branch reports Unsupported instead of shared InvalidInput or
+Internal capacity; zero skipped. The earlier nonexistent-enum compile failure
+is excluded from this count. Runtime source is unchanged. The exact reviewed
+helper proposal is prepared separately before applying it.
+
+
+The overseer confirmed no combo-5b overlap and authorized production after the
+plan-fit review, with push/CI parallel to exact source review. The applied
+helper includes the full None/Expired/Remaining receipt gate and existing shared
+Mutation admission; no rejected admission is finalized again. The unchanged
+seven controls now all PASS, zero failures or skips. In particular, both
+original invalid-clock and capacity failures become typed engine refusals,
+while native messages, keyless operation, Store/no-I/O, prior-owner delivery and
+immediate reuse stay GREEN. The only manifest change removes the one planned
+count-two fingerprint. #1870 remains frozen and unaffected on its own branch.
+
+Exact source proposal SHA-256
+`c6ca2e3b60fb34b5af0c40ca99de1119edd3da46ee8417c00b8dab20002dc3ad`
+is SOURCE/API CLEAR from hcmq3f. `618518256e0` applies that source; local scoped
+Backpack verification passes 167 tests with zero failures and one pre-existing
+ignored account/background repair test. All-target strict Clippy and scoped fmt
+pass. Original seven control bodies are unchanged.
+
+The first bans run correctly stopped on stale-base MEXC inventory growth after
+an unrelated prune landed. `0e9161a1479` plain-merges actual `db6fa45bbb7` (MEXC
+and OKX venue changes/docs only; no shared engine change), retaining incoming
+CALLERS first plus the own suffix exactly once. Both Backpack source/control
+blobs remain byte-identical to the tested implementation. Bans, including both
+inventory scanner/ratchet controls, now pass. Relative to that incoming tip,
+exactly five own paths remain and the only map change is the planned count-two
+Backpack trading fingerprint removal. Key-selection maps are unchanged.
+Fresh CI and exact committed preservation review are in flight; no merge or
+full-package proof is claimed. Architecture gate: No shared policy copy, only
+native refusal messages composed through existing shared custody APIs.
+
 ## Next plan/RED slice: local history-query refusals, 2026-10-24
 
 Owner mxb4mq. Fresh branch `fix/rust-backpack-local-history-refusals` starts at
