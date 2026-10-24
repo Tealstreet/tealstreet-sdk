@@ -1668,3 +1668,9 @@ fixed-mode Store preservation from either initial value, warning order, repeated
 slot reuse, private placement bytes/progress and legacy empty jobs. No ignored
 tests, removed financial assertion or fabricated custody; broad replay and
 WASM/CPU/memory checks belong to CI.
+
+The scoped Crypto.com suite passes 174 tests across 16 targets; strict all-target
+Clippy, formatting, bans and the 15 request inventory tests pass. Read-only
+credential scanning confirms no key-selection term change, and all production
+outside Crypto.com trading.rs stays base-exact. Original controls remain
+byte-identical to their RED checkpoint. CI is still required before readiness.

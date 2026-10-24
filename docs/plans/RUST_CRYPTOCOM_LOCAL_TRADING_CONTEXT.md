@@ -3,12 +3,12 @@
 Plan first, codex-ih35js, 2026-10-24. Exact landing:
 `9330c11bdea731368cb1254fa3dc068d11380cdd` (#1788 landed).
 Read with RUST_CRYPTOCOM_REQUEST_CONTEXT.md, RUST_REQUEST_CONTEXT.md and the
-caller/audit/quality ledgers. This checkpoint plans and tests; it changes no
-production, existing fixture, Cargo, checker or manifest byte.
+caller/audit/quality ledgers. The original checkpoint contained only this plan
+and new controls. The implementation and actual-tip verification follow below.
 
 ## Exact inventory and slice
 
-Current Crypto.com inventory is **20 path/fingerprint entries /21 occurrences**:
+At the plan base, Crypto.com inventory is **20 path/fingerprint entries /21 occurrences**:
 account2/2, history4/5, identity2/2, lib1/1, trading11/11.
 This slice removes **8 trading fingerprints /8 occurrences**, leaving trading3/3
 and venue**12/13**. It is the largest immediate independent subset: seven local
@@ -174,3 +174,22 @@ Store projection and emits the original warning only on success. All 26 dedicate
 controls pass without assertion changes. Existing private jobs, signature bytes,
 queues, timers and asynchronous terminals are unchanged. Scoped crate/strict and
 inventory checks plus independent runtime reviews are in progress before push.
+
+
+## Scoped verification before CI
+
+At production commit cb2d0503831, the dedicated 26 controls are byte-exact to the
+original RED commit a4de0397773. The complete scoped Crypto.com crate passes
+174 tests across 16 targets, and strict all-target Clippy passes. Formatting,
+whitespace, full check-bans.sh, request inventory and its 15 tests pass. Local
+checks run sequentially with CARGO_BUILD_JOBS=4; no workspace/all-feature sweep,
+WASM build or timing run was performed.
+
+Using #1831's checker source read-only against the actual changed file, both
+before and after have zero credential-selection terms/evasions. Only Crypto.com
+trading.rs is changed production; engine, hosts, crypto, signing, checkers, Cargo,
+account, history and lib are base-exact. Request inventory changes exactly one
+key, removing the eight planned singleton hashes and keeping incoming key order.
+The actual venue result is 12 fingerprints / 13 occurrences (was 20 / 21).
+Three bounded runtime source/caller/full-map reviews cover cb2d0503831; CI is
+pending and no READY or merge claim is made by these local receipts.
