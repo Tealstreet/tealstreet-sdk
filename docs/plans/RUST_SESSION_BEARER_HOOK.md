@@ -573,5 +573,5 @@ Controls (`session_bearer.rs`). Mutation checks:
 - `SessionHeaders::new` refuses an empty set, 5 entries, duplicate names,
   every transport and hop-by-hop name and an invalid name, and redacts its `Debug` output.
 
-Results: 32 default and 38 with barriers; engine lib 868; clippy
+Results: 32 default and 38 with barriers; engine lib 870 (1075 with features); clippy
 `-D warnings` in both modes.
