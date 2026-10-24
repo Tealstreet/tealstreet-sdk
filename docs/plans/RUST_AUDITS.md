@@ -3062,3 +3062,17 @@ family 49 to 41. This corrects the initial terminal-only estimate of seven; no
 rename-only prune or removal of another Job's shared request funnel is claimed.
 Original controls stay unchanged. Existing product/public fixtures only drive
 real Prepare/Bind/Claim; all wire, row, validation and financial assertions stay.
+
+
+## GRVT public book command custody
+
+Plan82570/fold15dd precede compiling originals acb6 (16 assertion RED/8 GREEN);
+released-packet deadline assertions were strengthened at cde916 before source.
+Fe7 API/original and 9cz native/original reviews CLEAR. Source now passes all24
+originals and the complete260-test GRVT suite, zero ignored. Pure native book
+codec, status/rate-limit metadata and financial validation remain, with exact
+Plan DATA/retry/preparation custody and admission before local empty success.
+Library default-delegation control moved to genuine public-trades state after
+BookQuery became managed, per55's fixture direction; mutant distinction retained.
+Exact six-site prune: lib11->8, depth_query3->0, family41->35, foreign map unchanged.
+Source review/CI are separate gates; no budget or actual-parent landing claim.

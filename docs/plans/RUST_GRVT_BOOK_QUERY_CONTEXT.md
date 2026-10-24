@@ -170,3 +170,38 @@ Fe7 original review acb6 is CLEAR for production. Before source, the two timeout
 controls now additionally assert the actual Bind/Claim packet timeout (20 s or
 remaining caller cap). Re-executed strengthened originals remain 16 assertion
 RED / 8 GREEN / zero ignored on unchanged production; those suffixes remain gated.
+
+
+## Production checkpoint
+
+BookQuery now owns Plan/Slot/leg/body, admits before lookup, and uses the cleared
+single-call Read Plan. Unknown-market empty completes through done_preflight;
+exact DATA delivery is validated before the native pure response decoder. The
+decoder returns its existing result or VenueError; its status, native-code,
+field precedence, level order, cumulative arithmetic and metadata are unchanged.
+Typed Network or physical Timeout alone selects retry, Revoked is silent, all
+other retry refusals seal strictly. Status Timeout and RateLimited remain DATA
+terminals. Preparation and untyped failures never authorize a retry.
+
+The strengthened 24 original controls all pass after cutover, and the complete
+GRVT crate run passes 260 tests, zero ignored. Scoped all-target strict Clippy
+and formatting pass after collapsing one nested if as requested by Clippy.
+The first full run exposed raw-only public/trading fixture drains; they now
+drive prepared_actions, preserving every original native/financial assertion.
+The book fixture excludes only shared SetTimer/ClearTimer bookkeeping when
+retaining its one-transport assertion; rate-limit no-timer behavior is pinned
+independently by the original target's complete action batch.
+
+As agreed with 55, the preparation-delegation control now uses real credential-
+free Query::PublicTrades state. It boots the native catalog, captures the native
+public pending through a released failure callback and queues that pending at
+a real managed Prepare. Venue/default chain results still match; a direct
+fail_pending mutant differs, exact Cancel and duplicate refusal fences remain.
+No Identity, private account or login fixture is introduced. An initial wrapper
+omitted catalog item forwarding, leaving no selected market; that fixture setup
+was corrected before the passing receipt, with no production history change.
+
+Scanner-exact scope is lib 11 to 8 and depth_query 3 to 0, GRVT 41 to 35. Only
+those two map keys change; foreign manifest bytes/order and all candle source
+blobs remain exact to the parent. No engine, host, Cargo, signer, private reducer,
+queue or Session source is changed. Shared callback edits are BookQuery-only.

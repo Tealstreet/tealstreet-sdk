@@ -54,9 +54,7 @@ pub struct Pending {
     pub(crate) auth_generation: u64,
 }
 pub(crate) enum Job {
-    BookQuery {
-        command: safe_cex_engine::CommandId,
-    },
+    BookQuery(Box<depth_query::Request>),
     Account(account::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
@@ -75,7 +73,7 @@ pub(crate) enum Job {
 impl Job {
     fn is_private(&self) -> bool {
         match self {
-            Self::BookQuery { .. }
+            Self::BookQuery(_)
             | Self::Markets { .. }
             | Self::Candles(_)
             | Self::Account(account::Request::Login) => false,
@@ -218,6 +216,10 @@ impl Grvt {
         );
     }
     fn send_request(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending) {
+        if let Job::BookQuery(request) = pending.job {
+            self.book_query_send(cx, *request);
+            return;
+        }
         if let Job::Candles(request) = pending.job {
             self.candle_send(cx, *request);
             return;
@@ -234,11 +236,7 @@ impl Grvt {
         }
         pending.auth_generation = self.account.generation;
         let (base, headers, at) = match &pending.job {
-            Job::BookQuery { .. } => (
-                self.mdg(),
-                vec![("Content-Type", "application/json".into())],
-                None,
-            ),
+            Job::BookQuery(_) => unreachable!(),
             Job::Candles(_) => unreachable!(),
             Job::Markets { .. } => (
                 self.mdg(),
@@ -316,10 +314,12 @@ impl Grvt {
     }
     fn fail_pending(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending.job {
-            Job::BookQuery { command } => cx.fail(
-                command,
-                depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
-            ),
+            Job::BookQuery(request) => {
+                let _ = cx.fail_plan(
+                    &request.plan,
+                    depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
+                );
+            }
             Job::Identity { command } => self.identity_failed(cx, command, error),
             Job::Account(request) => self.account_failed(cx, request, error),
             Job::Trade(request) => {
@@ -833,7 +833,7 @@ impl Venue for Grvt {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match &mut pending.job {
-            Job::Identity { .. } | Job::BookQuery { .. } => {}
+            Job::Identity { .. } | Job::BookQuery(_) => {}
             Job::Account(request) => self.account_item(cx, request, item),
             Job::Trade(request) => self.trade_item(cx, request, item),
             Job::History(request) => self.history_item(cx, request, item),
@@ -910,8 +910,8 @@ impl Venue for Grvt {
             self.candle_response(cx, *request, response);
             return;
         }
-        if let Job::BookQuery { command } = pending.job {
-            self.book_query_response(cx, command, response);
+        if let Job::BookQuery(request) = pending.job {
+            self.book_query_response(cx, *request, response);
             return;
         }
         if let Err(error) = wire::check(&response) {
@@ -957,7 +957,7 @@ impl Venue for Grvt {
             return;
         }
         match pending.job {
-            Job::BookQuery { .. } => unreachable!(),
+            Job::BookQuery(_) => unreachable!(),
             Job::Identity { command } => self.identity_response(cx, command, response),
             Job::Account(request) => self.account_response(cx, request, response),
             Job::Trade(request) => self.trade_response(cx, request, response),
@@ -1081,13 +1081,22 @@ impl Venue for Grvt {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        if let Job::Candles(request) = pending.job {
+        if let Job::BookQuery(request) = pending.job {
+            let _ = cx.fail_plan(&request.plan, error);
+        } else if let Job::Candles(request) = pending.job {
             let _ = cx.fail_plan(&request.plan, error);
         } else {
             self.on_sign_error(cx, pending, error);
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
+        if let Job::BookQuery(request) = pending.job {
+            let _ = cx.fail_plan(
+                &request.plan,
+                depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
+            );
+            return;
+        }
         if let Job::Candles(request) = pending.job {
             let _ = cx.fail_plan(&request.plan, "GRVT candle read failed");
             return;
@@ -1112,7 +1121,7 @@ impl Venue for Grvt {
                     *failed = false;
                 }
                 Job::Candles(_) => unreachable!(),
-                Job::Identity { .. } | Job::BookQuery { .. } => {}
+                Job::Identity { .. } | Job::BookQuery(_) => {}
                 Job::Account(request) => request.reset(),
                 Job::Trade(request) => request.reset(),
                 Job::History(request) => {
@@ -1140,7 +1149,16 @@ impl Venue for Grvt {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        if let Job::Candles(request) = pending.job {
+        if let Job::BookQuery(request) = pending.job {
+            if matches!(
+                error.kind,
+                Some(safe_cex_engine::ErrorKind::Network | safe_cex_engine::ErrorKind::Timeout)
+            ) {
+                self.book_query_failed(cx, *request, &error.message);
+            } else {
+                let _ = cx.fail_plan(&request.plan, error);
+            }
+        } else if let Job::Candles(request) = pending.job {
             if matches!(
                 error.kind,
                 Some(safe_cex_engine::ErrorKind::Network | safe_cex_engine::ErrorKind::Timeout)
@@ -1209,27 +1227,8 @@ impl Venue for Grvt {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if let Command::FetchOrderBook {
-            command,
-            ref symbol,
-            ..
-        } = command
-        {
-            if let Some(market) = cx.store.market(symbol) {
-                #[derive(Serialize)]
-                struct Request<'a> {
-                    i: &'a str,
-                    d: u32,
-                }
-                let body = serde_json::to_string(&Request {
-                    i: &market.id,
-                    d: 50,
-                })
-                .expect("book request serializes");
-                self.request(cx, "/lite/v1/book", body, Job::BookQuery { command });
-            } else {
-                cx.done(command, r#"{"bids":[],"asks":[]}"#.into());
-            }
+        if let Command::FetchOrderBook { ref symbol, .. } = command {
+            self.fetch_book_query(cx, symbol);
             return;
         }
 

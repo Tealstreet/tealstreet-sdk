@@ -173,7 +173,7 @@ fn opts() -> PlaceOrderOpts {
 }
 fn command(e: &mut Engine<Grvt>, c: Command) -> Vec<Action> {
     e.handle(NOW + 2., Event::Command(c));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, NOW + 2.)
 }
 fn http(actions: Vec<Action>, suffix: &str) -> HttpRequest {
     actions
