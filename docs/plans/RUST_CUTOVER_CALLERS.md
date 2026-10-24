@@ -7910,3 +7910,34 @@ SDK RustExchange callers keep their existing capability behavior: Aster's
 Settings leverage path can return cache/null without a low-level FetchLeverage,
 and clientOrderLookup=false uses the existing open-order fallback. This entry
 describes the low-level command terminals, not additional SDK dispatches.
+
+## Session-bound requests (Bearer hook)
+
+Plan: RUST_SESSION_BEARER_HOOK.md. A managed request bound to a Session takes
+its session headers just in time from the venue's `session_bearer`. That hook
+returns a bounded `SessionHeaders` set at the venue's declared
+`SessionPlacement`, fenced by one revision. Caller-visible behaviour for a
+venue that adopts the hook:
+
+- **NotReady waits instead of failing.** An unsent bound call whose bundle is
+  NotReady, or not newer than a revision the claim fence found moved or
+  cleared, parks inside its own call window. The venue's `session_ready`
+  announce re-prepares it with no attempt, grant or login spent. Expiry while
+  parked is the existing Timeout, NotSent, with health unchanged. The
+  engine's default `session_bearer` answers NotReady, so a Session-bound call
+  on a venue that does not implement the hook waits out its window instead of
+  failing at once (R4 change). No venue binds a Session today.
+- **Venue obligations.** The revision moves on every bundle change and on
+  every successful refresh, even with unchanged values; `session_bearer` and
+  `session_bearer_revision` read the same counter; the venue calls
+  `session_ready` after each refresh. A refresh that is never announced
+  leaves parked calls to expire at their window.
+- **Mutation groups.** A Session-bound request cannot join a Mutation group:
+  it is refused at issue before any effect, and the command fails once,
+  NotSent, InvalidInput, "Session-bound requests cannot join a Mutation
+  group". This applies to any venue that adopts `session_bearer` and declares
+  barriers. Group-claim revision checking (R11) is built by the first consumer
+  that needs bound groups.
+- **Header order.** The bundle goes First, or immediately after a named header
+  (`After`, falling back to First), as declared with the bundle. Collision and
+  whole-packet count/byte limits refuse NotSent, wiping the inserted copies.

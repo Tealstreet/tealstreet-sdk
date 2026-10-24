@@ -2669,6 +2669,7 @@ fn pacing_waiting_signed_call(retire_during_wait: bool) {
         assert_eq!(shared.failures.len(), 1, "{:?}", shared.failures);
         assert_eq!(shared.failures[0].outcome, Some(Outcome::NotSent));
         assert_eq!(shared.failures[0].kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(shared.failures[0].message, "Session retired", "Revoked");
         return;
     }
     shared.borrow_mut().refresh(None);
