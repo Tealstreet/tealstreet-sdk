@@ -125,6 +125,12 @@ With `SerialPolicy.refusals_complete = true`, declared at admission:
 - Any uncertain fact still forces the failure projection. `done_plan` cannot
   hide uncertainty.
 
+The policy is a permission, not an override. A venue that follows native
+rules where a refusal stops the command (for example OKX code 1: reject,
+stop, restore) calls `fail_plan`, which keeps the failure projection with the
+recorded refusals. Only the native continue-and-finish path (OKX code 2) calls
+`done_plan`.
+
 Default (`false`), as for every declared Plan, the projection is unchanged.
 No consumer fallback, fabricated acceptance or numeric terminal.
 
