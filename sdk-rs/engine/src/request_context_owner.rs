@@ -153,8 +153,6 @@ impl HttpOwnerRetirement {
 
 /// Release handle for a serial Plan parked on a venue condition. It carries the
 /// Plan's issuer and command generation, so it grants nothing by itself.
-// The RED stubs never construct one; the source reads both fields.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ConditionWait {
     pub(crate) plan: Plan,

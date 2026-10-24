@@ -74,6 +74,8 @@ mod condition_waits {
         release: Release,
         release_in_park: bool,
         release_on_timer: bool,
+        park_next: Option<SerialCall>,
+        issued: Vec<Operation>,
         park_on_timer: bool,
         last_data: Option<(CommandId, Context)>,
         second_waits: Vec<Result<(), Error>>,
@@ -100,6 +102,7 @@ mod condition_waits {
         probes: Vec<(&'static str, Result<(), Error>, bool)>,
         storage: Vec<(usize, usize, usize)>,
         foreign: Option<Context>,
+        entry_refusals: usize,
     }
 
     fn queue(cx: &mut Cx<'_, Context>, context: Context) {
@@ -181,6 +184,7 @@ mod condition_waits {
             self.storage
                 .push(cx.io.request_contexts.plan_context_storage());
             if let Ok(context) = cx.plan_leg_context(&plan, &slot) {
+                self.issued.push(context.operation());
                 queue(cx, context);
             }
         }
@@ -203,13 +207,21 @@ mod condition_waits {
         }
         fn park_serial(&mut self, cx: &mut Cx<'_, Context>, id: CommandId, context: &Context) {
             let (plan, slot) = self.plan(id).expect("admitted Plan");
-            let result = cx.serial_plan_condition_wait(&plan, &slot, context, self.serial_bound);
+            let next = self.park_next.unwrap_or_else(mutation);
+            let result =
+                cx.serial_plan_condition_wait(&plan, &slot, context, next, self.serial_bound);
             self.serial_waits
                 .push(result.as_ref().map(drop).map_err(|error| *error));
             if let Ok(wait) = result {
                 self.second_waits.push(
-                    cx.serial_plan_condition_wait(&plan, &slot, context, self.serial_bound)
-                        .map(drop),
+                    cx.serial_plan_condition_wait(
+                        &plan,
+                        &slot,
+                        context,
+                        mutation(),
+                        self.serial_bound,
+                    )
+                    .map(drop),
                 );
                 self.waits.push(wait);
             } else {
@@ -285,7 +297,7 @@ mod condition_waits {
                 };
                 let before = snapshot(cx);
                 let result = cx
-                    .serial_plan_condition_wait(&plan, &slot, &context, None)
+                    .serial_plan_condition_wait(&plan, &slot, &context, mutation(), None)
                     .map(drop);
                 self.probes.push((refused, result, snapshot(cx) == before));
                 if !self.delayed_before_park {
@@ -390,7 +402,7 @@ mod condition_waits {
             {
                 let before = snapshot(cx);
                 let result = cx
-                    .serial_plan_condition_wait(&plan, &slot, &context, None)
+                    .serial_plan_condition_wait(&plan, &slot, &context, mutation(), None)
                     .map(drop);
                 self.timer_parks.push((result, snapshot(cx) == before));
             }
@@ -434,7 +446,7 @@ mod condition_waits {
                 write_credential: (!self.read_preflight).then(credential),
             };
             let Ok(preflight) = cx.begin_preflight(policy) else {
-                self.parks.push(Err(Error::Capacity));
+                self.entry_refusals += 1;
                 return;
             };
             self.entries.push((id, preflight.clone()));
@@ -767,6 +779,30 @@ mod condition_waits {
     }
 
     #[test]
+    fn condition_24_a_parked_plan_issues_the_next_call_it_named_on_release() {
+        let mut e = engine(Cond {
+            total: 3,
+            serial_parks: 1,
+            park_next: Some(SerialCall {
+                operation: Operation::Read,
+                ..mutation()
+            }),
+            ..Default::default()
+        });
+        place(&mut e, 0., 7);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let (_, now) = drive(&mut e, actions, 0., ["ok:a"]);
+        assert_eq!(e.venue.serial_waits, [Ok(())]);
+        borrowed_read(&mut e, now + 1_000.);
+        assert_eq!(
+            e.venue.issued.last(),
+            Some(&Operation::Read),
+            "a replan re-reads after release: {:?}",
+            e.venue.issued
+        );
+    }
+
+    #[test]
     fn condition_05_stale_double_and_second_waits_are_refused() {
         let mut e = engine(Cond {
             total: 2,
@@ -939,17 +975,23 @@ mod condition_waits {
         }
         e.drain_actions().for_each(drop);
         assert_eq!(e.venue.parks, [Ok(()), Ok(()), Ok(())]);
-        let mut actions = borrowed_read(&mut e, 1_000.);
+        let actions = borrowed_read(&mut e, 1_000.);
         assert_eq!(e.venue.ready, [7, 8, 9], "FIFO wakes");
         let mut done = Vec::new();
-        for _ in 0..3 {
-            let (after, _) = drive(&mut e, actions, 1_000., ["ok:x"]);
+        // All three admit in one flush, so their calls are prepared together.
+        let tokens = actions
+            .iter()
+            .filter_map(|a| prepared(std::slice::from_ref(a)))
+            .collect::<Vec<_>>();
+        for token in tokens {
+            release(&mut e, token, 1_000.);
+            reply(&mut e, token, 1_000. + STEP_MS, "ok:x");
+            let after = e.drain_actions().collect::<Vec<_>>();
             done.extend(
                 [7, 8, 9]
                     .into_iter()
                     .filter(|id| !terminals(&after, *id).is_empty()),
             );
-            actions = after;
         }
         assert_eq!(done, [7, 8, 9]);
         assert!(
@@ -1146,7 +1188,10 @@ mod condition_waits {
         let actions = e.drain_actions().collect::<Vec<_>>();
         let result = terminals(&actions, 65);
         assert!(
-            matches!(&result[..], [Err(error)] if error.outcome == Some(crate::Outcome::NotSent)),
+            // The existing order-lock entry refusal: no outcome, nothing sent.
+            matches!(&result[..], [Err(error)] if error.message
+                == "Order amendment or cancellation is already in flight"
+                && error.outcome.is_none()),
             "{result:?}"
         );
         assert!(prepared(&actions).is_none());

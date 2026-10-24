@@ -4646,8 +4646,9 @@ impl<V: Venue> Engine<V> {
             return false;
         };
         let Some(plan) = self.io.request_contexts.plan_for_timer(*timer) else {
-            return false;
+            return self.expire_preflight_condition(now, *timer);
         };
+        self.expire_plan_condition(now, &plan);
         self.flush_http_plans(now);
         request_context_registry::ContextRegistry::rearm_live_plan(&mut self.io, &plan);
         true

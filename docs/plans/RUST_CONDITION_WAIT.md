@@ -48,11 +48,13 @@ impl<P> Cx<'_, P> {
     /// Between serial calls, from the current call's exact custody under the
     /// same checks as `continue_serial_plan` (definitive fact, no
     /// uncertainty). Settles the call and parks the Plan with no live call.
+    /// `next` is issued after release, so a replan picks its re-read here.
     pub fn serial_plan_condition_wait(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
+        next: SerialCall,
         bound_ms: Option<u32>,
     ) -> Result<ConditionWait, Error>;
 
@@ -196,7 +198,8 @@ the limit.
 
 For Bitget placements the binding limit is lower: 64 active order-lock scopes
 (`order_locks.rs`, `acquire`). The 65th queued placement is refused at entry,
-NotSent, before any send (RED23). Bitget already sets
+before any send, with the existing refusal "Order amendment or cancellation
+is already in flight" and no outcome (RED23). Bitget already sets
 `guard_order_mutations` at `49f7d1857b6`, so this is existing entry
 behaviour, not new with the migration. It is still disclosed in Bitget's
 CALLERS against native's unbounded queue. The 256 owner limit binds
@@ -262,6 +265,30 @@ non-placement commands.
 10. A mid-Plan expiry after an earlier released and accepted call: `fail_plan`
     projects the accepted IDs and a failure that is not NotSent (native
     `trade_fail` keeps the IDs once anything was effective).
+
+## Source notes
+
+- **Preflight form.** `park_preflight_for` parks from Initial or
+  Preflight-ready custody, setting a condition-park flag. A bound arms one
+  engine timer, tracked per Preflight. Ready delivery clears the timer and
+  the flag. A re-park counts as progress. A condition-parked Preflight that
+  holds nothing may be failed from any callback, so a stop racing a queued
+  release gives one terminal and no ready. A declined expiry seals once:
+  "Condition wait expired", Timeout, NotSent.
+- **Serial form.** It is `continue_serial` with `Next::Parked`, which runs
+  every continuation check and parks the named `next` call. The wait lives in
+  `Serial.condition` (generation, deadline) and folds into the Plan's one
+  timer. Release checks issuer and generation, then unparks and makes the
+  call eligible now, so delivery is the normal flush into
+  `on_http_plan_ready`. A declined expiry seals through `fail_plan`: the
+  streamed IDs are projected, with no fence.
+- **Changes from the frozen REDs.** `serial_plan_condition_wait` gains `next`
+  (Bitget's 40085 replan re-reads after release), and the tests pass
+  `mutation()`. RED24 is a new control: a parked Plan issues the Read it named.
+  RED23 pins the existing entry refusal; it had expected NotSent, which that
+  shared refusal never carried, so changing it would alter every venue that
+  guards order mutations. The fixture fixes are RED11 (answer every prepared
+  call in a batch) and RED14 (entry refusals counted apart from parks).
 
 ## Gates
 

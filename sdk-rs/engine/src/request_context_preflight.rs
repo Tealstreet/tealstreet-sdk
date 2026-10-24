@@ -301,13 +301,23 @@ impl<P> Cx<'_, P> {
         preflight: &Preflight,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
-        self.validate_preflight_failure_custody(preflight)?;
+        // A condition-parked owner holds no call or loan: any callback may end it.
+        let parked = self.io.request_contexts.condition_parked(preflight);
+        if !parked {
+            self.validate_preflight_failure_custody(preflight)?;
+        }
+        let delivery = if parked {
+            None
+        } else {
+            self.io.http_delivery.as_ref()
+        };
         let seal = self.io.request_contexts.seal_preflight(
             preflight,
             self.now,
-            self.io.http_delivery.as_ref(),
+            delivery,
             Some(error.into()),
         )?;
+        self.clear_preflight_condition(preflight);
         let Owner::Command { id, .. } = preflight.owner() else {
             return Err(Error::Invalid);
         };
