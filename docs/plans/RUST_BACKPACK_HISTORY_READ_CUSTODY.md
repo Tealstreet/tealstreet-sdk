@@ -123,3 +123,23 @@ must retain exact selected/private or keyless/public roots, DATA before any
 item/status/diagnostic, released-failure/live-root recovery and page-local
 row/ID/skip discard. One live leg, 50-page retirement, pressure and JS parity
 remain explicit source-stage checks.
+
+## Native primary-readiness source finding
+
+Hcmq3f found that the first unapplied source proposal would select the installed
+primary identity before native account_start had created account.credentials.
+Native primary-only history refuses both before start and while the catalogue
+is held. Preserve that behavior without a new refusal or support expansion.
+Slots must receive the installed primary identity only when the actual typed
+Option<Credentials> native state is Some; a real Secondary remains eligible
+independently, including before start and in public-only mode. No key/secret
+re-probe or separate credential-selection gate is needed. M26 reviews this
+exact native-readiness filter before application.
+
+Six working native controls pin pre-start/discovery-held refusals across the
+three private routes (native message, absent kind/outcome, no physical work or
+Store mutation). A separate Secondary positive covers both startup states and
+private/public-only modes, retaining the native60000 window before primary
+initialization even when recv_window5000 is configured. These are working
+parity controls, not original-source failures or a behavior ruling. The old
+a1dde121 source patch is NOT approved for application.

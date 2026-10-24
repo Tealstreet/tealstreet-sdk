@@ -509,3 +509,144 @@ fn selected_provider_orders_signature_overrides_different_raw_read_material() {
 fn selected_provider_funding_signature_overrides_different_raw_read_material() {
     provider_read_identity_owns_history_signature(Route::Funding);
 }
+
+fn before_primary_account_start(
+    discovery_held: bool,
+    secondary: bool,
+    public_only: bool,
+) -> Driver {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::ReadCredentials;
+    use safe_cex_venue_backpack::{Backpack, Options};
+    let primary_seed = STANDARD.encode([7u8; 32]);
+    let read_seed = STANDARD.encode([9u8; 32]);
+    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
+        primary: (!public_only).then(|| LocalIdentity {
+            key: Secret::new("primary-before-start".into()),
+            secret: Secret::new(primary_seed.clone()),
+            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+            ..Default::default()
+        }),
+        secondary: secondary.then(|| LocalIdentity {
+            key: Secret::new("secondary-before-start".into()),
+            secret: Secret::new(read_seed.clone()),
+            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+            ..Default::default()
+        }),
+    })
+    .unwrap();
+    let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
+        public_data_only: public_only,
+        key: Some("primary-before-start".into()),
+        secret: Some(primary_seed),
+        identity: identities.primary.clone(),
+        read_identity: identities.secondary.clone(),
+        read_credentials_status: secondary.then_some(Ok(())),
+        read_credentials: secondary.then(|| ReadCredentials {
+            key: "secondary-before-start".into(),
+            secret: read_seed,
+            passphrase: None,
+        }),
+        recv_window: Some(5000.),
+    }));
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
+    if discovery_held {
+        e.start(1000.);
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Http(request) if request.url == "https://api.backpack.exchange/api/v1/markets")).count(), 1, "genuine catalogue is held without delivering discovery");
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Sign { .. } | Action::SignedOutbound { .. }))
+        );
+    }
+    e
+}
+fn native_primary_unavailable(route: Route, discovery_held: bool) {
+    let mut e = before_primary_account_start(discovery_held, false, false);
+    let before = e.account_snapshot_frame(2000.).to_vec();
+    e.handle_command(
+        2000.,
+        Command::Query {
+            command: 71,
+            query: route.query(2),
+        },
+        Some(37),
+    )
+    .unwrap();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 2000.);
+    assert!(
+        actions.iter().all(|a| matches!(a, Action::Notice(_))),
+        "installed primary identity cannot bypass native credential readiness"
+    );
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 71, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].message, "Backpack credentials unavailable");
+    assert_eq!(failures[0].kind, None);
+    assert_eq!(failures[0].outcome, None);
+    assert!(done(&actions).is_empty());
+    assert_eq!(e.account_snapshot_frame(2000.), before);
+}
+macro_rules! native_primary_startup_cases {
+    ($pre:ident, $held:ident, $route:expr) => {
+        #[test]
+        fn $pre() {
+            native_primary_unavailable($route, false);
+        }
+        #[test]
+        fn $held() {
+            native_primary_unavailable($route, true);
+        }
+    };
+}
+native_primary_startup_cases!(
+    native_primary_only_fills_before_start_refuses,
+    native_primary_only_fills_held_discovery_refuses,
+    Route::Fills
+);
+native_primary_startup_cases!(
+    native_primary_only_orders_before_start_refuses,
+    native_primary_only_orders_held_discovery_refuses,
+    Route::Orders
+);
+native_primary_startup_cases!(
+    native_primary_only_funding_before_start_refuses,
+    native_primary_only_funding_held_discovery_refuses,
+    Route::Funding
+);
+
+#[test]
+fn native_secondary_history_works_before_start_and_with_held_discovery() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let seed = STANDARD.encode([9u8; 32]);
+    let native =
+        safe_cex_venue_backpack::sign::Credentials::new("secondary-before-start".into(), &seed)
+            .unwrap();
+    for public_only in [false, true] {
+        for held in [false, true] {
+            for route in [Route::Fills, Route::Orders, Route::Funding] {
+                let mut e = before_primary_account_start(held, true, public_only);
+                let request = ask(&mut e, route, Some(37), 2);
+                let params = [
+                    ("limit".into(), "2".into()),
+                    ("sortDirection".into(), "Desc".into()),
+                ]
+                .into();
+                assert_eq!(
+                    request.headers,
+                    native.headers(route.instruction(), &[params], 2000.),
+                    "secondary stays available; pre-account native window is60000, not uninitialized recv_window5000"
+                );
+                assert_eq!(done(&respond(&mut e, &request, 2036., "[]")), ["[]"]);
+            }
+        }
+    }
+}
