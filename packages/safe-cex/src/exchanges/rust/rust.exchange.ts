@@ -634,7 +634,9 @@ export class RustEngineExchange extends BaseExchange {
     const signerSetup = bridgeConstruction.dispatchSigning && !setupError
       ? delegated ? new DelegatedSignerSetup(exchangeName, options)
         : aster ? new LocalSignerSetup(aster.setupOptions, deriveSignerSetupPolicy(exchangeName), aster.secondarySigningFromPrimary)
-          : new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName))
+          : deriveSignerSetupMapping(exchangeName) === 'apexomni'
+            ? new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName), false, options.omniKeySeed || undefined)
+            : new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName))
       : undefined;
     const signingMode=signerSetup ? derivePublicMode(exchangeName,options,undefined,signerSetup.credentialPresence) : undefined;
     if (signingMode && !signingMode.publicDataOnly && delegatedMode === 'payload'
