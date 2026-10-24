@@ -394,6 +394,38 @@ impl LocalSigner {
         }
         self.raw_key(reference)
     }
+    /// Signing material, typed before any arm runs: an asymmetric algorithm
+    /// needs trusted policy's matching declaration, and a declared key never
+    /// MACs. Undeclared refs keep MAC behaviour; zkLink stays role-only.
+    fn sign_key(&self, reference: &KeyRef, algorithm: Algorithm) -> Result<&[u8], SignError> {
+        if algorithm == Algorithm::ZkLinkContract {
+            return self.role_key(reference, ExtraKey::ZklinkSeed);
+        }
+        let declared = self.algorithms.get(reference).copied();
+        if asymmetric(algorithm) {
+            if declared != Some(algorithm) {
+                return Err(SignError::InvalidRequest);
+            }
+        } else if declared.is_some() {
+            return Err(SignError::InvalidRequest);
+        }
+        self.key(reference)
+    }
+    /// Trusted installation of asymmetric material with its declaration,
+    /// replacing any earlier key and declaration at once. Role refs refuse.
+    pub fn insert_declared(
+        &mut self,
+        reference: KeyRef,
+        bytes: Vec<u8>,
+        algorithm: Algorithm,
+    ) -> Result<(), SignError> {
+        if !asymmetric(algorithm) || self.roles.contains_key(&reference) {
+            return Err(SignError::InvalidRequest);
+        }
+        self.keys.insert(reference.clone(), Zeroizing::new(bytes));
+        self.algorithms.insert(reference, algorithm);
+        Ok(())
+    }
     fn role_key(&self, reference: &KeyRef, role: ExtraKey) -> Result<&[u8], SignError> {
         if self.roles.get(reference) != Some(&role) {
             return Err(SignError::InvalidRequest);
@@ -516,10 +548,7 @@ impl LocalSigner {
                     payload,
                 } => {
                     let message = self.expand(payload, &result)?;
-                    let key = match algorithm {
-                        Algorithm::ZkLinkContract => self.role_key(key, ExtraKey::ZklinkSeed)?,
-                        _ => self.key(key)?,
-                    };
+                    let key = self.sign_key(key, *algorithm)?;
                     match algorithm {
                         Algorithm::HmacSha256 => {
                             let mut mac = Hmac::<Sha256>::new_from_slice(key)
@@ -596,11 +625,16 @@ fn ed25519_canonical_y(bytes: &[u8; 32]) -> bool {
     modulus[31] = 0x7f;
     y.iter().rev().lt(modulus.iter().rev())
 }
-/// Algorithms whose keys have a public form; MAC secrets never do.
+/// Asymmetric algorithms: a key must be declared for exactly one of them, and
+/// MAC secrets never are. Only some have a public form (`public_key_len`).
 fn asymmetric(algorithm: Algorithm) -> bool {
     matches!(
         algorithm,
-        Algorithm::Ed25519 | Algorithm::Es256 | Algorithm::Secp256k1Digest | Algorithm::StarkDigest
+        Algorithm::Ed25519
+            | Algorithm::Es256
+            | Algorithm::Secp256k1Digest
+            | Algorithm::StarkDigest
+            | Algorithm::SchnorrDigest
     )
 }
 /// Mirrors the `sign_now` arms; keep the two in step.
@@ -621,10 +655,7 @@ impl Signer for LocalSigner {
         true
     }
     fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
-        let usable = match algorithm {
-            Algorithm::ZkLinkContract => self.role_key(key, ExtraKey::ZklinkSeed).is_ok(),
-            _ => self.key(key).is_ok(),
-        };
+        let usable = self.sign_key(key, algorithm).is_ok();
         if usable && implemented(algorithm) {
             Capability::Supported
         } else {
@@ -1858,6 +1889,48 @@ mod tests {
         assert_eq!(
             signer.sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32])),
             Err(SignError::Unsupported)
+        );
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn insert_declared_is_atomic_asymmetric_only_and_never_on_a_role() {
+        let mut signer = LocalSigner::new();
+        let key = KeyRef("raw.signing".into());
+        let scalar = || vec![0x11; 32];
+        // MAC algorithms are never declarable, and nothing is installed.
+        assert_eq!(
+            signer.insert_declared(key.clone(), scalar(), Algorithm::HmacSha256),
+            Err(SignError::InvalidRequest)
+        );
+        assert_eq!(
+            signer.sign_now(&sign_request("hmacSha256", &key, b"m".to_vec())),
+            Err(SignError::Unavailable)
+        );
+        signer
+            .insert_declared(key.clone(), scalar(), Algorithm::Secp256k1Digest)
+            .unwrap();
+        assert!(
+            signer
+                .sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32]))
+                .is_ok()
+        );
+        // Redeclaring replaces key and declaration in one step.
+        signer
+            .insert_declared(key.clone(), scalar(), Algorithm::Ed25519)
+            .unwrap();
+        assert_eq!(
+            signer.sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32])),
+            Err(SignError::InvalidRequest)
+        );
+        // A role ref is its own declaration and refuses another.
+        let (seed, _, _) = zklink_case();
+        let (mut zklink, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let role = ids.primary.unwrap().extra[&ExtraKey::ZklinkSeed].clone();
+        assert_eq!(
+            zklink.insert_declared(role, scalar(), Algorithm::Secp256k1Digest),
+            Err(SignError::InvalidRequest)
         );
     }
 }

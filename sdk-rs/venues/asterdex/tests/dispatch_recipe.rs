@@ -48,15 +48,26 @@ fn ordered_query(case: &Case) -> Query {
 }
 
 fn provider(key: &str, secret: &str, encoding: KeyEncoding) -> (Arc<LocalSigner>, Identity) {
-    let (signer, ids) = LocalSigner::from_setup(LocalSetup {
-        primary: Some(LocalIdentity {
-            key: Secret::new(key.into()),
-            secret: Secret::new(secret.into()),
-            secret_encoding: encoding,
-            ..Default::default()
-        }),
-        secondary: None,
-    })
+    let (signer, ids) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(LocalIdentity {
+                key: Secret::new(key.into()),
+                secret: Secret::new(secret.into()),
+                secret_encoding: encoding,
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+        safe_cex_engine::signing::CredentialSetupPolicy {
+            primary: (encoding == KeyEncoding::Hex).then(|| {
+                safe_cex_engine::signing::IdentitySetupPolicy {
+                    signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest),
+                    ..Default::default()
+                }
+            }),
+            secondary: None,
+        },
+    )
     .unwrap();
     (Arc::new(signer), ids.primary.unwrap())
 }
