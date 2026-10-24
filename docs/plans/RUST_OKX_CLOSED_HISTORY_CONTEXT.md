@@ -195,3 +195,12 @@ genuine managed candle preparations and verify unrelated peers remain pending.
 All existing runtime, existing tests/fixtures, dependencies, checkers and
 inventories stay byte-exact to the pinned landing. Direct manifest shrink
 remains0; production adoption and green runtime/CI certification are later work.
+
+Current-tip integration at `bb96cab4ef3` genuinely merges actual
+`5f86ae5171727e795ddbe2b772dfcc436a86f50e`, keeping incoming README rows plus
+this plan's row once. The unchanged original controls rerun with the same
+10 RED/6 working partition and all9 existing tests passing. Strict new-target
+Clippy, scoped fmt and both request-context checks (15 checker controls) now
+pass. All three independent source/adversarial, caller and full-map reviews
+are CLEAR at that pin, architecture gate No. Exactly three own paths differ
+from actual landing; runtime, existing tests/fixtures and all maps stay exact.
