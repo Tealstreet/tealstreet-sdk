@@ -778,6 +778,33 @@ fn corpus() -> Vec<String> {
         }
     }
     out.extend(nested_corpus(&VALUES));
+    out.extend(sequence_corpus());
+    out
+}
+
+/// serde's internally tagged enums also accept a sequence whose first element
+/// is the tag and whose remaining elements are the fields in order.
+fn sequence_corpus() -> Vec<String> {
+    let mut out = vec![
+        r#"["fetchAccount"]"#.to_owned(),
+        r#"["nope",1]"#.to_owned(),
+        "[1,1]".to_owned(),
+        "[null]".to_owned(),
+    ];
+    for example in examples() {
+        let values: Vec<&str> = example.iter().map(|(_, v)| *v).collect();
+        out.push(format!("[{}]", values.join(",")));
+        if values.len() > 1 {
+            out.push(format!("[{}]", values[..values.len() - 1].join(",")));
+        }
+        out.push(format!("[{},1]", values.join(",")));
+        out.push(format!("[{},1e999]", values.join(",")));
+        if values.len() > 1 {
+            let mut typed = values.clone();
+            typed[1] = r#""x""#;
+            out.push(format!("[{}]", typed.join(",")));
+        }
+    }
     out
 }
 
