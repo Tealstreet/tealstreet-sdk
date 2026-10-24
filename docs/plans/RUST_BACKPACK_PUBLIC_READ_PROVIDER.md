@@ -7,14 +7,14 @@ three private history GETs.
 
 ## Stack and status
 
-- Local branch `feat/rust-backpack-public-read-provider`, not pushed. It
-  stacks on:
-  - #2078 (`825d203d5d3`, the shared read-key policy);
-  - #2073 (`9db50a1ecb7`, Backpack's real secondary identity and typed read
-    status);
-  - codex-mxb4mq's parity control `c5a8ebbd4bf`.
-- #2073 and #2078 are not landed. The branch is re-composed on their actual
-  landings before any push.
+- PR #2090, branch `feat/rust-backpack-public-read-provider`, composed on the
+  actual landings by a plain merge of tip `2caa80214f0`:
+  - #2078 (`cec22de6e87`, the shared read-key policy);
+  - #2073 (`8f8fbaf1415`, Backpack's real secondary identity and typed read
+    status).
+- It carries codex-mxb4mq's parity control (`c5a8ebbd4bf`), agreed; the
+  history slice inherits this copy and declares the `backpack` row atomically
+  with history adoption.
 - Plan and REDs at `268b3288497`. The source seam is committed locally after
   codex-mxb4mq's plan CLEAR (see below).
 
