@@ -167,3 +167,120 @@ Phase-two execution receipt: plan `8c6a924b170` precedes separate original-sourc
 
 
 Pre-integration verification: all twelve candle controls, full Orderly/Binance native suites, strict all-target Clippy and scoped formatting pass. The bans wrapper passed its thirteen scanner controls but correctly stopped at newer incoming Bybit inventory prunes; current actual landing must be genuinely integrated and the incoming prunes retained before both inventory gates can pass. All three independent implementation audits are clean, architecture gate No. Fresh integrated native/static gates and exact-head CI remain required.
+
+
+## P0 write adoption, classifier pin 2026-10-23
+
+Audited actual `6741c1c6609437e32090c76745a56ca6c2262445`. This appendix
+supersedes earlier draft WRITE method references; production is unchanged.
+
+| Audit row | Reverified source | Caller-visible acceptance |
+| --- | --- | --- |
+| #24 | `trading.rs::answer_failure` gives code -1007 no outcome; `trade_response` therefore chooses `trade_failed`, bypassing `trade_lost` and `account_after_uncertain_write`. | Explicit Unknown, native code retained, no write replay, and the existing positions/ordinary/algo order reconcile is entered under shared ownership. |
+| #29 | `account.rs::account_response` deactivates Info on any 4xx except 408/429. | Native auth evidence and credential role decide auth handling; unrelated 400/404 is not proof that the key expired. Released read classification makes no money-effect claim. |
+
+The existing code distinctions are -1000/-1011/-1012 (uncertain),
+-1001/-1002 (AuthInvalid), -1003 (RateLimited), and explicit rejection codes
+-1004/-1005/-1006/-1008/-1103..=-1101. Move this existing finite mapping into
+one const CodeTable; add the audited -1007 Unknown row. Never move the old
+401/403/any4xx ladder wholesale into status rows. Existing native evidence
+must survive even on non-2xx, while engine 408/5xx precedence remains Unknown.
+A success envelope still requires the existing complete ID, type and account
+codec; success:true alone does not prove a placement or cancellation.
+
+### Landed classifier and write-journal boundary
+
+Use actual #1837 (`e0322577e354739dde6d7e5011e74ab660145885`), not the
+older draft signatures. Declare one family `classify::CodeTable` with `rows`,
+`success`, explicit `unlisted: Verdict::Unknown(None)` and evidence-backed
+`status` entries only. `Key::Message` is exact and code-less; never mix message
+and code rows or introduce substring/prefix inference. Decode integer codes
+strictly via the native codec / `classify::decode_int`, never through f64.
+Engine precedence owns transport, 408/5xx, native evidence, status and malformed
+success. A native code or 2xx alone never proves successful execution.
+
+A genuine command Context uses the actual command entry and real credential;
+managed signed HTTP carries it through Pending. At the exact delivered attempt,
+`classify_write(&ctx, &TABLE, native, message)` creates the failure Fact.
+`http_write_fact(&ctx, WriteFact::Failed { fact, known_effects }, reports)`
+records it; `http_write_failure` is the whole-failure shortcut. Complete native
+success reports `WriteFact::Accepted { order_ids }`; malformed success uses
+`http_write_unproven`. A real batch acknowledgement uses `http_write_batch`
+with caller-ordered items and the native expected count. The codec proves
+identity/uniqueness and correlation; preserve individually known IDs as
+reconciliation evidence without invented caller counts on an incomplete reply.
+
+Only the engine's opaque resend grant may feed `http_resend_context`, retaining
+the original root, deadline and one-shot budget. Use `http_write_leg_intent`
+only for permitted intent narrowing before release. Finish once through
+`done_context`/`fail_context`; CommandWrites owns aggregation, partial IDs and
+whole-command demotion. Do not use private engine-test-only `http_write_result`,
+transitional unmanaged `classify::write`, local status/outcome ladders or a
+numeric completion fallback. A preparation refusal's local NotSent fact is
+valid, but prior released siblings still determine the whole-command outcome.
+
+No runtime conversion is authorized in this plan/tests slice. Missing reusable
+signing, session, Plan/CallWindow or reconciliation ownership remains a shared
+prerequisite; no per-venue replacement. On adoption, reverify actual seam pins,
+remove RED ignore markers while retaining behavior assertions, prune only the
+venue's genuinely removed legacy fingerprints, and add a landed CALLERS
+appendix. Plan/tests preparation neither prunes inventory nor closes P0 rows.
+
+### Phases, prerequisites and regression controls
+
+The single native ordinary place/cancel/settings area comes before multi-leg
+algo/bracket trees, replacement, cancel-many and preflight groups. Signed
+managed conversion needs claude-19pt8s's Ed25519 recipe/provider (#1844) plus the
+shared Base58 key encoding seam; do not feed pre-signed bytes through unsigned
+admission. Plan/CallWindow owns multi-request admission and no-I/O preflight
+completion. Session mutations belong to claude-55ao7t; account reconciliation
+requires actual Background/Execution ownership and exact delivery validation
+(#1856 for Background), not a fake command Read. #1857's typed stream-integrity
+callback is a separate prerequisite where used, not an actual API claim.
+
+Keep native stale-guard revisions, coverage, positional bracket tree identity,
+terminal/fill fences, snapshot pairing and remaining-size replacement logic.
+Unknown must retain the uncertain placement reservation until authoritative
+reconciliation; a later refusal cannot discard an earlier accepted ID. Use
+native complete branch facts with intent-specific declarations, not a local
+`effective` demotion or inference from final Store contents.
+
+At this audit #1791 holds `src/history.rs` and `tests/history.rs`; leave them
+untouched. Add ignored original-source tests only to unoccupied
+`tests/trading.rs`, reusing its authenticated fixture: HTTP 200 code -1007 must
+be Unknown and start all three existing reconcile reads; HTTP 503 must retain native code
+-1001 while preserving its already-correct Unknown/no-resend behavior. Run `cargo test -p
+safe-cex-venue-orderly --test trading p0_write_ -- --ignored --nocapture`.
+Both must compile and fail behavioral assertions on the original source.
+
+Additional adoption controls: -1007 after an earlier successful leg retains
+structured IDs; 408/5xx with every known refusal code remain uncertain; stale,
+late, duplicate and wrong-attempt callbacks cannot publish or finalize twice;
+Info 400/404 with non-auth code does not deactivate; genuine auth errors keep
+role-aware handling; preparation NotSent never erases prior released effects.
+Existing caller messages/native symbols and successful JSON remain stable.
+This slice removes no entries from the complete inventory above and adds no
+CALLERS landed claim. Future gates are venue + Binance, scoped strict
+Clippy/fmt, bans, both ratchets, independent reviews and exact-head CI.
+
+Architecture gate: No. Tests specify native facts and the shared classifier/
+journal path; session, signing, reconciliation and admission gaps stay shared.
+
+Local plan/test evidence: 2 original-source controls compile and fail
+by the intended behavior assertions; normal venue suites pass
+(181 tests, 2 explicit ignored RED controls).
+Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
+pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
+controls expose defects; they are not GREEN adoption or P0 closure evidence.
+
+The Info companion row #29 also has an original-source control in the same
+unreserved trading target: a native non-auth -1004 on HTTP400 during client/info
+startup must not deactivate or emit AUTH_REJECTED, and read recovery stays
+armed. It uses the existing authenticated options and actual startup request;
+no session mutation or production callback is replaced. The same p0_write_
+command now runs three controls; its earlier two-control receipt is historical.
+
+Updated local evidence: all three controls compile and fail their intended
+original-source assertions; normal Orderly passes181 tests/three ignored.
+Scoped strict all-target Clippy, fmt, bans and both ratchets pass. These are
+regression controls for future shared adoption, not P0 closure evidence.

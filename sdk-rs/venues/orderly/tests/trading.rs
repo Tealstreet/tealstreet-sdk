@@ -1787,3 +1787,134 @@ fn lost_and_server_failed_writes_are_unknown_but_rejections_are_not() {
             .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get))
     );
 }
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+fn p0_write_timeout_code_remains_unknown_and_reconciles() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    place(
+        &mut e,
+        701,
+        r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}]"#,
+    );
+    let request = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &request,
+        200,
+        r#"{"success":false,"code":-1007,"message":"timeout"}"#,
+    );
+    let out = actions(&mut e);
+    let failures: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 701,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].venue_code.as_deref(), Some("-1007"));
+    assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+    for path in ["/v1/positions", "/v1/orders?", "/v1/algo/orders?"] {
+        assert!(
+            out.iter()
+                .any(|action| matches!(action, Action::Http(request)
+            if request.url.contains(path))),
+            "missing reconcile {path}"
+        );
+    }
+    assert!(
+        !out.iter()
+            .any(|action| matches!(action, Action::Http(request)
+        if request.method == safe_cex_engine::Method::Post))
+    );
+}
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+fn p0_write_5xx_preserves_native_code_without_proving_refusal() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    place(
+        &mut e,
+        702,
+        r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}]"#,
+    );
+    let request = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &request,
+        503,
+        r#"{"success":false,"code":-1001,"message":"auth-looking upstream failure"}"#,
+    );
+    let out = actions(&mut e);
+    let failures: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 702,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].venue_code.as_deref(), Some("-1001"));
+    assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        !out.iter()
+            .any(|action| matches!(action, Action::Http(request)
+        if request.method == safe_cex_engine::Method::Post))
+    );
+}
+
+#[test]
+#[ignore = "original RED: Info auth classification waits for managed account adoption"]
+fn p0_write_info_non_auth_4xx_does_not_deactivate() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_orderly::Orderly::new(
+        options(),
+    ));
+    e.start(1000.0);
+    let mut delivered_info = false;
+    for _ in 0..4 {
+        let request = requests(&mut e).pop().expect("native startup request");
+        if request.url.ends_with("/v1/public/info") {
+            reply(&mut e, &request, 200, MARKETS);
+        } else if request.url.ends_with("/v1/public/futures") {
+            reply(&mut e, &request, 200, TICKERS);
+        } else {
+            assert!(request.url.ends_with("/v1/client/info"));
+            delivered_info = true;
+            reply(
+                &mut e,
+                &request,
+                400,
+                r#"{"success":false,"code":-1004,"message":"invalid request parameter"}"#,
+            );
+            let out = actions(&mut e);
+            assert!(
+                !out.iter()
+                    .any(|action| matches!(action, Action::Notice(Notice::Deactivate))),
+                "an unrelated request error does not prove invalid credentials"
+            );
+            assert!(!out.iter().any(
+                |action| matches!(action, Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::AUTH_REJECTED)
+            ));
+            assert!(
+                out.iter()
+                    .any(|action| matches!(action, Action::SetTimer { .. })),
+                "native account read recovery must remain armed"
+            );
+            break;
+        }
+    }
+    assert!(
+        delivered_info,
+        "Info failure exercised, not just public discovery"
+    );
+}
