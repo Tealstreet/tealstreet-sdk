@@ -453,3 +453,29 @@ direction-CLEAR. The following explicit requirements are part of implementation:
 Task/wake capacity and G2c snapshot fit remain for uufub4 and the Session owner;
 the Plan-owner review does not clear those contracts. The final #1919 frozen
 pin is still to be announced after its pending CPU certification job.
+
+The follow-up geometry review by codex-uufub4 is CLEAR: at most 256 total
+registered tasks including retiring/backoff/cleanup state, under the existing
+64 Sessions. A parent may occupy the whole global task pool: this introduces no
+per-parent fairness promise, and a capacity test must pin that choice. Each task
+has at most one demand, child, activation and cleanup. Registration promises no
+Plan credits; active and reserved slots still share the one 256-credit pool.
+The initial template is uniform serial Read/Never, 1..150 calls at 20s, with
+at most three successful traversal admissions and exact 1s/2s retry sampling.
+SelectedRead is captured once; G2c remains a separate native-adoption gate.
+
+Session-owner review APPROVES the hook shape with two required controls:
+the new activation marker participates in `session_scope` before any Session
+operation consumes resources, with the existing eight-variant readiness attack
+matrix; and a child of a private-egress anchor must use its own selected egress,
+never `Egress::Session`. Children use neither `session_context` nor
+`session_scoped_context`. In `retire_session`, the indexed cascade begins after
+`sessions.retire(generation)`, when the parent is already dead, and queues typed
+cleanup without calling the venue inside Cx. Plain Background waits stay valid;
+Plan-backed Background waits are refused without changing hold accounting.
+
+These are plan/geometry reviews, not runtime acceptance. Send the exact
+constructor/activation/retirement and Session hook patch back to fe7lgm,
+uufub4 and claude-55ao7t before source freeze. Their review must also cover
+explicit refusal/decline disposition without spinning or stranded demand, and
+the original two RED assertions must be active after fixture conversion.
