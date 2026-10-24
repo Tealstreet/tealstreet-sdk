@@ -1,15 +1,15 @@
 mod support;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
-use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response};
+use safe_cex_engine::{Action, Command, Event, Notice, Query, Response};
 use safe_cex_venue_phemex::PhemexPerpetuals;
 use serde::Deserialize;
-use support::Options;
+use support::{Options, PreparedEngine as Engine};
 
 const NOW: f64 = 1_710_000_000_000.;
 const FILL: &str = r#"{"transactTimeNs":1669407633999999999,"symbol":"BTCUSDT","currency":"USDT","side":"Sell","tradeType":"Trade","execQtyRq":"0.001","execPriceRp":"16600","execFeeRv":"0.00166","execID":"5c3d96e1-8874-53b6-b6e5-9dcc4d28b4ab","orderID":"fcdfeafa-ed68-45d4-b2bd-7bc27f2b2b0b"}"#;
 const ORDER: &str = r#"{"actionTimeNs":1667562110213260743,"transactTimeNs":1667562110221077395,"orderId":"743fc923-cb01-4261-88d1-b35dba2cdac0","symbol":"BTCUSDT","side":"Buy","ordType":"Market","ordStatus":"Filled","priceRp":"21206.7","orderQtyRq":"0.001","cumQtyRq":"0.001","reduceOnly":false}"#;
 fn engine(private: bool) -> Engine<PhemexPerpetuals> {
-    let mut e = support::engine(Options {
+    let mut e = support::prepared_engine(Options {
         key: private.then(|| "key".into()),
         secret: private.then(|| "secret".into()),
         ..Options::default()
@@ -388,7 +388,7 @@ fn private_history_rejects_rows_beyond_the_documented_page_maximum() {
 #[test]
 fn public_only_mode_refuses_private_history_even_with_credentials() {
     let market = engine(true).store().markets()[0].clone();
-    let mut e = support::engine(Options {
+    let mut e = support::prepared_engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         public_data_only: true,
@@ -762,7 +762,7 @@ fn income_single_millisecond_window_and_unsupported_filters_fail_closed() {
 #[test]
 fn secondary_reads_never_change_definitive_lookup_identity_or_routing() {
     let market = engine(true).store().markets()[0].clone();
-    let mut e = support::engine(Options {
+    let mut e = support::prepared_engine(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: Some(safe_cex_engine::ReadCredentials {
