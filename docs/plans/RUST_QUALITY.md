@@ -1869,3 +1869,24 @@ lookup/signer/root suites pass89 tests across7 targets; strict all-target Clippy
 formatting and request/credential ratchets cover the scoped change. Existing
 financial assertions and fixtures are unchanged. Independent source/caller/map
 reviews and fresh exact-head CI remain required before READY.
+
+
+
+
+Metadata/settings freshness: BingX query ownership and both adapters' background
+Store observations/write fences use the shared settings boundary. WEEX explicit
+leverage reads retain incoming managed Context/native-revision behavior and do
+not coalesce. Its duplicate-config control remains; the following own unlanded
+controls were removed when that query cutover was excluded:
+
+- `metadata_owner_coalesces_native_config_and_completes_both_callers`
+- `metadata_owner_fails_both_joined_callers_and_keeps_good_settings`
+- `metadata_owner_preserves_secondary_only_get_credentials`
+- `metadata_started_during_a_write_stays_nonpublishing_after_refusal`
+- `an_old_account_config_cannot_overwrite_completed_metadata`
+
+No incoming WEEX test is deleted or weakened. BingX's four original entry
+assertions remain unchanged. Its Plan/observer adoption still requires the
+reviewed shared seam, typed provider-refusal/pending-owner controls, native
+retry/lease and observer denial matrix, plus fresh family replay/size gates.
+[Scope and proof](RUST_METADATA_FRESHNESS.md).

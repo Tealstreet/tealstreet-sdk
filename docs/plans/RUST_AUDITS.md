@@ -3192,3 +3192,17 @@ No selection witness is moved into lib.rs. Original actual credential-checker
 removal RED is green after adoption: closed1 to0, history2 to1, all foreign keys
 unchanged. Local cache/empty/error precedence and existing history authority are
 preserved; no shared checker exemption or source change.
+
+
+
+
+## Metadata/settings freshness core
+
+The engine/Store owner supplies BingX query coalescing, settings-write fences
+and background settings publication observations. WEEX retains its incoming
+managed Context leverage reader and native settings revision; only background
+settings proposals and Store write fences use this shared boundary. No WEEX
+query coalescing or joined managed adoption is claimed. Native financial fences
+remain separate. BingX Plan/observer production wiring still requires the
+reviewed planned-execution seam and independent-observer controls.
+[Implementation and limits](RUST_METADATA_FRESHNESS.md).

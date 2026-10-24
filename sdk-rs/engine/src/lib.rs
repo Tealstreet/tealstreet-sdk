@@ -17,6 +17,7 @@ pub mod fence;
 pub mod history;
 pub mod json;
 pub mod log;
+pub mod metadata;
 pub mod model;
 pub mod nonce;
 pub mod num;

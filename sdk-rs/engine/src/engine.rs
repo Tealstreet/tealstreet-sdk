@@ -2462,6 +2462,7 @@ impl<P> Cx<'_, P> {
             panic!("HTTP owner retirement bookkeeping failed");
         }
         self.io.untrack_read_root(command);
+        self.store.metadata_write_finished(command);
         #[cfg(feature = "order-locks")]
         {
             if write_sealed

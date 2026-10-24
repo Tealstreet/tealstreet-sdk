@@ -116,6 +116,14 @@ impl Harness {
                 Action::Notice(Notice::CommandProgress { receipts, .. }) => {
                     self.progress.extend(receipts)
                 }
+                Action::Notice(Notice::Deactivate) => {
+                    panic!("provider refusal cannot deactivate the venue")
+                }
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::AUTH_REJECTED =>
+                {
+                    panic!("provider refusal cannot reject account authentication")
+                }
                 Action::Notice(Notice::AccountAuth { .. }) => {
                     panic!("provider refusal is not venue auth evidence")
                 }
@@ -221,8 +229,10 @@ fn read_owner_keeps_typed_provider_failure(kind: u8) {
                 },
             };
             h.command(command);
+            let auth_failures = h.engine.health().auth_failures;
             h.refuse(error);
             assert_eq!(h.error(), &error.venue_error(), "owner {kind}");
+            assert_eq!(h.engine.health().auth_failures, auth_failures);
         }
     }
 }
@@ -237,6 +247,38 @@ fn history_keeps_typed_provider_failure() {
 #[test]
 fn metadata_keeps_typed_provider_failure() {
     read_owner_keeps_typed_provider_failure(2);
+}
+
+#[test]
+fn typed_margin_failure_preserves_newer_store_settings() {
+    let mut h = Harness::new();
+    h.command(Command::FetchLeverage {
+        command: 42,
+        symbol: "BTCUSDT".into(),
+    });
+    h.release();
+    h.reply(r#"{"code":0,"data":{"longLeverage":5,"shortLeverage":6}}"#);
+    assert_eq!(
+        h.signs.len(),
+        1,
+        "the real margin Plan slot awaits its provider"
+    );
+    h.engine.store_mut().update_setting("BTCUSDT", |setting| {
+        setting.leverage = 25.;
+        setting.buy_leverage = Some(25.);
+        setting.sell_leverage = Some(25.);
+        setting.margin_type = Some(MarginType::Cross);
+    });
+    let auth_failures = h.engine.health().auth_failures;
+    h.refuse(SignError::Refused);
+    assert_eq!(h.error(), &SignError::Refused.venue_error());
+    assert_eq!(h.engine.health().auth_failures, auth_failures);
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.leverage, 25.);
+    assert_eq!(
+        (setting.buy_leverage, setting.sell_leverage),
+        (Some(25.), Some(25.))
+    );
 }
 #[test]
 fn first_write_provider_refusal_is_typed_not_sent() {
