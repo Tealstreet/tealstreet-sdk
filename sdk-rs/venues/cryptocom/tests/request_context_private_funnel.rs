@@ -27,6 +27,23 @@ impl Signer for Parked {
     }
 }
 struct Refused;
+struct CountingRefused(Arc<std::sync::atomic::AtomicUsize>);
+impl Signer for CountingRefused {
+    fn sign(&self, work: SignRequest) -> SignFuture {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Refused.sign(work)
+    }
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Refused.sign_ready(work)
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: safe_cex_engine::signing::Algorithm) -> Capability {
+        Refused.can_sign(key, algorithm)
+    }
+}
 struct ParkedWs(Arc<dyn Signer>);
 impl Signer for ParkedWs {
     fn sign(&self, work: SignRequest) -> SignFuture {
@@ -384,6 +401,32 @@ fn startup_private_snapshot_waits_for_provider_after_public_catalogue() {
     let a = respond(&mut e, NOW, &r, 200, support::INSTRUMENTS);
     no_private_http(&a);
     assert!(a.iter().any(|a| matches!(a, Action::Sign { .. })));
+}
+
+#[test]
+fn account_provider_refusal_schedules_one_poll_without_transport_retries() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut e = engine(options());
+    e.set_signer(Some(Arc::new(CountingRefused(calls.clone()))))
+        .unwrap();
+    e.start(NOW);
+    let catalogue = http(&actions(&mut e, NOW), "public/get-instruments");
+    let failed = respond(&mut e, NOW, &catalogue, 200, support::INSTRUMENTS);
+    no_private_http(&failed);
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "provider refusal is not released transport failure"
+    );
+    assert_eq!(
+        failed
+            .iter()
+            .filter(
+                |action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == NOW + 10000.)
+            )
+            .count(),
+        1
+    );
 }
 #[test]
 fn private_ws_auth_waits_for_provider_at_native_ready_boundary() {
