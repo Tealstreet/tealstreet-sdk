@@ -472,6 +472,10 @@ fn native_not_ready_refusal_precedes_invalid_planning_result() {
         passphrase: Some("test-passphrase".into()),
         ..Default::default()
     });
+    assert!(
+        engine.store().market("BTCUSDT").is_none(),
+        "planning would fail because the requested market is absent"
+    );
     place(&mut engine, vec![order(1)]);
     let output = prepared(&mut engine, 5.);
     assert!(
@@ -492,6 +496,82 @@ fn native_not_ready_refusal_precedes_invalid_planning_result() {
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0].message, "OKX account is not ready");
     assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
+}
+
+#[test]
+fn native_bracket_continues_and_finishes_after_caller_receipt_deadline() {
+    let mut engine = trading_engine();
+    let mut input = order(1);
+    input.stop_loss = Some(36000.);
+    input.take_profit = Some(42000.);
+    engine
+        .handle_command(
+            5.,
+            Command::PlaceOrders {
+                command: OWNER,
+                orders: vec![input],
+            },
+            Some(1),
+        )
+        .expect("native command dispatch");
+    let mut output = prepared(&mut engine, 5.);
+    for step in 0..3 {
+        let field = if step == 0 { "ordId" } else { "algoId" };
+        let response =
+            format!(r#"{{"code":"0","data":[{{"{field}":"{step}","sCode":"0","sMsg":""}}]}}"#);
+        reply(&mut engine, post(&output), &response, 7.);
+        output = prepared(&mut engine, 7.);
+        assert!(!output.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+        )));
+    }
+    assert_eq!(
+        output
+            .iter()
+            .filter(|a| matches!(a,
+                Action::Notice(Notice::CommandDone { command: OWNER, result })
+                    if result == r#"["0","1","2"]"#
+            ))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn native_keeps_duplicate_ids_and_releases_successors_without_step_wait() {
+    let mut engine = trading_engine();
+    let mut input = order(1);
+    input.stop_loss = Some(36000.);
+    input.take_profit = Some(42000.);
+    place(&mut engine, vec![input]);
+    let mut output = prepared(&mut engine, 5.);
+    for step in 0..3 {
+        let field = if step == 0 { "ordId" } else { "algoId" };
+        let response =
+            format!(r#"{{"code":"0","data":[{{"{field}":"repeated","sCode":"0","sMsg":""}}]}}"#);
+        reply(&mut engine, post(&output), &response, 6.);
+        output = prepared(&mut engine, 6.);
+        if step < 2 {
+            post(&output);
+            assert!(
+                !output.iter().any(|a| matches!(a,
+                    Action::SetTimer { at_ms, .. } if *at_ms <= 6.
+                )),
+                "the next physical call released without firing a wait timer"
+            );
+        }
+    }
+    assert_eq!(
+        output
+            .iter()
+            .filter(|a| matches!(a,
+                Action::Notice(Notice::CommandDone { command: OWNER, result })
+                    if result == r#"["repeated","repeated","repeated"]"#
+            ))
+            .count(),
+        1
+    );
 }
 
 #[test]

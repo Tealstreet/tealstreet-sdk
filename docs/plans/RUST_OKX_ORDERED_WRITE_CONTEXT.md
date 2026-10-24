@@ -41,8 +41,9 @@ clearance for that new primitive. The current direction is:
    over an invalid planning result. A retained queue owner uses preflight parking and
    ready callback, never a replayed numeric command.
 3. Admit one command-owned streamed serial Plan. It has no declared step count
-   or step cap: the engine owns a receipt-capped root and one active call at a
-   time. Each call has a 20000 ms window, attempts one, Never, and no refusal
+   or step cap: the engine owns one root and one active call at a time. The
+   proposed receipt cap is not native parity (see the wall-clock gate below).
+   Each call has a 20000 ms window, attempts one, Never, and no refusal
    fallback or added wait. Continue only from the previous step's exact DATA
    custody, under the same root. Do not simulate streaming with repeated Plan
    admission. Exact constructors await the shared owner; do not invent names.
@@ -89,7 +90,8 @@ The OKX crate must opt into `http-plans` explicitly at implementation time.
 1. **Streamed serial primitive:** the current ruling is **no step cap**.
    The earlier 2048/2049 ruling and tests are superseded and removed. fe7lgm
    owns the shared primitive: exact-DATA continuation, O(1) resources per active
-   step, one Context, receipt-capped elapsed time, and incremental full IDs.
+   step, one Context, and incremental full IDs. Its overall wall-clock policy
+   must preserve the native behavior pinned below or obtain an explicit ruling.
    One plain input order permits 10000 split lots, or 500 twenty-row calls;
    both protections make 30000 calls (entry, stop, take-profit per lot).
    Important: that bound is per input order. `CommandIn::PlaceOrders.orders`
@@ -116,6 +118,12 @@ The OKX crate must opt into `http-plans` explicitly at implementation time.
    incrementally, without truncation. The originals complete 30000 and 60000
    serial calls with every ID in native order. This shared evidence change
    belongs to the engine owner, not an extra venue journal.
+5. **Whole-command deadline:** native has no receipt-bound whole-funnel cap.
+   A real `handle_command(5, ..., Some(1))` bracket continues and finishes at
+   time 7, after its receipt deadline 6, with all three IDs. Physical requests
+   retain their own 20 s timeouts. The proposed streamed receipt-capped root
+   would stop native work and is not consumer-CLEAR until the shared owner
+   resolves that policy. No venue-synthesized deadline or renewal is authorized.
 
 For sizing, if plain inputs yield P unprotected lots, protected inputs yield
 L_i lots with b_i enabled protections (one or two), and there are A standalone
@@ -184,3 +192,12 @@ order, realistic code-`1` rejection/status restoration and readiness precedence.
 The 500-request/10000-ID positive remains. Runtime is 6.15 seconds locally with
 one test thread; this is not a managed Plan CPU certification. No production,
 existing fixture, Cargo or checker source has changed.
+
+Additive native-parity controls confirm that the receipt deadline does not cap
+the native bracket chain, accepted IDs preserve duplicates (`repeated` three
+times), and successive writes release at the same response time without a
+venue-added step wait. Native appends `job.ids` in ACK order; no ID dedup is
+performed. Readiness now explicitly asserts the requested market is absent,
+so the not-ready result demonstrates precedence over a real planning error.
+The refreshed dedicated target executes thirteen controls: **two original
+assertion REDs, eleven GREEN, zero ignored**; scoped strict Clippy and fmt pass.
