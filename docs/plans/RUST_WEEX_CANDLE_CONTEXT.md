@@ -1,6 +1,6 @@
 # WEEX candle query Read custody
 
-Status: plan before original compiling assertions; production held.
+Status: plan and original compiling assertions; production held.
 Base: actual `be710b3f2d7692244144b3f8f10810dc52790796`.
 
 ## Scope and train separation
@@ -114,3 +114,23 @@ tests stop at their first assertion; do not claim unexecuted suffixes as REDs.
 Run only the changed target with CARGO_BUILD_JOBS=4; broad checks belong in CI.
 
 Production remains held for bounded native/bridge review and a new instruction.
+
+## Executed original evidence
+
+The plan was committed first at `22051e3953b`. On the unchanged native source,
+`cargo test -p safe-cex-venue-weex --test candle_context` executes six assertion
+REDs and six GREEN controls, with zero ignored tests or setup/compile failures.
+The two release assertions first pass exact URL/method/empty-header/body checks,
+then fail `(1, 0, 0)` versus `(0, 1, 1)`. The short receipt sees timeout None
+instead of Some(1234). Equality and parked expiry see no typed Timeout. A late
+expired 429 parks a live peer, yielding zero requests instead of one.
+
+The six controls cover exact sorted variable-length row output, empty output,
+fractional live delivery, unsupported REST interval, effective native 20 s
+physical timeout, and successful eligible dequeue after the native pause.
+Each variant is an independent test. The stale parked-timer and strict-timeout
+suffixes after a first failed assertion remain post-cutover execution gates.
+The drain expects successful Claim and does not certify held-claim refusal.
+Only this plan and the new test change; source, existing tests, manifests,
+checker/STAGING and combo-5b files remain base-exact. No native adoption or CI
+claim follows from these original assertions.
