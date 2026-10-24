@@ -585,9 +585,14 @@ fn original_retired_bind_item_failure_and_timer_do_not_touch_reused_owner() {
     );
     e.handle(NOW + 20_006., Event::TimerFired { timer });
     assert!(e.drain_actions().next().is_none());
+    let fresh = r#"{"code":0,"result":{"data":[{"t":900001,"o":"9","h":"10","l":"8","c":"9.5","v":"11"}]}}"#;
+    let results = terminals(&reply(&mut e, NOW + 20_007., &second, 200, fresh, true), 18);
+    assert_eq!(results.len(), 1);
+    let rows: serde_json::Value = serde_json::from_str(results[0].as_ref().unwrap()).unwrap();
     assert_eq!(
-        terminals(&reply(&mut e, NOW + 20_007., &second, 200, ROWS, true), 18).len(),
-        1
+        rows,
+        serde_json::json!([{"timestamp":900001.,"open":9.,"high":10.,"low":8.,"close":9.5,"volume":11.}])
     );
+    assert!(e.take_frame(NOW + 20_007.).is_none());
     assert_eq!(e.health().auth_failures, 0);
 }
