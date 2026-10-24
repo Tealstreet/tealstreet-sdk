@@ -7557,6 +7557,21 @@ deferral timer. Shared entry refusal is Read outcome none; preparation refusal
 retains typed NotSent. This command neither publishes nor repairs Store books or
 private account/session state. Limit remains ignored, d=50 and native wire remain.
 
+### TxFlow immediate local command custody
+
+Fifteen local occurrences now consume genuine command entry through shared Read
+ownership or keyless Mutation refusal: initial history/candle validation,
+filtered empty income, cached leverage, unsupported book/STP and pre-I/O write
+refusals. FetchStpMode is Read and SetStpMode is Mutation; both keep native
+Unsupported/NotSent metadata. None/Expired caller waits use cause-aware rejection
+without a numeric fallback. Native JSON, validation order, finite-clock messages
+and no-I/O behavior are preserved. FetchAccount remains the shared pre-venue
+capability refusal; its unreachable native arm stays held. Physical HTTP,
+pagination, signed writes, queues, account/socket state and financial reducers
+are outside this slice. Inventory decreases from25 to10; #2031's ticker CPU
+change lands first and must be preserved on actual integration before freeze.
+
+
 
 
 
