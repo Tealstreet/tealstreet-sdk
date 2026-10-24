@@ -1,5 +1,5 @@
 // Declared read-key policy (docs/plans/RUST_READ_KEY_POLICY.md), JS setup side.
-// Generic policy controls remain separate from Backpack's declared consumer.
+// Synthetic setup controls cover both policies; actual declarations are pinned below.
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 import type { SignerSetupPolicy } from '../../exchanges/rust/construction';
@@ -126,10 +126,16 @@ describe('the unchanged default', () => {
       .toThrow('Rust engine secondary signing keys require a nonempty key and secret');
   });
 
-  it('keeps undeclared bridge records and setup policies unchanged', () => {
-    for (const name of (Object.keys(rules.venues) as ExchangeName[]).filter((name) => name !== 'backpack')) {
+  it('keeps bridge records and setup policy unchanged for undeclared families', () => {
+    for (const name of Object.keys(rules.venues) as ExchangeName[]) {
+      if (name === 'cryptocom' || name === 'backpack') continue;
       expect(deriveBridgeConstruction(name, base)).not.toHaveProperty('readCredentials');
       expect(deriveSignerSetupPolicy(name)).not.toHaveProperty('readCredentials');
     }
   });
+});
+
+it('declares Crypto.com ValidateOnly in both the bridge and trusted setup', () => {
+  expect(deriveBridgeConstruction('cryptocom', base)).toHaveProperty('readCredentials', 'validateOnly');
+  expect(deriveSignerSetupPolicy('cryptocom')).toHaveProperty('readCredentials', 'validateOnly');
 });
