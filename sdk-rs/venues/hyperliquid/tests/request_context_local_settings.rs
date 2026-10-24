@@ -16,6 +16,7 @@ const SPOT: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"nam
 struct Probe {
     inner: Hyperliquid,
     peers: Vec<Context>,
+    validated: usize,
 }
 impl Venue for Probe {
     type Pending = Pending;
@@ -83,6 +84,12 @@ impl Venue for Probe {
                     self.peers.push(c)
                 }
             }
+            Command::SetTickerSymbols { symbols } if symbols.as_slice() == ["validate_peers"] => {
+                for peer in &self.peers {
+                    cx.validate_http_context(peer).unwrap();
+                }
+                self.validated = self.peers.len();
+            }
             Command::SetTickerSymbols { symbols } if symbols.as_slice() == ["seed_hedged"] => {
                 cx.store.set_hedged(true);
             }
@@ -129,6 +136,7 @@ fn boot(mode: Mode) -> Engine<Probe> {
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
         inner,
         peers: vec![],
+        validated: 0,
     });
     e.start(NOW);
     let initial: Vec<_> = prepared_actions(&mut e, NOW)
@@ -378,6 +386,18 @@ fn capacity(case: Case) {
         .unwrap();
     let actions = e.drain_actions().collect::<Vec<_>>();
     native(&e, &actions, case);
+    e.handle(
+        NOW,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["validate_peers".into()],
+        }),
+    );
+    assert!(e.drain_actions().next().is_none());
+    assert_eq!(
+        e.venue().validated,
+        255,
+        "every retained peer remains valid"
+    );
 }
 macro_rules! controls {
     ($capacity:ident,$native:ident,$case:ident) => {

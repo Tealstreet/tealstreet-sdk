@@ -128,3 +128,13 @@ evidence. No production, Cargo, existing fixture, checker or manifest changed.
 
 Scoped strict Clippy on the new target and scoped rustfmt/diff checks pass, with
 four cargo jobs and sequential local builds. No workspace or all-feature sweep.
+
+
+## Retained-peer strengthening before production
+
+Both original reviewers CLEAR26e34250300. Fe7 independently ran13 GREEN /
+12 assertion REDs;9cz's review is read-only. The requested P3 now validates each
+of all255 remaining peer Contexts after exact first-peer retirement and recovery,
+then checks the observed count. The original25 controls still execute12 intended
+REDs/13 GREEN/0ignored on unchanged9d344 source; the new suffix remains gated
+until cutover. No direct next_id introspection claim is made by integration tests.
