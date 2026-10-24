@@ -74,6 +74,15 @@ impl Bearer {
     }
 }
 
+/// The Bind-time decision for one hook answer: bind these headers at this
+/// revision, or park (None) until a newer revision than `seen` is announced.
+fn admit(_seen: Option<u64>, answer: SessionBearer) -> Option<(SessionHeaders, u64)> {
+    match answer {
+        SessionBearer::Ready { headers, revision } => Some((headers, revision)),
+        SessionBearer::NotReady => None,
+    }
+}
+
 fn bearer_refused(reason: Error) -> VenueError {
     VenueError::new(match reason {
         Error::Revoked => "Session retired",
@@ -1933,6 +1942,36 @@ mod tests {
             &session(&["Cookie", "X-Id"], &fits),
         )
         .expect("four values under the shared budget");
+    }
+
+    fn ready(revision: u64, cookie: &str) -> SessionBearer {
+        SessionBearer::Ready {
+            headers: session(&["Cookie"], cookie),
+            revision,
+        }
+    }
+
+    /// P11 (fe7lgm seed): a call seeded with `seen` = r parks on a Ready read
+    /// at or below r, and binds at r+1, even when the re-login returned an
+    /// identical cookie (dazzy3: the revision moves on every refresh).
+    #[test]
+    fn a_seeded_call_parks_until_a_revision_above_its_seed() {
+        assert!(
+            admit(Some(5), ready(5, "same")).is_none(),
+            "Ready at the seed"
+        );
+        assert!(
+            admit(Some(5), ready(4, "same")).is_none(),
+            "Ready below the seed"
+        );
+        assert!(admit(Some(5), SessionBearer::NotReady).is_none());
+        let (headers, revision) = admit(Some(5), ready(6, "same")).expect("newer revision");
+        assert_eq!(revision, 6);
+        assert_eq!(headers.entries()[0].1.expose(), "same");
+        assert!(
+            admit(None, ready(1, "first")).is_some(),
+            "an unseeded call binds"
+        );
     }
 
     #[derive(Debug)]
