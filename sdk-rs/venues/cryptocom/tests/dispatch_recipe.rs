@@ -48,12 +48,27 @@ fn rest_and_ws_auth_recipes_match_the_legacy_envelope_bytes() {
     let venue = ProbeVenue::new(
         Cryptocom::new(Options::default()),
         move |_: &mut Cryptocom, cx: &mut safe_cex_engine::Cx<'_, _>| {
+            // ProbeVenue ignores this carrier on response; the signed request
+            // remains the same legacy recipe control, not a managed Read.
+            let context = cx
+                .http_context(
+                    safe_cex_engine::request_context::Scope::Background,
+                    safe_cex_engine::request_context::Policy {
+                        operation: safe_cex_engine::request_context::Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: safe_cex_engine::request_context::RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
             let request = cx.request(
                 Method::Post,
                 REST.into(),
                 vec![("Content-Type", "application/json".into())],
                 None,
                 safe_cex_venue_cryptocom::Pending::Tickers {
+                    context,
                     rows: vec![],
                     skipped: Default::default(),
                 },

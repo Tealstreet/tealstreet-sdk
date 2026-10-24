@@ -10,24 +10,47 @@ fn engine() -> Engine<WeexFutures> {
     support::setup::engine(Options::default())
 }
 fn ask(e: &mut Engine<WeexFutures>, command: u32, symbol: &str, limit: Option<u32>) -> HttpRequest {
+    ask_at(e, 1000., command, symbol, limit)
+}
+fn ask_at(
+    e: &mut Engine<WeexFutures>,
+    now: f64,
+    command: u32,
+    symbol: &str,
+    limit: Option<u32>,
+) -> HttpRequest {
     e.handle(
-        1000.0,
+        now,
         Event::Command(Command::FetchOrderBook {
             command,
             symbol: symbol.into(),
             limit,
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(e, now);
     assert_eq!(
         actions.len(),
-        1,
-        "one unsigned REST request, no startup/stream actions"
+        3,
+        "only root timer, child timer and unsigned HTTP"
     );
-    let Action::Http(request) = actions.into_iter().next().unwrap() else {
-        panic!("REST query must dispatch")
-    };
-    request
+    let mut deadlines: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { at_ms, .. } => Some(*at_ms),
+            _ => None,
+        })
+        .collect();
+    deadlines.sort_by(f64::total_cmp);
+    assert_eq!(deadlines, vec![now + 20_000., now + 120_000.]);
+    let mut requests: Vec<_> = actions
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(requests.len(), 1, "one unsigned managed REST request");
+    requests.remove(0)
 }
 fn reply(
     e: &mut Engine<WeexFutures>,
@@ -44,8 +67,18 @@ fn reply_with_headers(
     headers: &str,
     body: &str,
 ) -> Vec<Action> {
+    reply_at(e, request, 1001., status, headers, body)
+}
+fn reply_at(
+    e: &mut Engine<WeexFutures>,
+    request: &HttpRequest,
+    now: f64,
+    status: u16,
+    headers: &str,
+    body: &str,
+) -> Vec<Action> {
     e.handle(
-        1001.0,
+        now,
         Event::HttpResponse {
             request: request.id,
             response: Response {
@@ -89,7 +122,14 @@ fn failed(actions: &[Action], owner: u32, kind: ErrorKind) {
         .collect();
     assert_eq!(errors.len(), 1, "exactly one owned failure");
     assert_eq!(errors[0].kind, Some(kind));
-    assert_eq!(errors[0].outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        errors[0].outcome,
+        if kind == ErrorKind::Network {
+            None
+        } else {
+            Some(Outcome::NotSent)
+        }
+    );
     assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::AUTH_REJECTED)));
     assert!(!actions.iter().any(|a| matches!(
         a,
@@ -266,20 +306,49 @@ fn shared_rate_pause_defers_new_query_without_retrying_the_failed_owner() {
         }),
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    assert_eq!(actions.len(), 1);
-    let Action::SetTimer { timer, at_ms } = &actions[0] else {
-        panic!("shared pause admission")
-    };
-    assert_eq!(*at_ms, 4001.0);
-    e.handle(*at_ms, Event::TimerFired { timer: *timer });
-    let actions: Vec<_> = e.drain_actions().collect();
-    assert_eq!(actions.len(), 1);
-    let Action::Http(request) = &actions[0] else {
-        panic!("deferred owner dispatch")
-    };
+    assert_eq!(
+        actions.len(),
+        2,
+        "only original root timer and native pause timer"
+    );
+    assert!(
+        actions
+            .iter()
+            .all(|action| matches!(action, Action::SetTimer { .. }))
+    );
+    let (timer, at_ms) = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == 4001. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("native shared pause admission");
+    e.handle(at_ms, Event::TimerFired { timer });
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, at_ms);
+    assert_eq!(
+        actions.len(),
+        2,
+        "only child timer and deferred unsigned HTTP"
+    );
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == 24_001.))
+            .count(),
+        1
+    );
+    let mut requests: Vec<_> = actions
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(requests.len(), 1);
+    let request = requests.remove(0);
     assert!(request.url.ends_with("symbol=ETHUSDT&limit=1"));
-    done(&reply(&mut e, request, 200, BOOK), 8);
-    assert!(reply(&mut e, &r, 200, BOOK).is_empty());
+    done(&reply_at(&mut e, &request, 4002., 200, "", BOOK), 8);
+    assert!(reply_at(&mut e, &r, 4003., 200, "", BOOK).is_empty());
 }
 #[test]
 fn reversed_concurrent_queries_and_transport_failure_keep_owners_once() {
@@ -289,10 +358,10 @@ fn reversed_concurrent_queries_and_transport_failure_keep_owners_once() {
     done(&reply(&mut e, &b, 200, BOOK), 8);
     done(&reply(&mut e, &a, 200, BOOK), 7);
     assert!(reply(&mut e, &a, 200, BOOK).is_empty());
-    let a = ask(&mut e, 9, "BTCUSDT", None);
-    let b = ask(&mut e, 10, "ETHUSDT", None);
+    let a = ask_at(&mut e, 1002., 9, "BTCUSDT", None);
+    let b = ask_at(&mut e, 1002., 10, "ETHUSDT", None);
     e.handle(
-        1001.0,
+        1003.0,
         Event::HttpFailed {
             request: a.id,
             error: "network failure",
@@ -303,5 +372,5 @@ fn reversed_concurrent_queries_and_transport_failure_keep_owners_once() {
         9,
         ErrorKind::Network,
     );
-    done(&reply(&mut e, &b, 200, BOOK), 10);
+    done(&reply_at(&mut e, &b, 1004., 200, "", BOOK), 10);
 }

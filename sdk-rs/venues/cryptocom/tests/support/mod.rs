@@ -44,7 +44,13 @@ impl Harness {
         h
     }
     pub fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
+            // A host removes cancelled deadlines from its active timer queue.
+            if let Action::ClearTimer { timer } = &action {
+                self.actions.retain(
+                    |a| !matches!(a, Action::SetTimer { timer: pending, .. } if pending == timer),
+                );
+            }
             // Failures as the plain text the host renders.
             let action = match action {
                 Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
