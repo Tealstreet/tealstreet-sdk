@@ -1216,6 +1216,7 @@ impl Venue for Bingx {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Identity(read) => self.identity_failed(cx, read, error),
             Pending::Trade(request) => {
                 self.trading
                     .on_sign_failed(cx, self.credentials.as_ref(), request, error)
@@ -1292,17 +1293,6 @@ impl Venue for Bingx {
                     self.account.on_sign_failed(cx, request, error, credentials);
                 }
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
-        }
-    }
-    fn on_http_failed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        pending: Pending,
-        error: safe_cex_engine::VenueError,
-    ) {
-        match pending {
-            Pending::Identity(read) => self.identity_failed(cx, read, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
