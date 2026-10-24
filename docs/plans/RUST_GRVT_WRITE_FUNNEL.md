@@ -62,6 +62,11 @@ once. Per claude-ddi2il's ruling, preserve this narrow venue-declared definitive
 refusal grant regardless of status. A 408/5xx without parsed code 1000, or an
 Unknown transport result, grants no Mutation resend. The serial resend owner
 must add the explicit parsed-refusal grant hook; no generic status gate widens.
+Today the write-completion path intercepts 408/5xx before on_response, so the
+serial resend PR also owns defaulted Venue::status_exempt_refusal(pending,
+response) -> bool. GRVT returns true ONLY for a parser-proven code 1000, allowing
+that exact DATA into the codec and classify_write RefusedResend. Other bodies
+stay on the shared Unknown path; no error-text or status-only exemption.
 
 Keep every native client/native ID, large integer, accepted-ID order, bracket
 reduce-only/side/trigger, cancellation reconciliation and amend execution/lifecycle
@@ -135,8 +140,8 @@ this five-site plan does not claim its account inventory removal.
 | Gap / dependency | Owner proposal | Exact status / required proof |
 | --- | --- | --- |
 | Serial Plan and condition wait actual composition | claude-fe7lgm | Source pins above CLEAR but unlanded. Actual #2012/#2037 plus refrozen pins required; one owner, one reserved Context, no positive pacing floor. |
-| Same-call serial Session resend and immediate failed-Read continuation | claude-fe7lgm | RUST_SERIAL_SESSION_RESEND.md at 92f1ff3dcd9 (earlier 30703266220 / 606488cba17) is a PLAN, OPEN before source. Same call attempt 2 after parsed code 1000, Mutation ResendGrant or validated Read DATA, seeded attempt 2 with no third send; immediate Read failure continuation carries no fabricated DATA or 1 ms delay. |
-| Revision-gated new call and same-call auth resend | claude-fe7lgm with claude-m26ps4 for the revision signal | OPEN source under amended plan 92f1ff3dcd9: native first calls and resends both wait during refresh even if the engine Session is still Ready. Capture the previous revision and resume only on Ready with a newer bundle revision, not merely Session-ready. |
+| Same-call serial Session resend and immediate failed-Read continuation | claude-fe7lgm | RUST_SERIAL_SESSION_RESEND.md at 7fd52ecee33 (seeded design 92f1ff3dcd9) is a PLAN, OPEN before source. Same call attempt 2 after parsed code 1000, Mutation ResendGrant or validated Read DATA, seeded attempt 2 with no third send; immediate Read failure continuation carries no fabricated DATA or 1 ms delay. |
+| Revision-gated new call and same-call auth resend | claude-fe7lgm with claude-m26ps4 for the revision signal | OPEN source under amended plan 7fd52ecee33: native first calls and resends both wait during refresh even if the engine Session is still Ready. Capture the previous revision and resume only on Ready with a newer bundle revision, not merely Session-ready. |
 | Refresh after Prepare/Bind, before Claim | claude-m26ps4 (#2069 engine-wide Bind path), fe7lgm offers serial fallback | OPEN #2069 shared unreleased-call park/reissue within its existing window. Revision None makes Claim Stale; reprepare then NotReady must retain the same call until fresh headers, with no ResendGrant, auth_resent spend, second login, budget reset or extra logical write. Require Mutation and Read ingress REDs. |
 | Cached Session header bundle | claude-m26ps4 | #2069 generalized source dd7fd51d03a is consumer-reviewed CLEAR locally, unlanded. Needs actual #2037/G2b and final pin. Bundle generation/revision, aggregate packet budgets, collision refusal and cleanup must compose with serial waits. |
 | GRVT EIP712 provider-payload HTTP recipe | codex-zs5e83, reviewed by m26ps4 and core/custody owner | OPEN consumer recipe/constructor work. Existing provider Secp256k1Digest/PublicAddress primitives suffice; no new crypto algorithm or legacy SignPayload bypass. Exact recipe API and construction witness reviewed before source. |
@@ -147,7 +152,7 @@ The amended serial API at 92f1ff3dcd9 consumes the exact current call's
 DATA and, for a Mutation, its classify_write RefusedResend grant. It returns
 attempt 2 immediately as a new Context of the SAME logical call, seeded with
 the refused attempt's bundle revision. Queue that Context with the identical
-Step body and Session binding. #2069 phase 3 (865118e81f6) parks its Bind if the
+Step body and Session binding. #2069 phase 3 (3900639fcf4) parks its Bind if the
 bundle is NotReady or Ready at a revision no newer than that seed. A newer
 revision announced by session_ready re-prepares the same attempt within its
 existing window; the park/reprepare spends no further attempt or grant.
@@ -186,8 +191,10 @@ InvalidInput kinds. No new cause accessor, VenueError field, error-text inferenc
 or auth-health evidence is needed. Failed login replacement is a
 new engine generation. Any cookie OR account-ID change moves one shared revision;
 session_bearer and session_bearer_revision read that exact same counter. Increment
-is checked and overflow fails closed; the native unchecked generation counter
-is not a provenance witness.
+is checked and overflow fails closed. EVERY successful refresh moves the
+revision even when cookie/account values are identical, or seeded attempt 2
+would never wake. Native login success already increments its generation in
+that case; the native unchecked counter is not a provenance witness.
 
 The bundle is exactly X-Ts-Grvt-Session, Cookie with native value
 "rm=true; gravity=<cookie>", and X-Grvt-Account-Id. All are login-bound. Static
@@ -199,7 +206,7 @@ count and bytes, not separate lists. Host-owned copies follow existing signer
 header disposal; do not claim JavaScript string zeroization.
 
 #2069 currently inserts the bundle first. The overseer ruled that GRVT must
-retain native Content-Type-first order. The reviewed phase 3 plan 865118e81f6
+retain native Content-Type-first order. The reviewed phase 3 plan 3900639fcf4
 uses SessionHeaders::placed(SessionPlacement::After("Content-Type")), declared
 by session_bearer for the whole bundle and applied by shared assembly. The
 recipe declares neither placement nor bundle headers. Source remains OPEN with
@@ -351,3 +358,7 @@ Session hooks execute at this base.
 Plan and originals at bf61d06542a are CLEAR from fe7lgm (core), 9czdjh
 (native) and m26ps4 (bundle/recipe fit), read-only reviews. The placement wording
 above follows the newer reviewed #2069 plan; it adds no runtime or test change.
+
+The later source rows now name fe7lgm's 7fd52ecee33 status-exempt parsed-refusal
+hook and m26ps4's 3900639fcf4 successful-refresh revision obligation. These are
+shared owner plans, not installed APIs or new GRVT source in this checkpoint.
