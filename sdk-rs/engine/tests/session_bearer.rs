@@ -85,6 +85,8 @@ struct Shared {
     recipe_accept: bool,
     /// Reads are paced in `GROUP`.
     paced: bool,
+    /// A preparation-failure callback announces the bundle again.
+    announce_on_failure: bool,
     /// Token the venue caches for the generation it opens on retire.
     next_generation_token: Option<&'static str>,
     bearer: bool,
@@ -168,6 +170,7 @@ impl Shared {
             placement: SessionPlacement::First,
             recipe_accept: false,
             paced: false,
+            announce_on_failure: false,
             next_generation_token: None,
             bearer: true,
             bind_retired: false,
@@ -869,6 +872,10 @@ impl Venue for Probe {
         };
         if let Some(second) = second {
             cx.retire_session(&second).unwrap();
+        }
+        if self.shared.borrow().announce_on_failure {
+            let session = self.shared.borrow().session.clone().expect("live Session");
+            assert!(cx.session_ready(&session).is_empty());
         }
         self.fail(cx, pending, error);
     }
@@ -2193,14 +2200,15 @@ fn p5_parked_calls_wake_in_fifo_order() {
     let (mut e, shared) = engine(|shared| shared.token = None);
     let first = ask(&mut e, 1);
     let second = ask(&mut e, 2);
-    parks(&mut e, &shared, NOW + 1., first[0].0);
+    // Parked in the reverse of issue (and RequestId) order.
     parks(&mut e, &shared, NOW + 1., second[0].0);
+    parks(&mut e, &shared, NOW + 1., first[0].0);
     shared.borrow_mut().refresh(Some("A"));
     let woken = prepare_actions(announce(&mut e, &shared, NOW + 2.));
     let order: Vec<_> = woken.iter().map(|(p, _)| p.attempt().request).collect();
     assert_eq!(
         order,
-        [first[0].0.attempt().request, second[0].0.attempt().request]
+        [second[0].0.attempt().request, first[0].0.attempt().request]
     );
 }
 
@@ -2419,4 +2427,141 @@ fn p1_paced_call_woken_from_a_park_releases_without_a_fresh_pacing_wait() {
         matches!(e.claim_http(NOW + 4., permit), Ok(Claim::Released(_))),
         "the woken call waited on a pacing slot it never used"
     );
+}
+
+/// Review P1: an ordinary Stale (here a route that expired before claim) is
+/// not a bundle change. The call re-binds at the unchanged revision and sends;
+/// it must not park waiting for a revision no refresh will produce.
+#[test]
+fn an_ordinary_stale_rebinds_at_the_same_revision_without_parking() {
+    for signed in [false, true] {
+        let (mut e, shared) = engine(|shared| shared.signed = signed);
+        let issued = ask(&mut e, 1);
+        e.http_prepared(
+            NOW + 1.,
+            issued[0].0,
+            Prepared {
+                id: 1,
+                expires_at: Some(NOW + 1.5),
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let permit = match sign_work(&actions) {
+            Some(work) => {
+                sign(&mut e, NOW + 1., work);
+                bind(e.drain_actions().collect())
+            }
+            None => bind(actions),
+        }
+        .expect("bound packet")
+        .0;
+        assert!(!matches!(
+            e.claim_http(NOW + 2., permit),
+            Ok(Claim::Released(_))
+        ));
+        let reprepared = prepares(&mut e);
+        assert_eq!(reprepared.len(), 1, "signed={signed}");
+        let (permit, packet) =
+            prepared(&mut e, NOW + 3., reprepared[0].0).expect("re-bound at the same revision");
+        assert_eq!(authorization(&packet), Some("Bearer A"));
+        assert!(matches!(
+            e.claim_http(NOW + 4., permit),
+            Ok(Claim::Released(_))
+        ));
+        assert!(shared.borrow().failures.is_empty());
+    }
+}
+
+/// P4b: a call fenced at claim (bound at r, bundle cleared) has floor r. An
+/// announce of a Ready bundle still at r leaves it parked; r+1 wakes it.
+#[test]
+fn p4b_an_announce_at_the_fenced_revision_stays_parked() {
+    let (mut e, shared) = engine(|_| {});
+    let issued = ask(&mut e, 1);
+    let (permit, _) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound at revision 1");
+    shared.borrow_mut().refresh(None);
+    assert!(!matches!(
+        e.claim_http(NOW + 2., permit),
+        Ok(Claim::Released(_))
+    ));
+    let reprepared = prepares(&mut e);
+    parks(&mut e, &shared, NOW + 3., reprepared[0].0);
+    {
+        let mut shared = shared.borrow_mut();
+        shared.token = Some("A");
+        shared.revision = 1;
+    }
+    assert!(
+        prepare_actions(announce(&mut e, &shared, NOW + 4.)).is_empty(),
+        "woke at the revision it was fenced at"
+    );
+    shared.borrow_mut().refresh(Some("B"));
+    let woken = prepare_actions(announce(&mut e, &shared, NOW + 5.));
+    assert_eq!(woken.len(), 1);
+    let (_, packet) = prepared(&mut e, NOW + 6., woken[0].0).expect("bound packet");
+    assert_eq!(authorization(&packet), Some("Bearer B"));
+}
+
+/// Review P2: a woken call whose re-prepare fails runs a venue callback that
+/// announces again; the nested drain wakes the next parked call. The outer
+/// drain must not re-prepare that call a second time (which would fail it).
+#[test]
+fn a_nested_announce_does_not_re_prepare_a_woken_call_twice() {
+    let (mut e, shared) = engine(|shared| {
+        shared.token = None;
+        shared.announce_on_failure = true;
+    });
+    let early = ask(&mut e, 1);
+    parks(&mut e, &shared, NOW + 1., early[0].0);
+    e.handle(
+        NOW + 10_000.,
+        Event::Command(Command::FetchAccount { command: 2 }),
+    );
+    let late = prepare_actions(e.drain_actions().collect());
+    parks(&mut e, &shared, NOW + 10_001., late[0].0);
+    shared.borrow_mut().refresh(Some("A"));
+    // The early call's window has passed (its timer not yet fired); the late
+    // call's has not.
+    let woken = prepare_actions(announce(&mut e, &shared, NOW + 20_000.5));
+    let shared_ref = shared.borrow();
+    assert_eq!(shared_ref.failures.len(), 1, "{:?}", shared_ref.failures);
+    assert_eq!(shared_ref.failures[0].outcome, Some(Outcome::NotSent));
+    drop(shared_ref);
+    let late_request = late[0].0.attempt().request;
+    let mine: Vec<_> = woken
+        .into_iter()
+        .filter(|(p, _)| p.attempt().request == late_request)
+        .collect();
+    assert_eq!(mine.len(), 1, "the late call re-prepared exactly once");
+    let (_, packet) = prepared(&mut e, NOW + 20_001., mine[0].0).expect("bound packet");
+    assert_eq!(authorization(&packet), Some("Bearer A"));
+}
+
+/// Review P2: the signed-Bind park site. The bundle clears between the sign
+/// request and the signing result; the signed packet is not bound, and the
+/// wake re-signs with a fresh signing attempt and binds the new bundle.
+#[test]
+fn p8b_a_bundle_cleared_during_signing_parks_and_re_signs_on_wake() {
+    let (mut e, shared) = engine(|shared| shared.signed = true);
+    let issued = ask(&mut e, 1);
+    let actions = route(&mut e, NOW + 1., issued[0].0);
+    let first = sign_work(&actions).expect("sign work while Ready");
+    shared.borrow_mut().refresh(None);
+    sign(&mut e, NOW + 2., first);
+    let after = e.drain_actions().collect::<Vec<_>>();
+    assert!(bind(after).is_none(), "bound with a NotReady bundle");
+    assert!(
+        shared.borrow().failures.is_empty(),
+        "{:?}",
+        shared.borrow().failures
+    );
+    shared.borrow_mut().refresh(Some("B"));
+    let woken = prepare_actions(announce(&mut e, &shared, NOW + 3.));
+    assert_eq!(woken.len(), 1);
+    let actions = route(&mut e, NOW + 4., woken[0].0);
+    let second = sign_work(&actions).expect("re-sign on wake");
+    assert_ne!(second.0, first.0, "a fresh signing attempt");
+    sign(&mut e, NOW + 4., second);
+    let (_, packet) = bind(e.drain_actions().collect()).expect("bound packet");
+    assert_eq!(authorization(&packet), Some("Bearer B"));
 }
