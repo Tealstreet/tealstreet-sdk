@@ -852,11 +852,7 @@ impl Bitrue {
                 );
                 return true;
             }
-            Command::SetPositionMode {
-                command,
-                hedged,
-                symbol: _,
-            } => {
+            Command::SetPositionMode { hedged, .. } => {
                 if *hedged {
                     let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
                         return true;
@@ -867,8 +863,7 @@ impl Bitrue {
                             .kind(ErrorKind::Unsupported),
                     );
                 } else {
-                    cx.store.set_hedged(false);
-                    cx.done(*command, "[]".into());
+                    let _ = cx.done_local_setting("[]".into(), |store| store.set_hedged(false));
                 }
                 return true;
             }

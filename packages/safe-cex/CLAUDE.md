@@ -116,6 +116,9 @@ revision; provider text and partial results are not returned on failure.
 A native `dispatchSigning` checkpoint alone does not enable these hosted APIs;
 its family must also pass exact legacy-wire and actual WASM/SDK acceptance gates.
 The BingX native checkpoint keeps hosted admission disabled until those gates.
+Phemex native dispatch signing likewise keeps hosted/delegated admission disabled.
+Trusted setup removes both local credential slots from generic options; its
+REST and user.auth recipes use provider custody and the signed expiry-only receipt.
 The shared delegated-provider companion admits keyless `remoteSigner` and
 `PayloadSigner` accounts only for aliases enabled in construction-rules.json.
 RemoteSigner wins and cannot fall back to PayloadSigner/local secrets; secondary
