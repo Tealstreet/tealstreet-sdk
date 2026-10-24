@@ -55,6 +55,15 @@ pub enum Pending {
     Signed(Box<Signed>),
 }
 
+impl Pending {
+    pub(crate) fn into_trade(self) -> Option<trading::Request> {
+        match self {
+            Self::Trade(request) => Some(request),
+            _ => None,
+        }
+    }
+}
+
 /// A signed request kept re-signable, so a signature rejection is resent once.
 pub struct Signed {
     inner: Pending,
@@ -842,7 +851,16 @@ impl Venue for Bingx {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Identity(_) => {}
-            Pending::Signed(signed) => self.on_item(cx, &mut signed.inner, item),
+            Pending::Signed(signed) => {
+                if signed
+                    .context
+                    .as_ref()
+                    .is_some_and(|context| cx.validate_http_context(context).is_err())
+                {
+                    return;
+                }
+                self.on_item(cx, &mut signed.inner, item);
+            }
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history.on_item(cx, request, item),
@@ -965,6 +983,13 @@ impl Venue for Bingx {
         }
         let pending = match pending {
             Pending::Signed(signed) => {
+                if signed
+                    .context
+                    .as_ref()
+                    .is_some_and(|context| cx.validate_http_context(context).is_err())
+                {
+                    return;
+                }
                 if !signed.resent && signature_rejected(response.body) {
                     if signed.context.is_some() {
                         self.resend_managed(cx, *signed);
@@ -989,22 +1014,29 @@ impl Venue for Bingx {
                 return;
             }
             Pending::Trade(request) => {
-                if request.changes_settings() {
-                    self.account.settings_changed();
-                }
-                self.account.bump_orders();
-                self.account.bump_positions();
-                let reconcile = (request.changes_settings() || request.reconciles_orders())
-                    && success(response).is_ok();
-                let accepted = request.accepts_placement(response);
-                self.trading
-                    .on_response(cx, self.credentials.as_ref(), request, response);
-                if accepted {
-                    self.account.accept_placed_response(cx, response.body);
-                }
-                if reconcile && let Some(c) = &self.credentials {
-                    self.account.reconcile(cx, c);
-                }
+                let account = &mut self.account;
+                self.trading.on_response(
+                    cx,
+                    self.credentials.as_ref(),
+                    request,
+                    response,
+                    |cx, request| {
+                        if request.changes_settings() {
+                            account.settings_changed();
+                        }
+                        account.bump_orders();
+                        account.bump_positions();
+                        if request.accepts_placement(response) {
+                            account.accept_placed_response(cx, response.body);
+                        }
+                        if (request.changes_settings() || request.reconciles_orders())
+                            && success(response).is_ok()
+                            && let Some(credentials) = &self.credentials
+                        {
+                            account.reconcile(cx, credentials);
+                        }
+                    },
+                );
                 self.observe_orders(cx);
                 return;
             }
@@ -1177,6 +1209,54 @@ impl Venue for Bingx {
             ),
         }
     }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Identity(read) => self.identity_failed(cx, read, error),
+            Pending::Trade(request) => {
+                self.trading
+                    .on_sign_failed(cx, self.credentials.as_ref(), request, error)
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.trading.retired(owner);
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
+        if let Some(credentials) = &self.credentials {
+            self.account.reconcile_orders(cx, credentials);
+        }
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if matches!(pending, Pending::Trade(_)) {
+            trading::evidence(response.body, evidence);
+        }
+    }
     fn on_sign_error(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1213,17 +1293,6 @@ impl Venue for Bingx {
                     self.account.on_sign_failed(cx, request, error, credentials);
                 }
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
-        }
-    }
-    fn on_http_failed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        pending: Pending,
-        error: safe_cex_engine::VenueError,
-    ) {
-        match pending {
-            Pending::Identity(read) => self.identity_failed(cx, read, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
@@ -1479,9 +1548,23 @@ impl Venue for Bingx {
                 }
             }
             other => {
-                self.account.bump_orders();
-                self.account.bump_positions();
-                if !self.trading.command(cx, self.credentials.as_ref(), other) {
+                let changes_settings = matches!(
+                    &other,
+                    Command::SetLeverage { .. }
+                        | Command::SetMarginType { .. }
+                        | Command::SetPositionMode { .. }
+                );
+                let account = &mut self.account;
+                if !self
+                    .trading
+                    .command(cx, self.credentials.as_ref(), other, || {
+                        if changes_settings {
+                            account.settings_changed();
+                        }
+                        account.bump_orders();
+                        account.bump_positions();
+                    })
+                {
                     cx.notice(
                         Level::Warn,
                         code::COMMAND_UNSUPPORTED,

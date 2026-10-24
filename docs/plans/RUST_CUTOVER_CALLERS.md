@@ -6515,6 +6515,41 @@ EEA composite cap/stall still rejects. Only successful native51603 is definitive
 lookup absence. FetchClosedPositions/okxJournal remains its separate unchanged
 source. Discovery still uses the retained legacy list/sign funnel.
 
+## Crypto.com candle and local-history read ownership
+
+fetchCandles uses unsigned Public managed HTTP with one physical attempt and a
+20-second engine deadline spanning preparation and response. Custom transports
+must drive prepare, bind and the final engine claim before sending; this candle
+path supplies no legacy-request fallback. Legacy unsigned
+HTTP relied on the host timeout after dispatch; preparation now consumes the
+same immutable command bound. Expiry/transport failures preserve typed Timeout/
+Network with public-read NotSent. Initial invalid-time/capacity refusals retain
+typed InvalidInput/Internal and no outcome. Native URL/timeframe mapping, raw
+bounds and candle timestamps/order, ignored limit and numeric-string parsing
+remain unchanged. Native HTTP/envelope/row/missing-list errors retain full string
+error fields and auth-health isolation; no public401/403/40101 auth retry is added.
+Undecodable text remains the native stream-list string at200 and HTTP string at500.
+
+Only five synchronous history terminals borrow shared entry and finalize a
+Context. Finite native errors/[] and validation order stay exact; invalid engine
+time or owner-capacity exhaustion gives one typed engine refusal instead.
+fetchHistoricalFills/fetchHistoricalOrders, fetchIncomeHistory/fetchIncomeHistoryRange,
+fetchPublicTrades and findOrderByClientOrderId consumers retain all successful
+native history signing/pagination/coverage paths. Explicitly bounded income
+with caller limit0 still dispatches native HTTP. This is not managed network
+history or signer adoption.
+
+### Crypto.com current shared failure contract
+
+Managed delivered text without the expected list at HTTP200 retains the native
+message and now carries the shared engine Internal kind, with the established
+public-read NotSent outcome. HTTP500 retains its native HTTP-error string.
+This follows the existing typed undecodable-response seam; the adapter does not
+demote the kind to mimic legacy string-only callbacks. The20s Context lifetime
+is explicitly a new admission-through-preparation/response whole-command bound,
+distinct from the old host's physical HTTP timeout fallback. Raw candle t/order
+and malformed numeric-string-to-zero coercion remain unchanged.
+
 ## Retained command readiness
 
 With the engine's `http-plans` feature, native FIFO commands can park their own
@@ -6555,3 +6590,32 @@ still projects the one shared journal, including accepted IDs and uncertainty.
 
 BingX ordinary trading and Bybit #1914 adopt this in their separate caller PRs.
 The core declaration alone does not migrate either venue or remove legacy sites.
+
+
+## BingX ordinary trading uses the complete native Plan
+
+PlaceOrders, CancelOrders, CancelSymbolOrders, AmendOrder and native settings
+writes admit the full serial request list under genuine WriteAfterReads
+Preflight. Each physical attempt keeps its native 20s timeout; a parsed numeric
+100001 proof permits one fresh signature attempt with the same client order ID
+and bytes apart from timestamp/signature. Signature-like text, HTTP408/5xx,
+malformed ACKs, effect-bearing refusal IDs and unlisted codes never grant resend.
+Unknown errors keep native diagnostics and proven IDs in the shared journal.
+80014 is a Place-only InvalidInput refusal; earlier accepted per-request IDs
+produce KnownPartial rather than whole failure. Ordinary cancellation batches
+continue independent siblings after provider/transport/delivered gateway failure;
+other commands keep their native stop-on-error behavior. No failed call is
+retried by that continuation.
+
+80016 means absent order, not confirmed cancellation. It succeeds only for a
+validated ordinary Cancel leg and leaves the local order unchanged until the
+required fresh-owner full order read reconciles it; the symbol remains fenced
+until orders_reconciled. An old snapshot cannot clear that fence or overwrite a
+newly completed read. Unknown/system responses and malformed replies are now
+explicit Unknown (malformed codec replies carry Internal); native messages and
+accepted prefix IDs remain. Exact delivery and write-effect eligibility precede
+Store reducers. Root expiry and retirement use shared typed cleanup once.
+The declaration/citations and native controls are in RUST_BINGX_TRADING_CONTEXT.
+Metadata, session/account queries, history and the remaining shared staging
+funnels are separate conversions. This caller branch depends on #1939 and does
+not alter the frozen engine source.
