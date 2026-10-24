@@ -330,3 +330,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Orderly initial history refusals | Implemented; bounded reviews and CI pending | Before converting the three initial history refusals; excludes combo-5b signer/source work. | [RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md](RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md) |
 
 | GRVT unsigned candle Read Plan | Managed adoption under review | Before changing candle caller limits, streaming or the six-attempt transport budget. | [RUST_GRVT_CANDLE_CONTEXT.md](RUST_GRVT_CANDLE_CONTEXT.md) |
+
+| GRVT unsigned book command | Plan; original controls next, stacked after candle draft | Before changing independent FetchOrderBook command ownership, native errors or the six-attempt transport budget. | [RUST_GRVT_BOOK_QUERY_CONTEXT.md](RUST_GRVT_BOOK_QUERY_CONTEXT.md) |
