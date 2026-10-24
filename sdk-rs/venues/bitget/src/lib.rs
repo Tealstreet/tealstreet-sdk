@@ -270,7 +270,7 @@ impl BitgetFutures {
             },
         ) {
             Ok(context) => context,
-            Err(reason) => return self.public_failed(cx, tickers, reason.venue_error()),
+            Err(reason) => return self.public_failed(cx, tickers, reason.read_venue_error()),
         };
         let path = if tickers {
             paths::TICKERS
@@ -302,7 +302,7 @@ impl BitgetFutures {
             Ok(id) => cx.stream_response(id, ArrayAt::Envelope(&[&["data"]])),
             Err((pending, reason)) => {
                 retire_discovery(cx, &pending);
-                self.public_failed(cx, tickers, reason.venue_error());
+                self.public_failed(cx, tickers, reason.read_venue_error());
             }
         }
     }
@@ -1020,6 +1020,10 @@ impl Venue for BitgetFutures {
                 cx.fail(command, error)
             }
             Pending::Trade(request) => self.trade_sign_failed(cx, *request, error),
+            pending @ (Pending::Markets { .. } | Pending::Tickers { .. }) => {
+                retire_discovery(cx, &pending);
+                self.public_failed(cx, matches!(pending, Pending::Tickers { .. }), error);
+            }
             Pending::Account {
                 generation,
                 context,
@@ -1031,7 +1035,6 @@ impl Venue for BitgetFutures {
                     self.resume_trading(cx);
                 }
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
 

@@ -311,3 +311,61 @@ fn an_http_error_backs_off_without_publishing() {
     assert_eq!(cycle.markets_published, 0);
     assert!(cycle.timers.iter().any(|(_, at)| *at > 1.0));
 }
+
+#[test]
+fn a_refused_contracts_preparation_backs_off_and_retries_through_managed_custody() {
+    let mut engine = crate::support::engine(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    engine.start(0.0);
+    engine.prepare_dispatch(0.0);
+    let preparation = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(http) => match *http {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if request.url == MARKETS => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("managed contracts preparation");
+    engine.http_preparation_failed(
+        1.0,
+        preparation,
+        safe_cex_engine::request_context::Error::Stale,
+        safe_cex_engine::VenueError::new("route refused"),
+    );
+    let mut cycle = Cycle {
+        engine,
+        now: 1.0,
+        requests: Vec::new(),
+        managed: HashSet::new(),
+        timers: Vec::new(),
+        markets_published: 0,
+    };
+    cycle.collect();
+    assert!(
+        cycle.requests.is_empty(),
+        "a refused preparation sends nothing"
+    );
+    assert_eq!(cycle.markets_published, 0);
+    assert!(
+        cycle.timers.iter().any(|(_, at)| *at > 1.0),
+        "native discovery backoff armed"
+    );
+    cycle.advance(30_000.0);
+    let retry = cycle
+        .requests
+        .iter()
+        .find(|r| r.url == MARKETS)
+        .unwrap_or_else(|| panic!("no contracts retry: {:?}", cycle.urls()));
+    assert!(
+        cycle.managed.contains(&retry.id),
+        "the retry is managed too"
+    );
+}
