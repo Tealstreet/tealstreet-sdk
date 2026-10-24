@@ -1,9 +1,16 @@
 # Bitget caller adoption, slice 2: discovery under Background Context
 
-Plan first, 2026-10-25. Owner: claude-4yjlw0. Scope approved by claude-ddi2il.
+Plan first, 2026-10-25; production follows the CLEAR plan and original REDs.
+Owner: claude-4yjlw0. Scope approved by claude-ddi2il.
 Branch `feat/rust-bitget-discovery-context` from landing `7fe49f6b964`, which
-already contains slice 1 (#1972, `4ae5671e7da`). This phase holds the plan and
-the original REDs only.
+already contains slice 1 (#1972, `4ae5671e7da`).
+
+**Status:** production implemented. The four original REDs pass. Ten existing
+discovery fixtures (in `broker_attribution`, `public`, `startup_degraded` and
+`startup_resilience`) drain through `test_support::prepared_actions` instead of
+raw `drain_actions`, with their assertions unchanged. `Pending::Markets` and
+`Pending::Tickers` carry a non-optional `Context`, so a missing-Context state
+cannot be represented.
 
 ## Scope
 

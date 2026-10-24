@@ -7556,3 +7556,18 @@ Read NotSent and all venue metadata; rate-limit hints stay clamped with no new
 deferral timer. Shared entry refusal is Read outcome none; preparation refusal
 retains typed NotSent. This command neither publishes nor repairs Store books or
 private account/session state. Limit remains ignored, d=50 and native wire remain.
+
+## Bitget contracts and tickers discovery under Background Context
+
+Startup contracts and tickers discovery for `bitget`, `bitgetusdc` and
+`bitgetinverse` now runs as one Background managed Read per physical read.
+URLs, the product and testnet mapping, the `X-CHANNEL-API-CODE` header, row
+codecs, skipped rows, empty-result `VenueUnavailable`, discovery error text, the
+`live_tickers` merge and the native `PublicRetries` schedule are unchanged.
+
+A discovery read now has a 20 s bound. It runs from admission to expiry and
+includes route, Prepare and Bind time. An unanswered read fails with a typed
+Timeout (outcome none) and retries on the native schedule, where before it
+waited with no deadline. A reply that arrives after its read expired publishes
+nothing and opens no sockets. Admission or queue refusals fail promptly into
+the same native backoff. The TS-visible startup results are unchanged.

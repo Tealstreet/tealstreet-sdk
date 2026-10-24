@@ -211,7 +211,10 @@ fn valid_live_ticker_recovers_a_catalogue_market_missing_from_the_rest_seed() {
         })
         .unwrap();
     engine.handle(0.0, Event::HttpResponse { request: ticker.id, response: Response { status: 200, headers: "", body: r###"{"code":"00000","data":[{"symbol":"BTCUSDT","bidPr":"99.9","askPr":"100.1","lastPr":"100","indexPrice":"99","changeUtc24h":"0.01","baseVolume":"1000","quoteVolume":"100000","fundingRate":"0.0001"}]}"### }});
-    actions.extend(safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0));
+    actions.extend(safe_cex_engine::test_support::prepared_actions(
+        &mut engine,
+        0.0,
+    ));
 
     assert!(engine.store().market("ETHUSDT").is_some());
     assert!(engine.store().ticker("ETHUSDT").is_none());
