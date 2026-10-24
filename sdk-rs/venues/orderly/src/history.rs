@@ -10,7 +10,8 @@ use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::{CommandId, CommandWait, Cx, Method, Query, Response, TimerId, VenueError};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -23,6 +24,30 @@ const MAX_TIME: f64 = 253402300799000.0;
 // slots across commands and page continuations; the extra millisecond avoids
 // treating both ends of a sixty-second window as twenty-one starts.
 const FUNDING_SPACING: f64 = 3001.0;
+
+fn reject_local_history(cx: &mut Cx<'_, Pending>, error: impl Into<VenueError>) {
+    match cx.command_wait() {
+        Some(CommandWait::Remaining(_)) => {}
+        Some(CommandWait::Expired) => {
+            let _ = cx.reject_expired_command(Operation::Read);
+            return;
+        }
+        None => {
+            let _ = cx.reject_unstamped_command(Operation::Read);
+            return;
+        }
+    }
+    let Ok(context) = cx.admit_http_command(Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }) else {
+        return;
+    };
+    let _ = cx.fail_context(&context, error);
+}
 
 #[derive(Default)]
 pub struct HistoryState {
@@ -308,7 +333,7 @@ impl Orderly {
     ) {
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(command, "Orderly client-order lookup is not supported");
+                reject_local_history(cx, "Orderly client-order lookup is not supported");
                 return;
             }
             Query::Fills {
@@ -348,8 +373,8 @@ impl Orderly {
                 if kind.as_ref().is_some_and(|k| {
                     !matches!(k.to_ascii_uppercase().as_str(), "FUNDING" | "FUNDING_FEE")
                 }) {
-                    cx.fail(
-                        command,
+                    reject_local_history(
+                        cx,
                         "Orderly income supports settled funding payments only",
                     );
                     return;
@@ -398,7 +423,7 @@ impl Orderly {
         let native = match validation {
             Ok(native) => native,
             Err(e) => {
-                cx.fail(command, e);
+                reject_local_history(cx, e);
                 return;
             }
         };
