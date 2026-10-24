@@ -39,6 +39,10 @@
       "value": "binancepm"
     },
     {
+      "name": "Binanceoptions",
+      "value": "binanceoptions"
+    },
+    {
       "name": "Bingx",
       "value": "bingx"
     },

@@ -1428,6 +1428,8 @@ pub enum ExchangeName {
     Binancespot,
     #[serde(rename = "binancepm")]
     Binancepm,
+    #[serde(rename = "binanceoptions")]
+    Binanceoptions,
     #[serde(rename = "bingx")]
     Bingx,
     #[serde(rename = "bitget")]
@@ -5004,6 +5006,8 @@ mod strict_codecs {
         Binancespot,
         #[serde(rename = "binancepm")]
         Binancepm,
+        #[serde(rename = "binanceoptions")]
+        Binanceoptions,
         #[serde(rename = "bingx")]
         Bingx,
         #[serde(rename = "bitget")]

@@ -267,7 +267,7 @@ this.ws = this.createWebsocket(baseUrl);
 `directFallback` is a `WsDirectFallback` (`utils/wsDirectFallback.ts`; `protected`
 on the private class because the business class extends it). After two consecutive
 connects that produced zero messages it dials `route.fallback` — the athena Caddy
-passthrough `okx-proxy-ja.tealstreet.io` (legacy upstream 8443, pending an infrastructure change to 443) —
+passthrough `okx-proxy-ja.tealstreet.io` (upstream `ws.okx.com` on 443; reference copy in `infra/athena/caddy/okx-proxy.caddyfile`) —
 for the rest of the socket's lifetime and emits `grafana-info`. The resolver attaches
 `fallback` only to a DIRECT resolution, so with `tealstreetProxy` on the private and
 business sockets keep the chosen EKS tunnel and never degrade to the passthrough.

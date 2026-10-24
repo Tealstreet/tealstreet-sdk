@@ -39,7 +39,7 @@ fn maintained_ping_clock_before_send_and_disposal() {
         runtime.io.ready.set(1);
         let parent = Parent::new();
         let socket = BaseWebSocket::new(1, parent.clone(), runtime.clone(), Rc::new(Protocol));
-        ready(socket.create_websocket("wss://ws.okx.com:8443/ws/v5/public".into(), vec![], None))
+        ready(socket.create_websocket("wss://ws.okx.com/ws/v5/public".into(), vec![], None))
             .unwrap();
         let time =
             f64::from_bits(u64::from_str_radix(case["timeBits"].as_str().unwrap(), 16).unwrap());
