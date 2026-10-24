@@ -147,6 +147,7 @@ impl<P> Cx<'_, P> {
         root: &Context,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(root.owner())?;
         let sealed = self
             .io
             .request_contexts
@@ -187,6 +188,7 @@ impl<P> Cx<'_, P> {
         execution: &ExecutionHandle,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(execution.0.owner())?;
         if self
             .io
             .http_delivery

@@ -204,6 +204,10 @@ pub(super) struct ContextRegistry {
     executions: execution::Executions,
     #[cfg(feature = "http-plans")]
     retirements: VecDeque<HttpOwnerRetirement>,
+    #[cfg(feature = "http-plans")]
+    preflight_ready: VecDeque<Preflight>,
+    #[cfg(feature = "http-plans")]
+    preflight_initial: Vec<Preflight>,
     /// Scoped delivery loans outlive temporary marker removal and even owner
     /// cleanup. Readiness may run only after the true outermost scope exits.
     #[cfg(feature = "http-plans")]
@@ -1378,6 +1382,7 @@ impl<P> Cx<'_, P> {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
             Owner::Session { generation } => {
+                self.session_scope()?;
                 let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
                 return self.io.request_contexts.issue_session(
                     identity,
@@ -1399,6 +1404,10 @@ impl<P> Cx<'_, P> {
         parent: Option<&Context>,
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
+        #[cfg(feature = "http-plans")]
+        if self.io.http_preflight_ready.is_some() {
+            return Err(Error::Revoked);
+        }
         if !self.io.entry_context_allowed(scope) {
             return Err(Error::Revoked);
         }
@@ -1560,6 +1569,7 @@ impl<P> Cx<'_, P> {
     /// event. This is completion authority only: no send permission or deadline
     /// extension. The caller must finish in the same callback without yielding.
     pub(crate) fn validate_completion_context(&self, context: &Context) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(context.owner())?;
         let Owner::Command { id, .. } = context.owner() else {
             return Err(Error::Invalid);
         };
@@ -1953,6 +1963,7 @@ impl<P> Cx<'_, P> {
         intent: crate::classify::Intent,
         protection_cancel: bool,
     ) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(context.owner())?;
         self.io.request_contexts.validate(context, self.now)?;
         let Owner::Command { id, generation } = context.owner() else {
             return Err(Error::Invalid);
@@ -2012,6 +2023,7 @@ impl<P> Cx<'_, P> {
     /// Command generation stays live until done/fail or its final bound expires.
     /// Expired current handles may retire; this grants no send/retry permission.
     pub fn finish_http_context(&mut self, context: &Context) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(context.owner())?;
         self.io.request_contexts.validate_legacy(context)?;
         self.io.request_contexts.validate_handle(context)?;
         self.io.retire_http_leg(context);
