@@ -9,6 +9,10 @@ use crate::request_context::{
 #[path = "http_unsigned_headers_tests.rs"]
 mod unsigned_headers_tests;
 
+#[cfg(feature = "http-plans")]
+#[path = "http_group.rs"]
+mod mutation_group;
+
 enum ManagedRecipe {
     Unsigned(&'static [(&'static str, &'static str)]),
     Signed(Box<dyn crate::SignStep>),
@@ -21,6 +25,8 @@ pub(super) struct Managed {
     response_started: bool,
     signing_attempt: Option<RequestId>,
     recipe: Option<crate::signing_dispatch::Pending>,
+    #[cfg(feature = "http-plans")]
+    group: Option<Box<mutation_group::Member>>,
 }
 
 impl Managed {
@@ -168,6 +174,15 @@ impl<P> Cx<'_, P> {
         if let Err(error) = self.io.request_contexts.validate(&context, self.now) {
             return Err((pending, error));
         }
+        #[cfg(feature = "http-plans")]
+        let group = match self
+            .io
+            .request_contexts
+            .validate_mutation_group_submission(&context)
+        {
+            Ok(key) => key.map(|key| Box::new(mutation_group::Member::new(key))),
+            Err(error) => return Err((pending, error)),
+        };
         if context.credential().is_some() != step.is_some() {
             return Err((pending, Error::Invalid));
         }
@@ -300,6 +315,8 @@ impl<P> Cx<'_, P> {
                 response_started: false,
                 signing_attempt,
                 recipe: None,
+                #[cfg(feature = "http-plans")]
+                group,
             },
         );
         self.io.pending.insert(
@@ -459,6 +476,12 @@ impl<P> Io<P> {
 
     fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
+        #[cfg(feature = "http-plans")]
+        if managed.group.is_some() {
+            self.actions.retain(|action| !matches!(action,
+                Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::BindGroup { members, .. }
+                    if members.iter().any(|member| member.preparation.attempt().request == request))));
+        }
         self.request_contexts
             .retire_attempt(managed.lifecycle.context(), request);
         self.rearm_execution_timer();
@@ -489,6 +512,20 @@ impl<P> Io<P> {
         #[cfg(feature = "order-locks")]
         self.order_read_tokens.remove(&request);
         self.pending.remove(&request)
+    }
+}
+
+#[cfg(not(feature = "http-plans"))]
+impl<V: Venue> Engine<V> {
+    pub fn http_group_pending(&self, _: &crate::request_context::GroupPermit) -> bool {
+        false
+    }
+    pub fn claim_http_group(
+        &mut self,
+        _: f64,
+        _: crate::request_context::GroupPermit,
+    ) -> Result<crate::request_context::GroupClaim, Error> {
+        Err(Error::Invalid)
     }
 }
 
@@ -525,6 +562,20 @@ impl<V: Venue> Engine<V> {
                 }
                 managed.lifecycle.prepared(token, prepared)
             });
+        #[cfg(feature = "http-plans")]
+        if managed.group.is_some() {
+            match prepared_result {
+                Ok(()) => self.pump_mutation_group(now, request),
+                Err(Error::State) => {}
+                Err(error) => self.http_preparation_failed(
+                    now,
+                    token,
+                    error,
+                    VenueError::new("HTTP group route failed"),
+                ),
+            }
+            return;
+        }
         if prepared_result.is_ok()
             && let Some(attempt) = managed.signing_attempt
         {
@@ -638,6 +689,13 @@ impl<V: Venue> Engine<V> {
                         .max(1.) as u32,
                 );
                 managed.recipe = Some(pending);
+                #[cfg(feature = "http-plans")]
+                if let Some(member) = &mut managed.group {
+                    member.packet = Some(packet);
+                    member.permit = Some(permit);
+                    self.pump_mutation_group(now, request);
+                    return;
+                }
                 self.io
                     .actions
                     .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
@@ -742,6 +800,15 @@ impl<V: Venue> Engine<V> {
     /// its transport API on Released, with no intervening await or actor hop.
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
         self.assert_live();
+        #[cfg(feature = "http-plans")]
+        if self
+            .io
+            .managed_http
+            .get(&permit.attempt().request)
+            .is_some_and(|managed| managed.group.is_some())
+        {
+            return Err(Error::Revoked);
+        }
         self.io.dispatch_now = now;
         self.expire_read_roots(now);
         let request = permit.attempt().request;
@@ -903,6 +970,20 @@ impl<V: Venue> Engine<V> {
             );
             return;
         }
+        #[cfg(feature = "http-plans")]
+        if managed
+            .group
+            .as_ref()
+            .is_some_and(|member| member.announced && !member.bound)
+        {
+            self.http_preparation_failed(
+                now,
+                token,
+                Error::State,
+                VenueError::new("HTTP group binding failed before claim"),
+            );
+            return;
+        }
         // Do not advance a lifecycle generation or take its retained recipe
         // unless a fresh signing attempt can also be allocated.
         if managed.signing_attempt.is_some() && !self.io.signing.available_id() {
@@ -923,6 +1004,10 @@ impl<V: Venue> Engine<V> {
                 VenueError::new("HTTP request cannot be prepared again"),
             );
             return;
+        }
+        #[cfg(feature = "http-plans")]
+        if let Some(member) = &mut managed.group {
+            member.reset();
         }
         let old_signing = managed.signing_attempt;
         if let Some(recipe) = managed

@@ -34,6 +34,41 @@ impl ClaimDraft {
     }
 }
 impl Lifecycle {
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn group_needs_activation(&self) -> bool {
+        matches!(self.state, State::Prepared(_))
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn validate_group_activation(&self, now: f64) -> Result<(), Error> {
+        let State::Prepared(route) = self.state else {
+            return Err(Error::State);
+        };
+        if route.expires_at.is_some_and(|expiry| now >= expiry) {
+            return Err(Error::Stale);
+        }
+        if self.permits == u64::MAX {
+            return Err(Error::Capacity);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn group_send_before(&self, release: &HttpRelease) -> Result<f64, Error> {
+        let State::Permitted(route, _) = self.state else {
+            return Err(Error::State);
+        };
+        let before = self
+            .deadline
+            .min(self.fresh_until)
+            .min(route.expires_at.unwrap_or(f64::MAX))
+            .min(release.signature_valid_until.unwrap_or(f64::MAX));
+        if !before.is_finite() || before <= release.time.raw_ms {
+            return Err(Error::Stale);
+        }
+        Ok(before)
+    }
+
     pub(crate) fn prepare_claim(
         &self,
         permit: Permit,

@@ -465,3 +465,33 @@ postcommit failures only after sibling sends. Claim/output-copy exceptions are
 fail-stop, never a precommit refusal. Exact owner review, Rust ABI controls,
 retained-sibling controls, native host and full engine adoption remain open.
 Neither artifact is applied to held runtime hooks or claimed READY.
+
+## Applied orchestration checkpoint
+
+Core owner cleared exact artifact `100d5404582c` against `28e1bb36f3e` after
+review corrections. The hooks are now applied and formatted. Group-member
+preparation callbacks cannot use `finish_plan_failed_call` to retire only an
+unreleased member: the exact recorded/released-attempt validator refuses before
+any settlement. Released independent failures still use the existing path.
+
+Both original asynchronous REDs are active and GREEN, with assertions retained.
+The dedicated integration target passes seven controls: first signature held,
+second provider refusal with zero HTTP/auth-health change, reverse successful
+replies, stale announced/unbound whole-group failure despite a callback's
+partial-completion attempt, inert nonfinite/individual claims, precommit Timeout
+with NotSent and no reconciliation, and postcommit independent 503 plus an
+accepted sibling preserving its native ID in Unknown. Fifty-two group-filtered
+engine unit controls pass, including protocol/custody/storage controls. Strict
+Clippy passes for the library and dedicated integration target with Plans/locks,
+and for the feature-off library. These are local scoped results, not READY.
+
+Native and WASM host artifacts remain unapplied and separately reviewed. The
+JS boundary must defer an entire control/text transport notification before
+socket maps, statistics or engine effects. A reentrant borrowed binary payload
+or bounded notification overflow makes the host fail-stop after attempting all
+handoffs, before replaying notifications. No payload is retained or copied to
+manufacture immutability. The upcoming canonical pacing-set resolver must be
+consumed before group admission can support aliases; outer zero alone is not
+proof of expanded zero pacing. The #2016 inherited-uncertainty group control
+remains a named dependency control until that reviewed witness is composed;
+this checkpoint creates no substitute witness or hardcoded NotSent projection.

@@ -32,7 +32,7 @@ fn credential(slot: CredentialSlot) -> Credential {
     }
 }
 fn prepared_actions(engine: &mut Engine<Consumer>, now: f64) -> Vec<Action> {
-    use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+    use safe_cex_engine::request_context::{Claim, GroupClaim, HttpAction, Prepared};
     let mut queue = std::collections::VecDeque::new();
     engine.prepare_dispatch(now);
     queue.extend(engine.drain_actions());
@@ -68,6 +68,22 @@ fn prepared_actions(engine: &mut Engine<Consumer>, now: f64) -> Vec<Action> {
                     match engine.claim_http(now, permit) {
                         Ok(Claim::Released(_)) => actions.push(Action::Http(request)),
                         Ok(Claim::WaitUntil(_)) => panic!("fixture has no pacing"),
+                        Err(_) => {}
+                    }
+                }
+                HttpAction::BindGroup { permit, members } => {
+                    if !engine.http_group_pending(&permit) {
+                        continue;
+                    }
+                    let requests: Vec<_> = members
+                        .into_iter()
+                        .map(|mut member| member.request.take().expect("initial group packet"))
+                        .collect();
+                    match engine.claim_http_group(now, permit) {
+                        Ok(GroupClaim::Released(_)) => {
+                            actions.extend(requests.into_iter().map(Action::Http))
+                        }
+                        Ok(GroupClaim::WaitUntil(_)) => panic!("fixture has no group pacing"),
                         Err(_) => {}
                     }
                 }
@@ -136,6 +152,11 @@ struct Consumer {
     slots: HashMap<u64, Slot>,
     contexts: Vec<Context>,
     replies: usize,
+    independent: bool,
+    preparation_attack: bool,
+    attack_results: Vec<safe_cex_engine::request_context::Error>,
+    failures: usize,
+    reconciles: usize,
 }
 impl Consumer {
     fn issue(&mut self, cx: &mut Cx<'_, Context>) {
@@ -220,7 +241,7 @@ impl Venue for Consumer {
                 &preflight,
                 &steps,
                 PlanPolicy {
-                    independent_calls: false,
+                    independent_calls: self.independent,
                     operation: Operation::Mutation,
                     credential: Some(credential(CredentialSlot::Primary)),
                     pacing: None,
@@ -242,18 +263,36 @@ impl Venue for Consumer {
         cx.validate_plan_delivery(&plan, &context).unwrap();
         // The baseline stops at Verify: never fabricate a money fact for its GET.
         assert!(self.pair || self.replies == 0);
-        cx.http_write_fact(&context, WriteFact::Accepted { order_ids: vec![] }, None)
-            .unwrap();
+        cx.http_write_fact(
+            &context,
+            WriteFact::Accepted {
+                order_ids: if self.independent {
+                    vec!["accepted-short".into()]
+                } else {
+                    vec![]
+                },
+            },
+            None,
+        )
+        .unwrap();
         cx.finish_plan_call(&plan, &self.slots[&context.leg()], &context)
             .unwrap();
         self.replies += 1;
         if self.pair {
-            if self.replies == 2 {
+            if self.replies + self.failures == 2 {
                 cx.done_plan(&plan, "[]".into()).unwrap();
             }
         } else {
             self.issue(cx);
         }
+    }
+    fn prepare_group_http_release(
+        &self,
+        _: &Context,
+        _: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<safe_cex_engine::request_context::Admission, safe_cex_engine::request_context::Error>
+    {
+        Ok(safe_cex_engine::request_context::Admission::Unscheduled)
     }
     fn capture_http_reconciliation(
         &self,
@@ -263,6 +302,47 @@ impl Venue for Consumer {
         safe_cex_engine::request_context::Error,
     > {
         safe_cex_engine::request_context::ReconciliationData::new("native-7".into())
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Context>,
+        context: Context,
+        _: safe_cex_engine::request_context::Error,
+        _: safe_cex_engine::VenueError,
+    ) {
+        if self.preparation_attack {
+            self.attack_results.push(
+                cx.finish_plan_failed_call(
+                    self.plan.as_ref().unwrap(),
+                    &self.slots[&context.leg()],
+                    &context,
+                )
+                .unwrap_err(),
+            );
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Context>,
+        context: Context,
+        error: safe_cex_engine::VenueError,
+    ) {
+        assert!(self.independent);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        self.failures += 1;
+        cx.finish_plan_failed_call(
+            self.plan.as_ref().unwrap(),
+            &self.slots[&context.leg()],
+            &context,
+        )
+        .unwrap();
+        if self.replies + self.failures == 2 {
+            cx.done_plan(self.plan.as_ref().unwrap(), "[]".into())
+                .unwrap();
+        }
+    }
+    fn reconcile_uncertain(&mut self, _: &mut Cx<'_, Context>, _: Option<&[String]>) {
+        self.reconciles += 1;
     }
     fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, message: &str) {
         let _ = message;
@@ -279,10 +359,14 @@ impl Venue for Consumer {
     }
 }
 fn start(pair: bool) -> Engine<Consumer> {
-    let mut engine = support::seeded_engine(Consumer {
+    start_consumer(Consumer {
         pair,
         ..Default::default()
-    });
+    })
+}
+fn start_consumer(consumer: Consumer) -> Engine<Consumer> {
+    let pair = consumer.pair;
+    let mut engine = support::seeded_engine(consumer);
     engine.set_signer(Some(Arc::new(Provider))).unwrap();
     engine.start(0.);
     let command = if pair {
@@ -360,7 +444,6 @@ fn http(actions: &[Action]) -> Vec<&HttpRequest> {
         .collect()
 }
 #[test]
-#[ignore = "G2b group preparation runtime adoption: codex-hcmq3f, feat/rust-plan-mutation-prepare-barrier"]
 fn original_red_first_signature_cannot_release_while_sibling_is_pending() {
     let (mut engine, work) = work();
     signed(&mut engine, &work[0], 2.);
@@ -371,7 +454,6 @@ fn original_red_first_signature_cannot_release_while_sibling_is_pending() {
     );
 }
 #[test]
-#[ignore = "G2b group preparation runtime adoption: codex-hcmq3f, feat/rust-plan-mutation-prepare-barrier"]
 fn original_red_second_provider_refusal_leaves_zero_http_released() {
     let (mut engine, work) = work();
     signed(&mut engine, &work[0], 2.);
@@ -443,4 +525,180 @@ fn both_provider_results_release_both_and_reverse_replies_complete_once() {
         1
     );
     assert!(done.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result }) if result == "[]")));
+}
+
+fn announced(
+    consumer: Consumer,
+    second_at: f64,
+) -> (
+    Engine<Consumer>,
+    safe_cex_engine::request_context::GroupPermit,
+    Vec<safe_cex_engine::request_context::GroupPacket>,
+) {
+    let mut engine = start_consumer(consumer);
+    let actions = prepared_actions(&mut engine, 1.);
+    let work: Vec<_> = actions
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((attempt, work)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(work.len(), 2);
+    signed(&mut engine, &work[0], 2.);
+    signed(&mut engine, &work[1], second_at);
+    engine.prepare_dispatch(second_at);
+    let mut group = None;
+    for action in engine.drain_actions() {
+        match action {
+            Action::ManagedHttp(action) => {
+                if let safe_cex_engine::request_context::HttpAction::BindGroup { permit, members } =
+                    *action
+                {
+                    assert!(group.replace((permit, members)).is_none());
+                }
+            }
+            Action::Http(_) => panic!("individual group release"),
+            _ => {}
+        }
+    }
+    let (permit, members) = group.unwrap();
+    (engine, permit, members)
+}
+fn failed_once(
+    actions: &[Action],
+    outcome: safe_cex_engine::Outcome,
+) -> &safe_cex_engine::VenueError {
+    assert!(http(actions).is_empty());
+    let errors: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].outcome, Some(outcome));
+    errors[0]
+}
+#[test]
+fn stale_announced_group_refuses_partial_completion_and_seals_once() {
+    use safe_cex_engine::request_context::{Error, HttpAction};
+    let (mut engine, permit, members) = announced(
+        Consumer {
+            pair: true,
+            preparation_attack: true,
+            ..Default::default()
+        },
+        3.,
+    );
+    engine.http_preparation_failed(
+        4.,
+        members[0].preparation,
+        Error::Stale,
+        safe_cex_engine::VenueError::new("stale bound packet"),
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    failed_once(&actions, safe_cex_engine::Outcome::NotSent);
+    assert_eq!(engine.venue().attack_results, [Error::State]);
+    assert_eq!(engine.venue().reconciles, 0);
+    assert!(!engine.http_group_pending(&permit));
+    assert!(matches!(
+        engine.claim_http_group(5., permit),
+        Err(Error::Revoked)
+    ));
+    assert!(engine.drain_actions().all(|a| !matches!(a, Action::ManagedHttp(action) if matches!(*action, HttpAction::Prepare { .. } | HttpAction::BindGroup { .. }))));
+}
+#[test]
+fn invalid_time_and_individual_claims_are_inert_before_whole_release() {
+    use safe_cex_engine::request_context::{Error, GroupClaim};
+    let (mut engine, permit, _) = announced(
+        Consumer {
+            pair: true,
+            ..Default::default()
+        },
+        3.,
+    );
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(matches!(
+            engine.claim_http_group(now, permit.clone()),
+            Err(Error::Invalid)
+        ));
+        assert!(engine.http_group_pending(&permit));
+        assert_eq!(engine.drain_actions().count(), 0);
+    }
+    for member in permit.members() {
+        assert!(matches!(
+            engine.claim_http(4., *member),
+            Err(Error::Revoked)
+        ));
+        assert_eq!(engine.drain_actions().count(), 0);
+    }
+    assert!(
+        matches!(engine.claim_http_group(4., permit.clone()), Ok(GroupClaim::Released(releases)) if releases.len() == 2)
+    );
+    assert!(matches!(
+        engine.claim_http_group(4., permit),
+        Err(Error::Revoked)
+    ));
+}
+#[test]
+fn precommit_deadline_is_timeout_not_sent_with_no_reconciliation() {
+    let (mut engine, permit, _) = announced(
+        Consumer {
+            pair: true,
+            ..Default::default()
+        },
+        3.,
+    );
+    assert!(engine.claim_http_group(20_001., permit).is_err());
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let error = failed_once(&actions, safe_cex_engine::Outcome::NotSent);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+    assert_eq!(engine.venue().reconciles, 0);
+}
+#[test]
+fn committed_independent_503_keeps_the_accepted_sibling_id() {
+    let mut engine = start_consumer(Consumer {
+        pair: true,
+        independent: true,
+        ..Default::default()
+    });
+    let work: Vec<_> = prepared_actions(&mut engine, 1.)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((attempt, work)),
+            _ => None,
+        })
+        .collect();
+    signed(&mut engine, &work[0], 2.);
+    signed(&mut engine, &work[1], 3.);
+    let actions = prepared_actions(&mut engine, 3.);
+    let requests = http(&actions);
+    assert_eq!(requests.len(), 2);
+    engine.handle(
+        4.,
+        Event::HttpResponse {
+            request: requests[0].id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: "unavailable",
+            },
+        },
+    );
+    let interim = prepared_actions(&mut engine, 4.);
+    assert!(!interim.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
+    )));
+    reply(&mut engine, requests[1], 5.);
+    let terminal = prepared_actions(&mut engine, 5.);
+    let error = failed_once(&terminal, safe_cex_engine::Outcome::Unknown);
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["accepted-short"]
+    );
+    assert_eq!(engine.venue().failures, 1);
+    assert_eq!(engine.venue().replies, 1);
 }

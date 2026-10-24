@@ -57,6 +57,19 @@ pub struct GroupPacket {
     pub request: Option<crate::HttpRequest>,
 }
 
+impl GroupPacket {
+    fn wipe(&mut self) {
+        if let Some(packet) = self.request.take() {
+            crate::signing_dispatch::wipe(&mut crate::Action::Http(packet));
+        }
+    }
+}
+impl Drop for GroupPacket {
+    fn drop(&mut self) {
+        self.wipe();
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GroupRelease {
     pub release: HttpRelease,

@@ -8,6 +8,7 @@ mod conditional;
 use conditional::{AdmissionDeclaration, terminal_ordinals};
 #[path = "request_context_group_plan.rs"]
 mod mutation_group;
+pub(in crate::engine) use mutation_group::MutationGroupKey;
 use std::ops::Range;
 
 pub(super) struct State {
@@ -1175,6 +1176,16 @@ impl<P> Cx<'_, P> {
                 .as_ref()
                 .ok_or(Error::State)?
                 .validate_failed_attempt(delivery.attempt.request)?;
+            if body.barriers.iter().any(|range| range.contains(&index)) {
+                self.io
+                    .request_contexts
+                    .owner_entry(plan.owner())
+                    .unwrap()
+                    .writes
+                    .as_ref()
+                    .ok_or(Error::State)?
+                    .validate_housekeeping(delivery.attempt.request)?;
+            }
         }
         self.io.retire_http_leg(context);
         self.io.request_contexts.contexts.remove(&context.leg());
