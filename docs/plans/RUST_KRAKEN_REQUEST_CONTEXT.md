@@ -204,3 +204,128 @@ Phase-two execution receipt: plan `a0a116c1f80` precedes separate test commit `b
 
 
 Phase-two local verification: all twelve candle controls and 541 Kraken/Binance native tests pass; strict all-target Clippy, scoped formatting, bans and both request-context scripts pass. Independent source/adversarial, caller and full-map plan reviews are clean; implementation source and caller reviews are clean, with the full-map audit recorded separately before readiness. No standalone replay/package proof is claimed; CI owns replay gates.
+
+
+## P0 write adoption, classifier pin 2026-10-23
+
+Audited actual `6741c1c6609437e32090c76745a56ca6c2262445`; this appendix
+supersedes draft WRITE API references. Futures and Spot remain separate native
+signature, credential, nonce and endpoint domains within this venue plan.
+
+| Audit row | Reverified native path | Required adoption |
+| --- | --- | --- |
+| #18 Spot | `spot/trading.rs::trade_response` accumulates returned txids; `trade_failed` discards them. | Record each accepted txid as a journal fact and preserve it in structured Partial on a later failed leg. |
+| #21 Futures | `trading.rs::trading_finish` appends accepted IDs only to the message and locally clears outcome. | Keep native text, plus exact `partial.order_ids`; shared aggregation replaces `effective`/`amend_canceled` demotion. |
+| #37 Futures | `trading_http` parses the body but its non-2xx branch bypasses `refusal` and drops native-code metadata. | Decode native evidence for every delivered status; engine precedence still makes 408/5xx uncertain. |
+| #30 / P2 Spot | `spot/account.rs::private_response` retries a substring signature error and deactivates on any 401/403. | Shared classification + opaque resend grant; credential role and native auth evidence control auth handling. Status alone never proves key invalidity. |
+
+Futures already distinguishes `authenticationError` (AuthInvalid),
+`apiLimitExceeded` (RateLimited), explicit refusal codes/statuses such as
+`insufficientFunds`/`invalidArgument`, and uncertain `Server Error`,
+`Unavailable`, `unknownError`. Move that existing finite list into const rows;
+retain uncertain/unlisted values. Native `placed`/`filled`/`cancelled`/`edited`
+requires the existing complete identity codec, not success-code acceptance.
+On edits `postWouldExecute`/`iocWouldNotExecute` may cancel the original: this
+is not an effects-free refusal and must remain explicitly unproven/partial.
+Spot has native `EAPI:*`, `EOrder:*`, `EGeneral:*` strings. Preserve distinct
+finite codes; any documented suffix grammar is decoded before lookup. Do not
+convert existing broad prefix/contains branches into newly invented refusal
+rows. Audit ambiguous multiple-error envelopes without claiming every error
+proves the whole command refused. No new bare-status table entries without
+protocol evidence. One family table must not mix code-less Message rows and
+native Text rows; Futures/Spot keep their distinct native evidence codecs.
+
+### Landed classifier and write-journal boundary
+
+Use actual #1837 (`e0322577e354739dde6d7e5011e74ab660145885`), not the
+older draft signatures. Declare one family `classify::CodeTable` with `rows`,
+`success`, explicit `unlisted: Verdict::Unknown(None)` and evidence-backed
+`status` entries only. `Key::Message` is exact and code-less; never mix message
+and code rows or introduce substring/prefix inference. Decode integer codes
+strictly via the native codec / `classify::decode_int`, never through f64.
+Engine precedence owns transport, 408/5xx, native evidence, status and malformed
+success. A native code or 2xx alone never proves successful execution.
+
+A genuine command Context uses the actual command entry and real credential;
+managed signed HTTP carries it through Pending. At the exact delivered attempt,
+`classify_write(&ctx, &TABLE, native, message)` creates the failure Fact.
+`http_write_fact(&ctx, WriteFact::Failed { fact, known_effects }, reports)`
+records it; `http_write_failure` is the whole-failure shortcut. Complete native
+success reports `WriteFact::Accepted { order_ids }`; malformed success uses
+`http_write_unproven`. A real batch acknowledgement uses `http_write_batch`
+with caller-ordered items and the native expected count. The codec proves
+identity/uniqueness and correlation; preserve individually known IDs as
+reconciliation evidence without invented caller counts on an incomplete reply.
+
+Only the engine's opaque resend grant may feed `http_resend_context`, retaining
+the original root, deadline and one-shot budget. Use `http_write_leg_intent`
+only for permitted intent narrowing before release. Finish once through
+`done_context`/`fail_context`; CommandWrites owns aggregation, partial IDs and
+whole-command demotion. Do not use private engine-test-only `http_write_result`,
+transitional unmanaged `classify::write`, local status/outcome ladders or a
+numeric completion fallback. A preparation refusal's local NotSent fact is
+valid, but prior released siblings still determine the whole-command outcome.
+
+No runtime conversion is authorized in this plan/tests slice. Missing reusable
+signing, session, Plan/CallWindow or reconciliation ownership remains a shared
+prerequisite; no per-venue replacement. On adoption, reverify actual seam pins,
+remove RED ignore markers while retaining behavior assertions, prune only the
+venue's genuinely removed legacy fingerprints, and add a landed CALLERS
+appendix. Plan/tests preparation neither prunes inventory nor closes P0 rows.
+
+### Phases, blockers and original RED controls
+
+First migrate genuinely single-write Futures placement/edit/cancel with the
+HMAC recipe supplied by claude-4yjlw0, retaining stable_id nonce custody in the
+shared signer. Spot nonce/signature custody is distinct. Native batches,
+place-many, cancel/replace and settings preflight require shared Plan admission;
+not an improvised vector of independently admitted owners. GetWebSocketsToken
+is a session mutation owned by claude-55ao7t. Background reconcile delivery
+needs #1856; history completion needs #1848. Check actual availability first.
+
+At this audit #1797 owns Spot trading source/tests, #1798 owns Spot book,
+#1852/#1866 own Kraken sign.rs. These source/test paths remain untouched.
+Append ignored public-Engine regressions only to the unoccupied Futures
+`tests/trading.rs`: first native placement succeeds with ID `accepted`, later
+placement refuses or loses transport. Require exactly one failed terminal,
+`partial.order_ids == ["accepted"]`, no replay, and Unknown for transport.
+Run `cargo test -p safe-cex-venue-kraken --test trading p0_write_ -- --ignored
+--nocapture`; both assertions must fail on original production source, not
+compilation. No new test key material is needed.
+
+Spot acceptance controls use the separate unreserved target described below:
+txid preservation after a later refusal; 401/403 with non-auth native evidence
+does not deactivate; 503 with a signature string grants no resend. Futures
+non-2xx native auth/rate-limit/refusal fields must survive, with 408/5xx still
+Unknown. Rejected/NotSent may describe a later local leg, never erase earlier
+accepted effects; definitive mixed effects need Partial, not forced Unknown.
+Retain cancellation/fill races, replacement IDs and caller order. Recheck the
+full legacy inventory above at implementation; this slice removes no entries.
+
+Architecture gate: No for plans and native Engine regressions. Runtime
+classification, aggregation, retry, nonce and admission stay shared concerns.
+Future implementation gates: venue + Binance, scoped strict Clippy/fmt, bans,
+both ratchets, clean source/caller/full-map reviews and exact-head CI.
+
+Local plan/test evidence: 2 original-source controls compile and fail
+by the intended behavior assertions; normal venue suites pass
+(244 tests, 2 explicit ignored RED controls).
+Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
+pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
+controls expose defects; they are not GREEN adoption or P0 closure evidence.
+
+
+Additional original-source controls avoid the #1797 reservation entirely:
+`tests/spot_write_adoption_red.rs` imports the existing Spot support module
+without editing Spot source or the held spot_trading target. It pins accepted
+txid preservation, non-auth native evidence on401 without deactivation, and a
+503 signature body without write replay. Futures trading adds a non-2xx native
+code preservation control. The combined six controls run with `cargo test -p
+safe-cex-venue-kraken --test trading --test spot_write_adoption_red
+--no-fail-fast p0_write_ -- --ignored --nocapture`. The earlier two-control
+receipt remains historical; the updated six-control proof supersedes it.
+
+Updated local evidence: all six original-source controls compile and fail the
+intended behavior assertions; the normal suite passes 244 tests with six
+explicit ignored controls. Scoped strict all-target Clippy, fmt, bans and both
+ratchets pass. This remains preparation, not a runtime fix or P0 closure.
