@@ -31,6 +31,25 @@ fn nonempty(value: &Option<String>) -> Option<&str> {
 }
 
 impl Options {
+    /// A V3 API-wallet account on public test material.
+    pub fn v3_wallet() -> Self {
+        Self {
+            key: Some("0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0".into()),
+            secret: Some("4fd0a42218f3eae43a6ce26d22544e986139a01e5b34a62db53757ffca81bae1".into()),
+            application_id: Some("0x63DD5aCC6b1aa0f563956C0e534DD30B6dcF7C4e".into()),
+            ..Self::default()
+        }
+    }
+    /// A V1 HMAC account with its own read agent, on fixture material.
+    pub fn v1_with_read_agent() -> Self {
+        Self {
+            key: Some("primary-key".into()),
+            secret: Some("primary-secret".into()),
+            read_key: Some("read-key".into()),
+            read_secret: Some("read-secret".into()),
+            ..Self::default()
+        }
+    }
     pub fn build(self) -> (AsterDex, safe_cex_engine::signing::Provider) {
         self.try_build().expect("valid fixture setup")
     }
