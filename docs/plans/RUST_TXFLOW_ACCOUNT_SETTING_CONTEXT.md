@@ -30,7 +30,11 @@ account routing has no PublicCors override. It is not a setting mutation and
 needs no signing, credential selection or fabricated identity.
 
 Propose one genuine keyless Background Read Context per physical setting call,
-Never retry and no pacing. Its explicit 20-second admission-to-expiry bound,
+Never retry and no pacing, admitted with
+http_context_with_egress(Background, policy, Egress::Primary). Credential None
+otherwise defaults to RoutingIntent::Public, which does not preserve this
+account-scoped wallet/vault query's host route. Explicit Primary egress carries
+no credential or signing authority. There is no Session here. Its explicit 20-second admission-to-expiry bound,
 including a stalled Prepare/Bind, is NEW policy. There is no aggregate deadline
 over the sequential settings queue. Review the exact existing Context/managed
 send API and native egress before source.
@@ -64,6 +68,9 @@ Commit and execute originals against unchanged source before adoption:
   setting publication at the new exact 20-second bound.
 - Native private setup and exact unsigned POST/body/headers/route, settings and
   hedge rails without positions, user/coin mismatch and malformed/status errors.
+- A separate NEW-CONTRACT control requires the actual managed Prepare intent
+  to be Primary; retain bound request route None and no PublicCors. The native
+  route-only control cannot prove managed host egress by itself.
 - Genuine write/socket revision changes fencing a held response, native 100 ms
   successor and 60-second refresh, plus ordinary no-read/public-only behavior.
 
@@ -97,3 +104,11 @@ outside Git at /tmp/codex-hcmq3f-txflow-setting-original.log. Capacity, exact
 replacement/retirement, typed failure and generation/revision/hedge controls
 remain source-stage gates; no runtime adoption, source clearance, CI, readiness
 or landing is claimed.
+
+
+API review correction: m26 identified that implicit keyless routing would turn
+this wallet query into Public intent. Source is held until the explicit Primary
+egress plan/control delta is reviewed. The new Prepare-intent assertion is a
+managed-adoption contract, not a claim about a legacy routing breach. All ten
+prior original control bodies remain unchanged; no runtime or inventory change
+is present in this correction.
