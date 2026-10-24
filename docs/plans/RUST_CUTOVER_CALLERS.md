@@ -7417,3 +7417,15 @@ Each refusal first admits its genuine Mutation owner; shared admission rejection
 supersedes the native diagnostic with its typed NotSent terminal. Schedule time
 <now+5000 refuses; equality and None disarm still reach the unchanged signed path.
 No caller parameter, signing/selection change, valid write, retry or timer is added.
+
+## GRVT fixed local settings
+
+Both margin requests and hedged mode retain their exact Unsupported/NotSent
+refusals before credential use. One-way still returns [] and sets Store
+hedged=false without a key or remote call. Shared admission, command-owner
+capacity, invalid clock and caller receipt now precede these native fixed
+results and the Store effect. Shared refusal produces one typed NotSent failure
+with no native fallback or projection; foreground-only capacity is Internal.
+One-way LocalSetting uses no HTTP Context or journal. The two local Mutation
+refusals use keyless20s/Never admission without any physical I/O. No new caller
+parameter, signer selection, remote retry or valid-write behavior is introduced.

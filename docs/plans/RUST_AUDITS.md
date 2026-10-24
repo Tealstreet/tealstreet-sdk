@@ -3110,3 +3110,12 @@ Only trading22->15 and trading/schedule3->1 inventory occurrences change, family
 Valid writes, queues, signatures, nonces, account, History, Builder and sockets
 remain exact. Original checks precede source and expose custody gaps, not new
 financial outcome defects or an altered signing model.
+
+## GRVT fixed setting terminal custody
+
+The margin-mode and hedged-mode refusals now admit genuine keyless Mutation
+owners before fail_context. One-way mode uses LocalSetting, with hedged=false
+projected only inside the prepared commit closure. All three exits retain native
+order before trade_plan, credentials, builders and queues. Only trading8->5 is
+pruned; every foreign inventory byte and retained hash count stays unchanged.
+Valid trading, queued revalidation, signing and private lifecycle are excluded.

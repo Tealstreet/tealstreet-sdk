@@ -128,3 +128,13 @@ assertion REDs/9 working GREENs/0 ignored. The new case reaches the native margi
 Unsupported refusal instead of shared InvalidInput, independently pinning this
 branch. All previous15 test bytes remain an unchanged prefix. No production,
 existing fixture, Cargo or inventory has changed at this checkpoint.
+
+## Production checkpoint
+
+After native/API original CLEAR, the three fixed terminals use the reviewed
+shared pattern directly. All16 unchanged original assertions pass, as do42
+existing trading controls. Only trading.rs plus its own two inventory digests
+change in production; no lib/account/login/candle/book/signing/engine/host path
+is adopted. The inventory is trading8->5 and family48->45 on the plan base.
+CALLERS records the newly enforced admission/capacity/clock/receipt precedence.
+Bounded source review and exact intended-head CI remain required before READY.

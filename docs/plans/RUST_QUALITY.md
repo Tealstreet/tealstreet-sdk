@@ -1792,3 +1792,14 @@ merged-spot success line. Native result/error/Store, duplicate-owner, invalid
 clock, zero-wait and schedule4999/5000/None boundary assertions are retained.
 The existing trading, spot and schedule targets pass unchanged. No broad local
 workspace/all-feature or WASM/performance build substitutes for exact-head CI.
+
+## GRVT fixed local setting controls
+
+Plan-first originals execute16 controls on unchanged production:7 intended
+assertion REDs/9 working GREENs/0 ignored. All16 now pass, including four real
+256-command capacity cases and exact first-peer retirement followed by native
+recovery and validation of all255 survivors. Separate NaN Event cases cover
+margin, hedged refusal and one-way projection. Native keyless/public-only,
+zero-wait and duplicate-owner assertions remain intact. The42 existing trading
+tests pass unchanged. Scoped strict GRVT Clippy and formatting are required;
+workspace, feature, WASM and performance coverage stays in CI.
