@@ -200,9 +200,9 @@ fn typed_failure(h: &Harness) -> &safe_cex_engine::VenueError {
     &h.failures[0]
 }
 
-fn late_success_is_inert(h: &mut Harness, request: safe_cex_engine::HttpRequest) {
+fn late_success_is_inert(h: &mut Harness, request: safe_cex_engine::HttpRequest, now: f64) {
     let before = h.actions.len();
-    h.respond(request, r#"{"code":"0","data":[{"instId":"BTC-USDT","marginMode":"cross","positionSide":"net","leverage":"12"}]}"#);
+    h.respond_at(request, r#"{"code":"0","data":[{"instId":"BTC-USDT","marginMode":"cross","positionSide":"net","leverage":"12"}]}"#, now);
     assert!(
         !h.actions[before..].iter().any(|a| matches!(
             a,
@@ -234,7 +234,7 @@ fn released_network_failure_keeps_its_typed_kind_and_native_text() {
         (error.kind, error.outcome),
         (Some(safe_cex_engine::ErrorKind::Network), None)
     );
-    late_success_is_inert(&mut h, request);
+    late_success_is_inert(&mut h, request, 3.0);
 }
 
 #[test]
@@ -257,7 +257,7 @@ fn exact_read_deadline_is_a_typed_timeout() {
         (error.kind, error.outcome),
         (Some(safe_cex_engine::ErrorKind::Timeout), None)
     );
-    late_success_is_inert(&mut h, request);
+    late_success_is_inert(&mut h, request, 20_002.0);
 }
 
 #[test]

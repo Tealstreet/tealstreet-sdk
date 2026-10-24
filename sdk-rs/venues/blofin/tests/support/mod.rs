@@ -191,7 +191,7 @@ impl Harness {
     pub fn respond(&mut self, r: HttpRequest, body: &str) {
         self.respond_at(r, body, 0.0);
     }
-    fn respond_at(&mut self, r: HttpRequest, body: &str, now: f64) {
+    pub fn respond_at(&mut self, r: HttpRequest, body: &str, now: f64) {
         self.e.handle(
             now,
             Event::HttpResponse {
