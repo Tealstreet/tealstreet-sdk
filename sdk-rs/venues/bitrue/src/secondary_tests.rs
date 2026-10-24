@@ -1,18 +1,32 @@
 use super::*;
-use safe_cex_engine::test_support::{ProbeVenue, http_requests};
-use safe_cex_engine::{Action, ReadCredentials};
-fn options() -> Options {
-    Options {
-        key: Some("primary-key".into()),
-        secret: Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".into()),
-        read_credentials: Some(ReadCredentials {
-            key: "read-key".into(),
-            secret: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=".into(),
-            passphrase: Some("read-pass".into()),
-        }),
-
-        ..Options::default()
-    }
+use safe_cex_engine::Action;
+use safe_cex_engine::test_support::{ProbeVenue, prepared_actions};
+fn options() -> (Options, safe_cex_engine::signing::Provider) {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    let slot = |key: &str, material: &str| LocalIdentity {
+        key: Secret::new(key.into()),
+        secret: Secret::new(material.into()),
+        ..Default::default()
+    };
+    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
+        primary: Some(slot(
+            "primary-key",
+            "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        )),
+        secondary: Some(slot(
+            "read-key",
+            "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
+        )),
+    })
+    .unwrap();
+    (
+        Options {
+            credentials: identities.primary,
+            read_credentials: identities.secondary,
+            ..Default::default()
+        },
+        std::sync::Arc::new(provider),
+    )
 }
 
 fn probe(venue: Bitrue) -> ProbeVenue<Bitrue, impl FnMut(&mut Bitrue, &mut Cx<'_, Pending>)> {
@@ -24,17 +38,30 @@ fn probe(venue: Bitrue) -> ProbeVenue<Bitrue, impl FnMut(&mut Bitrue, &mut Cx<'_
                 "/secondary-test",
                 None,
                 None,
-                Job::Account(account::Request::Listen { generation: 0 }),
+                if method == Method::Get {
+                    Job::Account(account::Request::Snapshot {
+                        revision: 0,
+                        data: Default::default(),
+                    })
+                } else {
+                    Job::Account(account::Request::Listen { generation: 0 })
+                },
             );
         }
     })
 }
 #[test]
 fn secondary_get_keeps_primary_mutations() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(probe(Bitrue::new(options())));
+    let (options, provider) = options();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(probe(Bitrue::new(options)));
+    engine.set_signer(Some(provider)).unwrap();
     engine.start(1700000000000.0);
-    let requests: Vec<_> = http_requests(&mut engine)
+    let requests: Vec<_> = prepared_actions(&mut engine, 1700000000000.)
         .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
         .filter(|r| r.url.contains("secondary-test"))
         .collect();
     assert_eq!(requests.len(), 4);
@@ -44,11 +71,10 @@ fn secondary_get_keeps_primary_mutations() {
         } else {
             "primary-key"
         };
-        let opts = options();
         let secret = if request.method == Method::Get {
-            opts.read_credentials.as_ref().unwrap().secret.as_str()
+            "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI="
         } else {
-            opts.secret.as_deref().unwrap()
+            "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
         };
         assert_eq!(
             request
@@ -72,8 +98,8 @@ fn secondary_get_keeps_primary_mutations() {
 
 #[test]
 fn invalid_secondary_identity_stops_startup_before_io() {
-    let mut opts = options();
-    opts.read_credentials.as_mut().unwrap().secret.clear();
+    let (mut opts, _) = options();
+    opts.read_credentials.as_mut().unwrap().signing.0.clear();
     let mut engine = safe_cex_engine::test_support::seeded_engine(Bitrue::new(opts));
     engine.start(1700000000000.0);
     assert!(
@@ -85,10 +111,16 @@ fn invalid_secondary_identity_stops_startup_before_io() {
 
 #[test]
 fn catalog_get_uses_primary_unlimited_client_identity_and_route() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Bitrue::new(options()));
+    let (options, provider) = options();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Bitrue::new(options));
+    engine.set_signer(Some(provider)).unwrap();
     engine.start(1700000000000.0);
-    let requests: Vec<_> = http_requests(&mut engine)
+    let requests: Vec<_> = prepared_actions(&mut engine, 1700000000000.)
         .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
         .filter(|r| r.url.contains("/fapi/v1/contracts"))
         .collect();
     assert_eq!(requests.len(), 1);
