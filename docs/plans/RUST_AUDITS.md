@@ -2906,3 +2906,18 @@ remaining ordered failures and fixers are exact, with three writes, six
 checkpoints and zero transport/signature failure counters. Only the current-tape
 four-key group is removed; all other manifest bytes remain unchanged. The
 historical one-pair evidence is distinct from current-head five-pair CI.
+
+## MEXC pre-I/O Mutation refusals
+
+Two reachable native trade_command refusals use direct genuine Mutation entry,
+Context diagnostic and Context failure. The duplicate Err terminal after an
+always-returning Err branch is removed as unreachable. Exact removal-only prune
+is3 fingerprints/3 occurrences (two converted branches plus one orphan), leaving
+MEXC18F/18O and trading4F/4O. Signed writes, queue progression, pacing, identity,
+account/history, unsigned background sends and asynchronous terminals remain
+explicit separate consumers. Native UUID entropy before refusal consumes no
+engine action/ID/entry custody; real Engine controls prove admission remains valid.
+
+Architecture gate: No. Existing shared entry/refusal, diagnostics and terminal
+authority; one pure policy, no local journal, issuer wrapper, timer, classifier,
+credential counter or numeric completion fallback.

@@ -300,3 +300,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Crypto.com replay diagnostics | Plan and local controls | Before narrowing exact private-stream declarations; preserve receiver-specific channels and genuine final errors. | [RUST_CRYPTOCOM_REPLAY_DIAGNOSTICS.md](RUST_CRYPTOCOM_REPLAY_DIAGNOSTICS.md) |
 
 - [Binance Spot replay protocol diagnostics](RUST_BINANCESPOT_REPLAY_DIAGNOSTICS.md) — source-bound audit controls and exact declaration pruning, preserving native failures.
+| MEXC local write refusal Contexts | Implementation under review | Before converting pre-I/O validation/missing-key refusals or deleting the duplicate unreachable Err terminal. | [RUST_MEXC_LOCAL_WRITE_CONTEXT.md](RUST_MEXC_LOCAL_WRITE_CONTEXT.md) |

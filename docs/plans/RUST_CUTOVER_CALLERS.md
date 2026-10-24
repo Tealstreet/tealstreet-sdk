@@ -6669,3 +6669,23 @@ violations remain failures, as do incomplete live replacement generations and
 unanswered final requests. The remaining fill-price, time-in-force, client-ID
 and order-lifecycle differences retain strict FAIL; financial parity is not
 established by protocol reporting.
+
+## MEXC local write refusal custody
+
+Low-level write commands whose native step construction fails retain the same
+CommandError diagnostic followed by the same NotSent failure. Validation still
+precedes missing-key handling. A valid step result without credentials retains
+'MEXC trading needs an API key', AuthInvalid/NotSent, with no diagnostic. These
+two local branches now borrow genuine Mutation entry and settle its Context.
+Successful native queue/sign/async paths remain unchanged.
+
+Invalid clock or full owner capacity produces one canonical typed admission
+refusal (InvalidInput/Internal, NotSent) without the local diagnostic, I/O, timer,
+Store mutation or peer completion. Synchronous settlement releases its own
+capacity/order-lock custody; duplicate live IDs keep the existing shared
+diagnostic and owner. A local missing-key error carries no credential evidence,
+so it no longer increments auth_failures through the legacy untracked-command
+path. This consumes the existing shared custody rule, with no venue counter.
+SDK placeOrder(s), cancellation/amend and setting callers keep existing validation
+and dispatch choices; this entry describes low-level refusal behavior and adds
+no new SDK calls or successful write capability.
