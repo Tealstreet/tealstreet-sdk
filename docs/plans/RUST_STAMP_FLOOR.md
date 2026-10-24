@@ -1,10 +1,11 @@
 # Receipt-bound stamp floor
 
-Plan, 2026-10-24. Lane claude-m26ps4 (dispatch signing), approved by
-claude-ddi2il. The consumer is codex-9czdjh's Bitrue dispatch signer (plan
-`dea54abae38`): a native -1022 signature resend must use a timestamp strictly
-after the stamp the venue already received, even when the clock is fixed or
-moves backward.
+Plan, 2026-10-24. Owner codex-9czdjh; design/reviewer claude-m26ps4,
+transferred by claude-ddi2il. The consumer is the Bitrue dispatch signer
+(plan `664d8ac0032`): every eligible native -1022 signature resend AND transport
+reissue uses a stamp strictly after its own prior released stamp, including
+fixed/backward clocks. The independent one-signature/three-transport budgets
+and all retry authority remain with the admitted owner, not this primitive.
 
 ## Today
 
@@ -30,8 +31,9 @@ moves backward.
     its stamp to 0.
   - With `None` it is `max(0, stamp_ms())`: equal to `stamp_ms()` on every
     valid clock.
-  - `floor + 1` beyond `MAX_SAFE_INTEGER` refuses `InvalidRequest`. There is
-    no rounding or saturation.
+  - Any resulting stamp beyond `MAX_SAFE_INTEGER` refuses `InvalidRequest`,
+    whether the current clock or `floor + 1` crosses the bound. A non-finite
+    current clock is invalid; no rounding, saturation or NaN-to-zero fallback.
 - `stamp_ms()` is unchanged, so no other family's stamps move.
 - **The floor carries no authority.** It only constrains the stamp. Resend
   authority still comes from the venue's genuine refusal classification plus
@@ -60,9 +62,43 @@ moves backward.
 
 ## Ownership and order
 
-- claude-m26ps4: the engine primitive, its REDs and the docs.
-- codex-9czdjh: the Bitrue recipe that consumes it, kept in their own PR.
-- Branch `feat/rust-stamp-floor`, off tip `59f50e4f37b`. Independent review
+- codex-9czdjh owns this shared primitive and its separate Bitrue consumer.
+- claude-m26ps4 owns design review and handed off `3e3241341db` (plan + new-API
+  compile REDs) and `6ec4e604fdb` (source + reported focused GREEN controls).
+- Current branch `feat/rust-receipt-stamp-floor` retains both handoff commits,
+  based on actual `59f50e4f37b`. Independent review
   answers "per-venue fix of a cross-cutting concern?". The answer is no: it is
   a shared dispatch primitive, and any venue with a monotonic-stamp resend can
   use it.
+
+
+## Handoff audit and remaining phases
+
+The inherited R1-R4 receipt at `3e3241341db` is explicitly compile-time only:
+missing StampFloor/stamp_after/stamp_floor, not a native behavioral regression.
+Source `6ec4e604fdb` is inherited, not newly executed evidence by this lane.
+Its safe-integer test covers floor overflow but not the final current-clock
+result. Add NEW-CONTRACT controls, frozen before the source correction:
+
+- A current clock at MAX_SAFE_INTEGER+1 is refused with None and a genuine floor.
+- Non-finite current clocks (NaN and both infinities) are refused, retaining
+  finite negative-to-zero and maximum-safe positive working controls.
+- stamp_ms itself remains byte-exact and is not redefined by this helper.
+
+Run these assertions first against inherited source (actual assertion REDs),
+then perform one final-result validity check and preserve the original assertions.
+The floor remains minted exclusively by SigningRelease from a validated released
+receipt. It is Copy metadata, not request/owner/identity/retry authority.
+No other family opts into stamp_after in this slice; no venue or manifest delta.
+
+Open-PR map: signing_release.rs/signing_dispatch.rs are clear. Engine lib.rs is
+claimed by #1747/#1798, but the overseer explicitly granted the one-line export
+exception; whoever lands second composes that distinct hunk. No other claimed
+source is touched. M26 stopped edits and reviews this takeover pin.
+
+Focused verification: stamp/receipt/dispatch tests and privacy doctests, optional
+features off/on, strict scoped clippy/fmt, scanner/bans as applicable. Full CI
+covers the shared engine and all venue/WASM/replay inputs. Independent source,
+caller and full-map reviews plus m26 review precede readiness; draft PR only,
+no merge without an engine window. Add audit/quality receipt without changing
+other source, retry semantics or clock behavior.
