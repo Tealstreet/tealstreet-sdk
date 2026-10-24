@@ -3244,6 +3244,17 @@ Architecture gate: No. The adapter consumes engine admission, typed refusal and
 terminal authority directly, with one pure policy declaration and no local
 issuer, owner map, timer, retry loop or numeric completion fallback.
 
+## AsterDEX operation-aware local trade refusal custody
+
+Three numeric synchronous trading failures now converge on direct shared entry
+and Context diagnostic/failure. Operation is explicit from the caller, so a
+V1 FetchStpMode plan Err cannot become Mutation. Native credential/plan/capacity
+projection remains pure before entry, and both acknowledgement cleanup paths
+are deferred until successful local admission or native accepted-job dispatch.
+Selected remote jobs retain native custody without an abandoned managed owner.
+Exact removal is3F/3O; no engine, signer, callback, checker or staging exception
+changes. Native state pruning is endpoint policy; lifetime, rejection, terminal
+and credential-evidence authority stay in the engine.
 
 
 ## Metadata/settings freshness core
