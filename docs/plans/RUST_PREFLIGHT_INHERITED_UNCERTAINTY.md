@@ -92,8 +92,17 @@ fact-free control passes.
 - `inherited_uncertainty_requires_live_write_preflight_custody_and_mutates_nothing`
   (5, control).
 
-RED 7 becomes the execution carry RED. It is added after #1919 lands,
-together with the founder and follower Unknown controls. The custody and
+RED 7, the execution carry, lives on the stacked branch
+`feat/rust-planned-inherited-uncertainty` (#1919 pin `2f4a08b449c` plus this
+PR), with RED `bf2285da325` before the carry `106b267fc6d`:
+- `an_inherited_fact_reaches_every_observer_of_a_rejected_execution`: the
+  founder and a fact-free follower get Unknown, not Rejected.
+- `an_inherited_founder_leaving_before_release_is_never_told_not_sent`: an
+  early-detached sole observer gets Unknown, and no ID is spent.
+- `a_refused_execution_admission_keeps_the_inherited_fact` (control).
+- `an_inherited_execution_success_stays_successful` (control).
+The carry moves the fact with the journal into the new physical owner, via
+`.inheriting` on the moved writes and on the owner field. The custody and
 idempotence tests are new-contract controls, not original REDs.
 
 H2 mapping (dazzy3): RED1 (`29c154338ff`) needs no fact; it is Unknown from its
