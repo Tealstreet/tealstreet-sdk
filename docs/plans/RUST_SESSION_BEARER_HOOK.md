@@ -299,6 +299,23 @@ These are added with the source.
   same scope still refuse with `State` (`session_scope`), so binding is never
   mistaken for the scope exemption.
 
+**claude-fe7lgm's RED review (CLEAR as checkpoint), P2 pins:**
+- **Both Bind sites.** Unsigned requests Bind from `managed.original` (around
+  `http_lifecycle:509`). Signed requests Bind from the signer's outbound packet
+  (around `:600`).
+  - The hook writes `Authorization` at both sites.
+  - For signed requests the header is added *after* signing, so the venue
+    signature does not cover it. That is fine for Paradex, which signs the body.
+  - Add signed variants of R1 and R2.
+- **Reprepare keeps Primary.** Reprepare re-reads `context.routing_intent()`
+  (around `:894`). The binding lives on the managed packet, so a reprepared
+  bound packet must keep Primary rather than fall back to Public. R2 also
+  asserts that the reprepared Prepare's intent is Primary.
+- **Adapter cutover.** R1 to R5 and R12 attach the token as a static
+  `Authorization` header today, which R6 will refuse after source. At cutover
+  the adapter switches to the binding parameter with no static
+  `Authorization`, and every outcome assertion stays unchanged.
+
 **Engine facts the source must follow:**
 - **The real prepare point.** `queue_managed` emits `HttpAction::Prepare` at
   issue, with headers snapshotted from static slices (`http_lifecycle.rs:180`).
