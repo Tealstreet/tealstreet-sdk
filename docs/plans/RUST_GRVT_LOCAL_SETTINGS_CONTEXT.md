@@ -119,3 +119,12 @@ two duplicate controls retaining the exact original Read owner. Each capacity
 recovery suffix validates all255 survivors, but remains unexecuted on original
 source after the earlier expected RED. Production, existing tests, Cargo and
 all inventories remain byte-exact7fe at this checkpoint.
+
+### Margin invalid-clock strengthening
+
+Before production, append an independent margin NaN Event control as requested
+by the API reviewer. The unchanged target now executes16 controls:7 intended
+assertion REDs/9 working GREENs/0 ignored. The new case reaches the native margin
+Unsupported refusal instead of shared InvalidInput, independently pinning this
+branch. All previous15 test bytes remain an unchanged prefix. No production,
+existing fixture, Cargo or inventory has changed at this checkpoint.

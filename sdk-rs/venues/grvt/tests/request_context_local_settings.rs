@@ -345,3 +345,8 @@ fn duplicate_one_way_preserves_the_original_read_owner() {
 fn duplicate_refusal_preserves_the_original_read_owner() {
     duplicate(Case::Hedged);
 }
+
+#[test]
+fn invalid_clock_precedes_native_margin_refusal() {
+    invalid_clock(Case::Cross);
+}
