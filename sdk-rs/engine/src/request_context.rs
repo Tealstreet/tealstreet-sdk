@@ -122,7 +122,7 @@ impl Session {
     }
 }
 
-/// The venue's current session token as one full `Authorization` value.
+/// One full session header value (a token, cookie or session id).
 /// Bounded, redacted in `Debug` and wiped on drop; it never enters a Context.
 pub struct SecretHeaderValue(String);
 
@@ -154,12 +154,64 @@ impl std::fmt::Debug for SecretHeaderValue {
     }
 }
 
+/// The headers one Session generation attaches to a bound request, e.g. a
+/// lone `Authorization`, or a session id plus its cookie. At most
+/// `MAX_SESSION_HEADERS` distinct venue-declared names; transport-owned names
+/// are refused. Values stay secret; the engine inserts them at prepare.
+#[derive(Debug)]
+pub struct SessionHeaders(Vec<(&'static str, SecretHeaderValue)>);
+
+pub const MAX_SESSION_HEADERS: usize = 4;
+
+impl SessionHeaders {
+    /// Refuses an empty or oversized set, a duplicate (case-insensitive) or
+    /// invalid name, or a transport-owned name. Refused values are wiped on drop.
+    pub fn new(entries: Vec<(&'static str, SecretHeaderValue)>) -> Result<Self, Error> {
+        const TRANSPORT: [&str; 5] = [
+            "Host",
+            "Content-Length",
+            "Transfer-Encoding",
+            "Connection",
+            "Content-Type",
+        ];
+        let distinct = entries.iter().enumerate().all(|(index, (name, _))| {
+            entries[..index]
+                .iter()
+                .all(|(earlier, _)| !earlier.eq_ignore_ascii_case(name))
+        });
+        let valid = !entries.is_empty()
+            && entries.len() <= MAX_SESSION_HEADERS
+            && distinct
+            && entries.iter().all(|(name, value)| {
+                !TRANSPORT
+                    .iter()
+                    .any(|owned| owned.eq_ignore_ascii_case(name))
+                    && crate::signing_headers::validate_unsigned(&[(name, value.expose())]).is_ok()
+            });
+        if valid {
+            Ok(Self(entries))
+        } else {
+            Err(Error::Invalid)
+        }
+    }
+
+    /// The common single-header case.
+    pub fn authorization(value: SecretHeaderValue) -> Self {
+        Self(vec![("Authorization", value)])
+    }
+
+    pub(crate) fn entries(&self) -> &[(&'static str, SecretHeaderValue)] {
+        &self.0
+    }
+}
+
 /// A venue's answer for one Session generation at managed prepare.
 #[derive(Debug)]
 pub enum SessionBearer {
-    /// `revision` is monotonic within the generation and never reused.
+    /// `revision` is monotonic within the generation and never reused; it
+    /// covers the whole header set.
     Ready {
-        value: SecretHeaderValue,
+        headers: SessionHeaders,
         revision: u64,
     },
     NotReady,

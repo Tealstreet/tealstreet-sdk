@@ -7,7 +7,7 @@ use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::request_context::{
     Claim, Context, Credential, Egress, Error, HttpAction, Operation, Owner, Permit, Policy,
     Preparation, Prepared, RetryEvidence, RetryPolicy, RoutingIntent, Scope, SecretHeaderValue,
-    Session, SessionBearer, SessionPolicy,
+    Session, SessionBearer, SessionHeaders, SessionPolicy,
 };
 use safe_cex_engine::signing::{
     Algorithm, KeyRef, Operation as SignOperation, PayloadPart, SignError, SignReceipt,
@@ -87,6 +87,10 @@ struct Shared {
     /// on it through `session_scoped_context`.
     session_egress: bool,
     recipe_authorization: bool,
+    /// The Session attaches a session id and cookie instead of Authorization.
+    cookie_session: bool,
+    /// The recipe declares its own Cookie header.
+    recipe_cookie: bool,
     crowded: bool,
     /// The sibling leg binds the same Session as the root.
     sibling_bound: bool,
@@ -150,6 +154,8 @@ impl Shared {
             retry_rebinds: false,
             session_egress: false,
             recipe_authorization: false,
+            cookie_session: false,
+            recipe_cookie: false,
             crowded: false,
             sibling_bound: false,
             signed: false,
@@ -190,6 +196,27 @@ impl Shared {
     fn refresh(&mut self, token: Option<&'static str>) {
         self.token = token;
         self.revision += 1;
+    }
+    /// The Session's header set: a lone Authorization, or a GRVT-style session
+    /// id plus its cookie.
+    fn headers(&self, token: &str) -> SessionHeaders {
+        if self.cookie_session {
+            SessionHeaders::new(vec![
+                (
+                    "X-Ts-Grvt-Session",
+                    SecretHeaderValue::new(token.into()).unwrap(),
+                ),
+                (
+                    "Cookie",
+                    SecretHeaderValue::new(format!("rm=true;gravity={token}")).unwrap(),
+                ),
+            ])
+            .unwrap()
+        } else {
+            SessionHeaders::authorization(
+                SecretHeaderValue::new(format!("Bearer {token}")).unwrap(),
+            )
+        }
     }
     /// The venue maps a raw generation to its own cache: an old generation's
     /// packet is never served by a new generation's token.
@@ -279,6 +306,8 @@ fn policy(retry: bool, signed: bool) -> Policy {
     }
 }
 const JSON: &[(&str, &str)] = &[("Content-Type", "application/json")];
+const RECIPE_COOKIE: &[(&str, &str)] =
+    &[("cookie", "recipe=1"), ("Content-Type", "application/json")];
 const RECIPE_AUTHORIZATION: &[(&str, &str)] = &[
     ("authorization", "Bearer recipe"),
     ("Content-Type", "application/json"),
@@ -400,6 +429,8 @@ impl Probe {
         } else {
             let headers = if shared.recipe_authorization {
                 RECIPE_AUTHORIZATION
+            } else if shared.recipe_cookie {
+                RECIPE_COOKIE
             } else if shared.crowded {
                 CROWDED
             } else {
@@ -523,7 +554,7 @@ impl Venue for Probe {
         shared.hook_calls += 1;
         match shared.token {
             Some(token) if shared.serves(generation) => SessionBearer::Ready {
-                value: SecretHeaderValue::new(format!("Bearer {token}")).unwrap(),
+                headers: shared.headers(token),
                 revision: shared.revision,
             },
             _ => SessionBearer::NotReady,
@@ -1211,7 +1242,9 @@ fn r6_recipe_authorization_header_is_refused() {
         "a recipe-supplied Authorization header was accepted"
     );
     let ready = SessionBearer::Ready {
-        value: SecretHeaderValue::new("Bearer jwt-secret".into()).unwrap(),
+        headers: SessionHeaders::authorization(
+            SecretHeaderValue::new("Bearer jwt-secret".into()).unwrap(),
+        ),
         revision: 1,
     };
     assert!(!format!("{ready:?}").contains("jwt-secret"));
@@ -1754,4 +1787,96 @@ fn gate_retire_in_start_is_fenced_before_start_returns() {
     assert_eq!(preparation, cancelled);
     assert!(route(&mut e, NOW + 1., *preparation).is_empty());
     assert_eq!(e.health(), &health);
+}
+
+fn header<'a>(request: &'a HttpRequest, name: &str) -> Option<&'a str> {
+    request
+        .headers
+        .iter()
+        .find(|(owned, _)| owned.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+/// Header bundle (GRVT-style): every Session header is read just in time,
+/// re-read together on a revision move, and never prefabricated.
+#[test]
+fn a_session_header_bundle_attaches_together_and_refreshes_together() {
+    for signed in [false, true] {
+        let (mut e, shared) = engine(|shared| {
+            shared.cookie_session = true;
+            shared.signed = signed;
+        });
+        let issued = ask(&mut e, 1);
+        assert_eq!(header(&issued[0].1, "Cookie"), None, "prefabricated cookie");
+        let (permit, request) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound packet");
+        assert_eq!(header(&request, "X-Ts-Grvt-Session"), Some("A"));
+        assert_eq!(header(&request, "Cookie"), Some("rm=true;gravity=A"));
+        assert_eq!(authorization(&request), None);
+        shared.borrow_mut().refresh(Some("B"));
+        assert!(!matches!(
+            e.claim_http(NOW + 2., permit),
+            Ok(Claim::Released(_))
+        ));
+        let reprepared = prepares(&mut e);
+        let (permit, request) =
+            prepared(&mut e, NOW + 3., reprepared[0].0).expect("rebound packet");
+        assert_eq!(header(&request, "X-Ts-Grvt-Session"), Some("B"));
+        assert_eq!(header(&request, "Cookie"), Some("rm=true;gravity=B"));
+        assert!(matches!(
+            e.claim_http(NOW + 4., permit),
+            Ok(Claim::Released(_))
+        ));
+    }
+}
+
+/// A recipe header colliding with any bundle name is refused on a bound
+/// request before anything is bound, with no venue authority used.
+#[test]
+fn a_recipe_header_colliding_with_the_bundle_is_refused() {
+    let (mut e, shared) = engine(|shared| {
+        shared.cookie_session = true;
+        shared.recipe_cookie = true;
+    });
+    let issued = ask(&mut e, 1);
+    let health = e.health().clone();
+    let actions = route(&mut e, NOW + 1., issued[0].0);
+    assert!(bind(actions).is_none(), "a colliding packet was bound");
+    assert_eq!(shared.borrow().failures.len(), 1);
+    assert_eq!(e.health(), &health);
+}
+
+/// The bundle's own limits: 1 to 4 distinct, header-safe, non-transport names.
+#[test]
+fn session_header_sets_are_bounded_and_redacted() {
+    let value = |text: &str| SecretHeaderValue::new(text.into()).unwrap();
+    assert_eq!(SessionHeaders::new(vec![]).err(), Some(Error::Invalid));
+    let five = (0..5)
+        .map(|index| (["a", "b", "c", "d", "e"][index], value("v")))
+        .collect();
+    assert_eq!(SessionHeaders::new(five).err(), Some(Error::Invalid));
+    assert_eq!(
+        SessionHeaders::new(vec![("Cookie", value("a")), ("cookie", value("b"))]).err(),
+        Some(Error::Invalid)
+    );
+    for owned in [
+        "Host",
+        "content-length",
+        "Transfer-Encoding",
+        "Connection",
+        "Content-Type",
+        "bad name",
+    ] {
+        assert_eq!(
+            SessionHeaders::new(vec![(owned, value("v"))]).err(),
+            Some(Error::Invalid),
+            "{owned}"
+        );
+    }
+    let set = SessionHeaders::new(vec![
+        ("X-Ts-Grvt-Session", value("session-secret")),
+        ("Cookie", value("gravity=cookie-secret")),
+    ])
+    .unwrap();
+    let debug = format!("{set:?}");
+    assert!(!debug.contains("session-secret") && !debug.contains("cookie-secret"));
 }

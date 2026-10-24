@@ -2,8 +2,8 @@
 use super::*;
 use crate::request_context::{
     Attempt, Claim, Context, Error, HttpAction, HttpRelease, Lifecycle, Operation, Owner, Permit,
-    Preparation, Prepared, ReleaseTime, ResponseProof, RoutingIntent, SecretHeaderValue, Session,
-    SessionBearer,
+    Preparation, Prepared, ReleaseTime, ResponseProof, RoutingIntent, Session, SessionBearer,
+    SessionHeaders,
 };
 
 #[cfg(test)]
@@ -60,14 +60,14 @@ impl Bearer {
         &mut self,
         venue: &V,
         registry: &request_context_registry::ContextRegistry,
-    ) -> Result<SecretHeaderValue, Error> {
+    ) -> Result<SessionHeaders, Error> {
         if !registry.session_generation_live(self.generation) {
             return Err(Error::Revoked);
         }
         match venue.session_bearer(self.generation) {
-            SessionBearer::Ready { value, revision } => {
+            SessionBearer::Ready { headers, revision } => {
                 self.revision = Some(revision);
-                Ok(value)
+                Ok(headers)
             }
             SessionBearer::NotReady => Err(Error::State),
         }
@@ -82,15 +82,33 @@ fn bearer_refused(reason: Error) -> VenueError {
     })
 }
 
-/// Insert the Bind packet's one token copy, then re-check the header limits;
-/// a packet the header would overflow is refused with the copy wiped.
-fn attach_bearer(
+/// Insert the Bind packet's one copy of each session header, then re-check the
+/// header limits. A name the packet already carries (recipe or signer) or an
+/// overflow is refused with every inserted copy wiped.
+fn attach_session_headers(
     headers: &mut Vec<(&'static str, String)>,
-    value: &SecretHeaderValue,
+    signer_headers: &[(String, String)],
+    session: &SessionHeaders,
 ) -> Result<(), Error> {
-    headers.insert(0, ("Authorization", value.expose().to_owned()));
+    let taken = |name: &str| {
+        headers
+            .iter()
+            .any(|(owned, _)| owned.eq_ignore_ascii_case(name))
+            || signer_headers
+                .iter()
+                .any(|(owned, _)| owned.eq_ignore_ascii_case(name))
+    };
+    if session.entries().iter().any(|(name, _)| taken(name)) {
+        return Err(Error::Invalid);
+    }
+    let inserted = session.entries().len();
+    for (index, (name, value)) in session.entries().iter().enumerate() {
+        headers.insert(index, (*name, value.expose().to_owned()));
+    }
     if crate::signing_headers::validate_owned(headers).is_err() {
-        zeroize::Zeroize::zeroize(&mut headers.remove(0).1);
+        for (_, mut value) in headers.drain(..inserted) {
+            zeroize::Zeroize::zeroize(&mut value);
+        }
         return Err(Error::Invalid);
     }
     Ok(())
@@ -822,8 +840,9 @@ impl<V: Venue> Engine<V> {
                 if let Some(bearer) = managed.bearer.as_mut() {
                     match bearer
                         .read(&self.venue, &self.io.request_contexts)
-                        .and_then(|value| attach_bearer(&mut request.headers, &value))
-                    {
+                        .and_then(|session| {
+                            attach_session_headers(&mut request.headers, &[], &session)
+                        }) {
                         Ok(()) => {}
                         Err(reason) => {
                             self.http_preparation_failed(
@@ -1002,21 +1021,15 @@ impl<V: Venue> Engine<V> {
             (Ok(permit), Some(Action::Http(mut packet))) if packet.id == request => {
                 // Added after signing, so the venue signature never covers it.
                 if let Some(bearer) = managed.bearer.as_mut() {
-                    let read = if packet
-                        .headers
-                        .iter()
-                        .any(|(name, _)| is_authorization(name))
-                        || packet
-                            .signer_headers
-                            .iter()
-                            .any(|(name, _)| is_authorization(name))
-                    {
-                        Err(Error::Invalid)
-                    } else {
-                        bearer
-                            .read(&self.venue, &self.io.request_contexts)
-                            .and_then(|value| attach_bearer(&mut packet.headers, &value))
-                    };
+                    let read = bearer
+                        .read(&self.venue, &self.io.request_contexts)
+                        .and_then(|session| {
+                            attach_session_headers(
+                                &mut packet.headers,
+                                &packet.signer_headers,
+                                &session,
+                            )
+                        });
                     match read {
                         Ok(()) => {}
                         Err(reason) => {

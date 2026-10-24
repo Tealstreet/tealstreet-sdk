@@ -510,3 +510,46 @@ barriers and the core-size maps):
   the group-member refusal (refused before any effect, reservation dropped),
   and a signed bound request that waits on pacing while its Session retires
   or goes NotReady (the pre-check refuses when signing begins).
+
+## Header bundle (claude-ddi2il ruling, 2026-10-25)
+
+GRVT's private writes carry a login-bound header set: `X-Ts-Grvt-Session`,
+`Cookie: rm=true;gravity=…` and `X-Grvt-Account-Id`. The hook is generalized
+before landing rather than adding a second, parallel one.
+- `SessionBearer::Ready { headers: SessionHeaders, revision }`.
+- `SessionHeaders` holds 1 to `MAX_SESSION_HEADERS` (4) distinct
+  (case-insensitive) venue-declared names with `SecretHeaderValue` values.
+  Transport-owned names (Host, Content-Length, Transfer-Encoding, Connection,
+  Content-Type) and invalid names are refused. `SessionHeaders::authorization`
+  is the single-header case, so Paradex and BreakoutProp DXAPI are unchanged.
+- One revision covers the whole set. All existing fences apply to it:
+  - a just-in-time read at prepare;
+  - claim-time Revoked/Stale and a reprepare;
+  - retry inheritance;
+  - the retire cascade;
+  - `Wiping` on drop.
+- `attach_session_headers` refuses, on a bound request, any recipe or signer
+  header whose name collides with a bundle name. It inserts every entry,
+  re-checks the header limits and wipes all inserted copies on refusal. The
+  issue-time refusal of a recipe `Authorization` on bound requests stays.
+- Venue obligation (GRVT audit, codex-zs5e83):
+  - A rotation within one engine Session is a new revision; the stale packet
+    is reprepared and the old revision is never released.
+  - A failed login retires the Session; the replacement is a new generation.
+  - While a refresh has cleared the venue's cache, `session_bearer` answers
+    NotReady and a bound prepare fails typed. So the venue parks writes
+    behind the login Session (`session_wait`/`plan_session_wait`) until it is
+    Ready, rather than issuing into NotReady.
+  - The venue's revision is strictly monotonic and overflow fails closed.
+
+Controls (`session_bearer.rs`), mutation-checked: removing the collision check
+fails the collision test.
+- A GRVT-style bundle attaches together and refreshes together on a revision
+  move, unsigned and signed.
+- A recipe `Cookie` colliding with the bundle is refused before Bind, with
+  health unchanged.
+- `SessionHeaders::new` refuses an empty set, 5 entries, duplicate names,
+  transport names and an invalid name, and redacts its `Debug` output.
+
+Results: 29 default and 35 with barriers; engine lib 868; clippy
+`-D warnings` in both modes.

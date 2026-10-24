@@ -2725,14 +2725,16 @@ pub trait Venue {
     }
 
     /// Called only while preparing a Session-bound managed request: the one
-    /// place the token is copied. No I/O, `Cx` or state change.
+    /// place the session headers (an `Authorization`, or a session id plus its
+    /// cookie) are copied. No I/O, `Cx` or state change.
     fn session_bearer(&self, _generation: u64) -> crate::request_context::SessionBearer {
         crate::request_context::SessionBearer::NotReady
     }
 
     /// The current revision only, or `None` when not ready: the claim-time
     /// fence, and the signed path's readiness check before provider work. It
-    /// must not touch, clone or allocate the token.
+    /// must not touch, clone or allocate the session headers; one revision
+    /// covers the whole header set.
     fn session_bearer_revision(&self, _generation: u64) -> Option<u64> {
         None
     }
