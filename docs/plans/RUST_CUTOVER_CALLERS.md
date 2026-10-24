@@ -6389,6 +6389,130 @@ fill, transport or signing behavior. The tape and declared-failure policy retain
 their existing meaning; a clean intermediate capture does not certify private
 parity.
 
+## Hyperliquid perps history caller-root custody
+
+Perps fills, orders, income, public trades and uncached REST client-ID lookup now
+use one Read root at the exact caller receipt deadline (configured/per-call
+rustCommandTimeoutMs; absent input is stamped120000ms at engine receipt). Each physical
+page gets a20s child at eligible dequeue in the native shared Account FIFO,
+capped by that unchanged root. Missing receipts refuse typed with no default,
+I/O or outcome. These unsigned JSON POSTs retain the same user/vault/application
+subject, Content-Type and transport-preparation obligation. Public Auth* failures
+retain typed metadata without AccountAuth evidence.
+
+At root expiry the engine emits one strict Timeout with no financial outcome:
+accepted rows, INCOMPLETE markers and native finalizers are discarded; late data
+and old queued continuations are inert. A failed page while the root remains
+live keeps native accepted-only recovery, or strict failure if no eligible rows
+were accepted. fetchHistoricalPositions / PositionHistory::FillsSymbol therefore
+reject at root expiry instead of folding a prefix. Lookup keeps native unknownOid
+and symbol-mismatch non-definitive results and untyped codec errors.
+
+Native geometry is unchanged:200 pages per fills/funding stage, up to400 for
+combined income, inclusive timestamp/ID progress, retention notices, sorting and
+limits. Streamed pages reserve120 weight then settle20+ceil(rows/20) in the shared
+1000/min budget (full fills120, full funding45); no whole-walk duration is promised.
+Queued children do not spend their20s before dequeue, but the caller root keeps
+running. Existing cached/invalid/anonymous local lookup and standalone spot
+completion behavior remain unchanged. Uncached public-only identity refusals now
+obey caller-root capacity before their native message; admitted local refusals
+immediately clear their root timer and publish exactly one terminal.
+
+## Bitget native dispatch signer checkpoint (draft; hosted prerequisite pending)
+
+This proposed change covers `bitget`, `bitgetusdc` and `bitgetinverse` native
+execution through the existing engine signer/provider. Production venue options
+contain only opaque primary/secondary identities. Trusted #1738 setup consumes
+material once: private primary passphrase required, missing secondary passphrase
+inherits the primary reference, and explicit empty rejects before startup.
+Ordinary private GETs (identity, metadata, resolve-amend and history included)
+select secondary when configured; degraded balance recovery retains its existing
+primary identity/egress exception. Writes and Classic/UTA private WS use primary.
+Public requests stay unsigned; product, inverse sizing and UTA admission remain.
+
+#1714/#1728 provider bootstrap requirements extend to these aliases: provision
+and rotate/dispose the provider in the engine-owning worker/host, rather than
+copying sanitized exchange options. Use construction/readiness metadata instead
+of `options.key`. No new persisted account-ID mapping is introduced. Missing
+passphrases now fail trusted setup synchronously rather than a later startup
+callback. Native provider refusal does not prove Classic account type or native
+auth rejection. Strict identity/history reads cannot report successful absence;
+a wholly unsent write remains notSent, while existing accepted/resent/rollback
+financial evidence is preserved.
+
+Hosted and keyless admission now builds on the landed shared presentation
+extension; see the next subsection. Passphrase custody stays with the trusted
+provider; no SDK receiver secret, new required external wire field or
+venue-local crypto fallback is authorized.
+[Family plan and proof gates](RUST_BITGET_DISPATCH_SIGNER.md).
+
+### Bitget hosted and keyless remote signing (draft; actual-WASM CI pending)
+
+Browser `signHttpRequest`/`signWsAuth` for `bitget`, `bitgetusdc` and
+`bitgetinverse` use the shared owned provider without constructing a TS Bitget
+venue. Hosted HTTP formatting lives in the standalone `bitget/bitget.signing.ts`
+codec, which the TS interceptor also uses, so it survives deletion of the TS
+venue classes. Hosted capture signs with primary custody even when a secondary
+is configured; without a complete primary the request returns unsigned, as the
+legacy interceptor did. MACs are Base64; the provider presents
+`ACCESS-PASSPHRASE` and the codec sets `ACCESS-KEY`, `ACCESS-SIGN`,
+`ACCESS-TIMESTAMP`, `ACCESS-PASSPHRASE` over the request's broker headers.
+
+Keyless `remoteSigner` is declared for all three aliases on the existing
+external wire: WS login requests keep the hard-coded `exchangeName: 'bitget'`
+label, `outputFormat: 'base64'` and integer-seconds `extraData.timestamp`
+derived from prepared work; signed HTTP preimages keep the alias label. Native
+login JSON keeps its string timestamp. The primary-only wire refuses work
+needing the secondary identity before callback/I/O, never silently using
+primary. Private `PayloadSigner` stays typed `unsupported`/`notSent`: the TS
+Bitget interceptor never invokes it. RemoteSigner wins with no local or payload
+fallback.
+
+The WS-seconds codec is now construction-declared and shared with OKX:
+`wire.extraData: "secondsTimestamp"` requires `wire.secondsSuffix`
+(`{method, path}`; OKX `GET` + `/users/self/verify`, Bitget `GET` +
+`/user/verify`). Native login work is three typed byte parts (seconds, method,
+path) from the engine `seconds_suffix_payload` helper; the remote bridge decodes
+it only against its own family's declaration. OKX keeps its exact concatenation,
+MAC, receipt and external wire. Per-alias actual-WASM hosted and native-login
+tests run in CI only; no live capture is claimed.
+
+## OKX history caller-root custody
+
+All four OKX aliases admit history, income, public trades and client-ID lookup
+through a Read root at the exact caller receipt deadline. The absent host wait
+is stamped120000ms at engine receipt; configured/per-call waits keep their raw
+absolute deadline, and a missing receipt gets one typed Read refusal with no
+outcome or fallback. Native local[]/lookup validation still follows admission.
+
+Each physical page has a20s/Never child minted at its actual native send/dequeue
+boundary, capped by that root. Native100ms orders/income pacing, immediate fills
+archive fallback and EEA product transitions stay unchanged. Ordinary signed
+reads retain Secondary else Primary, client-ID lookup Primary, and public trades
+stay unsigned. Demo headers, exact paths/query bytes and dispatch recipes are
+unchanged. Hosts must perform managed route preparation and final release;
+managed Primary intent uses the host's default primary egress (physical routeNone).
+
+Whole-root expiry is strict: one Timeout with no financial outcome, rows,
+INCOMPLETE marker or soft[]; parked continuations and late DATA cannot resume or
+finish a reused command. Ordinary released page transport/HTTP/parse failure or
+a child-only timeout while the root is live still emits the native command_error
+then soft[] for queries, discarding every prior page. Lookup rejects instead of
+claiming absence. Provider/preparation refusals before release are strict typed NotSent failures.
+Synchronous child/submission refusals are also strict, with the shared Read
+projection (outcome None). Native
+lookup codec errors retain their untyped kind. Serialization errors finalized
+through ReadCompletion use the shared Internal classification.
+
+fetchHistoricalFills, fetchHistoricalOrders, fetchIncomeHistory and its range
+variant, fetchPublicTrades and findOrderByClientOrderId use this bound. Native
+PAGE100, orders cap50, income cap200 per product, EEA SWAP/FUTURES composition,
+decimal ID cursors, sorting, dedup, fee/PnL decomposition and contract conversion
+are unchanged. Plain page-cap/stall results retain their own incomplete notice;
+EEA composite cap/stall still rejects. Only successful native51603 is definitive
+lookup absence. FetchClosedPositions/okxJournal remains its separate unchanged
+source. Discovery still uses the retained legacy list/sign funnel.
+
 ## GRVT replay protocol coverage at final capture
 
 GRVT replay reports evaluate private-stream coverage at the logical end of the

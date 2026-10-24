@@ -1,17 +1,18 @@
-use safe_cex_crypto::secrets::EraseSecrets;
+use safe_cex_engine::signing::{Identity, KeyRef};
 use safe_cex_venue_bitget::Options;
-
 #[test]
-fn credential_options_debug_redacts_and_erasure_scrubs_owned_fields() {
-    let mut options = Options {
-        key: Some("audit-secret-sentinel".into()),
-        secret: Some("audit-secret-sentinel".into()),
-        passphrase: Some("audit-secret-sentinel".into()),
-        ..Options::default()
+fn production_options_retain_only_opaque_identity_refs() {
+    let options = Options {
+        credentials: Some(Identity {
+            credential: KeyRef("ref:owned-credential".into()),
+            signing: KeyRef("ref:owned-signing".into()),
+            passphrase: Some(KeyRef("ref:owned-passphrase".into())),
+            stable_id: None,
+            extra: Default::default(),
+        }),
+        ..Default::default()
     };
-    assert!(!format!("{options:?}").contains("audit-secret-sentinel"));
-    options.erase_secrets();
-    assert!(options.key.as_ref().is_none_or(String::is_empty));
-    assert!(options.secret.as_ref().is_none_or(String::is_empty));
-    assert!(options.passphrase.as_ref().is_none_or(String::is_empty));
+    let text = format!("{options:?}");
+    assert!(!text.contains("test-secret-sentinel"));
+    assert!(text.contains("ref:owned-signing"));
 }

@@ -984,3 +984,39 @@ revision/terminal/opened fence as retained order rows, preserving cancel routes.
 Read-only recovery uses the existing coalesced timers and busy/pause handling;
 malformed-only or foreign-only traffic does not claim useful financial liveness.
 The financial fill channel, auth, signing and write-retry policy are unchanged.
+
+
+## Rust dispatch signer checkpoint
+
+The draft native migration stages private HTTP and Classic/UTA login with shared
+engine SignStep work. Venue state carries opaque identities; trusted setup owns
+all material. Private primary passphrase is mandatory; an absent secondary
+passphrase inherits its primary provider ref, while explicit empty rejects.
+Ordinary GET uses secondary, degraded balance recovery remains primary, and POST
+and WS stay primary. Public broker headers remain unchanged.
+
+Owned identity/history/trade read provider refusal bypasses network read retries.
+Background account failures retain existing recovery/backoff, and provider refusal
+cannot promote an unconfirmed Classic account. Earlier accepted writes, native40009 resend evidence
+and original rollback diagnostics retain existing outcome semantics. Hosted
+admission is described below. No secret restoration or venue-local signing
+fallback is permitted.
+
+
+## Rust hosted and remote signing
+
+Hosted `signHttpRequest`/`signWsAuth` and keyless `remoteSigner` are admitted
+for all three aliases through the shared owned provider; no TS venue is built.
+`bitget.signing.ts` is the standalone HTTP codec shared with the `bitget.api.ts`
+interceptor: same `$` symbol strip (except candles), `encode: false` query,
+underscore-stripped signed body and ms timestamp. Hosted capture uses primary
+custody only and sets `ACCESS-KEY`/`ACCESS-SIGN`/`ACCESS-TIMESTAMP`/
+`ACCESS-PASSPHRASE`; the passphrase comes from the provider's Present result.
+
+Remote WS login keeps the legacy wire (`exchangeName: 'bitget'`, Base64,
+`extraData.timestamp` in seconds over `timestamp + "GET" + "/user/verify"`).
+The decode is declared in `construction-rules.json` as `secondsTimestamp` with
+`secondsSuffix`, shared with OKX; native login work is three typed parts.
+Private `PayloadSigner` is typed unsupported (the TS interceptor never calls
+it), RemoteSigner wins without fallback, and primary-only remote wire refuses
+secondary-identity work before any callback. Actual-WASM proofs are CI-run.
