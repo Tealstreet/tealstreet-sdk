@@ -7889,3 +7889,20 @@ move that state before admission or use committed on_signing_release; the pure
 hook cannot mutate Pending. Execution-owned groups, retries and fallback members
 are refused in this first slice. Later serial mixed Read/Mutation steps require
 G2. No venue is adopted and no legacy request site is removed by this seam alone.
+
+
+## Phemex identity and recurring account read ownership
+
+FetchAccount uses one original caller Read root and one selected signed Read leg.
+The native account cycle uses independent USDT/USDC Background reads sharing its
+existing cycle origin; uncertain-order reconciliation uses an explicitly Primary
+Background read with its existing signed-write-expiry plus 5s eligibility fence.
+Each physical read now has a 20s admission bound, including parked preparation or
+provider work. Identity also retains the original caller deadline.
+
+Live DATA/stream/common-429 effects require exact shared delivery plus native
+cycle or symbol/read custody. Typed failures and expired-current handles instead
+retire exact ownership and run matching native cleanup/backoff once; they cannot
+clear newer work. Partial currency publication, native poll/retry, revision and
+uncertain-write semantics remain native. History/income, PublicTrades, socket
+login/snapshot behavior, request wire and credential-selection policy are retained.
