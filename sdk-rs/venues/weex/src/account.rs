@@ -1253,6 +1253,45 @@ mod auth_envelopes {
     }
 
     #[test]
+    fn unavailable_account_selection_keeps_the_credential_refusal_text() {
+        let venue = WeexFutures::new(crate::Options::default());
+        let probe = safe_cex_engine::test_support::ProbeVenue::new(venue, |venue, cx| {
+            // Exercise the defensive branch; production account admission
+            // requires an immutable configured primary before send_account.
+            let Task::Account(request) = pending(venue, Kind::Balance).task else {
+                unreachable!()
+            };
+            venue.account.pending = 1;
+            venue.send_account(cx, request);
+        });
+        let mut engine = safe_cex_engine::test_support::seeded_engine(probe);
+        engine.start(1000.);
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            safe_cex_engine::Action::Http(_)
+                | safe_cex_engine::Action::ManagedHttp(_)
+                | safe_cex_engine::Action::Sign { .. }
+                | safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Deactivate)
+        )));
+        let messages: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(event)) => {
+                    Some(event.message.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                "WEEX private read: WEEX account read requires credentials; retaining last-known-good state"
+            ]
+        );
+    }
+
+    #[test]
     fn stale_seed_account_auth_evidence_is_inert() {
         let mut venue = WeexFutures::new(crate::Options::default());
         let old = pending(&venue, Kind::Balance);
