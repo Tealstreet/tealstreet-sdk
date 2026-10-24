@@ -103,6 +103,9 @@ pub fn actions<V: safe_cex_engine::Venue>(
                     Err(_) => {}
                 },
                 HttpAction::Cancel { .. } => {}
+                HttpAction::BindGroup { .. } => {
+                    panic!("Crypto.com uses command-owned Plans, not joined writes")
+                }
             },
             Action::Sign { attempt, .. } if engine.signer().is_none() => {
                 engine.handle(

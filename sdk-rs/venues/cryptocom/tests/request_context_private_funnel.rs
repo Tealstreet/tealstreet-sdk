@@ -1396,3 +1396,194 @@ fn account_physical_timeout_retries_after_retiring_the_old_background_read() {
     h.respond(&fresh, support::EMPTY);
     let _ = h.http("private/user-balance");
 }
+
+fn fail_released_write(h: &mut Harness, request: &HttpRequest, timeout: bool) {
+    let timer = timeout.then(|| physical_timer(&h.actions, h.now + 20_000.));
+    h.actions.clear();
+    if let Some(timer) = timer {
+        h.now += 20_000.;
+        h.event(Event::TimerFired { timer });
+    } else {
+        h.event(Event::HttpFailed {
+            request: request.id,
+            error: "released write connection reset",
+        });
+    }
+}
+
+#[test]
+fn independent_unproven_http_failure_continues_without_reusing_the_failed_call() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.event(Event::Command(Command::PlaceOrders {
+        command: OWNER,
+        orders: vec![placement("unproven"), placement("accepted")],
+    }));
+    let first = h.http("private/create-order");
+    h.actions.clear();
+    h.event(Event::HttpResponse {
+        request: first.id,
+        response: Response {
+            status: 500,
+            headers: "",
+            body: r#"{"code":40101,"message":"bad signature"}"#,
+        },
+    });
+    assert!(terminals(&h.actions).is_empty());
+    no_private_http(&h.actions);
+    pace(&mut h);
+    let sibling = h.http("private/create-order");
+    assert_ne!(first.id, sibling.id);
+    assert!(sibling.body.as_ref().unwrap().contains("accepted"));
+    h.respond(
+        &sibling,
+        r#"{"code":0,"result":{"order_id":9007199254740993}}"#,
+    );
+    pace(&mut h);
+    let terminal = terminals(&h.actions);
+    assert_eq!(terminal.len(), 1);
+    let error = terminal[0]
+        .as_ref()
+        .expect_err("unproven first row stays failed");
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["9007199254740993"]
+    );
+}
+
+#[test]
+fn independent_released_write_failure_waits_20ms_before_the_native_sibling() {
+    for timeout in [false, true] {
+        let mut h = Harness::new();
+        h.load();
+        h.actions.clear();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: OWNER,
+            orders: vec![placement("failed"), placement("accepted")],
+        }));
+        let first = h.http("private/create-order");
+        fail_released_write(&mut h, &first, timeout);
+        assert!(terminals(&h.actions).is_empty());
+        no_private_http(&h.actions);
+        let timer = physical_timer(&h.actions, h.now + 20.);
+        h.now += 19.;
+        h.event(Event::TimerFired { timer });
+        no_private_http(&h.actions);
+        h.now += 1.;
+        h.event(Event::TimerFired { timer });
+        let sibling = h.http("private/create-order");
+        assert_ne!(first.id, sibling.id);
+        h.respond(
+            &sibling,
+            r#"{"code":0,"result":{"order_id":9007199254740993}}"#,
+        );
+        pace(&mut h);
+        let terminal = terminals(&h.actions);
+        assert_eq!(terminal.len(), 1);
+        let error = terminal[0]
+            .as_ref()
+            .expect_err("the failed row stays failed");
+        assert_eq!(
+            error.partial.as_ref().unwrap().order_ids,
+            ["9007199254740993"]
+        );
+    }
+}
+
+#[test]
+fn independent_failure_keeps_earlier_ids_and_later_sibling_ids_in_order() {
+    for timeout in [false, true] {
+        let mut h = Harness::new();
+        h.load();
+        h.actions.clear();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: OWNER,
+            orders: vec![placement("one"), placement("failed"), placement("three")],
+        }));
+        h.reply(
+            "private/create-order",
+            r#"{"code":0,"result":{"order_id":9007199254740993}}"#,
+        );
+        pace(&mut h);
+        let second = h.http("private/create-order");
+        fail_released_write(&mut h, &second, timeout);
+        assert!(terminals(&h.actions).is_empty());
+        no_private_http(&h.actions);
+        pace(&mut h);
+        h.reply(
+            "private/create-order",
+            r#"{"code":0,"result":{"order_id":9007199254740995}}"#,
+        );
+        pace(&mut h);
+        let terminal = terminals(&h.actions);
+        assert_eq!(terminal.len(), 1);
+        let error = terminal[0]
+            .as_ref()
+            .expect_err("the middle failure stays in the journal");
+        assert_eq!(
+            error.partial.as_ref().unwrap().order_ids,
+            ["9007199254740993", "9007199254740995"]
+        );
+    }
+}
+
+#[test]
+fn independent_all_released_failures_emit_one_failure_and_no_success() {
+    for timeout in [false, true] {
+        let mut h = Harness::new();
+        h.load();
+        h.actions.clear();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: OWNER,
+            orders: vec![placement("one"), placement("two")],
+        }));
+        let first = h.http("private/create-order");
+        fail_released_write(&mut h, &first, timeout);
+        assert!(terminals(&h.actions).is_empty());
+        pace(&mut h);
+        let second = h.http("private/create-order");
+        fail_released_write(&mut h, &second, timeout);
+        assert!(terminals(&h.actions).is_empty());
+        pace(&mut h);
+        let terminal = terminals(&h.actions);
+        assert_eq!(terminal.len(), 1);
+        assert_eq!(
+            terminal[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        no_private_http(&h.actions);
+    }
+}
+
+#[test]
+fn coupled_leverage_released_failure_never_continues_or_resends() {
+    for timeout in [false, true] {
+        let mut h = Harness::new();
+        h.load();
+        h.actions.clear();
+        h.event(Event::Command(Command::SetLeverage {
+            command: OWNER,
+            symbol: "BTCUSD-PERP".into(),
+            leverage: 20.,
+            side: None,
+        }));
+        h.reply(
+            "private/user-balance",
+            r#"{"code":0,"result":{"data":[{"account_id":"account-123"}]}}"#,
+        );
+        pace(&mut h);
+        let write = h.http("private/change-account-leverage");
+        fail_released_write(&mut h, &write, timeout);
+        no_private_http(&h.actions);
+        let terminal = terminals(&h.actions);
+        assert_eq!(terminal.len(), 1);
+        assert_eq!(
+            terminal[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        assert!(!h.actions.iter().any(
+            |action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 20.)
+        ));
+    }
+}
