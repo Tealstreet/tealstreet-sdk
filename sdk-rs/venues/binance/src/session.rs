@@ -38,6 +38,8 @@ impl BinanceFutures {
             match cx.open_session(SessionPolicy {
                 credential: Some(credential.clone()),
                 repeat_safe: true,
+                // Signed: routed by its credential, never a session egress.
+                private_egress: None,
             }) {
                 Ok(opened) => *session = Some(opened),
                 Err(_) => return self.session_unavailable(cx, pending),

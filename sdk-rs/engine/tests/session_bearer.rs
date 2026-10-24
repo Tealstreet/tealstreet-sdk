@@ -416,6 +416,7 @@ impl Probe {
                 cx.open_session(SessionPolicy {
                     credential: None,
                     repeat_safe: true,
+                    private_egress: None,
                 })
                 .unwrap(),
             );
@@ -480,6 +481,7 @@ impl Venue for Probe {
             .open_session(SessionPolicy {
                 credential: None,
                 repeat_safe: true,
+                private_egress: None,
             })
             .unwrap();
         let timer = cx.set_timer(60_000.);
@@ -489,6 +491,7 @@ impl Venue for Probe {
                 cx.open_session(SessionPolicy {
                     credential: None,
                     repeat_safe: true,
+                    private_egress: None,
                 })
                 .unwrap(),
             );

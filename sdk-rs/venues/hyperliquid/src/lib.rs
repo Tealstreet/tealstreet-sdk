@@ -111,18 +111,13 @@ pub enum Pending {
         dexs: Vec<(String, u32)>,
         index: u32,
     },
-    Candles {
-        command: CommandId,
-        candles: Vec<Candle>,
-        valid: bool,
-    },
     ManagedCandles(Box<ManagedCandleRead>),
     SocketRefresh {
         mode_ready: bool,
     },
 }
 
-/// A single public perps read owns its exact root and physical HTTP delivery.
+/// A public candle read owns its exact root and physical HTTP delivery.
 pub struct ManagedCandleRead {
     context: Context,
     candles: Vec<Candle>,
@@ -1275,21 +1270,6 @@ impl Venue for Hyperliquid {
                     let _ = cx.fail_context(&read.context, "Malformed Hyperliquid candles");
                 }
             }
-            Pending::Candles {
-                command,
-                candles,
-                valid,
-            } => {
-                let result: Result<String, String> = if valid {
-                    Ok(serde_json::to_string(&candles).unwrap())
-                } else {
-                    Err("Malformed Hyperliquid candles".into())
-                };
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
-                }
-            }
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
@@ -1386,12 +1366,6 @@ impl Venue for Hyperliquid {
                     Err(_) => read.valid = false,
                 }
             }
-            Pending::Candles { candles, valid, .. } => {
-                match serde_json::from_str::<CandleRow>(item) {
-                    Ok(row) => candles.push(row.candle()),
-                    Err(_) => *valid = false,
-                }
-            }
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -1413,7 +1387,6 @@ impl Venue for Hyperliquid {
             }
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, *request, error),
-            Pending::Candles { command, .. } => cx.fail(command, error),
             Pending::Dexs { .. } => self.next_dex(cx),
             Pending::Meta { dex, offset, .. } => {
                 let optional = !dex.is_empty();
@@ -1505,84 +1478,53 @@ impl Venue for Hyperliquid {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval,
                 limit,
                 from_ms,
                 to_ms,
             } => {
-                if !self.spot
-                    && !cx
-                        .store
-                        .market(&symbol)
-                        .is_some_and(|market| market.is_spot == Some(true))
-                {
-                    let Ok(context) = cx.admit_http_command(Policy {
-                        operation: Operation::Read,
-                        credential: None,
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    }) else {
-                        return;
-                    };
-                    if !supported(interval) {
-                        let _ = cx.fail_context(&context, interval.unsupported("Hyperliquid"));
-                        return;
-                    }
-                    let Some(coin) = self.coin(cx, &symbol) else {
-                        let _ = cx.fail_context(&context, "Market not found");
-                        return;
-                    };
-                    let Some(body) = candle_body(cx.now, coin, interval, limit, from_ms, to_ms)
-                    else {
-                        let _ = cx.fail_context(&context, "Invalid candle time range");
-                        return;
-                    };
-                    let pending = Pending::ManagedCandles(Box::new(ManagedCandleRead {
-                        context: context.clone(),
-                        candles: Vec::new(),
-                        valid: true,
-                    }));
-                    match cx.request_managed_with_headers(
-                        context.clone(),
-                        None,
-                        Method::Post,
-                        format!("{}/info", self.rest()),
-                        &[("Content-Type", "application/json")],
-                        Some(body),
-                        pending,
-                    ) {
-                        Ok(id) => cx.stream_response(id, ArrayAt::Root),
-                        Err((_pending, error)) => {
-                            let _ = cx.fail_context(&context, error.venue_error());
-                        }
-                    }
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
                     return;
-                }
+                };
                 if !supported(interval) {
-                    cx.fail(command, interval.unsupported("Hyperliquid"));
+                    let _ = cx.fail_context(&context, interval.unsupported("Hyperliquid"));
                     return;
                 }
                 let Some(coin) = self.coin(cx, &symbol) else {
-                    cx.fail(command, "Market not found");
+                    let _ = cx.fail_context(&context, "Market not found");
                     return;
                 };
                 let Some(body) = candle_body(cx.now, coin, interval, limit, from_ms, to_ms) else {
-                    cx.fail(command, "Invalid candle time range");
+                    let _ = cx.fail_context(&context, "Invalid candle time range");
                     return;
                 };
-                self.info(
-                    cx,
-                    body,
-                    ArrayAt::Root,
-                    Pending::Candles {
-                        command,
-                        candles: Vec::new(),
-                        valid: true,
-                    },
-                );
+                let pending = Pending::ManagedCandles(Box::new(ManagedCandleRead {
+                    context: context.clone(),
+                    candles: Vec::new(),
+                    valid: true,
+                }));
+                match cx.request_managed_with_headers(
+                    context.clone(),
+                    None,
+                    Method::Post,
+                    format!("{}/info", self.rest()),
+                    &[("Content-Type", "application/json")],
+                    Some(body),
+                    pending,
+                ) {
+                    Ok(id) => cx.stream_response(id, ArrayAt::Root),
+                    Err((_pending, error)) => {
+                        let _ = cx.fail_context(&context, error.venue_error());
+                    }
+                }
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.trade_command(cx, trade),

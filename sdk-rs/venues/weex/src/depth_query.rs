@@ -1,6 +1,9 @@
 //! Command-owned public snapshots never publish subscription depth.
-use crate::{Pending, WeexFutures, rate};
+use crate::{DeferredGet, Pending, Task, WeexFutures, paths, rate};
+use safe_cex_engine::history::ReadCompletion;
+use safe_cex_engine::request_context::{Context, Operation, Owner, Policy, RetryPolicy};
 use safe_cex_engine::{CommandId, Cx, ErrorKind, Outcome, Response, VenueError};
+use safe_cex_engine::{CommandWait, Method};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
@@ -103,13 +106,162 @@ fn version(raw: Option<&RawValue>) -> Result<String, VenueError> {
         }
     }
 }
+pub(crate) struct Request {
+    completion: ReadCompletion,
+    leg: Option<Context>,
+}
+impl Request {
+    pub(crate) fn owner(&self) -> Owner {
+        self.completion.root().owner()
+    }
+    fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.leg
+            .as_ref()
+            .is_some_and(|leg| self.completion.validate_delivery(cx, leg).is_ok())
+    }
+    fn retire_leg(&self, cx: &mut Cx<'_, Pending>) {
+        if let Some(leg) = &self.leg {
+            let _ = cx.finish_http_context(leg);
+        }
+    }
+    pub(crate) fn failed(self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        self.retire_leg(cx);
+        let _ = self.completion.finish(cx, Err(error));
+    }
+    fn complete(self, cx: &mut Cx<'_, Pending>, json: String) {
+        let leg = self.leg;
+        let _ = self.completion.finish(cx, Ok(json));
+        if let Some(leg) = leg {
+            let _ = cx.finish_http_context(&leg);
+        }
+    }
+}
 impl WeexFutures {
-    pub(crate) fn book_query_response(
-        &self,
+    pub(crate) fn fetch_book_query(
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
+        symbol: &str,
+        limit: Option<u32>,
+    ) {
+        match cx.command_wait() {
+            Some(CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+            None => {
+                let _ = cx.reject_unstamped_command(Operation::Read);
+                return;
+            }
+            Some(CommandWait::Remaining(_)) => {}
+        }
+        let Ok(root) = cx.admit_caller_read_root(None, None) else {
+            return;
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root.clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(&root, error.read_venue_error());
+                return;
+            }
+        };
+        let query = format!(
+            "symbol={}&limit={}",
+            safe_cex_engine::url::encode(symbol),
+            limit.unwrap_or(200)
+        );
+        self.send_book_query(
+            cx,
+            Request {
+                completion,
+                leg: None,
+            },
+            query,
+        );
+    }
+    pub(crate) fn send_book_query(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        query: String,
+    ) {
+        if let Err(error) = cx.validate_http_context(request.completion.root()) {
+            if error != safe_cex_engine::request_context::Error::Revoked {
+                request.failed(cx, error.read_venue_error());
+            }
+            return;
+        }
+        if cx.now < self.paused_until {
+            let timer = cx.set_timer(self.paused_until - cx.now);
+            self.deferred_gets.push(DeferredGet {
+                timer,
+                seed_generation: self.seed_generation,
+                path: paths::DEPTH.into(),
+                query,
+                task: Task::BookQuery(request),
+                stream: None,
+            });
+            return;
+        }
+        let leg = match cx.http_leg_context(
+            request.completion.root(),
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(leg) => leg,
+            Err(error) => {
+                request.failed(cx, error.read_venue_error());
+                return;
+            }
+        };
+        request.leg = Some(leg.clone());
+        let pending = Pending {
+            task: Task::BookQuery(request),
+            invalid: false,
+            skipped: Vec::new(),
+            seed_generation: self.seed_generation,
+        };
+        let queued = cx.request_managed_with_headers(
+            leg,
+            None,
+            Method::Get,
+            format!("{}{}?{query}", paths::REST, paths::DEPTH),
+            &[],
+            None,
+            pending,
+        );
+        if let Err((
+            Pending {
+                task: Task::BookQuery(request),
+                ..
+            },
+            error,
+        )) = queued
+        {
+            request.failed(cx, error.read_venue_error());
+        }
+    }
+
+    pub(crate) fn book_query_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
         response: Response<'_>,
     ) {
+        if !request.delivered(cx) {
+            request.retire_leg(cx);
+            return;
+        }
+        if response.status == 429 {
+            self.paused_until = self
+                .paused_until
+                .max(cx.now + rate::delay(response, cx.now));
+        }
         let envelope = envelope(response.body);
         let native = envelope.as_ref().ok().and_then(|e| {
             text(e.code).map(Cow::into_owned).or_else(|| {
@@ -146,7 +298,7 @@ impl WeexFutures {
             if kind == ErrorKind::RateLimited {
                 error = error.retry_after_ms(rate::delay(response, cx.now));
             }
-            cx.fail(command, error);
+            request.failed(cx, error);
             return;
         }
         let malformed_code = envelope.as_ref().is_ok_and(|e| e.code.is_some()) && native.is_none();
@@ -163,8 +315,8 @@ impl WeexFutures {
             })
             .and_then(|book| serde_json::to_string(&book).map_err(|_| invalid()));
         match result {
-            Ok(json) => cx.done(command, json),
-            Err(error) => cx.fail(command, error),
+            Ok(json) => request.complete(cx, json),
+            Err(error) => request.failed(cx, error),
         }
     }
 }
