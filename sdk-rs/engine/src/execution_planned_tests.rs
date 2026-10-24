@@ -10,6 +10,8 @@ mod planned_execution {
     const FOLLOWER: CommandId = 8;
     const SHORT_FOLLOWER: CommandId = 9;
     const LATE: CommandId = 10;
+    /// Issues its own command-owned read; its delivery probes the execution.
+    const PROBE: CommandId = 6;
 
     fn credential() -> crate::request_context::Credential {
         crate::request_context::Credential {
@@ -86,6 +88,10 @@ mod planned_execution {
         reject_only: bool,
         /// Each accepted write publishes its identity to the observers.
         progress: bool,
+        /// Receipts per accepted write (one when zero).
+        progress_batch: usize,
+        /// After the Plan terminal, publish once more (non-empty, then empty).
+        after_terminal: bool,
     }
 
     impl Shared {
@@ -256,12 +262,43 @@ mod planned_execution {
         ) {
             match command {
                 FOUNDER => self.found(cx),
+                PROBE => {
+                    let root = cx
+                        .admit_http_command(Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 60_000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        })
+                        .unwrap();
+                    cx.request_managed(
+                        root.clone(),
+                        Method::Get,
+                        "https://venue.test/probe".into(),
+                        None,
+                        root,
+                    )
+                    .unwrap();
+                }
                 FOLLOWER | LATE.. => self.follow(cx, 60_000),
                 SHORT_FOLLOWER => self.follow(cx, 100),
                 _ => unreachable!(),
             }
         }
         fn on_response(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: Response<'_>) {
+            if matches!(context.owner(), crate::request_context::Owner::Command { .. }) {
+                // A command-owned delivery is not one of the execution's legs.
+                let receipt = crate::OrderIdentityReceipt {
+                    symbol: "BTC-USD".into(),
+                    kind: crate::OrderIdentityKind::ClientOrderId,
+                    identity: "probe".into(),
+                };
+                let execution = self.execution.clone().unwrap();
+                self.refusals
+                    .push(cx.execution_progress(&execution, vec![receipt]).unwrap_err());
+                return;
+            }
             self.delivered += 1;
             let plan = self.plan.clone().unwrap();
             let slot = self.slot.clone().unwrap();
@@ -307,12 +344,18 @@ mod planned_execution {
             .unwrap();
             cx.validate_http_write_effects(&context).unwrap();
             if self.progress {
-                let receipt = crate::OrderIdentityReceipt {
-                    symbol: "BTC-USD".into(),
-                    kind: crate::OrderIdentityKind::ClientOrderId,
-                    identity: format!("native-{}", self.delivered),
-                };
-                cx.execution_progress(self.execution.as_ref().unwrap(), vec![receipt])
+                let receipts = (0..self.progress_batch.max(1))
+                    .map(|n| crate::OrderIdentityReceipt {
+                        symbol: "BTC-USD".into(),
+                        kind: crate::OrderIdentityKind::ClientOrderId,
+                        identity: if n == 0 {
+                            format!("native-{}", self.delivered)
+                        } else {
+                            format!("native-{}-{n}", self.delivered)
+                        },
+                    })
+                    .collect();
+                cx.execution_progress(self.execution.as_ref().unwrap(), receipts)
                     .unwrap();
             }
             cx.finish_plan_call(&plan, &slot, &context).unwrap();
@@ -321,6 +364,18 @@ mod planned_execution {
                 return;
             }
             cx.done_plan(&plan, "placed".into()).unwrap();
+            if self.after_terminal {
+                let execution = self.execution.clone().unwrap();
+                let receipt = crate::OrderIdentityReceipt {
+                    symbol: "BTC-USD".into(),
+                    kind: crate::OrderIdentityKind::ClientOrderId,
+                    identity: "after-terminal".into(),
+                };
+                for receipts in [vec![receipt], Vec::new()] {
+                    self.refusals
+                        .push(cx.execution_progress(&execution, receipts).unwrap_err());
+                }
+            }
         }
         fn on_http_plan_ready(&mut self, cx: &mut Cx<'_, Context>, _: &Plan) {
             if self.reject_first && self.delivered == 1 {
@@ -1030,5 +1085,119 @@ mod planned_execution {
             e.venue.joined.last(),
             Some(&Ok(crate::engine::Joined::Live(vec![receipt])))
         );
+    }
+
+    fn progress_notices(actions: &[Action], owner: CommandId) -> Vec<usize> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandProgress { command, receipts })
+                    if *command == owner =>
+                {
+                    Some(receipts.len())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn accept(e: &mut Engine<Shared>, token: Preparation) -> Vec<Action> {
+        e.handle(
+            1_000.,
+            Event::HttpResponse {
+                request: token.attempt().request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "{}",
+                },
+            },
+        );
+        e.drain_actions().collect()
+    }
+
+    /// After the Plan terminal commits, progress (empty or not) is refused and
+    /// reaches no observer.
+    #[test]
+    fn execution_progress_after_the_plan_terminal_is_revoked() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            progress: true,
+            after_terminal: true,
+            ..Shared::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., FOLLOWER);
+        let tokens = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, tokens[0], 0.);
+        e.drain_actions().for_each(drop);
+        let actions = accept(&mut e, tokens[0]);
+        assert_eq!(
+            e.venue.refusals,
+            vec![Error::Revoked, Error::Revoked, Error::Revoked]
+        );
+        for owner in [FOUNDER, FOLLOWER] {
+            assert_eq!(progress_notices(&actions, owner), vec![1], "owner {owner}");
+        }
+    }
+
+    /// Past the replay bound live observers still receive every identity, but
+    /// a later joiner is refused rather than given a truncated replay.
+    #[test]
+    fn execution_progress_overflow_keeps_live_observers_and_refuses_late_joiners() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            progress: true,
+            progress_batch: 257,
+            two_steps: true,
+            ..Shared::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., FOLLOWER);
+        let tokens = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, tokens[0], 0.);
+        e.drain_actions().for_each(drop);
+        let actions = accept(&mut e, tokens[0]);
+        for owner in [FOUNDER, FOLLOWER] {
+            assert_eq!(progress_notices(&actions, owner), vec![257], "owner {owner}");
+        }
+        command(&mut e, 1_000., LATE);
+        assert_eq!(e.venue.joined.last(), Some(&Err(Error::Capacity)));
+    }
+
+    /// Another command's delivery cannot publish the execution's identities.
+    #[test]
+    fn execution_progress_from_a_command_owned_delivery_is_revoked() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            progress: true,
+            ..Shared::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., PROBE);
+        let tokens = prepared(&e.drain_actions().collect::<Vec<_>>());
+        let probe = *tokens.last().unwrap();
+        e.http_prepared(
+            0.,
+            probe,
+            Prepared {
+                id: probe.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let permit = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("probe binding");
+        assert!(matches!(e.claim_http(0., permit), Ok(Claim::Released(_))));
+        let actions = accept(&mut e, probe);
+        assert_eq!(e.venue.refusals, vec![Error::Revoked, Error::Revoked]);
+        assert!(progress_notices(&actions, FOUNDER).is_empty());
     }
 }

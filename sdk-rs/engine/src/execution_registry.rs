@@ -335,6 +335,11 @@ impl ContextRegistry {
         execution_root: &Context,
         receipts: Vec<crate::OrderIdentityReceipt>,
     ) -> Result<Vec<(CommandId, u64, Vec<crate::OrderIdentityReceipt>)>, Error> {
+        if !execution_root.issued_by(&self.issuer)
+            || self.contexts.get(&execution_root.leg()) != Some(execution_root)
+        {
+            return Err(Error::Revoked);
+        }
         let execution = self.execution_of(execution_root).ok_or(Error::Revoked)?;
         self.executions.groups.progress(execution, receipts)
     }

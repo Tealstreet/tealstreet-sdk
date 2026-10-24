@@ -196,9 +196,8 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Revoked);
         }
-        if receipts.is_empty() {
-            return Ok(());
-        }
+        // Owners already past their deadline time out before any progress.
+        self.sweep_executions();
         let observers = self
             .io
             .request_contexts
