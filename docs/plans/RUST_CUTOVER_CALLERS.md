@@ -6895,3 +6895,23 @@ though normal signature-refusal envelopes have no rows. Exact delivery gates
 and generation cleanup make late responses inert, including after ID reuse.
 Local history replies, account cycles, metadata groups, trading and the shared
 legacy signer funnel remain with their existing owners.
+
+
+## BingX local candle refusals use command Read authority
+
+FetchCandles keeps unknown-market, unsupported-interval and invalid-range
+validation in that order, before credentials, with its exact native untyped
+error on an admissible entry. Only these three local branches acquire an
+immediate credential-free Read Context and finish it through fail_context;
+there is no physical request, signer, timer or auth evidence. Valid signed and
+keyless remote candle issuance and all selection sites are unchanged.
+
+Capacity now supersedes the selected local error with the canonical Read
+capacity refusal. A missing receipt from an invalid/nonadvancing clock rejects
+as Revoked: "Request context was revoked", InvalidInput, no outcome. An expired
+own receipt uses the existing Read Timeout rejection. No default receipt or
+numeric fallback is fabricated. Duplicate live IDs preserve their diagnostic
+and original owner, and local completion releases authority for immediate ID
+reuse. Native absent kind/outcome remain absent; these refusals do not use the
+ReadCompletion string-to-Internal projection. No TypeScript, host, CLI or AWS
+production caller signature changes are required.

@@ -287,3 +287,35 @@ fn duplicate_local_refusal_cannot_replace_a_live_account_owner() {
     }
     complete_original(&mut e, requests[0]);
 }
+
+fn private_invalid_clock(refusal: Refusal) {
+    let mut e = engine(true);
+    let actions = ask(&mut e, f64::NAN, refusal);
+    assert_eq!(
+        failure(&actions, COMMAND),
+        &safe_cex_engine::request_context::Error::Revoked.read_venue_error()
+    );
+    let actions = ask(&mut e, NOW, refusal);
+    assert_eq!(failure(&actions, COMMAND), &refusal.error());
+}
+#[test]
+fn private_unknown_market_refuses_invalid_clock_then_allows_fresh_id_reuse() {
+    private_invalid_clock(Refusal::UnknownMarket);
+}
+#[test]
+fn private_unsupported_interval_refuses_invalid_clock_then_allows_fresh_id_reuse() {
+    private_invalid_clock(Refusal::UnsupportedInterval);
+}
+#[test]
+fn private_invalid_range_refuses_invalid_clock_then_allows_fresh_id_reuse() {
+    private_invalid_clock(Refusal::InvalidRange);
+}
+#[test]
+fn nonadvancing_clock_cannot_fabricate_a_receipt_for_a_local_refusal() {
+    let mut e = engine(false);
+    let actions = ask(&mut e, f64::MAX, Refusal::UnknownMarket);
+    assert_eq!(
+        failure(&actions, COMMAND),
+        &safe_cex_engine::request_context::Error::Revoked.read_venue_error()
+    );
+}

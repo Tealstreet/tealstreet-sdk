@@ -1,6 +1,6 @@
 # BingX local candle refusal custody
 
-Status: plan and compiling original assertion evidence; production held.
+Status: production conversion and scoped controls; draft source review and CI pending.
 Base: actual `db6fa45bbb7cbbfdfeb0aa40d3dd93caac9c9e0b`.
 
 ## Scope and ownership
@@ -149,3 +149,32 @@ capacity setup, Revoked invalid-clock projection, and disjointness from 5b.
 Invalid-clock assertions use a keyless engine and capacity assertions use a
 private engine; no private invalid-clock coverage is claimed. Production and
 core-fit review remain separate gates.
+
+## Production conversion
+
+After both bounded plan reviews were CLEAR, the overseer authorized production.
+The branch plainly integrates actual BingX paging landing `557de7ae7fb`; only
+the README index append required a keep-both resolution. The conversion replaces
+only the three local numeric failures with refuse_candle_query. The helper
+uses the existing receipt gate and Read admission, then fail_context with the
+full native error. It never touches the valid remote suffix or key selection.
+
+The source-derived request inventory diff removes exactly the three named
+fingerprints from BingX lib.rs, with no additions or other key changes. STAGING,
+credential inventory, shared engine/checker/signing source and account.rs remain
+incoming-exact. CALLERS records the local capacity/receipt precedence and exact
+Revoked error, while retaining native absent fields for admissible failures.
+
+All original eleven test bodies are retained. Four new controls pin private
+invalid-clock refusal plus fresh same-ID reuse for each branch, and an
+unstampable nonadvancing f64::MAX clock. The six original assertions now pass,
+including each capacity test's previously unexecuted original-owner recovery
+suffix. The local-candle target passes 15/15, with zero ignored tests. Existing
+managed-read target passes 13 tests with two pre-existing ignores, and the
+public target passes 9/9. Scoped strict Clippy, rustfmt and bans/ratchets pass. Builds are scoped
+and serial with jobs=4; CI owns broad feature/workspace/CPU/WASM checks.
+
+This helper is private and called synchronously only from the selected command
+branches. Expired/missing-receipt and callback custody beyond the genuine entry
+controls remain shared API/source evidence, not a new injected callback test.
+Bounded native/core source review and full CI are separate from local evidence.
