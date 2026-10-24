@@ -131,9 +131,13 @@ struct Active {
 impl Active {
     fn live(&self) -> bool {
         #[cfg(feature = "http-plans")]
-        { self.state == ActiveState::Live }
+        {
+            self.state == ActiveState::Live
+        }
         #[cfg(not(feature = "http-plans"))]
-        { true }
+        {
+            true
+        }
     }
 }
 
@@ -588,10 +592,7 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
         time(now)?;
         let Some(read) = self.reads.iter_mut().find(|read| {
             read.active.is_some_and(|active| {
-                active.token == token
-                    && active.live()
-                    && active.issued
-                    && now < active.deadline
+                active.token == token && active.live() && active.issued && now < active.deadline
             })
         }) else {
             return Ok(false);
@@ -616,7 +617,9 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             .find(|read| &read.key == key)
             .ok_or(Error::UnknownKey)?;
         #[cfg(feature = "http-plans")]
-        if read.retain_until_retired && let Some(active) = &mut read.active {
+        if read.retain_until_retired
+            && let Some(active) = &mut read.active
+        {
             if active.state != ActiveState::Retiring(AfterRetirement::Remove) {
                 active.state = ActiveState::Retiring(AfterRetirement::Cancel);
             }
@@ -649,7 +652,10 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
 
     #[cfg(feature = "http-plans")]
     pub(crate) fn retiring(&self, key: &K) -> Option<Attempt> {
-        self.reads.iter().find(|read| &read.key == key)?.active
+        self.reads
+            .iter()
+            .find(|read| &read.key == key)?
+            .active
             .filter(|active| matches!(active.state, ActiveState::Retiring(_)))
             .map(|active| active.token)
     }
@@ -664,18 +670,22 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
         time(now)?;
         let Some(index) = self.reads.iter().position(|read| {
             read.retain_until_retired
-                && read.active.is_some_and(|active| active.token == token
-                    && matches!(active.state, ActiveState::Retiring(_)))
+                && read.active.is_some_and(|active| {
+                    active.token == token && matches!(active.state, ActiveState::Retiring(_))
+                })
         }) else {
             return Ok(false);
         };
         let read = &mut self.reads[index];
-        let ActiveState::Retiring(disposition) = read.active.expect("exact retiring token").state else {
+        let ActiveState::Retiring(disposition) = read.active.expect("exact retiring token").state
+        else {
             unreachable!()
         };
         read.active = None;
         match disposition {
-            AfterRetirement::Remove => { self.reads.remove(index); }
+            AfterRetirement::Remove => {
+                self.reads.remove(index);
+            }
             AfterRetirement::Cancel => {
                 read.pending = None;
                 read.retry_not_before = f64::NEG_INFINITY;
@@ -695,7 +705,8 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
                 read.invalidation_due = None;
             }
             AfterRetirement::Superseded => {
-                read.invalidation_due.get_or_insert_with(|| after(now, read.policy.debounce_ms));
+                read.invalidation_due
+                    .get_or_insert_with(|| after(now, read.policy.debounce_ms));
             }
         }
         Ok(true)
@@ -754,7 +765,9 @@ mod tests {
         let mut scheduler = Scheduler::new(1, vec!["private"]).unwrap();
         let mut terms = policy();
         terms.refresh_debounce_ms = 0.;
-        scheduler.register_task("orders", &"private", terms).unwrap();
+        scheduler
+            .register_task("orders", &"private", terms)
+            .unwrap();
         scheduler.request(&"orders", 0., Demand::Refresh).unwrap();
         scheduler
     }
@@ -767,12 +780,29 @@ mod tests {
         scheduler.pause(&"private", 100.).unwrap();
         assert!(scheduler.retiring(&"orders") == Some(first));
         assert!(scheduler.next_deadline().is_none());
-        assert!(scheduler.take_ready(200., |_| unreachable!()).unwrap().is_none());
+        assert!(
+            scheduler
+                .take_ready(200., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
         assert!(scheduler.admit(first, 10.).unwrap().is_none());
-        assert!(!scheduler.finish(first, 10., false, |_| unreachable!()).unwrap());
+        assert!(
+            !scheduler
+                .finish(first, 10., false, |_| unreachable!())
+                .unwrap()
+        );
         assert!(!scheduler.progress(first, 10.).unwrap());
-        assert!(scheduler.ack_retired(first, 500., |_| unreachable!()).unwrap());
-        assert!(!scheduler.ack_retired(first, 500., |_| unreachable!()).unwrap());
+        assert!(
+            scheduler
+                .ack_retired(first, 500., |_| unreachable!())
+                .unwrap()
+        );
+        assert!(
+            !scheduler
+                .ack_retired(first, 500., |_| unreachable!())
+                .unwrap()
+        );
         let next = ready(&mut scheduler, 500.);
         assert!(next != first);
         assert!(!scheduler.mark_issued(first, 500.).unwrap());
@@ -785,13 +815,27 @@ mod tests {
         let mut scheduler = retained();
         let first = ready(&mut scheduler, 0.);
         assert!(scheduler.mark_issued(first, 0.).unwrap());
-        assert!(scheduler.take_ready(100., |_| unreachable!()).unwrap().is_none());
+        assert!(
+            scheduler
+                .take_ready(100., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
         assert!(scheduler.retiring(&"orders") == Some(first));
         assert!(scheduler.next_deadline().is_none());
-        assert!(!scheduler.finish(first, 101., true, |_| unreachable!()).unwrap());
+        assert!(
+            !scheduler
+                .finish(first, 101., true, |_| unreachable!())
+                .unwrap()
+        );
         assert!(scheduler.ack_retired(first, 150., |delay| delay).unwrap());
         assert!(scheduler.next_deadline() == Some(1_150.));
-        assert!(scheduler.take_ready(1_149., |_| unreachable!()).unwrap().is_none());
+        assert!(
+            scheduler
+                .take_ready(1_149., |_| unreachable!())
+                .unwrap()
+                .is_none()
+        );
         assert!(ready(&mut scheduler, 1_150.) != first);
     }
 
@@ -802,15 +846,32 @@ mod tests {
             let mut scheduler = retained();
             let first = ready(&mut scheduler, 0.);
             assert!(scheduler.mark_issued(first, 0.).unwrap());
-            if remove { scheduler.retire(&"orders").unwrap(); }
-            else { scheduler.cancel(&"orders").unwrap(); }
+            if remove {
+                scheduler.retire(&"orders").unwrap();
+            } else {
+                scheduler.cancel(&"orders").unwrap();
+            }
             assert!(scheduler.retiring(&"orders") == Some(first));
             assert!(scheduler.register("new", &"private", policy()) == Err(Error::Capacity));
-            assert!(scheduler.take_ready(1_000., |_| unreachable!()).unwrap().is_none());
-            assert!(scheduler.ack_retired(first, 1_000., |_| unreachable!()).unwrap());
+            assert!(
+                scheduler
+                    .take_ready(1_000., |_| unreachable!())
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                scheduler
+                    .ack_retired(first, 1_000., |_| unreachable!())
+                    .unwrap()
+            );
             assert!(scheduler.next_deadline().is_none());
-            if remove { scheduler.register("new", &"private", policy()).unwrap(); }
-            else { scheduler.request(&"orders", 1_000., Demand::Refresh).unwrap(); }
+            if remove {
+                scheduler.register("new", &"private", policy()).unwrap();
+            } else {
+                scheduler
+                    .request(&"orders", 1_000., Demand::Refresh)
+                    .unwrap();
+            }
         }
     }
 
@@ -821,10 +882,22 @@ mod tests {
             let mut scheduler = retained();
             let first = ready(&mut scheduler, 0.);
             assert!(scheduler.mark_issued(first, 0.).unwrap());
-            if superseded { assert!(scheduler.superseded(first, 10.).unwrap()); }
-            else { assert!(scheduler.finish(first, 10., false, |_| unreachable!()).unwrap()); }
+            if superseded {
+                assert!(scheduler.superseded(first, 10.).unwrap());
+            } else {
+                assert!(
+                    scheduler
+                        .finish(first, 10., false, |_| unreachable!())
+                        .unwrap()
+                );
+            }
             assert!(scheduler.retiring(&"orders") == Some(first));
-            assert!(scheduler.take_ready(200., |_| unreachable!()).unwrap().is_none());
+            assert!(
+                scheduler
+                    .take_ready(200., |_| unreachable!())
+                    .unwrap()
+                    .is_none()
+            );
             assert!(scheduler.ack_retired(first, 500., |delay| delay).unwrap());
             assert!(scheduler.next_deadline() == Some(if superseded { 510. } else { 1_500. }));
         }

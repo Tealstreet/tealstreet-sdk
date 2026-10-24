@@ -546,6 +546,13 @@ impl<P> Cx<'_, P> {
             policy.pacing,
         )?
         .with_retry(policy.retry)?;
+        let count = u64::from(terms.attempts);
+        let signed = policy.credential.is_some();
+        if !self.io.next_id.available(1 + 3 * count)
+            || (signed && !self.io.signing.available_ids(count))
+        {
+            return Err(Error::Capacity);
+        }
         self.io.request_contexts.prune(self.now);
         self.io.request_contexts.check_context_capacity(
             self.io
@@ -567,13 +574,6 @@ impl<P> Cx<'_, P> {
             .call
             .try_reserve_exact(1)
             .map_err(|_| Error::Capacity)?;
-        let count = u64::from(terms.attempts);
-        let signed = policy.credential.is_some();
-        if !self.io.next_id.available(1 + 3 * count)
-            || (signed && !self.io.signing.available_ids(count))
-        {
-            return Err(Error::Capacity);
-        }
         let mut ids = self
             .io
             .reserve_ids(1 + 3 * count)

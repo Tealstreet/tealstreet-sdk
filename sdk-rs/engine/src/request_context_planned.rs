@@ -422,6 +422,13 @@ impl<P> Cx<'_, P> {
         }
         let mut body = Vec::new();
         body.try_reserve_exact(1).map_err(|_| Error::Capacity)?;
+        let io_count = 1 + count as u64 + 3 * attempts as u64 + extra as u64;
+        let signed = policy.credential.is_some();
+        if !self.io.next_id.available(io_count)
+            || (signed && !self.io.signing.available_ids(attempts as u64))
+        {
+            return Err(Error::Capacity);
+        }
         self.io.request_contexts.prune(self.now);
         let old_slot = old_read.as_ref().is_some_and(|context| {
             self.io
@@ -456,13 +463,6 @@ impl<P> Cx<'_, P> {
             .plan_index
             .try_reserve(1)
             .map_err(|_| Error::Capacity)?;
-        let io_count = 1 + count as u64 + 3 * attempts as u64 + extra as u64;
-        let signed = policy.credential.is_some();
-        if !self.io.next_id.available(io_count)
-            || (signed && !self.io.signing.available_ids(attempts as u64))
-        {
-            return Err(Error::Capacity);
-        }
         // All fallible declaration/storage checks precede either namespace.
         let mut ids = self
             .io
