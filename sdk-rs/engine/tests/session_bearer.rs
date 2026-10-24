@@ -2168,10 +2168,10 @@ fn p3_first_call_issued_while_not_ready_parks_until_announced() {
 }
 
 /// P4: an announce at the revision the call already saw wakes nothing; a
-/// woken call that reads NotReady again re-parks with `seen` unchanged and
+/// woken call that reads NotReady again re-parks with its floor unchanged and
 /// needs a newer announce.
 #[test]
-fn p4_no_wake_without_a_newer_revision_and_re_park_keeps_seen() {
+fn p4_no_wake_without_a_newer_revision_and_re_park_keeps_the_floor() {
     let (mut e, shared) = engine(|shared| shared.token = None);
     let issued = ask(&mut e, 1);
     parks(&mut e, &shared, NOW + 1., issued[0].0);
