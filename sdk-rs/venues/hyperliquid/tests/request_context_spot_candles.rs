@@ -436,7 +436,29 @@ fn preparation_refusal_is_typed_and_never_empty_success() {
         Error::State,
         VenueError::new("fixture preparation refused").kind(ErrorKind::InvalidInput),
     );
-    let out = results(&e.drain_actions().collect::<Vec<_>>(), OWNER);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let mut cancellations = 0;
+    for action in &actions {
+        match action {
+            Action::Http(_) => panic!("refused preparation leaked HTTP"),
+            Action::ManagedHttp(action) => {
+                assert_eq!(
+                    action.as_ref(),
+                    &HttpAction::Cancel {
+                        preparation: p,
+                        signing: None
+                    }
+                );
+                cancellations += 1;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        cancellations, 1,
+        "only the exact refused preparation is cancelled"
+    );
+    let out = results(&actions, OWNER);
     assert_eq!(out.len(), 1);
     let failure = out[0].as_ref().unwrap_err();
     assert_eq!(failure.message, "fixture preparation refused");

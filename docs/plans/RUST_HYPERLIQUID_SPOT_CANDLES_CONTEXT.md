@@ -114,3 +114,9 @@ passes. The broader Hyperliquid/Binance native run and all-feature Clippy were
 stopped under Sam's machine-load directive; they are not passing receipts.
 CI covers the broader validation. Future local builds are one scoped run at a
 time with CARGO_BUILD_JOBS=4 until that directive is lifted.
+
+Production review restored full-batch preparation-failure inspection. The first
+restored blanket ManagedHttp prohibition failed10/11 because shared retirement
+correctly emits Cancel. The guard now requires exactly that preparation's one
+Cancel (no signing token), and rejects raw HTTP and every Prepare/Bind action.
+This discloses the second previously-gated suffix correction; no runtime change.
