@@ -10,7 +10,6 @@ use crate::request_context::{
 use crate::request_context::{
     HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
 };
-use std::collections::HashMap;
 #[cfg(feature = "http-plans")]
 use std::collections::VecDeque;
 
@@ -163,6 +162,8 @@ mod owned_call;
 mod preflight;
 #[cfg(feature = "http-plans")]
 pub(super) use owned_call::Admission as OwnedAdmission;
+#[cfg(feature = "http-plans")]
+pub(super) use owned_call::ReleasedReadFailure;
 
 #[cfg(feature = "http-plans")]
 #[path = "request_context_planned.rs"]
@@ -199,8 +200,8 @@ pub(super) enum Seal {
 #[derive(Default)]
 pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
-    contexts: HashMap<u64, Context>,
-    commands: HashMap<CommandId, CommandOwner>,
+    contexts: crate::IdMap<u64, Context>,
+    commands: std::collections::HashMap<CommandId, CommandOwner>,
     sessions: session::Sessions,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
@@ -224,7 +225,7 @@ pub(super) struct ContextRegistry {
     /// Plan-backed executions' physical owners, keyed by execution identity.
     /// They hold the Plan, its slots and journal; no command observes them.
     #[cfg(feature = "http-plans")]
-    physical: HashMap<u64, CommandOwner>,
+    physical: crate::IdMap<u64, CommandOwner>,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
     /// Order-read epoch at each live owner's first released Read: one logical
@@ -1520,23 +1521,15 @@ impl<P> Cx<'_, P> {
 
     /// A new physical leg under the same logical authority. Preserve its exact
     /// raw deadline; integer timeout recomputation cannot round the bound up.
+    /// Session legs use `session_leg_context`, so families without Sessions
+    /// never link Session issuance.
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
         self.io.request_contexts.validate_legacy(parent)?;
         self.io.request_contexts.validate_send(parent, self.now)?;
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
-            Owner::Session { generation } => {
-                self.session_scope()?;
-                let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-                return self.io.request_contexts.issue_session(
-                    identity,
-                    generation,
-                    policy,
-                    self.now,
-                    Some(parent),
-                );
-            }
+            Owner::Session { .. } => return Err(Error::Invalid),
             Owner::Execution { .. } => Scope::Execution,
         };
         self.make_http_context(scope, policy, Some(parent), None)

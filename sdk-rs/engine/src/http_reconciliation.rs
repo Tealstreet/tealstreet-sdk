@@ -2,7 +2,6 @@
 //! Contains no outbound request, generic venue continuation or signing recipe.
 use super::{Attempt, Error, HttpRelease, Owner};
 use crate::RequestId;
-use std::collections::HashMap;
 
 pub(crate) const CAPACITY: usize = 256;
 pub(crate) const BODY_LIMIT: usize = 256 * 1024;
@@ -96,7 +95,7 @@ enum Slot {
 
 #[derive(Default)]
 pub(crate) struct Responses {
-    slots: HashMap<RequestId, Slot>,
+    slots: crate::IdMap<RequestId, Slot>,
     bytes: usize,
 }
 

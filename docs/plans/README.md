@@ -287,6 +287,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | [Bitget CPU option-B follow-up](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md) | Shared second-runner CPU remeasurement, two-run mean and fail-closed certification; enabled for every CPU-gated suite, with unchanged tapes and thresholds. |
 | Caller-wait Read root expiry | Plan under review (claude-fe7lgm) | Before relying on engine-owned expiry of a tracked caller-wait Read root, or refusing a missing command receipt. | [RUST_READ_ROOT_EXPIRY.md](RUST_READ_ROOT_EXPIRY.md) |
 | Command-entry WASM size | Measured; step 1 in PR | Before adding engine code on a family's first command-entry admission, or chasing per-site entry cost. | [RUST_COMMAND_ENTRY_SIZE.md](RUST_COMMAND_ENTRY_SIZE.md) |
+| Engine core size | Session-leg split and ID-map hasher under review | Before a family's first RequestContext adoption pushes it over budget. | [RUST_ENGINE_CORE_SIZE.md](RUST_ENGINE_CORE_SIZE.md) |
 | Store order fence domains | Keep-both documentation plan | Before changing the broad late-ACK revision or selective logical snapshot epoch. | [RUST_ORDER_FENCE_DOMAINS.md](RUST_ORDER_FENCE_DOMAINS.md) |
 | Selected Read roots and page legs | Shared implementation; final dependency integration pending | Before retaining one selected caller-wait root across native physical history pages. | [RUST_SELECTED_READ_LEGS.md](RUST_SELECTED_READ_LEGS.md) |
 
@@ -338,6 +339,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Crypto.com public discovery ownership | Managed implementation under review | Before managing the last unsigned discovery sender and its Markets/Tickers continuations. | [RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md](RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md) |
 
 | Orderly initial history refusals | Implemented; bounded reviews and CI pending | Before converting the three initial history refusals; excludes combo-5b signer/source work. | [RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md](RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md) |
+| Command-owned Read-Plan history authority | Implemented; source reviews and focused checks clear, CI pending | Before accepting Plan pages, settling Slots with accepted rows or recovering a released transport failure through the same Plan terminal. | [RUST_READ_PLAN_HISTORY_AUTHORITY.md](RUST_READ_PLAN_HISTORY_AUTHORITY.md) |
 
 | Multi-constraint release pacing | Shared engine prerequisite; plan and RED phase | Before composing several HTTP rate groups at one Claim or signing after pacing waits. | [RUST_MULTI_CONSTRAINT_PACING.md](RUST_MULTI_CONSTRAINT_PACING.md) |
 | Independent Mutation Plan calls | Plan-first engine follow-up after #1932 | Before continuing independent native batch siblings after a delivered unproven 408/5xx. | [RUST_PLAN_INDEPENDENT_FAILURES.md](RUST_PLAN_INDEPENDENT_FAILURES.md) |
