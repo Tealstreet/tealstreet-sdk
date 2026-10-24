@@ -965,6 +965,8 @@ impl Venue for Blofin {
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),
+            // The shared Network/Timeout kind stays; its text is the native message.
+            Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }

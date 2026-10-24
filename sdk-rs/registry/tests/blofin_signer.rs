@@ -97,3 +97,40 @@ fn public_and_keyless_accounts_install_nothing() {
         assert!(signer.is_none());
     }
 }
+
+#[test]
+fn passphrase_refs_mirror_native_eligibility() {
+    let read = |passphrase: Option<&str>| {
+        let mut read = json!({ "key": "secondary-key", "secret": "secondary-secret" });
+        if let Some(passphrase) = passphrase {
+            read["passphrase"] = json!(passphrase);
+        }
+        read
+    };
+    let base = |passphrase: Option<&str>, secondary: serde_json::Value| {
+        let mut options = json!({
+            "key": "primary-key", "secret": "primary-secret", "readCredentials": secondary,
+        });
+        if let Some(passphrase) = passphrase {
+            options["passphrase"] = json!(passphrase);
+        }
+        options
+    };
+    for (options, primary, secondary) in [
+        // No Primary passphrase: refused natively even with the read key's own.
+        (base(None, read(Some("secondary-pass"))), false, false),
+        // An empty Primary passphrase is refused, as is its inheritance.
+        (base(Some(""), read(None)), false, false),
+        // An explicit empty Secondary passphrase never falls back to Primary.
+        (base(Some("primary-pass"), read(Some(""))), true, false),
+        // An empty Primary with an explicit nonempty Secondary signs the GET natively.
+        (base(Some(""), read(Some("secondary-pass"))), false, true),
+    ] {
+        let (identities, _) = construct(options);
+        assert_eq!(identities.primary.unwrap().passphrase.is_some(), primary);
+        assert_eq!(
+            identities.secondary.unwrap().passphrase.is_some(),
+            secondary
+        );
+    }
+}

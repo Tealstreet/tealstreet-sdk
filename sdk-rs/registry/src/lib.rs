@@ -342,7 +342,7 @@ fn backpack_provider(
 
 /// BloFin's one provider setup from the configured strings. The adopted
 /// FetchLeverage Read signs through it; unadopted paths keep the raw fields
-/// until the family cutover. An absent Secondary passphrase inherits Primary's.
+/// until the family cutover. Passphrase refs mirror native `headers` exactly.
 #[cfg(feature = "blofin")]
 fn blofin_signer(
     options: &EngineOptions,
@@ -358,21 +358,28 @@ fn blofin_signer(
     if options.public_data_only || !present(&options.key) || !present(&options.secret) {
         return Ok((None, Default::default()));
     }
+    // Native: no Primary passphrase refuses any slot; an absent Secondary
+    // passphrase inherits Primary's; an empty effective one (including an
+    // explicit empty Secondary, which never falls back) is refused.
+    let passphrase = |read: Option<&String>| {
+        options
+            .passphrase
+            .as_ref()
+            .map(|primary| read.unwrap_or(primary).clone())
+            .filter(|value| !value.is_empty())
+            .map(Secret::new)
+    };
     let setup = LocalSetup {
         primary: Some(LocalIdentity {
             key: Secret::new(options.key.clone().unwrap_or_default()),
             secret: Secret::new(options.secret.clone().unwrap_or_default()),
-            passphrase: options.passphrase.clone().map(Secret::new),
+            passphrase: passphrase(None),
             ..Default::default()
         }),
         secondary: options.read_credentials.as_ref().map(|read| LocalIdentity {
             key: Secret::new(read.key.clone()),
             secret: Secret::new(read.secret.clone()),
-            passphrase: read
-                .passphrase
-                .clone()
-                .or_else(|| options.passphrase.clone())
-                .map(Secret::new),
+            passphrase: passphrase(read.passphrase.as_ref()),
             ..Default::default()
         }),
     };

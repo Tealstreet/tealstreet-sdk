@@ -260,8 +260,9 @@ impl Blofin {
                 "cross"
             }
         );
-        // One selection: a configured Secondary serves this GET beside a
-        // Primary; native refusal text and precedence are unchanged.
+        // A configured Secondary serves this GET beside a Primary. The refusal
+        // inspects the same immutable Slots that SelectedRead then selects from,
+        // a deterministic repeat; native refusal text and precedence are unchanged.
         let identities = &self.options.identities;
         let slots = Slots::new(
             identities

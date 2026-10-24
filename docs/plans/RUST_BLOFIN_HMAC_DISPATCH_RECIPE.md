@@ -311,3 +311,20 @@ Tests:
   inheritance, an explicit Secondary passphrase, and public/keyless accounts
   installing nothing.
 - The whole BloFin package, scoped strict Clippy, fmt and the full bans pass.
+
+Review fixes:
+- claude-m26ps4 P2: the setup passphrase refs now mirror native `headers`
+  exactly: `primary.map(|p| read.unwrap_or(p)).filter(nonempty)`. That means:
+  - no Primary passphrase gives no ref on either slot;
+  - an empty Primary gives no Primary ref;
+  - an explicit empty Secondary never falls back;
+  - an empty Primary beside an explicit nonempty Secondary keeps the
+    Secondary ref.
+
+  The registry matrix pins all four cases, and venue controls pin the
+  missing-ref and no-identity refusals with no managed/sign work.
+- codex-5c57jl P2: `on_http_failed` routes Leverage directly, so a released
+  Network failure and the exact 20 s Read deadline keep their typed kinds with
+  no outcome. One terminal settles, and a late success is inert.
+- Both P3s: the repeat inspection of the same immutable Slots is described
+  accurately in the source.

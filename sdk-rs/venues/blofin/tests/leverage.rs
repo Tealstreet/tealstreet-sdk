@@ -194,3 +194,99 @@ fn unknown_symbol_does_not_issue_a_request() {
     assert!(result(&h).is_err());
     assert!(h.pending.is_empty());
 }
+
+fn typed_failure(h: &Harness) -> &safe_cex_engine::VenueError {
+    assert_eq!(h.failures.len(), 1, "one terminal");
+    &h.failures[0]
+}
+
+fn late_success_is_inert(h: &mut Harness, request: safe_cex_engine::HttpRequest) {
+    let before = h.actions.len();
+    h.respond(request, r#"{"code":"0","data":[{"instId":"BTC-USDT","marginMode":"cross","positionSide":"net","leverage":"12"}]}"#);
+    assert!(
+        !h.actions[before..].iter().any(|a| matches!(
+            a,
+            Action::Notice(
+                Notice::CommandDone { command: 71, .. } | Notice::CommandFailed { command: 71, .. }
+            )
+        )),
+        "a late duplicate settles nothing"
+    );
+    assert_eq!(h.e.store().setting("BTCUSDT").unwrap().leverage, 0.0);
+}
+
+#[test]
+fn released_network_failure_keeps_its_typed_kind_and_native_text() {
+    let mut h = flat();
+    lookup(&mut h);
+    let request = h.take("batch-leverage-info");
+    h.e.handle(
+        2.0,
+        Event::HttpFailed {
+            request: request.id,
+            error: "network failure",
+        },
+    );
+    h.collect();
+    let error = typed_failure(&h);
+    assert_eq!(error.message, "network failure");
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(safe_cex_engine::ErrorKind::Network), None)
+    );
+    late_success_is_inert(&mut h, request);
+}
+
+#[test]
+fn exact_read_deadline_is_a_typed_timeout() {
+    let mut h = flat();
+    lookup(&mut h);
+    let request = h.take("batch-leverage-info");
+    let timer = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 20_001.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("the Read's 20s deadline");
+    h.e.handle(20_001.0, Event::TimerFired { timer });
+    h.collect();
+    let error = typed_failure(&h);
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(safe_cex_engine::ErrorKind::Timeout), None)
+    );
+    late_success_is_inert(&mut h, request);
+}
+
+#[test]
+fn a_selected_identity_without_a_passphrase_ref_refuses_natively_before_any_work() {
+    // Trusted setup omits the ref wherever native `headers` would refuse.
+    let mut h = Harness::with_identities(|ids| ids.primary.as_mut().unwrap().passphrase = None);
+    h.seed();
+    h.ws(r#"{"arg":{"channel":"positions"},"data":[]}"#);
+    let before = h.pending.len();
+    lookup(&mut h);
+    assert_eq!(result(&h).unwrap_err(), "BloFin requires a passphrase");
+    assert_eq!(h.pending.len(), before, "no HTTP");
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::ManagedHttp(_) | Action::Sign { .. }))
+    );
+}
+
+#[test]
+fn no_selectable_identity_refuses_with_the_native_credentials_text() {
+    let mut h = Harness::with_identities(|ids| *ids = Default::default());
+    h.seed();
+    h.ws(r#"{"arg":{"channel":"positions"},"data":[]}"#);
+    lookup(&mut h);
+    assert_eq!(result(&h).unwrap_err(), "BloFin requires API credentials");
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::ManagedHttp(_) | Action::Sign { .. }))
+    );
+}
