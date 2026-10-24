@@ -2,8 +2,8 @@
 
 Plan-first base: actual5ae97ac93c6e7ad0bacc1ad06039f1856c098019.
 The overseer approved the one unsigned catalog sender plus deletion of one
-provably unreachable option-refusal arm under the #2074 ruling. This checkpoint
-is plan-only. Original controls and independent review precede production.
+provably unreachable option-refusal arm under the #2074 ruling. The plan and original controls
+were committed before production; both independent original reviews are CLEAR.
 
 ## Scope and inventory
 
@@ -152,3 +152,27 @@ noncatalog preparation default delegation and login composition. Capacity
 recovery/255-survivor, root cleanup/reuse, held release and managed retry/refresh
 suffixes remain unexecuted after earlier REDs until cutover. Production, Cargo,
 all inventories and every existing fixture remain byte-exact the actual base.
+
+
+## Production checkpoint
+
+The catalog sender now carries its own Background root in Job::Markets and
+validates every item, final response and stream-error delivery before native
+mutation. Success retires after all synchronous native continuations; failures
+retire before startup Backoff. The dead options arm is deleted independently,
+with all three actual engine pre-entry refusals unchanged. Exactly two singleton
+lib hashes disappear (8->6); no foreign key or predicate changes.
+
+All26 originals now pass, including the previously gated suffixes. One appended
+source-stage control proves that Shared public-feed mode still expires an
+unanswered catalog read and follows native Backoff without socket activity.
+Existing transport collectors in the delegation/public/startup fixtures now
+drive real Prepare/Bind/Claim. The socket-supervision fixture services its allowed
+REST refresh instead of leaving it unanswered under the new20s contract; its
+zero socket supervision assertions remain. The old diagnostic describes the
+serviced refresh accordingly. Original26 assertion bodies stay unchanged.
+
+Scoped library, account, login_session, products, markets_refresh, public,
+startup_resilience and request_context_catalog execute123PASS/0ignored. Strict
+all-target GRVT Clippy -D warnings passes sequentially with CARGO_BUILD_JOBS=4.
+Source review and intended-head CI remain required before READY.

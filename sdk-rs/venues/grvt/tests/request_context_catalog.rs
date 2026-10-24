@@ -1,4 +1,4 @@
-//! Original catalog custody controls; native-positive release alone permits raw compatibility.
+//! Wire/reply ingress probes accept legacy HTTP; managed custody probes require Prepare.
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{
@@ -802,4 +802,45 @@ fn failure_releases_the_catalog_context_capacity_before_backoff() {
     let actions = drain(&mut e);
     backoff(&actions, NOW + 1., 1000.);
     fill_all_peer_contexts(&mut e, NOW + 2.);
+}
+
+#[test]
+fn suppressed_feed_keeps_the_unanswered_catalog_deadline_and_backoff() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
+        inner: Grvt::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        }),
+        defer_start: false,
+        forwarded: 0,
+        items: 0,
+        peers: vec![],
+        validated: 0,
+    });
+    e.set_public_feed_policy(safe_cex_engine::PublicFeedPolicy::Shared)
+        .unwrap();
+    e.start(NOW);
+    let actions = drain(&mut e);
+    let (first, _) = prep(&actions);
+    release_managed(&mut e, &actions, NOW);
+    let timer = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
+            _ => None,
+        })
+        .expect("unanswered shared-feed catalog remains bounded");
+    e.handle(NOW + 20_000., Event::TimerFired { timer });
+    let actions = drain(&mut e);
+    let retry = backoff(&actions, NOW + 20_000., 1000.);
+    assert!(!e.store().loaded().markets);
+    e.handle(NOW + 21_000., Event::TimerFired { timer: retry });
+    let actions = drain(&mut e);
+    let (next, _) = prep(&actions);
+    assert_ne!(first, next);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::WsConnect { .. } | Action::WsSend { .. }))
+    );
 }

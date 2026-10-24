@@ -3192,3 +3192,21 @@ No selection witness is moved into lib.rs. Original actual credential-checker
 removal RED is green after adoption: closed1 to0, history2 to1, all foreign keys
 unchanged. Local cache/empty/error precedence and existing history authority are
 preserved; no shared checker exemption or source change.
+
+
+## GRVT unsigned instrument catalog custody
+
+Plan bea3c4cd014 precedes originals955aaf6448a:14 compiling assertion REDs
+and12 working controls on unchanged production. Core and native original
+reviews are CLEAR. The catalog now uses an unsigned Background Read root and
+managed Prepare/Bind/Claim, with exact delivery validation before every item,
+final response and stream-error mutation. Success retires after synchronous
+native publication and continuation; failure retires before native Backoff.
+The login-only Pending.context remains None for catalog jobs.
+
+Inventory lib8->6 removes one catalog sender and separately deletes one
+provably unreachable options refusal. The engine still rejects all three option
+commands before venue entry; the fallback unsupported arm only supplies match
+exhaustiveness. Foreign inventory bytes/order and signing/selection stay exact.
+Scoped123 controls and strict Clippy pass; independent source and exact-head CI
+remain separate gates.

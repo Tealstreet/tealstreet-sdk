@@ -1869,3 +1869,18 @@ lookup/signer/root suites pass89 tests across7 targets; strict all-target Clippy
 formatting and request/credential ratchets cover the scoped change. Existing
 financial assertions and fixtures are unchanged. Independent source/caller/map
 reviews and fresh exact-head CI remain required before READY.
+
+
+## GRVT catalog publication and deadline controls
+
+All26 original controls now pass, including the formerly gated Prepare/Bind,
+capacity recovery with255 surviving peers, timeout cleanup, fresh retry/refresh
+roots and stale stream-error suffixes. The real mid-stream item then expired
+final DATA control passes. A27th source-stage control pins unanswered catalog
+HTTP timeout/backoff under Shared public-feed mode without socket actions.
+Selected native account/login/products/refresh/public/startup and library targets
+bring the scoped total to123PASS/0ignored. Scoped all-target Clippy -D warnings
+passes with four jobs. Existing fixture transport collectors drive genuine
+Prepare/Bind/Claim; native assertions remain, with the socket-only fixture now
+servicing its allowed REST refresh. Workspace/features/WASM/performance remain
+CI gates; no local broad-build or full-CI claim.
