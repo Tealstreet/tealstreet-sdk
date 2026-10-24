@@ -406,11 +406,12 @@ retires a second Session in the same flush. Composition with combo-5b
 **Phase 2, part 1 (R8, R9, R10 and the outer-path gate).**
 - R8 cannot be a same-leg retry of an unanswered write: `Context::retry`
   refuses `ReadFailure` for a Mutation, and a resend needs a `ResendGrant`
-  from a `RefusedResend` answer. Two truthful variants are pinned instead:
-  - a released, unanswered write followed by a fenced sibling write on the
-    same command;
-  - a granted resend fenced before release.
-  Both terminals are `Unknown` through `failure_projection`.
+  from a `RefusedResend` answer. R8 is pinned as a released, unanswered write
+  followed by a fenced sibling write on the same command, which is `Unknown`.
+  A control shows the same writes with none released are `NotSent`.
+  - A separate guard covers a resend after a definitive refusal, fenced
+    before release. Its `Unknown` is `failure_projection`'s existing
+    conservative rule, not R8 evidence.
 - R9 is a guard: expiry and retire in one event fail the Plan as `Timeout`.
 - R10: one Plan with two bound legs, plus a plain Command. Exactly one
   terminal per owner, no HTTP, and callback depth 1.

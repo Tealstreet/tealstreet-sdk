@@ -227,7 +227,10 @@ struct Probe {
 struct Depth(Rc<RefCell<Shared>>);
 impl Drop for Depth {
     fn drop(&mut self) {
-        self.0.borrow_mut().depth -= 1;
+        // Never a second panic while a failing callback still holds a borrow.
+        if let Ok(mut shared) = self.0.try_borrow_mut() {
+            shared.depth -= 1;
+        }
     }
 }
 fn write_policy() -> Policy {
@@ -1326,12 +1329,55 @@ fn r8_retire_after_an_unanswered_released_write_projects_unknown() {
     assert!(!released(&mut e, NOW + 4., second.expect("second write")));
 }
 
-/// R8, resend: a write refused `RefusedResend` is resent through
-/// `http_resend_context`, inheriting the binding; the Session is retired
-/// before the resend releases. The resend fails NotSent, and the command
-/// terminal is the journal's projection (Unknown), not NotSent.
+/// R8 control: the same writes with none released project NotSent, so R8's
+/// Unknown comes from the released write.
 #[test]
-fn r8_retire_before_a_bound_resend_releases_projects_unknown() {
+fn control_r8_fenced_writes_with_none_released_project_not_sent() {
+    let (mut e, shared) = engine(|shared| {
+        shared.write_legs = 2;
+        shared.next_generation_token = Some("C");
+    });
+    let issued = amend(&mut e, 1);
+    assert_eq!(issued.len(), 2);
+    let mut first = None;
+    let mut second = None;
+    for (preparation, request, intent) in issued {
+        assert_eq!(intent, RoutingIntent::Primary);
+        let packet = prepared(&mut e, NOW + 1., preparation).expect("bound write");
+        assert_eq!(authorization(&packet.1), Some("Bearer A"));
+        if request.url.ends_with("/write-0") {
+            first = Some(packet.0);
+        } else {
+            second = Some(packet.0);
+        }
+    }
+    let first = first.expect("first write");
+    retire(&mut e, &shared, NOW + 3.);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let fenced = &shared.borrow().failures;
+    assert!(!fenced.is_empty());
+    assert_eq!(fenced[0].outcome, Some(Outcome::NotSent), "the attempt");
+    let terminals = terminals(&actions);
+    assert_eq!(terminals.len(), 1, "one command terminal: {terminals:?}");
+    let (command, error) = &terminals[0];
+    assert_eq!(*command, 1);
+    assert_eq!(
+        error.as_ref().and_then(|error| error.outcome),
+        Some(Outcome::NotSent),
+        "nothing was released, so the command is NotSent"
+    );
+    assert!(!released(&mut e, NOW + 4., first));
+    assert!(!released(&mut e, NOW + 4., second.expect("second write")));
+}
+
+/// Guard, not R8: the first write was answered (a definitive `RefusedResend`),
+/// so nothing is unanswered. The resend inherits the binding and is fenced
+/// before release. The Unknown terminal is `failure_projection`'s existing
+/// conservative rule (released then unreleased on one leg); the Bearer adds
+/// nothing to it.
+#[test]
+fn guard_fenced_resend_after_a_refusal_keeps_the_conservative_unknown() {
     let (mut e, shared) = engine(|shared| {
         shared.write_legs = 1;
         shared.resend = true;
