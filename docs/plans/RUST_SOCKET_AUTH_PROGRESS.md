@@ -167,3 +167,12 @@ Scoped socket regressions pass 130 tests; the independent snapshot-barrier targe
 passes all 16 controls. The first normal bans run found the newly landed #2074
 Breakout inventory ahead of this branch, so freeze must first carry that actual
 landing and rerun normal ratchets. No exemption or foreign map repair is used.
+
+Current-landing source checkpoint `6494f5ddeee` carries #2074 without changing
+owned runtime/control blobs from `1b4ef8b6f64`. Normal bans/ratchets now pass.
+Strict scoped Clippy passes both managed-sockets/test-support (library plus the
+dedicated target) and the default feature library; scoped rustfmt/diff checks
+pass. CI owns full workspace, feature composition, size and replay certification.
+Source/API review requests bind to the immutable runtime checkpoint above;
+9czdjh's consumer and uufub4's core verdicts remain separate from these owner
+executions. Push is a draft freeze candidate with one PR-triggered Rust run.
