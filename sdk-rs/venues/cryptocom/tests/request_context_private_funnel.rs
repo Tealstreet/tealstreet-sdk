@@ -1160,3 +1160,82 @@ fn recipe_apply_without_prepare_cannot_inject_a_signed_body() {
         "refusal must not partially mutate the request"
     );
 }
+
+fn review_integrity(e: &mut TestEngine, now: f64, r: &HttpRequest) -> Vec<Action> {
+    e.handle(
+        now,
+        Event::HttpStart {
+            request: r.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        now,
+        Event::HttpChunk {
+            request: r.id,
+            data: &[0xff],
+        },
+    );
+    e.handle(now, Event::HttpEnd { request: r.id });
+    actions(e, now)
+}
+#[test]
+fn review_identity_integrity_is_not_a_transport_retry() {
+    let mut e = engine(options());
+    let first = ask(&mut e, NOW);
+    let r = http(&first, "private/get-accounts");
+    let out = review_integrity(&mut e, NOW + 1., &r);
+    no_private_http(&out);
+    let t = terminals(&out);
+    assert_eq!(t.len(), 1, "one strict integrity failure");
+    assert_eq!(t[0].as_ref().unwrap_err().kind, Some(ErrorKind::Internal));
+}
+#[test]
+fn review_history_integrity_is_not_a_transport_retry() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.engine
+        .handle_command(
+            h.now,
+            Command::Query {
+                command: OWNER,
+                query: Query::Fills {
+                    symbol: Some("BTCUSD-PERP".into()),
+                    order_id: None,
+                    from_ms: Some(h.now - 1000.),
+                    to_ms: Some(h.now + 1000.),
+                    limit: Some(1),
+                },
+            },
+            None,
+        )
+        .unwrap();
+    h.collect();
+    let r = h.http("private/get-trades");
+    h.actions.clear();
+    let out = review_integrity(&mut h.engine, h.now + 1., &r);
+    let t = terminals(&out);
+    assert_eq!(
+        t.len(),
+        1,
+        "integrity must not park a retry instead of terminating"
+    );
+    assert_eq!(t[0].as_ref().unwrap_err().kind, Some(ErrorKind::Internal));
+    no_private_http(&out);
+}
+#[test]
+fn review_account_integrity_recovers_once_without_inline_transport_retry() {
+    let mut h = Harness::new();
+    let r = h.http("private/get-positions");
+    h.actions.clear();
+    let out = review_integrity(&mut h.engine, h.now + 1., &r);
+    no_private_http(&out);
+    assert_eq!(
+        out.iter()
+            .filter(|a| matches!(a,Action::SetTimer {at_ms,..} if *at_ms==h.now+1.+10_000.))
+            .count(),
+        1
+    );
+}
