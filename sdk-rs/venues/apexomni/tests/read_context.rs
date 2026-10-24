@@ -364,3 +364,241 @@ fn signed_symbols_re_sign_once_and_never_transport_retry() {
             .any(|a| matches!(a, Action::SetTimer { .. }))
     );
 }
+
+// Readiness controls for the managed source (RUST_APEXOMNI_READ_CONTEXT.md).
+
+/// Every Prepare is refused by the host route; nothing reaches the network.
+fn refused(engine: &mut TestEngine, now: f64) -> Output {
+    let mut output = Output::default();
+    let mut queue: std::collections::VecDeque<_> = engine.drain_actions().collect();
+    while let Some(action) = queue.pop_front() {
+        match action {
+            Action::Http(request) => {
+                output.legacy += 1;
+                output.requests.push(request);
+            }
+            Action::ManagedHttp(action) => {
+                if let HttpAction::Prepare { preparation, .. } = *action {
+                    output.prepared += 1;
+                    engine.http_preparation_failed(
+                        now,
+                        preparation,
+                        safe_cex_engine::request_context::Error::Invalid,
+                        safe_cex_engine::VenueError::new("route refused"),
+                    );
+                }
+            }
+            action => output.actions.push(action),
+        }
+        queue.extend(engine.drain_actions());
+    }
+    output
+}
+
+#[test]
+fn signature_resend_and_transport_retries_are_managed_attempts() {
+    let (mut engine, _) = seeded();
+    let first = command(
+        &mut engine,
+        20.,
+        Command::FetchAccount { command: COMMAND },
+        None,
+    );
+    let resent = reply(&mut engine, 21., &first.requests[0], SIGNATURE);
+    managed(&resent, 1);
+    let mut output = transport_loss(&mut engine, 22., &resent.requests[0]);
+    for attempt in 0..3 {
+        managed(&output, 1);
+        let request = output.requests.remove(0);
+        output = transport_loss(&mut engine, 23. + f64::from(attempt), &request);
+    }
+    assert!(output.requests.is_empty());
+    assert!(terminal(&output, COMMAND).is_err());
+}
+
+#[test]
+fn fill_aliases_and_the_history_fallback_are_managed_legs_of_one_root() {
+    let (mut engine, _) = seeded();
+    let mut output = command(&mut engine, 20., fills(), None);
+    let mut paths = vec![];
+    for page in 0..4 {
+        managed(&output, 1);
+        signed(&output.requests[0], "/v3/");
+        paths.push(output.requests[0].url.clone());
+        let request = output.requests.remove(0);
+        output = reply(&mut engine, 21. + f64::from(page), &request, ORDERS);
+    }
+    assert!(paths[0].contains("/v3/fills?") && paths[0].contains("symbol=BTC-USDT"));
+    assert!(paths[1].contains("/v3/fills?") && paths[1].contains("symbol=BTCUSDT"));
+    assert!(paths[2].contains("/v3/history-orders?") && paths[2].contains("symbol=BTC-USDT"));
+    assert!(paths[3].contains("/v3/history-orders?") && paths[3].contains("symbol=BTCUSDT"));
+    assert!(output.requests.is_empty());
+    assert_eq!(terminal(&output, COMMAND).unwrap(), "[]");
+}
+
+#[test]
+fn a_refused_symbols_preparation_reschedules_startup_without_sending() {
+    let mut engine = engine(Some("pass"));
+    engine.start(0.);
+    let output = refused(&mut engine, 0.);
+    assert_eq!((output.legacy, output.prepared), (0, 1));
+    assert!(output.requests.is_empty());
+    assert!(
+        output.actions.iter().any(
+            |a| matches!(a, Action::SetTimer { at_ms, .. } if (750. ..=1_000.).contains(at_ms))
+        ),
+        "startup backoff"
+    );
+}
+
+#[test]
+fn a_refused_snapshot_preparation_is_not_retried_on_the_network() {
+    let mut engine = engine(Some("pass"));
+    engine.start(0.);
+    let symbols = drain(&mut engine, 0.).requests.remove(0);
+    engine.handle(
+        10.,
+        Event::HttpResponse {
+            request: symbols.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: MARKETS,
+            },
+        },
+    );
+    let output = refused(&mut engine, 10.);
+    assert_eq!((output.legacy, output.prepared), (0, 2));
+    assert!(output.requests.is_empty());
+    assert!(!engine.store().loaded().positions);
+}
+
+#[test]
+fn refused_command_preparations_fail_their_own_command_once() {
+    // A refused fills page walks the native aliases and fallback, never a resend.
+    for (query, pages) in [
+        (Command::FetchAccount { command: COMMAND }, 1),
+        (fills(), 4),
+    ] {
+        let (mut engine, _) = seeded();
+        engine.handle_command(20., query, None).unwrap();
+        let output = refused(&mut engine, 20.);
+        assert_eq!((output.legacy, output.prepared), (0, pages));
+        assert!(output.requests.is_empty());
+        let terminals = output
+            .actions
+            .iter()
+            .filter(|a| {
+                matches!(a, Action::Notice(Notice::CommandFailed { command, .. } | Notice::CommandDone { command, .. }) if *command == COMMAND)
+            })
+            .count();
+        assert_eq!(terminals, 1);
+        assert!(terminal(&output, COMMAND).is_err());
+    }
+}
+
+#[test]
+fn late_data_after_a_finished_background_read_changes_nothing() {
+    let (mut engine, snapshot) = seeded();
+    let positions = snapshot
+        .requests
+        .iter()
+        .find(|r| r.url.ends_with("/v3/account"))
+        .unwrap()
+        .clone();
+    reply(&mut engine, 30., &positions, ACCOUNT);
+    let late = reply(&mut engine, 31., &positions, ACCOUNT);
+    assert!(late.requests.is_empty());
+    assert_eq!((late.legacy, late.prepared, late.claimed), (0, 0, 0));
+}
+
+#[test]
+fn a_reused_command_id_with_a_live_peer_sends_nothing_more() {
+    let (mut engine, _) = seeded();
+    let first = command(
+        &mut engine,
+        20.,
+        Command::FetchAccount { command: COMMAND },
+        None,
+    );
+    managed(&first, 1);
+    let _ = engine.handle_command(21., Command::FetchAccount { command: COMMAND }, None);
+    let second = drain(&mut engine, 21.);
+    assert!(second.requests.is_empty());
+    let done = reply(&mut engine, 22., &first.requests[0], ACCOUNT);
+    assert!(terminal(&done, COMMAND).is_ok());
+}
+
+#[test]
+fn a_background_read_answered_at_its_exact_deadline_is_not_a_success() {
+    let (mut engine, snapshot) = seeded();
+    // Both snapshot reads were issued at 10 with the 20 s native timeout.
+    for request in &snapshot.requests {
+        let body = if request.url.ends_with("/v3/account") {
+            ACCOUNT
+        } else {
+            ORDERS
+        };
+        let output = reply(&mut engine, 20_010., request, body);
+        assert!(output.requests.is_empty(), "no balance read follows");
+    }
+    assert!(!engine.store().loaded().positions);
+    assert!(!engine.store().loaded().orders);
+}
+
+#[test]
+fn a_position_heal_refresh_is_a_managed_signed_background_read() {
+    let mut engine = engine(Some("pass"));
+    engine.start(0.);
+    let symbols = drain(&mut engine, 0.).requests.remove(0);
+    let snapshot = reply(&mut engine, 10., &symbols, MARKETS);
+    let socket = snapshot
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .expect("private socket");
+    engine.handle(20., Event::WsOpened { socket });
+    drain(&mut engine, 20.);
+    let mut balance = vec![];
+    for request in &snapshot.requests {
+        let body = if request.url.ends_with("/v3/account") {
+            ACCOUNT
+        } else {
+            ORDERS
+        };
+        balance.extend(reply(&mut engine, 30., request, body).requests);
+    }
+    reply(
+        &mut engine,
+        31.,
+        &balance[0],
+        r#"{"code":0,"data":{"totalEquityValue":"1000","initialMargin":"0","maintenanceMargin":"0"}}"#,
+    );
+    engine.handle(
+        100.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"topic":"ws_zk_accounts_v3","type":"delta","contents":{"positions":[]}}"#,
+        },
+    );
+    let timer = drain(&mut engine, 100.)
+        .actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms: 1_100. } => Some(timer),
+            _ => None,
+        })
+        .expect("heal timer");
+    engine.handle(1_100., Event::TimerFired { timer });
+    let heal = drain(&mut engine, 1_100.);
+    assert_eq!(heal.requests.len(), 1);
+    signed(&heal.requests[0], "/v3/account");
+    managed(&heal, 1);
+}

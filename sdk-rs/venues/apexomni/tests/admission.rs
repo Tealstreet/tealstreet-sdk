@@ -86,7 +86,7 @@ fn refs_only_account_read_is_signed_by_the_provider_at_release() {
 fn refs_only_private_ws_login_is_signed_by_the_provider() {
     let mut e = refs_only(true);
     let socket = e
-        .drain_actions()
+        .prepared(10.0)
         .find_map(|action| match action {
             Action::WsConnect {
                 socket,

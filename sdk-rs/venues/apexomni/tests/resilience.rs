@@ -68,9 +68,9 @@ fn engine(seed: &str) -> TestEngine {
 }
 fn seeded(e: &mut TestEngine, markets: &str) -> (Option<SocketId>, Vec<HttpRequest>, Vec<Action>) {
     e.start(0.0);
-    let r = requests(e).remove(0);
+    let r = requests(e, 0.0).remove(0);
     response(e, &r, 10.0, markets);
-    let actions: Vec<_> = e.prepared(0.0).collect();
+    let actions: Vec<_> = e.prepared(10.0).collect();
     let socket = actions.iter().find_map(|a| match a {
         Action::WsConnect {
             socket,
@@ -105,7 +105,7 @@ fn ready(orders: &str) -> (TestEngine, SocketId) {
     e.handle(20.0, Event::WsOpened { socket });
     e.prepared(20.0).for_each(drop);
     answer(&mut e, http, 30.0, ACCOUNT, orders);
-    e.prepared(20.0).for_each(drop);
+    e.prepared(30.0).for_each(drop);
     (e, socket)
 }
 fn frame(body: &str) -> String {
@@ -113,14 +113,15 @@ fn frame(body: &str) -> String {
 }
 fn heal_orders(e: &mut TestEngine, socket: SocketId, at: f64, body: &str) {
     ws(e, socket, at, &frame(r#"{"orders":[]}"#));
-    let timer = e.prepared(at)
+    let timer = e
+        .prepared(at)
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if at_ms == at + 1000.0 => Some(timer),
             _ => None,
         })
         .unwrap();
     e.handle(at + 1000.0, Event::TimerFired { timer });
-    let request = requests(e)
+    let request = requests(e, at + 1000.0)
         .into_iter()
         .find(|r| r.url.ends_with("/v3/open-orders"))
         .unwrap();
@@ -166,7 +167,8 @@ fn accepted_cancel_fences_stale_reads_but_an_order_the_venue_kept_reappears() {
     assert_eq!(order_ids(&e), ["parent", "parent__stop_loss"]);
     // A read already in flight when the cancel lands cannot reopen it.
     ws(&mut e, socket, 100.0, &frame(r#"{"orders":[]}"#));
-    let timer = e.prepared(100.0)
+    let timer = e
+        .prepared(100.0)
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
@@ -205,7 +207,8 @@ fn accepted_cancel_fences_stale_reads_but_an_order_the_venue_kept_reappears() {
 fn stale_read_landing_after_the_grace_window_cannot_reopen_a_cancelled_order() {
     let (mut e, socket) = ready(&list(&[PARENT]));
     ws(&mut e, socket, 100.0, &frame(r#"{"orders":[]}"#));
-    let timer = e.prepared(100.0)
+    let timer = e
+        .prepared(100.0)
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
@@ -288,7 +291,7 @@ fn malformed_startup_rows_still_initialise_the_account_and_signing_state() {
     );
     let broken = r#"{"id":"broken","symbol":"BTC-USDT","status":"MYSTERY","type":"LIMIT","side":"BUY","size":"1","price":"1"}"#;
     answer(&mut e, http, 30.0, &account, &list(&[broken, PARENT]));
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(30.0).collect();
     assert!(e.store().loaded().positions && e.store().loaded().orders);
     assert_eq!(e.store().position("BTCUSDT:long").unwrap().contracts, 2.0);
     assert_eq!(order_ids(&e), ["parent", "parent__stop_loss"]);
@@ -451,7 +454,7 @@ fn one_malformed_order_keeps_its_stored_copy_while_valid_peers_commit() {
     let changed = FRESH.replace(r#""price":"95""#, r#""price":"96""#);
     let broken = PARENT.replace(r#""side":"BUY""#, r#""side":"SIDEWAYS""#);
     heal_orders(&mut e, socket, 100.0, &list(&[&changed, &broken]));
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared(1110.0).collect();
     assert_eq!(e.store().order("fresh").unwrap().price, 96.0);
     assert_eq!(order_ids(&e), ["fresh", "parent", "parent__stop_loss"]);
     assert!(warned(

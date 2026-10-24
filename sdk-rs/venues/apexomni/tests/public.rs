@@ -135,7 +135,8 @@ fn subscriptions_are_reference_counted_and_reconnect_uses_real_testnet_public_ro
     e.start(0.0);
     let r = requests(&mut e, 0.0).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let s = e.prepared(10.0)
+    let s = e
+        .prepared(10.0)
         .find_map(|a| {
             if let Action::WsConnect {
                 socket,
@@ -182,7 +183,8 @@ fn subscriptions_are_reference_counted_and_reconnect_uses_real_testnet_public_ro
             code: 1006,
         },
     );
-    let t = e.prepared(50.0)
+    let t = e
+        .prepared(50.0)
         .find_map(|a| {
             if let Action::SetTimer { timer, .. } = a {
                 Some(timer)
@@ -245,7 +247,8 @@ fn fetch_candles_uses_seconds_bounds_daily_omission_and_sorted_results() {
         1_700_000_000_001.0,
         r#"{"code":0,"data":{"BTCUSDT":[{"t":2000,"o":"2","h":"4","l":"1","c":"3","v":"7"},{"t":1000,"o":"1","h":"3","l":"1","c":"2","v":"5"}]}}"#,
     );
-    let result = e.prepared(1_700_000_000_001.0)
+    let result = e
+        .prepared(1_700_000_000_001.0)
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { result, .. }) = a {
                 Some(result)
@@ -326,7 +329,8 @@ fn depth_gap_recovers_snapshot_and_ignores_duplicates_and_pre_snapshot_deltas() 
         r#"{"topic":"orderBook200.H.BTCUSDT","type":"delta","data":{"u":12,"a":[],"b":[["1","99"]]}}"#,
     );
     assert!(e.book("BTCUSDT").unwrap().is_empty());
-    let sends: Vec<_> = e.prepared(34.0)
+    let sends: Vec<_> = e
+        .prepared(34.0)
         .filter_map(|a| {
             if let Action::WsSend { text, .. } = a {
                 Some(text)
@@ -372,7 +376,8 @@ fn secondary_trade_uses_decimal_quote_conversion_and_rollover_without_backflow()
     other.start(0.0);
     let request = requests(&mut other, 0.0).remove(0);
     response(&mut other, &request, 10.0, MARKETS);
-    let socket = other.prepared(10.0)
+    let socket = other
+        .prepared(10.0)
         .find_map(|a| {
             if let Action::WsConnect {
                 socket,

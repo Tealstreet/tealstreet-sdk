@@ -60,7 +60,7 @@ fn private_seed(engine: &mut TestEngine, http: Vec<HttpRequest>) {
         };
         response(engine, &request, 30., body);
     }
-    let balance = requests(engine)
+    let balance = requests(engine, 30.)
         .into_iter()
         .find(|request| request.url.ends_with("/v3/account-balance"))
         .unwrap();

@@ -92,14 +92,15 @@ fn position_update(e: &mut TestEngine, socket: SocketId, at: f64, side: &str, si
 }
 fn begin_position_heal(e: &mut TestEngine, socket: SocketId, at: f64) -> HttpRequest {
     ws(e, socket, at, &frame("delta", r#"{"positions":[]}"#));
-    let timer = e.prepared(at)
+    let timer = e
+        .prepared(at)
         .find_map(|action| match action {
             Action::SetTimer { timer, at_ms } if at_ms == at + 1000.0 => Some(timer),
             _ => None,
         })
         .unwrap();
     e.handle(at + 1000.0, Event::TimerFired { timer });
-    requests(e)
+    requests(e, at + 1000.0)
         .into_iter()
         .find(|request| request.url.ends_with("/v3/account"))
         .unwrap()
@@ -147,7 +148,8 @@ fn order(id: &str, status: &str, cumulative: &str) -> String {
 fn login_precedes_immediate_subscription_and_ping_with_private_role() {
     let (mut e, socket, _) = seeded();
     e.handle(20.0, Event::WsOpened { socket });
-    let messages: Vec<_> = e.prepared(20.0)
+    let messages: Vec<_> = e
+        .prepared(20.0)
         .filter_map(|a| match a {
             Action::WsSend { socket: s, text } if s == socket => Some(text),
             _ => None,
@@ -401,7 +403,8 @@ fn canceled_parent_removes_virtual_siblings_and_delayed_rest_cannot_reopen() {
     let (mut e, socket) = ready();
     // Order heal begins before the terminal event.
     ws(&mut e, socket, 100.0, &frame("delta", r#"{"orders":[]}"#));
-    let timer = e.prepared(100.0)
+    let timer = e
+        .prepared(100.0)
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
@@ -535,7 +538,8 @@ fn a_late_rest_snapshot_cannot_reopen_a_position_removed_by_websocket_zero() {
         100.0,
         &frame("delta", r#"{"positions":[]}"#),
     );
-    let timer = e.prepared(100.0)
+    let timer = e
+        .prepared(100.0)
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
@@ -697,14 +701,16 @@ fn server_ping_echoes_args_and_reconnect_fences_old_socket() {
     );
     assert!(e.prepared(100.0).any(|a| matches!(a,Action::WsSend{text,..} if text == r#"{"op":"pong","args":["server-token",7]}"#)));
     e.handle(200.0, Event::WsClosed { socket, code: 1006 });
-    let timer = e.prepared(200.0)
+    let timer = e
+        .prepared(200.0)
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if (950.0..=1200.0).contains(&at_ms) => Some(timer),
             _ => None,
         })
         .unwrap();
     e.handle(1200.0, Event::TimerFired { timer });
-    let replacement = e.prepared(1200.0)
+    let replacement = e
+        .prepared(1200.0)
         .find_map(|a| match a {
             Action::WsConnect {
                 socket,
@@ -833,7 +839,8 @@ fn account_identity_uses_documented_id_and_does_not_replace_account_store() {
         110.0,
         r#"{"code":0,"data":{"id":"611779989544632629"}}"#,
     );
-    let result = e.prepared(110.0)
+    let result = e
+        .prepared(110.0)
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone {
                 command: 91,
@@ -859,7 +866,8 @@ fn acknowledged_leverage_survives_older_snapshot_and_cached_position_heal() {
         100.0,
         &frame("delta", r#"{"positions":[]}"#),
     );
-    let timer = e.prepared(100.0)
+    let timer = e
+        .prepared(100.0)
         .find_map(|a| match a {
             Action::SetTimer {
                 timer,
@@ -914,7 +922,8 @@ fn missing_or_blank_order_identifiers_reject_rest_heal_without_clearing_state() 
     ] {
         let (mut e, socket) = ready();
         ws(&mut e, socket, 100.0, &frame("delta", r#"{"orders":[]}"#));
-        let timer = e.prepared(100.0)
+        let timer = e
+            .prepared(100.0)
             .find_map(|a| match a {
                 Action::SetTimer {
                     timer,
@@ -982,7 +991,15 @@ fn account_identity_can_be_read_before_start_without_an_omni_seed() {
         1700000000123.0,
         Event::Command(Command::FetchAccount { command: 77 }),
     );
-    let actions = engine.prepared(1700000000123.0).collect::<Vec<_>>();
+    let mut actions = engine.prepared(1700000000123.0).collect::<Vec<_>>();
+    // The managed read's own deadline is the only timer; no venue sockets or timers start.
+    let deadline = actions.iter().find_map(|action| match action {
+        Action::SetTimer { timer, at_ms } if *at_ms == 1700000000123.0 + 20_000.0 => Some(*timer),
+        _ => None,
+    });
+    actions.retain(
+        |action| !matches!(action, Action::SetTimer { timer, .. } if Some(*timer) == deadline),
+    );
     assert_eq!(
         actions.len(),
         1,
@@ -1011,7 +1028,10 @@ fn account_identity_can_be_read_before_start_without_an_omni_seed() {
         1700000000130.0,
         r#"{"code":0,"data":{"id":"611779989544632629"}}"#,
     );
-    let actions = engine.prepared(1700000000130.0).collect::<Vec<_>>();
+    let mut actions = engine.prepared(1700000000130.0).collect::<Vec<_>>();
+    actions.retain(
+        |action| !matches!(action, Action::ClearTimer { timer } if Some(*timer) == deadline),
+    );
     assert_eq!(actions.len(), 1);
     assert!(
         matches!(&actions[0], Action::Notice(Notice::CommandDone { command: 77, result: body }) if body == r#"{"userId":"611779989544632629","affiliateId":null}"#)
@@ -1039,7 +1059,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: f64::INFINITY,
         },
     );
-    let stale: Vec<_> = e.prepared(now)
+    let stale: Vec<_> = e
+        .prepared(now)
         .filter_map(|a| match a {
             Action::ClearTimer { timer } => Some(timer),
             _ => None,
@@ -1076,7 +1097,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e.prepared(due)
+    let mut pending: Vec<_> = e
+        .prepared(due)
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -1131,7 +1153,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: 10_000. / POLL_MS,
         },
     );
-    let resumed: Vec<_> = e.prepared(due + 2.)
+    let resumed: Vec<_> = e
+        .prepared(due + 2.)
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,

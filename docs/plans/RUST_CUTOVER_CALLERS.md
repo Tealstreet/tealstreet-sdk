@@ -7714,3 +7714,14 @@ ApeX now signs only through the provider at dispatch
   until P8.
 - **`sign::request` and `sign::ws_login`** are legacy test oracles taking
   `sign::LegacyCredentials`; the venue never calls them.
+
+## ApeX managed reads (#2066)
+
+Every ApeX non-trading read now passes managed host preparation
+([plan](RUST_APEXOMNI_READ_CONTEXT.md)). Symbols, the snapshot legs, balance and
+heal refreshes are Background Reads under the native snapshot generation;
+FetchAccount is a command Read; fills and the history-orders fallback are legs of
+the caller's original root, so expiry is a strict Timeout with no partial rows.
+The one-time signature resend and the three-retry transport budget are unchanged
+native counters authorised by `http_retry_context(ReadFailure)` or a fresh leg.
+The ApeX request-provenance staging row is removed.

@@ -9,10 +9,10 @@ mod read;
 pub mod sign;
 mod trading;
 
+use read::Split;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::signing::Identity;
-use read::Split;
 use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue};
 use std::collections::HashMap;
 
@@ -29,10 +29,10 @@ safe_cex_crypto::redacted_debug!(Options);
 
 pub enum Pending {
     Candles(public::Candles),
-    Public(read::Read, public::Request),
-    Account(read::Read, account::Request),
+    Public(Box<read::Read>, public::Request),
+    Account(Box<read::Read>, account::Request),
     Trade(trading::Request),
-    History(read::Read, history::Request),
+    History(Box<read::Read>, Box<history::Request>),
 }
 
 pub struct ApexOmni {
@@ -133,7 +133,7 @@ impl ApexOmni {
 
     fn response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         match read::split(pending) {
-            Split::Read(read, native) => self.read_response(cx, read, native, response),
+            Split::Read(read, native) => self.read_response(cx, *read, native, response),
             Split::Candles(pending) => self.candle_response(cx, pending, response),
             Split::Trade(pending) => self.trading_response(cx, pending, response),
         }
@@ -141,7 +141,7 @@ impl ApexOmni {
 
     fn transport_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match read::split(pending) {
-            Split::Read(read, native) => self.read_transport_failed(cx, read, native, error),
+            Split::Read(read, native) => self.read_transport_failed(cx, *read, native, error),
             Split::Candles(pending) => self.candle_transport_failed(cx, pending, error.into()),
             Split::Trade(pending) => {
                 let error = trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
@@ -157,7 +157,7 @@ impl ApexOmni {
         error: safe_cex_engine::VenueError,
     ) {
         match read::split(pending) {
-            Split::Read(read, native) => self.read_failed(cx, read, native, error),
+            Split::Read(read, native) => self.read_failed(cx, *read, native, error),
             Split::Candles(pending) => Self::candle_failed(cx, pending, error),
             Split::Trade(pending) => self.trading_failed(cx, pending, error),
         }

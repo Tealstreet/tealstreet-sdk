@@ -1,12 +1,12 @@
 //! Bounded execution reads walk venue symbol alternatives before using WS cache.
 use crate::{ApexOmni, Pending, history_wire as wire, read, sign};
 use safe_cex_engine::history::{HistoryRows, ReadCompletion, ReadHistoryRows};
+use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::model::OrderSide;
 use safe_cex_engine::request_context::{CommandEntryError, Context, Operation};
 use safe_cex_engine::selected_read::{
     CommandReadError, LocalRefusal, ReadLegPolicy, ReadRole, ReadRoot, SelectedRead,
 };
-use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::OrderSide;
 use safe_cex_engine::{Command, Cx, Query, Response, TimerId, VenueError, num};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -457,15 +457,13 @@ impl ApexOmni {
                 return;
             }
         };
-        if let Err((pending, error)) = self.send_read(
+        self.send_read(
             cx,
             read::Custody::Leg(leg),
             sign::Request::get(path, params),
             Some(ARRAYS),
-            read::Native::History(request),
-        ) {
-            self.failed(cx, pending, error.venue_error());
-        }
+            read::Native::History(Box::new(request)),
+        );
     }
     pub(crate) fn history_item(
         &mut self,

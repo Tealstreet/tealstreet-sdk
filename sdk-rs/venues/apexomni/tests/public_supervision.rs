@@ -1,7 +1,7 @@
 mod support;
 use safe_cex_engine::{Action, Command, Event, PublicFeedPolicy, SocketChannel, SocketId, TimerId};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
-use support::TestEngine;
+use support::{Prepared, TestEngine};
 
 const PING: &str = r#"{"op":"ping"}"#;
 const PONG: &str = r#"{"op":"pong"}"#;
@@ -44,7 +44,7 @@ impl Harness {
     }
 
     fn pump(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in self.engine.prepared(self.now) {
             match action {
                 Action::WsConnect {
                     socket,

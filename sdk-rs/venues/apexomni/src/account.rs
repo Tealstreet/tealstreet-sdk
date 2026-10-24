@@ -1,23 +1,21 @@
 //! Atomic private snapshots, socket healing and execution identity.
 use crate::{ApexOmni, Pending, private_wire as wire, read, sign};
-use safe_cex_engine::credential_selection::CredentialUnavailable;
-use safe_cex_engine::request_context::{CommandEntryError, Context, Operation, RetryPolicy};
-use safe_cex_engine::selected_read::{
-    BackgroundReadError, CommandReadError, LocalRefusal, ReadPolicy, ReadRole, SelectedRead,
-};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::credential_selection::CredentialUnavailable;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::request_context::{CommandEntryError, Context, Operation, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    BackgroundReadError, CommandReadError, LocalRefusal, ReadPolicy, ReadRole, SelectedRead,
+};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::Store;
-use safe_cex_engine::{
-    Command, Cx, Fill, Response, SocketChannel, SocketId, TimerId, VenueError,
-};
+use safe_cex_engine::{Command, Cx, Fill, Response, SocketChannel, SocketId, TimerId, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -794,12 +792,7 @@ impl ApexOmni {
             revision: self.account.revision,
             rows: SnapshotBuilder::default(),
         };
-        self.snapshot_read(
-            cx,
-            "/v3/open-orders",
-            Some(ArrayAt::Field("data")),
-            pending,
-        );
+        self.snapshot_read(cx, "/v3/open-orders", Some(ArrayAt::Field("data")), pending);
     }
 
     fn request_balance(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -836,25 +829,32 @@ impl ApexOmni {
                 return;
             }
         };
-        if let Err((pending, error)) = self.send_read(
+        self.send_read(
             cx,
             read::Custody::Admitted(read),
             sign::Request::get(path, vec![]),
             at,
             read::Native::Account(request),
-        ) {
-            self.failed(cx, pending, error.venue_error());
-        }
+        );
     }
 
-    fn snapshot_refused(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: String) {
-        match request {
-            Request::Positions { .. } => self.account.positions_pending = false,
-            Request::Orders { .. } => self.account.orders_pending = false,
-            Request::Balance => self.account.balance_pending = false,
+    fn snapshot_refused(&mut self, cx: &mut Cx<'_, Pending>, leg: Request, error: String) {
+        let snapshot = match leg {
+            Request::Positions { .. } => {
+                self.account.positions_pending = false;
+                true
+            }
+            Request::Orders { .. } => {
+                self.account.orders_pending = false;
+                true
+            }
+            Request::Balance => {
+                self.account.balance_pending = false;
+                false
+            }
             Request::Identity => return,
-        }
-        if !matches!(request, Request::Balance) {
+        };
+        if snapshot {
             self.account.snapshot = None;
         }
         cx.notice(Level::Error, code::CONFIG_INVALID, error);
@@ -922,7 +922,7 @@ impl ApexOmni {
                     }
                 }
             }
-            Request::Balance | Request::Identity { .. } => {}
+            Request::Balance | Request::Identity => {}
         }
     }
 
@@ -1305,15 +1305,13 @@ impl ApexOmni {
         };
         match SelectedRead::command(cx, selected, policy, missing) {
             Ok(read) => {
-                if let Err((pending, error)) = self.send_read(
+                self.send_read(
                     cx,
                     read::Custody::Admitted(read),
                     sign::Request::get("/v3/account", vec![]),
                     None,
                     read::Native::Account(Request::Identity),
-                ) {
-                    self.failed(cx, pending, error.venue_error());
-                }
+                );
             }
             Err(CommandReadError::Entry(CommandEntryError::Revoked)) => {
                 let _ = cx.reject_expired_command(Operation::Read);

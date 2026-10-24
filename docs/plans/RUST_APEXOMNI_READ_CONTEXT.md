@@ -62,9 +62,10 @@ and attaches `cx.sign_http`. Wrapper state lives in `Pending::SignedAuth`.
   - A missing identity stays public discovery for symbols only. Every other
     read keeps the typed refusal "ApeX API key, signing key and passphrase are
     required" through `LocalRefusal`, before any action.
-  - The passphrase test reads the trusted `Identity.passphrase` ref only,
-    never presence of material (m26ps4 pin 2). Its comment stays, and the
-    ApeX expectation in the credential-selection checker records it.
+  - The passphrase test reads the trusted `Identity.passphrase` ref of the
+    `Slots::select` identity only, never presence of material (m26ps4 pin 2).
+    Its comment stays. The credential-selection checker has no term for it, and
+    ApeX keeps no venue-local selection, so no ApeX checker entry is needed.
   - Background Read with the 20 s native timeout. The signed branch carries
     `RetryPolicy::ReadFailure` solely for its one native signature resend via
     `http_retry_context(ReadFailure)`; it has zero transport retries. The
@@ -107,7 +108,7 @@ and attaches `cx.sign_http`. Wrapper state lives in `Pending::SignedAuth`.
 
 ## Original REDs (`venues/apexomni/tests/read_context.rs`)
 
-Run on unchanged source `aa824213600` with
+Run on unchanged source `aa824213600` (all 10 GREEN after the source change) with
 `cargo test -p safe-cex-venue-apexomni --test read_context`:
 **7 assertion REDs, 3 GREEN controls, no compile or fixture failures.**
 One drain counts legacy `Http` and follows the real Prepare/Bind/Claim
@@ -132,19 +133,43 @@ handoff.
     transport loss, sends nothing more and schedules the startup backoff
     (GREEN control).
 
-Readiness controls to add with the source change:
-- managed counters on the signature resend, transport retries and the
-  history fallback leg;
-- poll-tick and heal refreshes;
-- stale snapshot generation after an uncertain write;
-- late DATA after `finish_http_context`;
-- reused command ID with a live peer;
-- preparation refusal for each family;
-- an exact-deadline Background read that does not complete as success.
+Readiness controls, added with the source change (all GREEN):
+- managed attempts for the signature resend and every transport retry
+  (`signature_resend_and_transport_retries_are_managed_attempts`);
+- the fills aliases and history-orders fallback as managed legs of one root,
+  with one terminal (`fill_aliases_and_the_history_fallback_are_managed_legs_of_one_root`);
+- a position heal refresh as a managed signed Background read;
+- late DATA after a finished Background read changes nothing;
+- a reused command ID with a live peer sends nothing more;
+- preparation refusal for each family: symbols reschedule startup, snapshot
+  legs are not resent, FetchAccount fails once, and a refused fills page walks
+  the native aliases and fallback without a resend, then fails once;
+- a Background read answered at its exact deadline does not commit.
+- A stale snapshot after an uncertain write stays fenced by the native
+  generation, as the existing
+  `late_cancel_ack_preserves_uncertainty_without_bypassing_native_read_fences`
+  now shows over managed reads.
 
-Existing native suites (`account`, `history`, `public`, `resilience`,
-`startup_resilience`, `symbols_signing`) keep their bodies; fixtures may adopt
-`prepared_actions` mechanically only.
+## Source change
+
+- `read.rs` holds each read's custody (`Public` Context, `AdmittedRead`, or a
+  history `ReadLeg`) with the request's own `legacy` and `retries` budgets.
+  `Pending::Public/Account/History` carry it beside the native request.
+- Delivery is validated before any item or response: Background custody with
+  `validate_background_read_http_delivery`; FetchAccount with
+  `validate_read_http_delivery`; history legs through `ReadRoot::validate_delivery`.
+  A stale Background delivery settles natively without publishing; a stale
+  command delivery is left to the engine's terminal.
+- Background contexts retire with `finish_http_context` after their native
+  completion; command roots end at `done_context`/`fail_context`, and history
+  through `ReadHistoryRows` admitted under the exact delivered leg.
+- Unsigned symbols use `RetryPolicy::Never`, so a signature-shaped refusal is a
+  failure and the startup backoff, not a resend.
+
+Existing native suites keep their bodies. Their fixtures adopt
+`prepared_actions` at the time of the event that produced each drain, through
+`support::Prepared`; the trading suite's own timed wrapper drains the same way.
+The FetchAccount identity test also admits the managed read's own deadline timer.
 
 ## Gates
 

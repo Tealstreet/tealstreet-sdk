@@ -18,7 +18,8 @@ fn seeded_socket() -> (TestEngine, safe_cex_engine::SocketId) {
     e.start(0.0);
     let r = requests(&mut e, 0.0).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let socket = e.prepared(10.0)
+    let socket = e
+        .prepared(10.0)
         .find_map(|a| {
             if let Action::WsConnect {
                 socket,
@@ -57,6 +58,10 @@ fn query(
             },
         }),
     );
+}
+/// The release time before page `n`: the query, then each prior page's reply.
+fn after(n: usize) -> f64 {
+    if n == 0 { 20.0 } else { 29.0 + n as f64 }
 }
 fn result(e: &mut TestEngine, now: f64) -> Result<String, String> {
     e.prepared(now)
@@ -308,7 +313,7 @@ fn exhausted_rest_failures_reject_without_laundering_cache_then_rest_stays_autho
     e.prepared(15.0).for_each(drop);
     query(&mut e, None, None, None, None);
     for i in 0..4 {
-        let r = owned_request(&mut e, 20.0);
+        let r = owned_request(&mut e, after(i));
         response(
             &mut e,
             &r,
@@ -317,12 +322,12 @@ fn exhausted_rest_failures_reject_without_laundering_cache_then_rest_stays_autho
         );
     }
     assert!(
-        owned_error(&mut e, 30.0 + i as f64)
+        owned_error(&mut e, 33.0)
             .message
             .contains("temporarily unavailable")
     );
     query(&mut e, None, None, None, None);
-    let r = requests(&mut e, 30.0 + i as f64).remove(0);
+    let r = requests(&mut e, 20.0).remove(0);
     response(
         &mut e,
         &r,
@@ -366,7 +371,7 @@ fn anonymous_ws_cache_preserves_raw_execution_identity_across_second_precision_o
     e.prepared(15.0).for_each(drop);
     query(&mut e, None, None, None, None);
     for offset in 0..4 {
-        let request = requests(&mut e, 15.0).remove(0);
+        let request = requests(&mut e, after(offset)).remove(0);
         response(
             &mut e,
             &request,
@@ -374,7 +379,7 @@ fn anonymous_ws_cache_preserves_raw_execution_identity_across_second_precision_o
             r#"{"code":0,"data":[]}"#,
         );
     }
-    let result = result(&mut e, 30.0 + offset as f64).unwrap();
+    let result = result(&mut e, 33.0).unwrap();
     let rows: Vec<Row> = serde_json::from_str(&result).unwrap();
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|r| r.timestamp == 1700000000.0));
@@ -393,7 +398,7 @@ fn same_second_ws_cache_uses_latest_execution_before_limit() {
     e.prepared(15.0).for_each(drop);
     query(&mut e, None, None, None, Some(1));
     for offset in 0..4 {
-        let request = requests(&mut e, 15.0).remove(0);
+        let request = requests(&mut e, after(offset)).remove(0);
         response(
             &mut e,
             &request,
@@ -401,7 +406,7 @@ fn same_second_ws_cache_uses_latest_execution_before_limit() {
             r#"{"code":0,"data":[]}"#,
         );
     }
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0 + offset as f64).unwrap()).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 33.0).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].order_id.as_deref(), Some("second-order"));
     assert_eq!(rows[0].qty, 2.0);
@@ -487,7 +492,7 @@ fn ws_and_synthetic_cache_filter_and_sort_using_original_milliseconds() {
             Some(1),
         );
         for offset in 0..4 {
-            let request = requests(&mut e, 15.0).remove(0);
+            let request = requests(&mut e, after(offset)).remove(0);
             response(
                 &mut e,
                 &request,
@@ -495,7 +500,7 @@ fn ws_and_synthetic_cache_filter_and_sort_using_original_milliseconds() {
                 r#"{"code":0,"data":[]}"#,
             );
         }
-        let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 30.0 + offset as f64).unwrap()).unwrap();
+        let rows: Vec<Row> = serde_json::from_str(&result(&mut e, 33.0).unwrap()).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].order_id.as_deref(), Some("order-456"));
         assert_eq!(rows[0].timestamp, 1700000000.0);
@@ -590,7 +595,7 @@ fn all_native_alias_failures_reject_typed_instead_of_empty_success() {
     let mut e = seeded();
     query(&mut e, None, None, None, None);
     for i in 0..4 {
-        let r = owned_request(&mut e, 20.0);
+        let r = owned_request(&mut e, after(i));
         candidate(&r, i);
         response(
             &mut e,
@@ -599,7 +604,11 @@ fn all_native_alias_failures_reject_typed_instead_of_empty_success() {
             r#"{"code":40001,"msg":"native unavailable"}"#,
         );
     }
-    assert!(owned_error(&mut e, 30.0 + i as f64).message.contains("native unavailable"));
+    assert!(
+        owned_error(&mut e, 33.0)
+            .message
+            .contains("native unavailable")
+    );
 }
 #[test]
 fn malformed_and_missing_list_exhaustion_cannot_publish_valid_prefixes_or_cache() {
@@ -610,11 +619,11 @@ fn malformed_and_missing_list_exhaustion_cannot_publish_valid_prefixes_or_cache(
         let mut e = cached();
         query(&mut e, None, None, None, None);
         for i in 0..4 {
-            let r = owned_request(&mut e, 20.0);
+            let r = owned_request(&mut e, after(i));
             candidate(&r, i);
             response(&mut e, &r, 30.0 + i as f64, &body);
         }
-        owned_error(&mut e, 30.0 + i as f64);
+        owned_error(&mut e, 33.0);
     }
 }
 #[test]
@@ -660,7 +669,11 @@ fn transport_exhaustion_resets_all_sixteen_attempt_prefixes_before_typed_rejecti
             },
         );
     }
-    assert!(owned_error(&mut e, 30.0).message.contains("network unavailable"));
+    assert!(
+        owned_error(&mut e, 30.0)
+            .message
+            .contains("network unavailable")
+    );
 }
 #[test]
 fn validated_empty_or_filtered_success_keeps_cache_selection_amid_failed_alternatives() {
@@ -677,7 +690,7 @@ fn validated_empty_or_filtered_success_keeps_cache_selection_amid_failed_alterna
             };
             response(&mut e, &r, 30.0 + i as f64, body);
         }
-        let rows = owned_rows(&mut e, 7, 30.0 + i as f64);
+        let rows = owned_rows(&mut e, 7, 33.0);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].order_id.as_deref(), Some("cached-order"));
     }
@@ -806,7 +819,10 @@ fn history_rejection_does_not_erase_background_cache_or_cross_concurrent_owners(
         30.0,
         &format!(r#"{{"code":0,"data":[{FILL}]}}"#),
     );
-    assert_eq!(owned_rows(&mut e, 8, 30.0)[0].order_id.as_deref(), Some("order1"));
+    assert_eq!(
+        owned_rows(&mut e, 8, 30.0)[0].order_id.as_deref(),
+        Some("order1")
+    );
     response(
         &mut e,
         &first,

@@ -2,12 +2,12 @@
 use crate::{ApexOmni, Pending, public_wire as wire};
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, Interval, Limits, Market, MinMax, PositionSide, Precision, Ticker,
 };
-use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::request_context::{
     Context, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
 };
@@ -226,9 +226,7 @@ impl ApexOmni {
             match SelectedRead::background(cx, selected, policy) {
                 Ok(read) => Ok(crate::read::Custody::Admitted(read)),
                 Err(BackgroundReadError::Selection(_)) => Err(crate::read::MISSING.to_owned()),
-                Err(BackgroundReadError::Admission(error)) => {
-                    Err(error.read_venue_error().message)
-                }
+                Err(BackgroundReadError::Admission(error)) => Err(error.read_venue_error().message),
             }
         } else {
             let policy = Policy {
@@ -242,8 +240,8 @@ impl ApexOmni {
                 .map(crate::read::Custody::Public)
                 .map_err(|error| error.read_venue_error().message)
         };
-        let queued = custody.map(|custody| {
-            self.send_read(
+        match custody {
+            Ok(custody) => self.send_read(
                 cx,
                 custody,
                 crate::sign::Request::get("/v3/symbols", vec![]),
@@ -253,11 +251,7 @@ impl ApexOmni {
                     "perpetualContract",
                 ])),
                 crate::read::Native::Public(markets),
-            )
-        });
-        match queued {
-            Ok(Ok(_)) => {}
-            Ok(Err((pending, error))) => self.failed(cx, pending, error.venue_error()),
+            ),
             Err(error) => {
                 cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.public.seed_retry.failed(cx, ());

@@ -1,6 +1,7 @@
 mod support;
 use safe_cex_engine::model::Balance;
 use safe_cex_engine::{Action, Engine, Event, SocketChannel, SocketId, TimerId};
+use support::Prepared;
 type LivenessEngine = Engine<safe_cex_venue_apexomni::ApexOmni>;
 const REJECTED: &str = r#"{"op":"login","success":false,"ret_msg":"bad key"}"#;
 const ACCEPTED: &str = r#"{"op":"login","success":true}"#;
@@ -20,7 +21,8 @@ fn connecting() -> (LivenessEngine, SocketId, f64, bool) {
     e.start(0.0);
     let request = support::requests(&mut e, 0.0).remove(0);
     support::response(&mut e, &request, 10.0, support::MARKETS);
-    let socket = e.prepared(10.0)
+    let socket = e
+        .prepared(10.0)
         .find_map(|a| match a {
             Action::WsConnect {
                 socket,
@@ -39,7 +41,8 @@ fn started() -> (LivenessEngine, SocketId, f64, TimerId) {
         e.drain_actions().for_each(drop);
         e.handle(opened_at, Event::WsOpened { socket });
     }
-    let timer = e.prepared(opened_at)
+    let timer = e
+        .prepared(opened_at)
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if at_ms == opened_at + 5000.0 => Some(timer),
             _ => None,
@@ -102,7 +105,8 @@ fn rejected_login_closes_preserves_state_and_increases_retry_backoff() {
             "retired socket events must be inert"
         );
         e.handle(at, Event::TimerFired { timer: retry });
-        let replacement = e.prepared(at)
+        let replacement = e
+            .prepared(at)
             .find_map(|a| match a {
                 Action::WsConnect {
                     socket,
@@ -124,7 +128,8 @@ fn rejected_login_closes_preserves_state_and_increases_retry_backoff() {
         socket = replacement;
         now = at;
         e.handle(now, Event::WsOpened { socket });
-        watch = e.prepared(now)
+        watch = e
+            .prepared(now)
             .find_map(|a| match a {
                 Action::SetTimer { timer, .. } => Some(timer),
                 _ => None,
@@ -139,7 +144,8 @@ fn continuous_pongs_cannot_extend_the_authentication_deadline() {
     e.handle(now + 4999.0, Event::WsMessage { socket, text: PONG });
     e.prepared(now + 4999.0).for_each(drop);
     e.handle(now + 5000.0, Event::TimerFired { timer: first_watch });
-    let mut timers: Vec<_> = e.prepared(now + 5000.0)
+    let mut timers: Vec<_> = e
+        .prepared(now + 5000.0)
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -154,7 +160,8 @@ fn continuous_pongs_cannot_extend_the_authentication_deadline() {
         e.handle(at - 1.0, Event::WsMessage { socket, text: PONG });
         e.prepared(at - 1.0).for_each(drop);
         e.handle(at, Event::TimerFired { timer });
-        timers = e.prepared(at)
+        timers = e
+            .prepared(at)
             .filter_map(|a| match a {
                 Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
                 _ => None,

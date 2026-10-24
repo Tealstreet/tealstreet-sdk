@@ -8,7 +8,7 @@ pub const MARKETS: &str = r#"{"code":0,"data":{"contractConfig":{"perpetualContr
 pub trait Prepared {
     fn prepared(&mut self, now: f64) -> std::vec::IntoIter<Action>;
 }
-impl Prepared for TestEngine {
+impl<V: safe_cex_engine::Venue> Prepared for Engine<V> {
     fn prepared(&mut self, now: f64) -> std::vec::IntoIter<Action> {
         safe_cex_engine::test_support::prepared_actions(self, now).into_iter()
     }
