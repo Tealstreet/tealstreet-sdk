@@ -7958,3 +7958,19 @@ reservations, signed role, wire and completion behavior. Existing SDK STP, order
 cancel and setting dispatch remains; no successful capability is added. The
 exact prune is3 fingerprints/3 occurrences, family43F/67O to40F/64O at this base;
 remaining remote trading/refusal/history/session consumers stay inventoried.
+
+## ApeX managed reads (#2066)
+
+Every ApeX non-trading read now passes managed host preparation
+([plan](RUST_APEXOMNI_READ_CONTEXT.md)). Symbols, the snapshot legs, balance and
+heal refreshes are Background Reads under the native snapshot generation;
+FetchAccount is a command Read; fills and the history-orders fallback are legs of
+the caller's original root, so expiry is a strict Timeout with no partial rows.
+The one-time signature resend and the three-retry transport budget are unchanged
+native counters authorised by `http_retry_context(ReadFailure)` or a fresh leg;
+only a typed Network failure spends a transport retry.
+**NEW bounds:** each read's 20 s timeout now runs from admission to expiry, so it
+covers host preparation, binding and signing as well as the HTTP exchange.
+Retries keep that deadline; each history page is a fresh 20 s leg clipped to the
+caller's original deadline.
+The ApeX request-provenance staging row is removed.

@@ -1,14 +1,20 @@
 //! Bounded execution reads walk venue symbol alternatives before using WS cache.
-use crate::{ApexOmni, Pending, history_wire as wire, sign};
-use safe_cex_engine::history::{Completion, HistoryRows};
+use crate::{ApexOmni, Pending, history_wire as wire, read, sign};
+use safe_cex_engine::history::{HistoryRows, ReadCompletion, ReadHistoryRows};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::OrderSide;
+use safe_cex_engine::request_context::{CommandEntryError, Context, Operation};
+use safe_cex_engine::selected_read::{
+    CommandReadError, LocalRefusal, ReadLegPolicy, ReadRole, ReadRoot, SelectedRead,
+};
 use safe_cex_engine::{Command, Cx, Query, Response, TimerId, VenueError, num};
 use serde::Serialize;
 use std::collections::HashSet;
 
 pub struct Request {
-    owner: Box<HistoryRows<Execution>>,
+    /// The caller's original receipt; every alias and fallback page is a leg of it.
+    root: ReadRoot,
+    owner: Box<ReadHistoryRows<Execution>>,
     symbol: String,
     candidates: Vec<String>,
     candidate: usize,
@@ -23,6 +29,9 @@ pub struct Request {
     validated_response: bool,
 }
 impl Request {
+    pub(crate) fn root(&self) -> &ReadRoot {
+        &self.root
+    }
     pub(crate) fn reset(&mut self) {
         self.count = 0;
         self.current.clear();
@@ -369,12 +378,32 @@ impl ApexOmni {
                 if market.id != market.symbol {
                     candidates.push(market.symbol.clone());
                 }
+                let (symbol, quote) = (market.symbol.clone(), market.quote.clone());
+                let selected = SelectedRead::select(&self.slots, ReadRole::Read { scope: None });
+                let missing = LocalRefusal {
+                    diagnostic: None,
+                    error: VenueError::new(read::MISSING),
+                };
+                let root = match SelectedRead::command_root(cx, selected, missing) {
+                    Ok(root) => root,
+                    Err(CommandReadError::Entry(CommandEntryError::Revoked)) => {
+                        let _ = cx.reject_expired_command(Operation::Read);
+                        return Ok(());
+                    }
+                    Err(_) => return Ok(()),
+                };
+                let completion =
+                    match ReadCompletion::from_context(cx, command, root.context().clone()) {
+                        Ok(completion) => completion,
+                        Err(error) => {
+                            let _ = cx.fail_context(root.context(), error.read_venue_error());
+                            return Ok(());
+                        }
+                    };
                 let request = Request {
-                    owner: Box::new(HistoryRows::new(
-                        Completion::new(command),
-                        encode_executions,
-                    )),
-                    symbol: market.symbol.clone(),
+                    root,
+                    owner: Box::new(HistoryRows::new(completion, encode_executions)),
+                    symbol,
                     candidates,
                     candidate: 0,
                     fallback: false,
@@ -382,7 +411,7 @@ impl ApexOmni {
                     from: from_ms.filter(|n| n.is_finite()),
                     to: to_ms.filter(|n| n.is_finite()),
                     limit: limit.unwrap_or(100).clamp(1, 100) as usize,
-                    quote: market.quote.clone(),
+                    quote,
                     count: 0,
                     current: vec![],
                     validated_response: false,
@@ -392,7 +421,7 @@ impl ApexOmni {
         }
         Ok(())
     }
-    fn request_history(&self, cx: &mut Cx<'_, Pending>, request: Request) {
+    fn request_history(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         let mut params = vec![
             (
                 "symbol".into(),
@@ -414,15 +443,27 @@ impl ApexOmni {
         } else {
             "/v3/fills"
         };
-        let command = request.owner.command();
-        if let Err(error) = self.signed(
+        let leg = request.root.leg(
             cx,
+            ReadLegPolicy {
+                timeout_ms: read::TIMEOUT_MS,
+                pacing: None,
+            },
+        );
+        let leg = match leg {
+            Ok(leg) => leg,
+            Err(error) => {
+                let _ = request.owner.finish(cx, Err(error.read_venue_error()));
+                return;
+            }
+        };
+        self.send_read(
+            cx,
+            read::Custody::Leg(leg),
             sign::Request::get(path, params),
-            Pending::History(request),
             Some(ARRAYS),
-        ) {
-            cx.fail(command, error);
-        }
+            read::Native::History(Box::new(request)),
+        );
     }
     pub(crate) fn history_item(
         &mut self,
@@ -455,6 +496,7 @@ impl ApexOmni {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut request: Request,
+        leg: &Context,
         _response: Response<'_>,
     ) {
         // The signed wrapper and required-list decoder validated this response.
@@ -462,25 +504,28 @@ impl ApexOmni {
         request.validated_response = true;
         // Nonempty primary data is authoritative even when its rows are filtered.
         if request.count > 0 {
-            self.finish_history(cx, request);
+            self.finish_history(cx, request, leg);
             return;
         }
         request.candidate += 1;
         request.reset();
         if request.candidate == request.candidates.len() {
             if request.fallback {
-                self.finish_history(cx, request);
+                self.finish_history(cx, request, leg);
                 return;
             }
             request.fallback = true;
             request.candidate = 0;
         }
+        // The completed page leg retires before its successor is minted.
+        let _ = cx.finish_http_context(leg);
         self.request_history(cx, request);
     }
     pub(crate) fn history_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut request: Request,
+        leg: &Context,
         error: &str,
     ) {
         request.reset();
@@ -488,18 +533,20 @@ impl ApexOmni {
         if request.candidate == request.candidates.len() {
             if request.fallback {
                 if request.validated_response {
-                    self.finish_history(cx, request);
+                    self.finish_history(cx, request, leg);
                 } else {
-                    request.owner.finish(cx, Err(VenueError::new(error)));
+                    let _ = request.owner.finish(cx, Err(VenueError::new(error)));
                 }
                 return;
             }
             request.fallback = true;
             request.candidate = 0;
         }
+        // The completed page leg retires before its successor is minted.
+        let _ = cx.finish_http_context(leg);
         self.request_history(cx, request);
     }
-    fn finish_history(&self, cx: &mut Cx<'_, Pending>, mut request: Request) {
+    fn finish_history(&self, cx: &mut Cx<'_, Pending>, mut request: Request, leg: &Context) {
         if request.current.is_empty() {
             request.current = self
                 .account
@@ -539,11 +586,17 @@ impl ApexOmni {
             .current
             .sort_by(|a, b| b.timestamp_ms.total_cmp(&a.timestamp_ms));
         request.current.truncate(request.limit);
-        for entry in request.current {
-            request.owner.stage(entry.row);
-        }
-        request.owner.accept_page();
-        request.owner.finish(cx, Ok(()));
+        // Rows enter coverage only under this exact delivery of the original root.
+        let admitted = request.owner.admit(cx, leg).map(|mut page| {
+            for entry in request.current {
+                page.stage(entry.row);
+            }
+            page.accept_page();
+        });
+        let _ = match admitted {
+            Ok(()) => request.owner.finish(cx, Ok(())),
+            Err(error) => request.owner.reject(cx, error.read_venue_error()),
+        };
     }
     pub(crate) fn history_timer(&mut self, _cx: &mut Cx<'_, Pending>, _timer: TimerId) -> bool {
         false
