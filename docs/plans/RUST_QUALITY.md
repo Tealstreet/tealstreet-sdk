@@ -1759,3 +1759,11 @@ missing-array hint controls pass on an independently archived native source;
 one exposed the candidate's narrower decoded-field retry projection. The fix
 retains the exact approved minimum compatibility input, not a new retry policy.
 Source/caller closure is CLEARf0ecc; full-map carryover is pending for that delta.
+
+### Paradex config and initial local entry
+
+Original e743120ab7b compiles with 22 intended REDs/four controls on actual77f124;
+all26 pass unchanged after implementation. Exact request inventory shrinks seven
+occurrences (account10->9/trading21->15/family48->41), with no bootstrap/shared
+engine/signing edit. Config expiry now includes host preparation; typed entry
+refusals and LocalSetting receipt enforcement are caller-visible boundaries.
