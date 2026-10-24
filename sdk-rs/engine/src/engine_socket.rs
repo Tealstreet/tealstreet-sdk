@@ -34,11 +34,22 @@ pub(super) struct Continuation<P> {
 
 impl<P> Cx<'_, P> {
     fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut Self) -> R) -> R {
-        let mut driver = std::mem::take(&mut self.io.socket_driver);
+        let mut driver = self.take_socket_driver();
         let result = f(&mut driver, self);
-        self.io.socket_driver = driver;
+        self.restore_socket_driver(driver);
         result
     }
+    // Shared out of line: every driver closure would otherwise inline the
+    // driver's default construction and drop.
+    #[inline(never)]
+    fn take_socket_driver(&mut self) -> Driver {
+        std::mem::take(&mut self.io.socket_driver)
+    }
+    #[inline(never)]
+    fn restore_socket_driver(&mut self, driver: Driver) {
+        self.io.socket_driver = driver;
+    }
+    #[inline(never)]
     pub(super) fn socket_effects(&mut self, effects: Vec<Effect>) {
         if self.io.socket_effects.len().saturating_add(effects.len()) > MAX_EFFECTS {
             self.io.socket_failed = true;
