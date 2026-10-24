@@ -908,3 +908,18 @@ Pending, validate root.validate_delivery on the exact pair before parsing, and
 settle only the retained root. Local refusals remain synchronous/keyless with
 no physical leg. Root/leg source and revised controls require hcmq3f review
 before apply; the prior fixed-context proposal is superseded, not CLEAR.
+
+Short-caller originals690c31c9cb1 execute21 controls:12GREEN/9assertionRED,
+zero ignored. Genuine handle_command wait37 accepts native ID at1036; the
+request's missing physical timeout cap and publication at1038 are two added
+REDs. Existing seven adoption REDs persist. No compile/missing-API failures
+are counted. The proposed corrected source is
+/tmp/codex-backpack-identity-root.patch, SHA-256
+114cfd3f54a6602456489994cbe2471dd8c57f301879fda7a0bda0eeaac4e3ee.
+Actual ReadRoot plus ReadLeg live in Pending; root comes from command_root's
+original receipt, one physical leg caps at20s and the exact root deadline,
+and root.validate_delivery authenticates that same selected pair. Local
+missing/configuration refusals remain immediate keyless completions, not
+physical roots. Registry/seed/Slots rules carry unchanged; lib pending/callback
+ownership and identity root issuance require fresh hcmq3f source review.
+No runtime source applied, compile/readiness or CI claim for this proposal.
