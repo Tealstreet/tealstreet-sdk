@@ -561,3 +561,12 @@ Test compile correction before any original RED claim: the initial control used
 nonexistent ErrorKind::Capacity. Capacity is a Context admission cause projected
 as existing ErrorKind::Internal; the test now pins that actual shared contract.
 The failed compile is not assertion-RED evidence and no production changed.
+
+Original-source execution on `26deb9e7477` compiles and runs seven controls:
+three GREEN (native messages/fields and no work/Store change, duplicate prior
+owner delivery, immediate reuse), four assertion RED (both settings at an
+invalid clock and at the 256-owner capacity bound). All four fail only because
+the old numeric branch reports Unsupported instead of shared InvalidInput or
+Internal capacity; zero skipped. The earlier nonexistent-enum compile failure
+is excluded from this count. Runtime source is unchanged. The exact reviewed
+helper proposal is prepared separately before applying it.
