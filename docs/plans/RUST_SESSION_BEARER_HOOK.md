@@ -36,25 +36,36 @@ Moving these requests onto managed dispatch leaves three holes:
 - It grants no authority. The request keeps its own root, Slot, Attempt and
   owner, and binding to a retired Session refuses with `Revoked`.
 
-**Hook.** A read-only `Venue` method with a default of `NotReady`:
+**Hook.** Two read-only `Venue` methods; both default to `NotReady` / `None`:
 
 ```rust
+/// At prepare and reprepare only: the one place the token is copied.
 fn session_bearer(&self, generation: u64) -> SessionBearer;
 enum SessionBearer {
     Ready { value: SecretHeaderValue, revision: u64 },
     NotReady,
 }
+/// At claim: no token, no clone, no allocation.
+fn session_bearer_revision(&self, generation: u64) -> Option<u64>;
 ```
 
-- It is `&self`, with no I/O, no `Cx` and no state change. It returns the
-  venue's current token, rendered as the header value, and a revision that the
-  venue bumps on every token change.
-- The engine calls it only at managed prepare, reprepare and retry or resend
-  preparation of a bound request. It never calls it at issue and never queues
-  the result.
+- Both are `&self`, with no I/O, no `Cx` and no state change.
+- `session_bearer` returns the venue's current token as the full header value
+  (`Bearer <jwt>`) plus its revision. It is the only call that copies the token.
+- `session_bearer_revision` returns the current revision only, or `None` when
+  the venue is not ready. It never touches the token, so the claim path neither
+  clones nor allocates.
+- The revision is scoped to the generation and monotonic: it is bumped on every
+  token change within that generation, never wraps or is reused, and a value
+  that would overflow makes the hook answer `NotReady`.
+- The engine calls `session_bearer` only at managed prepare, reprepare and
+  retry or resend preparation of a bound request, and `session_bearer_revision`
+  only at claim. It never calls either at issue and never queues a result.
 - The engine sets exactly one header, `Authorization`, and a recipe header of
-  that name is refused. `SecretHeaderValue` is redacted in `Debug` and never
-  appears in notices or diagnostics.
+  that name is refused. `SecretHeaderValue` is redacted in `Debug`, never
+  appears in notices or diagnostics, is bounded in length, and is wiped on drop
+  and on reprepare. Proving the wipe, redaction and header bounds is part of
+  the runtime patch.
 
 **Where it plugs in** (managed lifecycle only; the recipe interface is
 unchanged):
@@ -64,8 +75,8 @@ unchanged):
      work or HTTP. The venue's own auth path decides when to try again.
    - `Ready` sets the header on the outbound action. The prepared packet records
      `(generation, revision)`.
-2. **Claim and release.** Re-check the generation, then call the hook to get
-   the current revision.
+2. **Claim and release.** Re-check the generation, then call
+   `session_bearer_revision` (no token copy).
    - **Generation not live:** the packet never releases. It is discarded and
      the owner is failed typed `NotSent` (`SessionRetired`).
    - **Revision moved within the same generation:** force a reprepare through
@@ -189,7 +200,14 @@ Notes:
   - a Read carries no financial outcome;
   - previously released or effective legs never turn the whole job `NotSent`.
 
-## REDs (engine; compile REDs where the API is new)
+## REDs (engine; compiling runtime REDs)
+
+Per codex-zs5e83, a missing method is not an original RED. Each RED compiles
+against today's engine through a test-only observation adapter: a probe venue
+that issues managed requests through the existing Prepare/Bind/Claim path and
+records what the engine does. Each RED asserts the contract, which today's
+engine lacks. Working controls show unbound requests and already-released
+packets behaving correctly today.
 
 - **R1 (just-in-time read).** A bound request issued while the venue holds
   token A, then prepared after the venue moves to B, sends B. The hook is never
