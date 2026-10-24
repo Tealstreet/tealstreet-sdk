@@ -438,3 +438,22 @@ fake response unchanged. Shared recorded-transport control (1), package typechec
 and fixture formatting pass. ESLint excludes this existing WASM fixture by repo
 configuration; no lint execution is claimed for it. No local WASM package/build
 or repaired replay result is claimed before fresh CI.
+
+## Explicit-empty public startup regression
+
+Fresh CI40085573052 exposed a distinct real failure after the feature/transport
+repairs: public replay times out waiting for Bitrue's socket, and the shipping
+worker control observes no HTTP requests. Independent source review traced
+explicit `key:"",secret:""` setup to a present primary Identity with empty refs.
+The registry passed it to Slots, so the catalogue selected signing and the
+recipe correctly refused before transport. The older native fixture filtered
+empty pairs, masking the registry boundary.
+
+Before source changes, add a native registry regression for explicit-empty and
+partial primary inputs, beside the existing `{}` working control. Each must
+issue one unsigned Primary-routed catalogue request. Normalize only an
+incomplete primary at the trusted Bitrue construction boundary; preserve invalid
+secondary refusal, keyed public-only catalogue signing and provider-only REST
+custody. Do not change shared Slot selection, route policy or the signing recipe.
+The banned-patterns failure separately reports unrelated incoming Lighter and
+Paradex prunes; re-integrate the real landing rather than relaxing the checker.

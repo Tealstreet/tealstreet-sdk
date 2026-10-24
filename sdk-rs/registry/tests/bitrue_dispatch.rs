@@ -97,3 +97,33 @@ fn keyless_catalogue_and_hosted_admission_remain_distinct() {
     );
     assert!(!safe_cex_venues::remote_signing_policy("bitrue").enabled);
 }
+
+#[test]
+fn explicit_empty_primary_keeps_the_native_unsigned_catalogue() {
+    for input in [
+        r#"{"key":"","secret":"","publicDataOnly":true}"#,
+        r#"{"key":"fixture-key","secret":"","publicDataOnly":true}"#,
+        r#"{"key":"","secret":"fixture-material","publicDataOnly":true}"#,
+    ] {
+        let requests = build(
+            "bitrue",
+            serde_json::from_str(input).unwrap(),
+            entropy(),
+            Catalogue,
+        )
+        .unwrap();
+        assert_eq!(requests.len(), 1, "unsigned catalogue for {input}");
+        assert_eq!(
+            requests[0].route,
+            Some(safe_cex_engine::RequestRoute::Primary)
+        );
+        assert_eq!(
+            requests[0]
+                .headers
+                .iter()
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>(),
+            ["Content-Type", "X-Referer"]
+        );
+    }
+}
