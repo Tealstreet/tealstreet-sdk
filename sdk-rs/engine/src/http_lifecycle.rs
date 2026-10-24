@@ -1164,7 +1164,7 @@ impl<V: Venue> Engine<V> {
                     };
                     #[cfg(feature = "http-plans")]
                     let sealed = if let Some(plan) = &plan {
-                        cx.fail_plan(plan, error)
+                        cx.fail_plan_owned(plan, error)
                     } else {
                         cx.fail_context(&delivery.context, error)
                     };

@@ -4463,7 +4463,7 @@ impl<V: Venue> Engine<V> {
                     store: &mut self.store,
                     io: &mut self.io,
                 }
-                .fail_plan(
+                .fail_plan_owned(
                     &plan,
                     VenueError::new("HTTP plan timed out").kind(ErrorKind::Timeout),
                 )

@@ -366,7 +366,7 @@ impl<P> Cx<'_, P> {
                     .result(&delivery, WriteResult::Failed(error.clone()))
                     .expect("pre-enrolled selected write");
             }
-            self.fail_plan(&plan, error)
+            self.fail_plan_owned(&plan, error)
                 .expect("exact selected plan failure");
             return;
         }

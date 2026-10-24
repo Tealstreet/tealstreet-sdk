@@ -3,7 +3,8 @@
 Plan only, 2026-10-24. Owner codex-uufub4. Required reviewers are
 claude-fe7lgm (Plan ownership and terminals), codex-cxxyqr (history admission and
 recovery), and consumer codex-zs5e83. Base: actual landing `ce278e0b4a9`.
-This checkpoint changes documentation only; signatures below are provisional.
+The original plan and evidence are followed by a reviewed binding slice;
+page/terminal and transport-proof signatures below remain provisional.
 
 ## Problem and scope
 
@@ -246,3 +247,30 @@ new-contract controls still require the reviewed implementation. No shared
 runtime or venue inventory is changed in this checkpoint. Scoped strict Clippy
 and workspace formatting pass; these deliberately failing assertions are not
 claimed as green CI or adoption readiness.
+
+## Reviewed binding implementation slice
+
+The exact eligibility artifact `8669f8009332d567000372f48fd5214211f1d35be9980665980e7db8a589568f`
+is source-cleared by fe7lgm and cxxyqr. It adds one Body history flag, a unique
+PlanReadCompletion, common public terminal/settlement denials and engine-only
+failure routing through the existing seal funnel. Binding requires every entry
+Unissued with no call, so it cannot silently omit an earlier selected or settled
+page. The constructor requires a live command Read Plan with a retained receipt
+cap and its exact entry, readiness or handoff custody. No IDs are spent.
+
+Four NEW-CONTRACT controls pass with all features and without defaults with
+http-plans/test-support: initial binding and cloned-handle/standalone settlement
+refusal; refusal after selecting an unqueued Slot; refusal after settled DATA,
+with the exact previously held remaining Slot still issuing and succeeding; and
+an expiry callback unwrapping public fail_plan as an inert Ok followed by one
+engine Timeout. Scoped strict Clippy, feature-off library check and workspace
+formatting pass. Initial harness omissions and a Slot equality comparison were
+compile failures, corrected before these behavior receipts; neither is a RED.
+
+This slice has no success terminal or venue adopter. In particular, completed
+history followed by a cloned done_plan bypass needs its full bridge control once
+guarded acceptance exists. Atomic accepted rows/Slot settlement, prepared DATA
+and accepted-prefix terminal, and exact released transport proof remain separate
+source and new-contract gates. The original six assertions are preserved and
+are not claimed green by binding alone. Do not adopt this half in a venue or
+mark the PR ready before those remaining contracts are implemented and reviewed.
