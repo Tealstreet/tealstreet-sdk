@@ -505,4 +505,8 @@ barriers and the core-size maps):
 - Fail-closed until R11: with `http-mutation-barriers`, a Bearer-bound
   request that would join a mutation group is refused `Invalid` at issue,
   because the group claim does not yet check each member's Bearer.
-
+- Independent review of the restack (`926f4bf523f`): CLEAR, not a per-venue
+  fix of a cross-cutting concern. Two P3 tests are added at the R11 refresh:
+  the group-member refusal (refused before any effect, reservation dropped),
+  and a signed bound request that waits on pacing while its Session retires
+  or goes NotReady (the pre-check refuses when signing begins).
