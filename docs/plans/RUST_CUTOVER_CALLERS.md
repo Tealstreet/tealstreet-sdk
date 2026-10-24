@@ -7228,6 +7228,18 @@ A walk needs two registry Context slots: root and current physical page. Initial
 root admission reserves only its own slot; if the first child cannot fit, one
 strict typed Capacity/localNotSent terminal retires the root without HTTP.
 
+
+## Backpack unsupported command candle intervals
+
+Unsupported FetchCandles intervals keep the exact native refusal message and
+absent error kind on a valid keyless Read entry. The shared receipt, clock and
+capacity checks run first; invalid clocks and unavailable capacity report their
+existing typed engine errors without a write outcome. Missing or expired
+receipts refuse without renewing the caller's bound. Duplicate IDs retain the
+prior owner's authority and eventual reply. Refusal creates no HTTP, managed
+preparation, signing, socket, timer or Store update. Supported candle intervals,
+query/stream behavior and unsupported WS subscription diagnostics are unchanged.
+
 ## HTTP pacing sets and signing eligibility
 
 A venue declares primitive floors through `http_pacing()` and optional immutable
