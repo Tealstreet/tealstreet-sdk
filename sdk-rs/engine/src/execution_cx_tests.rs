@@ -28,6 +28,8 @@ struct GroupProbe {
     /// Admit this command's root but hold it instead of beginning or joining.
     hold: Option<CommandId>,
     cross_errors: Vec<crate::request_context::Error>,
+    abort: bool,
+    joined: Vec<(CommandId, Joined)>,
 }
 
 impl Venue for GroupProbe {
@@ -60,8 +62,9 @@ impl Venue for GroupProbe {
         }
         let key = format!("k{id}");
         if let Some(execution) = &self.execution {
-            if let Err(error) = cx.join_execution(execution, &root, &key) {
-                self.join_errors.push(error);
+            match cx.join_execution(execution, &root, &key) {
+                Ok(joined) => self.joined.push((id, joined)),
+                Err(error) => self.join_errors.push(error),
             }
         } else {
             let execution = cx
@@ -89,7 +92,10 @@ impl Venue for GroupProbe {
             .is_ok()
         {
             self.publications += 1;
-            if self.complete {
+            if self.abort {
+                cx.abort_execution(&execution, VenueError::new("read failed"))
+                    .unwrap();
+            } else if self.complete {
                 cx.complete_execution(&execution, |key| Ok(format!("\"{key}\"")))
                     .unwrap();
             }
@@ -152,11 +158,9 @@ impl Run {
             })
             .collect()
     }
-    /// Prepare and claim the only physical request; returns its id.
+    /// Prepare and claim the newest physical request; returns its id.
     fn release(&mut self, at: f64) -> RequestId {
-        let [preparation] = self.prepares()[..] else {
-            panic!("exactly one physical request: {:?}", self.prepares());
-        };
+        let preparation = *self.prepares().last().expect("a physical request");
         self.engine.http_prepared(
             at,
             preparation,
@@ -231,6 +235,7 @@ fn joined_commands_share_one_request_and_each_completes_once() {
     });
     run.handle(1., fetch(1));
     run.handle(2., fetch(2));
+    assert_eq!(run.prepares().len(), 1, "one shared physical request");
     let request = run.release(3.);
     run.respond(4., request);
     assert_eq!(run.engine.venue().publications, 1);
@@ -386,6 +391,20 @@ fn a_member_cannot_issue_its_own_physical_request() {
         cx.http_context(Scope::Command(1), read_policy(500)),
         Err(crate::request_context::Error::Revoked)
     );
+    // Nor may it send on the entry root it already holds.
+    let managed = cx.io.managed_http.len();
+    let sent = cx.request_managed(
+        root.clone(),
+        crate::Method::Get,
+        "https://venue.test/own-root".into(),
+        None,
+        root.clone(),
+    );
+    assert_eq!(
+        sent.map_err(|(_, error)| error),
+        Err(crate::request_context::Error::Revoked)
+    );
+    assert_eq!(cx.io.managed_http.len(), managed);
 }
 
 #[test]
@@ -479,4 +498,277 @@ fn begin_and_join_need_the_observer_commands_own_genuine_callback() {
             .map(|_| ()),
         Err(crate::request_context::Error::Revoked)
     );
+}
+
+/// Begin a background-rooted read (or the successor of `previous`) with one
+/// leg; returns the background root.
+fn background_read(run: &mut Run, at: f64, previous: Option<ExecutionHandle>) -> Context {
+    let mut cx = Cx {
+        now: at,
+        store: &mut run.engine.store,
+        io: &mut run.engine.io,
+    };
+    let background = cx
+        .http_context(Scope::Background, read_policy(1_000))
+        .unwrap();
+    let execution = match previous {
+        None => cx
+            .begin_background_execution(&background, read_policy(1_000), Window::BeforeRelease)
+            .unwrap(),
+        Some(previous) => cx
+            .begin_successor_execution(&previous, &background, read_policy(1_000))
+            .unwrap(),
+    };
+    let leg = cx
+        .http_leg_context(execution.context(), read_policy(1_000))
+        .unwrap();
+    cx.request_managed(
+        leg.clone(),
+        Method::Get,
+        "https://group.test/account".into(),
+        None,
+        leg,
+    )
+    .unwrap();
+    run.engine.venue.execution = Some(execution);
+    run.actions.extend(run.engine.drain_actions());
+    background
+}
+
+fn cx_at(run: &mut Run, now: f64) -> Cx<'_, Context> {
+    Cx {
+        now,
+        store: &mut run.engine.store,
+        io: &mut run.engine.io,
+    }
+}
+
+#[test]
+fn a_background_root_publishes_and_completes_without_command_observers() {
+    let mut run = Run::new(GroupProbe {
+        complete: true,
+        ..Default::default()
+    });
+    background_read(&mut run, 1., None);
+    let request = run.release(2.);
+    run.respond(3., request);
+    assert_eq!(run.engine.venue().publications, 1);
+    assert!(run.done().is_empty() && run.failed().is_empty());
+}
+
+#[test]
+fn owners_joining_after_release_wait_for_the_next_background_read() {
+    let mut run = Run::new(GroupProbe {
+        complete: true,
+        ..Default::default()
+    });
+    background_read(&mut run, 1., None);
+    run.handle(2., fetch(1));
+    let first = run.release(3.);
+    run.handle(4., fetch(2));
+    assert_eq!(
+        run.engine.venue().joined,
+        [(1, Joined::Live(vec![])), (2, Joined::Pending)]
+    );
+    run.respond(5., first);
+    assert_eq!(run.done(), [(1, "\"k1\"".to_owned())]);
+    let previous = run.engine.venue().execution.clone();
+    background_read(&mut run, 6., previous);
+    let second = run.release(7.);
+    run.respond(8., second);
+    assert_eq!(
+        run.done(),
+        [(1, "\"k1\"".to_owned()), (2, "\"k2\"".to_owned())]
+    );
+}
+
+#[test]
+fn a_failed_read_fails_only_owners_that_joined_before_its_release() {
+    let mut run = Run::new(GroupProbe {
+        abort: true,
+        ..Default::default()
+    });
+    background_read(&mut run, 1., None);
+    run.handle(2., fetch(1));
+    let first = run.release(3.);
+    run.handle(4., fetch(2));
+    run.respond(5., first);
+    assert_eq!(run.failed(), [(1, None)]);
+    run.engine.venue.abort = false;
+    run.engine.venue.complete = true;
+    let previous = run.engine.venue().execution.clone();
+    background_read(&mut run, 6., previous);
+    let second = run.release(7.);
+    run.respond(8., second);
+    assert_eq!(run.done(), [(2, "\"k2\"".to_owned())]);
+}
+
+#[test]
+fn a_queued_owner_times_out_once_when_no_next_read_arrives() {
+    let mut run = Run::new(GroupProbe {
+        complete: true,
+        timeouts: HashMap::from([(2, 100)]),
+        ..Default::default()
+    });
+    background_read(&mut run, 1., None);
+    let first = run.release(2.);
+    run.handle(3., fetch(2));
+    run.respond(4., first);
+    assert!(run.done().is_empty());
+    assert_eq!(run.engine.io.execution_timer.map(|(_, at)| at), Some(103.));
+    run.fire_execution_timer(103.);
+    assert_eq!(run.failed(), [(2, Some(ErrorKind::Timeout))]);
+    assert_eq!(run.engine.io.execution_timer, None);
+}
+
+#[test]
+fn background_roots_refuse_command_roots_and_writes() {
+    let mut run = Run::new(GroupProbe::default());
+    let mut cx = Cx {
+        now: 1.,
+        store: &mut run.engine.store,
+        io: &mut run.engine.io,
+    };
+    let command = cx
+        .http_context(Scope::Command(9), read_policy(1_000))
+        .unwrap();
+    let background = cx
+        .http_context(Scope::Background, read_policy(1_000))
+        .unwrap();
+    let mut write = read_policy(1_000);
+    write.operation = Operation::Mutation;
+    for (root, policy) in [(&command, read_policy(1_000)), (&background, write)] {
+        assert_eq!(
+            cx.begin_background_execution(root, policy, Window::BeforeRelease)
+                .map(|_| ()),
+            Err(crate::request_context::Error::Invalid)
+        );
+    }
+}
+
+#[test]
+fn a_finished_background_root_publishes_only_while_a_command_observer_survives() {
+    for observed in [false, true] {
+        let mut run = Run::new(GroupProbe {
+            complete: true,
+            ..Default::default()
+        });
+        let background = background_read(&mut run, 1., None);
+        if observed {
+            run.handle(2., fetch(1));
+        }
+        let request = run.release(3.);
+        cx_at(&mut run, 4.)
+            .finish_http_context(&background)
+            .unwrap();
+        run.respond(5., request);
+        assert_eq!(run.engine.venue().publications, usize::from(observed));
+        assert_eq!(run.done().len(), usize::from(observed));
+    }
+}
+
+#[test]
+fn a_successor_needs_the_same_background_credential() {
+    let mut run = Run::new(GroupProbe::default());
+    background_read(&mut run, 1., None);
+    run.release(2.);
+    let previous = run.engine.venue().execution.clone().unwrap();
+    let mut cx = cx_at(&mut run, 3.);
+    let mut other = read_policy(1_000);
+    other.credential = Some(crate::request_context::Credential {
+        slot: CredentialSlot::Primary,
+        reference: crate::signing::KeyRef("other-account".into()),
+    });
+    let foreign = cx.http_context(Scope::Background, other).unwrap();
+    assert_eq!(
+        cx.begin_successor_execution(&previous, &foreign, read_policy(1_000))
+            .map(|_| ()),
+        Err(crate::request_context::Error::Invalid)
+    );
+}
+
+#[test]
+fn one_background_context_roots_at_most_one_live_execution() {
+    let mut run = Run::new(GroupProbe::default());
+    let background = background_read(&mut run, 1., None);
+    assert_eq!(
+        cx_at(&mut run, 2.)
+            .begin_background_execution(&background, read_policy(1_000), Window::BeforeRelease)
+            .map(|_| ()),
+        Err(crate::request_context::Error::State)
+    );
+}
+
+#[test]
+fn a_succeeded_execution_refuses_joins_and_a_second_successor() {
+    let mut run = Run::new(GroupProbe::default());
+    background_read(&mut run, 1., None);
+    run.release(2.);
+    run.handle(3., fetch(1));
+    let previous = run.engine.venue().execution.clone().unwrap();
+    background_read(&mut run, 4., Some(previous.clone()));
+    // A caller still holding the old handle cannot strand an owner on it.
+    run.engine.venue.execution = Some(previous.clone());
+    run.handle(5., fetch(2));
+    assert_eq!(
+        run.engine.venue().join_errors,
+        [crate::request_context::Error::State]
+    );
+    let mut cx = cx_at(&mut run, 6.);
+    let background = cx
+        .http_context(Scope::Background, read_policy(1_000))
+        .unwrap();
+    assert_eq!(
+        cx.begin_successor_execution(&previous, &background, read_policy(1_000))
+            .map(|_| ()),
+        Err(crate::request_context::Error::State)
+    );
+}
+
+#[test]
+fn a_retired_previous_execution_has_no_successor() {
+    let mut run = Run::new(GroupProbe {
+        complete: true,
+        ..Default::default()
+    });
+    background_read(&mut run, 1., None);
+    let request = run.release(2.);
+    run.respond(3., request);
+    let previous = run.engine.venue().execution.clone().unwrap();
+    let mut cx = cx_at(&mut run, 4.);
+    let background = cx
+        .http_context(Scope::Background, read_policy(1_000))
+        .unwrap();
+    assert_eq!(
+        cx.begin_successor_execution(&previous, &background, read_policy(1_000))
+            .map(|_| ()),
+        Err(crate::request_context::Error::Revoked)
+    );
+}
+
+#[test]
+fn a_group_retired_before_its_leg_is_sent_leaves_no_stale_root() {
+    let mut run = Run::new(GroupProbe::default());
+    for round in 0..3 {
+        let command = 10 + round;
+        run.engine.venue.execution = None;
+        run.handle(f64::from(round) * 10. + 1., fetch(command));
+        let root = run.engine.venue().roots[&command].clone();
+        // The sole observer leaves before its leg is released.
+        let mut cx = Cx {
+            now: f64::from(round) * 10. + 2.,
+            store: &mut run.engine.store,
+            io: &mut run.engine.io,
+        };
+        cx.detach_execution_observer(&root, VenueError::new("cancelled"))
+            .unwrap();
+        assert!(run.engine.io.managed_http.is_empty());
+        assert!(!run.engine.io.request_contexts.has_executions());
+        // Any later event retires the stale root.
+        run.handle(
+            f64::from(round) * 10. + 3.,
+            Event::TimerFired { timer: TimerId(1) },
+        );
+        assert_eq!(run.engine.io.request_contexts.root_count(), 0);
+    }
 }

@@ -28,6 +28,24 @@ use wire::*;
 const REST: &str = "https://api-futures.kucoin.com";
 const SNAPSHOT_SHARD: usize = 380;
 
+fn local_mutation_command_policy() -> safe_cex_engine::request_context::Policy {
+    safe_cex_engine::request_context::Policy {
+        operation: safe_cex_engine::request_context::Operation::Mutation,
+        ..local_read_command_policy()
+    }
+}
+
+fn local_read_command_policy() -> safe_cex_engine::request_context::Policy {
+    use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
@@ -1225,8 +1243,15 @@ impl Venue for Kucoin {
         }
         match command {
             Command::SetTickerSymbols { .. } => {}
-            Command::FetchLeverage { command, .. } => {
-                cx.fail(command, "KuCoin leverage query is unsupported");
+            Command::FetchLeverage { .. } => {
+                let Ok(context) = cx.admit_http_command(local_read_command_policy()) else {
+                    return;
+                };
+                let _ = cx.fail_context(
+                    &context,
+                    not_sent("KuCoin leverage query is unsupported")
+                        .kind(safe_cex_engine::ErrorKind::Unsupported),
+                );
             }
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
@@ -1327,13 +1352,22 @@ impl Venue for Kucoin {
                             from_ms.unwrap_or(end - minutes as f64 * 60000.0 * 500.0)
                         };
                         if !start.is_finite() || !end.is_finite() || start < 0.0 || start > end {
-                            cx.fail(command, "invalid KuCoin candle range");
+                            let Ok(context) = cx.admit_http_command(local_read_command_policy())
+                            else {
+                                return;
+                            };
+                            let _ = cx.fail_context(&context, "invalid KuCoin candle range");
                             return;
                         }
                         let api = api_symbol(cx.store, &symbol);
                         self.public(cx,&format!("/api/v1/kline/query?symbol={api}&granularity={minutes}&from={}&to={}",start as u64,end as u64),Some(ArrayAt::EnvelopeField("data")),Pending::Candles{command,rows:vec![],invalid:false});
                     }
-                    Err(e) => cx.fail(command, e),
+                    Err(e) => {
+                        let Ok(context) = cx.admit_http_command(local_read_command_policy()) else {
+                            return;
+                        };
+                        let _ = cx.fail_context(&context, e);
+                    }
                 }
             }
             Command::Query { command, query } => self.history_command(cx, command, query),

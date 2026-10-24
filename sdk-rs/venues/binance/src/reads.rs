@@ -1,10 +1,11 @@
 //! Explicit read adapters; all send and completion authority stays in the engine.
 use crate::{BinanceFutures, Credentials, Pending, Query};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::request_context::{
     CommandEntryError, Context, Credential, Operation, Policy, RetryPolicy, Scope,
 };
-use safe_cex_engine::{CredentialSlot, Cx, ErrorKind, Method, Venue, VenueError};
+use safe_cex_engine::{Cx, ErrorKind, Method, Venue, VenueError};
 
 pub(crate) struct Read {
     pub url: String,
@@ -63,20 +64,16 @@ impl BinanceFutures {
         stream: Option<ArrayAt>,
         pending: Pending,
     ) {
-        let (credentials, slot) = match &self.options.read_credentials {
-            Some(credentials) => (credentials, CredentialSlot::Secondary),
-            None => match &self.credentials {
-                Some(credentials) => (credentials, CredentialSlot::Primary),
-                None => {
-                    self.on_sign_error(
-                        cx,
-                        pending,
-                        VenueError::new("Binance read requires credentials")
-                            .kind(ErrorKind::InvalidInput),
-                    );
-                    return;
-                }
-            },
+        let Ok((selection, credentials)) = self
+            .credentials
+            .select(CredentialRole::Read { scope: None })
+        else {
+            self.on_sign_error(
+                cx,
+                pending,
+                VenueError::new("Binance read requires credentials").kind(ErrorKind::InvalidInput),
+            );
+            return;
         };
         self.background_read(
             cx,
@@ -86,10 +83,7 @@ impl BinanceFutures {
                 query,
                 stream,
             },
-            Some(Credential {
-                slot,
-                reference: credentials.credential.clone(),
-            }),
+            Some(selection.credential(credentials.credential.clone())),
             pending,
         );
     }

@@ -1,10 +1,11 @@
 //! Funding has its own ledger. Inclusive time cursors preserve boundary rows.
+use crate::history::local_read_policy;
 use crate::wire::Envelope;
 use crate::{Kucoin, Pending};
 use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
-use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId, VenueError};
+use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, Query, TimerId, VenueError};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::HashMap;
@@ -109,38 +110,97 @@ impl Kucoin {
             limit,
         } = query
         else {
-            cx.fail(command, "Unsupported KuCoin funding query");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Unsupported KuCoin funding query")
+                    .kind(ErrorKind::Unsupported)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         };
         if kind.as_deref() != Some("FUNDING_FEE") {
-            cx.fail(command, "Unsupported KuCoin funding query");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Unsupported KuCoin funding query")
+                    .kind(ErrorKind::Unsupported)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         }
         if self.credentials.is_none() {
-            cx.fail(command, "KuCoin credentials required");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("KuCoin credentials required")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         }
         let Some(symbol) = symbol.filter(|s| !s.is_empty()) else {
-            cx.fail(command, "KuCoin funding history requires a symbol");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("KuCoin funding history requires a symbol")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         };
         let Some(market) = cx.store.market(&symbol) else {
-            cx.fail(command, format!("Unknown KuCoin market {symbol}"));
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new(format!("Unknown KuCoin market {symbol}"))
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         };
         let end = to_ms.unwrap_or_else(|| cx.now.floor());
         let start = from_ms.unwrap_or((end - DAY as f64).max(0.0));
         let (Some(from), Some(end)) = (millis(start), millis(end)) else {
-            cx.fail(command, "Invalid KuCoin funding time range");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Invalid KuCoin funding time range")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         };
         if from > end {
-            cx.fail(command, "Invalid KuCoin funding time range");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Invalid KuCoin funding time range")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         }
         let limit = limit.unwrap_or(1000) as usize;
         if limit == 0 {
-            cx.done(command, "[]".into());
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.done_context(&context, "[]".into());
             return;
         }
         self.funding_schedule(

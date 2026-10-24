@@ -78,6 +78,8 @@ impl Method {
 pub enum RequestRoute {
     /// A primary-account read must not use the secondary read identity/egress.
     Primary,
+    /// A read signed by the secondary key uses the read identity's egress.
+    Secondary,
     Direct,
     PublicCors,
 }
@@ -85,6 +87,7 @@ impl RequestRoute {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Primary => "primary",
+            Self::Secondary => "secondary",
             Self::Direct => "direct",
             Self::PublicCors => "publicCors",
         }
@@ -532,8 +535,10 @@ pub enum VenueAction {
 }
 
 /// The shared rejection for a venue action the venue does not implement.
+const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this venue";
+
 pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
-    cx.fail(command, "This action is not supported on this venue");
+    cx.fail(command, UNSUPPORTED_VENUE_ACTION);
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -843,6 +848,12 @@ mod command_entry;
 #[cfg(test)]
 #[path = "request_context_entry_tests.rs"]
 mod command_entry_tests;
+#[cfg(test)]
+#[path = "command_wait_tests.rs"]
+mod command_wait_tests;
+#[cfg(test)]
+#[path = "read_root_expiry_tests.rs"]
+mod read_root_expiry_tests;
 
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
@@ -883,6 +894,8 @@ struct PendingHttp<P> {
     auth: Option<ReadAuth>,
 }
 
+#[path = "read_root_expiry.rs"]
+mod read_root_expiry;
 #[path = "request_context_registry.rs"]
 mod request_context_registry;
 
@@ -895,6 +908,7 @@ mod execution_cx;
 #[cfg(test)]
 #[path = "execution_cx_tests.rs"]
 mod execution_cx_tests;
+pub use command_entry::{CommandWait, DEFAULT_COMMAND_WAIT_MS, MAX_COMMAND_WAIT_MS};
 pub use execution_cx::{ExecutionHandle, Joined, Window};
 
 /// A delivered response whose bytes the engine cannot hand to a codec. The
@@ -1431,6 +1445,10 @@ impl Polls {
     }
 }
 
+#[cfg(feature = "managed-sockets")]
+#[path = "engine_socket.rs"]
+mod managed_sockets;
+
 struct Io<P> {
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
@@ -1439,9 +1457,17 @@ struct Io<P> {
     http_failure_kind: ErrorKind,
     // Status and headers of the managed write reply being delivered.
     http_write_reply: Option<(u16, String)>,
+    // Reconcile reads the engine owes the venue, one per uncertain seal: the
+    // symbols (`None` = all) and the earliest time to ask.
+    #[cfg(feature = "order-locks")]
+    reconcile_due: Vec<(Option<Vec<String>>, f64)>,
     command_entry: Option<command_entry::Entry>,
+    /// Caller waits stamped at each external command receipt.
+    command_waits: command_entry::Waits,
     #[cfg(feature = "http-plans")]
     http_plan_ready: Option<crate::request_context::Plan>,
+    #[cfg(feature = "http-plans")]
+    http_plan_expiring: Option<crate::request_context::Plan>,
     http_owner_poison: bool,
     #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
@@ -1462,13 +1488,25 @@ struct Io<P> {
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
     execution_timer: Option<(TimerId, f64)>,
+    /// Tracked caller-wait Read roots: (deadline, command, generation).
+    /// Preallocated to owner capacity so tracking never allocates.
+    read_roots: Vec<(f64, CommandId, u64, TimerId)>,
+    read_roots_expiring: bool,
+    /// Action capacity right after the sweep's reservation, for tests.
+    #[cfg(test)]
+    read_root_sweep_capacity: Option<usize>,
     public_feed_policy: PublicFeedPolicy,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
+    session_waits: request_context_registry::session::Waits<P>,
     signing: crate::signing_dispatch::Dispatch,
     protocol_clock: crate::protocol_clock::ProtocolClock,
     signer: Option<crate::signing::Provider>,
+    /// Trusted-construction refs per slot, used only for capability admission.
+    identities: crate::signing::Identities,
+    /// Algorithms a host-fulfilled (Action::Sign) signer declared at install.
+    host_algorithms: Option<Vec<crate::signing::Algorithm>>,
     dispatch_now: f64,
     signing_admission: Vec<(Action, crate::signing::SignError)>,
     streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
@@ -1490,6 +1528,26 @@ struct Io<P> {
     auth_failure_counted: bool,
     /// Each retried read's latest Error time and digit-normalised text, by call site.
     retried_failures: HashMap<&'static str, (f64, String)>,
+    #[cfg(feature = "managed-sockets")]
+    socket_driver: crate::socket_driver::Driver,
+    #[cfg(feature = "managed-sockets")]
+    managed_sockets: bool,
+    #[cfg(feature = "managed-sockets")]
+    socket_failed: bool,
+    #[cfg(feature = "managed-sockets")]
+    socket_effects: std::collections::VecDeque<crate::socket_driver::Effect>,
+    #[cfg(feature = "managed-sockets")]
+    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal<P>>,
+    #[cfg(feature = "managed-sockets")]
+    socket_proposal_bytes: usize,
+    #[cfg(feature = "managed-sockets")]
+    socket_proposal_next: u64,
+    #[cfg(feature = "managed-sockets")]
+    socket_after: std::collections::VecDeque<(crate::socket_lifecycle::Epoch, String)>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuations: std::collections::VecDeque<managed_sockets::Continuation<P>>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuation_bytes: usize,
 }
 
 impl<P> Default for Io<P> {
@@ -1499,9 +1557,14 @@ impl<P> Default for Io<P> {
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_due: Vec::new(),
             command_entry: None,
+            command_waits: Default::default(),
             #[cfg(feature = "http-plans")]
             http_plan_ready: None,
+            #[cfg(feature = "http-plans")]
+            http_plan_expiring: None,
             http_owner_poison: false,
             #[cfg(feature = "http-plans")]
             http_plan_poison: false,
@@ -1521,13 +1584,20 @@ impl<P> Default for Io<P> {
             actions: Vec::new(),
             placement_acks: Default::default(),
             execution_timer: None,
+            read_roots: Vec::with_capacity(256),
+            read_roots_expiring: false,
+            #[cfg(test)]
+            read_root_sweep_capacity: None,
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
             pending: HashMap::new(),
             signatures: Vec::new(),
+            session_waits: Default::default(),
             signing: Default::default(),
             protocol_clock: Default::default(),
             signer: None,
+            identities: Default::default(),
+            host_algorithms: None,
             dispatch_now: 0.,
             signing_admission: Vec::new(),
             streams: HashMap::new(),
@@ -1546,11 +1616,61 @@ impl<P> Default for Io<P> {
             sockets: SocketRoles::default(),
             auth_failure_counted: false,
             retried_failures: HashMap::new(),
+            #[cfg(feature = "managed-sockets")]
+            socket_driver: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            managed_sockets: false,
+            #[cfg(feature = "managed-sockets")]
+            socket_failed: false,
+            #[cfg(feature = "managed-sockets")]
+            socket_effects: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_proposals: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_proposal_bytes: 0,
+            #[cfg(feature = "managed-sockets")]
+            socket_proposal_next: 0,
+            #[cfg(feature = "managed-sockets")]
+            socket_after: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuations: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuation_bytes: 0,
         }
     }
 }
 
 impl<P> Io<P> {
+    /// Bounded: past the cap, coalesce into one full read that waits for the
+    /// latest merged deadline, so no rate or credential wait is cut short.
+    #[cfg(feature = "order-locks")]
+    #[inline(never)]
+    fn queue_reconcile(&mut self, symbols: Option<Vec<String>>, at: f64) {
+        const RECONCILE_QUEUE: usize = 64;
+        // A seal at a non-finite clock is due at the next drain.
+        let at = if at.is_finite() { at } else { 0. };
+        if self.reconcile_due.len() < RECONCILE_QUEUE {
+            self.reconcile_due.push((symbols, at));
+            return;
+        }
+        let latest = self
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .fold(at, f64::max);
+        self.reconcile_due = vec![(None, latest)];
+    }
+
+    fn managed_socket_active(&self) -> bool {
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.managed_sockets
+        }
+        #[cfg(not(feature = "managed-sockets"))]
+        {
+            false
+        }
+    }
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
         let index = self.signatures.iter().position(|(id, _)| *id == request)?;
         Some(self.signatures.swap_remove(index).1)
@@ -1605,6 +1725,51 @@ impl<P> Io<P> {
 }
 
 impl<P> Cx<'_, P> {
+    #[cfg(not(feature = "managed-sockets"))]
+    fn managed_send_allowed(&self, _socket: SocketId) -> bool {
+        true
+    }
+    /// Admission check for a command that releases several signed requests:
+    /// every need must be supported before the first release, so a refusal
+    /// is a whole-command NotSent rather than a partial effect.
+    pub fn can_sign(
+        &self,
+        slot: CredentialSlot,
+        needs: &[crate::signing::Need],
+    ) -> Result<(), crate::signing::SignError> {
+        use crate::signing::{Capability, KeyUse, SignError};
+        let identity = match slot {
+            CredentialSlot::Primary => self.io.identities.primary.as_ref(),
+            CredentialSlot::Secondary => self.io.identities.secondary.as_ref(),
+        }
+        .ok_or(SignError::InvalidRequest)?;
+        // Resolve every ref first, so a malformed command is InvalidRequest
+        // regardless of the order of its needs.
+        let keys = needs
+            .iter()
+            .map(|need| match need.key {
+                KeyUse::Signing => Some(&identity.signing),
+                KeyUse::Extra(extra) => identity.extra.get(&extra),
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or(SignError::InvalidRequest)?;
+        for (need, key) in needs.iter().zip(keys) {
+            let capability = match (&self.io.signer, &self.io.host_algorithms) {
+                (Some(signer), _) => signer.can_sign(key, need.algorithm),
+                (None, Some(declared)) if declared.contains(&need.algorithm) => {
+                    Capability::Supported
+                }
+                (None, Some(_)) => Capability::Unsupported,
+                // No Rust provider means the host fulfils Action::Sign; undeclared is unknown.
+                (None, None) => Capability::Unknown,
+            };
+            if capability != Capability::Supported {
+                return Err(SignError::Unsupported);
+            }
+        }
+        Ok(())
+    }
+
     /// Calibrated venue UTC for outbound timestamps, absolute expiry and
     /// time-based nonces. Timers, deadlines and emitted data retain `self.now`.
     pub fn protocol_now(&self) -> f64 {
@@ -1632,20 +1797,25 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
+        let spec = spec.into();
+        if self.io.managed_socket_active()
+            || spec.channel == Some(SocketChannel::Public)
+                && self.io.public_feed_policy != PublicFeedPolicy::Direct
+        {
+            return SocketId(0);
+        }
+        let socket = SocketId(self.io.next());
+        self.queue_socket_transport(socket, spec);
+        socket
+    }
+    fn queue_socket_transport(&mut self, socket: SocketId, spec: SocketSpec) {
         let SocketSpec {
             url,
             channel,
             context,
             headers,
             binary,
-        } = spec.into();
-        if channel == Some(SocketChannel::Public)
-            && self.io.public_feed_policy != PublicFeedPolicy::Direct
-        {
-            // Socket zero is reserved for suppressed feeds; it never reaches a host.
-            return SocketId(0);
-        }
-        let socket = SocketId(self.io.next());
+        } = spec;
         if let Some(channel) = &channel {
             self.io
                 .sockets
@@ -1659,7 +1829,6 @@ impl<P> Cx<'_, P> {
             channel,
             context,
         });
-        socket
     }
 
     /// Create an unsigned upgrade and stage it through the shared signing queue.
@@ -1673,6 +1842,10 @@ impl<P> Cx<'_, P> {
         if socket.0 == 0 {
             return socket;
         }
+        self.sign_socket_upgrade(socket, step);
+        socket
+    }
+    fn sign_socket_upgrade(&mut self, socket: SocketId, step: Box<dyn crate::SignStep>) {
         let index = self
             .io
             .actions
@@ -1683,10 +1856,12 @@ impl<P> Cx<'_, P> {
             .expect("connect queued its upgrade");
         let outbound = self.io.actions.remove(index);
         self.stage_signed(index, outbound, step);
-        socket
     }
 
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
+        if !self.managed_send_allowed(socket) {
+            return;
+        }
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
@@ -1707,6 +1882,21 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn close(&mut self, socket: SocketId) {
+        #[cfg(feature = "managed-sockets")]
+        if self.io.managed_socket_active() {
+            self.io.opaque_entry_activity();
+            if let Some(epoch) = self.io.socket_driver.state.socket_epoch(socket) {
+                self.retire_socket(epoch.feed(), crate::socket_lifecycle::RetireReason::Stopped);
+            }
+            return;
+        }
+        self.close_socket_transport(socket);
+    }
+
+    /// Physical close and signing cancellation only. Managed lifecycle effects
+    /// use this after revoking the epoch, before native invalidation; public
+    /// close can then enter retirement without recursively invoking itself.
+    fn close_socket_transport(&mut self, socket: SocketId) {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
@@ -1855,6 +2045,9 @@ impl<P> Cx<'_, P> {
 
     /// WS authentication uses the same deadline/freshness/generation service.
     pub fn send_signed(&mut self, socket: SocketId, text: String, step: Box<dyn crate::SignStep>) {
+        if !self.managed_send_allowed(socket) {
+            return;
+        }
         let index = self.io.actions.len();
         self.stage_signed(index, Action::WsSend { socket, text }, step);
     }
@@ -2232,11 +2425,15 @@ impl<P> Cx<'_, P> {
                 Err(error)
             }
         };
+        // A credential-free route's auth-kind refusal is no credential evidence.
+        let credential_evidence = self.io.request_contexts.owner_credentialed(command);
+        self.io.finish_command_wait(command);
         self.io.retire_http_command(command);
         if !self.io.request_contexts.finish(command) {
             self.io.http_owner_poison = true;
             panic!("HTTP owner retirement bookkeeping failed");
         }
+        self.io.untrack_read_root(command);
         #[cfg(feature = "order-locks")]
         {
             if write_sealed
@@ -2247,7 +2444,33 @@ impl<P> Cx<'_, P> {
             {
                 self.io.order_locks.managed_resolved(command);
             }
-            self.io.order_locks.finish(command, result.is_err());
+            let scope = self.io.order_locks.reconcile_scope(command);
+            let absent = self.io.order_locks.absent_pending(command);
+            let marked = self.io.order_locks.finish(command, result.is_err());
+            let unknown = result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.outcome == Some(crate::Outcome::Unknown));
+            // Every uncertain seal asks again, even for an already-uncertain
+            // symbol: an earlier in-flight read may predate this write.
+            // A managed write the lock never held still reconciles: a full read.
+            let scope = scope.or_else(|| (write_sealed && unknown).then_some(None));
+            if let Some(scope) = scope.filter(|_| unknown || absent || !marked.is_empty()) {
+                // A rate limit or credential refusal must not fan out reads now.
+                let delay = match result.as_ref().err().and_then(|error| error.kind) {
+                    Some(ErrorKind::RateLimited) => result
+                        .as_ref()
+                        .err()
+                        .and_then(|error| error.retry_after_ms)
+                        .unwrap_or(crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS),
+                    Some(
+                        ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission,
+                    ) => crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS,
+                    _ => 0.,
+                };
+                let delay = delay.clamp(0., crate::startup::MAX_RATE_LIMIT_PAUSE_MS);
+                self.io.queue_reconcile(scope, self.now + delay);
+            }
             self.io.active_commands.remove(&command);
         }
         #[cfg(not(feature = "order-locks"))]
@@ -2255,7 +2478,9 @@ impl<P> Cx<'_, P> {
         let notice = match result {
             Ok(result) => Notice::CommandDone { command, result },
             Err(error) => {
-                count_auth_failure(self.io, Some(&error));
+                if credential_evidence {
+                    count_auth_failure(self.io, Some(&error));
+                }
                 Notice::CommandFailed { command, error }
             }
         };
@@ -2340,6 +2565,17 @@ pub trait Venue {
     /// has sealed and retired it. No Store, response or completion authority.
     fn discard_unproven_http_command(&mut self, _owner: crate::request_context::Owner) {}
 
+    /// The engine retired this tracked Read root at its deadline. `pending`
+    /// holds the continuations of its outstanding requests, already discarded
+    /// from transport. Drop them and any queued continuation for `owner`; the
+    /// engine seals the command itself. No Cx: no completion, send or Store.
+    fn read_root_retired(
+        &mut self,
+        _owner: crate::request_context::Owner,
+        _pending: Vec<Self::Pending>,
+    ) {
+    }
+
     /// Discard only continuation state matching this exact retired generation.
     /// This cleanup hook has no Store, response, command or I/O authority.
     #[cfg(feature = "http-plans")]
@@ -2404,6 +2640,32 @@ pub trait Venue {
         self.on_sign_error(cx, pending, error);
     }
 
+    /// Reconcile writes whose outcome is unknown: issue a fresh order read for
+    /// these symbols (`None`: all) and report it through `orders_reconciled`.
+    /// The engine asks once per uncertain seal, after any rate-limit wait.
+    fn reconcile_uncertain(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _symbols: Option<&[String]>,
+    ) {
+    }
+
+    /// A session waiter reached its owner's original deadline before the venue
+    /// drained it. Nothing was sent for that owner.
+    fn on_session_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        self.on_http_preparation_failed(
+            cx,
+            pending,
+            crate::request_context::Error::TimedOut,
+            error,
+        );
+    }
+
     /// Defer symbol cancellation until placement native identities are known.
     fn guard_pending_placements(&self) -> bool {
         false
@@ -2449,6 +2711,14 @@ pub trait Venue {
         _receipt: crate::signing::SignReceipt,
     ) {
     }
+    /// Observe exact final-release clock metadata; this grants no transport right.
+    fn on_signing_release(
+        &mut self,
+        target: SigningTarget<'_, Self::Pending>,
+        release: crate::SigningRelease,
+    ) {
+        self.on_signing_receipt(target, release.receipt());
+    }
     /// Shared dispatch signing failure, typed before transport. Composite jobs
     /// retain earlier attempt outcomes when projecting this attempted notSent.
     fn on_sign_error(
@@ -2469,6 +2739,50 @@ pub trait Venue {
         self.on_request_failed(cx, pending, error);
     }
 
+    #[cfg(feature = "managed-sockets")]
+    fn socket_control(
+        &self,
+        _store: &Store,
+        _feed: crate::socket_lifecycle::FeedId,
+        _authenticated: bool,
+        _text: &str,
+    ) -> crate::socket_lifecycle::Control {
+        crate::socket_lifecycle::Control::Other
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn socket_startup_ready(&self, _store: &Store) -> bool {
+        false
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn on_socket_event(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _event: crate::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Err(crate::socket_lifecycle::SocketError::NotPermitted)
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn on_socket_interests_released(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _epoch: crate::socket_lifecycle::Epoch,
+        _pending: Self::Pending,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Ok(())
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn encode_socket_interests(
+        &self,
+        _store: &Store,
+        _feed: crate::socket_lifecycle::FeedId,
+        _subscribe: bool,
+        _items: &[crate::socket_lifecycle::Interest],
+        _emit: &mut dyn FnMut(
+            crate::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), crate::socket_lifecycle::SocketError>,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Err(crate::socket_lifecycle::SocketError::NotPermitted)
+    }
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>);
     fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId);
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
@@ -2515,7 +2829,9 @@ pub trait Venue {
         _headers: &str,
         error: &str,
     ) {
-        self.on_request_failed(cx, pending, error);
+        // The venue answered but the stream broke (or is not UTF-8): a
+        // malformed reply, never transport loss. Defaults reach on_request_failed.
+        self.on_http_failed(cx, pending, malformed_body(error));
     }
     fn on_request_failed(
         &mut self,
@@ -2525,9 +2841,9 @@ pub trait Venue {
     );
     /// A request that may have reached the venue failed without a usable
     /// response. `error.kind` is `Timeout` for engine deadline expiry,
-    /// `Internal` for a whole delivered body (or managed write reply) the engine
-    /// cannot decode, else `Network`. Streams that break mid-array still use
-    /// `on_stream_malformed`.
+    /// `Internal` for a delivered body (or managed write reply) the engine cannot
+    /// decode, including a stream that breaks mid-array (the default
+    /// `on_stream_malformed` forwards here), else `Network`.
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -2604,6 +2920,8 @@ pub struct Engine<V: Venue> {
     startup_watch_at: Option<f64>,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
+    #[cfg(feature = "order-locks")]
+    reconcile_timer: Option<(TimerId, f64)>,
     /// Set while dispatching released commands, which must not be held again.
     releasing: bool,
     /// Hosts opt in when the account can sign; public-only engines have no account sections.
@@ -2650,6 +2968,8 @@ impl<V: Venue> Engine<V> {
             started: false,
             startup_watch_at: None,
             ack_timer: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_timer: None,
             releasing: false,
             account_startup: false,
             shared_books: HashMap::new(),
@@ -2680,6 +3000,38 @@ impl<V: Venue> Engine<V> {
     }
     pub fn signer(&self) -> Option<crate::signing::Provider> {
         self.io.signer.clone()
+    }
+
+    /// Trusted construction registers the same refs the venue holds, so
+    /// command admission can resolve a slot without trusting the venue's claim.
+    pub fn set_identities(
+        &mut self,
+        identities: crate::signing::Identities,
+    ) -> Result<(), VenueError> {
+        if self.started {
+            return Err(
+                VenueError::new("Identities must be configured before startup")
+                    .kind(ErrorKind::InvalidInput),
+            );
+        }
+        self.io.identities = identities;
+        Ok(())
+    }
+    pub fn identities(&self) -> &crate::signing::Identities {
+        &self.io.identities
+    }
+
+    /// A host signer fulfilling Action::Sign declares what it can sign; undeclared is unknown.
+    pub fn set_host_algorithms(
+        &mut self,
+        algorithms: Option<Vec<crate::signing::Algorithm>>,
+    ) -> Result<(), VenueError> {
+        if self.started {
+            return Err(VenueError::new("Signer must be configured before startup")
+                .kind(ErrorKind::InvalidInput));
+        }
+        self.io.host_algorithms = algorithms;
+        Ok(())
     }
 
     /// Delegated REST-only intent does not disable account reads or writes.
@@ -2761,6 +3113,7 @@ impl<V: Venue> Engine<V> {
         update: PublicFeedUpdate,
     ) -> Result<(), &'static str> {
         self.assert_live();
+        self.expire_read_roots(now);
         if self.public_feed_policy() != PublicFeedPolicy::Shared {
             return Err("publicFeedUpdate requires shared public feed policy");
         }
@@ -2954,6 +3307,7 @@ impl<V: Venue> Engine<V> {
     pub fn start(&mut self, now: f64) {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
         if std::mem::replace(&mut self.started, true) {
             return;
         }
@@ -2963,6 +3317,7 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         self.venue.start(&mut cx);
+        self.process_socket_work(now);
         self.flush_http_owner_retirements();
         self.flush_http_plans(now);
         self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
@@ -2971,8 +3326,57 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        // A poisoned engine traps before any expiry cleanup; then a due root
+        // is sealed before this receipt can find it still live.
+        self.assert_live();
+        self.expire_read_roots(now);
+        // An external command receipt gets the SDK default caller wait.
+        if let Event::Command(command) = &event
+            && let Some(id) = command.completion_id()
+        {
+            let deadline =
+                command_entry::wait_deadline(now, command_entry::DEFAULT_COMMAND_WAIT_MS);
+            self.io.receive_command_wait(id, deadline, now);
+        }
+        self.handle_received(now, event);
+        self.io.command_waits.end_receipt();
+    }
+
+    /// Dispatch one host command with the caller's own wait. A non-finite
+    /// clock, an out-of-range wait or a deadline that does not advance is
+    /// refused with nothing dispatched.
+    pub fn handle_command(
+        &mut self,
+        now: f64,
+        command: Command,
+        wait_ms: Option<u32>,
+    ) -> Result<(), crate::request_context::Error> {
+        let wait_ms = wait_ms.unwrap_or(command_entry::DEFAULT_COMMAND_WAIT_MS);
+        if !(1..=command_entry::MAX_COMMAND_WAIT_MS).contains(&wait_ms) {
+            return Err(crate::request_context::Error::Invalid);
+        }
+        let deadline = command_entry::wait_deadline(now, wait_ms)
+            .ok_or(crate::request_context::Error::Invalid)?;
+        self.assert_live();
+        self.expire_read_roots(now);
+        if let Some(id) = command.completion_id() {
+            self.io.receive_command_wait(id, Some(deadline), now);
+        }
+        self.handle_received(now, Event::Command(command));
+        self.io.command_waits.end_receipt();
+        Ok(())
+    }
+
+    fn handle_received(&mut self, now: f64, event: Event<'_>) {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.expire_read_roots(now);
+        if let Event::TimerFired { timer } = &event
+            && self.io.read_root_timer(*timer, now)
+        {
+            return;
+        }
+        self.process_socket_work(now);
         self.io.http_responses.prune(now);
         // Expired observers detach before any delivery can project to them.
         self.sweep_executions(now);
@@ -3019,12 +3423,29 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
             && let Some((_, pending)) = self.io.signing.expire(*timer)
         {
             self.sign_failed(now, pending.outbound, crate::signing::SignError::TimedOut);
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
+            return;
+        }
+        #[cfg(feature = "order-locks")]
+        if let Event::TimerFired { timer } = &event
+            && self.reconcile_timer.is_some_and(|(own, _)| own == *timer)
+        {
+            self.reconcile_timer = None;
+            // The full end-of-event path: deferred commands, the reconcile
+            // drain itself and shared tickers.
+            self.finish_event_scope(now);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
@@ -3066,8 +3487,14 @@ impl<V: Venue> Engine<V> {
         if !released.is_empty() {
             // A nested release (order-lock `ready` re-entering `handle`) keeps the flag.
             let was_releasing = std::mem::replace(&mut self.releasing, true);
-            for command in released {
+            for (_, receipt) in &released {
+                self.io.command_waits.batch(*receipt);
+            }
+            for (command, receipt) in released {
+                let carried = command.completion_id().map(|id| (id, receipt));
+                let outer = self.io.command_waits.carry(carried);
                 self.handle_event(now, Event::Command(command));
+                self.io.command_waits.carry(outer);
             }
             self.releasing = was_releasing;
         }
@@ -3083,6 +3510,18 @@ impl<V: Venue> Engine<V> {
             self.io.actions.push(Action::SetTimer { timer, at_ms });
             self.ack_timer = Some((timer, at_ms));
         }
+    }
+
+    // Managed and legacy text use the same native callback boundary.
+    #[cfg(feature = "managed-sockets")]
+    #[inline(never)]
+    fn deliver_socket_message(
+        venue: &mut V,
+        cx: &mut Cx<'_, V::Pending>,
+        socket: SocketId,
+        text: &str,
+    ) {
+        venue.on_message(cx, socket, text);
     }
 
     fn handle_event(&mut self, now: f64, event: Event<'_>) {
@@ -3151,7 +3590,12 @@ impl<V: Venue> Engine<V> {
             match command {
                 Command::PlaceOrders { command, .. } => self.io.placement_acks.placing(*command),
                 Command::CancelOrders { .. } | Command::AmendOrder { .. }
-                    if self.io.placement_acks.hold(&self.store, command, now) =>
+                    if self.io.placement_acks.hold(
+                        &self.store,
+                        command,
+                        self.io.command_waits.receipt_of(command),
+                        now,
+                    ) =>
                 {
                     self.release_held(now);
                     return;
@@ -3216,6 +3660,20 @@ impl<V: Venue> Engine<V> {
             self.startup_watch_at =
                 watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
         }
+        #[cfg(feature = "managed-sockets")]
+        if self.io.managed_socket_active() {
+            // Managed ingress shares the ordinary event prelude and epilogue.
+            // In particular health accounting is reset once per host event.
+            if self.handle_managed_socket(now, &event) {
+                self.finish_event_scope(now);
+                return;
+            }
+        }
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
         match event {
             Event::PollScaleChanged { scale } => {
                 if scale.is_nan() || scale <= 0. {
@@ -3242,7 +3700,10 @@ impl<V: Venue> Engine<V> {
             }
             Event::WsMessage { socket, text } => {
                 cx.io.sockets.received(socket, now, &mut cx.io.health);
-                self.venue.on_message(&mut cx, socket, text)
+                #[cfg(feature = "managed-sockets")]
+                Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
+                #[cfg(not(feature = "managed-sockets"))]
+                self.venue.on_message(&mut cx, socket, text);
             }
             Event::WsClosed { socket, code } => {
                 for timer in cx.io.signing.close_socket(socket) {
@@ -3344,12 +3805,12 @@ impl<V: Venue> Engine<V> {
             Event::Command(Command::FetchAccount { command })
                 if self.venue.capabilities().account == AccountLookup::Unsupported =>
             {
-                unsupported_venue_action(&mut cx, command);
+                cx.refuse_before_entry(command, UNSUPPORTED_VENUE_ACTION);
             }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.capabilities().amend_with_symbol =>
             {
-                cx.fail(
+                cx.refuse_before_entry(
                     command,
                     "symbol-aware amendment is unsupported by this venue",
                 );
@@ -3374,7 +3835,11 @@ impl<V: Venue> Engine<V> {
                         );
                         return;
                     }
-                    if cx.io.order_locks.defer(&command) {
+                    if cx
+                        .io
+                        .order_locks
+                        .defer(&command, cx.io.command_waits.receipt_of(&command))
+                    {
                         return;
                     }
                     if (!matches!(command, Command::PlaceOrders { .. })
@@ -3394,7 +3859,7 @@ impl<V: Venue> Engine<V> {
                             }
                             _ => "Order amendment or cancellation is already in flight",
                         };
-                        cx.fail(id, error);
+                        cx.refuse_before_entry(id, error);
                         return;
                     }
                 }
@@ -3413,7 +3878,7 @@ impl<V: Venue> Engine<V> {
                         _ => None,
                     };
                     if let Some(command) = unsupported {
-                        cx.fail(command, "Options are not enabled on this account");
+                        cx.refuse_before_entry(command, "Options are not enabled on this account");
                         return;
                     }
                 }
@@ -3468,7 +3933,15 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "order-locks")]
         let order_response = self.io.order_response_token.take();
         #[cfg(feature = "order-locks")]
-        for (command, failed) in self.io.order_locks.ready() {
+        let ready = self.io.order_locks.ready();
+        #[cfg(feature = "order-locks")]
+        for (.., receipt) in &ready {
+            self.io.command_waits.batch(*receipt);
+        }
+        #[cfg(feature = "order-locks")]
+        for (command, failed, receipt) in ready {
+            let carried = command.completion_id().map(|id| (id, receipt));
+            let outer = self.io.command_waits.carry(carried);
             if failed && self.venue.fence_uncertain_cancel_all() {
                 let Command::CancelSymbolOrders { command, .. } = command else {
                     unreachable!()
@@ -3478,7 +3951,7 @@ impl<V: Venue> Engine<V> {
                     store: &mut self.store,
                     io: &mut self.io,
                 };
-                cx.fail(
+                cx.refuse_before_entry(
                     command,
                     "Placement outcome is uncertain; reconcile before cancel-all",
                 );
@@ -3486,14 +3959,82 @@ impl<V: Venue> Engine<V> {
                 if let Some(id) = command.completion_id() {
                     self.io.active_commands.remove(&id);
                 }
-                self.handle(now, Event::Command(command));
+                // Not a new receipt: it keeps the receipt it was deferred with.
+                self.handle_received(now, Event::Command(command));
             }
+            self.io.command_waits.carry(outer);
         }
+        self.process_socket_work(now);
         self.io.http_delivery = delivery;
         self.io.command_entry = entry;
         #[cfg(feature = "order-locks")]
         {
             self.io.order_response_token = order_response;
+        }
+        #[cfg(feature = "order-locks")]
+        self.reconcile_uncertain(now);
+        self.restore_shared_tickers(false, now);
+    }
+
+    /// Ask the venue once for each due uncertain-write reconcile read, then
+    /// re-arm one wake-up for deferred ones. A fresh read the venue reports
+    /// through `orders_reconciled` clears the order-lock fence as before.
+    // Out of line: its callers share one copy (wasm size budget).
+    #[cfg(feature = "order-locks")]
+    #[inline(never)]
+    fn reconcile_uncertain(&mut self, now: f64) {
+        // Never inside a command entry; the hook runs with no HTTP delivery
+        // or order-read authority of its own.
+        if self.io.command_entry.is_some() {
+            return;
+        }
+        let (mut any, mut all, mut symbols) = (false, false, Vec::<String>::new());
+        self.io.reconcile_due.retain_mut(|(scope, at)| {
+            if *at > now && now.is_finite() {
+                return true;
+            }
+            any = true;
+            match scope.take() {
+                None => all = true,
+                Some(scope) => {
+                    for symbol in scope {
+                        if !symbols.contains(&symbol) {
+                            symbols.push(symbol);
+                        }
+                    }
+                }
+            }
+            false
+        });
+        if any {
+            let delivery = self.io.http_delivery.take();
+            let token = self.io.order_response_token.take();
+            let mut cx = Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            };
+            self.venue
+                .reconcile_uncertain(&mut cx, (!all).then_some(symbols.as_slice()));
+            self.io.http_delivery = delivery;
+            self.io.order_response_token = token;
+        }
+        let next = self
+            .io
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .min_by(f64::total_cmp);
+        if self.reconcile_timer.map(|(_, at)| at) == next {
+            return;
+        }
+        if let Some((timer, _)) = self.reconcile_timer.take() {
+            self.io.actions.push(Action::ClearTimer { timer });
+        }
+        if let Some(at_ms) = next {
+            let timer = TimerId(self.io.next());
+            self.io.actions.push(Action::SetTimer { timer, at_ms });
+            self.reconcile_timer = Some((timer, at_ms));
         }
     }
 
@@ -3657,7 +4198,22 @@ impl<V: Venue> Engine<V> {
                     cx.store,
                     &mut cx.io.actions,
                 );
+                // Session writes skip the journaled collector, so expose the
+                // reply metadata the write classifier reads during this callback.
+                let session_write = cx.io.http_delivery.as_ref().is_some_and(|delivery| {
+                    delivery.context.operation() == crate::request_context::Operation::Mutation
+                        && matches!(
+                            delivery.context.owner(),
+                            crate::request_context::Owner::Session { .. }
+                        )
+                });
+                if session_write {
+                    cx.io.http_write_reply = Some((response.status, response.headers.to_owned()));
+                }
                 self.venue.on_response(&mut cx, pending.value, response);
+                if session_write {
+                    cx.io.http_write_reply = None;
+                }
             }
             Err(_) => {
                 let make_failure = || malformed_body("response body is not UTF-8");
@@ -3685,8 +4241,12 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
-                cx.close(socket);
-                self.venue.on_close(&mut cx, socket, 1006);
+                if cx.io.managed_socket_active() {
+                    cx.close(socket);
+                } else {
+                    cx.close(socket);
+                    self.venue.on_close(&mut cx, socket, 1006);
+                }
             }
             _ => {}
         }
@@ -3700,6 +4260,12 @@ impl<V: Venue> Engine<V> {
         result: Result<crate::signing::SignResult, crate::signing::SignError>,
     ) {
         use crate::signing_dispatch::Completion;
+        #[cfg(feature = "managed-sockets")]
+        if let Some((socket, connect)) = self.io.signing.outbound_socket(attempt)
+            && !self.socket_gate(now, socket, connect)
+        {
+            return;
+        }
         let Some(completion) =
             self.io
                 .signing
@@ -3837,6 +4403,7 @@ impl<V: Venue> Engine<V> {
         if !now.is_finite()
             || self.io.http_delivery.is_some()
             || self.io.http_plan_ready.is_some()
+            || self.io.http_plan_expiring.is_some()
             || !self.io.request_contexts.plan_scope_clear()
         {
             return;
@@ -3845,6 +4412,7 @@ impl<V: Venue> Engine<V> {
         while let Some(plan) = self.io.request_contexts.next_plan_ready(now) {
             advanced = true;
             if now >= plan.deadline() {
+                self.expire_plan_calls(now, &plan);
                 Cx {
                     now,
                     store: &mut self.store,
@@ -3937,6 +4505,7 @@ impl<V: Venue> Engine<V> {
 
     pub fn prepare_dispatch(&mut self, now: f64) {
         self.assert_live();
+        self.expire_read_roots(now);
         self.flush_http_owner_retirements();
         self.io.dispatch_now = now;
         self.flush_http_plans(now);
@@ -3956,7 +4525,20 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    #[inline(always)]
     fn dispatch_actions(&mut self, now: f64) {
+        self.assert_live();
+        if self.io.actions.is_empty()
+            && self.io.signing_admission.is_empty()
+            && self.io.signing.is_empty()
+        {
+            return;
+        }
+        self.dispatch_queued_actions(now);
+    }
+
+    #[inline(never)]
+    fn dispatch_queued_actions(&mut self, now: f64) {
         use crate::signing_dispatch::Completion;
         for (outbound, error) in std::mem::take(&mut self.io.signing_admission) {
             self.sign_failed(now, outbound, error);
@@ -3967,6 +4549,29 @@ impl<V: Venue> Engine<V> {
             self.assert_live();
             while let Some(action) = queued.pop_front() {
                 self.io.assert_action_safe(&action);
+                let emitted = self.io.actions.len();
+                #[cfg(not(feature = "managed-sockets"))]
+                let live = true;
+                #[cfg(feature = "managed-sockets")]
+                let live = if !self.io.managed_socket_active() {
+                    true
+                } else {
+                    match &action {
+                        Action::Sign { attempt, .. } => {
+                            self.io.signing.outbound_socket(*attempt).is_none_or(
+                                |(socket, connect)| self.socket_gate(now, socket, connect),
+                            )
+                        }
+                        Action::SignedOutbound { outbound, .. } => {
+                            self.gate_socket_action(now, outbound)
+                        }
+                        _ => self.gate_socket_action(now, &action),
+                    }
+                };
+                self.queue_dispatch_callback_actions(&mut queued, emitted);
+                if !live {
+                    continue;
+                }
                 match action {
                     Action::SignedOutbound { attempt, outbound } => {
                         match self.io.signing.release(
@@ -3975,24 +4580,54 @@ impl<V: Venue> Engine<V> {
                             now,
                             self.io.protocol_clock.revision(),
                         ) {
-                            Some(Completion::Ready(pending, outbound)) => {
+                            Some(Completion::Ready(mut pending, mut outbound)) => {
+                                let time = crate::request_context::ReleaseTime {
+                                    raw_ms: now,
+                                    protocol_ms: self.io.protocol_clock.at(now),
+                                    revision: self.io.protocol_clock.revision(),
+                                };
+                                let release =
+                                    match crate::SigningRelease::new(pending.receipt, time) {
+                                        Ok(release) => release,
+                                        Err(crate::request_context::Error::Stale) => {
+                                            crate::signing_dispatch::wipe(&mut outbound);
+                                            pending.timer = TimerId(0);
+                                            let next = self.io.signing.next_id();
+                                            self.io.signing.retry(next, pending);
+                                            continue;
+                                        }
+                                        Err(_) => {
+                                            crate::signing_dispatch::wipe(&mut outbound);
+                                            let emitted = self.io.actions.len();
+                                            self.sign_failed(
+                                                now,
+                                                pending.outbound,
+                                                crate::signing::SignError::InvalidRequest,
+                                            );
+                                            self.queue_dispatch_callback_actions(
+                                                &mut queued,
+                                                emitted,
+                                            );
+                                            continue;
+                                        }
+                                    };
                                 match &outbound {
                                     Action::Http(http) => {
                                         if let Some(value) = self.io.pending.get_mut(&http.id) {
-                                            self.venue.on_signing_receipt(
+                                            self.venue.on_signing_release(
                                                 SigningTarget::Http {
                                                     request: http.id,
                                                     pending: &mut value.value,
                                                 },
-                                                pending.receipt,
+                                                release,
                                             );
                                         }
                                     }
                                     Action::WsConnect { socket, .. }
                                     | Action::WsSend { socket, .. } => {
-                                        self.venue.on_signing_receipt(
+                                        self.venue.on_signing_release(
                                             SigningTarget::Socket { socket: *socket },
-                                            pending.receipt,
+                                            release,
                                         );
                                     }
                                     _ => {}
@@ -4103,13 +4738,34 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    #[cfg(not(feature = "managed-sockets"))]
+    fn process_socket_work(&mut self, _now: f64) {}
+    #[cfg(not(feature = "managed-sockets"))]
+    fn has_socket_work(&self) -> bool {
+        false
+    }
+
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
         self.assert_live();
+        // No clock here: the last observed engine time, never a wall clock.
+        self.expire_read_roots(self.io.dispatch_now);
         self.flush_http_plans(self.io.dispatch_now);
         self.flush_http_owner_retirements();
         self.io.assert_actions_safe();
+        self.process_socket_work(self.io.dispatch_now);
+        self.io.assert_actions_safe();
         self.dispatch_actions(self.io.dispatch_now);
+        self.process_socket_work(self.io.dispatch_now);
+        #[cfg(feature = "managed-sockets")]
+        if self.io.managed_socket_active() {
+            self.fence_socket_actions(self.io.dispatch_now);
+            self.dispatch_actions(self.io.dispatch_now);
+            self.drain_socket_frames(self.io.dispatch_now);
+            self.process_socket_work(self.io.dispatch_now);
+            self.dispatch_actions(self.io.dispatch_now);
+            self.fence_socket_actions(self.io.dispatch_now);
+        }
         if self.store.take_rejected_empty_catalogue() {
             push_event(
                 &mut self.io.actions,
@@ -4126,12 +4782,18 @@ impl<V: Venue> Engine<V> {
         self.flush_http_owner_retirements();
         self.assert_live();
         self.io.assert_actions_safe();
+        #[cfg(feature = "managed-sockets")]
+        if !self.io.socket_continuations.is_empty() {
+            self.arm_socket_continuations(self.io.dispatch_now);
+            self.io.assert_actions_safe();
+        }
         self.io.actions.drain(..)
     }
 
     pub fn has_actions(&self) -> bool {
         !self.io.actions.is_empty()
             || !self.io.signing_admission.is_empty()
+            || self.has_socket_work()
             || self.io.signing.next_work().is_some()
             || self.store.rejected_empty_catalogue()
     }
@@ -4154,6 +4816,7 @@ impl<V: Venue> Engine<V> {
     /// this method deliberately leaves the stream's baseline untouched.
     pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
+        self.expire_read_roots(now);
         let buffer = std::mem::take(&mut self.io.snapshot);
         let mut w = FrameWriter::new(buffer, now);
         let everything = self.store.everything();
@@ -4177,6 +4840,7 @@ impl<V: Venue> Engine<V> {
     /// changes, queued events or public stream baselines.
     pub fn account_snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
+        self.expire_read_roots(now);
         let buffer = std::mem::take(&mut self.io.snapshot);
         let mut writer = FrameWriter::new(buffer, now);
         self.store
@@ -4191,6 +4855,7 @@ impl<V: Venue> Engine<V> {
     /// frame. Returns `None` when nothing changed.
     pub fn take_frame(&mut self, now: f64) -> Option<&[u8]> {
         self.assert_live();
+        self.expire_read_roots(now);
         self.write_frame(now, true)
     }
 
@@ -4200,6 +4865,7 @@ impl<V: Venue> Engine<V> {
     /// travel with the orders they belong to.
     pub fn take_market_frame(&mut self, now: f64) -> Option<&[u8]> {
         self.assert_live();
+        self.expire_read_roots(now);
         self.write_frame(now, false)
     }
 
@@ -7966,3 +8632,7 @@ mod dispatch_signing_tests;
 #[cfg(all(test, feature = "order-locks", feature = "http-plans"))]
 #[path = "http_plan_boundary_tests.rs"]
 mod http_plan_boundary_tests;
+
+#[cfg(feature = "http-plans")]
+#[path = "http_plan_expiry.rs"]
+mod http_plan_expiry;

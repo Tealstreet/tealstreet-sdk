@@ -188,15 +188,32 @@ slot/ref never implies equal account.
   Generalizes Coinbase's runtime drop; other families adopt it only
   explicitly, listed per PR.
 
-### C2. Account subject (deferred; decision with Sam, not in Phase 2)
+### C1 as built (Phase 2a: core, hosts, Binance)
+
+- `Public` is not a role (an unsigned request has nothing to select), and
+  `NoPrimary` is not policy: `select` returns `CredentialUnavailable::Missing`
+  and the venue keeps its existing presentation (silent skip, typed failure,
+  KuCoin's unsigned fallback). Only `secondary_requires_primary` is family data.
+- `RequestRoute::Secondary` exists; `Selection::bind` declares it on
+  non-managed requests. Native and TS hosts honour the declared route, and they
+  reject a Secondary route with a non-secondary managed intent. The legacy
+  GET/header inference stays for unadopted venues and is deleted with the last
+  adopter.
+- Secondary-epoch evidence gating and `retire_secondary` adoption land with
+  Coinbase (Phase 2b), the only family that retires a read key today. The C4
+  checker is a separate Phase 2 PR.
+
+### C2. Account subject (decided by Sam 2026-10-23)
 
 `AccountSubject { signer, trading_account, fee_subject, public_id }` per slot,
 kept as separate fields, resolved once by the venue identity codec and read by
-every request from the engine instead of recomputed. Candidate rule: secondary
-account reads are admitted only once the secondary's resolved trading account
-equals the primary's, where the venue can report it (Coinbase does this today);
-otherwise current behaviour. This changes behaviour for misconfigured read keys
-and needs a claude-ddi2il/owner decision. Not part of Phase 1.
+every request from the engine instead of recomputed. Decision: secondary
+account reads require the secondary key's resolved account subject to equal
+the primary's. A mismatch is refused with a typed, not-sent error, never
+silently served from another account (Coinbase checks this today, by
+portfolio). This changes behaviour for misconfigured read keys and gets a
+RUST_CUTOVER_CALLERS entry. It ships in its own PR after the Coinbase
+adoption.
 
 ### C3. Nonce authority (single store, moved into the engine)
 
@@ -225,11 +242,16 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
 - Domains stay distinct: HL/TxFlow share `hyperliquid-agent` deliberately;
   Kraken and Aster keep their own. Each family keeps its current floor clock;
   clock policy is codex-5c57jl's lane.
-- Remote-signed families that need a monotonic domain require
-  `Identity.stable_id` (typed unavailable when absent). The hosted signing
-  facade passes `stable_id: None` today, so those families cannot be hosted
-  until trusted setup supplies one; the facade's caller-supplied `stamp_ms`
-  stays unchanged.
+- Remote-signed families that need a monotonic domain require a non-secret
+  key:
+  - `Identity.stable_id`, or
+  - a public identifier when the venue's own sequence is public (Aster V3
+    signer address, HL agent address).
+  
+  It is never a hash of key material, and never an address derived from a key
+  inside a venue. A family whose only identity is secret material (Kraken)
+  gets a typed unavailable when `stable_id` is absent. The hosted signing
+  facade's caller-supplied `stamp_ms` stays unchanged.
 - Kraken's secret-digest key moves to `stable_id` with its signer migration
   (codex-5c57jl, #1718). Today slots with an equal API key share one sequence
   even when their secrets differ (`kraken/account.rs:403-415`), so trusted
@@ -253,6 +275,37 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
 - Random/derived/timestamp families keep their protocol data; they are listed
   so a future duplicate-timestamp defect (e.g. cryptocom nonce = request id)
   has one owner.
+
+### C3 as built (part 1: store, keys, Hyperliquid/TxFlow)
+
+- `engine/src/nonce.rs` holds the shared process-global store. AsterDEX V3
+  keeps its own static (`asterdex/src/sign.rs:231`) until its migration, after
+  its open PRs.
+- `crypto::nonce::kraken` is a thin caller of `reserve_kraken_legacy`, which can
+  reach only the `kraken` secret-digest domain. It goes away with Kraken's
+  stable-id signer migration.
+- `NonceKey::{stable_id, ethereum_address}` are the only constructors. The
+  `hyperliquid-agent` key stays byte-identical (`sha256` of the lowercase `0x`
+  address), so no sequence resets across the upgrade.
+- Family policy is declared once in the engine as a `NonceDomain` constant
+  (name, raw/protocol clock floor and scale, limit); `HYPERLIQUID_AGENT` is the
+  first. `Cx::reserve_nonce(&domain, &key)` computes the floor with exact
+  integer arithmetic.
+- Hyperliquid and TxFlow reserve through one `reserve_agent_nonce` helper.
+  `crypto::nonce::ethereum_agent` is removed.
+- Lighter reserves from an engine `VenueCounter`:
+  - one per engine, as before. Two engines on one API key still rely on
+    Lighter's 21104 resync: sharing the counter would change allocation, and
+    the owner ruled nonce limits document-only;
+  - it is bounded by the signer's safe-integer range;
+  - it is seeded only from a validated `nextNonce` reply whose request epoch is
+    still current;
+  - `take` reserves before signing;
+  - sign errors, refusals, uncertain sends and the 21104 resync invalidate it,
+    which bumps the epoch.
+- Still to come:
+  - Aster V3 (`asterdex-v3`, ProtocolMs x1000), after its open PRs;
+  - `DispatchContext::reserve_nonce`, after #1771.
 
 ### C4. Enforcement
 
@@ -320,7 +373,7 @@ Re-check before each PR.
    - registry AsterDEX/Binance construction.
 
    Each PR prunes its checker rows.
-6. **C2 subject**, only after a decision.
+6. **C2 subject**: refuse secondary reads whose account subject differs from the primary's (typed notSent); RUST_CUTOVER_CALLERS entry.
 
 Each PR:
 - CARGO_BUILD_JOBS=2; `cargo test -p` for touched crates, plus clippy/fmt;

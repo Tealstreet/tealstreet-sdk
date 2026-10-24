@@ -5,6 +5,7 @@ mod history;
 mod identity;
 mod income;
 mod public_candles;
+mod public_trades;
 mod sign;
 mod trading;
 mod wire;
@@ -62,6 +63,7 @@ pub enum Pending {
     Trade(trading::Request),
     History(history::Request),
     Income(income::Request),
+    PublicTrades(Box<public_trades::Read>),
 }
 #[derive(Default)]
 struct Connection {
@@ -360,6 +362,9 @@ impl PhemexPerpetuals {
             Pending::Orders(r) => self.orders_read_failed(cx, r, error),
             Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Unknown),
             Pending::History(r) => self.history_failed(cx, r, error),
+            Pending::PublicTrades(read) => {
+                self.public_trades_failed(cx, *read, safe_cex_engine::VenueError::new(error));
+            }
             Pending::Income(r) => self.income_failed(cx, r, error),
             Pending::Depth { symbol, generation } => {
                 if self
@@ -617,11 +622,17 @@ impl Venue for PhemexPerpetuals {
             }
             Pending::Account(r) => self.account_item(cx, r, item),
             Pending::History(r) => self.history_item(cx, r, item),
+            Pending::PublicTrades(read) => read.item(cx, item),
             Pending::Income(r) => self.income_item(cx, r, item),
             _ => {}
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, r: Response<'_>) {
+        if let Pending::PublicTrades(read) = &p
+            && !read.valid_delivery(cx)
+        {
+            return;
+        }
         if r.status == 429 {
             self.paused_until = self.paused_until.max(
                 cx.now
@@ -719,6 +730,7 @@ impl Venue for PhemexPerpetuals {
             Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
             Pending::Trade(p) => self.trade_response(cx, p, r),
             Pending::History(p) => self.history_response(cx, p, r),
+            Pending::PublicTrades(read) => self.public_trades_response(cx, *read, r),
             Pending::Income(p) => self.income_response(cx, p, r),
         }
     }
@@ -729,6 +741,7 @@ impl Venue for PhemexPerpetuals {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
             Pending::PublicCandles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
@@ -742,6 +755,7 @@ impl Venue for PhemexPerpetuals {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
             Pending::PublicCandles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
