@@ -268,6 +268,9 @@ fails at an assertion.
 8. Admission refusals spend nothing: a Read Preflight, a Read admission with
    `refusals_complete`, no write credential, a zero timeout, a nonzero resolved
    pacing floor, and outside genuine entry or ready custody.
+9. A max-size control for CPU: 30,000 continued calls (one bracketed max input)
+   with per-call work O(1). Time is reported on the PR as the CPU
+   certification input, not asserted.
 10. A refused continue (expired root, uncertain fact, foreign delivery) leaves
     the current call settleable: `finish_plan_call` then `done_plan` succeeds
     with the journal intact and nothing reserved.
@@ -275,15 +278,21 @@ fails at an assertion.
     chain stops and the fence is armed.
 12. A definitive mixed batch (KnownPartial) continues to the next call, then
     `done_plan` succeeds under `refusals_complete`, with that batch's accepted
-    IDs in order and its refusals counted. A PartialUnknown batch refuses
-    continuation and projects Unknown.
+    IDs in order and its refusals counted. Those refusals share the one
+    `TEXT_BYTES` stream-and-retire budget and count. A PartialUnknown batch
+    refuses continuation and projects Unknown.
 13. Receipt binding: WriteAfterReads `begin_preflight_with_command_wait` binds
     the entry receipt. Controls: missing receipt; expired at entry; an
     unbound Preflight refused at admission; expired at admission is TimedOut;
     a second admission from the same Preflight is State; admission in ready
-    custody after a park uses the original cap exactly.
-14. A 60,000-call all-refused chain: retained refusal evidence stops growing
-    at `TEXT_BYTES`, the count is exact, and `done_plan("[]")` succeeds.
+    custody after a park uses the original cap exactly. Expired at entry is
+    Revoked, the same kind the ReadOnly path returns today. ReadOnly
+    behaviour is unchanged: its existing tests stay green and untouched. A
+    declared mutation Plan admitted from a WriteAfterReads Preflight with a
+    bound receipt is still Invalid, as at the base.
+14. A 60,000-call all-refused chain, with KnownPartial batches mixed in:
+    retained refusal evidence from both stops growing at `TEXT_BYTES`, the
+    count is exact, and `done_plan("[]")` succeeds.
 15. An empty native job ends through `done_empty_plan` with no Plan, Context
     or attempt.
 16. A KnownPartial batch, then `fail_plan`: failure projected with that batch's
@@ -292,9 +301,6 @@ fails at an assertion.
     and refuses a third. A Read call inside a mutation chain. A delayed
     continuation fires from the Plan timer, refuses outside that callback, and
     keeps one Context and one timer.
-9. A max-size control for CPU: 30,000 continued calls (one bracketed max input)
-   with per-call work O(1). Time is reported on the PR as the CPU
-   certification input, not asserted.
 
 ## Gates
 
