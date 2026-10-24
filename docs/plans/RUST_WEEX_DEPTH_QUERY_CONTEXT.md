@@ -1,6 +1,6 @@
 # WEEX public order-book query custody
 
-Status: plan before original compiling assertions; no production conversion.
+Status: plan and original compiling assertion evidence; no production conversion.
 Base: actual `77f124089477a6aed502d9b02aa7f08752b7bfa5`.
 
 ## Scope and exact inventory
@@ -35,15 +35,20 @@ uses no SelectedRead because the native request is public and unsigned.
   handling. No contract-value scaling, cache/book publication or level IDs.
 - Non-2xx/native error classification, venue code/message and retry-after fields
   retain their native shape. Existing explicit native HTTP/codec NotSent fields
-  are not silently normalized by this slice. Shared admission, physical Network
-  and Timeout, and root expiry use canonical Read errors with outcome None.
-  The native transport wrapper previously fabricated Network/NotSent; consuming
-  the real typed failure is an intentional caller change to document in CALLERS.
+  are not silently normalized by this slice. Genuine Read entry/Context admission
+  uses its canonical outcome None; managed pre-release preparation/provider
+  refusals retain their exact typed NotSent fields. Released Network failures,
+  engine physical Timeout and root expiry use Read outcome None. The native
+  transport wrapper classified even host timeout as Network/NotSent; the new
+  typed Network/Timeout distinction is an intentional CALLERS change. A query
+  parked behind a pause previously waited without a venue whole-query bound; it
+  now ends at the caller receipt deadline, also an explicit CALLERS obligation.
 - Preserve the native shared 429 pause only after exact live root/leg/attempt
   admission for BookQuery. Managed ingress/root expiry discards expired or revoked
   deliveries before the venue callback; their 429 cannot extend the shared pause.
   This is an intentional change to document in CALLERS and prove with late-429
-  versus unrelated-live-query control. Unrelated discovery/account stale-seed or
+  versus unrelated-live-query control; a slow 429 that native formerly observed
+  after caller abandonment is no longer learned. Unrelated discovery/account stale-seed or
   cycle rate-signal policy remains unchanged. A new query can park until a live
   response's pause ends; the failed owner never retries. No new pacing or retry.
 
@@ -63,9 +68,10 @@ uses no SelectedRead because the native request is public and unsigned.
    authority, never numeric `done`/`fail`. Publish the command result before
    retiring the physical child; failure/admission paths retire first, then fail
    the exact live root. Only proven revoked owners drop without a new terminal.
-4. The no-Cx `read_root_retired` hook removes parked work/timers by exact Owner
-   including generation. Existing history cleanup composes with this hook but
-   is not a dependency. Stale timers, DATA and same-id old generations are inert.
+4. The no-Cx `read_root_retired` hook removes parked work by exact Owner including
+   generation. It cannot clear an already scheduled venue timer; a later fire
+   finds no matching queue entry and is inert. Existing history cleanup composes
+   with this hook but is not a dependency. Stale DATA and reused IDs are inert.
 5. Shared get/discovery/subscription paths and all signing, account and trading
    code remain outside this slice. Remove helpers only if this conversion makes
    them provably orphaned. No engine change, new registry or timer policy.
@@ -77,8 +83,9 @@ counts legacy HTTP and real Prepare/Bind/Claim. Native URL/headers/body positive
 must run before custody assertions. Do not fabricate missing methods or calls.
 
 - Managed release: expected 0 legacy, 1 Prepare, 1 Claim after native wire checks.
-- Configured receipt caps the physical timeout; a raised wait retains the native
-  20 s physical bound instead of becoming a longer per-call timeout.
+- Configured receipt caps the physical timeout (RED). A raised wait retains the
+  native effective 20 s physical bound (GREEN control): legacy timeout_ms None
+  already defaults to 20,000 ms, so explicit representation alone is not a bug.
 - In-flight DATA at the original receipt deadline is strict Timeout exactly once
   without success or book publication. The live-before-deadline control succeeds.
 - A shared rate pause admits no child while parked; receipt expiry before dequeue
@@ -101,3 +108,30 @@ Context API fit from the WEEX owners. The source commit must list caller-visible
 bound/error changes in CALLERS and run scoped native/managed controls, strict
 Clippy/fmt, bans and the exact inventory ratchet. Fresh CI includes WEEX CPU/size.
 The legacy TypeScript/AWS runtime and hosted signing setup are untouched.
+
+## Original evidence receipt
+
+The plan was committed first at `e1f0451410d`; the exact live-429 wording was
+refined at `a170d99231e` before freezing this assertion checkpoint. Bounded native
+and Context reviewers identified the same late-429 limitation; the plan now
+records that caller delta. Native review also corrected the physical-timeout
+representation test: None already means 20 s, so this is a GREEN control.
+
+Executed on unchanged actual-base production:
+
+- `cargo test -p safe-cex-venue-weex --test depth_query_context`: **5 independent
+  assertion REDs, 3 GREEN, 0 ignored**, no compile/setup failure. Native unsigned
+  URL/headers/body positives precede the release-custody mismatch `(1,0,0)` vs
+  `(0,1,1)`. Receipt cap is None vs Some(1234); equality emits success instead of
+  a typed root Timeout; parked expiry emits zero terminals; an expired 429
+  parks the unrelated owner instead of releasing its request.
+- GREEN: effective native 20 s physical limit with a raised receipt, a live
+  fractional-boundary success, and a successful query after a real native pause.
+- Existing `--test depth_query`: **8/8 GREEN**. Strict all-feature Clippy on the
+  new target and workspace fmt check pass.
+
+The post-cutover stale pause-timer suffix and strict late-429 terminal assertion
+follow each test's original first RED; they are readiness gates, not claimed
+originally executed. The driver deliberately expects successful Claim and does
+not yet exercise typed held-claim refusal. Production, manifest, checker and
+STAGING are byte-identical to the base; only plan/index/new test differ.
