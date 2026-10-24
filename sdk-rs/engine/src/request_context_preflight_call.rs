@@ -190,6 +190,11 @@ impl ContextRegistry {
         }
     }
 
+    fn inherited_uncertain(&self, handle: &Preflight) -> bool {
+        self.preflight_owner(handle)
+            .is_ok_and(|owner| owner.inherited_uncertain)
+    }
+
     pub(super) fn preflight_state(&self, handle: &Preflight) -> Result<&State, Error> {
         let owner = self.preflight_owner(handle)?;
         let CommandPhase::Preflight(state) = &owner.phase else {
@@ -316,6 +321,14 @@ impl<P> Cx<'_, P> {
             callback(self);
             return;
         }
+        self.with_recorded_owned_failure(error, callback);
+    }
+
+    fn with_recorded_owned_failure(
+        &mut self,
+        error: impl FnOnce() -> VenueError,
+        callback: impl FnOnce(&mut Self),
+    ) {
         let delivery = self
             .io
             .http_delivery
@@ -331,6 +344,26 @@ impl<P> Cx<'_, P> {
         {
             self.finish_owned_read_failure(&delivery, error());
         }
+    }
+
+    pub(in super::super::super) fn with_independent_plan_failure(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+        callback: impl FnOnce(&mut Self, VenueError),
+    ) -> Result<(), Error> {
+        let owned = self.io.http_delivery.as_ref().is_some_and(|delivery| {
+            self.io
+                .request_contexts
+                .plan_from_context(&delivery.context)
+                .is_some_and(|current| current.same_plan(plan))
+                && self.io.request_contexts.record_owned_read_failure(delivery)
+        });
+        if !owned {
+            return self.fail_plan(plan, error);
+        }
+        self.with_recorded_owned_failure(|| error.clone(), |cx| callback(cx, error.clone()));
+        Ok(())
     }
 
     #[inline(never)]
@@ -380,6 +413,7 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .preflight_state(&handle)
             .expect("owned admission");
+        let inherited = self.io.request_contexts.inherited_uncertain(&handle);
         let mut error = VenueError::new("HTTP read admission failed")
             .kind(match reason {
                 Error::TimedOut => crate::ErrorKind::Timeout,
@@ -392,6 +426,7 @@ impl<P> Cx<'_, P> {
         let seal = if state.policy.purpose == PreflightPurpose::WriteAfterReads {
             error = CommandWrites::new(CAPACITY)
                 .expect("fixed journal bound")
+                .inheriting(inherited)
                 .fail(error)
                 .expect("empty projection");
             Seal::Failure(error, Vec::new())

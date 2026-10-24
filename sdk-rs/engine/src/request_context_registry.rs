@@ -16,6 +16,9 @@ use std::collections::VecDeque;
 
 const CAPACITY: usize = 256;
 
+#[path = "local_setting.rs"]
+mod local_setting;
+
 #[path = "session_context.rs"]
 pub(super) mod session;
 
@@ -67,9 +70,13 @@ struct CommandOwner {
     /// Some Context or declared policy of this owner named a credential; only
     /// then can its auth-kind failure be credential-health evidence.
     credentialed: bool,
+    /// An earlier attempt of this intent may have reached the venue. Every
+    /// journal this owner creates projects its failure at least Unknown.
+    inherited_uncertain: bool,
 }
 
 enum CommandPhase {
+    LocalSetting,
     Context {
         root: Context,
         entry_owned: bool,
@@ -133,6 +140,7 @@ impl CommandOwner {
     fn context_root(&self) -> Option<&Context> {
         match &self.phase {
             CommandPhase::Context { root, .. } => Some(root),
+            CommandPhase::LocalSetting => None,
             #[cfg(feature = "http-plans")]
             _ => None,
         }
@@ -141,6 +149,7 @@ impl CommandOwner {
     fn retained(&self) -> bool {
         match &self.phase {
             CommandPhase::Context { entry_owned, .. } => *entry_owned,
+            CommandPhase::LocalSetting => true,
             #[cfg(feature = "http-plans")]
             CommandPhase::Preflight(_) | CommandPhase::Planned(_) | CommandPhase::Retiring(_) => {
                 true
@@ -321,10 +330,10 @@ impl ContextRegistry {
             CommandPhase::Context {
                 root, entry_owned, ..
             } => (root, entry_owned),
-            #[cfg(feature = "http-plans")]
             _ => panic!("command entry must retain a Context root"),
         };
-        assert_eq!(root, context);
+        // Plain comparisons: release WASM carries no Debug for Context or Owner.
+        assert!(root == context, "command entry retains its own root");
         assert!(!*entry_owned, "command entry already retained");
         *entry_owned = true;
     }
@@ -563,6 +572,7 @@ impl ContextRegistry {
                         .map(|(_, intent)| intent),
                     leg_intents: Vec::new(),
                     credentialed: context.credential().is_some(),
+                    inherited_uncertain: false,
                 });
         }
         self.contexts.insert(identity, context.clone());
@@ -809,7 +819,8 @@ impl ContextRegistry {
                     writes.register(request, context.leg())?;
                 }
             } else {
-                let mut writes = CommandWrites::new(CAPACITY)?;
+                let mut writes =
+                    CommandWrites::new(CAPACITY)?.inheriting(owner.inherited_uncertain);
                 writes.register(request, context.leg())?;
                 owner.writes = Some(writes);
             }
@@ -1166,19 +1177,18 @@ impl ContextRegistry {
         {
             return Seal::Stale;
         }
-        let declared = self
-            .commands
-            .get(&command)
-            .is_some_and(|owner| owner.mutation_declared);
+        let (declared, inherited) = self.commands.get(&command).map_or((false, false), |owner| {
+            (owner.mutation_declared, owner.inherited_uncertain)
+        });
         let mut writes = match self
             .commands
             .get_mut(&command)
             .and_then(|owner| owner.writes.take())
         {
             Some(writes) => writes,
-            None if declared => {
-                CommandWrites::new(CAPACITY).expect("fixed positive journal capacity")
-            }
+            None if declared => CommandWrites::new(CAPACITY)
+                .expect("fixed positive journal capacity")
+                .inheriting(inherited),
             None => return Seal::Legacy(error),
         };
         if error.is_none() && writes.succeed().is_ok() {
@@ -1391,7 +1401,7 @@ impl ContextRegistry {
                 }
                 #[cfg(feature = "http-plans")]
                 CommandPhase::Retiring(_) => return false,
-                CommandPhase::Context { .. } => {}
+                CommandPhase::Context { .. } | CommandPhase::LocalSetting => {}
             }
         }
         self.forget_observer(command);

@@ -1038,6 +1038,8 @@ pub struct CommandWrites {
     report_bytes: usize,
     report_messages: usize,
     evidence: evidence::EvidenceBudget,
+    // An earlier attempt of this intent may have reached the venue.
+    inherited_uncertain: bool,
 }
 // Private synchronous terminal preparation. Never exposed as a venue grant.
 #[cfg(feature = "http-plans")]
@@ -1091,6 +1093,7 @@ impl CommandWrites {
             report_bytes: 0,
             report_messages: 0,
             evidence: evidence::EvidenceBudget::default(),
+            inherited_uncertain: false,
         })
     }
     pub fn register(&mut self, id: RequestId, leg: u64) -> Result<(), Error> {
@@ -1552,6 +1555,14 @@ impl CommandWrites {
     /// authority, including for evidence-only IDs on a failed native reply.
     #[cfg(feature = "http-plans")]
     pub(crate) fn validate_failed_attempt(&self, id: RequestId) -> Result<(), Error> {
+        if self.failed_attempt(id)?.id_overflow {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "http-plans")]
+    fn failed_attempt(&self, id: RequestId) -> Result<&WriteAttempt, Error> {
         if self.sealed {
             return Err(Error::State);
         }
@@ -1563,10 +1574,23 @@ impl CommandWrites {
         if self.superseded(attempt.leg) || self.latest(attempt.leg) != Some(id) {
             return Err(Error::Revoked);
         }
-        if attempt.id_overflow || !matches!(attempt.result, Some(WriteResult::Failed(_))) {
+        if !matches!(attempt.result, Some(WriteResult::Failed(_))) {
             return Err(Error::State);
         }
-        Ok(())
+        Ok(attempt)
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn failed_attempt_error(&self, id: RequestId) -> Result<VenueError, Error> {
+        let attempt = self.failed_attempt(id)?;
+        let Some(WriteResult::Failed(error)) = &attempt.result else {
+            return Err(Error::State);
+        };
+        let mut error = error.clone();
+        if attempt.id_overflow {
+            evidence::mark_id_overflow(&mut error);
+        }
+        Ok(error)
     }
 
     /// Seal success only when every terminal logical leg is proven accepted.
@@ -1593,6 +1617,13 @@ impl CommandWrites {
             return Err(Error::State);
         }
         Ok(())
+    }
+
+    /// Carry an owner's inherited maybe-sent fact; it can only raise a failure
+    /// projection to Unknown and never clears.
+    pub(crate) fn inheriting(mut self, uncertain: bool) -> Self {
+        self.inherited_uncertain |= uncertain;
+        self
     }
 
     /// Seal exactly once. A caller's fallback text never chooses the outcome;
@@ -1684,7 +1715,9 @@ impl CommandWrites {
                 error
             }
         };
-        error.outcome = if !any_released {
+        error.outcome = if self.inherited_uncertain {
+            Some(Outcome::Unknown)
+        } else if !any_released {
             Some(Outcome::NotSent)
         } else if uncertain || overflow {
             Some(Outcome::Unknown)

@@ -47,7 +47,8 @@ struct LocalWrite {
 
 /// What a response means for its job.
 enum Call {
-    Hyro(crate::hyro::Request),
+    /// A Hyro link-filtered reconcile read.
+    Hyro(crate::hyro::Lookup),
     ResolveMode {
         symbol: String,
         command: Box<Command>,
@@ -411,18 +412,19 @@ impl BybitLinear {
         check_client_order_ids(cx, orders)
     }
 
-    pub(crate) fn send_hyro(
+    /// A Hyro reconcile read on its own Background authority.
+    pub(crate) fn hyro_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         rest: Rest,
-        request: crate::hyro::Request,
+        lookup: crate::hyro::Lookup,
     ) {
-        self.send(
+        self.send_read(
             cx,
             rest,
             Then::Trade(Request {
                 command: 0,
-                call: Call::Hyro(request),
+                call: Call::Hyro(lookup),
                 local: None,
             }),
         );
@@ -466,30 +468,24 @@ impl BybitLinear {
             cx.fail(*command, not_sent(error));
             return;
         }
-        if self.variant.is_hyro() {
-            if !self.private_ready() {
-                let id = match &command {
-                    Command::PlaceOrders { command, .. }
-                    | Command::CancelOrders { command, .. }
-                    | Command::AmendOrder { command, .. }
-                    | Command::CancelSymbolOrders { command, .. }
-                    | Command::SetLeverage { command, .. }
-                    | Command::SetMarginType { command, .. }
-                    | Command::SetPositionMode { command, .. } => *command,
-                    _ => return,
-                };
-                cx.fail(
-                    id,
-                    not_sent(
-                        "HyroTrader account is reconnecting; wait for private state reconciliation",
-                    ),
-                );
-                return;
-            }
-            if let Command::PlaceOrders { command, orders } = command {
-                self.start_hyro_place(cx, command, &orders);
-                return;
-            }
+        if self.variant.is_hyro() && !self.private_ready() {
+            let id = match &command {
+                Command::PlaceOrders { command, .. }
+                | Command::CancelOrders { command, .. }
+                | Command::AmendOrder { command, .. }
+                | Command::CancelSymbolOrders { command, .. }
+                | Command::SetLeverage { command, .. }
+                | Command::SetMarginType { command, .. }
+                | Command::SetPositionMode { command, .. } => *command,
+                _ => return,
+            };
+            cx.fail(
+                id,
+                not_sent(
+                    "HyroTrader account is reconnecting; wait for private state reconciliation",
+                ),
+            );
+            return;
         }
         if let Some((id, result)) = self.variant_control(&command) {
             match result {
@@ -857,8 +853,8 @@ impl BybitLinear {
     ) {
         let Request { command, call, .. } = request;
         match call {
-            Call::Hyro(request) => {
-                self.on_hyro_sign_failed(cx, request, error);
+            Call::Hyro(read) => {
+                self.on_hyro_response(cx, read, Err(&error.message));
                 return;
             }
             Call::ResolveMode { .. } => {

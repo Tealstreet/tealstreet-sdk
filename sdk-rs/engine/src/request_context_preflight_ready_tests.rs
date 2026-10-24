@@ -174,6 +174,7 @@ impl Venue for ScopeProbe {
                         calls: &calls,
                     }],
                     PlanPolicy {
+                        independent_calls: false,
                         operation: Operation::Read,
                         credential: None,
                         pacing: None,
@@ -238,6 +239,7 @@ impl Venue for ScopeProbe {
                             calls: &calls,
                         }],
                         PlanPolicy {
+                            independent_calls: false,
                             operation: Operation::Read,
                             credential: None,
                             pacing: None,
@@ -313,6 +315,7 @@ impl Venue for ScopeProbe {
                             calls: &calls,
                         }],
                         PlanPolicy {
+                            independent_calls: false,
                             operation: Operation::Read,
                             credential: None,
                             pacing: None,

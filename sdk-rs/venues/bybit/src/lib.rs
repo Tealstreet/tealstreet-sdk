@@ -2401,6 +2401,15 @@ impl Venue for BybitLinear {
         self.retire_history(owner);
     }
 
+    fn reconcile_http(
+        &self,
+        _cx: &mut safe_cex_engine::request_context::Reconciliation<'_>,
+        data: &safe_cex_engine::request_context::ReconciliationData,
+        response: Response<'_>,
+    ) {
+        self.hyro_late_ack(data.as_str(), &response);
+    }
+
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending.then {
             Then::Ordinary(request) => self.on_ordinary_leg_failed(cx, request, error),

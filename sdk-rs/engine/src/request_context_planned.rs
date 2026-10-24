@@ -275,6 +275,24 @@ impl ContextRegistry {
             .then(|| state.body[0].handle.clone())
     }
 
+    pub(in super::super) fn independent_plan_failure(
+        &self,
+        delivery: &Delivery,
+        fallback: VenueError,
+    ) -> Option<VenueError> {
+        let plan = self.plan_from_context(&delivery.context)?;
+        let body = self.plan_body(&plan).ok()?;
+        if !body.policy.independent_calls || body.policy.operation != Operation::Mutation {
+            return None;
+        }
+        Some(
+            self.owner_entry(plan.owner())
+                .and_then(|owner| owner.writes.as_ref())
+                .and_then(|writes| writes.failed_attempt_error(delivery.attempt.request).ok())
+                .unwrap_or(fallback),
+        )
+    }
+
     fn validate_plan(&self, handle: &Plan, now: f64) -> Result<&Body, Error> {
         if !now.is_finite() {
             return Err(Error::Invalid);
@@ -355,7 +373,10 @@ impl<P> Cx<'_, P> {
             PreflightPurpose::ReadOnly => (Operation::Read, intent.read_credential),
             PreflightPurpose::WriteAfterReads => (Operation::Mutation, intent.write_credential),
         };
-        if policy.operation != operation || policy.credential != credential {
+        if (policy.independent_calls && operation != Operation::Mutation)
+            || policy.operation != operation
+            || policy.credential != credential
+        {
             return Err(Error::Invalid);
         }
         let receipt_cap = self.io.request_contexts.preflight_receipt_cap(preflight)?;
@@ -539,7 +560,9 @@ impl<P> Cx<'_, P> {
                     generation: identity,
                     phase: CommandPhase::Planned(State { body }),
                     last_deadline: deadline,
-                    writes,
+                    // The founder's inherited fact moves with its journal, so
+                    // every observer's projection keeps it.
+                    writes: writes.map(|writes| writes.inheriting(owner.inherited_uncertain)),
                     mutation_declared: owner.mutation_declared,
                     credentialed: owner.credentialed,
                     pending: 0,
@@ -547,6 +570,7 @@ impl<P> Cx<'_, P> {
                     waits: 0,
                     intent: owner.intent,
                     leg_intents,
+                    inherited_uncertain: owner.inherited_uncertain,
                 };
                 // The founder keeps its own pending/delivery accounting and
                 // becomes an observer: it holds no journal or send right.
@@ -565,7 +589,7 @@ impl<P> Cx<'_, P> {
             }
             _ => {
                 owner.phase = CommandPhase::Planned(State { body });
-                owner.writes = writes;
+                owner.writes = writes.map(|writes| writes.inheriting(owner.inherited_uncertain));
                 owner.leg_intents = leg_intents;
                 owner.last_deadline = deadline;
                 registry.plan_index.push(preflight.owner());

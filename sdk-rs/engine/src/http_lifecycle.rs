@@ -771,7 +771,10 @@ impl<V: Venue> Engine<V> {
         // Session writes change no orders: no reconciliation record and no
         // write-revision fence over unrelated command reconciliation.
         let journal = managed.lifecycle.context().operation() == Operation::Mutation
-            && matches!(managed.lifecycle.context().owner(), Owner::Command { .. });
+            && matches!(
+                managed.lifecycle.context().owner(),
+                Owner::Command { .. } | Owner::Execution { .. }
+            );
         if journal {
             let capture = if self.io.streams.contains_key(&request) {
                 Err(Error::Invalid)
@@ -1163,7 +1166,18 @@ impl<V: Venue> Engine<V> {
                         io: &mut self.io,
                     };
                     #[cfg(feature = "http-plans")]
-                    let sealed = if let Some(plan) = &plan {
+                    let sealed = if let Some(failure) = cx
+                        .io
+                        .request_contexts
+                        .independent_plan_failure(&delivery, error.clone())
+                    {
+                        cx.with_independent_plan_failure(
+                            plan.as_ref()
+                                .expect("independent failure belongs to a Plan"),
+                            failure,
+                            |cx, failure| self.venue.on_http_failed(cx, pending.value, failure),
+                        )
+                    } else if let Some(plan) = &plan {
                         cx.fail_plan(plan, error)
                     } else {
                         cx.fail_context(&delivery.context, error)
@@ -1251,6 +1265,8 @@ mod tests {
     include!("request_context_reconciliation_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_plan_expiry_tests.rs");
+    #[cfg(feature = "http-plans")]
+    include!("request_context_plan_independence_tests.rs");
 
     #[derive(Debug)]
     struct Pending(Context);

@@ -71,6 +71,7 @@ impl ContextRegistry {
                     .map(|(_, intent)| intent),
                 leg_intents: Vec::new(),
                 credentialed,
+                inherited_uncertain: false,
             },
         );
         let handle = Preflight::new(&self.issuer, command, generation);
@@ -110,13 +111,33 @@ impl ContextRegistry {
         match (state.policy.purpose, error) {
             (PreflightPurpose::ReadOnly, error) => Ok(Seal::Legacy(error)),
             (PreflightPurpose::WriteAfterReads, Some(error)) => {
-                // The same empty-journal projection as a Context mutation
-                // refused before registration bounds text/IDs and proves NotSent.
-                let error = CommandWrites::new(CAPACITY)?.fail(error)?;
+                // The same empty-journal projection as a Context mutation refused
+                // before registration bounds text/IDs; NotSent unless inherited.
+                let error = CommandWrites::new(CAPACITY)?
+                    .inheriting(owner.inherited_uncertain)
+                    .fail(error)?;
                 Ok(Seal::Failure(error, Vec::new()))
             }
             (PreflightPurpose::WriteAfterReads, None) => Err(Error::State),
         }
+    }
+
+    fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
+        let owner = self.preflight_owner(preflight)?;
+        let CommandPhase::Preflight(state) = &owner.phase else {
+            unreachable!()
+        };
+        if state.policy.purpose != PreflightPurpose::WriteAfterReads {
+            return Err(Error::Invalid);
+        }
+        let Owner::Command { id, .. } = preflight.owner() else {
+            unreachable!()
+        };
+        self.commands
+            .get_mut(&id)
+            .expect("validated preflight owner")
+            .inherited_uncertain = true;
+        Ok(())
     }
 
     pub(crate) fn has_retirements(&self) -> bool {
@@ -259,7 +280,18 @@ impl<P> Cx<'_, P> {
         self.finish_sealed_command(id, Some(result), seal)
     }
 
-    /// Failure before any plan was admitted proves no write reached the venue.
+    /// Record that an earlier attempt of this intent may have reached the venue.
+    /// Monotonic: every later failure of this command projects at least Unknown.
+    /// It grants no send, resend, renewal, import or success authority; the
+    /// resulting Unknown follows the existing Unknown reconciliation.
+    pub fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
+        self.io
+            .request_contexts
+            .inherit_preflight_uncertainty(preflight)
+    }
+
+    /// Failure before any plan was admitted proves this command sent no write;
+    /// an inherited maybe-sent fact still projects Unknown.
     /// Expiry cannot turn this handle into success, retry or send authority.
     pub fn fail_preflight(
         &mut self,

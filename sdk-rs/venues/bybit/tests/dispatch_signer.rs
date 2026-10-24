@@ -601,7 +601,8 @@ fn hyro_provider_refusal_preserves_an_earlier_ack_and_unknown_create() {
                 },
             );
         }
-        let actions: Vec<_> = h.engine.drain_actions().collect();
+        // H2: Hyro creates are managed Plan legs; the second is signed at dispatch.
+        let actions = managed(&mut h.engine, h.now);
         let error = failed(&actions, 42);
         assert_eq!(
             error.outcome,
@@ -820,9 +821,7 @@ fn refused_retry_after_initial_dispatch(
 ) -> safe_cex_engine::VenueError {
     let (mut h, gate) = ready(variant);
     let mut order = order();
-    if !variant.is_hyro() {
-        order.client_order_id = Some("immutable-dispatch-id".into());
-    }
+    order.client_order_id = Some("immutable-dispatch-id".into());
     h.command(Command::PlaceOrders {
         command: 42,
         orders: vec![order],
@@ -835,10 +834,7 @@ fn refused_retry_after_initial_dispatch(
         order_link_id: String,
     }
     let sent: SentIdentity = serde_json::from_str(body).unwrap();
-    assert!(!sent.order_link_id.is_empty());
-    if !variant.is_hyro() {
-        assert_eq!(sent.order_link_id, "immutable-dispatch-id");
-    }
+    assert_eq!(sent.order_link_id, "immutable-dispatch-id");
     gate.mode.store(1, Ordering::SeqCst);
     if let Some(code) = native_code {
         let message = if code == 10002 {
@@ -867,11 +863,7 @@ fn refused_retry_after_initial_dispatch(
             },
         );
     }
-    let retry_actions = if variant.is_hyro() {
-        h.engine.drain_actions().collect()
-    } else {
-        prepare_parked(&mut h.engine, h.now)
-    };
+    let retry_actions = prepare_parked(&mut h.engine, h.now);
     let (attempt, retry_work) = work(retry_actions);
     assert!(retry_work.operations.iter().any(|op| matches!(op,safe_cex_engine::signing::Operation::Sign {payload,..} if matches!(payload.last(),Some(safe_cex_engine::signing::PayloadPart::Bytes {bytes}) if bytes==body.as_bytes()))),"retry must retain exact body and immutable client identity");
     assert_eq!(
@@ -888,11 +880,7 @@ fn refused_retry_after_initial_dispatch(
             result: Err(SignError::Refused),
         },
     );
-    let mut actions: Vec<_> = if variant.is_hyro() {
-        h.engine.drain_actions().collect()
-    } else {
-        prepare_parked(&mut h.engine, h.now)
-    };
+    let mut actions: Vec<_> = prepare_parked(&mut h.engine, h.now);
     // Both paths reconcile the earlier dispatched create with one signed order
     // read; no new mutation may be emitted on this provider failure.
     let (attempt, repair) = work(actions.clone());
@@ -913,11 +901,7 @@ fn refused_retry_after_initial_dispatch(
     );
     // The only signing job here is the reconcile read checked above.
     actions.retain(|a| !matches!(a, Action::Sign { .. }) && !matches!(a, Action::Http(_)));
-    actions.extend(if variant.is_hyro() {
-        h.engine.drain_actions().collect::<Vec<_>>()
-    } else {
-        managed(&mut h.engine, h.now)
-    });
+    actions.extend(managed(&mut h.engine, h.now));
     let error = failed(&actions, 42);
     assert!(!error.message.contains("dispatch-secret"));
     assert!(!error.message.contains("https://"));
@@ -973,18 +957,173 @@ fn host_failure_never_resends_an_ordinary_write_and_stays_unknown() {
     assert!(h.engine.store().orders().is_empty());
 }
 
+/// H2: the engine grants a signature resend only to a command-owned write, so
+/// an execution-owned Hyro create refused 10004 is a definitive refusal: no
+/// resend, no reconcile read, and the next identical call is a new identity.
 #[test]
-fn hyro_native_signature_rejection_then_retry_provider_refusal_reconciles_prior_attempt() {
-    let error = refused_retry_after_initial_dispatch(Variant::Hyrotrader, Some(10004));
-    assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert_eq!(error.kind, None);
-    assert_eq!(error.venue_code.as_deref(), None);
+fn hyro_native_signature_rejection_is_a_definitive_refusal_without_resend() {
+    let (mut h, _gate) = ready(Variant::Hyrotrader);
+    h.command(Command::PlaceOrders {
+        command: 42,
+        orders: vec![order()],
+    });
+    let original = h.take("/v5/order/create");
+    let refused = sent_link(&original);
+    h.engine.handle(
+        h.now,
+        Event::HttpResponse {
+            request: original.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"retCode":10004,"retMsg":"error sign","result":{}}"#,
+            },
+        },
+    );
+    let actions = managed(&mut h.engine, h.now);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. })),
+        "no write resend and no reconcile read"
+    );
+    let error = failed(&actions, 42);
+    assert_eq!(error.outcome, Some(Outcome::Rejected));
+    assert_eq!(error.venue_code.as_deref(), Some("10004"));
+    assert!(!error.message.contains("dispatch-secret"));
+    assert!(!error.message.contains("https://"));
+    h.command(Command::PlaceOrders {
+        command: 43,
+        orders: vec![order()],
+    });
+    assert_ne!(sent_link(&h.take("/v5/order/create")), refused);
 }
 
+/// H2 (R1(a)): transport text, even "error sign", is no resend authority for a
+/// Hyro create. The call is Unknown at once, naming its link, and reconciles
+/// with that link's read beside the snapshot.
 #[test]
-fn hyro_host_failure_eligible_retry_then_provider_refusal_retains_ambiguity() {
-    let error = refused_retry_after_initial_dispatch(Variant::Hyrotrader, None);
+fn hyro_host_failure_never_resends_and_reconciles_its_link() {
+    let (mut h, _gate) = ready(Variant::Hyrotrader);
+    h.command(Command::PlaceOrders {
+        command: 42,
+        orders: vec![order()],
+    });
+    let original = h.take("/v5/order/create");
+    let link = sent_link(&original);
+    h.engine.handle(
+        h.now,
+        Event::HttpFailed {
+            request: original.id,
+            error: "network lost; error sign",
+        },
+    );
+    let actions = managed(&mut h.engine, h.now);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+        "no write resend"
+    );
+    assert!(
+        actions.iter().any(
+            |a| matches!(a, Action::Http(r) if r.url.contains(&format!("orderLinkId={link}")))
+        )
+    );
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 42, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    let [error] = failures.as_slice() else {
+        panic!("exactly one owned failure");
+    };
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(error.kind, None);
     assert_eq!(error.venue_code, None);
+    assert!(error.message.contains(&link));
+    assert!(!error.message.contains("dispatch-secret"));
+    assert!(h.engine.store().orders().is_empty());
+}
+
+fn sent_link(request: &HttpRequest) -> String {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SentIdentity {
+        order_link_id: String,
+    }
+    serde_json::from_str::<SentIdentity>(request.body.as_deref().unwrap())
+        .unwrap()
+        .order_link_id
+}
+
+const EMPTY_PAGE: &str = r#"{"retCode":0,"result":{"list":[]}}"#;
+
+/// RUST_REQUEST_CONTEXT required retry case for Hyro: a create that reached
+/// the venue keeps its uncertainty even when reconciliation found no row and
+/// the same-ID retry then fails at the signer.
+#[test]
+fn hyro_retry_refused_after_a_released_create_stays_unknown() {
+    let (mut h, gate) = ready(Variant::Hyrotrader);
+    h.command(Command::PlaceOrders {
+        command: 42,
+        orders: vec![order()],
+    });
+    let request = h.take("/v5/order/create");
+    h.event(Event::HttpFailed {
+        request: request.id,
+        error: "lost after dispatch",
+    });
+    h.respond("/v5/order/realtime", 200, EMPTY_PAGE);
+    // Both axes are now complete and absent: the same-ID retry is signed next.
+    gate.mode.store(2, Ordering::SeqCst);
+    h.respond("/v5/order/history", 200, EMPTY_PAGE);
+    assert_eq!(
+        h.outcomes
+            .iter()
+            .filter(|(c, _)| *c == 42)
+            .collect::<Vec<_>>(),
+        [&(42, Some(Outcome::Unknown))]
+    );
+}
+
+/// Review 2: a create the signer refuses before release never happened, so
+/// its send is restored and a later retry can still send that link once.
+#[test]
+fn hyro_signer_refused_retry_restores_its_send() {
+    let (mut h, gate) = ready(Variant::Hyrotrader);
+    let answer = |h: &mut Harness, link: &str| {
+        let filter = format!("orderLinkId={link}");
+        while h.has_request(&filter) {
+            h.respond(&filter, 200, EMPTY_PAGE);
+        }
+    };
+    h.command(Command::PlaceOrders {
+        command: 42,
+        orders: vec![order()],
+    });
+    let create = h.take("/v5/order/create");
+    let link = sent_link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost after dispatch",
+    });
+    answer(&mut h, &link);
+    gate.mode.store(2, Ordering::SeqCst);
+    h.command(Command::PlaceOrders {
+        command: 43,
+        orders: vec![order()],
+    });
+    answer(&mut h, &link);
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(h.unknown.contains(&43));
+    gate.mode.store(0, Ordering::SeqCst);
+    h.command(Command::PlaceOrders {
+        command: 44,
+        orders: vec![order()],
+    });
+    answer(&mut h, &link);
+    assert_eq!(sent_link(&h.take("/v5/order/create")), link);
 }

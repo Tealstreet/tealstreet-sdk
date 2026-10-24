@@ -1124,7 +1124,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1149,7 +1152,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 6.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1177,13 +1183,19 @@ mod product_semantics {
                     },
                 }),
             );
-            let request = actions(&mut e).remove(0);
+            let request = prepared(&mut e, 4.)
+                .into_iter()
+                .find(|a| matches!(a, Action::Http(_)))
+                .expect("prepared native history HTTP");
             assert!(
                 matches!(&request, Action::Http(r) if r.url.contains(if symbol.is_some() { "instType=FUTURES" } else { "instType=SWAP" }))
             );
             reply(&mut e, &request, &envelope(""), 5.0);
             if symbol.is_none() {
-                let request = actions(&mut e).remove(0);
+                let request = prepared(&mut e, 5.)
+                    .into_iter()
+                    .find(|a| matches!(a, Action::Http(_)))
+                    .expect("prepared native history HTTP");
                 assert!(matches!(&request, Action::Http(r) if r.url.contains("instType=FUTURES")));
                 reply(&mut e, &request, &envelope(""), 6.0);
             }
@@ -1351,7 +1363,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1377,7 +1392,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 6.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(
             &mut e,
             &request,
@@ -1407,10 +1425,16 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         let old: Vec<_> = (1..=100).map(|i| format!(r#"{{"instId":"BTC-USD-SWAP","billId":"{i}","type":"8","pnl":"0","fee":"0","balChg":"0.0001","ccy":"BTC","ts":"1700000000000"}}"#)).collect();
         reply(&mut e, &request, &envelope(&old.join(",")), 5.0);
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 5.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         assert!(matches!(&request, Action::Http(r) if r.url.contains("instType=FUTURES")));
         reply(
             &mut e,
@@ -1445,7 +1469,10 @@ mod product_semantics {
                 },
             }),
         );
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         let row = r#"{"instId":"BTC-USD-SWAP","ordId":"100","side":"buy","ordType":"limit","state":"filled","px":"50000","sz":"1","accFillSz":"1","cTime":"1700000000000"}"#;
         let page = envelope(&vec![row; 100].join(","));
         reply(&mut e, &request, &page, 5.0);
@@ -1457,7 +1484,10 @@ mod product_semantics {
             })
             .unwrap();
         e.handle(105.0, Event::TimerFired { timer });
-        let request = actions(&mut e).remove(0);
+        let request = prepared(&mut e, 105.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
         reply(&mut e, &request, &page, 106.0);
         let out = actions(&mut e);
         assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error: s, .. }) if s.legacy_text().contains("incomplete source"))));
