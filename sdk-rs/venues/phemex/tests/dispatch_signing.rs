@@ -291,6 +291,9 @@ fn drive_routes(e: &mut Engine<Probe>, now: f64, initial: Vec<Action>) -> Vec<Ac
                     Err(_) => {}
                 },
                 HttpAction::Cancel { .. } => {}
+                HttpAction::BindGroup { .. } => {
+                    panic!("single-request fixture cannot release a request group")
+                }
             }
         } else {
             out.push(action);
