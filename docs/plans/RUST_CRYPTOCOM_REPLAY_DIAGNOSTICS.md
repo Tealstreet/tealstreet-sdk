@@ -48,3 +48,13 @@ matching sweep branch supplies five private pairs without changing CI policy.
 Actual #1944 integration and fresh composed CI are required before final
 qualification; reviewed source evidence does not claim its landing. No merge
 without a window, separate fresh guard and head-matched merge.
+
+## Local controls
+
+The original unconditional capture module at `d59643b0b16` produces two assertion
+REDs: the pre-ACK checkpoint persists four TS and five Rust missing-channel
+errors. Ten working controls remain GREEN, including invalid HMAC, pre-ACK
+subscriptions, a genuine late missing heartbeat and the Rust-only `user.trade`
+requirement. The same twelve controls pass with reviewed #1944 capture source;
+no audit policy or native source changed. Original log:
+`/tmp/codex-cryptocom-original-capture-controls/original-capture.log`.
