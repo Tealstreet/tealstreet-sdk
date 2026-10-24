@@ -1486,6 +1486,7 @@ fn non_first_reprepare_wakes_with_the_first_member_already_permitted() {
 /// Mutation group. It is refused at issue, before any effect: nothing reaches
 /// the host, and the command fails once, NotSent, with a message naming the
 /// restriction.
+#[cfg(feature = "session-bearer")]
 #[test]
 fn a_session_bound_group_member_is_refused_not_sent_before_any_effect() {
     let mut engine = start_consumer(Consumer {

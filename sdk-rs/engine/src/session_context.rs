@@ -431,6 +431,7 @@ impl State {
 }
 
 impl ContextRegistry {
+    #[cfg(feature = "session-bearer")]
     pub(in crate::engine) fn session_generation_live(&self, generation: u64) -> bool {
         self.sessions.live(generation)
     }
@@ -533,8 +534,13 @@ impl<P> Cx<'_, P> {
     ) -> Result<Vec<(Context, P, VenueError)>, Error> {
         self.session_scope()?;
         let generation = self.io.request_contexts.validate_session(session)?;
-        let bound = self.io.bearer_bound_len(generation);
-        if self.io.bearer_fenced.try_reserve(bound).is_err() {
+        #[cfg(feature = "session-bearer")]
+        if self
+            .io
+            .bearer_fenced
+            .try_reserve(self.io.bearer_bound_len(generation))
+            .is_err()
+        {
             return Err(Error::Capacity);
         }
         let waiters = self.drain_waits(generation, VenueError::new("Session retired"));
@@ -544,6 +550,7 @@ impl<P> Cx<'_, P> {
         registry
             .contexts
             .retain(|_, context| context.owner() != session.owner());
+        #[cfg(feature = "session-bearer")]
         self.io.fence_bearer_generation(generation);
         Ok(waiters)
     }
@@ -623,6 +630,7 @@ impl<P> Cx<'_, P> {
         };
         // Also announces the bundle: parked Bind calls re-check after the
         // callback. Without room to record it they stay parked to their window.
+        #[cfg(feature = "session-bearer")]
         if !self.io.bearer_woken.contains(&generation)
             && self.io.bearer_woken.try_reserve(1).is_ok()
         {

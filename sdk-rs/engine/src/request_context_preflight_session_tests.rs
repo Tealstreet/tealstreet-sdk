@@ -560,6 +560,7 @@ fn an_ended_preflight_wait_without_progress_fails_once() {
 /// The binding is refused Revoked before any effect, and that refused issue
 /// in the Preflight's custody is its one terminal (the owned-admission
 /// failure, NotSent). Nothing is sent.
+#[cfg(feature = "session-bearer")]
 #[test]
 fn an_ended_preflight_hook_cannot_bind_its_retired_session() {
     let (mut e, old, _) = parked(Reads::default(), 60_000);

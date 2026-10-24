@@ -1526,10 +1526,12 @@ struct Io<P> {
     /// few live Sessions, so a scan beats another map type in every build.
     bearer_bound: Vec<(u64, Vec<RequestId>)>,
     /// Bound preparations a Session retire fenced, failed after the callback.
+    #[cfg(feature = "session-bearer")]
     bearer_fenced: Vec<crate::request_context::Preparation>,
     /// Unreleased Bearer calls parked on (generation, request), in park order.
     bearer_parked: Vec<(u64, RequestId)>,
     /// Generations whose venue announced a bundle; drained after the callback.
+    #[cfg(feature = "session-bearer")]
     bearer_woken: Vec<u64>,
     http_pacing: crate::request_context::SendPacing,
     http_responses: crate::request_context::ReconciliationResponses,
@@ -1642,8 +1644,10 @@ impl<P> Default for Io<P> {
             http_write_revision: 0,
             managed_http: Default::default(),
             bearer_bound: Vec::new(),
+            #[cfg(feature = "session-bearer")]
             bearer_fenced: Vec::new(),
             bearer_parked: Vec::new(),
+            #[cfg(feature = "session-bearer")]
             bearer_woken: Vec::new(),
             http_pacing: Default::default(),
             entropy: None,

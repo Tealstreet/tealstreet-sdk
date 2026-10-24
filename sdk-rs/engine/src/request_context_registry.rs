@@ -209,6 +209,7 @@ pub(super) struct ContextRegistry {
     /// (leg, Session generation) for each Bearer-bound leg; same-leg retries
     /// and resends inherit it. Leg identities are never reused. Bounded by
     /// CAPACITY, so a scan avoids another map type in every build.
+    #[cfg(feature = "session-bearer")]
     bearer_legs: Vec<(u64, u64)>,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
@@ -708,6 +709,7 @@ impl ContextRegistry {
             .is_some_and(|writes| writes.superseded(context.leg()))
     }
 
+    #[cfg(feature = "session-bearer")]
     pub(super) fn leg_bearer(&self, context: &Context) -> Option<u64> {
         let leg = context.leg();
         self.bearer_legs
@@ -717,6 +719,7 @@ impl ContextRegistry {
     }
 
     /// Prune bindings of retired legs, then reserve one slot before any effect.
+    #[cfg(feature = "session-bearer")]
     pub(super) fn reserve_leg_bearer(&mut self) -> Result<(), Error> {
         if self.bearer_legs.len() >= CAPACITY {
             let contexts = &self.contexts;
@@ -726,6 +729,7 @@ impl ContextRegistry {
         self.bearer_legs.try_reserve(1).map_err(|_| Error::Capacity)
     }
 
+    #[cfg(feature = "session-bearer")]
     pub(super) fn bind_leg_bearer(&mut self, leg: u64, generation: u64) {
         match self.bearer_legs.iter_mut().find(|(bound, _)| *bound == leg) {
             Some((_, bound)) => *bound = generation,

@@ -1,9 +1,11 @@
 //! Managed HTTP preparation and the engine's synchronous final claim.
 use super::*;
+#[cfg(feature = "session-bearer")]
+use crate::request_context::SessionBearer;
 use crate::request_context::{
     Attempt, Claim, Context, Error, HttpAction, HttpRelease, Lifecycle, Operation, Owner, Permit,
-    Preparation, Prepared, ReleaseTime, ResponseProof, RoutingIntent, Session, SessionBearer,
-    SessionHeaders, SessionPlacement,
+    Preparation, Prepared, ReleaseTime, ResponseProof, RoutingIntent, Session, SessionHeaders,
+    SessionPlacement,
 };
 
 #[cfg(test)]
@@ -39,6 +41,7 @@ pub(super) struct Managed {
 /// highest revision this call must not bind again: raised only when the claim
 /// fence finds the bundle moved or cleared (or by an owner's seed), so an
 /// ordinary Stale reprepare re-binds at the unchanged revision.
+#[cfg(feature = "session-bearer")]
 #[derive(Clone, Copy)]
 struct Bearer {
     generation: u64,
@@ -46,7 +49,29 @@ struct Bearer {
     floor: Option<u64>,
 }
 
+#[cfg(feature = "session-bearer")]
 impl Bearer {
+    fn new(generation: u64) -> Option<Self> {
+        Some(Self {
+            generation,
+            revision: None,
+            floor: None,
+        })
+    }
+    fn generation(&self) -> u64 {
+        self.generation
+    }
+    fn bound_revision(&self) -> Option<u64> {
+        self.revision
+    }
+    /// The claim fence found the bound bundle moved or cleared: never bind
+    /// its revision again.
+    fn fence(&mut self) {
+        self.floor = self.floor.max(self.revision);
+    }
+    fn forget_revision(&mut self) {
+        self.revision = None;
+    }
     /// Claim-time fence: no token copy, clone or allocation.
     fn current<V: Venue>(
         &self,
@@ -83,9 +108,52 @@ impl Bearer {
     }
 }
 
+/// Without `session-bearer` no managed call is ever bound: an uninhabited
+/// Bearer makes every binding branch unreachable, so it compiles out.
+#[cfg(not(feature = "session-bearer"))]
+#[derive(Clone, Copy)]
+enum Bearer {}
+
+#[cfg(not(feature = "session-bearer"))]
+impl Bearer {
+    fn new(_: u64) -> Option<Self> {
+        None
+    }
+    fn generation(&self) -> u64 {
+        match *self {}
+    }
+    fn bound_revision(&self) -> Option<u64> {
+        match *self {}
+    }
+    fn fence(&mut self) {
+        match *self {}
+    }
+    fn forget_revision(&mut self) {
+        match *self {}
+    }
+    fn current<V: Venue>(
+        &self,
+        _: &V,
+        _: &request_context_registry::ContextRegistry,
+    ) -> Result<Option<u64>, Error> {
+        match *self {}
+    }
+    fn read<V: Venue>(
+        &mut self,
+        _: &V,
+        _: &request_context_registry::ContextRegistry,
+    ) -> Result<Option<SessionHeaders>, Error> {
+        match *self {}
+    }
+    fn wakes(&self, _: Option<u64>) -> bool {
+        match *self {}
+    }
+}
+
 /// The Bind-time decision for one hook answer: bind these headers at this
 /// revision, or park (None) until a revision above `floor` is announced.
 /// Refused headers drop here and wipe themselves.
+#[cfg(feature = "session-bearer")]
 fn admit(floor: Option<u64>, answer: SessionBearer) -> Option<(SessionHeaders, u64)> {
     match answer {
         SessionBearer::Ready { headers, revision }
@@ -97,8 +165,13 @@ fn admit(floor: Option<u64>, answer: SessionBearer) -> Option<(SessionHeaders, u
     }
 }
 
+/// The issue-time refusal of a Session-bound request in a build without the
+/// `session-bearer` engine feature.
+#[cfg(not(feature = "session-bearer"))]
+const SESSION_BEARER_DISABLED: &str = "Session-bound requests require the session-bearer feature";
+
 /// The issue-time refusal of a Session-bound Mutation group member.
-#[cfg(feature = "http-mutation-barriers")]
+#[cfg(all(feature = "session-bearer", feature = "http-mutation-barriers"))]
 const SESSION_GROUP_REFUSAL: &str = "Session-bound requests cannot join a Mutation group";
 
 fn bearer_refused(reason: Error) -> VenueError {
@@ -296,7 +369,7 @@ impl<P> Cx<'_, P> {
         // member's Bearer (R11, deferred to its first consumer), so a
         // Session-bound request cannot join a Mutation group. Decided first,
         // so it wins over a later expiry or capacity refusal; all are NotSent.
-        #[cfg(feature = "http-mutation-barriers")]
+        #[cfg(all(feature = "session-bearer", feature = "http-mutation-barriers"))]
         let refusal = (generation.is_some()
             && self
                 .io
@@ -304,8 +377,10 @@ impl<P> Cx<'_, P> {
                 .validate_mutation_group_submission(&context)
                 .is_ok_and(|group| group.is_some()))
         .then_some(SESSION_GROUP_REFUSAL);
-        #[cfg(not(feature = "http-mutation-barriers"))]
+        #[cfg(all(feature = "session-bearer", not(feature = "http-mutation-barriers")))]
         let refusal: Option<&'static str> = None;
+        #[cfg(not(feature = "session-bearer"))]
+        let refusal = bearer.is_some().then_some(SESSION_BEARER_DISABLED);
         let result = match resolved {
             Ok(_) if refusal.is_some() => Err((pending, Error::Invalid)),
             Ok(bearer) => self.queue_managed_admitted(
@@ -325,17 +400,21 @@ impl<P> Cx<'_, P> {
         if let (Some(admission), Err((_, error))) = (admission.as_ref(), &result) {
             self.fail_owned_admission(admission, *error, refusal);
         }
+        #[cfg(feature = "session-bearer")]
         match (generation, &result) {
             (Some(generation), Ok(_)) => self.io.request_contexts.bind_leg_bearer(leg, generation),
             (Some(generation), Err(_)) => self.io.drop_empty_bearer_bound(generation),
             _ => {}
         }
+        #[cfg(not(feature = "session-bearer"))]
+        let _ = (leg, generation);
         result
     }
 
     /// Binding grants nothing: issuer and liveness only, never session scope.
     /// A same-leg retry or resend inherits the leg's binding. Index storage is
     /// reserved here, before any effect.
+    #[cfg(feature = "session-bearer")]
     fn resolve_bearer(
         &mut self,
         context: &Context,
@@ -356,6 +435,20 @@ impl<P> Cx<'_, P> {
             self.io.reserve_bearer_bound(generation)?;
         }
         Ok(generation)
+    }
+
+    /// Without `session-bearer`, any Session binding is refused before any
+    /// effect; an owning Plan names the reason.
+    #[cfg(not(feature = "session-bearer"))]
+    fn resolve_bearer(
+        &mut self,
+        _: &Context,
+        bearer: Option<&Session>,
+    ) -> Result<Option<u64>, Error> {
+        match bearer {
+            Some(_) => Err(Error::Invalid),
+            None => Ok(None),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -531,16 +624,13 @@ impl<P> Cx<'_, P> {
                 signing_attempt,
                 recipe: None,
                 intent,
-                bearer: bearer.map(|generation| Bearer {
-                    floor: None,
-                    generation,
-                    revision: None,
-                }),
+                bearer: bearer.and_then(Bearer::new),
                 #[cfg(feature = "http-mutation-barriers")]
                 group,
                 waiting_route: None,
             },
         );
+        #[cfg(feature = "session-bearer")]
         if let Some(generation) = bearer
             && let Some(bound) = self.io.bearer_bound_mut(generation)
         {
@@ -708,6 +798,7 @@ impl<P> Io<P> {
             .map(|(_, requests)| requests)
     }
 
+    #[cfg(feature = "session-bearer")]
     pub(super) fn bearer_bound_len(&self, generation: u64) -> usize {
         self.bearer_bound
             .iter()
@@ -715,6 +806,7 @@ impl<P> Io<P> {
             .map_or(0, |(_, requests)| requests.len())
     }
 
+    #[cfg(feature = "session-bearer")]
     fn reserve_bearer_bound(&mut self, generation: u64) -> Result<(), Error> {
         if self.bearer_bound_mut(generation).is_none() {
             self.bearer_bound
@@ -735,6 +827,7 @@ impl<P> Io<P> {
 
     /// Queue every unreleased packet bound to a retired generation for a typed
     /// failure after the current callback; released packets still deliver.
+    #[cfg(feature = "session-bearer")]
     pub(super) fn fence_bearer_generation(&mut self, generation: u64) {
         let Some(index) = self
             .bearer_bound
@@ -758,12 +851,13 @@ impl<P> Io<P> {
         cancel: Option<Action>,
     ) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
+        #[cfg(feature = "session-bearer")]
         self.bearer_parked.retain(|(_, parked)| *parked != request);
         if let Some(bearer) = managed.bearer
-            && let Some(bound) = self.bearer_bound_mut(bearer.generation)
+            && let Some(bound) = self.bearer_bound_mut(bearer.generation())
         {
             bound.retain(|id| *id != request);
-            self.drop_empty_bearer_bound(bearer.generation);
+            self.drop_empty_bearer_bound(bearer.generation());
         }
         #[cfg(feature = "http-mutation-barriers")]
         if managed.group.is_some() {
@@ -1236,6 +1330,7 @@ impl<V: Venue> Engine<V> {
     /// Runs until the queue is empty, in place to keep the storage reserved at
     /// retire: a failure callback that retires another Session is drained here.
     /// Then re-prepare the parked calls each announce woke.
+    #[cfg(feature = "session-bearer")]
     pub(super) fn flush_bearer_fences(&mut self, now: f64) {
         loop {
             if !self.io.bearer_fenced.is_empty() {
@@ -1254,6 +1349,10 @@ impl<V: Venue> Engine<V> {
             }
         }
     }
+
+    /// No Session binding exists without `session-bearer`.
+    #[cfg(not(feature = "session-bearer"))]
+    pub(super) fn flush_bearer_fences(&mut self, _: f64) {}
 
     /// Hold an unreleased call whose bundle is NotReady (or not above its
     /// `floor`) inside its own window. Its timer stays at the call deadline.
@@ -1289,12 +1388,13 @@ impl<V: Venue> Engine<V> {
             timer,
             at_ms: deadline,
         });
-        self.io.bearer_parked.push((bearer.generation, request));
+        self.io.bearer_parked.push((bearer.generation(), request));
     }
 
     /// In park order, re-prepare the first parked call of `generation` whose
     /// current revision is above its `floor`, one at a time: each re-prepare
     /// may run venue callbacks that change the list or the revision.
+    #[cfg(feature = "session-bearer")]
     fn wake_bearer_parks(&mut self, now: f64, generation: u64) {
         loop {
             let revision = self.venue.session_bearer_revision(generation);
@@ -1363,7 +1463,7 @@ impl<V: Venue> Engine<V> {
                     self.http_preparation_failed(now, preparation, reason, bearer_refused(reason));
                     return Err(reason);
                 }
-                Ok(revision) if revision.is_none() || revision != bearer.revision => {
+                Ok(revision) if revision.is_none() || revision != bearer.bound_revision() => {
                     // The bound bundle is gone: never bind its revision again.
                     if let Some(fenced) = self
                         .io
@@ -1371,7 +1471,7 @@ impl<V: Venue> Engine<V> {
                         .get_mut(&request)
                         .and_then(|managed| managed.bearer.as_mut())
                     {
-                        fenced.floor = fenced.floor.max(bearer.revision);
+                        fenced.fence();
                     }
                     self.http_preparation_failed(
                         now,
@@ -1517,6 +1617,7 @@ impl<V: Venue> Engine<V> {
             return;
         }
         // However it leaves, a re-prepared call is no longer parked.
+        #[cfg(feature = "session-bearer")]
         self.io
             .bearer_parked
             .retain(|(_, parked)| *parked != request);
@@ -1591,7 +1692,7 @@ impl<V: Venue> Engine<V> {
                 signing: old_signing,
             })));
         if let Some(bearer) = managed.bearer.as_mut() {
-            bearer.revision = None;
+            bearer.forget_revision();
         }
         let mut http = managed.original.clone();
         http.timeout_ms = Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
@@ -2018,110 +2119,117 @@ mod tests {
     #[cfg(feature = "http-plans")]
     include!("request_context_plan_independence_tests.rs");
 
-    use crate::request_context::SecretHeaderValue;
-    use crate::signing_headers::{MAX_HEADERS, MAX_VALUE_BYTES};
+    /// Bearer bundle attach and Bind-admission units (`session-bearer` only).
+    #[cfg(feature = "session-bearer")]
+    mod bearer {
+        use super::*;
+        use crate::request_context::SecretHeaderValue;
+        use crate::request_context::SessionBearer;
+        use crate::signing_headers::{MAX_HEADERS, MAX_VALUE_BYTES};
 
-    fn session(names: &[&'static str], value: &str) -> SessionHeaders {
-        SessionHeaders::new(
-            names
+        fn session(names: &[&'static str], value: &str) -> SessionHeaders {
+            SessionHeaders::new(
+                names
+                    .iter()
+                    .map(|name| (*name, SecretHeaderValue::new(value.into()).unwrap()))
+                    .collect(),
+            )
+            .unwrap()
+        }
+        fn signer(count: usize, value: &str) -> Vec<(String, String)> {
+            (0..count)
+                .map(|index| (format!("x-s{index}"), value.to_owned()))
+                .collect()
+        }
+        const RECIPE_NAMES: [&str; 29] = [
+            "x-r0", "x-r1", "x-r2", "x-r3", "x-r4", "x-r5", "x-r6", "x-r7", "x-r8", "x-r9",
+            "x-r10", "x-r11", "x-r12", "x-r13", "x-r14", "x-r15", "x-r16", "x-r17", "x-r18",
+            "x-r19", "x-r20", "x-r21", "x-r22", "x-r23", "x-r24", "x-r25", "x-r26", "x-r27",
+            "x-r28",
+        ];
+        fn recipe(count: usize, value: &str) -> Vec<(&'static str, String)> {
+            RECIPE_NAMES[..count]
                 .iter()
-                .map(|name| (*name, SecretHeaderValue::new(value.into()).unwrap()))
-                .collect(),
-        )
-        .unwrap()
-    }
-    fn signer(count: usize, value: &str) -> Vec<(String, String)> {
-        (0..count)
-            .map(|index| (format!("x-s{index}"), value.to_owned()))
-            .collect()
-    }
-    const RECIPE_NAMES: [&str; 29] = [
-        "x-r0", "x-r1", "x-r2", "x-r3", "x-r4", "x-r5", "x-r6", "x-r7", "x-r8", "x-r9", "x-r10",
-        "x-r11", "x-r12", "x-r13", "x-r14", "x-r15", "x-r16", "x-r17", "x-r18", "x-r19", "x-r20",
-        "x-r21", "x-r22", "x-r23", "x-r24", "x-r25", "x-r26", "x-r27", "x-r28",
-    ];
-    fn recipe(count: usize, value: &str) -> Vec<(&'static str, String)> {
-        RECIPE_NAMES[..count]
-            .iter()
-            .map(|name| (*name, value.to_owned()))
-            .collect()
-    }
+                .map(|name| (*name, value.to_owned()))
+                .collect()
+        }
 
-    /// The final packet is recipe + signer + session headers; its count limit
-    /// spans all three and a refusal leaves both vectors exactly as they were.
-    #[test]
-    fn session_headers_count_against_the_whole_packet_including_signer_headers() {
-        let signer_headers = signer(3, "v");
-        let mut headers = recipe(28, "v");
-        attach_session_headers(&mut headers, &signer_headers, &session(&["Cookie"], "c"))
-            .expect("exactly 32 headers");
-        assert_eq!(headers.len() + signer_headers.len(), MAX_HEADERS);
+        /// The final packet is recipe + signer + session headers; its count limit
+        /// spans all three and a refusal leaves both vectors exactly as they were.
+        #[test]
+        fn session_headers_count_against_the_whole_packet_including_signer_headers() {
+            let signer_headers = signer(3, "v");
+            let mut headers = recipe(28, "v");
+            attach_session_headers(&mut headers, &signer_headers, &session(&["Cookie"], "c"))
+                .expect("exactly 32 headers");
+            assert_eq!(headers.len() + signer_headers.len(), MAX_HEADERS);
 
-        let original = recipe(29, "v");
-        let mut headers = original.clone();
-        assert_eq!(
-            attach_session_headers(&mut headers, &signer_headers, &session(&["Cookie"], "c")),
-            Err(Error::Invalid)
-        );
-        assert_eq!(headers, original);
-        assert_eq!(signer_headers, signer(3, "v"));
-    }
+            let original = recipe(29, "v");
+            let mut headers = original.clone();
+            assert_eq!(
+                attach_session_headers(&mut headers, &signer_headers, &session(&["Cookie"], "c")),
+                Err(Error::Invalid)
+            );
+            assert_eq!(headers, original);
+            assert_eq!(signer_headers, signer(3, "v"));
+        }
 
-    /// Bytes likewise: each vector fits the budget alone; together they don't.
-    #[test]
-    fn session_headers_byte_budget_spans_recipe_and_signer_headers() {
-        let big = "x".repeat(MAX_VALUE_BYTES);
-        let original = recipe(1, &big);
-        let signer_headers = signer(1, &big);
-        let mut headers = original.clone();
-        assert_eq!(
+        /// Bytes likewise: each vector fits the budget alone; together they don't.
+        #[test]
+        fn session_headers_byte_budget_spans_recipe_and_signer_headers() {
+            let big = "x".repeat(MAX_VALUE_BYTES);
+            let original = recipe(1, &big);
+            let signer_headers = signer(1, &big);
+            let mut headers = original.clone();
+            assert_eq!(
+                attach_session_headers(
+                    &mut headers,
+                    &signer_headers,
+                    &session(&["Cookie", "X-Id"], &big)
+                ),
+                Err(Error::Invalid)
+            );
+            assert_eq!(headers, original);
+
+            let fits = "x".repeat(MAX_VALUE_BYTES - 64);
+            let mut headers = recipe(1, &fits);
             attach_session_headers(
                 &mut headers,
-                &signer_headers,
-                &session(&["Cookie", "X-Id"], &big)
-            ),
-            Err(Error::Invalid)
-        );
-        assert_eq!(headers, original);
-
-        let fits = "x".repeat(MAX_VALUE_BYTES - 64);
-        let mut headers = recipe(1, &fits);
-        attach_session_headers(
-            &mut headers,
-            &signer(1, &fits),
-            &session(&["Cookie", "X-Id"], &fits),
-        )
-        .expect("four values under the shared budget");
-    }
-
-    fn ready(revision: u64, cookie: &str) -> SessionBearer {
-        SessionBearer::Ready {
-            headers: session(&["Cookie"], cookie),
-            revision,
+                &signer(1, &fits),
+                &session(&["Cookie", "X-Id"], &fits),
+            )
+            .expect("four values under the shared budget");
         }
-    }
 
-    /// P11 (fe7lgm seed): a call seeded with `floor` = r parks on a Ready read
-    /// at or below r, and binds at r+1, even when the re-login returned an
-    /// identical cookie (dazzy3: the revision moves on every refresh).
-    #[test]
-    fn a_seeded_call_parks_until_a_revision_above_its_seed() {
-        assert!(
-            admit(Some(5), ready(5, "same")).is_none(),
-            "Ready at the seed"
-        );
-        assert!(
-            admit(Some(5), ready(4, "same")).is_none(),
-            "Ready below the seed"
-        );
-        assert!(admit(Some(5), SessionBearer::NotReady).is_none());
-        let (headers, revision) = admit(Some(5), ready(6, "same")).expect("newer revision");
-        assert_eq!(revision, 6);
-        assert_eq!(headers.entries()[0].1.expose(), "same");
-        assert!(
-            admit(None, ready(1, "first")).is_some(),
-            "an unseeded call binds"
-        );
+        fn ready(revision: u64, cookie: &str) -> SessionBearer {
+            SessionBearer::Ready {
+                headers: session(&["Cookie"], cookie),
+                revision,
+            }
+        }
+
+        /// P11 (fe7lgm seed): a call seeded with `floor` = r parks on a Ready read
+        /// at or below r, and binds at r+1, even when the re-login returned an
+        /// identical cookie (dazzy3: the revision moves on every refresh).
+        #[test]
+        fn a_seeded_call_parks_until_a_revision_above_its_seed() {
+            assert!(
+                admit(Some(5), ready(5, "same")).is_none(),
+                "Ready at the seed"
+            );
+            assert!(
+                admit(Some(5), ready(4, "same")).is_none(),
+                "Ready below the seed"
+            );
+            assert!(admit(Some(5), SessionBearer::NotReady).is_none());
+            let (headers, revision) = admit(Some(5), ready(6, "same")).expect("newer revision");
+            assert_eq!(revision, 6);
+            assert_eq!(headers.entries()[0].1.expose(), "same");
+            assert!(
+                admit(None, ready(1, "first")).is_some(),
+                "an unseeded call binds"
+            );
+        }
     }
 
     #[derive(Debug)]

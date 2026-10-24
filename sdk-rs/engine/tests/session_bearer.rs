@@ -1,4 +1,5 @@
 //! Runtime tests for `docs/plans/RUST_SESSION_BEARER_HOOK.md`.
+#![cfg(feature = "session-bearer")]
 //! The probe binds its private requests to its Session at issue and answers
 //! the engine's Bearer hooks from its venue-held token cache.
 mod support;

@@ -1869,6 +1869,7 @@ mod planned_calls {
     /// (its one terminal); the seal retires the parked unit, so no ended hook
     /// runs and its pending comes back once, after the terminal, with no
     /// custody. Nothing is sent.
+    #[cfg(feature = "session-bearer")]
     #[test]
     fn r10b_a_retired_session_fails_a_bound_leg_and_its_parked_sibling_once() {
         let mut e = crate::test_support::seeded_engine(Plans { idle: true, parallel: true, ..Default::default() });
