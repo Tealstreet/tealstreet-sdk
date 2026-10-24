@@ -1351,6 +1351,142 @@ mod tests {
         assert_eq!(signer.key(&primary.signing).unwrap(), b"YXBleC1zZWNyZXQ=");
     }
 
+    // KuCoin broker role (RUST_KUCOIN_BROKER_ROLE.md). REDs: the role and the
+    // trim/alias setup options do not exist yet.
+    fn kucoin_policy() -> CredentialSetupPolicy {
+        use safe_cex_engine::signing::{ExtraFieldPolicy, ExtraKeyPolicy, IdentitySetupPolicy};
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                extra: Some(ExtraKeyPolicy {
+                    key: ExtraKey::KucoinBroker,
+                    field: ExtraFieldPolicy::Optional,
+                    encoding: Some(KeyEncoding::Utf8),
+                    trim: true,
+                }),
+                ..Default::default()
+            }),
+            secondary: Some(IdentitySetupPolicy {
+                extra: Some(ExtraKeyPolicy {
+                    key: ExtraKey::KucoinBroker,
+                    field: ExtraFieldPolicy::AliasPrimary,
+                    encoding: None,
+                    trim: false,
+                }),
+                ..Default::default()
+            }),
+        }
+    }
+    fn kucoin_setup(broker: Option<&str>, secondary: serde_json::Value) -> serde_json::Value {
+        let mut primary = serde_json::json!({"key": "api-key", "secret": "api-secret"});
+        if let Some(broker) = broker {
+            primary["extra"] = serde_json::json!({"kucoinBroker": {"value": broker}});
+        }
+        serde_json::json!({"primary": primary, "secondary": secondary})
+    }
+    fn broker_sign(
+        signer: &LocalSigner,
+        broker: &KeyRef,
+        api: &KeyRef,
+    ) -> Result<Vec<u8>, SignError> {
+        signer
+            .sign_now(&SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![Operation::Sign {
+                    algorithm: Algorithm::HmacSha256,
+                    key: broker.clone(),
+                    payload: vec![
+                        PayloadPart::Bytes {
+                            bytes: b"1700000000000".to_vec(),
+                        },
+                        PayloadPart::Bytes {
+                            bytes: b"partner".to_vec(),
+                        },
+                        PayloadPart::Credential { key: api.clone() },
+                    ],
+                }],
+            })
+            .map(|result| result.values[0].clone())
+    }
+    fn hmac_of(key: &[u8]) -> Vec<u8> {
+        let mut mac = Hmac::<Sha256>::new_from_slice(key).unwrap();
+        mac.update(b"1700000000000partnerapi-key");
+        mac.finalize().into_bytes().to_vec()
+    }
+
+    /// R1: one trimmed broker ref signs HMAC-SHA256 over stamp + partner +
+    /// the selected API key, equal to an independent HMAC.
+    #[test]
+    fn kucoin_broker_ref_signs_stamp_partner_and_the_selected_api_key() {
+        let (signer, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("broker-secret"), serde_json::Value::Null).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        let primary = ids.primary.unwrap();
+        let broker = primary.extra[&ExtraKey::KucoinBroker].clone();
+        assert_eq!(
+            broker_sign(&signer, &broker, &primary.credential),
+            Ok(hmac_of(b"broker-secret"))
+        );
+    }
+
+    /// R2: native trim (including U+FEFF) before install; blank after trim
+    /// is absent, not an error.
+    #[test]
+    fn kucoin_broker_material_is_trimmed_and_blank_mints_nothing() {
+        let (signer, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("  b\u{feff} "), serde_json::Value::Null).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        let primary = ids.primary.unwrap();
+        let broker = primary.extra[&ExtraKey::KucoinBroker].clone();
+        assert_eq!(
+            broker_sign(&signer, &broker, &primary.credential),
+            Ok(hmac_of(b"b"))
+        );
+        for blank in ["   ", ""] {
+            let (_, ids) = LocalSigner::from_json_with_policy(
+                kucoin_setup(Some(blank), serde_json::Value::Null).to_string(),
+                kucoin_policy(),
+            )
+            .unwrap();
+            assert!(ids.primary.unwrap().extra.is_empty(), "{blank:?}");
+        }
+    }
+
+    /// R3: a read-key identity names the primary's one broker ref; it cannot
+    /// supply its own, and without a primary broker it has none.
+    #[test]
+    fn kucoin_read_identity_aliases_the_primary_broker_ref() {
+        let read = serde_json::json!({"key": "read-key", "secret": "read-secret"});
+        let (_, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("broker-secret"), read.clone()).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        assert_eq!(
+            ids.secondary.unwrap().extra.get(&ExtraKey::KucoinBroker),
+            ids.primary.unwrap().extra.get(&ExtraKey::KucoinBroker)
+        );
+        let own = serde_json::json!({"key": "read-key", "secret": "read-secret",
+            "extra": {"kucoinBroker": {"value": "other"}}});
+        assert!(
+            LocalSigner::from_json_with_policy(
+                kucoin_setup(Some("broker-secret"), own).to_string(),
+                kucoin_policy(),
+            )
+            .is_err()
+        );
+        let (_, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(None, read).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        assert!(ids.secondary.unwrap().extra.is_empty());
+    }
+
     #[test]
     fn zklink_extra_ref_is_installed_only_where_declared_and_redacted() {
         let (seed, _, _) = zklink_case();
