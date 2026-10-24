@@ -974,33 +974,39 @@ impl Venue for Orderly {
                 rows,
                 invalid: false,
             } => {
-                if cx.finish_http_context(&context).is_err() {
-                    return;
-                }
                 if rows.is_empty() {
-                    self.seed_backoff.failed(cx, Seed::Markets);
+                    if cx.finish_http_context(&context).is_ok() {
+                        self.seed_backoff.failed(cx, Seed::Markets);
+                    }
                     return;
                 }
                 let mut native = HashMap::new();
                 for m in &rows {
                     let Some(settlement) = m.symbol.strip_prefix(&m.base) else {
-                        self.retry_seed(cx, Seed::Markets, "Orderly invalid market identity");
+                        if cx.finish_http_context(&context).is_ok() {
+                            self.retry_seed(cx, Seed::Markets, "Orderly invalid market identity");
+                        }
                         return;
                     };
                     let actual = format!("PERP_{}_{settlement}", m.base);
                     if native_parts(&actual).is_none()
                         || native.insert(m.symbol.clone(), actual).is_some()
                     {
-                        self.retry_seed(
-                            cx,
-                            Seed::Markets,
-                            "Orderly duplicate or invalid market identity",
-                        );
+                        if cx.finish_http_context(&context).is_ok() {
+                            self.retry_seed(
+                                cx,
+                                Seed::Markets,
+                                "Orderly duplicate or invalid market identity",
+                            );
+                        }
                         return;
                     }
                 }
                 self.native = native;
                 cx.store.set_markets(rows);
+                if cx.finish_http_context(&context).is_err() {
+                    return;
+                }
                 self.seed_backoff.succeeded(cx, &Seed::Markets);
                 self.account_start(cx);
                 self.seed(cx, Seed::Tickers);
@@ -1010,14 +1016,20 @@ impl Venue for Orderly {
                 rows,
                 invalid: false,
             } => {
-                if cx.finish_http_context(&context).is_err() {
-                    return;
-                }
                 if rows.is_empty() {
-                    self.retry_seed(cx, Seed::Tickers, "Orderly ticker list has no usable rows");
+                    if cx.finish_http_context(&context).is_ok() {
+                        self.retry_seed(
+                            cx,
+                            Seed::Tickers,
+                            "Orderly ticker list has no usable rows",
+                        );
+                    }
                     return;
                 }
                 cx.store.set_tickers(rows);
+                if cx.finish_http_context(&context).is_err() {
+                    return;
+                }
                 self.seed_backoff.succeeded(cx, &Seed::Tickers);
                 self.connect_public(cx);
                 self.funding_start(cx);

@@ -159,3 +159,12 @@ was changed to bytes; the second failure uses native exponential backoff, and a
 second failure while a native retry is already armed adds no timer. Failure
 absence checks permit required exact cancellation while rejecting Prepare,
 Bind, signing and wire work. Original test assertions were not changed.
+
+## Publication custody correction
+
+Core review found that successful publication must retain the live DATA Context.
+The success order is exact delivery validation, native row/identity validation,
+native map/Store publication, exact Context retirement, then native Backoff
+success and account/ticker or socket/funding successors. Empty/invalid responses
+retire first and then enter their existing failure backoff. No test body or
+assertion changes accompany this correction.

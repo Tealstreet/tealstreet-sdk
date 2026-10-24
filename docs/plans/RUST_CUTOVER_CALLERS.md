@@ -7846,7 +7846,7 @@ admission bound covering Prepare, Bind and streamed response; there is no aggreg
 startup-chain bound, signing, pacing or managed retry. Native per-Seed Backoff
 remains the recovery owner. Exact DATA validation precedes decoding and global
 effects; matching failure cleanup retires its returned Context even at expiry.
-Markets retire before native account startup and ticker admission; tickers retire
-before socket/funding hooks. Independently issued reads retain independent custody.
+Markets and Tickers retain live DATA custody through native map/Store publication,
+then retire before native account startup/ticker admission or socket/funding hooks. Independently issued reads retain independent custody.
 Only the common unsigned seed sender is pruned; key selection and other funnels
 are unchanged.
