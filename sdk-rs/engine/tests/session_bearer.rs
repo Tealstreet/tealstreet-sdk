@@ -91,6 +91,8 @@ struct Shared {
     cookie_session: bool,
     /// The recipe declares its own Cookie header.
     recipe_cookie: bool,
+    /// The signing step writes a Cookie header at this site.
+    signed_cookie: Option<CookieSite>,
     crowded: bool,
     /// The sibling leg binds the same Session as the root.
     sibling_bound: bool,
@@ -156,6 +158,7 @@ impl Shared {
             recipe_authorization: false,
             cookie_session: false,
             recipe_cookie: false,
+            signed_cookie: None,
             crowded: false,
             sibling_bound: false,
             signed: false,
@@ -229,7 +232,14 @@ impl Shared {
     }
 }
 
-struct Recipe;
+#[derive(Clone, Copy)]
+enum CookieSite {
+    Packet,
+    Signer,
+}
+struct Recipe {
+    cookie: Option<CookieSite>,
+}
 impl SignStep for Recipe {
     fn prepare(
         &mut self,
@@ -257,6 +267,13 @@ impl SignStep for Recipe {
             return Err(SignError::InvalidRequest);
         };
         request.headers.push(("signature", "applied".into()));
+        match self.cookie {
+            Some(CookieSite::Packet) => request.headers.push(("Cookie", "signer=1".into())),
+            Some(CookieSite::Signer) => request
+                .signer_headers
+                .push(("Cookie".into(), "signer=1".into())),
+            None => {}
+        }
         Ok(())
     }
     fn freshness_ms(&self) -> f64 {
@@ -423,7 +440,9 @@ impl Probe {
                 Method::Post,
                 url,
                 None,
-                Box::new(Recipe),
+                Box::new(Recipe {
+                    cookie: shared.signed_cookie,
+                }),
                 pending,
             )
         } else {
@@ -1829,8 +1848,8 @@ fn a_session_header_bundle_attaches_together_and_refreshes_together() {
     }
 }
 
-/// A recipe header colliding with any bundle name is refused on a bound
-/// request before anything is bound, with no venue authority used.
+/// A recipe header colliding with any bundle name is refused NotSent before
+/// anything is bound; the bundle read for the check reaches no packet.
 #[test]
 fn a_recipe_header_colliding_with_the_bundle_is_refused() {
     let (mut e, shared) = engine(|shared| {
@@ -1841,8 +1860,46 @@ fn a_recipe_header_colliding_with_the_bundle_is_refused() {
     let health = e.health().clone();
     let actions = route(&mut e, NOW + 1., issued[0].0);
     assert!(bind(actions).is_none(), "a colliding packet was bound");
-    assert_eq!(shared.borrow().failures.len(), 1);
+    let shared = shared.borrow();
+    assert_eq!(shared.failures.len(), 1);
+    assert_eq!(shared.failures[0].outcome, Some(Outcome::NotSent));
     assert_eq!(e.health(), &health);
+}
+
+/// Signed: a signing step that writes a bundle name, on the packet or among
+/// the signer headers, is refused NotSent before the signed Bind.
+#[test]
+fn a_signed_header_colliding_with_the_bundle_is_refused() {
+    for site in [CookieSite::Packet, CookieSite::Signer] {
+        let (mut e, shared) = engine(|shared| {
+            shared.cookie_session = true;
+            shared.signed = true;
+            shared.signed_cookie = Some(site);
+        });
+        let issued = ask(&mut e, 1);
+        assert!(
+            prepared(&mut e, NOW + 1., issued[0].0).is_none(),
+            "a colliding signed packet was bound"
+        );
+        let shared = shared.borrow();
+        assert_eq!(shared.failures.len(), 1);
+        assert_eq!(shared.failures[0].outcome, Some(Outcome::NotSent));
+    }
+}
+
+/// R6 for a bundle: a crowded recipe cannot take a two-header bundle; the
+/// attempt fails NotSent before any packet is bound.
+#[test]
+fn a_session_header_bundle_that_overflows_the_header_limit_is_refused() {
+    let (mut e, shared) = engine(|shared| {
+        shared.cookie_session = true;
+        shared.crowded = true;
+    });
+    let issued = ask(&mut e, 1);
+    assert!(bind(route(&mut e, NOW + 1., issued[0].0)).is_none());
+    let shared = shared.borrow();
+    assert_eq!(shared.failures.len(), 1);
+    assert_eq!(shared.failures[0].outcome, Some(Outcome::NotSent));
 }
 
 /// The bundle's own limits: 1 to 4 distinct, header-safe, non-transport names.
