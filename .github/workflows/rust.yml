@@ -178,6 +178,7 @@ jobs:
           if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
+      - uses: ./.github/actions/prefetch-cargo
       - name: Install pinned binaryen (wasm-opt)
         run: bash sdk-rs/harness/install-binaryen.sh
       - name: Build and measure both capabilities from this checkout
