@@ -17,13 +17,16 @@ use safe_cex_engine::ErrorKind;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
+use safe_cex_engine::history::ReadCompletion;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
+use safe_cex_engine::request_context::{Context, Operation, Owner, Policy, RetryPolicy};
 use safe_cex_engine::selected_read::{ReadRole, SelectedRead};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId,
+    Venue,
 };
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use wire::*;
@@ -64,15 +67,41 @@ enum Task {
         symbol: String,
         generation: u32,
     },
-    Candles {
-        command: CommandId,
-        rows: Vec<Candle>,
-    },
+    Candles(CandleQuery),
     Leverage {
         symbol: String,
         revision: u64,
         context: safe_cex_engine::request_context::Context,
     },
+}
+struct CandleQuery {
+    completion: ReadCompletion,
+    leg: Option<Context>,
+    rows: Vec<Candle>,
+}
+impl CandleQuery {
+    fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.leg
+            .as_ref()
+            .is_some_and(|leg| self.completion.validate_delivery(cx, leg).is_ok())
+    }
+    fn retire_leg(&self, cx: &mut Cx<'_, Pending>) {
+        if let Some(leg) = &self.leg {
+            let _ = cx.finish_http_context(leg);
+        }
+    }
+    fn failed(self, cx: &mut Cx<'_, Pending>, error: safe_cex_engine::VenueError) {
+        self.retire_leg(cx);
+        if cx.validate_http_context(self.completion.root()).is_err() {
+            return;
+        }
+        cx.notice(
+            safe_cex_engine::Level::Warn,
+            code::REQUEST_FAILED,
+            format!("WEEX: {}", error.message),
+        );
+        let _ = self.completion.finish(cx, Err(error));
+    }
 }
 struct DeferredGet {
     timer: TimerId,
@@ -262,6 +291,104 @@ impl WeexFutures {
             cx.request_streamed(Method::Get, url, vec![], at, pending);
         } else {
             cx.request(Method::Get, url, vec![], None, pending);
+        }
+    }
+    fn candle_query(
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        requested_interval: Interval,
+    ) -> Option<CandleQuery> {
+        match cx.command_wait() {
+            Some(CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return None;
+            }
+            None => {
+                let _ = cx.reject_unstamped_command(Operation::Read);
+                return None;
+            }
+            Some(CommandWait::Remaining(_)) => {}
+        }
+        let root = cx.admit_caller_read_root(None, None).ok()?;
+        if !interval(requested_interval, false) {
+            let _ = cx.fail_context(&root, requested_interval.unsupported("WEEX"));
+            return None;
+        }
+        match ReadCompletion::from_context(cx, command, root.clone()) {
+            Ok(completion) => Some(CandleQuery {
+                completion,
+                leg: None,
+                rows: Vec::new(),
+            }),
+            Err(error) => {
+                let _ = cx.fail_context(&root, error.read_venue_error());
+                None
+            }
+        }
+    }
+    fn send_candle_query(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        query: &str,
+        mut request: CandleQuery,
+    ) {
+        if let Err(error) = cx.validate_http_context(request.completion.root()) {
+            if error != safe_cex_engine::request_context::Error::Revoked {
+                request.failed(cx, error.read_venue_error());
+            }
+            return;
+        }
+        if cx.now < self.paused_until {
+            let timer = cx.set_timer(self.paused_until - cx.now);
+            self.deferred_gets.push(DeferredGet {
+                timer,
+                seed_generation: self.seed_generation,
+                path: path.into(),
+                query: query.into(),
+                task: Task::Candles(request),
+                stream: Some(ArrayAt::Root),
+            });
+            return;
+        }
+        let leg = match cx.http_leg_context(
+            request.completion.root(),
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(leg) => leg,
+            Err(error) => {
+                request.failed(cx, error.read_venue_error());
+                return;
+            }
+        };
+        request.leg = Some(leg.clone());
+        let pending = Pending {
+            task: Task::Candles(request),
+            invalid: false,
+            skipped: Vec::new(),
+            seed_generation: self.seed_generation,
+        };
+        match cx.request_managed_with_headers(
+            leg,
+            Method::Get,
+            format!("{}{path}?{query}", paths::REST),
+            &[],
+            None,
+            pending,
+        ) {
+            Ok(id) => cx.stream_response(id, ArrayAt::Root),
+            Err((pending, error)) => {
+                let Task::Candles(request) = pending.task else {
+                    unreachable!("candle continuation")
+                };
+                request.failed(cx, error.read_venue_error());
+            }
         }
     }
     /// A fresh symbol configuration read, as the TS adapter's leverage query does.
@@ -573,7 +700,7 @@ impl WeexFutures {
             format!("WEEX: {error}"),
         );
         match task {
-            Task::Identity { .. } | Task::BookQuery(_) => unreachable!(),
+            Task::Identity { .. } | Task::BookQuery(_) | Task::Candles(_) => unreachable!(),
             Task::Daily | Task::BookTickers => {
                 self.seed.failed = true;
                 self.discovery.failed(cx, true);
@@ -589,7 +716,6 @@ impl WeexFutures {
                     self.book_failed(cx, &symbol);
                 }
             }
-            Task::Candles { command, .. } => cx.fail(command, error),
             Task::Leverage { context, .. } => managed::reject(cx, &context, error),
             Task::Account(r) => self.account_failed(cx, r, error),
             Task::Trade(r) => {
@@ -787,6 +913,11 @@ impl Venue for WeexFutures {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, p: &mut Pending, item: &str) {
+        if let Task::Candles(request) = &p.task
+            && !request.delivered(cx)
+        {
+            return;
+        }
         if matches!(p.task, Task::Daily | Task::BookTickers)
             && p.seed_generation != self.seed_generation
         {
@@ -860,8 +991,8 @@ impl Venue for WeexFutures {
                 }
                 true
             }
-            Task::Candles { rows, .. } => serde_json::from_str::<CandleRow>(item)
-                .map(|r| rows.push(r.candle()))
+            Task::Candles(request) => serde_json::from_str::<CandleRow>(item)
+                .map(|r| request.rows.push(r.candle()))
                 .is_ok(),
             _ => true,
         };
@@ -870,6 +1001,35 @@ impl Venue for WeexFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, response: Response<'_>) {
+        if let Task::Candles(mut request) = p.task {
+            if !request.delivered(cx) {
+                request.retire_leg(cx);
+                return;
+            }
+            if response.status == 429 {
+                self.paused_until = self
+                    .paused_until
+                    .max(cx.now + rate::delay(response, cx.now));
+            }
+            if response.status >= 400 {
+                request.failed(
+                    cx,
+                    format!("HTTP {}: {}", response.status, response.body).into(),
+                );
+            } else if p.invalid {
+                request.failed(cx, "malformed REST row".into());
+            } else {
+                request
+                    .rows
+                    .sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                let result = serde_json::to_string(&request.rows).expect("candles");
+                let _ = request.completion.finish(cx, Ok(result));
+                if let Some(leg) = request.leg {
+                    let _ = cx.finish_http_context(&leg);
+                }
+            }
+            return;
+        }
         if let Task::Account(request) = p.task {
             let context = request.context.clone();
             // A native rate-limit signal still pauses this immutable identity's
@@ -959,7 +1119,7 @@ impl Venue for WeexFutures {
             );
         }
         match p.task {
-            Task::BookQuery(_) => unreachable!(),
+            Task::BookQuery(_) | Task::Candles(_) => unreachable!(),
             Task::Leverage {
                 symbol,
                 revision,
@@ -1057,10 +1217,24 @@ impl Venue for WeexFutures {
                 cx.book_changed(&symbol);
                 self.reconcile_topics(cx);
             }
-            Task::Candles { command, mut rows } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(command, serde_json::to_string(&rows).expect("candles"));
+        }
+    }
+    fn on_stream_error(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, response: Response<'_>) {
+        let message = format!(
+            "response did not contain the expected list: {}",
+            response.body
+        );
+        if let Task::Candles(request) = p.task {
+            if request.delivered(cx) {
+                request.failed(
+                    cx,
+                    safe_cex_engine::VenueError::new(message).kind(ErrorKind::Internal),
+                );
+            } else {
+                request.retire_leg(cx);
             }
+        } else {
+            self.on_request_failed(cx, p, &message);
         }
     }
     /// Provider refusal is typed, never sent and never venue auth evidence.
@@ -1071,6 +1245,7 @@ impl Venue for WeexFutures {
         error: safe_cex_engine::VenueError,
     ) {
         match p.task {
+            Task::Candles(request) => request.failed(cx, error),
             Task::BookQuery(request) => request.failed(cx, error),
             Task::Account(r) => {
                 self.account_request_failed(cx, r, p.seed_generation, &error.message)
@@ -1089,19 +1264,17 @@ impl Venue for WeexFutures {
         error: safe_cex_engine::VenueError,
     ) {
         match p.task {
+            Task::Candles(request) => request.failed(cx, error),
             Task::BookQuery(request) => request.failed(cx, error),
             Task::Trade(request) => self.trade_failed(cx, request, error),
             task => self.on_request_failed(cx, Pending { task, ..p }, &error.message),
         }
     }
-    fn read_root_retired(
-        &mut self,
-        owner: safe_cex_engine::request_context::Owner,
-        _pending: Vec<Pending>,
-    ) {
+    fn read_root_retired(&mut self, owner: Owner, _pending: Vec<Pending>) {
         self.retire_history(owner);
         self.deferred_gets.retain(|deferred| match &deferred.task {
             Task::BookQuery(query) => query.owner() != owner,
+            Task::Candles(candles) => candles.completion.root().owner() != owner,
             _ => true,
         });
     }
@@ -1154,10 +1327,12 @@ impl Venue for WeexFutures {
             {
                 return;
             }
-            if let Task::BookQuery(request) = r.task {
-                self.send_book_query(cx, request, r.query);
-            } else {
-                self.get(cx, &r.path, &r.query, r.task, r.stream);
+            match r.task {
+                Task::Candles(request) => {
+                    self.send_candle_query(cx, &r.path, &r.query, request);
+                }
+                Task::BookQuery(request) => self.send_book_query(cx, request, r.query),
+                task => self.get(cx, &r.path, &r.query, task, r.stream),
             }
             return;
         }
@@ -1300,10 +1475,9 @@ impl Venue for WeexFutures {
                 from_ms,
                 to_ms,
             } => {
-                if !interval(i, false) {
-                    cx.fail(command, i.unsupported("WEEX"));
+                let Some(request) = Self::candle_query(cx, command, i) else {
                     return;
-                }
+                };
                 let historical = from_ms.is_some() || to_ms.is_some();
                 let mut query = format!(
                     "interval={i}&limit={}&symbol={symbol}",
@@ -1320,7 +1494,7 @@ impl Venue for WeexFutures {
                 if historical {
                     query.push_str("&priceType=LAST");
                 }
-                self.get(
+                self.send_candle_query(
                     cx,
                     if historical {
                         paths::HISTORY_KLINES
@@ -1328,11 +1502,7 @@ impl Venue for WeexFutures {
                         paths::KLINES
                     },
                     &query,
-                    Task::Candles {
-                        command,
-                        rows: vec![],
-                    },
-                    Some(ArrayAt::Root),
+                    request,
                 );
             }
             Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
