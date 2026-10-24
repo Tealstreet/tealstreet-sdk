@@ -66,9 +66,9 @@ honestly where later suffix checks cannot run on legacy source.
 The existing perps test named merged_spot_candles_remain_on_the_existing_legacy_path
 is a historical hold control. Only during production adoption, replace its
 transport expectation with actual managed Prepare/Bind/Claim while preserving
-its exact spot wire/result and following perps assertions. Existing spot native
-fixtures already use a real prepared_actions drain; preserve every native
-wire/financial assertion and adapt only transport drivers if needed.
+its exact spot wire/result and following perps assertions. Existing spot native fixtures use a raw drain for legacy transport. Adapt only
+the two candle drivers to real prepared_actions, preserving every native
+wire/financial assertion.
 
 Production follows a reviewed plan and compiling original RED commit, then
 unchanged original assertions, native Hyperliquid/Binance checks, strict scoped
@@ -92,3 +92,25 @@ Correct only those new suffix expectations to the reused seam's actual contract;
 retain every original RED boundary assertion. No engine/metadata behavior change.
 The incidental unused legacy command binding/import-format setup errors during
 implementation were corrected and are not counted as original RED evidence.
+
+
+## Production checkpoint
+
+All FetchCandles entries now reuse the existing ManagedCandles implementation.
+The obsolete spot pending payload and its response/item/failure arms are removed.
+The generic info sender, Builder/History and socket callbacks are unchanged.
+The manifest changes only lib.rs, deleting the six audited occurrences without
+adding a fingerprint: lib9->3 and Hyperliquid37->31.
+
+The eleven dedicated controls, ten existing candle controls and43 spot controls
+pass (64 total, zero ignored). The two raw spot fixture drains and the historical
+legacy-path expectation now drive actual Prepare/Bind/Claim; native wire/result
+assertions remain. The only original-test correction is the disclosed gated
+unreleased-failure metadata expectation above. Production review and CI remain
+separate gates.
+
+Full bans and the15 request/8 socket checker controls pass, and scoped rustfmt
+passes. The broader Hyperliquid/Binance native run and all-feature Clippy were
+stopped under Sam's machine-load directive; they are not passing receipts.
+CI covers the broader validation. Future local builds are one scoped run at a
+time with CARGO_BUILD_JOBS=4 until that directive is lifted.

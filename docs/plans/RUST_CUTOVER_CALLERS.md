@@ -6761,3 +6761,16 @@ can expire before outbound. Each native orderBookDetails/orderBooks attempt has
 its own budget. Native endpoint fallback and shared startup backoff are retained,
 with the old attempt retired before follow-up. No command result is introduced.
 All four deployments keep their headers/body, route, catalog codec and metadata.
+
+
+### Hyperliquid spot candles share managed Read custody
+
+Standalone and merged spot FetchCandles now use the existing perps public Read
+Context: unsigned,20s from command admission, Never retry. Admission precedes
+native interval/market/range validation. Preparation and host claim time consume
+that original deadline; expired or unreleased replies cannot publish candles.
+Native POST/info body, @coin mapping, header order, rows and local error strings
+remain. Existing perps metadata is retained: an unreleased preparation failure or
+timeout carries NotSent; a released Read timeout has no financial outcome.
+No signer, Session, Plan or socket authority is introduced. Six real legacy
+terminal occurrences are removed (Hyperliquid37->31, lib9->3).

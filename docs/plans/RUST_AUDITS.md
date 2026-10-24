@@ -2957,3 +2957,14 @@ read with exact delivery validation and retirement before fallback/retry. No
 signer, private authority, session or engine policy is changed. Original new
 targets execute seven native controls PASS and15 intended assertion REDs, zero
 ignored. Exact own prune is four singleton occurrences across three keys.
+
+
+### Hyperliquid spot candle tail
+
+The six spot candle terminals now reuse the existing perps managed Read path.
+The obsolete pending owner and its numeric completions are removed; generic info,
+Builder, History and socket paths remain unchanged. The original checkpoint ran
+two working controls plus nine compiling assertion REDs on unchanged production.
+All eleven now pass alongside ten existing candle and43 spot controls. Two gated
+new-test metadata expectations were corrected to the existing perps NotSent
+contract; primary RED boundaries and native wire/result assertions are retained.

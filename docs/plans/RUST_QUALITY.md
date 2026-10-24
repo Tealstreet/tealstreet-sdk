@@ -1595,3 +1595,13 @@ preclaim/released expiry, failed streamed prefixes and inert stale/duplicate wor
 A255-peer registry-pressure control forces each catalog attempt to retire before
 fallback/retry and successful slot reuse; expiry cannot conceal a root leak.
 Existing startup fixtures retain their assertions while using shared preparation.
+
+
+### Hyperliquid spot candle custody controls
+
+Eleven dedicated controls cover standalone/merged spot on both networks, exact
+native wire and rows, validation order, real Prepare/Bind/Claim, early delivery,
+original deadline, preparation failure, clock/capacity recovery and duplicate
+owner/delivery. All pass with zero ignored. Existing candle and spot fixtures
+retain native assertions while driving managed preparation. The new probe opens
+no socket, so it makes no standalone socket-composition claim.
