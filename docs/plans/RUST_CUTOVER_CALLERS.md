@@ -6574,3 +6574,20 @@ before reserving IDs or consuming timers/continuations. Session-ready/failed
 drains return empty; session_wait returns its pending unchanged. Read-only
 session_live and the active Plan's own APIs remain available. Ordinary Session,
 socket, timer and startup callbacks retain their existing Session authority.
+
+
+## Command Read-Plan history authority (#2011)
+
+`PlanReadCompletion::from_plan` binds one freshly admitted command Read Plan
+with a retained command receipt cap before any Slot is selected or settled.
+Use `PlanHistoryRows::admit` in exact DATA custody, stage through its exclusive
+guard, then `accept_page` or `finish_with`; standalone public Plan terminals and
+Slot settlement refuse after binding. The guard exposes no Cx accessor.
+
+`admit_failure` requires the exact latest released Network/physical Timeout
+Attempt in its engine callback and a live original Plan. Recovery uses only
+nonempty accepted rows and discards the failed page; preparation/provider,
+logical expiry and integrity failures remain strict. `reject` uses the same
+prepared Plan seal and is inert during that Plan's engine expiry callback.
+No numeric completion, Context-root cast, external finalizer, owner renewal,
+Background/Execution Plan, or native consumer cutover is introduced.

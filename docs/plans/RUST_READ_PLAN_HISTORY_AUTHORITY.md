@@ -1,10 +1,11 @@
 # Command-owned Read-Plan history authority
 
-Plan only, 2026-10-24. Owner codex-uufub4. Required reviewers are
+Implementation and contract, 2026-10-24. Owner codex-uufub4. Required reviewers are
 claude-fe7lgm (Plan ownership and terminals), codex-cxxyqr (history admission and
 recovery), and consumer codex-zs5e83. Base: actual landing `ce278e0b4a9`.
-The original plan and evidence are followed by a reviewed binding slice;
-page/terminal and transport-proof signatures below remain provisional.
+The original plan and evidence are followed by the reviewed binding and atomic
+page/terminal implementation. The public row adapter is `PlanHistoryRows<T>`;
+cursor/range adapters and venue adoption are outside this implementation.
 
 ## Problem and scope
 
@@ -274,3 +275,50 @@ and accepted-prefix terminal, and exact released transport proof remain separate
 source and new-contract gates. The original six assertions are preserved and
 are not claimed green by binding alone. Do not adopt this half in a venue or
 mark the PR ready before those remaining contracts are implemented and reviewed.
+
+
+## Reviewed atomic page and terminal implementation
+
+Artifact `5d81990a3c1504b834648890fbb48f3cfd0056e229545ae007305b810790e581`
+is source-cleared by fe7lgm and cxxyqr. It adds `PlanHistoryRows<T>` with exclusive
+DATA and released-failure guards, atomic accepted-page/Slot settlement, and a
+prepared terminal through the common Plan funnel. Every preparation, including
+cleanup actions and an optional marker, precedes Slot/credit/leg effects.
+A terminal DATA settle retains one redundant SetTimer action immediately before
+the common seal clears it; this does not renew the owner or its caller cap.
+
+The engine records an exact latest released Attempt and permits recovery only
+inside its released Network or physical-timeout callback while the original
+command Plan is live. The failure scope is cleared across nested callbacks,
+never restored with an outer delivery, and not installed during Plan expiry.
+Issuer identity is checked explicitly for both DATA and expired-leg failure
+admission. Empty accepted output stays strict; staged rows never authorize
+recovery. Accepted rows may be shaped to an empty result after their witness has
+been established. Encoder errors seal strictly without a marker; encoder unwind
+leaves the engine poisoned.
+
+The original outcome assertions use the bound adapter without changing legacy
+numeric completion. Controls cover early completion and issued peers, latest
+release ordering, equal-field foreign issuers, fractional caller expiry,
+preparation Timeout, streamed staged-row discard, and actual malformed UTF-8
+and unfinished-stream ingress. The latter both deny recovery and seal Internal.
+Private controls cover defensive Internal failure injection, nested-scope
+clearing, the ordinary Network positive, and helper-level cleanup reservation
+refusal with unchanged authority followed by working recovery.
+
+The reservation control forces helper-level capacity overflow; it is not a
+full-terminal allocator/OOM fault injection. That remains a named certification
+gate. Unrelated socket/readiness scope behavior also has no dedicated execution
+receipt here. No venue adoption, Background/Execution authority, cursor/range
+adapter implementation, or size/CPU result is claimed by this PR.
+
+
+Applied-branch verification: 21 history integration controls, four binding
+controls and four private boundary controls pass in each of all-features and
+no-default-features with http-plans/test-support (29 per mode, zero ignored).
+Strict engine all-target Clippy passes in both modes; feature-off library check
+and workspace fmt pass. The initial Clippy placement failure was corrected by
+moving the unchanged cleanup helpers before the inline test module.
+The provenance ratchet currently refuses 14 foreign venue inventory entries
+already pruned on the landing branch; this implementation changes no venue,
+checker or inventory blob. Actual landing integration and fresh CI remain gates.

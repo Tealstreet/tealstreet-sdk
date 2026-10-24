@@ -163,6 +163,8 @@ mod owned_call;
 mod preflight;
 #[cfg(feature = "http-plans")]
 pub(super) use owned_call::Admission as OwnedAdmission;
+#[cfg(feature = "http-plans")]
+pub(super) use owned_call::ReleasedReadFailure;
 
 #[cfg(feature = "http-plans")]
 #[path = "request_context_planned.rs"]

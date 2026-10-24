@@ -9,7 +9,7 @@ use crate::{CommandId, Cx, ErrorKind, Level, Value, VenueError};
 #[path = "history_plan.rs"]
 mod plan;
 #[cfg(feature = "http-plans")]
-pub use plan::PlanReadCompletion;
+pub use plan::{PlanFailureAdmission, PlanHistoryRows, PlanReadCompletion, PlanRowsAdmission};
 
 /// Missing coverage in automatic account reconciliation, not a user query.
 /// Severity is an engine policy; venues report the native coverage fact.

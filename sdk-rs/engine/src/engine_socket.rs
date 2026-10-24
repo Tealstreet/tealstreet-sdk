@@ -328,6 +328,10 @@ impl<V: Venue> Engine<V> {
     fn socket_native(&mut self, now: f64, event: LifecycleEvent) -> Result<(), SocketError> {
         self.assert_live();
         // Lifecycle work is independent of the HTTP codec that queued it.
+        #[cfg(feature = "http-plans")]
+        {
+            self.io.http_history_failure = None;
+        }
         let delivery = self.io.http_delivery.take();
         let mut cx = Cx {
             now,
@@ -972,6 +976,10 @@ impl<V: Venue> Engine<V> {
         }
         self.io.socket_continuation_bytes -= work.bytes;
         self.assert_live();
+        #[cfg(feature = "http-plans")]
+        {
+            self.io.http_history_failure = None;
+        }
         let delivery = self.io.http_delivery.take();
         let entry = self.io.command_entry.take();
         #[cfg(feature = "order-locks")]

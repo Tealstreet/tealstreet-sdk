@@ -24,6 +24,7 @@ struct Body {
     handoff: Option<Delivery>,
     initial_custody: bool,
     history_bound: bool,
+    history_latest_release: Option<Attempt>,
 }
 
 struct Entry {
@@ -531,6 +532,7 @@ impl<P> Cx<'_, P> {
             handoff: self.io.http_delivery.clone(),
             initial_custody: self.io.http_delivery.is_none() && self.io.http_plan_ready.is_none(),
             history_bound: false,
+            history_latest_release: None,
         });
         if let Some(context) = old_read {
             self.io.retire_http_leg(&context);
@@ -690,6 +692,7 @@ impl<P> Cx<'_, P> {
                 predecessor: None,
             },
             stage: Stage::Ready,
+            released_failure: None,
         };
         call.select(self.now, self.io.http_delivery.clone())?;
         let owner = self
@@ -1433,3 +1436,100 @@ impl<P> Cx<'_, P> {
         self.finish_sealed_command(id, Some(result), Seal::Success)
     }
 }
+
+impl ContextRegistry {
+    pub(in crate::engine) fn record_read_plan_release(&mut self, delivery: &Delivery) {
+        let Some(plan) = self.plan_from_context(&delivery.context) else {
+            return;
+        };
+        let Ok(body) = self.plan_body_mut(&plan) else {
+            return;
+        };
+        if !body.history_bound {
+            return;
+        }
+        if body.entries.iter().any(|entry| {
+            entry
+                .call
+                .as_ref()
+                .is_some_and(|call| call.matches(delivery))
+        }) {
+            body.history_latest_release = Some(delivery.attempt);
+        }
+    }
+
+    pub(in crate::engine) fn record_read_plan_failure(
+        &mut self,
+        delivery: &Delivery,
+        origin: super::ReleasedReadFailure,
+    ) -> bool {
+        let Some(plan) = self.plan_from_context(&delivery.context) else {
+            return false;
+        };
+        let Ok(body) = self.plan_body_mut(&plan) else {
+            return false;
+        };
+        if !body.history_bound || body.history_latest_release != Some(delivery.attempt) {
+            return false;
+        }
+        let Some(call) = body
+            .entries
+            .iter_mut()
+            .find_map(|entry| entry.call.as_mut().filter(|call| call.matches(delivery)))
+        else {
+            return false;
+        };
+        if !matches!(call.stage, Stage::Active { failed: true }) {
+            return false;
+        }
+        call.released_failure = Some(origin);
+        true
+    }
+}
+
+impl<P> Cx<'_, P> {
+    pub(crate) fn validate_read_plan_history_failure(
+        &self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<Attempt, Error> {
+        self.validate_preflight_ready_owner(plan.owner())?;
+        if self.io.http_owner_poison
+            || self.io.http_plan_poison
+            || self.io.http_plan_expiring.is_some()
+        {
+            return Err(Error::Revoked);
+        }
+        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        if !body.history_bound
+            || !matches!(plan.owner(), Owner::Command { .. })
+            || body.policy.operation != Operation::Read
+            || body.receipt_cap.is_none()
+        {
+            return Err(Error::Invalid);
+        }
+        let index = body.schedule.ordinal(slot)?;
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let call = body.entries[index]
+            .call
+            .as_ref()
+            .filter(|call| {
+                call.context.same_issuer(context)
+                    && call.context == *context
+                    && call.matches(delivery)
+            })
+            .ok_or(Error::Revoked)?;
+        if !matches!(call.stage, Stage::Active { failed: true })
+            || call.released_failure.is_none()
+            || body.history_latest_release != Some(delivery.attempt)
+            || self.io.http_history_failure != Some(delivery.attempt)
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(delivery.attempt)
+    }
+}
+
+#[path = "request_context_history_plan.rs"]
+mod history;

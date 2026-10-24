@@ -1452,6 +1452,8 @@ mod managed_sockets;
 struct Io<P> {
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
+    #[cfg(feature = "http-plans")]
+    http_history_failure: Option<crate::request_context::Attempt>,
     // Typed cause of the HttpFailed being delivered: Network from the host,
     // Timeout when the engine expires a released request at its deadline.
     http_failure_kind: ErrorKind,
@@ -1557,6 +1559,8 @@ impl<P> Default for Io<P> {
         Self {
             request_contexts: Default::default(),
             http_delivery: None,
+            #[cfg(feature = "http-plans")]
+            http_history_failure: None,
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
             #[cfg(feature = "order-locks")]
@@ -3567,6 +3571,19 @@ impl<V: Venue> Engine<V> {
     }
 
     fn handle_event(&mut self, now: f64, event: Event<'_>) {
+        self.handle_event_with_read_timeout(now, event, false);
+    }
+
+    fn handle_event_with_read_timeout(
+        &mut self,
+        now: f64,
+        event: Event<'_>,
+        physical_timeout: bool,
+    ) {
+        #[cfg(feature = "http-plans")]
+        {
+            self.io.http_history_failure = None;
+        }
         let request = match &event {
             Event::HttpResponse { request, .. }
             | Event::HttpStart { request, .. }
@@ -3593,7 +3610,11 @@ impl<V: Venue> Engine<V> {
             self.io.request_contexts.enter_delivery(delivery);
         }
         let previous = std::mem::replace(&mut self.io.http_delivery, delivery.clone());
-        self.handle_event_scoped(now, event);
+        self.handle_event_scoped(now, event, physical_timeout);
+        #[cfg(feature = "http-plans")]
+        {
+            self.io.http_history_failure = None;
+        }
         self.io.http_delivery = previous;
         if let Some(delivery) = delivery.as_ref() {
             self.io.request_contexts.exit_delivery(delivery);
@@ -3615,7 +3636,7 @@ impl<V: Venue> Engine<V> {
         );
     }
 
-    fn handle_event_scoped(&mut self, now: f64, event: Event<'_>) {
+    fn handle_event_scoped(&mut self, now: f64, event: Event<'_>, _physical_timeout: bool) {
         // A new event cannot borrow an in-flight managed command's generation.
         // Sibling legs originate under Cx authority, not a repeated wire command.
         if let Event::Command(command) = &event
@@ -3826,6 +3847,21 @@ impl<V: Venue> Engine<V> {
                     cx.io.health.count(log_code::HTTP_FAILED);
                     let kind = cx.io.http_failure_kind;
                     let make_failure = || VenueError::new(error).kind(kind);
+                    #[cfg(feature = "http-plans")]
+                    {
+                        use request_context_registry::ReleasedReadFailure;
+                        let origin = if kind == ErrorKind::Network {
+                            Some(ReleasedReadFailure::Network)
+                        } else if _physical_timeout && kind == ErrorKind::Timeout {
+                            Some(ReleasedReadFailure::PhysicalTimeout)
+                        } else {
+                            None
+                        };
+                        cx.with_read_plan_failure_origin(origin, make_failure, |cx| {
+                            self.venue.on_http_failed(cx, pending.value, make_failure());
+                        });
+                    }
+                    #[cfg(not(feature = "http-plans"))]
                     cx.with_owned_read_failure(make_failure, |cx| {
                         self.venue.on_http_failed(cx, pending.value, make_failure());
                     });
@@ -3972,6 +4008,10 @@ impl<V: Venue> Engine<V> {
         // Deferred commands are engine-owned work, not part of the HTTP codec
         // whose callback just released the lock. Do not lend that codec's
         // attempt authority to an unrelated internal finalization.
+        #[cfg(feature = "http-plans")]
+        {
+            self.io.http_history_failure = None;
+        }
         let delivery = self.io.http_delivery.take();
         let entry = self.io.command_entry.take();
         #[cfg(feature = "order-locks")]
@@ -4051,6 +4091,10 @@ impl<V: Venue> Engine<V> {
             false
         });
         if any {
+            #[cfg(feature = "http-plans")]
+            {
+                self.io.http_history_failure = None;
+            }
             let delivery = self.io.http_delivery.take();
             let token = self.io.order_response_token.take();
             let mut cx = Cx {
@@ -4473,6 +4517,7 @@ impl<V: Venue> Engine<V> {
                 self.io.http_plan_poison = true;
                 #[cfg(feature = "order-locks")]
                 let order_response = self.io.order_response_token.take();
+                self.io.http_history_failure = None;
                 self.venue.on_http_plan_ready(
                     &mut Cx {
                         now,
