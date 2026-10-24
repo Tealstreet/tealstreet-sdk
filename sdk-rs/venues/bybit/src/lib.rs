@@ -859,6 +859,19 @@ impl BybitLinear {
                         .outcome(safe_cex_engine::Outcome::NotSent);
                     self.identity_response(cx, context, Err(error));
                 }
+                // A page refused before any send keeps the engine's typed error.
+                Then::History(request) => {
+                    let error = error
+                        .venue_error()
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    self.on_history_failed(cx, request, error);
+                }
+                Then::Closed(request) => {
+                    let error = error
+                        .venue_error()
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    self.on_closed_failed(cx, *request, error);
+                }
                 then => self.on_public_response(cx, then, Err(&error.venue_error().message)),
             },
         }
@@ -2758,6 +2771,15 @@ impl Venue for BybitLinear {
             self.identity_response(cx, context, Err(error));
             return;
         }
+        // A page or its re-read keeps the signer's typed error.
+        if let Then::History(request) = pending.then {
+            self.on_history_failed(cx, request, error);
+            return;
+        }
+        if let Then::Closed(request) = pending.then {
+            self.on_closed_failed(cx, *request, error);
+            return;
+        }
         if pending.rest.resent {
             // This refusal concerns only the retry. The earlier dispatched
             // attempt keeps the existing conservative failure/recovery path.
@@ -2768,8 +2790,6 @@ impl Venue for BybitLinear {
         match pending.then {
             Then::Trade(request) => self.on_trade_sign_failed(cx, request, error),
             Then::Identity(context) => self.identity_response(cx, context, Err(error)),
-            Then::History(request) => self.on_history_failed(cx, request, error),
-            Then::Closed(request) => self.on_closed_failed(cx, *request, error),
             Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
             Then::Options(request) => self.on_options_response(cx, request, Err(error)),
             then => self.on_public_response(cx, then, Err(&error.message)),

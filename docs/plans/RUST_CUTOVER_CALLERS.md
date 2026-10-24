@@ -6484,6 +6484,6 @@ them as fixtures.
 | Fills, order history, income, public trades and closed positions are bounded by the caller's wait | At the deadline: strict `timeout`, no rows and no incomplete marker (was unbounded; a long multi-window walk eventually returned) | Pass a wait that covers the range, or narrow it. |
 | Each page has its own window inside the caller's (20 s, or less when the caller's wait ends first) | An unanswered page fails typed `timeout`; transport loss is typed `network` (was never, or text) | None. |
 | A page failure after accepted rows | Unchanged: accepted rows plus the incomplete marker; typed failure when none | None. |
-| A native refusal | Classified: keeps its `kind` and the native `venueCode` (was no kind and no code) | Branch on `kind`. |
+| A native refusal | Classified: keeps its `kind` and the native `venueCode` (was `internal` and no code) | Branch on `kind`. |
 | A signature/timestamp refusal (`10002`/`10004`) | Re-read once as a managed retry with Bybit's clock; host text never re-sends | None. |
 | Credentials | Unchanged: the read key when configured, else the primary; keyless account history is `[]` with no request | None. |

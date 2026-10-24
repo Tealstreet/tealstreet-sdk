@@ -130,7 +130,7 @@ fn a_native_history_refusal_keeps_its_kind() {
     assert_eq!(failure(&h, 63).kind, Some(ErrorKind::AuthInvalid));
 }
 
-/// A native timestamp refusal re-reads once, as a fresh managed leg with
+/// A native timestamp refusal re-reads once, as a retry attempt of its leg with
 /// Bybit's clock; host text that resembles one never re-sends.
 #[test]
 fn history_re_reads_only_on_a_native_timestamp_refusal() {
@@ -199,4 +199,49 @@ fn keyless_account_history_is_empty_without_io() {
     });
     assert_eq!(h.result(67), Some(&Ok("[]".to_owned())));
     assert!(!h.has_request("/v5/execution/list"));
+}
+
+/// A re-read that succeeds completes the command with its page.
+#[test]
+fn a_successful_history_re_read_completes_the_command() {
+    let mut h = ready(false);
+    h.command(Command::Query {
+        command: 68,
+        query: fills(None, None),
+    });
+    let page = h.take("/v5/execution/list");
+    h.reply(page.id, 200, TIMESTAMP_REFUSAL);
+    let retry = h.take("/v5/execution/list");
+    h.reply(retry.id, 200, FILL);
+    let result = h.result(68).expect("completed").as_ref().expect("rows");
+    assert!(result.contains("\"id\":\"e1\""), "{result}");
+    assert!(!h.has_request("/v5/execution/list"));
+}
+
+/// Each handled page retires its leg: a walk longer than the context capacity
+/// never runs out of page slots.
+#[test]
+fn a_walk_longer_than_the_context_capacity_keeps_paging() {
+    let mut h = ready(false);
+    let to = 1_672_300_000_000.0;
+    h.command_waiting(
+        Command::Query {
+            command: 69,
+            query: Query::Fills {
+                symbol: Some("BTCUSDT".into()),
+                order_id: None,
+                from_ms: Some(to - 299.0 * 7.0 * DAY),
+                to_ms: Some(to),
+                limit: Some(100),
+            },
+        },
+        600_000,
+    );
+    let mut pages = 0;
+    while h.has_request("/v5/execution/list") {
+        h.respond("/v5/execution/list", 200, EMPTY);
+        pages += 1;
+    }
+    assert!(pages > 256, "{pages} pages");
+    assert_eq!(h.result(69), Some(&Ok("[]".to_owned())));
 }
