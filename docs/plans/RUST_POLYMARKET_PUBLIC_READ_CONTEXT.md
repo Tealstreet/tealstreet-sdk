@@ -162,3 +162,12 @@ error envelopes. The guard now precedes that decoder; typed failure-only hooks
 remain separate and do not apply a DATA validator to Timeout. No unowned reducer
 or private/discovery path changes. Earlier source review receipts are historical;
 this narrow correction is sent back to core before final CLEAR.
+
+Core cleared the corrected ordering at cce4e22caf0. Its exact CI family build
+is 889,714 bytes for both web and Node, leaving 453,774 bytes below the budget.
+The own-family replay passed; the broad Binance WASM job found two REST-book
+fixture failures because the recorded transport lacked prepareHttp. Reusing the
+shared recorded preparation helper changes no assertion or production code.
+Against that CI artifact, the unchanged fixture reproduces two assertion failures
+and fourteen passes; the corrected fixture passes all sixteen tests. Scoped
+ESLint passes with its existing test-file warning. Full fresh CI remains required.
