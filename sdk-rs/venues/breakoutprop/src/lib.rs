@@ -1287,11 +1287,6 @@ impl Venue for BreakoutProp {
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
-            Command::FetchOptionChain { command, .. }
-            | Command::FetchOptionExpiries { command, .. }
-            | Command::FetchAccountGreeks { command } => {
-                cx.fail(command, "Options are not enabled on this account");
-            }
             Command::SetTickerSymbols { .. } => {}
             Command::Venue { command, .. } => {
                 safe_cex_engine::unsupported_venue_action(cx, command)
@@ -1384,11 +1379,16 @@ impl Venue for BreakoutProp {
                 RequestOperation::Read,
                 Err("Maximum leverage queries are unavailable for DXtrade".into()),
             ),
+            // Options never reach the venue: the engine refuses them before
+            // entry because BreakoutProp declares no options capability.
             unsupported @ (Command::AmendOrderWithSymbol { .. }
             | Command::FetchStpMode { .. }
             | Command::SetStpMode { .. }
             | Command::FetchAccount { .. }
-            | Command::FetchOrderBook { .. }) => {
+            | Command::FetchOrderBook { .. }
+            | Command::FetchOptionChain { .. }
+            | Command::FetchOptionExpiries { .. }
+            | Command::FetchAccountGreeks { .. }) => {
                 let operation = if matches!(
                     unsupported,
                     Command::AmendOrderWithSymbol { .. } | Command::SetStpMode { .. }
