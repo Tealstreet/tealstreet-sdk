@@ -431,3 +431,25 @@ barriers above. Those findings are accepted into this plan before source.
 Global/per-parent task, wake and cleanup capacities and the exact G2c identity
 snapshot API still require owner review; existing Session open and scheduler
 register calls do not by themselves prove the new pre-ID atomicity contract.
+
+Plan-owner review of `4a219db9602` against exact #1919 `2f4a08b449c` is
+direction-CLEAR. The following explicit requirements are part of implementation:
+
+- The shared physical table is currently keyed by a bare generation. Store or
+  check the full Owner variant in every lookup, including owner entry, mutable
+  owner entry, `physical_owner`, index membership and finish. Even a matching
+  numeric generation must not let Background resolve Execution or the reverse.
+- Terminal preparation has three owner cases. Background takes no execution
+  sweep or observer fan-out, but does reserve cleanup through the same
+  `prepare_owner_retirement` transaction. Commit and `finish_physical` must
+  support its Planned-to-Retiring transition, release reserved Context credits,
+  remove the Plan index and enqueue the exact typed retirement token.
+- `physical_plan_timer` must find Background Plan timers so retirement clears
+  them. `founded_by` stays Execution-only; Background never inherits a ready
+  command's loan. No capped Preflight can enter Background admission.
+- Pending registration and retirement change together. Use bounded vectors
+  and `assert!(a == b)` on handles to avoid unnecessary WASM formatting cost.
+
+Task/wake capacity and G2c snapshot fit remain for uufub4 and the Session owner;
+the Plan-owner review does not clear those contracts. The final #1919 frozen
+pin is still to be announced after its pending CPU certification job.
