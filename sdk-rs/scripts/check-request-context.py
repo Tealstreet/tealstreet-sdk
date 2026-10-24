@@ -402,17 +402,7 @@ SIGNER_POLICY_BOOTSTRAPS = {}
 # OKX legacy GETs and sign failures (#1773): approved by claude-ddi2il, same exit as WEEX.
 # Bitget private sends, signing and sign failures funnelled through lib.rs: approved by
 # claude-ddi2il, same exit; remove before master.
-# ApeX dispatch-time signing staging (#2008): three rehashed legacy staging calls plus
-# one sign_http (four exact digests, no canonical 6cf35cca), approved by claude-ddi2il;
-# removed by the ApeX read-path follow-up (managed Read/Background reads). Remove before master.
-STAGING_BOOTSTRAPS = {'venues/apexomni/src/lib.rs': ({'0adb175953636afd100d2ddc68ad421af677dc89c16a52471e5cb4c54aefe898': 1,
-    '49ba30affa9b727ea990dacbdef5a8033af5fbd08fe892e2fe8fcc8e080c596a': 1,
-    '97ed964385cc7a52fcd23993359dd831f672724592d73be7beda8c73e36fe2b9': 1},
-    {'43f0a5248e3c01a293d3738c30ea1e956206f0ee972b359917ab94cc8920b84b': 1,
-    '4d0bf337c43e368b2b3bb52928e8cfafdffba590f333fc8ccd63cdcff8059a5e': 1,
-    '50c383ad66e41296ad7968d1d004afce80581aa8183b7e393a28bce694028341': 1,
-    'beed17adaec269aa1ac580185fb6e9bc7f47d298ece6bffb103661f9da543ad0': 1}),
- 'venues/bingx/src/lib.rs': ({'1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
+STAGING_BOOTSTRAPS = {'venues/bingx/src/lib.rs': ({'1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
  '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 2,
  'b4b475ef7a3c08d3514bf2b7497dc3a85e7a328c33757287a83f82cb602f0a27': 1,
  'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
