@@ -82,3 +82,24 @@ Local Cargo is limited to changed Polymarket tests/crate with
 CARGO_BUILD_JOBS=4, one build at a time. Full workspace, WASM/size/performance
 checks run in CI; do not change budgets/profiles or waive enabled-adopter limits.
 READY requires source reviews CLEAR plus green CI, followed by auditor notice.
+
+## Original checkpoint receipt
+
+Plan aef0f018659 precedes original controls 3b1651f907e. Against unchanged
+actual0ee8 production, the isolated target compiles and executes twelve tests:
+five intended assertion RED, seven GREEN, zero ignored. Eager raw HTTP escapes;
+first- and second-page DATA at their exact new deadlines still publish;
+expired streamed rows reach native malformed-row diagnostics; and the
+unprepared page has no admission expiry timer. These are adoption boundaries.
+Late-host/timeout/backoff suffixes after each failing assertion remain unexecuted
+until adoption and must not be counted as original executed evidence.
+
+Working controls preserve exact repeated-slug GET wire/no private intent,
+opaque cursor/dedup and atomic metadata geometry, a successful 38s total walk
+with each page under 20s, actual later transport failure with prefix discard and
+first-page retry/recovered dedup state, cycle/envelope/full/oversized-page
+refusal, malformed-neighbour survival and empty-catalogue retry. No production,
+old fixture, Cargo, inventory, selection or shared-file change is present.
+An initial extra delimiter in the new fixture stopped rustfmt/compilation;
+it was corrected before the committed executable original checkpoint and is
+excluded from all assertion-RED counts. No native assertion was relaxed.
