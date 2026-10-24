@@ -172,6 +172,10 @@ struct Consumer {
     placing: bool,
     stagger_freshness: bool,
     entropy_log: Option<EntropyLog>,
+    /// The first group member binds this Session (refused until R11).
+    bind_session: bool,
+    session: Option<safe_cex_engine::request_context::Session>,
+    issue_errors: Vec<safe_cex_engine::request_context::Error>,
 }
 impl Consumer {
     fn issue(&mut self, cx: &mut Cx<'_, Context>) {
@@ -207,9 +211,10 @@ impl Consumer {
             let reference = context.credential().unwrap().reference.clone();
             self.slots.insert(context.leg(), slot);
             self.contexts.push(context.clone());
-            cx.request_signed_managed(
+            let bearer = self.session.clone().filter(|_| self.bind_session);
+            let issued = cx.request_signed_managed(
                 context.clone(),
-                None,
+                bearer.as_ref(),
                 method,
                 format!("https://openapi.blofin.com{path}"),
                 body,
@@ -223,8 +228,12 @@ impl Consumer {
                     self.entropy_log.clone(),
                 )),
                 context,
-            )
-            .unwrap();
+            );
+            if let Err((_, error)) = issued {
+                assert!(self.bind_session, "unexpected issue refusal: {error:?}");
+                self.issue_errors.push(error);
+                return;
+            }
         }
     }
 }
@@ -237,6 +246,16 @@ impl Venue for Consumer {
         }]
     }
     fn start(&mut self, cx: &mut Cx<'_, Context>) {
+        if self.bind_session {
+            self.session = Some(
+                cx.open_session(safe_cex_engine::request_context::SessionPolicy {
+                    credential: None,
+                    repeat_safe: true,
+                    private_egress: None,
+                })
+                .unwrap(),
+            );
+        }
         if self.warmup {
             let context = cx
                 .http_context(
@@ -1430,4 +1449,34 @@ fn non_first_reprepare_wakes_with_the_first_member_already_permitted() {
         engine.claim_http_group(152., old),
         Err(Error::Revoked)
     ));
+}
+
+/// #2069 R11 deferral (overseer ruling): a Session-bound request cannot join a
+/// Mutation group. It is refused at issue, before any effect: nothing reaches
+/// the host, and the command fails once, NotSent, with a message naming the
+/// restriction.
+#[test]
+fn a_session_bound_group_member_is_refused_not_sent_before_any_effect() {
+    let mut engine = start_consumer(Consumer {
+        pair: true,
+        bind_session: true,
+        ..Default::default()
+    });
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(
+        engine.venue().issue_errors,
+        [safe_cex_engine::request_context::Error::Invalid]
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::ManagedHttp(_) | Action::Sign { .. })),
+        "a refused group member reached the host"
+    );
+    let error = failed_once(&actions, safe_cex_engine::Outcome::NotSent);
+    assert_eq!(
+        error.message,
+        "Session-bound requests cannot join a Mutation group"
+    );
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
 }
