@@ -167,3 +167,36 @@ Is this a per-venue fix of a cross-cutting concern? No. It uses the shared
 registry admission pattern (#1964), the shared recipes and the shared
 not-ready refusal. The only ApeX-specific code is the venue's own request
 construction.
+
+## Implementation notes (c65eb470bd3)
+
+These deviate from the plan text above:
+- **Legacy start behaviour is kept.** A missing or unusable zkLink role gives
+  the legacy typed notice ("Invalid OmniKey seed: expected 65-byte Ethereum
+  signature; ApeX order placement is disabled …"). Account monitoring and
+  cancels continue, and each order's `can_sign` refuses placement (#1891). R6
+  now pins this, not a refused start. A missing passphrase keeps its legacy
+  notice and does not start private work.
+- **The construction row declares the seed and passphrase `optional`.** The
+  venue's notices above own the outcomes, and setup is not refused.
+- **Public `/v3/symbols` is always unsigned**, like klines. The legacy signer
+  added headers only when credentials happened to be present. Public discovery
+  no longer depends on signing material.
+- **The seed width is checked by a synchronous probe** `ZkLinkContract` sign
+  on the role. It is shared by native and JSON setup (`apexomni_admit`) and
+  refuses with the legacy message. A secondary is refused with "ApeX has no
+  read credentials; a secondary key is not supported".
+- **The legacy oracles stay in `sign.rs`** (`request`, `ws_login`), now
+  taking `sign::LegacyCredentials`, a type the venue never builds. ApeX
+  joining the checker's migrated set (`sign.rs` scanned) is a follow-up, once
+  `tests/dispatch_recipe.rs` and `tests/sign.rs` use literal vectors.
+- **Messages.** "ApeX API key, signing key and passphrase are required"
+  replaces the legacy wording, which named the secret.
+
+**Open: request-provenance ratchet.** Signed reads stage
+`cx.request`/`request_streamed_body` unsigned plus `cx.sign_http`. In
+`venues/apexomni/src/lib.rs` that rehashes the 2 legacy staging calls and adds
+1 `sign_http` site. The ratchet refuses any new site without an
+owner-authorized bootstrap, as with `SIGNER_POLICY_BOOTSTRAPS`. This needs a
+decision: an authorized rehash, or moving the reads onto managed Read contexts
+first.
