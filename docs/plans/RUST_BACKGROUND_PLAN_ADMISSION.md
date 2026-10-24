@@ -1,7 +1,7 @@
 # Generation-bound background Plan admission
 
-Plan-first G1 checkpoint, 2026-10-24. Owner codex-hcmq3f; first consumer
-claude-4yjlw0's BloFin custody cutover, native source review codex-9czdjh;
+Plan-first G1 checkpoint, 2026-10-24. Owner codex-zs5e83 (handover from
+codex-hcmq3f); first consumer is the BloFin custody cutover, native source review codex-9czdjh;
 Plan API fit codex-uufub4, session cascade fit claude-55ao7t. Base is actual
 `a828ede7ebb54bc9c032ea61365213abac5e3dca`. This phase adds docs and isolated
 original-source tests only. No runtime API or whole-family readiness is claimed.
@@ -284,7 +284,150 @@ the missing finite Plan/task custody, not a defect claim against the documented
 legacy Context API. Fixture admission/selection will move to G1 while keeping
 those wire assertions; no venue counter or fabricated command enforces them.
 
-These two original REDs are ignored under codex-hcmq3f's G1 runtime adoption.
+These two original REDs are ignored under codex-zs5e83's G1 runtime adoption.
 Session cascade, the #1842 non-Command phase hole and retired-child cleanup
 notification need additional controls on the integrated Session API, which is
 not present on this baseline. A missing method/compile failure is not counted.
+
+## Runtime takeover and composition checkpoint
+
+Handover is exact `0a014330647b97f2b6c3e06b4b5bbc1b90e09336`:
+plan `bdf688ceb30`, Session refinements `fd6e2037bb0`, and the original tests.
+The actual landing `a2533f5761f21afab4bc9037cfa6a187029b63e4` is genuinely
+integrated at `0a89fe77910`; only the README index needed keep-both resolution.
+On this tree, the unchanged `background_plan --include-ignored` target gives
+one working control and two intended assertion failures, zero ignored. Both
+fail at the original extra-HTTP assertions through Prepare/Bind/Claim.
+
+Plan owner claude-fe7lgm directed composition on reviewed #1919
+`2f4a08b449cb69316cf9d657f7c12f9e696c50a0`. That dependency is integrated
+at `35653ec28b8`, with no engine source conflict; the CALLERS conflict retains
+the actual landing's selected-root section followed by the dependency's
+retained-readiness section. This is a reviewed dependency stack, not an actual
+#1919 landing or G1 source clearance. Reintegrate actual prerequisites before
+final CI and any merge window.
+
+### Shared implementation boundary
+
+The next source review must cover these exact changes; names below remain
+proposed until the Plan and Session owners clear this checkpoint.
+
+| Path | G1 hook and preservation boundary |
+| --- | --- |
+| `engine/src/request_context_background_plan.rs` (new) | Bounded task declarations, issuer-bound task/activation handles, parent/task/child indexes and activation state. No second Session registry. |
+| `engine/src/request_context_background_retry.rs` (new, if needed) | Shared task scheduling and bounded traversal admissions, composed with `read_scheduler`; no venue callback owns a retry timer. |
+| `engine/src/request_context_planned.rs` | Factor declaration/resource preparation from the command-specific origin and commit. Background admission uses that same transaction, Schedule, slot/attempt reservation, journal and prepare/commit terminal funnel. |
+| `engine/src/request_context_registry.rs` | Resolve registered Plan-backed `Owner::Background` through the existing physical owner table. Preserve plain legacy Background owners. Fence live parent/task in handle and Plan lookup, and count physical pending/delivery retirement. Preserve LocalSetting and tracked command-root paths. |
+| `engine/src/request_context_preflight_call.rs` | Include Plan-backed Background owners in owned admission, delivery/failure bookkeeping and legacy-API denial. A generic `Scope::Background` issuance cannot attach to the child owner. |
+| `engine/src/request_context_owner.rs`, `request_context.rs` | Opaque task/activation declaration and exports behind `http-plans`; no public Preflight constructor or fake command founder. |
+| `engine/src/session_context.rs` | Validate issuer, index registrations under the exact Session, invalidate before cascade and refuse Session waits on a Background Plan. Keep ordinary Session credential/egress and all ready-callback guards. |
+| `engine/src/engine.rs` | Scoped activation callback, shared task wake, typed child retirement and poison handling at existing event/retirement boundaries; feature-off has no task state/callbacks. |
+| `engine/src/read_scheduler.rs` | Narrow checked retirement barrier if the existing scheduler cannot retain an active task until physical cleanup; preserve ordinary scheduler behavior. |
+| `engine/tests/background_plan.rs` and dedicated shared targets | Retain original transport assertions; change admission/selection fixture only after the reviewed API exists. Add capacity, Session cascade, retry and custody controls. |
+
+The existing physical table is reused for Background Plan phase/accounting;
+task entries contain only their parent binding, immutable declaration/selection,
+bounded cycle count, scheduling state and optional current child. Task, parent
+and child indexes use bounded vectors rather than another owner-keyed map.
+Capacity must bound live task registrations and retiring children, including
+backoff intervals without a child. No child can be replaced while its previous
+generation still holds pending delivery or cleanup custody.
+
+`validate_handle` alone is insufficient. `plan_body`, Plan readiness and slot
+selection do not necessarily pass through Context validation. Their common
+lookup must also reject a dead parent or retired task. A separate private
+failure-only lookup permits preparation and commitment of retirement after
+the parent is dead, without restoring ordinary validation, success or send
+rights. The existing `prepare_owner_retirement` and physical retirement funnel
+remain responsible for exact pending/delivery cleanup and one typed callback.
+
+Command-only assumptions that must be explicitly changed include
+`validate_legacy`, `owned_admission`, `register_attempt`, `context_phase`,
+`physical_owner`, owner entry lookup, Plan terminal dispatch and physical
+retirement bookkeeping. Plain legacy Background Reads keep their existing API;
+only registered Plan-backed Background owners take the owned path. There is
+no command notice, observer group or synthetic command receipt. A Background
+owner never satisfies command-ready founder custody and never uses a capped
+caller-receipt admission mode.
+
+Background pending accounting must change atomically with owner lookup:
+`register_attempt` currently skips all Background Reads while `retire_attempt`
+decrements retained owners. Letting only the latter resolve a new physical
+Background owner would underflow its pending count on first retirement.
+
+### Admission, callback and retirement transactions
+
+Registration validates the exact live Session issuer before reserving task
+storage or IDs. It captures a checked owned declaration template and immutable
+selected identity/slot/egress once. The current `SelectedRead` and `Selection`
+types do not prove trusted setup/config-generation provenance: G2c remains an
+explicit coordination gate, not a claim that constructing Slots solves it.
+Neither the anchor's primary credential nor an HTTP method selects the child.
+
+The activation contains no public constructor, Clone, numeric scope, Context or
+Preflight. The engine removes scheduled demand before entering the exact ready
+callback and retains a private issuer/task/activation validation record. All
+declaration checks, deadline arithmetic, context and physical-owner capacity,
+task/child/retirement index reservations, timer/action storage and HTTP/signing
+ID availability precede consuming that record and incrementing the task's
+successful-admission count. Failure before commit issues no Plan and consumes
+no traversal attempt. Selecting a call without submitting it is still no
+progress; the scoped callback guard retires it with a typed failure.
+
+Admission one, two and three each create a fresh finite Read Plan with at most
+150 one-attempt calls, not a 450-credit envelope. Completion or failure first
+seals the current Plan through the common terminal funnel; all physical work
+and the typed native cleanup retire before task scheduling can proceed. Only
+then may an eligible failure schedule the declared 1s/2s delay. Task-side
+admission count is independent of `RetryPolicy::max_steps`. The scheduler's
+current automatic expiry replacement must not run ahead of this barrier.
+The same barrier applies to `pause`, `superseded`, `cancel` and `retire`, which
+currently discard active scheduler tokens. In particular, a pause during
+Prepare/Sign/Bind must invalidate admission without freeing replacement demand
+before child cleanup. Add an externally retired token state and a private
+exact-token cleanup acknowledgement usable after its deadline; ordinary
+`finish` refuses expired tokens and cannot serve as that acknowledgement.
+Exact 1s/2s policy uses the shared scheduler's identity sampling, not randomized
+delay. Retry eligibility is checked again at activation after the wait.
+After the third failure or an ineligible auth/native failure, the cycle ends;
+a later genuine poll/invalidation may start another cycle. It cannot turn an
+old activation into a fourth attempt or reset Mutation evidence.
+
+Session retirement first makes the parent/task/activation bindings dead, then
+drains only indexed matching children and task waits through shared retirement.
+The task remains fenced during cleanup and no successor can activate until
+that cleanup completes. A parent-dead child can fail/retire but never publish
+DATA or succeed. Panic keeps the existing sticky poison. The empty-index path
+must return without scanning legacy Contexts or all live Session entries.
+
+### Verification before source freeze
+
+Besides retaining the two original wire REDs and 40s/two-20s control, test:
+
+- issuer/parent/task/activation substitution, replay and unrelated callbacks;
+  admitted but unsubmitted selection; fourth-attempt denial;
+- atomic capacity/ID refusal before activation consumption, including another
+  active child, retiring child and the 150-call reservation boundary;
+- parent retirement at Prepare, parked Sign, Bind, Claim, released response and
+  between-attempt backoff; no release/publication after invalidation;
+- strict Background Plan refusal at `session_wait`, command-ready and legacy
+  completion/admission paths, with plain Background positive controls;
+- full cleanup before 1s/2s retries, auth eligibility, accepted-page isolation,
+  exact one typed retirement, no command terminal and no successor on panic;
+- more than 256 completed cycles with no resource/identity reuse leak,
+  simultaneous independent children, and an O(1) idle-index counter;
+- feature-off compilation plus `http-plans,test-support` and order-locks
+  combinations, focused Session/Plan/readiness/scheduler controls and strict
+  touched-crate Clippy/fmt. Replay, WASM size and timing remain CI gates.
+
+Source/API audit is required from claude-fe7lgm and codex-uufub4, with the
+Session cascade hook checked by claude-55ao7t. The BloFin caller review remains
+codex-9czdjh plus HMAC owner claude-4yjlw0. No BloFin production, inventory prune,
+G2 mixed-leg readiness or G2c provenance clearance is implied by this checkpoint.
+
+Independent planning audits found the parent-lookup and legacy-phase bypasses,
+Background pending-accounting mismatch, and scheduler pause/expiry cleanup
+barriers above. Those findings are accepted into this plan before source.
+Global/per-parent task, wake and cleanup capacities and the exact G2c identity
+snapshot API still require owner review; existing Session open and scheduler
+register calls do not by themselves prove the new pre-ID atomicity contract.

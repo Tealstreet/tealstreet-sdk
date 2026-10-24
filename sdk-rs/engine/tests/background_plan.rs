@@ -144,7 +144,7 @@ fn existing_context_chain_can_span_two_physical_windows_without_fake_entry() {
     assert_eq!(engine.venue().outside_refusals, 1);
 }
 #[test]
-#[ignore = "G1 background Plan runtime adoption: codex-hcmq3f, feat/rust-background-plan-admission"]
+#[ignore = "G1 background Plan runtime adoption: codex-zs5e83, feat/rust-background-plan-admission"]
 fn original_red_unrelated_timer_cannot_borrow_background_cycle_custody() {
     let (mut engine, _) = start();
     let timer = engine.venue().unrelated.unwrap();
@@ -158,7 +158,7 @@ fn original_red_unrelated_timer_cannot_borrow_background_cycle_custody() {
     assert_eq!(engine.venue().attempted, Some(Err(Error::Revoked)));
 }
 #[test]
-#[ignore = "G1 background Plan runtime adoption: codex-hcmq3f, feat/rust-background-plan-admission"]
+#[ignore = "G1 background Plan runtime adoption: codex-zs5e83, feat/rust-background-plan-admission"]
 fn original_red_completed_two_call_cycle_cannot_release_an_undeclared_third_call() {
     let (mut engine, first) = start();
     reply(&mut engine, &first, 19_000.);
