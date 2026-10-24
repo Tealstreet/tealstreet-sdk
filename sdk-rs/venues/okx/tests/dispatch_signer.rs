@@ -8,7 +8,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use support::{envelope, prepared, reply, trading_engine_configure};
+use support::{actions, envelope, prepared, reply, trading_engine_configure};
 
 struct Gate {
     provider: Provider,
@@ -161,7 +161,27 @@ fn primary_lookup_provider_refusal_never_becomes_definitive_absence() {
             },
         }),
     );
-    let id = attempt(&prepared(&mut engine, 5.));
+    let preparation = actions(&mut engine)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                safe_cex_engine::request_context::HttpAction::Prepare { preparation, .. } => {
+                    Some(preparation)
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("lookup route preparation before deferred provider");
+    engine.http_prepared(
+        5.,
+        preparation,
+        safe_cex_engine::request_context::Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let id = attempt(&actions(&mut engine));
     engine.handle(
         6.,
         Event::Signed {

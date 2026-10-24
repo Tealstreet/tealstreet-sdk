@@ -17,10 +17,13 @@ fn query(e: &mut Engine<Okx>, query: Query) -> Action {
             query,
         }),
     );
-    prepared(e, 1_710_000_000_000.0)
+    prepared(e, 1_710_000_000_000.)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap()
+}
+fn reply(e: &mut Engine<Okx>, action: &Action, body: &str, offset: f64) {
+    support::reply(e, action, body, 1_710_000_000_000. + offset);
 }
 fn result(e: &mut Engine<Okx>) -> String {
     actions(e)
@@ -96,7 +99,10 @@ fn fills_fallback_deduplicates_trade_identity_and_converts_contracts() {
     let a = query(&mut e, fills());
     assert!(url(&a).contains("/trade/fills?instType=SWAP&instId=BTC-USDT-SWAP&ordId=123&begin=1709000000000&end=1711000000000&limit=5"));
     reply(&mut e, &a, &envelope(FILL), 10.0);
-    let a = take_http(&mut prepared(&mut e, 10.0));
+    let a = prepared(&mut e, 1_710_000_000_010.)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
     assert!(url(&a).contains("/trade/fills-history?"));
     let other = FILL.replace("\"200\"", "\"201\"");
     // The fee and fill bills of trade 200 remain a single execution.
@@ -121,7 +127,10 @@ fn fills_bounds_and_order_filter_apply_to_history_response() {
     let mut e = trading_engine();
     let a = query(&mut e, fills());
     reply(&mut e, &a, &envelope(""), 10.0);
-    let a = take_http(&mut prepared(&mut e, 10.0));
+    let a = prepared(&mut e, 1_710_000_000_010.)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
     let wrong_order = FILL.replace("\"123\"", "\"999\"");
     let old = FILL.replace("1710000000123", "1708000000000");
     reply(&mut e, &a, &envelope(&format!("{wrong_order},{old}")), 11.0);
