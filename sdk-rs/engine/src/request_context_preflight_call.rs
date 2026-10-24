@@ -70,10 +70,14 @@ impl State {
         Ok(())
     }
 
-    /// A read never outlives the caller's original receipt, however late it
-    /// is issued (including at a Session resume).
-    pub(super) fn read_bound(&self) -> f64 {
-        self.receipt_cap.map_or(f64::MAX, |(_, cap)| cap)
+    /// A read parked on or resumed from a Session never outlives the caller's
+    /// original receipt. A read issued in ordinary custody keeps its declared
+    /// window, so a valid handoff past the receipt still delivers.
+    pub(super) fn read_bound(&self, parked: bool) -> f64 {
+        match self.receipt_cap {
+            Some((_, cap)) if parked => cap,
+            _ => f64::MAX,
+        }
     }
 
     pub(super) fn admits_handoff(&self, delivery: Option<&Delivery>) -> bool {
@@ -604,8 +608,8 @@ impl<P> Cx<'_, P> {
         if !state.call.is_empty() || !state.admits_handoff(self.io.http_delivery.as_ref()) {
             return Err(Error::Revoked);
         }
-        self.validate_preflight_read(handle, &policy, terms)?;
-        self.issue_preflight_read(handle, policy, terms)
+        self.validate_preflight_read(handle, &policy, terms, false)?;
+        self.issue_preflight_read(handle, policy, terms, false)
     }
 
     /// The declared read's own terms, checked before any custody is spent.
@@ -614,6 +618,7 @@ impl<P> Cx<'_, P> {
         handle: &Preflight,
         policy: &Policy,
         terms: CallTerms,
+        parked: bool,
     ) -> Result<(), Error> {
         let state = self.io.request_contexts.preflight_state(handle)?;
         if policy.operation != Operation::Read
@@ -624,7 +629,7 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Invalid);
         }
-        let window = terms.window(self.now, state.read_bound())?;
+        let window = terms.window(self.now, state.read_bound(parked))?;
         Context::new(
             handle.owner(),
             1,
@@ -645,12 +650,13 @@ impl<P> Cx<'_, P> {
         handle: &Preflight,
         policy: Policy,
         terms: CallTerms,
+        parked: bool,
     ) -> Result<Context, Error> {
         let bound = self
             .io
             .request_contexts
             .preflight_state(handle)?
-            .read_bound();
+            .read_bound(parked);
         let window = terms.window(self.now, bound)?;
         self.io.request_contexts.prune(self.now);
         if self.io.request_contexts.contexts.len() + self.io.request_contexts.reserved_contexts

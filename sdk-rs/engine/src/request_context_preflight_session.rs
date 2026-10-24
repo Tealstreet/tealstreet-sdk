@@ -32,7 +32,7 @@ impl<P> Cx<'_, P> {
             if !state.call.is_empty() || !state.admits_handoff(self.io.http_delivery.as_ref()) {
                 return Err(Error::Revoked);
             }
-            self.validate_preflight_read(handle, &policy, terms)?;
+            self.validate_preflight_read(handle, &policy, terms, true)?;
             self.reserve_preflight_wait(handle)
                 .map(|cap| (generation, cap))
         })();
@@ -172,8 +172,8 @@ impl<P> Cx<'_, P> {
         if !state.session_parked || !state.call.is_empty() {
             return Err(Error::Revoked);
         }
-        self.validate_preflight_read(handle, &policy, terms)?;
-        let read = self.issue_preflight_read(handle, policy, terms)?;
+        self.validate_preflight_read(handle, &policy, terms, true)?;
+        let read = self.issue_preflight_read(handle, policy, terms, true)?;
         self.resumed_preflight(handle);
         Ok(read)
     }

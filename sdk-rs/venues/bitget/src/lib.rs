@@ -14,10 +14,11 @@ use safe_cex_engine::book::Book;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Context, Credential, Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use serde::{Serialize, de::IgnoredAny};
 use std::collections::HashMap;
@@ -41,11 +42,12 @@ pub struct Options {
 }
 
 pub enum Pending {
-    Identity(CommandId),
+    Identity(Context),
     History(Box<history::Request>),
     Trade(Box<trading::Request>),
     Account {
         generation: u64,
+        context: Context,
         request: account::Request,
     },
     Markets {
@@ -57,7 +59,7 @@ pub enum Pending {
         invalid: bool,
     },
     Candles {
-        command: CommandId,
+        root: Context,
         rows: Vec<Candle>,
         invalid: bool,
     },
@@ -253,9 +255,6 @@ impl BitgetFutures {
         };
         if !signed {
             return;
-        }
-        if self.primary_balance_read(path) {
-            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
         }
         cx.sign_http(
             id,
@@ -703,9 +702,12 @@ impl Venue for BitgetFutures {
             Pending::Trade(_) => {}
             Pending::Account {
                 generation,
+                context,
                 request,
             } => {
-                if *generation == self.account.generation {
+                if *generation == self.account.generation
+                    && cx.validate_background_read_http_delivery(context).is_ok()
+                {
                     self.account_item(cx, request, item);
                 }
             }
@@ -777,8 +779,8 @@ impl Venue for BitgetFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        if let Pending::Identity(command) = pending {
-            self.identity_response(cx, command, response);
+        if let Pending::Identity(root) = pending {
+            self.identity_response(cx, &root, response);
             return;
         }
         if let Pending::History(request) = pending {
@@ -791,13 +793,18 @@ impl Venue for BitgetFutures {
         }
         if let Pending::Account {
             generation,
+            context,
             request,
         } = pending
         {
-            if generation == self.account.generation {
+            // Publish under live custody, then retire; a stale page only retires.
+            if generation == self.account.generation
+                && cx.validate_background_read_http_delivery(&context).is_ok()
+            {
                 self.account_response(cx, request, response);
                 self.resume_trading(cx);
             }
+            let _ = cx.finish_http_context(&context);
             return;
         }
         let valid = serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
@@ -873,10 +880,14 @@ impl Venue for BitgetFutures {
                 self.connect(cx, 2);
             }
             Pending::Candles {
-                command,
+                root,
                 rows,
                 invalid: false,
-            } => cx.done(command, serde_json::to_string(&rows).expect("candles")),
+            } => {
+                if cx.validate_read_http_delivery(&root, &root).is_ok() {
+                    let _ = cx.done_context(&root, serde_json::to_string(&rows).expect("candles"));
+                }
+            }
             pending @ (Pending::Markets { .. } | Pending::Tickers { .. }) => self.public_failed(
                 cx,
                 matches!(pending, Pending::Tickers { .. }),
@@ -937,18 +948,20 @@ impl Venue for BitgetFutures {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
-            Pending::Identity(command) | Pending::Candles { command, .. } => {
-                cx.fail(command, error)
+            Pending::Identity(root) | Pending::Candles { root, .. } => {
+                let _ = cx.fail_context(&root, error);
             }
             Pending::History(request) => {
                 let command = request.command;
-                self.on_sign_error(cx, Pending::Identity(command), error)
+                cx.fail(command, error)
             }
             Pending::Trade(request) => self.trade_sign_failed(cx, *request, error),
             Pending::Account {
                 generation,
+                context,
                 request,
             } => {
+                let _ = cx.finish_http_context(&context);
                 if generation == self.account.generation {
                     self.account_sign_failed(cx, request, &error.message);
                     self.resume_trading(cx);
@@ -958,19 +971,41 @@ impl Venue for BitgetFutures {
         }
     }
 
+    /// Managed candle and identity reads keep the engine's typed deadline;
+    /// every other failure keeps its native text.
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        let deadline = error.kind == Some(safe_cex_engine::ErrorKind::Timeout);
+        match pending {
+            Pending::Candles { root, .. } if deadline => {
+                let _ = cx.fail_context(&root, error);
+            }
+            Pending::Identity(root) if deadline => self.identity_failed(cx, &root, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Identity(command) = pending {
-            self.identity_failed(cx, command, error);
+        if let Pending::Identity(root) = pending {
+            self.identity_failed(cx, &root, safe_cex_engine::VenueError::new(error));
             return;
         }
         match pending {
             Pending::History(request) => self.query_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_response(cx, *request, Err(error)),
-            Pending::Candles { command, .. } => cx.fail(command, error.to_owned()),
+            Pending::Candles { root, .. } => {
+                let _ = cx.fail_context(&root, error);
+            }
             Pending::Account {
                 generation,
+                context,
                 request,
             } => {
+                let _ = cx.finish_http_context(&context);
                 if generation == self.account.generation {
                     self.account_transport_failed(cx, request, error);
                     self.resume_trading(cx);
@@ -1024,8 +1059,9 @@ impl Venue for BitgetFutures {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if let Command::FetchAccount { command } = command {
-            self.fetch_identity(cx, command);
+        // The engine binds the command when the identity read is admitted.
+        if let Command::FetchAccount { .. } = command {
+            self.fetch_identity(cx);
             return;
         }
         match command {
@@ -1083,15 +1119,19 @@ impl Venue for BitgetFutures {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval: value,
                 limit,
                 from_ms,
                 to_ms,
             } => {
+                // A rejected admission already published the command's typed failure.
+                let Ok(root) = cx.admit_http_command(read_policy(None)) else {
+                    return;
+                };
                 let Some(native) = interval(value) else {
-                    cx.fail(command, value.unsupported("Bitget"));
+                    let _ = cx.fail_context(&root, value.unsupported("Bitget"));
                     return;
                 };
                 let limit = limit.unwrap_or(500).clamp(1, 1000);
@@ -1108,15 +1148,22 @@ impl Venue for BitgetFutures {
                 if let Some(start) = from_ms.filter(|v| *v < end) {
                     path.push_str(&format!("&startTime={}", num::format(start)));
                 }
-                self.get(
-                    cx,
-                    path,
-                    Pending::Candles {
-                        command,
-                        rows: vec![],
-                        invalid: false,
-                    },
-                );
+                let pending = Pending::Candles {
+                    root: root.clone(),
+                    rows: vec![],
+                    invalid: false,
+                };
+                match cx.request_managed_with_headers(
+                    root,
+                    Method::Get,
+                    format!("{}{path}", paths::REST),
+                    CHANNEL,
+                    None,
+                    pending,
+                ) {
+                    Ok(id) => cx.stream_response(id, ArrayAt::Envelope(&[&["data"]])),
+                    Err((pending, reason)) => self.on_sign_error(cx, pending, reason.venue_error()),
+                }
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.trade_command(cx, trade),
@@ -1127,6 +1174,20 @@ impl Venue for BitgetFutures {
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
+    }
+}
+
+/// Broker attribution, the only header a public Bitget read carries.
+const CHANNEL: &[(&str, &str)] = &[("X-CHANNEL-API-CODE", "Tealstreet")];
+
+/// Managed reads: one physical attempt inside a shared 20 s deadline.
+pub(crate) fn read_policy(credential: Option<Credential>) -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
     }
 }
 

@@ -3051,6 +3051,7 @@ dependencies = [
  "alloy-signer",
  "alloy-signer-local",
  "base64 0.22.1",
+ "bs58",
  "ed25519-dalek",
  "getrandom 0.3.4",
  "getrandom 0.4.3",

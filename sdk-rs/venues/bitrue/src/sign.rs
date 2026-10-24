@@ -1,4 +1,6 @@
-//! Exact-byte signing and request continuation data.
+//! Opaque dispatch recipe and request continuation data.
+pub mod dispatch;
+#[cfg(test)]
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::{Method, json::ArrayAt};
 #[derive(Clone)]
@@ -7,8 +9,9 @@ pub struct Request {
     pub path: String,
     pub body: Option<String>,
     pub at: Option<ArrayAt>,
-    pub timestamp: u64,
+    pub floor: Option<safe_cex_engine::StampFloor>,
 }
+#[cfg(test)]
 pub fn signature(secret: &str, timestamp: u64, method: Method, path: &str, body: &str) -> String {
     hmac_sha256(
         secret.as_bytes(),
