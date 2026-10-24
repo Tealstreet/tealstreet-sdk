@@ -92,3 +92,28 @@ Obtain bounded core/native-caller review on immutable pins. Do not touch any5b
 source or publish production from this checkpoint. Future source/actual5b
 composition, exact inventory pruning/foreign preservation, scoped native and
 strict checks, fresh CI/size/performance and train GO remain separate gates.
+
+## Original execution receipt
+
+Plan7ebf8778f96 precedes original testa4d033ed927. On unchanged actual9a runtime,
+`cargo test -p safe-cex-venue-orderly --test public_seed_context` compiles and
+executes11 tests: **5 intended assertion RED /6 GREEN/0 ignored**. No fixture
+correction, setup or compile failures occurred. Markets and Tickers each fail
+at raw release before Prepare; each endpoint publishes at its own proposed
+exact20s expiry; unprepared Markets has no admission deadline timer. Later
+backoff/late-Prepare assertions after those early failures remain unexecuted
+adoption suffix gates, not additional original evidence.
+
+The six working controls pin both REST/WS deployments, exact unsigned paths,
+method/empty headers/no body, native market identity/precision/leverage, quote
+fields and market-before-ticker loaded flags, native per-Seed network retry
+and recovery, and empty/unusable response retry. Log:
+/tmp/codex-orderly-public-seed-original.log (not committed). Scoped strict
+Clippy/fmt PASS. The canonical scanner confirms the named count-one sender and
+base28F/29O; whole source inventory equals the unchanged manifest.
+
+Only README, this plan and the new test differ from actual9a. Every runtime,
+previous test, inventory/checker, selection/nonce and held5b file is byte-exact.
+Hcmq3f confirmed ownership release for this plan/index/new-test-only scope;
+production is held until actual5b and separate authorization/review. No push,
+PR, CI, source adoption, READY or final composed count is claimed here.
