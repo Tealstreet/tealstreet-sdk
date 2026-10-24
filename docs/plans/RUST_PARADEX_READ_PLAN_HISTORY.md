@@ -3,9 +3,12 @@
 Owner codex-uufub4 for plan and original compiling assertions; production lane
 owner codex-zs5e83 may take over implementation. Base actual `77f12408947`;
 fresh branch `feat/rust-paradex-read-plan-history` stacks exact #2011
-`9486269b6361a4c06ee1059b90b4df65a5cfe070`. This phase changes only this plan,
-its index row and a new test target. No production, Cargo feature, checker,
-inventory, signing, credential, host or existing-test change is authorized here.
+`9486269b6361a4c06ee1059b90b4df65a5cfe070`. The target Session-wait draft
+composition is #2037 `13c42408eb6a7d6bbbce9287e0f92cd706da0bb4`; its
+post-5b integration and freeze will replace that draft dependency. This phase
+changes only this plan, its index row and a new test target. No production, Cargo
+feature, checker, inventory, signing, credential, host or existing-test change is
+authorized here.
 
 ## Scope and existing evidence
 
@@ -45,14 +48,17 @@ tests. Preserve all existing history financial/geometry assertions.
    acceptance/Slot settlement and the common prepared terminal. The local stack
    is a reviewed dependency, never an actual landing claim.
 2. The complete retained-Preflight/command-Plan Session wait composition must
-   actually land (fe7lgm's 9e23/a115 proposal is not an installed capability).
+   actually land. #2037 draft `13c42408eb6` supplies reviewed phases 1 and 2
+   on the pre-5b `77f12408947` base; it is not an installed capability.
    Capture the original caller receipt in the genuine command callback before
    auth/queueing. Park that same owner without a fresh command, guessed 20s root
    or early physical leg. Resume only the exact Session generation, current
    owner and retained cap. Waiting before activation spends no physical window.
-   Phase-1 #2037 alone does not supply retained Preflight wait or retry. Its
-   a2c54 readiness/outer-flush findings are closed by bounded source review of
-   b44c9cebc10 (42 scoped controls PASS); that pin is not an actual landing.
+   Phase 1 supplies unissued Plan-Slot wait; phase 2 supplies Read retry park
+   under the same declared attempt/window budget. Both have bounded source
+   clearance. Retained Preflight wait (N7) follows actual 5b integration, and
+   N8b still requires the Bearer fence. Re-pin this draft after fe7lgm integrates
+   5b, adds N7, runs fresh CI and freezes; none of these draft pins is a landing.
 3. m26ps4's Session-fenced JIT Bearer hook must actually land. JWT remains owned
    by Account and is read at actual prepare and every reprepare/new attempt,
    behind exact target/attempt/Session validation. Do not bake Authorization into
@@ -177,7 +183,10 @@ full adoption CI includes family WASM/CPU with unchanged budgets/profiles.
 Plan `7aa780e0cc2` preceded the new
 `venues/paradex/tests/request_context_private_history.rs` target. The current
 production and all existing tests remain byte-exact to actual `77f12408947`;
-only the reviewed #2011 dependency is stacked underneath this phase.
+the reviewed #2011 dependency is stacked underneath this phase. The requested
+#2037 `13c42408eb6` composition is a separate dependency refresh: preserve
+this target's original test blob and assertions, rerun it on the combined stack,
+and attribute that execution separately from the original checkpoint.
 
 Each negative case runs independently. The expected original result is 17
 assertion REDs and nine GREEN controls, zero ignored tests:
