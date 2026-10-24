@@ -138,7 +138,8 @@ pub enum SessionResend {
   venue-declared grant: the venue codec classifies that parsed refusal as
   `RefusedResend` through `classify_write`, whatever the status. This is not a
   generic 408/5xx widening. Any other code on a 408 or 5xx stays Unknown,
-  with no resend.
+  with no resend. Ruled (b), scoped to the GRVT codec; the shared policy is not
+  loosened, and Bitget and others keep the strict grant.
 - **Wait for a newer header revision, not merely Ready.** GRVT's refresh keeps
   the same engine Session Ready and only moves the header revision (#2069).
   The park records the revision the refused attempt used, and resumes only
@@ -189,9 +190,13 @@ pub enum SessionResend {
     Mutation call's failure is refused, spending nothing. Six chained
     immediate retries then succeed.
 
-15. A Mutation answered 503 (and 408) with parsed code 1000: the venue grant
-    makes it RefusedResend, the park resumes it once, and it is accepted. The
-    same status with any other code is Unknown and refuses the resend.
+15. Ruling controls (GRVT codec, venue-declared, disclosed in CALLERS):
+    - 408 with parsed code 1000, and 503 with parsed code 1000, each resend once
+      and are accepted;
+    - a 408 or 503 with an unparsed body or a non-1000 code is Unknown for a
+      Mutation (fence and reconcile) and refuses the resend;
+    - a second code 1000 on attempt 2 is terminal with native's error.
+    The shared grant policy is unchanged.
 16. Revision gate: parking while the Session is Ready on the refused
     attempt's revision does not resume it; a newer revision resumes it once.
 
