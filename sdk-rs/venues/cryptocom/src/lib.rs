@@ -913,6 +913,7 @@ impl Venue for Cryptocom {
             Pending::Identity(request) => self.identity_reject(cx, request, error),
             Pending::History(request) => self.history_reject(cx, request, error),
             Pending::Trade(request) => self.trade_reject(cx, request, error),
+            Pending::Account(request) => self.account_failed(cx, request, &error.message, false),
             Pending::PublicTrades(trade) => Self::public_trades_reject(cx, *trade, error),
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
