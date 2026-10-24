@@ -23,6 +23,12 @@ enum ManagedRecipe {
     ),
 }
 
+#[cfg(feature = "dispatch-nonce")]
+enum ClaimAdmission<'a> {
+    Mutable(&'a mut dyn FnMut(&HttpRelease) -> Result<crate::request_context::Admission, Error>),
+    NonceUnscheduled(&'a mut dyn FnMut(&HttpRelease) -> Result<(), Error>),
+}
+
 pub(super) struct Managed {
     lifecycle: Lifecycle,
     original: HttpRequest,
@@ -77,15 +83,15 @@ impl Managed {
 
     #[cfg(feature = "dispatch-nonce")]
     #[inline(never)]
-    fn claim_nonce(
+    fn claim(
         &mut self,
         permit: Permit,
         time: ReleaseTime,
         pacing: &mut crate::request_context::SendPacing,
-        admit: &mut dyn FnMut(&HttpRelease) -> Result<(), Error>,
+        mut admission: ClaimAdmission<'_>,
         signing_release: &mut Option<crate::SigningRelease>,
         nonce_stale: &mut bool,
-    ) -> Option<Result<Claim, Error>> {
+    ) -> Result<Claim, Error> {
         let nonce = self
             .recipe
             .as_ref()
@@ -94,7 +100,7 @@ impl Managed {
             .recipe
             .as_ref()
             .is_some_and(crate::signing_dispatch::Pending::has_nonce_claim);
-        let result = match (has_nonce_claim, nonce) {
+        match (has_nonce_claim, nonce) {
             (true, Some(nonce)) => {
                 let prepared = self.lifecycle.prepare_claim(permit, time, pacing);
                 match prepared {
@@ -102,7 +108,11 @@ impl Managed {
                         at,
                     )) => Ok(Claim::WaitUntil(at)),
                     Ok(crate::request_context::group_lifecycle::ClaimPreparation::Ready(draft)) => {
-                        let admission = admit(draft.release()).and_then(|()| {
+                        let admitted = match &mut admission {
+                            ClaimAdmission::NonceUnscheduled(admit) => admit(draft.release()),
+                            ClaimAdmission::Mutable(_) => Err(Error::Invalid),
+                        };
+                        let admission = admitted.and_then(|()| {
                             let release = *draft.release();
                             let observation =
                                 crate::SigningRelease::new(release.signature, release.time)?;
@@ -132,9 +142,18 @@ impl Managed {
                 }
             }
             (true, None) | (false, Some(_)) => Err(Error::State),
-            (false, None) => return None,
-        };
-        Some(result)
+            (false, None) => self.lifecycle.claim(permit, time, pacing, &mut |release| {
+                *signing_release =
+                    Some(crate::SigningRelease::new(release.signature, release.time)?);
+                match &mut admission {
+                    ClaimAdmission::Mutable(admit) => admit(release),
+                    ClaimAdmission::NonceUnscheduled(admit) => {
+                        admit(release)?;
+                        Ok(crate::request_context::Admission::Unscheduled)
+                    }
+                }
+            }),
+        }
     }
 }
 
@@ -1177,42 +1196,27 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "dispatch-nonce")]
         let mut nonce_stale = false;
         #[cfg(feature = "dispatch-nonce")]
-        let nonce_result = {
-            let release_mode = self.http_release;
-            let venue = &self.venue;
-            let value = &pending.value;
-            managed.claim_nonce(
+        let result = match self.http_release {
+            super::HttpRelease::Mutable(admit) => managed.claim(
                 permit,
                 time,
                 &mut self.io.http_pacing,
-                &mut |release| match release_mode {
-                    super::HttpRelease::NonceUnscheduled(admit) => admit(venue, value, release),
-                    super::HttpRelease::Mutable(_) => Err(Error::Invalid),
-                },
+                ClaimAdmission::Mutable(&mut |release| {
+                    admit(&mut self.venue, &mut pending.value, release)
+                }),
                 &mut signing_release,
                 &mut nonce_stale,
-            )
-        };
-        #[cfg(feature = "dispatch-nonce")]
-        let result = match nonce_result {
-            Some(result) => result,
-            None => {
-                managed
-                    .lifecycle
-                    .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
-                        signing_release =
-                            Some(crate::SigningRelease::new(release.signature, release.time)?);
-                        match self.http_release {
-                            super::HttpRelease::Mutable(admit) => {
-                                admit(&mut self.venue, &mut pending.value, release)
-                            }
-                            super::HttpRelease::NonceUnscheduled(admit) => {
-                                admit(&self.venue, &pending.value, release)?;
-                                Ok(crate::request_context::Admission::Unscheduled)
-                            }
-                        }
-                    })
-            }
+            ),
+            super::HttpRelease::NonceUnscheduled(admit) => managed.claim(
+                permit,
+                time,
+                &mut self.io.http_pacing,
+                ClaimAdmission::NonceUnscheduled(&mut |release| {
+                    admit(&self.venue, &pending.value, release)
+                }),
+                &mut signing_release,
+                &mut nonce_stale,
+            ),
         };
         #[cfg(not(feature = "dispatch-nonce"))]
         let result = {

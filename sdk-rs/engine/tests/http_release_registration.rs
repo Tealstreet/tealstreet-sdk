@@ -10,8 +10,8 @@ use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
-static MODES: [AtomicBool; 3] = [const { AtomicBool::new(false) }; 3];
-static CAPTURES: [AtomicUsize; 3] = [const { AtomicUsize::new(0) }; 3];
+static MODES: [AtomicBool; 6] = [const { AtomicBool::new(false) }; 6];
+static CAPTURES: [AtomicUsize; 6] = [const { AtomicUsize::new(0) }; 6];
 #[derive(Default)]
 struct Counters {
     pure: AtomicUsize,
@@ -36,9 +36,14 @@ impl<const ID: usize> Venue for Probe<ID> {
                 }
             })
         } else {
-            HttpRelease::Mutable(|this, _, _| {
+            HttpRelease::Mutable(|this, _, release| {
                 this.counters.mutable.fetch_add(1, Ordering::SeqCst);
-                Ok(Admission::Unscheduled)
+                match ID {
+                    3 => release.response_lease(200.).map(Admission::Scheduled),
+                    4 => Ok(Admission::Denied),
+                    5 => Err(Error::Invalid),
+                    _ => Ok(Admission::Unscheduled),
+                }
             })
         }
     }
@@ -137,4 +142,85 @@ fn refused_pure_admission_sends_nothing_and_never_calls_mutable_admission() {
         ),
         (0, 2, 0, 2)
     );
+}
+
+fn explicit_claims<const ID: usize>() -> (
+    Vec<Result<safe_cex_engine::request_context::Claim, Error>>,
+    Arc<Counters>,
+) {
+    use safe_cex_engine::request_context::{HttpAction, Prepared};
+    MODES[ID].store(false, Ordering::SeqCst);
+    let counters = Arc::new(Counters::default());
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Probe::<ID> {
+        counters: counters.clone(),
+        deny: false,
+    });
+    engine.start(0.);
+    let preparations: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(preparations.len(), 2);
+    for preparation in preparations {
+        engine.http_prepared(
+            0.,
+            preparation,
+            Prepared {
+                id: preparation.attempt().request.0,
+                expires_at: None,
+            },
+        );
+    }
+    let permits: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(permits.len(), 2);
+    let claims = permits
+        .into_iter()
+        .map(|permit| engine.claim_http(0., permit))
+        .collect();
+    assert_eq!(CAPTURES[ID].load(Ordering::SeqCst), 1);
+    assert_eq!(counters.mutable.load(Ordering::SeqCst), 2);
+    assert_eq!(counters.pure.load(Ordering::SeqCst), 0);
+    (claims, counters)
+}
+
+#[test]
+fn mutable_scheduled_admission_preserves_the_physical_response_lease() {
+    use safe_cex_engine::request_context::Claim;
+    let (claims, counts) = explicit_claims::<3>();
+    for claim in claims {
+        let Claim::Released(release) = claim.unwrap() else {
+            panic!("scheduled admission did not release");
+        };
+        assert_eq!(release.response_lease, Some(200.));
+    }
+    assert_eq!(counts.failures.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn mutable_denied_admission_refuses_without_a_release() {
+    let (claims, counts) = explicit_claims::<4>();
+    assert_eq!(claims, vec![Err(Error::Revoked), Err(Error::Revoked)]);
+    assert_eq!(counts.failures.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn mutable_admission_error_keeps_its_original_kind() {
+    let (claims, counts) = explicit_claims::<5>();
+    assert_eq!(claims, vec![Err(Error::Invalid), Err(Error::Invalid)]);
+    assert_eq!(counts.failures.load(Ordering::SeqCst), 2);
 }
