@@ -247,6 +247,7 @@ impl TxFlow {
         self.ticker_contexts.insert(asset, context.clone());
         if let Err((Pending::Ticker { asset, context }, error)) = cx.request_managed_with_headers(
             context.clone(),
+            None,
             Method::Post,
             format!("{}/info", self.rest()),
             &[
