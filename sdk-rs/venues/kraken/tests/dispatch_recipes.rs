@@ -249,6 +249,9 @@ fn drive(engine: &mut Engine<Probe>, expected_intent: RoutingIntent) -> Vec<Acti
                     }
                 }
                 HttpAction::Cancel { .. } => {}
+                HttpAction::BindGroup { .. } => {
+                    panic!("Kraken recipe fixtures declare no Mutation barrier")
+                }
             },
             Action::Http(_) => panic!("packet escaped final Claim"),
             other => actions.push(other),
@@ -704,4 +707,275 @@ fn secondary_selection_refuses_non_get_and_primary_only_history() {
             )
             .is_ok()
     );
+}
+
+// This fixture proves retained recipe composition, not native Kraken-family adoption.
+enum RetainedPending {
+    Read(safe_cex_engine::selected_read::AdmittedRead),
+    Leg(safe_cex_engine::selected_read::ReadLeg),
+}
+struct RetainedProbe {
+    ids: Identities,
+    spot: bool,
+    leg: bool,
+    root: Option<safe_cex_engine::selected_read::ReadRoot>,
+    captured: Arc<Mutex<Vec<safe_cex_engine::signing::Identity>>>,
+}
+impl Venue for RetainedProbe {
+    type Pending = RetainedPending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
+    fn http_release() -> HttpRelease<Self> {
+        HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+    }
+    fn start(&mut self, _: &mut Cx<'_, RetainedPending>) {}
+    fn on_command(&mut self, cx: &mut Cx<'_, RetainedPending>, _: Command) {
+        use safe_cex_engine::selected_read::{
+            LocalRefusal, ReadLegPolicy, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+        };
+        let slots = if self.spot {
+            setup::spot_slots(&self.ids)
+        } else {
+            setup::futures_slots(&self.ids)
+        };
+        let selected = SelectedRead::select(&slots, ReadRole::Read { scope: None });
+        let missing = LocalRefusal {
+            diagnostic: None,
+            error: VenueError::new("missing fixture identity"),
+        };
+        let pending = if self.leg {
+            let root = SelectedRead::command_root(cx, selected, missing)
+                .unwrap_or_else(|_| panic!("valid receipt"));
+            let leg = root
+                .leg(
+                    cx,
+                    ReadLegPolicy {
+                        timeout_ms: 20_000,
+                        pacing: None,
+                    },
+                )
+                .unwrap();
+            self.root = Some(root);
+            RetainedPending::Leg(leg)
+        } else {
+            RetainedPending::Read(
+                SelectedRead::command(
+                    cx,
+                    selected,
+                    ReadPolicy {
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                    missing,
+                )
+                .unwrap_or_else(|_| panic!("valid entry")),
+            )
+        };
+        self.ids = Identities::default();
+        let spot = self.spot;
+        let request = ReadRequest {
+            method: if spot { Method::Post } else { Method::Get },
+            url: if spot {
+                "https://api.kraken.com/0/private/Balance"
+            } else {
+                "https://futures.kraken.com/derivatives/api/v3/accounts"
+            }
+            .into(),
+            body: spot.then(String::new),
+            stream: None,
+        };
+        let captured = self.captured.clone();
+        let recipe = move |identity: &safe_cex_engine::signing::Identity,
+                           claim: safe_cex_engine::nonce::NonceClaim|
+              -> Box<dyn safe_cex_engine::SignStep> {
+            captured.lock().unwrap().push(identity.clone());
+            Box::new(
+                if spot {
+                    safe_cex_venue_kraken::sign::dispatch::Http::spot(
+                        identity,
+                        claim,
+                        "/0/private/Balance",
+                        "",
+                        5000.,
+                    )
+                } else {
+                    safe_cex_venue_kraken::sign::dispatch::Http::futures(
+                        identity,
+                        claim,
+                        Method::Get,
+                        "/derivatives/api/v3/accounts",
+                        "",
+                        false,
+                        5000.,
+                    )
+                }
+                .unwrap(),
+            )
+        };
+        let queued = match pending {
+            RetainedPending::Read(read) => read.queue_with_nonce(
+                cx,
+                request,
+                &safe_cex_engine::nonce::KRAKEN,
+                recipe,
+                RetainedPending::Read,
+            ),
+            RetainedPending::Leg(leg) => leg.queue_with_nonce(
+                cx,
+                request,
+                &safe_cex_engine::nonce::KRAKEN,
+                recipe,
+                RetainedPending::Leg,
+            ),
+        };
+        assert!(queued.is_ok());
+    }
+    fn on_response(
+        &mut self,
+        cx: &mut Cx<'_, RetainedPending>,
+        pending: RetainedPending,
+        _: Response<'_>,
+    ) {
+        match pending {
+            RetainedPending::Read(read) => cx.done_context(read.context(), "ok".into()).unwrap(),
+            RetainedPending::Leg(leg) => {
+                let root = self.root.as_ref().unwrap();
+                root.validate_delivery(cx, &leg).unwrap();
+                cx.finish_http_context(leg.context());
+                cx.done_context(root.context(), "ok".into()).unwrap();
+            }
+        }
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, RetainedPending>, _: SocketId) {}
+    fn on_close(&mut self, _: &mut Cx<'_, RetainedPending>, _: SocketId, _: u16) {}
+    fn on_message(&mut self, _: &mut Cx<'_, RetainedPending>, _: SocketId, _: &str) {}
+    fn on_request_failed(
+        &mut self,
+        _: &mut Cx<'_, RetainedPending>,
+        _: RetainedPending,
+        error: &str,
+    ) {
+        panic!("unexpected {error}");
+    }
+    fn on_timer(&mut self, _: &mut Cx<'_, RetainedPending>, _: TimerId) {}
+    fn book(&self, _: &str) -> Option<&Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+#[test]
+fn retained_read_and_leg_build_real_recipes_without_reselection_after_slots_change() {
+    for spot in [false, true] {
+        for leg in [false, true] {
+            let (p, ids) = provider(&format!("recipe-retained-{spot}-{leg}"), true, 0);
+            let expected_identity = if spot {
+                ids.primary.clone().unwrap()
+            } else {
+                ids.secondary.clone().unwrap()
+            };
+            let captured = Arc::new(Mutex::new(vec![]));
+            let mut engine = safe_cex_engine::test_support::seeded_engine(RetainedProbe {
+                ids: ids.clone(),
+                spot,
+                leg,
+                root: None,
+                captured: captured.clone(),
+            });
+            engine.set_identities(ids).unwrap();
+            engine.set_signer(Some(p.clone())).unwrap();
+            engine.start(NOW);
+            engine
+                .handle_command(NOW, Command::FetchAccount { command: 19 }, Some(60_000))
+                .unwrap();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
+            let packets = packets(&actions);
+            assert_eq!(packets.len(), 1);
+            assert_eq!(*captured.lock().unwrap(), vec![expected_identity.clone()]);
+            assert!(engine.venue().ids.primary.is_none() && engine.venue().ids.secondary.is_none());
+            assert_eq!(
+                packets[0].headers[0].1,
+                if spot {
+                    "fixture-primary"
+                } else {
+                    "fixture-read"
+                }
+            );
+            if spot {
+                assert_eq!(packets[0].headers[1].1, SPOT_MAC);
+                assert_eq!(packets[0].body.as_deref(), Some("nonce=1700000000000000"));
+            } else {
+                let native = safe_cex_venue_kraken::sign::Signer::new("cmVhZC1zZWNyZXQ=").unwrap();
+                assert_eq!(
+                    packets[0].headers[1].1,
+                    native
+                        .signature("", "1700000000000000", "/api/v3/accounts")
+                        .unwrap()
+                );
+            }
+            let work = p.work.lock().unwrap();
+            assert_eq!(work.len(), 1);
+            assert_eq!(work[0].receipt.nonce, Some(1700000000000000));
+            assert!(
+                matches!(&work[0].operations[2],safe_cex_engine::signing::Operation::Sign {key,..} if key==&expected_identity.signing)
+            );
+            drop(work);
+            let request = packets[0].id;
+            engine.handle(
+                NOW,
+                Event::HttpResponse {
+                    request,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: "{}",
+                    },
+                },
+            );
+            assert_eq!(
+                engine
+                    .drain_actions()
+                    .filter(|a| matches!(
+                        a,
+                        Action::Notice(safe_cex_engine::Notice::CommandDone { command: 19, .. })
+                    ))
+                    .count(),
+                1
+            );
+        }
+    }
+}
+#[test]
+fn retained_claim_slot_cannot_bypass_native_primary_only_guards() {
+    use safe_cex_engine::nonce::KRAKEN;
+    use safe_cex_venue_kraken::sign::dispatch::Http;
+    let (_, ids) = provider("recipe-retained-slot-guards", true, 0);
+    let slots = setup::futures_slots(&ids);
+    for method in [Method::Get, Method::Post] {
+        let (_, identity, claim) = slots
+            .select_with_nonce(CredentialRole::Read { scope: None }, &KRAKEN)
+            .unwrap();
+        assert!(
+            Http::futures(
+                identity,
+                claim,
+                method,
+                "/api/history/v3/executions",
+                "",
+                false,
+                5000.
+            )
+            .is_err()
+        );
+    }
+    let (_, identity, claim) = slots
+        .select_with_nonce(CredentialRole::Read { scope: None }, &KRAKEN)
+        .unwrap();
+    assert!(Http::spot(identity, claim, "/0/private/Balance", "", 5000.).is_err());
 }
