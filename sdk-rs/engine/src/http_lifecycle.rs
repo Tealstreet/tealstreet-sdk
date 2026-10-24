@@ -555,8 +555,6 @@ impl<P> Io<P> {
         }
     }
 
-    /// Queue every unreleased packet bound to a retired generation for a typed
-    /// failure after the current callback; released packets still deliver.
     fn reserve_bearer_bound(&mut self, generation: u64) -> Result<(), Error> {
         self.bearer_bound
             .try_reserve(1)
@@ -578,6 +576,8 @@ impl<P> Io<P> {
         }
     }
 
+    /// Queue every unreleased packet bound to a retired generation for a typed
+    /// failure after the current callback; released packets still deliver.
     pub(super) fn fence_bearer_generation(&mut self, generation: u64) {
         for request in self.bearer_bound.remove(&generation).unwrap_or_default() {
             if let Some(managed) = self.managed_http.get(&request)

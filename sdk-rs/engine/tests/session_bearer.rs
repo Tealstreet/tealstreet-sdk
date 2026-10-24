@@ -14,8 +14,8 @@ use safe_cex_engine::signing::{
 };
 use safe_cex_engine::{
     AccountLookup, Action, Capabilities, Command, CredentialSlot, Cx, DispatchContext, Engine,
-    ErrorKind, Event, HttpRequest, Method, Outcome, RequestId, Response, SignStep, SocketId,
-    TimerId, Venue, VenueError,
+    ErrorKind, Event, HttpRequest, Method, Notice, Outcome, RequestId, Response, SignStep,
+    SocketId, TimerId, Venue, VenueError,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -891,6 +891,36 @@ fn r14_preflight_owner_binds_its_own_request() {
     assert_eq!(shared.borrow().scoped_drains, Some(0));
     let (_, request) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound packet");
     assert_eq!(authorization(&request), Some("Bearer A"));
+}
+
+/// R7, Preflight: a refused binding fails the owning Preflight through its
+/// admission, once and NotSent, and nothing is prepared.
+#[cfg(feature = "http-plans")]
+#[test]
+fn r7_preflight_binding_a_retired_session_fails_the_preflight() {
+    let (mut e, shared) = engine(|shared| {
+        shared.preflight = true;
+        shared.next_generation_token = Some("C");
+    });
+    retire(&mut e, &shared, NOW + 1.);
+    e.drain_actions().for_each(drop);
+    shared.borrow_mut().bind_retired = true;
+    e.handle(
+        NOW + 2.,
+        Event::Command(Command::FetchAccount { command: 1 }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(shared.borrow().issue_errors, [Error::Revoked]);
+    assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(_))));
+    let failed = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(failed.len(), 1, "the Preflight was not failed once");
+    assert_eq!(failed[0].outcome, Some(Outcome::NotSent));
 }
 
 /// R12 control: unbound sibling legs of the same root prepare Public today.
