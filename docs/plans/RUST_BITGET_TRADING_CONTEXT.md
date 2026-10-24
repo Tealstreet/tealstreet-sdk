@@ -194,7 +194,13 @@ TS-visible results are unchanged except two new bounds:
   a released write, which then reconciles). Native trading calls had no
   request deadline.
 - More than 256 concurrent commands (the active job plus queued writes) are
-  refused Capacity, NotSent, before any send. Native queued without limit. Recorded in
+  refused Capacity, NotSent, before any send. Native queued without limit.
+- Placements are bound tighter, by 64 active order-lock scopes: the 65th
+  queued placement is refused at engine entry, NotSent, before any send
+  (`order_locks.rs:131`; fe7lgm condition RED23, `fa9ec033d2d`). This is
+  already live at `49f7d1857b6`, because Bitget sets
+  `guard_order_mutations` (lib.rs:612), but native queued without limit.
+  Other commands stay bound by the 256-owner limit. Recorded in
 `RUST_CUTOVER_CALLERS.md` at production time.
 
 ## Original REDs
