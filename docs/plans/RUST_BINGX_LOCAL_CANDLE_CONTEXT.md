@@ -66,11 +66,15 @@ Context through fail_context with the selected native error, preserving its
 untyped shape. Admission refusal returns through its existing typed transaction;
 never emit the native failure afterwards. No new shared engine API is needed.
 
-The local owner must never be confused with the already-managed remote candle
-Context. Do not spend Preflight, join metadata groups, borrow account ownership
+The local owner is separate from remote candle issuance: credentialed reads
+already use a managed Context, while keyless reads still use the legacy issue
+funnel. Do not spend Preflight, join metadata groups, borrow account ownership
 or move any existing selection/signing calls. Capacity/invalid entry takes
 precedence over the selected native error; this is the caller-visible change
-to document in RUST_CUTOVER_CALLERS.md with the production conversion.
+to document in RUST_CUTOVER_CALLERS.md with the production conversion. Name the
+invalid-clock refusal explicitly: Revoked, with message "Request context was
+revoked", InvalidInput kind and no outcome; do not substitute another venue
+precedent's Invalid error text.
 
 ## Original compiling assertions
 
@@ -134,3 +138,14 @@ preservation and slot reuse today. No expiry/deferred-entry execution, native
 remote candle adoption, production conversion, inventory prune or readiness is
 claimed by this evidence. Scoped target Clippy and rustfmt pass; no broad local
 build or CI dispatch was run for this checkpoint.
+
+## Native plan and evidence review
+
+claude-4yjlw0 reviewed plan `152dc3191e5` plus original checkpoint
+`32746b56571` against `db6fa45bbb7`: CLEAR, no P1/P2. This was read-only source
+and test inspection, not an independent Cargo rerun. The review verified the
+three fingerprints, validation/range order, native untyped errors, genuine
+capacity setup, Revoked invalid-clock projection, and disjointness from 5b.
+Invalid-clock assertions use a keyless engine and capacity assertions use a
+private engine; no private invalid-clock coverage is claimed. Production and
+core-fit review remain separate gates.
