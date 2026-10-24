@@ -62,7 +62,7 @@ function environmentDifferences(expected, actual, prefix = '') {
   return [...new Set([...Object.keys(expected), ...Object.keys(actual)])].sort().flatMap((key) => {
     const field = prefix ? `${prefix}.${key}` : key;
     const before = expected[key], after = actual[key];
-    if (before && after && typeof before === 'object' && typeof after === 'object')
+    if (before && after && typeof before === 'object' && typeof after === 'object' && Array.isArray(before) === Array.isArray(after))
       return environmentDifferences(before, after, field);
     return canonical(before) === canonical(after) ? [] : [{ field,
       expected: before ?? '<missing>', actual: after ?? '<missing>' }];
@@ -316,8 +316,9 @@ function readCapsule(root, directory, environment) {
   }
   const manifest = validateManifest(JSON.parse(fileBytes(path.join(directory, 'manifest.json')).toString('utf8')));
   if (manifest.workspaceRoot !== root) fail('workspace identity mismatch');
-  const differences = environmentDifferences(manifest.environment, environmentIdentity(environment));
-  if (differences.length) fail(`environment identity mismatch: ${JSON.stringify(differences)}`);
+  const actualEnvironment = environmentIdentity(environment);
+  if (canonical(manifest.environment) !== canonical(actualEnvironment))
+    fail(`environment identity mismatch: ${JSON.stringify(environmentDifferences(manifest.environment, actualEnvironment))}`);
   const hashes = new Map();
   for (const entry of [...manifest.entries, ...manifest.cacheEntries]) if (entry.type === 'file') {
     if (hashes.has(entry.sha256) && hashes.get(entry.sha256) !== entry.bytes) fail('inconsistent blob length');

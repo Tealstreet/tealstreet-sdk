@@ -50,3 +50,12 @@ each failure only the missing field-level evidence assertion. After source,
 the exact same controls plus CPU collection/CI integration tests pass53/53,
 zero skipped. Existing same-identity fingerprints and before-write rejection
 controls remain GREEN. No identity schema or comparison policy is changed.
+
+Independent bounded source review at c1ad788661e identified a future-shape
+formatter hazard: arrays and objects with the same indexed leaves could compare
+as no differences. Current environment validation rejects these shapes. Keep
+the original canonical equality as the sole rejection predicate, so diagnostic
+formatting can never weaken it, and recurse only across the same array/object
+kind. An additional boundary control pins invalid array/object substitutions
+as rejected before writes; it is a working control, not an original RED for
+an accepted environment. No comparison-policy change is made.

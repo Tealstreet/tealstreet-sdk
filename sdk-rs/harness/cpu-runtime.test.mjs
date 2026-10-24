@@ -113,6 +113,17 @@ for (const [label, current, differences] of [
   });
 }
 
+test('array and object environment substitutions remain rejected before restore writes', (t) => {
+  const { root, destination, options } = fixture(t);
+  api.sealRuntime(options);
+  removeRuntime(root);
+  for (const v8 of [[], {}, ['fixture-v8'], { 0: 'fixture-v8' }]) {
+    assert.throws(() => api.restoreRuntime({ root, directory: destination,
+      environment: { ...environment, nodeVersions: { ...environment.nodeVersions, v8 } } }), /invalid Node versions/);
+    assert.deepEqual(fs.readdirSync(root), []);
+  }
+});
+
 test('selection rejects traversal, overlapping roots, reserved Node and mutable cache collisions', (t) => {
   const { options } = fixture(t);
   for (const paths of [['../outside'], ['/absolute'], ['source/../source'], ['source//x'], ['source', 'source/main.mjs'], ['source', 'source-other', 'source/main.mjs'], ['.cpu-runtime'], ['cache'], ['source', 'source']]) {
