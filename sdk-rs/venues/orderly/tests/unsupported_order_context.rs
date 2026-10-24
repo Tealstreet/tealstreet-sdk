@@ -61,7 +61,12 @@ fn public() -> Driver {
         },
     );
     let _ = e.drain_actions().count();
-    assert!(!e.store().loaded().orders);
+    assert!(
+        e.store().loaded().orders,
+        "native public-only startup marks empty account tables loaded"
+    );
+    assert!(e.store().orders().is_empty());
+    assert!(e.store().positions().is_empty());
     e
 }
 fn ready(busy: bool) -> (Driver, Option<safe_cex_engine::HttpRequest>) {
