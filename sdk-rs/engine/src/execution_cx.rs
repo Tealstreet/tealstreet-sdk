@@ -51,6 +51,10 @@ impl<P> Cx<'_, P> {
         if !self.entry_callback(founder) {
             return Err(Error::Revoked);
         }
+        // A tracked caller-wait root stays a plain Command Read owner.
+        if self.io.request_contexts.tracked_owner(founder) {
+            return Err(Error::Invalid);
+        }
         if !self.io.next_id.available(1) {
             return Err(Error::Capacity);
         }
@@ -124,6 +128,9 @@ impl<P> Cx<'_, P> {
     ) -> Result<Joined, Error> {
         if !self.entry_callback(root) {
             return Err(Error::Revoked);
+        }
+        if self.io.request_contexts.tracked_owner(root) {
+            return Err(Error::Invalid);
         }
         self.sweep_executions();
         let joined = self

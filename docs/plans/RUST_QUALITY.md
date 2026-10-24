@@ -1337,3 +1337,72 @@ terminal under genuine local authority. Provider/prepare metadata and ordered
 recipe headers remain unchanged. Genuine engine controls cover capacity,
 duplicate entry, phase custody, expiry, retry, streaming and account evidence;
 native compatibility controls do not substitute for later venue adoption.
+
+## BingX identity original Read owner
+
+One AdmittedRead couples selection, credential and terminal authority without a
+venue admission or numeric fallback. Exact managed delivery is checked before
+native response decoding/publication. Local config precedence and 20s/Never
+remain native; typed transport/refusal errors keep checked diagnostic ordering.
+Only identity.rs loses two legacy terminal occurrences; other inventory is intact.
+
+
+## Shared CPU remeasurement controls
+
+Policy controls cover mean passing and failing, missing/failed second samples,
+5% boundaries, all three objectives, category changes, output/report tampering
+and unchanged strict failures. Runtime controls cover archive/path/type/link
+validation, prevalidated restoration, exact Node/dependency/module identities
+and initial/final loader cache snapshots. Coordinator controls reject foreign
+same-source run/job payloads, substituted physical runners and missing runtime
+authority, duplicate/retried second jobs and incomplete suite/case rosters.
+Workflow controls pin all 32 final required names and 110 original workloads,
+allow only an eligible projection to schedule a second runner, and require final
+certification even after missing or failed upstream work. Declared public FAILs
+remain declared results without CPU rescue. Measurements in CI report first and
+second samples separately; this methodology makes no runtime speedup claim.
+
+The first real second-runner archive exposed a mismatched transport bound. The
+shared size validator preserves the original bound in an extraction before
+regressions are committed: 5 RED with 16 working controls. The observed
+743,167,768-byte runtime case is checked without allocating a giant buffer;
+metadata/log/ordinary bounds, 4 GiB overflow, empty response recovery/exhaustion,
+mixed socket/empty budgets and CDN credential stripping remain explicit controls.
+Routing tests cover every registered suite and reject unknown runtime names.
+
+## Selected multi-page Read contract controls
+
+New-contract Engine controls cover exact receipt bounds, distinct page legs,
+immutable selection, wrong-root/foreign-engine delivery, queue/provider refusal,
+discard/requeue, streamed order, stale staged rows, typed root retirement and
+physical-timeout recovery. Existing single-leg controls remain unchanged. API
+privacy doctests distinguish original roots from children without claiming that
+borrowed Contexts lose generic core authority. Native consumers remain separate.
+
+
+### Replay audit finalization controls
+
+The behavior-preserving extraction has four working controls and two assertion
+REDs matching the historical WOO false protocol diagnostics. After final-only
+aggregation, all 31 focused audit/finalization/checkpoint/WOO protocol controls
+pass. Genuine late private violations remain visible; audit exceptions propagate.
+Both real replay callers and forgotten-final-flag mutations are checked.
+
+Native accepted-write snapshot races are separately reproduced by four REDs
+and two working controls; the identical six controls pass against queued #1788.
+Those venue changes and their tests are outside this standalone harness scope.
+
+## Hyperliquid perps history custody regressions
+
+Original test-only04e6ee356ad ran16 real-engine controls on unchanged venue
+production:11 assertion REDs,5 working native positives,0 ignored. All16 now
+pass. Four adoption controls add real root/page timer ordering, strict forced
+dequeue-capacity refusal with zero reservation charge, exact-owner cleanup with
+Account/History FIFO in both orders, and typed public Auth* metadata without
+private health evidence. Existing22 native history and11 cached-lookup fixtures
+retain financial assertions through shared managed preparation; long page-cap
+fixtures request the maximum caller wait and drive the actual native budget wake.
+Focused Hyperliquid+Binance suites pass568 tests/45 targets; the request-context
+checker unit suite passes15. Full inventory provenance awaits the replacement
+#1976 composition carrying current incoming Aster/OKX prunes. Independent source, caller
+and full-map reviews and fresh CI remain required before freezing this consumer.
