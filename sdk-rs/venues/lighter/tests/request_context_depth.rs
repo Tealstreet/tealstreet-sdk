@@ -19,8 +19,8 @@ fn boot(robinhood: bool, testnet: bool) -> (Engine<Lighter>, TimerId, SocketId) 
         ..Options::default()
     }));
     engine.start(NOW);
-    let metadata = engine
-        .drain_actions()
+    let metadata = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(r) => Some(r),
             _ => None,
@@ -44,6 +44,24 @@ fn boot(robinhood: bool, testnet: bool) -> (Engine<Lighter>, TimerId, SocketId) 
         .unwrap();
     engine.take_frame(NOW);
     (engine, poll, socket)
+}
+fn open_with_ticker(engine: &mut Engine<Lighter>, socket: SocketId) {
+    engine.handle(NOW, Event::WsOpened { socket });
+    for action in safe_cex_engine::test_support::prepared_actions(engine, NOW) {
+        if let Action::Http(request) = action
+            && request.url.ends_with("exchangeStats")
+        {
+            reply_at(
+                engine,
+                NOW,
+                &request,
+                200,
+                r#"{"code":200,"order_book_stats":[{"market_id":1,"mark_price":"100"}]}"#,
+            );
+        }
+    }
+    engine.drain_actions().for_each(drop);
+    engine.take_frame(NOW);
 }
 fn subscribe(engine: &mut Engine<Lighter>, now: f64, subscribe: bool) -> Vec<Action> {
     engine.handle(
@@ -271,8 +289,7 @@ fn old_success_and_failure_cannot_release_a_resubscribed_depth_owner() {
 #[test]
 fn newer_ws_revision_wins_and_stale_depth_context_does_not_leak_capacity() {
     let (mut engine, _, socket) = boot(false, false);
-    engine.handle(NOW, Event::WsOpened { socket });
-    engine.drain_actions().for_each(drop);
+    open_with_ticker(&mut engine, socket);
     let (token, _) = preparation(&subscribe(&mut engine, NOW, true), true);
     let request = release(&mut engine, token, NOW + 1.);
     engine.handle(NOW+2.,Event::WsMessage { socket,text:r#"{"channel":"order_book:1","type":"subscribed/order_book","order_book":{"nonce":10,"bids":[{"price":"99","size":"7"}],"asks":[]}}"# });
@@ -285,7 +302,8 @@ fn newer_ws_revision_wins_and_stale_depth_context_does_not_leak_capacity() {
 }
 #[test]
 fn full_capacity_allocates_no_depth_and_freed_slot_recovers_without_peer_damage() {
-    let (mut engine, poll, _) = boot(false, false);
+    let (mut engine, poll, socket) = boot(false, false);
+    open_with_ticker(&mut engine, socket);
     let mut first = None;
     for owner in 1..=256 {
         let token = peer(&mut engine, owner, NOW);

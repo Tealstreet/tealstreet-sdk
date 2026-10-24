@@ -71,27 +71,28 @@ impl PhemexPerpetuals {
             unreachable!()
         };
         if self.options.public_data_only || self.credentials.is_none() {
-            cx.fail(command, "Phemex private history requires credentials");
+            Self::finish_local_history(cx, Err("Phemex private history requires credentials"));
             return;
         }
         // This route is an account ledger; its documented rows have no symbol.
         if symbol.is_some() {
-            cx.fail(
-                command,
-                "Phemex account income cannot be filtered by symbol",
+            Self::finish_local_history(
+                cx,
+                Err("Phemex account income cannot be filtered by symbol"),
             );
             return;
         }
         let end = to_ms.unwrap_or(cx.now.floor());
         let start = from_ms.unwrap_or((end - 30. * DAY).max(0.));
         if !valid_time(start) || !valid_time(end) || start > end || limit == Some(0) {
-            cx.fail(command, "Invalid Phemex income range or limit");
+            Self::finish_local_history(cx, Err("Invalid Phemex income range or limit"));
             return;
         }
-        if self.income.active.len() >= 16 || !self.income.active.insert(command) {
-            cx.fail(command, "Too many active Phemex income queries");
+        if self.income.active.len() >= 16 || self.income.active.contains(&command) {
+            Self::finish_local_history(cx, Err("Too many active Phemex income queries"));
             return;
         }
+        self.income.active.insert(command);
         let request = Request {
             owner: Box::new(RangeHistory::new(
                 Completion::new(command),

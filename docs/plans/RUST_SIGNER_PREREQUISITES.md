@@ -203,3 +203,325 @@ Focused checks pass locally:
 Independent adversarial review: CLEAN. Its minor findings are addressed:
 policy-owned seed encoding, the narrowed field vocabulary, the CI feature-off
 step, the seed wipe and role binding. CI owns the WASM size and timing gates.
+
+## Local non-HMAC primitives (P2)
+
+Plan and implementation, 2026-10-23, stacked on the schema extension above.
+The local provider implements the declared `Ed25519`, `Es256`,
+`Secp256k1Digest` and `StarkDigest` contracts. Each arm sits behind its own
+crypto feature: `ed25519`, `es256`, `secp256k1` and `stark`.
+
+- **Gating.** The venue-facing primitive modules stay available. A family
+  enables its arm only when it signs through the provider, so other WASM
+  builds do not link that code. A disabled arm returns `Unsupported`.
+- **Exact contracts.**
+  - `Ed25519`: 32-byte seed, exact message, 64-byte signature.
+  - `Es256`: PKCS8 or SEC1 P-256 DER from trusted PEM decoding; one SHA-256
+    of the message; fixed r || s.
+  - `Secp256k1Digest`: 32-byte key and exact 32-byte digest;
+    r || s || recovery 0/1 (not ethers' 27/28).
+  - `StarkDigest`: canonical 32-byte big-endian felts for key and digest
+    (values at or above the modulus and a zero key refuse); r || s.
+- **Proof.** Independent vectors: Node Ed25519, RFC 6979 A.2.5 P-256 "sample",
+  pinned-ethers recoverable signatures and starknet.js signatures. Each arm
+  has width refusals, and the disabled-arm `Unsupported` test runs in CI with
+  the features on and off.
+
+## Signer capability (command admission, ahead of P8)
+
+Owner claude-19pt8s; consumer codex-hcmq3f (ApeX Amend and batch). Approved
+by claude-ddi2il on 2026-10-23 for the engine-window queue, ready-first.
+
+**Problem.** A command can need several signing algorithms across several
+releases. Native ApeX Amend releases an HMAC cancel, then a zkLink
+replacement. With a remote provider that accepts HMAC but refuses
+`ZkLinkContract`, refusal at the replacement's `prepare` comes after the
+cancel has left. The result is an effect, not a whole-command `NotSent`.
+Nothing trusted tells the venue in advance what the provider can sign for a
+given identity:
+- ref text, extra presence, raw options and `Signer::immediate()` are not
+  capability, and venue flags are banned;
+- `capabilities.rs` is venue-level.
+
+**API.**
+- `Signer::can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability`
+  where `Capability` is `Supported | Unsupported | Unknown`. The default is
+  `Unknown`. Providers answer from what trusted construction installed and
+  never sign to probe.
+  - Local provider (`LocalSigner`, which role-binds only extra refs):
+    - an ordinary installed ref is `Supported` for `HmacSha256`,
+      `HmacSha512` and `Sha256SecretSuffix`, and, once #1844 lands, for
+      its arms (ed25519, ES256, secp256k1, Stark), which accept ordinary
+      refs (before that they are `Unsupported`);
+    - an extra ref is `Supported` only for its role's algorithm, when that
+      crypto feature is compiled in (`ZkLinkContract` needs `zklink`);
+    - every other combination, and any ref not installed, is `Unsupported`.
+  - JS host provider: installing it clears the Rust provider, and the host
+    fulfils `Action::Sign`. host.mjs takes `signerAlgorithms` beside `signer`
+    and passes it as JSON to WASM `useExternalSigner(algorithmsJson?)`, which
+    parses exact `SignAlgorithm` names into `Engine::set_host_algorithms`
+    before startup. Undeclared means `Unknown`. The list is per
+    algorithm, not per ref. WASM and native local setups install the Rust
+    `LocalSigner` directly, so they need no list and local Amend keeps
+    working on every host.
+  - `remoteSignerProvider` declares `hmacSha256` only
+    (`REMOTE_SIGNER_ALGORITHMS`, the same constant its refusal check uses),
+    until P8 adds recipe ids. `DelegatedSignerSetup` passes it as
+    `signerAlgorithms`. It also refuses secondary-slot HMAC at sign time, which a
+    per-algorithm list cannot express. That is acceptable because the answer
+    is advisory and release still refuses before I/O.
+  - Browser `hosted_signing.rs` is a request facade for the TS exchanges, not
+    an engine `Signer`, so it is out of scope here.
+- **Engine-held identities.** Trusted construction registers the slot to
+  `Identity` map with the engine, next to `set_signer`
+  (`set_identities(signing::Identities)`, before startup, refs only). The venue
+  keeps its own copy for signing; the registry passes the same values.
+  `Engine::identities()` exposes them (refs only) for host tests.
+- `Cx::can_sign(slot: CredentialSlot, needs: &[Need]) -> Result<(), SignError>`,
+  where `Need` is `(KeyUse, Algorithm)` and `KeyUse` is `Signing` or
+  `Extra(ExtraKey)`. It is callable from `on_command` and any command or
+  preflight admission point, before the first release.
+  - The engine resolves the identity from its registered map. An
+    unregistered slot, or a `Need` whose ref the identity lacks, is
+    `SignError::InvalidRequest`.
+  - Every `Need` must be `Supported`. `Unsupported` or `Unknown` gives
+    `SignError::Unsupported`. Both errors map to `NotSent`
+    (`signing.rs:539-549`), so the venue reports a whole-command typed
+    `NotSent` before any I/O.
+  - Refs are resolved for every need before any capability is asked, so a
+    malformed command is `InvalidRequest` regardless of need order.
+  - No Rust provider means the host fulfils `Action::Sign`: the declared list
+    answers, and an undeclared host is `Unknown`.
+- There is no `DispatchContext::can_sign`: at prepare the step's own
+  `SignRequest` already refuses before I/O, so a second query adds nothing.
+- The answer is advisory for admission only. Signing at release stays the
+  choke point, so a provider that answered `Supported` and later refuses
+  still fails that release as today.
+
+**Use.** A multi-release command (ApeX Amend/batch with contracts) calls
+`cx.can_sign` once with every algorithm it will need, before releasing
+anything. Single-release commands need no call; `prepare` refusal already
+fails before I/O. There is no eager signing and no venue flag.
+
+**Architecture gate.** This is the cross-cutting fix. Any family with a
+multi-algorithm command uses the same query: ApeX now, later Paradex (Stark
+plus JWT) and Polymarket (EIP-712 plus L2 HMAC).
+
+**Tests.**
+- Engine: local `Supported`/`Unsupported` per ordinary ref, extra role and
+  feature; an unregistered slot or missing ref is `InvalidRequest`; `Unknown` default fails closed; a host with no
+  declaration is `Unknown`, and a later undeclared install clears an earlier one.
+- Host: a host.mjs provider with and without a declared list; a
+  `remoteSignerProvider` refusing `zkLinkContract` and accepting
+  `hmacSha256`.
+- Consumer proof (hcmq3f's PR): a keyless remote ApeX Amend is a typed
+  `NotSent` with zero HTTP actions; local Amend still sends the cancel and
+  the replacement.
+
+**P8 interaction.** When P8 admits recipe ids, `remoteSignerProvider` answers
+`Supported` for an algorithm only through a matching admitted recipe id.
+
+## Public derivations (P4)
+
+Plan, 2026-10-24. Owner claude-19pt8s. Approved by claude-ddi2il as its own
+engine PR off landing. Reviewers: codex-uufub4 (engine) and codex-hcmq3f
+(consumer). It unblocks the Hyperliquid, TxFlow and GRVT recipes and P6b
+(Polymarket `l1Wallet`). The Paradex Ethereum-to-Stark derivation stays out
+until Sam's B/C decision.
+
+**Dependencies.** Key-use tagging (`KeyUse`/`Need`, #1899) and the
+non-HMAC `Sign` arms (#1844). Before those land, `LocalSigner` refuses every
+non-HMAC `Sign`, and P4 stacks on them.
+
+**Problem.** Venues still touch key material for public values:
+- Hyperliquid `account.rs:315` warns when the key does not match the
+  configured API wallet.
+- Hyperliquid `lib.rs:1077` deactivates spot when key and wallet do not pair.
+- TxFlow `lib.rs:51` checks that the key parses.
+- GRVT `lib.rs:725` warns on a mismatch, and `trading.rs:784` deliberately
+  signs with the derived address so stale config cannot block trading.
+- Polymarket needs the `l1Wallet` address.
+
+These are mostly checks, not derivations. P4 moves the derivation behind the
+provider and keeps every check and its outcome. A venue holding only refs
+must never receive the key.
+
+**Operations** (engine `signing.rs`; non-secret results, no payload):
+- `Operation::PublicAddress { key }`: the 20-byte Ethereum address of a
+  `Secp256k1Digest` key.
+- `Operation::PublicKey { algorithm, key }`. Only `Ed25519` (32 bytes) and
+  `StarkDigest` (32-byte big-endian felt) for now. `Es256` and compressed
+  `Secp256k1Digest` have no consumer and are deferred. Any other algorithm
+  is `InvalidRequest`.
+- **Key typing.** A public operation is answered only for a ref that setup
+  policy declares as an asymmetric key of exactly that algorithm.
+  The declaration is `IdentitySetupPolicy.signing_algorithm` (trusted family
+  policy in `construction-rules.json`, never caller setup); #1899's `KeyUse`
+  only selects the ref. An HMAC or undeclared ref, a credential, a passphrase
+  or an extra-role ref is refused. Otherwise the result would be a stable
+  fingerprint of a secret. Each slot's ref answers only for its own
+  declaration. There is no request-level expected-slot check, so two
+  separately declared slots may both be fetched. Replacing a ref's material
+  (`insert`) drops its declaration. Role refs declare nothing yet, and
+  `zklinkSeed` answers nothing. `l1Wallet` derivation (an EIP-191/EIP-712
+  `Secp256k1Digest` role) is held for P6b's own slice, which adds the role and
+  its declaration.
+- **Key forms.** Each algorithm reads the same installed form as its `Sign`
+  arm:
+  - `Secp256k1Digest`: raw 32 bytes;
+  - `Ed25519`: 32-byte seed or the checked 64-byte keypair (#1948);
+  - `StarkDigest`: the felt below the curve order.
+  
+  The engine checks exact widths. `fetch_public`, the trusted setup boundary,
+  also checks every provider's answer semantically through the crypto crate:
+  a canonical, nonzero, on-curve Stark x and a canonically encoded
+  (y < p), decodable, non-weak Ed25519 point. The engine stays crypto-free.
+- **Mixed requests.** Public operations may share a request with
+  `Sign`/`Present`/`Sha256`. Ordering, atomicity and dependencies are
+  unchanged. P8 `remote` still requires exactly one `Sign`: a remote request
+  carrying a public operation is refused before any work. The existing
+  `bind` `_ =>` arm already does this, and a test pins it.
+
+**Local provider.** Answers from installed material through the existing
+primitives, behind the same crypto feature arms. Results never echo key
+material.
+
+**One channel: declared, bound account config (option A; both reviewers
+agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
+- **Binding.** A public value is account metadata bound to the trusted
+  identity, slot, exact designated `KeyRef`, algorithm or closed role, and
+  generation.
+- **Distinct roles.** The TxFlow agent address is not the main wallet,
+  application or vault, and the Polymarket `l1Wallet` address is not the
+  imported L2 API identity, funder or maker. Each binds only to its own key
+  role.
+- **Missing or conflicting metadata refuses setup**, before any private I/O. There is no fallback to
+  another ref or slot.
+- **What a declared value is.** Trusted account configuration. It is not a
+  cryptographically verified derivation, and never a new subject or nonce
+  selector.
+- **Local provider.** Trusted setup calls
+  `safe_cex_venues::fetch_public(provider, ops)`:
+  - public-only, bounded by op count, and validated before any provider
+    check;
+  - runs through `sign_ready`;
+  - returns `Unavailable` without scheduling for a non-immediate provider.
+- **Two values, never merged.** The *expected* value is venue config:
+  GRVT `signer_address`, the HL `key`/`user` wallet. It can be stale. The
+  *actual* signer value is the one fetched (local) or bound to the `KeyRef`
+  (host/remote) above. Only the actual value is signed with or checked by
+  recovery. The expected value only drives the native notices and the
+  deactivate. `applicationId`, the vault or the main wallet never stands in
+  for signer metadata.
+- **Admission compares, never overwrites.** When a value is declared,
+  admission compares it with the fetched one, and a mismatch keeps today's
+  outcome:
+  - the Hyperliquid and GRVT notices;
+  - Hyperliquid deactivating spot;
+  - TxFlow refusing a key that does not parse.
+
+  The expected value is never replaced or filled by the actual one. Each
+  check runs at start against the actual value: fetched for a local
+  provider, the bound metadata for host/remote. Both comparisons below are
+  case-insensitive. A local fetch failure maps to the family's
+  "underivable key" outcome today, never a setup refusal.
+  - HL `account_start` compares the actual value with `key.or(user)` and
+    emits Warn/`CONFIG_INVALID`, then continues. A fetch failure gives the
+    same warning (today's `map_or(true)`).
+  - HL standalone private spot emits Error/`AUTH_REJECTED`, then deactivates
+    and returns before `spot_meta`. It does so when the signing ref or the
+    declared `key` is absent, when the fetch fails, or on a mismatch.
+    Spot never fills `key`.
+  - GRVT warns (Warn/`CONFIG_INVALID`, interpolating the actual address) only
+    when the secret ref and `signer_address` exist and the fetch succeeds.
+    A fetch failure is silent at start, and the order fails at
+    `trading.rs:784` as today. Orders sign `Signature.s` with the actual
+    address (`trading.rs:784/987`), so a stale `signer_address` warns and
+    continues.
+  - Host/remote: the start checks use bound metadata, so HL spot still
+    deactivates at start on a mismatch. Missing metadata never reaches
+    start, because setup refuses it first. Per-dispatch
+    recovery is a second gate on the actual signature, not a replacement.
+- **Host and remote providers.** The value must be declared. Where the
+  family's signature is recoverable (EIP-712/191 for Hyperliquid, TxFlow,
+  GRVT and Polymarket), the family recovers the signer and compares it with
+  the declared value *before* physical release, import or any private
+  effect, in `SignStep::apply` or the P8 verifier, through the one shared
+  `safe_cex_crypto::ethereum::signed_by` (low-s only, v 0/1 or 27/28). The engine has no crypto
+  dependency, so the check cannot sit in dispatch itself. It compares only with the
+  actual signer metadata, never the expected config. An actual-signer
+  mismatch refuses with zero HTTP; this is never a post-send startup check. The comparison is
+  against the declared *signer* only: the Polymarket SignerType3 contract
+  maker or funder is never compared as if it were the recovered wallet. A
+  family that cannot verify before release
+  stays held for an explicit owner decision rather than trusting the
+  declaration.
+- **P6b consumes this channel.** The `l1Wallet` address comes from
+  `fetch_public` (local) or bound metadata (host/remote). P6b has no
+  separate setup-metadata path and no run-time `PublicAddress` fallback.
+  P4 does not by itself make P6b or keyless import ready.
+
+**JS.** No new `SignOperation` kinds: under A nothing at run time asks a
+host for a public value. Host and remote metadata is keyed by ref in the
+account setup policy (`localSignerSetup.ts`/`construction.ts` types), and
+setup refuses when it is missing.
+
+**REDs** (assertions on existing APIs, shown failing first; tests of new
+APIs are labelled as such, not REDs):
+- R1: Hyperliquid construction from refs only (no key in `Options`) cannot
+  run its agent-wallet check today; it reports a missing key instead of
+  comparing.
+- R2: through the existing dispatch, a host-provider EIP-712 signature
+  recovering to an address other than the declared one is still released.
+- R3: P6b's `l1Wallet` address cannot be produced without the key in the
+  venue.
+
+**Tests.**
+- New API: widths, canonical, on-curve and field-bound refusals per
+  algorithm.
+- Independent vectors: ethers addresses, RFC 8032 public keys, starknet.js
+  public keys.
+- Refusals for an HMAC/untyped ref, credential, passphrase, cross-slot ref,
+  and an out-of-role extra ref.
+- Mixed request ordering. A P8 remote request with a public operation
+  refuses before work.
+- `fetch_public` returns `Unavailable` without scheduling for a
+  non-immediate provider, and over-bound requests are refused.
+- Mismatch notices and the spot deactivate still fire, through the
+  Hyperliquid and GRVT admission.
+- GRVT, local and host/remote: a stale expected `signer_address` warns and
+  orders still sign and send with the actual address.
+- Local fetch failure: HL perps warns, HL spot deactivates, GRVT stays
+  silent at start and fails the order. Nothing refuses setup.
+- HL with no `key`: perps compares with `user()`, and spot deactivates.
+- HL: the agent, main wallet and vault stay distinct. This extends the
+  existing `spot_local_signer_identity_is_separate_from_main_wallet_and_vault`
+  control to refs and host metadata.
+- Missing or conflicting host metadata refuses setup.
+- A recovered-signer mismatch refuses before release.
+
+**Delivery split.** The engine PR (this branch) delivers:
+- the operations and their validation;
+- the `signing_algorithm` declaration in policy, the generator and TS types;
+- the local provider arms;
+- `fetch_public`;
+- `signed_by`.
+
+Its REDs are the existing-decode assertions: setup policy and `SignRequest`
+decode refuse the new field and kinds today. The engine-level tests above
+cover the widths, refusals, ordering and `fetch_public`. The per-family items
+come with each family's conversion, which also writes its own venue REDs (the
+R1-R3 shapes above):
+- admission mappings;
+- HL/GRVT/TxFlow outcome tests;
+- pre-release recovery wiring.
+
+The P8 remote-refusal test lands with #1926, where `bind` lives. The Ed25519
+keypair form arrives with #1948. P6b's `l1Wallet` role derivation is P6b's
+slice. This source does not prove the per-family pre-release enforcement or
+the compare-not-overwrite admission; each family conversion gates on those.
+
+**Architecture gate.** One shared provider operation and one setup channel
+for every family that needs a public value, with no venue derivation. The
+pre-release recovery check is one shared helper that every family calls,
+not a check written per venue.

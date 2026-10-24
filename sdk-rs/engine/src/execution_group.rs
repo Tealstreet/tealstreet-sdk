@@ -35,8 +35,6 @@ pub(crate) struct Member {
 pub(crate) enum Root {
     Command(Member),
     /// An existing background read Context keeps its own publication rights.
-    #[cfg_attr(not(test), allow(dead_code))]
-    // Background roots and writes: Bitrue/Hyro phases.
     Background {
         deadline: f64,
     },
@@ -91,6 +89,8 @@ struct Group {
     progress: Vec<OrderIdentityReceipt>,
     /// Retained progress overflowed, so a late joiner could miss identities.
     truncated: bool,
+    /// A successor adopted this execution's queue; it admits no more joiners.
+    succeeded: bool,
 }
 
 #[derive(Default)]
@@ -258,13 +258,13 @@ impl Groups {
                 pending: Vec::new(),
                 progress: Vec::new(),
                 truncated: false,
+                succeeded: false,
             },
         );
         Ok((execution, observer))
     }
 
     /// The next read of the same background root adopts its queued joiners.
-    #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
     pub(crate) fn begin_successor(
         &mut self,
         previous: Execution,
@@ -276,7 +276,7 @@ impl Groups {
         if !old.background {
             return Err(Error::Invalid);
         }
-        if !old.released {
+        if !old.released || old.succeeded {
             return Err(Error::State);
         }
         let window = old.window;
@@ -290,6 +290,7 @@ impl Groups {
             now,
         )?;
         let old = self.groups.get_mut(&previous.0).expect("validated above");
+        old.succeeded = true;
         let queued = std::mem::take(&mut old.pending);
         let group = self.groups.get_mut(&execution.0).expect("just issued");
         let mut sealed = Vec::new();
@@ -328,6 +329,9 @@ impl Groups {
             };
         }
         let group = self.groups.get(&execution.0).expect("open above");
+        if group.succeeded {
+            return Err(Error::State);
+        }
         if member.operation != group.operation {
             return Err(Error::Invalid);
         }
@@ -408,6 +412,11 @@ impl Groups {
     pub(crate) fn may_publish(&self, execution: Execution) -> bool {
         self.group(execution)
             .is_ok_and(|group| !group.terminal && (group.background || !group.observers.is_empty()))
+    }
+
+    pub(crate) fn has_observers(&self, execution: Execution) -> bool {
+        self.group(execution)
+            .is_ok_and(|group| !group.observers.is_empty())
     }
 
     #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.

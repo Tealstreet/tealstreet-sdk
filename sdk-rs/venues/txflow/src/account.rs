@@ -404,6 +404,12 @@ impl TxFlow {
             self.account.setting_queue = cx.store.markets().iter().map(|m| m.id.clone()).collect();
             self.next_setting(cx);
         }
+        if self.account.inflight.contains("state")
+            && self.account.inflight.contains("orders")
+            && (self.account.fills_exhausted || self.account.inflight.contains("fills"))
+        {
+            self.node.refresh_due = false;
+        }
     }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.account.started || !self.account.inflight.insert("orders".into()) {

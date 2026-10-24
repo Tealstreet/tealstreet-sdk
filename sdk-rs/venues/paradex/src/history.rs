@@ -1,9 +1,11 @@
 //! Rare cursor-paged reads never mutate the account store.
+pub mod public_trades;
 use crate::{Pending, account::Account};
 use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, Outcome, Query, Response, VenueError, json::ArrayAt};
 use serde::{Deserialize, Serialize};
@@ -170,6 +172,17 @@ struct PublicTrade {
     side: OrderSide,
     timestamp: f64,
 }
+fn public_trade(row: Row) -> Option<Output> {
+    Some(Output::Trade(PublicTrade {
+        side: side(&row.side)?,
+        id: row.id,
+        symbol: row.market,
+        price: number(&row.price),
+        qty: number(&row.size),
+        quote_qty: number(&row.size) * number(&row.price),
+        timestamp: number(&row.created_at),
+    }))
+}
 fn valid_row(row: &Row, query: &Query, fallback: bool) -> bool {
     if row.id.is_empty()
         || row.market.is_empty()
@@ -269,9 +282,22 @@ impl History {
         query: Query,
         public_only: bool,
     ) {
+        if let Query::PublicTrades { symbol, limit } = &query {
+            public_trades::start(cx, account, command, symbol.clone(), *limit);
+            return;
+        }
         if public_only && !matches!(query, Query::PublicTrades { .. }) {
-            cx.done(
-                command,
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.done_context(
+                &context,
                 if matches!(query, Query::OrderByClientId { .. }) {
                     "{\"found\":false,\"definitive\":false}".into()
                 } else {
@@ -287,7 +313,16 @@ impl History {
                 || client_order_id.chars().count() > 64
                 || client_order_id.contains(['\r', '\n']))
         {
-            cx.fail(command, "invalid Paradex client order ID");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "invalid Paradex client order ID");
             return;
         }
         let bounds = match &query {
@@ -303,11 +338,29 @@ impl History {
             .any(|v| !v.is_finite() || v < 0.)
             || matches!(bounds, (Some(a),Some(b)) if a>b)
         {
-            cx.fail(command, "invalid Paradex history time range");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "invalid Paradex history time range");
             return;
         }
         if matches!(query, Query::Fills { symbol: None, .. }) {
-            cx.done(command, "[]".into());
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.done_context(&context, "[]".into());
             return;
         }
         let request = Request {
@@ -377,14 +430,7 @@ impl History {
                     false,
                 )
             }
-            Query::PublicTrades { symbol, limit } => (
-                "/trades",
-                Some(symbol.as_str()),
-                None,
-                None,
-                limit.unwrap_or(100).clamp(1, 500),
-                true,
-            ),
+            Query::PublicTrades { .. } => return,
             Query::OrderByClientId { symbol, .. } => (
                 if request.lookup_history {
                     "/orders-history"
@@ -446,25 +492,16 @@ impl History {
             params.push(format!("cursor={}", encode(cursor)));
         }
         let path = format!("{path}?{}", params.join("&"));
-        if public {
-            cx.request_streamed(
-                Method::Get,
-                format!("{}{path}", account.rest()),
-                Vec::new(),
-                ArrayAt::Field("results"),
-                Pending::History(request),
-            );
-        } else {
-            account.request(
-                cx,
-                Method::Get,
-                path,
-                None,
-                Some(ArrayAt::Field("results")),
-                Pending::History(request),
-            );
-        }
+        account.request(
+            cx,
+            Method::Get,
+            path,
+            None,
+            Some(ArrayAt::Field("results")),
+            Pending::History(request),
+        );
     }
+
     pub fn on_item(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
         request.raw_rows += 1;
         if let Query::OrderByClientId {
@@ -639,16 +676,8 @@ impl History {
                 }
             }
             Query::PublicTrades { .. } => {
-                if let Some(side) = side(&row.side) {
-                    request.history.stage(Output::Trade(PublicTrade {
-                        id: row.id,
-                        symbol: row.market,
-                        price: number(&row.price),
-                        qty: number(&row.size),
-                        quote_qty: number(&row.size) * number(&row.price),
-                        side,
-                        timestamp: number(&row.created_at),
-                    }));
+                if let Some(row) = public_trade(row) {
+                    request.history.stage(row);
                 }
             }
         }
