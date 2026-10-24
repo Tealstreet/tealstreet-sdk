@@ -1,9 +1,11 @@
 //! Documented PerpetualV2 envelopes and aop_p execution/position payloads.
+mod support;
 use safe_cex_engine::model::{MarginType, OrderStatus, PositionMode};
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketId, TimerId,
 };
-use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+use safe_cex_venue_phemex::PhemexPerpetuals;
+use support::Options;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 2_000.0;
 
@@ -70,11 +72,11 @@ fn envelope(currency: &str, total: f64, used: f64, rows: &str) -> String {
     )
 }
 fn started() -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
-    }));
+    });
     e.start(NOW);
     let a: Vec<_> = e.drain_actions().collect();
     response(&mut e, NOW, request(&a, "products").id, 200, PRODUCTS);
@@ -553,6 +555,13 @@ fn deadline_revokes_late_generation_and_starts_fresh_reads() {
 fn dead_private_socket_reconnects_and_auth_uses_fresh_expiry() {
     let (mut e, _, s) = started();
     e.handle(NOW, Event::WsOpened { socket: s });
+    e.handle(
+        NOW,
+        Event::WsMessage {
+            socket: s,
+            text: r#"{"id":999,"error":null,"result":{"status":"success"}}"#,
+        },
+    );
     let a: Vec<_> = e.drain_actions().collect();
     let mut next = timer(&a, NOW + 5000.);
     for delta in [5000., 10000.] {
@@ -1368,11 +1377,11 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
 }
 #[test]
 fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
-    }));
+    });
     e.start(NOW);
     let a: Vec<_> = e.drain_actions().collect();
     let partial = PRODUCTS.replace(
