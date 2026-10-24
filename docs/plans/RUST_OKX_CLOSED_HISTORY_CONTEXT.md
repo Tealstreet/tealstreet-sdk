@@ -73,10 +73,9 @@ No manifest, checker, exemption or fingerprint rehash belongs in this checkpoint
   the output. Recovery depends on accepted output, not a page-number heuristic.
 - Native closed_sign_failed uses the same recovery: first/no-accepted-output
   provider refusal is strict, while a refusal after accepted rows recovers that
-  prefix. Pin this original baseline separately. The subsequent explicit
-  overseer ruling changes provider/preparation refusals to strict through the
-  exact root, consistent with #1950; preserve provider fields without retry or
-  auth inference. This is an intentional change, not native parity.
+  prefix. Preserve this original policy and pin both cases; the latest overseer
+  ruling withdrew the proposed strict-provider transplant. Preserve provider
+  fields without retry or auth inference. No provider-recovery change is planned.
 
 ## Managed geometry and caller changes
 
@@ -109,13 +108,13 @@ Local child-mint/submission refusal strictly rejects the still-live original
 root without prefix recovery, typed through shared Read projection. Only a
 proven revoked owner is inert. A released child timeout while the root remains
 live uses native accepted-output recovery; engine root expiry stays strict.
-Provider/preparation refusal strictly rejects the exact live root even after
-accepted output, per the overseer ruling. Preserve typed kind/message/native
-metadata; do not soften it to rows or emit an INCOMPLETE marker. Ordinary
-transport/HTTP/live-child-timeout failures retain accepted-output recovery.
+Provider/preparation refusal retains accepted-output recovery, per the latest
+overseer ruling: strict without accepted rows, otherwise native prefix plus
+owned INCOMPLETE. Keep the typed failure fields when it rejects. Ordinary
+transport/HTTP/live-child-timeout failures retain the same output-based recovery.
 
-CALLERS must describe new invalid-clock/capacity local refusals, the immutable
-whole-command bound and strict provider/preparation failure after accepted rows.
+CALLERS must describe new invalid-clock/capacity local refusals and the immutable
+whole-command bound. Provider recovery is preserved, not a caller-visible change.
 SDK fetchClosedPnl/fetchReportedClosedPnl catches/reports command failure and
 returns[]; fetchHistoricalPositions/okxJournal uses report:false and propagates
 rejection. Both consume fetchClosedPositionRows; recovered physical failures
@@ -140,11 +139,8 @@ After this plan commit add real Engine<Okx> tests, running unchanged production:
    publish into or retire the new owner.
 6. Native working controls pin raw wire/rows, keyless precedence, Secondary
    selection, first failure versus accepted-prefix recovery and rejected staged
-   rows. Preserve a working original provider-prefix baseline plus a separate
-   desired strict-provider RED after accepted output. The implementation will
-   update that one baseline expectation for the ruled policy, retaining this
-   original checkpoint; no ignored contradictory tests. First provider refusal
-   remains a working typed/no-output control. Existing
+   rows. Provider refusal before/after accepted output remains a working native
+   control; no contradictory strict-provider RED is included. Existing
    cap/cycle/unknown-time controls remain untouched and run independently.
 7. After adoption add exact child-deadline/preparation metadata and live child-
    timeout controls through the real managed adapter, keeping original RED
