@@ -2937,3 +2937,15 @@ done_local_setting. Native pre-credential ordering and the true-mode refusal
 remain unchanged. No venue-local admission, owner or completion algorithm.
 Bitrue inventory 30 -> 29 occurrences, 18 -> 17 fingerprints; all private
 signing/read/write migrations remain separate.
+
+## AsterDEX operation-aware local trade refusal custody
+
+Three numeric synchronous trading failures now converge on direct shared entry
+and Context diagnostic/failure. Operation is explicit from the caller, so a
+V1 FetchStpMode plan Err cannot become Mutation. Native credential/plan/capacity
+projection remains pure before entry, and both acknowledgement cleanup paths
+are deferred until successful local admission or native accepted-job dispatch.
+Selected remote jobs retain native custody without an abandoned managed owner.
+Exact removal is3F/3O; no engine, signer, callback, checker or staging exception
+changes. Native state pruning is endpoint policy; lifetime, rejection, terminal
+and credential-evidence authority stay in the engine.

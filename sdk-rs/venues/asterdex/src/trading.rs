@@ -8,6 +8,7 @@ use safe_cex_engine::model::{
     CancelOrderRef, MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts,
     PositionSide, StopTriggerType, StpMode, TimeInForce,
 };
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -185,6 +186,7 @@ struct StpResponse {
 
 impl AsterDex {
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let prune_on_refusal = matches!(&command, Command::CancelSymbolOrders { .. });
         let (id, job) = match command {
             Command::PlaceOrders { command, .. } | Command::AmendOrder { command, .. }
                 if self.position_mode_pending() =>
@@ -240,14 +242,15 @@ impl AsterDex {
                         symbol: o.symbol.clone(),
                     })
                     .collect::<Vec<_>>();
-                self.trading.acknowledged.retain(|id, _| {
-                    cx.store.order(id).is_none() && !self.account.terminal.contains_key(id)
-                });
                 orders.extend(
                     self.trading
                         .acknowledged
                         .iter()
-                        .filter(|(_, s)| **s == symbol)
+                        .filter(|(id, s)| {
+                            **s == symbol
+                                && cx.store.order(id).is_none()
+                                && !self.account.terminal.contains_key(*id)
+                        })
                         .map(|(id, symbol)| CancelOrderRef {
                             id: id.clone(),
                             symbol: symbol.clone(),
@@ -340,7 +343,7 @@ impl AsterDex {
             }
             _ => return,
         };
-        self.start_trade(cx, id, job);
+        self.start_trade(cx, id, Operation::Mutation, prune_on_refusal, job);
     }
 
     pub(crate) fn fetch_stp_mode(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
@@ -349,13 +352,22 @@ impl AsterDex {
         } else {
             Ok(single(Method::Get, "stpMode", Query::new(), Call::StpRead))
         };
-        self.start_trade(cx, command, plan);
+        self.start_trade(cx, command, Operation::Read, false, plan);
     }
-    fn start_trade(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId, job: Result<Job, String>) {
-        match job {
-            Ok(mut job) => {
-                // Authentication is shared by every step. Reject it once so
-                // synchronous signer failures cannot recurse through a split job.
+    fn start_trade(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: CommandId,
+        operation: Operation,
+        prune_on_refusal: bool,
+        job: Result<Job, String>,
+    ) {
+        let job = job
+            .map_err(|error| {
+                (VenueError::new(error).kind(ErrorKind::InvalidInput), prune_on_refusal)
+            })
+            .and_then(|mut job| {
+                // Validate the shared auth shape before reserving any split step.
                 if let Some(step) = job.steps.front() {
                     let valid = self
                         .credentials
@@ -363,45 +375,66 @@ impl AsterDex {
                         .map_err(|_| "Missing required Aster credentials".to_owned())
                         .and_then(|(_, slot)| self.auth(slot).map(drop));
                     if let Err(error) = valid {
-                        cx.command_error(id, error.clone());
-                        cx.fail(id, not_sent(error).kind(ErrorKind::AuthInvalid));
-                        return;
+                        return Err((VenueError::new(error).kind(ErrorKind::AuthInvalid), prune_on_refusal));
                     }
                 }
-                self.trading.acknowledged.retain(|id, _| {
-                    cx.store.order(id).is_none() && !self.account.terminal.contains_key(id)
-                });
                 job.reserved_places = job
                     .steps
                     .iter()
                     .filter(|step| matches!(step.call, Call::Place { .. }))
                     .count();
-                let reserved = self
-                    .trading
-                    .jobs
-                    .values()
-                    .map(|job| job.reserved_places)
-                    .sum::<usize>();
-                if job.reserved_places > 0
-                    && self.trading.acknowledged.len() + reserved + job.reserved_places
-                        > MAX_ACKNOWLEDGED_ORDERS
-                {
-                    let error = "Aster placement routing capacity reached; wait for order reconciliation or cancel existing acknowledged orders".to_owned();
-                    cx.command_error(id, error.clone());
-                    cx.fail(id, not_sent(error));
+                if job.reserved_places > 0 {
+                    let reserved = self
+                        .trading
+                        .jobs
+                        .values()
+                        .map(|job| job.reserved_places)
+                        .sum::<usize>();
+                    let acknowledged = self.trading.acknowledged.keys().filter(|id| {
+                        cx.store.order(id).is_none() && !self.account.terminal.contains_key(*id)
+                    }).count();
+                    if acknowledged + reserved + job.reserved_places > MAX_ACKNOWLEDGED_ORDERS
+                    {
+                        return Err((VenueError::new("Aster placement routing capacity reached; wait for order reconciliation or cancel existing acknowledged orders"), true));
+                    }
+                }
+                Ok(job)
+            });
+        let job = match job {
+            Ok(job) => job,
+            Err((mut error, prune)) => {
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
                     return;
+                };
+                if prune {
+                    self.prune_trade_acknowledged(cx);
                 }
-                if let Some(error) = &job.error {
-                    cx.command_error(id, error.message.clone());
+                if operation == Operation::Mutation {
+                    error.outcome = Some(Outcome::NotSent);
                 }
-                self.trading.jobs.insert(id, job);
-                self.advance_trade(cx, id);
+                let _ = cx.command_error_context(&context, error.message.clone());
+                let _ = cx.fail_context(&context, error);
+                return;
             }
-            Err(error) => {
-                cx.command_error(id, error.clone());
-                cx.fail(id, not_sent(error).kind(ErrorKind::InvalidInput));
-            }
+        };
+        self.prune_trade_acknowledged(cx);
+        if let Some(error) = &job.error {
+            cx.command_error(id, error.message.clone());
         }
+        self.trading.jobs.insert(id, job);
+        self.advance_trade(cx, id);
+    }
+
+    fn prune_trade_acknowledged(&mut self, cx: &Cx<'_, Pending>) {
+        self.trading.acknowledged.retain(|id, _| {
+            cx.store.order(id).is_none() && !self.account.terminal.contains_key(id)
+        });
     }
     fn advance_trade(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId) {
         let Some(job) = self.trading.jobs.get_mut(&id) else {

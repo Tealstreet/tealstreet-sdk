@@ -1575,3 +1575,22 @@ controls: command-owner capacity/recovery, expired/sub-ms receipt, duplicate
 original owner/diagnostic, Background Context independence, all credential
 configurations, true-mode refusal and absent symbol behavior. No fabricated
 Context or missing-method compile failure is evidence.
+
+## AsterDEX local trading refusal controls
+
+The committed original target executes24 behavioral assertion REDs and9 native
+positives on unchanged production. The same33 controls now pass unchanged after
+adoption. Eight path shapes cover explicit Read/Mutation/auth fields and symbol
+cancellation at invalid/full entry, with genuine256 retained peer roots and
+actual retirement/recovery. Separate controls pin all three STP Read outcomes,
+credential-free auth-health, both pre-admission acknowledged-state boundaries,
+duplicate owner protection and300 synchronous reuses.
+
+Native positives retain exact V1 POST/V3 Secondary STP GET at full managed
+capacity, a9,999-place job with only its live acknowledgement consuming capacity,
+Store-first cancellation followed by exactly DELETE/order/Call::Cancel(live),
+and finite admitted missing-key cancellation cleanup. Private state is seeded
+before Engine construction in an explicit cfg(test) child, not presented as a
+provider or physical-release receipt. Existing financial tests are unchanged.
+Family size and replay certification are left to fresh CI; the downloaded
+1,321,596-byte baseline excludes lean #1987/#2006 and is not an adoption result.

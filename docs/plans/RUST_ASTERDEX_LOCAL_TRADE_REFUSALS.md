@@ -224,3 +224,22 @@ independently inspected; runtime remains incoming-exact after removing the
 cfg(test) declaration. Strict scoped Clippy/fmt pass on the expanded source.
 The exact3F/3O prune remains planned, not applied, and no adoption family-size
 claim is made. The independent reviews did not run additional builds or CI.
+
+## Managed implementation checkpoint
+
+Actual tipceae26c3795 is genuinely plain-merged at e96135aec2b. The three local
+refusal branches converge on one direct operation-aware admission and Context
+diagnostic/failure path. A pure retained-count projection precedes placement
+capacity refusal; CancelSymbolOrders projects its retained routing list without
+pruning during job construction. Native cleanup runs only after successful local
+admission (with caller cleanup intent) or on the accepted legacy job path.
+Read carries no money outcome, Mutation is NotSent, and local Contexts carry no
+credential. Valid remote jobs get no new Context, signer wrapper or lifetime.
+
+The unchanged33 original controls now pass. The first focused command also named
+three integration targets while filtering by the unit module; those integration
+targets selected0 tests and are not counted. The subsequent unfiltered scoped
+Aster/Binance native run supplies the existing financial/dispatch checks. The
+manifest preserves incoming ordering and changes only the three selected hashes;
+no foreign entries or checker allowances are edited. Independent implementation
+reviews and fresh CI, including exact family bytes, follow this source checkpoint.
