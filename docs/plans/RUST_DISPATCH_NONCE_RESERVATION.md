@@ -566,3 +566,16 @@ The capability adds no authority: trusted mint, installed identity, captured
 registration, reservation and final floor checks remain required. Obtain plan
 and source review, then measure the exact combined pair and rerun the existing
 ON/OFF/native/real-WASM controls. This is local only; budgets remain fixed.
+
+
+Engine owner review rejected the associated-constant spelling because it makes
+Venue non-dyn-compatible (stable Rust cannot put a Sized bound on that const).
+Use a defaulted `#[inline] fn dispatch_nonce(&self) -> bool { false }` instead.
+The engine captures its initial permission with the release registration. A
+later statically dispatched call is only an optimization selector: true cannot
+grant authority beyond that captured permission; false must refuse any retained
+claim or reservation before ordinary Lifecycle admission. Therefore a changing
+getter cannot release a nonce without its fence. Pin a true-at-construction,
+false-at-Claim control to prove that refusal, and false-at-construction denial
+before IDs. The method preserves dyn compatibility; the paired release build
+will decide whether its constant default removes enough code.
