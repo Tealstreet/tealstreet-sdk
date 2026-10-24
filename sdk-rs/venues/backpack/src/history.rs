@@ -19,7 +19,7 @@ use safe_cex_engine::{CommandId, CommandWait, Cx, ErrorKind, Method, Query, Resp
 use serde::Serialize;
 
 #[cfg(test)]
-#[path = "history_retirement_tests.rs"]
+#[path = "../tests/support/history_retirement.rs"]
 mod retirement_tests;
 
 /// Requests per read before paging that still reports more is incomplete.

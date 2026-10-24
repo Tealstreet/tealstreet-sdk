@@ -1,5 +1,5 @@
 // Declared read-key policy (docs/plans/RUST_READ_KEY_POLICY.md), JS setup side.
-// No family declares a policy yet, so these drive it through the setup policy.
+// Generic policy controls remain separate from Backpack's declared consumer.
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 import type { SignerSetupPolicy } from '../../exchanges/rust/construction';
@@ -88,6 +88,16 @@ describe('ValidateOnly read keys', () => {
 });
 
 describe('PublicRead read keys', () => {
+  it('Backpack declares PublicRead in the bridge and real signer setup capsule', () => {
+    const policy = deriveSignerSetupPolicy('backpack');
+    expect(policy.readCredentials).toBe('publicRead');
+    expect(deriveBridgeConstruction('backpack', base).readCredentials).toBe('publicRead');
+    const { capsule } = construct({ ...base, publicDataOnly: true, secondary_key: 'read', secondary_secret: SENTINEL }, policy);
+    expect(JSON.parse(capsule).primary).toBeUndefined();
+    expect(capsule).not.toContain('primary-material');
+    expect(JSON.parse(capsule).secondary).toEqual({ key: 'read', secret: SENTINEL });
+  });
+
   const publicRead = { readCredentials: 'publicRead' as const };
   const read = { secondary_key: 'read', secondary_secret: SENTINEL };
 
@@ -116,8 +126,8 @@ describe('the unchanged default', () => {
       .toThrow('Rust engine secondary signing keys require a nonempty key and secret');
   });
 
-  it('declares no family yet, so every bridge record and setup policy is unchanged', () => {
-    for (const name of Object.keys(rules.venues) as ExchangeName[]) {
+  it('keeps undeclared bridge records and setup policies unchanged', () => {
+    for (const name of (Object.keys(rules.venues) as ExchangeName[]).filter((name) => name !== 'backpack')) {
       expect(deriveBridgeConstruction(name, base)).not.toHaveProperty('readCredentials');
       expect(deriveSignerSetupPolicy(name)).not.toHaveProperty('readCredentials');
     }

@@ -196,3 +196,23 @@ through the owner-reviewed Install test override, integrate the actual tip and
 prerequisite landings, qualify inventories on that composition, obtain exact
 committed preservation reviews, then take one PR-triggered Rust run. No READY
 or landing clearance is claimed by this checkpoint.
+
+## Actual provider landing and policy controls
+
+The provider owner CLEARed test carry552eda30: the undeclared registry control
+now explicitly chooses Install through its existing test-only override, with
+all assertions intact. Separate pins require the actual Backpack declaration
+and both registry/JS bridge records to be PublicRead. The real JS signer setup
+capsule drops primary material in public-only mode and retains the secondary;
+the ten scoped read-key policy controls pass. Other families remain unchanged.
+
+The fifty-page private observer fixture lives under tests/support and is
+compiled only by the cfg(test) unit module. Production source inventories
+conservatively include src test fixtures, so putting deterministic test signer
+setup in the test-support directory avoids adding four test-only material
+sites to the production signing baseline. No production site or assertion is
+hidden or removed, and no inventory allowance is added.
+
+The actual provider seam is now landed as8efb4548c39755a6a180b5a381de7c58fafb06c3.
+Integrate that immutable commit, rerun originals against its native source, and
+carry compatibility/source reviews before qualifying the composed candidate.
