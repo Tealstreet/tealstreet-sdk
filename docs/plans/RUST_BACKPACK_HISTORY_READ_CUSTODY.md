@@ -225,3 +225,22 @@ ignored account test. The new registry bridge pin uses the existing JSON
 options helper (EngineOptions has no Default); that compile correction is not
 RED evidence. The real WASM integration gate is now wired into only Backpack's
 existing family CI job after the family build, with no new job or CPU change.
+
+## Frozen candidate qualification on actual2090
+
+Native/custody reviewer hcmq3f CLEARed actual a917 composition and its original
+control/fixture preservation. Credential owner m26ps4 CLEARed the policy/test
+carry and admission update9010f589: a valid public-only saved read key now
+asserts real read-only signing authority, while malformed/31-byte reads retain
+no provider/identities. Mutation, SessionAuth and PrimaryRead remain Missing.
+The auditor CLEARed exactly the three Backpack-only CI wiring lines at ff0b;
+that workflow change requires this PR's own full green run.
+
+Actual qualification passes274 Backpack tests (one existing account adoption
+ignore),42 registry tests, strict scoped Clippy, formatting,10 JS policy tests
+and2 real compiled WASM/EngineHost parity tests. The forty-two registry tests
+include28 lib controls,12 Backpack admission controls and2 unchanged carried
+native public-only history controls. Actual bans/ratchets pass, with only the
+count-one0451 history request fingerprint removed. No signing, credential or
+socket allowance changes; provider and every unowned incoming file remain
+exact. Optimized WASM size and full matrix CI remain required before READY.
