@@ -18,6 +18,10 @@ use safe_cex_engine::selected_read::{
 use safe_cex_engine::{CommandId, CommandWait, Cx, ErrorKind, Method, Query, Response, VenueError};
 use serde::Serialize;
 
+#[cfg(test)]
+#[path = "history_retirement_tests.rs"]
+mod retirement_tests;
+
 /// Requests per read before paging that still reports more is incomplete.
 const MAX_PAGES: u32 = 50;
 
@@ -342,9 +346,16 @@ impl Backpack {
                 );
                 return;
             }
+            let selected = match SelectedRead::select(&slots, ReadRole::Read { scope: None }) {
+                Ok(selected) => selected,
+                Err(_) => {
+                    Self::reject_history_query(cx, "Backpack credentials unavailable");
+                    return;
+                }
+            };
             let Ok(root) = SelectedRead::command_root(
                 cx,
-                SelectedRead::select(&slots, ReadRole::Read { scope: None }),
+                Ok(selected),
                 LocalRefusal {
                     diagnostic: None,
                     error: "Backpack credentials unavailable".into(),

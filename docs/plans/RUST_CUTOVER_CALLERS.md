@@ -7851,3 +7851,7 @@ success. Accepted-prefix failure cleanup keeps native paging/economic facts,
 drops unaccepted page rows/IDs/skips and retires the exact leg before another.
 The Backpack publicRead row preserves saved-read-key private GET history in
 public_data_only through a read-only provider; no primary or hosted authority.
+
+History native error presentation: only a released Backpack history transport
+Network failure retains the native Internal kind; message/outcome/code remain
+unchanged. Preparation and physical Timeout retain their typed causes.

@@ -143,3 +143,56 @@ private/public-only modes, retaining the native60000 window before primary
 initialization even when recv_window5000 is configured. These are working
 parity controls, not original-source failures or a behavior ruling. The old
 a1dde121 source patch is NOT approved for application.
+
+## Scoped qualification corrections
+
+The source/native reviewers CLEARed compatibility patch 5608b94a on37a96.
+Select once before allocating the selected root: a missing selection uses the
+existing cause-aware local Read refusal, preserving native pre-start and held
+catalogue actions. A hit passes its exact binding into command_root unchanged.
+History alone presents a released Network failure with native Internal kind;
+message, outcome and code remain intact. Preparation and Timeout retain their
+typed causes. This preserves existing native assertions rather than changing
+their expected results.
+
+The released-page Timeout control delivers a real HTTP event at the released
+deadline while the original caller root remains live; the engine's HTTP event
+admission performs expiry. It does not synthesize a timer or failure receipt.
+A separate test observes actual retained root/leg handles across fifty pages,
+checks each retired leg is Revoked before the next release, and checks the
+original root is Revoked at the native page cap. Filtered native rows preserve
+empty accepted history plus its incompleteness notice at that cap.
+
+## Source-stage execution checkpoint
+
+After the reviewed compatibility correction, the scoped Backpack suite passes
+274 tests, with the one pre-existing ignored account/background signer adoption
+control unchanged. The 31 original/caller controls and 11 managed lifecycle
+controls all execute without skips. Lifecycle includes full-context pressure
+at page turnover, initial capacity refusal with genuine prior-owner delivery,
+stale retired-page DATA, physical Timeout under a live caller root, and
+page-two preparation/Network/status/codec accepted-prefix recovery. Strict
+crate Clippy and formatting pass with the pinned Rust toolchain, jobs4.
+
+The separate fifty-page observer checks actual exact handles through ordinary
+venue callbacks, without a production counter or engine change. Its filtered
+rows retain the native empty accepted result and one incompleteness notice at
+the page cap. Every recorded physical leg and the final original root are
+Revoked. The test's outbound HttpRequest is named packet so assertion macros
+do not create lexical request-site false positives; it introduces no opaque
+request/completion call and no inventory allowance.
+
+The real Backpack WASM family builds. Two JavaScript integration controls run
+the actual EngineHost and native Prepare/Bind/Claim/dispatch pipeline. Across
+fills/orders/funding, public-only saved read keys sign exactly the independent
+Node Ed25519 oracle with the native60000 window; malformed primary material
+is never probed. No raw HTTP, hosted signer or socket is used, missing keys
+retain native refusal metadata, and transport resources/timers settle. This
+is separate JS/WASM evidence, not inherited native registry proof. The local
+build has no wasm-opt, so optimized size remains a CI gate.
+
+Remaining freeze gates: carry the undeclared-policy registry working control
+through the owner-reviewed Install test override, integrate the actual tip and
+prerequisite landings, qualify inventories on that composition, obtain exact
+committed preservation reviews, then take one PR-triggered Rust run. No READY
+or landing clearance is claimed by this checkpoint.

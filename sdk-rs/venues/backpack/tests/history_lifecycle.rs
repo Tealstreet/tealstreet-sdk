@@ -303,19 +303,21 @@ fn page_two_released_network_status_and_codec_failures_discard_unaccepted_rows()
 fn page_two_released_physical_timeout_preserves_prefix_while_root_is_live() {
     let (mut e, _) = ready();
     let (token, _) = accepted_prefix(&mut e);
-    let (permit, _) = bind(&mut e, token, 2011.);
+    let (permit, request) = bind(&mut e, token, 2011.);
     let released = match e.claim_http(2011., permit).unwrap() {
         Claim::Released(release) => release,
         _ => panic!("release"),
     };
-    let timer = e
-        .drain_actions()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == released.deadline => Some(timer),
-            _ => None,
-        })
-        .expect("physical page timeout is armed");
-    e.handle(released.deadline, Event::TimerFired { timer });
+    e.drain_actions().for_each(drop);
+    assert!(released.deadline < 52_000., "the caller root is still live");
+    // Admission of this real HTTP event expires its released physical leg.
+    response(
+        &mut e,
+        &request,
+        released.deadline,
+        200,
+        &format!("[{}]", fill(999, SYMBOL)),
+    );
     partial(&e.drain_actions().collect::<Vec<_>>());
 }
 #[test]
@@ -341,4 +343,133 @@ fn duplicate_cannot_replace_live_history_and_original_still_delivers() {
         terminals(&e.drain_actions().collect::<Vec<_>>(), 71).0,
         ["[]"]
     );
+}
+
+fn park_depth(e: &mut Driver, command: u32) -> Preparation {
+    e.handle_command(
+        2000.,
+        Command::FetchOrderBook {
+            command,
+            symbol: SYMBOL.into(),
+            limit: None,
+        },
+        Some(50_000),
+    )
+    .unwrap();
+    e.prepare_dispatch(2000.);
+    preparation(e.drain_actions().collect()).0
+}
+fn finish_depth(e: &mut Driver, token: Preparation, command: u32) {
+    let request = release(e, token, 2015.);
+    response(e, &request, 2016., 200, r#"{"bids":[],"asks":[]}"#);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(terminals(&actions, command).0, [r#"{"bids":[],"asks":[]}"#]);
+    assert!(terminals(&actions, command).1.is_empty());
+}
+#[test]
+fn history_capacity_refusal_preserves_a_real_prior_owner() {
+    let (mut e, _) = ready();
+    let first = park_depth(&mut e, 1000);
+    for command in 1001..1256 {
+        park_depth(&mut e, command);
+    }
+    e.handle_command(
+        2001.,
+        Command::Query {
+            command: 71,
+            query: query(2),
+        },
+        Some(50_000),
+    )
+    .unwrap();
+    let actions: Vec<_> = e.drain_actions().collect();
+    no_send(&actions);
+    let (success, failures) = terminals(&actions, 71);
+    assert!(success.is_empty());
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].kind, Some(ErrorKind::Internal));
+    assert_eq!(failures[0].outcome, None);
+    finish_depth(&mut e, first, 1000);
+}
+#[test]
+fn full_context_pressure_retires_page_one_before_minting_page_two() {
+    let (mut e, _) = ready();
+    let (first, _) = enter(&mut e, 71, 50_000, 2);
+    let parked = park_depth(&mut e, 1000);
+    for command in 1001..1254 {
+        park_depth(&mut e, command);
+    }
+    let first = release(&mut e, first, 2001.);
+    response(
+        &mut e,
+        &first,
+        2010.,
+        200,
+        &format!("[{},{}]", fill(1, SYMBOL), fill(2, "UNLISTED_PERP")),
+    );
+    e.prepare_dispatch(2010.);
+    let (second, _) = preparation(e.drain_actions().collect());
+    let second = release(&mut e, second, 2011.);
+    response(&mut e, &second, 2012., 200, "[]");
+    let actions: Vec<_> = e.drain_actions().collect();
+    no_send(&actions);
+    let (success, failures) = terminals(&actions, 71);
+    assert!(failures.is_empty());
+    assert_eq!(success.len(), 1);
+    let rows: serde_json::Value = serde_json::from_str(success[0]).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["id"], "1");
+    assert!(!actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.code == "history.incomplete")));
+    finish_depth(&mut e, parked, 1000);
+}
+
+#[test]
+fn retired_page_data_cannot_publish_diagnostics_or_complete_its_successor() {
+    let (mut e, _) = ready();
+    let (first, _) = enter(&mut e, 71, 50_000, 2);
+    let first = release(&mut e, first, 2001.);
+    response(
+        &mut e,
+        &first,
+        2010.,
+        200,
+        &format!("[{},{}]", fill(1, SYMBOL), fill(2, "UNLISTED_PERP")),
+    );
+    e.prepare_dispatch(2010.);
+    let (second, _) = preparation(e.drain_actions().collect());
+    e.handle(
+        2011.,
+        Event::HttpStart {
+            request: first.id,
+            status: 503,
+            headers: "",
+        },
+    );
+    e.handle(
+        2011.,
+        Event::HttpChunk {
+            request: first.id,
+            data: br#"[{"side":"Unknown"},"#,
+        },
+    );
+    e.handle(2011., Event::HttpEnd { request: first.id });
+    let stale: Vec<_> = e.drain_actions().collect();
+    no_send(&stale);
+    assert!(
+        !stale
+            .iter()
+            .any(|action| matches!(action, Action::Notice(_)))
+    );
+    let second = release(&mut e, second, 2012.);
+    response(&mut e, &second, 2013., 200, "[]");
+    let actions: Vec<_> = e.drain_actions().collect();
+    let (success, errors) = terminals(&actions, 71);
+    assert!(errors.is_empty());
+    assert_eq!(success.len(), 1);
+    let rows: serde_json::Value = serde_json::from_str(success[0]).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["id"], "1");
+    assert!(!actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.code == "history.incomplete")));
 }

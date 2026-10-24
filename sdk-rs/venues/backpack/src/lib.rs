@@ -1083,7 +1083,15 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
-            Pending::History(request) => self.history_failed(cx, *request, error),
+            Pending::History(request) => {
+                // Native history presents a released transport failure as Internal.
+                let error = if error.kind == Some(safe_cex_engine::ErrorKind::Network) {
+                    error.kind(safe_cex_engine::ErrorKind::Internal)
+                } else {
+                    error
+                };
+                self.history_failed(cx, *request, error);
+            }
             Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Candles { context, .. } => {
