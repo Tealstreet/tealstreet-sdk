@@ -280,7 +280,15 @@ New-contract REDs follow the API review:
    - Resume selects exactly one attempt with the drain's delivery as
      predecessor.
    - Covered by N2 and by the retire-then-re-park control.
-3. **Preflight park.** `preflight_session_wait` and its retry twin (N7).
+3. **Preflight park (after combo-5b).** `preflight_session_wait` and its retry
+   twin (N7). It waits for #1896 for two reasons:
+   - an ended Preflight needs Preflight-ready custody
+     (`on_http_preflight_ready`) for its disposition, and there is no such
+     custody on 77f12408947;
+   - a retained Preflight's read window is unbounded, so its wait is bounded by
+     the #1949 receipt cap (a timer at the cap) or ends only through Session
+     retire/failed or `fail_preflight`.
+   It lands on the post-5b integration of this branch.
 4. **Bearer composition.** N8b and R10b' land with or after the Bearer hook's
    packet fence.
 
