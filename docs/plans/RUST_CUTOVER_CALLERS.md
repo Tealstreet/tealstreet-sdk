@@ -7241,6 +7241,15 @@ preparation, signing, socket, timer or Store update. Supported candle intervals,
 query/stream behavior and unsupported WS subscription diagnostics are unchanged.
 
 
+## CPU runtime environment mismatch evidence
+
+Shared CPU runtime restoration reports every differing identity field, including
+nested Node component versions, with the sealed expected and runner actual
+values in deterministic dotted-field order. Identity rejection still precedes
+all restore writes. The existing image, architecture, Node and component
+bindings remain enforced; provisioner versions are outside that identity.
+
+
 ## WEEX history pages retain the caller Read root (#2003)
 
 WEEX fills, normal/algo order history, public trades and income now retain the
