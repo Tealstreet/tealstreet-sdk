@@ -56,7 +56,9 @@ impl Rig {
     fn drain(&mut self) -> Vec<Action> {
         let mut out = Vec::new();
         while self.engine.has_actions() {
-            for action in self.engine.drain_actions().collect::<Vec<_>>() {
+            for action in
+                safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now)
+            {
                 match action {
                     Action::Http(r) => {
                         let body = match kind(&r).as_str() {
