@@ -957,22 +957,15 @@ fn retained_claim_slot_cannot_bypass_native_primary_only_guards() {
     use safe_cex_venue_kraken::sign::dispatch::Http;
     let (_, ids) = provider("recipe-retained-slot-guards", true, 0);
     let slots = setup::futures_slots(&ids);
-    for method in [Method::Get, Method::Post] {
+    for (method, path) in [
+        (Method::Get, "/api/history/v3/executions"),
+        (Method::Post, "/api/history/v3/executions"),
+        (Method::Post, "/api/v3/sendorder"),
+    ] {
         let (_, identity, claim) = slots
             .select_with_nonce(CredentialRole::Read { scope: None }, &KRAKEN)
             .unwrap();
-        assert!(
-            Http::futures(
-                identity,
-                claim,
-                method,
-                "/api/history/v3/executions",
-                "",
-                false,
-                5000.
-            )
-            .is_err()
-        );
+        assert!(Http::futures(identity, claim, method, path, "", false, 5000.).is_err());
     }
     let (_, identity, claim) = slots
         .select_with_nonce(CredentialRole::Read { scope: None }, &KRAKEN)

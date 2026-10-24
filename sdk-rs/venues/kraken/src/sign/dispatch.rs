@@ -193,6 +193,46 @@ impl Http {
     pub fn body(&self) -> Option<&str> {
         self.body.as_deref()
     }
+    fn work(&self, nonce: u64, stamp_ms: f64) -> Result<(Option<String>, SignRequest), SignError> {
+        let nonce_text = nonce.to_string();
+        let body = if self.spot {
+            Some(format!(
+                "{}{}nonce={nonce_text}",
+                self.form,
+                if self.form.is_empty() { "" } else { "&" }
+            ))
+        } else {
+            self.body.clone()
+        };
+        let hash_input = if self.spot {
+            format!("{nonce_text}{}", body.as_deref().unwrap())
+        } else {
+            format!("{}{nonce_text}{}", self.form, self.path)
+        };
+        let receipt = SignReceipt {
+            stamp_ms: Some(stamp_ms),
+            nonce: Some(nonce),
+            ..Default::default()
+        };
+        let mut work = hash_work(
+            &self.identity,
+            hash_input.into_bytes(),
+            self.spot.then_some(self.path.as_bytes()),
+            receipt,
+        );
+        work.context = Context {
+            venue: if self.spot { "krakenspot" } else { "kraken" }.into(),
+            method: self.method.as_str().into(),
+            host: self
+                .url
+                .strip_prefix("https://")
+                .and_then(|url| url.split('/').next())
+                .ok_or(SignError::InvalidRequest)?
+                .into(),
+            path: self.path.clone(),
+        };
+        Ok((body, work))
+    }
     fn attest(&self, request: &HttpRequest, body: Option<&str>) -> Result<(), SignError> {
         if request.method != self.method
             || request.url != self.url
@@ -236,43 +276,8 @@ impl SignStep for Http {
                 NonceError::InvalidTime | NonceError::InvalidClaim => SignError::InvalidRequest,
                 _ => SignError::Unavailable,
             })?;
-        let nonce_text = nonce.to_string();
-        let body = if self.spot {
-            Some(format!(
-                "{}{}nonce={nonce_text}",
-                self.form,
-                if self.form.is_empty() { "" } else { "&" }
-            ))
-        } else {
-            self.body.clone()
-        };
-        let hash_input = if self.spot {
-            format!("{nonce_text}{}", body.as_deref().unwrap())
-        } else {
-            format!("{}{nonce_text}{}", self.form, self.path)
-        };
-        let receipt = SignReceipt {
-            stamp_ms: Some(dispatch.stamp_ms()),
-            nonce: Some(nonce),
-            ..Default::default()
-        };
-        let mut work = hash_work(
-            &self.identity,
-            hash_input.into_bytes(),
-            self.spot.then_some(self.path.as_bytes()),
-            receipt,
-        );
-        work.context = Context {
-            venue: if self.spot { "krakenspot" } else { "kraken" }.into(),
-            method: self.method.as_str().into(),
-            host: self
-                .url
-                .strip_prefix("https://")
-                .and_then(|url| url.split('/').next())
-                .ok_or(SignError::InvalidRequest)?
-                .into(),
-            path: self.path.clone(),
-        };
+        let (body, work) = self.work(nonce, dispatch.stamp_ms())?;
+        let receipt = work.receipt;
         request.body = body.clone();
         self.prepared = Some((receipt, body));
         Ok(work)

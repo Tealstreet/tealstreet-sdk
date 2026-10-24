@@ -580,3 +580,29 @@ adoption proof is a later consumer gate. This fixture is not native Kraken
 account plumbing, a wasm module or EngineHost proof. No native funnel, registry,
 socket, read-key capsule or inventory changes; no push/CI. The exact retained
 constructor checkpoint is supplied for bounded review before proof use.
+
+### Private pure work builder for boundary proof
+
+The nonce owner requested a same-code u64-max formatter path without production
+nonce seeding. Http::work(nonce, stamp_ms) is private. It returns the exact body
+and atomic SignRequest; a mechanical check reconstructs the moved formatting,
+hash_work and advisory context block from086feb09c6e by replacing only the stamp
+parameter name. Actual prepare still attests, reserves exactly once, calls this
+helper and records that same returned receipt/body before apply. No new public
+constructor, nonce input, reservation override or authority is added.
+
+The unit control committed at086feb09c6e first fails on missing work() (an honest
+NEW-CONTRACT compile RED). After factoring, library11 and dispatcher16 controls
+pass, plus scoped strict Clippy. The unit uses actual LocalSigner HMAC with the
+independently supplied node:crypto literals for2^53+1,2^53+3 andu64MAX, asserting
+canonical decimal body/receipt JSON, round-trip u64, exact presented fixture key
+and MAC. It deliberately invokes no reserve, Cx, host or WASM and claims none.
+The direct claim-constructor guard also now pins Secondary POST /api/v3/sendorder
+alongside both existing history method cases and Spot; targeted control passes.
+
+The isolated WASM proof harness may append a test-only wrapper in this same
+module to access work(), keeping the actual source prefix byte-exact and hashing
+its separate harness artifact. That wrapper is not production SDK API and must
+not reserve/seed or masquerade as a real family consumer. V5 is codec+actual
+recipe MAC only; V3/V4 genuine reservations and stale-Claim repair remain engine
+proof obligations. Native Kraken-family adoption stays a later gate.
