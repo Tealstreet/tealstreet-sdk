@@ -1004,7 +1004,10 @@ fn hyro_retry_refused_after_a_released_create_stays_unknown() {
     gate.mode.store(2, Ordering::SeqCst);
     h.respond("/v5/order/history", 200, EMPTY_PAGE);
     assert_eq!(
-        h.outcomes.iter().filter(|(c, _)| *c == 42).collect::<Vec<_>>(),
+        h.outcomes
+            .iter()
+            .filter(|(c, _)| *c == 42)
+            .collect::<Vec<_>>(),
         [&(42, Some(Outcome::Unknown))]
     );
 }
