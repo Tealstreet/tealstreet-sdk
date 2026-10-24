@@ -588,3 +588,19 @@ Io.nonce_unscheduled as the captured release-mode fact used by barrier refusal;
 store nonce permission separately. Ordinary Plans and the default-capability
 pure mode retain their existing behavior. The changing-static-getter control
 still proves that an optimization selector cannot bypass captured permission.
+
+
+The first static-capability diagnostic (`55d4c639fbd`, before the reviewed
+capture-ceiling correction) measures 14,158,328 bytes, still 2,552 over. It
+restores the ordinary Lifecycle body per V, undoing part of ordinary sharing.
+Preserve the capability gate while splitting the concrete helper into two
+private entries: the reviewed nonce-capable Claim, and a shared nonce-free
+ordinary Claim containing exactly the previously shared ordinary arm. Choose
+the private entry from the static selector plus captured permission, then use
+the same exclusive borrowed admission enum. A disabled capability with retained
+nonce state still refuses State before either Lifecycle or callback. Both
+entries remain out of line; no generic body, public API or compiler profile
+changes. The ordinary entry preserves SigningRelease-before-admit and full
+Admission, and the nonce entry preserves its existing order and mutex body.
+This addresses the engine review's duplicated-ordinary-path note and requires
+the same ordinary/nonce/capture/barrier controls and exact measurement.
