@@ -74,10 +74,10 @@ jobs:
           - check: fmt
             command: cargo fmt --all --check
           - check: clippy
-            command: cargo clippy --locked --workspace --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark -- -D warnings
+            command: cargo clippy --locked --workspace --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark,hmac-sha512 -- -D warnings
           - check: test
             # Workspace builds unify crypto features; prove disabled and enabled provider arms.
-            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark --lib signer::'
+            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,hmac-sha512 --lib signer::'
           # Workspace resolution unifies family features. Exercise each
           # standalone engine closure, including both Plan configurations.
           - check: engine-feature-modes
