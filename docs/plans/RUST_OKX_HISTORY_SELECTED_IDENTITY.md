@@ -131,3 +131,16 @@ actual, and claude-4yjlw0 confirmed closed/history plus the new test stay disjoi
 from READY #1996. The shrink remains exactly two selection occurrences: closed1
 to0 and history2 to1. The snapshot-presence gate stays unchanged. New originals
 use the actual landed checker and real native signed requests before source.
+
+Original checkpoint: the removal-only credential inventory makes the actual
+checker fail with current-sites/inventory mismatch on unchanged production.
+Only closed1 ->0 and history2 ->1 differ from actual219d; every other inventory
+value is exact. The new actual-Engine target passes8 native controls and the
+existing lookup target passes8, zero ignored; scoped strict Clippy passes.
+Controls pin both-key/primary-only signatures, declared Primary/Secondary route
+intent, keyless/filtered-primary precedence, primary lookup, unsigned demo
+public trades, and later closed/order page selection and cursors. An initial
+fixture assertion incorrectly equated physical HttpRequest.route with managed
+routing intent; the immediate preparer leaves that transport field None. That
+assumption was corrected before counting originals: raw Prepare intent and
+provider-produced key headers are pinned separately, with no claimed routing RED.
