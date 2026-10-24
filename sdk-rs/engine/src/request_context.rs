@@ -1181,6 +1181,21 @@ pub struct CommandWrites {
     evidence: evidence::EvidenceBudget,
     // An earlier attempt of this intent may have reached the venue.
     inherited_uncertain: bool,
+    stream: Option<Box<StreamedWrites>>,
+}
+
+/// A streamed serial Plan's settled calls: accepted IDs exactly as received,
+/// refusals counted, and refusal reports kept only while the text budget lasts.
+#[derive(Default)]
+#[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+struct StreamedWrites {
+    refusals_complete: bool,
+    ids: Vec<String>,
+    settled: usize,
+    refused: usize,
+    effects: bool,
+    retained: Vec<(RequestId, VenueError, RejectionReports)>,
+    retained_bytes: usize,
 }
 // Private synchronous terminal preparation. Never exposed as a venue grant.
 #[cfg(feature = "http-plans")]
@@ -1235,6 +1250,7 @@ impl CommandWrites {
             report_messages: 0,
             evidence: evidence::EvidenceBudget::default(),
             inherited_uncertain: false,
+            stream: None,
         })
     }
     pub fn register(&mut self, id: RequestId, leg: u64) -> Result<(), Error> {
@@ -1744,6 +1760,9 @@ impl CommandWrites {
     }
 
     fn validate_success(&self) -> Result<(), Error> {
+        if let Some(stream) = &self.stream {
+            return self.validate_streamed_success(stream);
+        }
         if self.sealed || self.attempts.is_empty() || self.attempts.iter().any(|a| a.id_overflow) {
             return Err(Error::State);
         }
@@ -1792,7 +1811,8 @@ impl CommandWrites {
             return Err(Error::State);
         }
         let mut projected_budget = self.evidence;
-        let any_released = self.attempts.iter().any(|a| a.released);
+        let settled = self.streamed().map_or(0, |stream| stream.settled);
+        let any_released = settled > 0 || self.attempts.iter().any(|a| a.released);
         let uncertain = self.attempts.iter().enumerate().any(|(index, a)| {
             a.released
                 && (matches!(
@@ -1812,6 +1832,7 @@ impl CommandWrites {
                 })
         });
         let all_rejected = any_released
+            && !self.streamed().is_some_and(|stream| stream.effects)
             && self
                 .attempts
                 .iter()
@@ -1838,7 +1859,13 @@ impl CommandWrites {
                 .min_by(|(a, _), (b, _)| a.cmp(b))
                 .map(|(_, error)| error)
         };
-        let selected = select(true).or_else(|| select(false));
+        // Settled serial refusals precede every live call in planning order.
+        let selected = self
+            .streamed()
+            .and_then(|stream| stream.retained.first())
+            .map(|(_, error, _)| error.clone())
+            .or_else(|| select(true))
+            .or_else(|| select(false));
         let mut overflow = self.attempts.iter().any(|attempt| attempt.id_overflow);
         let mut error = match selected {
             Some(error) => error, // Already-budgeted facts are never charged again.
@@ -1872,16 +1899,29 @@ impl CommandWrites {
         // Preserve the selected native/fallback evidence prefix exactly. Append
         // additional facts in logical replacement order, without charging known
         // IDs again or reordering a bounded retained prefix.
-        let mut ids = error
-            .partial
-            .as_ref()
-            .map_or_else(Vec::new, |partial| partial.order_ids.clone());
-        for attempt in self.ordered_attempts() {
-            let order_ids = attempt.result.as_ref().map(WriteResult::order_ids);
-            if let Some(order_ids) = order_ids {
-                for id in order_ids {
-                    if !ids.contains(id) {
-                        ids.push(id.clone());
+        let mut ids = if let Some(stream) = self.streamed() {
+            // Native appends every identity exactly as received.
+            let mut ids = stream.ids.clone();
+            for attempt in self.ordered_attempts() {
+                if let Some(result) = &attempt.result {
+                    ids.extend(result.order_ids().iter().cloned());
+                }
+            }
+            ids
+        } else {
+            error
+                .partial
+                .as_ref()
+                .map_or_else(Vec::new, |partial| partial.order_ids.clone())
+        };
+        if self.streamed().is_none() {
+            for attempt in self.ordered_attempts() {
+                let order_ids = attempt.result.as_ref().map(WriteResult::order_ids);
+                if let Some(order_ids) = order_ids {
+                    for id in order_ids {
+                        if !ids.contains(id) {
+                            ids.push(id.clone());
+                        }
                     }
                 }
             }
@@ -1895,6 +1935,13 @@ impl CommandWrites {
         }
         if overflow {
             evidence::mark_id_overflow(&mut error);
+        }
+        if let Some(dropped) = self
+            .streamed()
+            .map(|stream| stream.refused - stream.retained.len())
+            .filter(|dropped| *dropped > 0)
+        {
+            error.message = format!("{} [truncated: {dropped} more refusals]", error.message);
         }
         Ok((error, projected_budget))
     }
@@ -1928,7 +1975,7 @@ impl CommandWrites {
         prepared.failure
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "http-plans"))]
     pub(crate) fn holds_attempt(&self, id: RequestId) -> bool {
         self.attempts.iter().any(|attempt| attempt.id == id)
     }
@@ -1937,24 +1984,185 @@ impl CommandWrites {
     /// A refusal recovered by a later attempt is history, not a rejected leg.
     /// Reading evidence never reopens a sealed command or emits another result.
     pub fn rejections(&self) -> impl Iterator<Item = (RequestId, &VenueError)> {
-        self.ordered_attempts()
-            .into_iter()
-            .filter(|attempt| self.terminal(attempt))
-            .filter_map(|attempt| match &attempt.result {
-                Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
-                    Some((attempt.id, error))
-                }
-                _ => None,
-            })
+        self.streamed_retained()
+            .map(|(id, error, _)| (*id, error))
+            .chain(
+                self.ordered_attempts()
+                    .into_iter()
+                    .filter(|attempt| self.terminal(attempt))
+                    .filter_map(|attempt| match &attempt.result {
+                        Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
+                            Some((attempt.id, error))
+                        }
+                        _ => None,
+                    }),
+            )
+    }
+
+    /// Every definitive refusal, including streamed ones past the retained text.
+    pub fn refusal_count(&self) -> usize {
+        self.streamed()
+            .map_or(0, |stream| stream.refused - stream.retained.len())
+            + self.rejections().count()
     }
 
     /// Engine-issued logical leg ids carry planning order, independently of
     /// physical registration/callback order and the position of a later retry.
     pub fn reports(&self) -> impl Iterator<Item = &str> {
-        self.ordered_attempts()
-            .into_iter()
+        self.streamed_retained()
+            .flat_map(|(_, _, reports)| reports.messages.iter().map(String::as_str))
+            .chain(
+                self.ordered_attempts()
+                    .into_iter()
+                    .filter(|attempt| self.terminal(attempt))
+                    .flat_map(|last| last.reports.messages.iter().map(String::as_str)),
+            )
+    }
+
+    fn streamed(&self) -> Option<&StreamedWrites> {
+        self.stream.as_deref()
+    }
+
+    fn streamed_retained(
+        &self,
+    ) -> impl Iterator<Item = &(RequestId, VenueError, RejectionReports)> {
+        self.stream.iter().flat_map(|stream| stream.retained.iter())
+    }
+
+    fn serial_uncertain(&self) -> bool {
+        self.inherited_uncertain
+            || self.attempts.iter().any(|attempt| {
+                attempt.id_overflow
+                    || (attempt.released
+                        && matches!(
+                            attempt.result,
+                            None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_))
+                        ))
+            })
+    }
+
+    fn validate_streamed_success(&self, stream: &StreamedWrites) -> Result<(), Error> {
+        if self.sealed || self.serial_uncertain() {
+            return Err(Error::State);
+        }
+        let mut refused = stream.refused > 0;
+        let mut sent = stream.settled > 0;
+        for attempt in self
+            .attempts
+            .iter()
             .filter(|attempt| self.terminal(attempt))
-            .flat_map(|last| last.reports.messages.iter().map(String::as_str))
+        {
+            match (&attempt.result, attempt.released) {
+                (Some(WriteResult::Accepted { .. }), true) => {}
+                (Some(WriteResult::Rejected(_) | WriteResult::KnownPartial(_)), true) => {
+                    refused = true
+                }
+                _ => return Err(Error::State),
+            }
+            sent = true;
+        }
+        if !sent || (refused && !stream.refusals_complete) {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "http-plans")]
+impl CommandWrites {
+    /// Journal one serial Plan call at a time: each settled call is compacted
+    /// into the streamed history before the next one registers.
+    pub(crate) fn streamed_with(mut self, refusals_complete: bool) -> Self {
+        self.stream = Some(Box::new(StreamedWrites {
+            refusals_complete,
+            ..StreamedWrites::default()
+        }));
+        self
+    }
+
+    /// Continuation custody: nothing uncertain, and (for a write) the leg's
+    /// latest attempt released with a definitive native answer.
+    pub(crate) fn validate_serial_continuation(&self, leg: Option<u64>) -> Result<(), Error> {
+        if self.sealed || self.serial_uncertain() {
+            return Err(Error::State);
+        }
+        let Some(leg) = leg else {
+            return Ok(());
+        };
+        let attempt = self
+            .latest(leg)
+            .and_then(|id| self.attempts.iter().find(|attempt| attempt.id == id))
+            .ok_or(Error::State)?;
+        if !attempt.released
+            || !matches!(
+                attempt.result,
+                Some(
+                    WriteResult::Accepted { .. }
+                        | WriteResult::Rejected(_)
+                        | WriteResult::KnownPartial(_)
+                )
+            )
+        {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
+    /// Move a settled leg into the streamed history. Its identities leave the
+    /// per-attempt budget; refusals beyond the retained text are only counted.
+    pub(crate) fn compact_serial(&mut self, leg: u64) {
+        let latest = self.latest(leg);
+        let mut index = 0;
+        while index < self.attempts.len() {
+            if self.attempts[index].leg != leg {
+                index += 1;
+                continue;
+            }
+            let attempt = self.attempts.remove(index);
+            let terminal = Some(attempt.id) == latest;
+            let stream = self.stream.as_mut().expect("streamed serial journal");
+            let mut reports = attempt.reports;
+            if let Some(result) = attempt.result {
+                self.evidence.release_identities(result.order_ids());
+                if terminal {
+                    match result {
+                        WriteResult::Accepted { order_ids } => {
+                            stream.effects |= !order_ids.is_empty();
+                            stream.ids.extend(order_ids);
+                        }
+                        WriteResult::Rejected(mut error) | WriteResult::KnownPartial(mut error) => {
+                            if let Some(partial) = error.partial.take() {
+                                stream.effects |= !partial.order_ids.is_empty();
+                                stream.ids.extend(partial.order_ids);
+                            }
+                            stream.refused += 1;
+                            let bytes = error.message.len()
+                                + error.venue_code.as_ref().map_or(0, String::len)
+                                + error.venue_message.as_ref().map_or(0, String::len);
+                            if stream.retained_bytes + bytes <= evidence::RETAINED_TEXT_BYTES {
+                                stream.retained_bytes += bytes;
+                                stream.retained.push((
+                                    attempt.id,
+                                    error,
+                                    std::mem::take(&mut reports),
+                                ));
+                            }
+                        }
+                        // Continuation never settles an uncertain fact.
+                        WriteResult::PartialUnknown(_) | WriteResult::Failed(_) => {
+                            unreachable!("validated definitive serial fact")
+                        }
+                    }
+                }
+            }
+            self.report_bytes -= reports.retained_bytes;
+            self.report_messages -= reports.messages.len();
+        }
+        self.legs.retain(|entry| entry.id != leg);
+        self.stream
+            .as_mut()
+            .expect("streamed serial journal")
+            .settled += 1;
     }
 }
 

@@ -107,6 +107,11 @@ mod serial_plans {
         read_failures: u32,
         probe_custody: bool,
         probe_second_admission: bool,
+        timer: Option<TimerId>,
+        idle_failures: bool,
+        session: Option<crate::request_context::Session>,
+        session_park: Option<Result<(), Error>>,
+        session_retired: Option<usize>,
         // Native job state.
         job_ids: Vec<String>,
         current: Option<SerialCall>,
@@ -158,8 +163,18 @@ mod serial_plans {
 
     impl Serial {
         fn policy(&self) -> SerialPolicy {
+            // A WriteAfterReads Preflight always holds a write credential, so the
+            // reachable "no write credential" case is a Plan naming another one.
+            let credential = if self.no_credential {
+                crate::request_context::Credential {
+                    reference: crate::signing::KeyRef("other".into()),
+                    ..credential()
+                }
+            } else {
+                credential()
+            };
             SerialPolicy {
-                credential: credential(),
+                credential,
                 pacing: self.pacing,
                 refusals_complete: self.refusals_complete,
             }
@@ -185,7 +200,7 @@ mod serial_plans {
                     PreflightPurpose::WriteAfterReads
                 },
                 read_credential: None,
-                write_credential: (!self.read_preflight && !self.no_credential).then(credential),
+                write_credential: (!self.read_preflight).then(credential),
             };
             let Ok(preflight) = cx.begin_preflight(policy) else {
                 self.admitted = Some(Err(Error::Revoked));
@@ -204,6 +219,26 @@ mod serial_plans {
                                 .map(drop),
                         );
                         assert_eq!(Self::snapshot(cx), again);
+                    }
+                    if let Some(session) = self.session.clone() {
+                        let token = cx
+                            .http_context(
+                                crate::request_context::Scope::Background,
+                                crate::request_context::Policy {
+                                    operation: Operation::Read,
+                                    credential: None,
+                                    timeout_ms: 1_000_000,
+                                    pacing: None,
+                                    retry: RetryPolicy::Never,
+                                },
+                            )
+                            .unwrap();
+                        let mid = Self::snapshot(cx);
+                        self.session_park = Some(
+                            cx.plan_session_wait(&plan, &slot, None, &session, token)
+                                .map_err(|(_, error)| error),
+                        );
+                        assert_eq!(Self::snapshot(cx), mid, "a refused park spends nothing");
                     }
                     self.plan = Some(plan);
                     self.slot = Some(slot);
@@ -226,7 +261,8 @@ mod serial_plans {
                 .push(cx.io.request_contexts.plan_context_storage());
             #[cfg(feature = "order-locks")]
             self.lock_held.push(cx.io.order_locks.contains(7));
-            queue(cx, context, call.operation == Operation::Mutation);
+            // Every serial call carries the admitted credential, Reads included.
+            queue(cx, context, true);
         }
         fn probe(&mut self, cx: &mut Cx<'_, Context>, name: &'static str, context: &Context) {
             let (Some(plan), Some(slot)) = (self.plan.clone(), self.slot.clone()) else {
@@ -323,7 +359,7 @@ mod serial_plans {
         type Pending = Context;
         fn start(&mut self, cx: &mut Cx<'_, Context>) {
             if self.probe_custody {
-                cx.set_timer(1.);
+                self.timer = Some(cx.set_timer(1.));
             }
         }
         fn on_command(&mut self, cx: &mut Cx<'_, Context>, _: Command) {
@@ -344,6 +380,11 @@ mod serial_plans {
                 self.probe(cx, "fact not yet recorded", &context);
             }
             self.data += 1;
+            if self.data == 1
+                && let Some(session) = self.session.clone()
+            {
+                self.session_retired = Some(cx.retire_session(&session).unwrap().len());
+            }
             let stop = match parse(response.body) {
                 Reply::Read => {
                     assert_eq!(self.current.unwrap().operation, Operation::Read);
@@ -482,6 +523,9 @@ mod serial_plans {
         }
         fn on_request_failed(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: &str) {
             self.failures += 1;
+            if self.idle_failures {
+                return;
+            }
             if self.probe_custody {
                 self.probe(cx, "failure callback", &context);
             }
@@ -516,8 +560,10 @@ mod serial_plans {
                     return;
                 }
             }
-            cx.finish_plan_failed_call(&plan, &slot, &context).unwrap();
-            self.terminal = Some(cx.fail_plan(&plan, "call failed"));
+            // An unreleased call (a provider refusal) is stopped by the engine.
+            if cx.finish_plan_failed_call(&plan, &slot, &context).is_ok() {
+                self.terminal = Some(cx.fail_plan(&plan, "call failed"));
+            }
         }
         fn on_http_plan_ready(&mut self, cx: &mut Cx<'_, Context>, plan: &Plan) {
             self.ready += 1;
@@ -532,6 +578,20 @@ mod serial_plans {
             }
         }
         fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {}
+        // The Plan's placement holds the engine's BTCUSD order lock.
+        fn guard_pending_placements(&self) -> bool {
+            true
+        }
+        fn guard_order_mutations(&self) -> bool {
+            true
+        }
+        // RED8's pacing controls name group 1; an undeclared group is never sendable.
+        fn http_pacing(&self) -> &[crate::request_context::Pacing] {
+            &[crate::request_context::Pacing {
+                group: 1,
+                minimum_gap_ms: 0.,
+            }]
+        }
         fn capture_http_reconciliation(
             &self,
             _: &Context,
@@ -552,16 +612,25 @@ mod serial_plans {
     // Engine driving: genuine Prepare, provider signing, Bind and Claim.
     fn command(engine: &mut Engine<Serial>, now: f64, wait_ms: Option<u32>) {
         engine.start(now);
-        engine
-            .handle_command(
-                now,
-                Command::Venue {
-                    command: 7,
-                    action: VenueAction::FetchBalanceInfo,
-                },
-                wait_ms,
-            )
-            .unwrap();
+        // A placement, so the engine holds a real BTCUSD order lock for the Plan.
+        // A ReadOnly Preflight is refused under that lock, so its controls read.
+        let command = if engine.venue.read_preflight {
+            Command::Venue {
+                command: 7,
+                action: VenueAction::FetchBalanceInfo,
+            }
+        } else {
+            Command::PlaceOrders {
+                command: 7,
+                orders: vec![
+                    serde_json::from_str(
+                        r#"{"symbol":"BTCUSD","type":"limit","side":"buy","amount":1,"price":1}"#,
+                    )
+                    .unwrap(),
+                ],
+            }
+        };
+        engine.handle_command(now, command, wait_ms).unwrap();
     }
     fn prepared(actions: &[Action]) -> Option<Preparation> {
         actions.iter().find_map(|a| match a {
@@ -804,14 +873,8 @@ mod serial_plans {
         let mut actions = e.drain_actions().collect::<Vec<_>>();
         let token = prepared(&actions).unwrap();
         release(&mut e, token, 0.);
-        let timer =
-            e.io.timers
-                .keys()
-                .copied()
-                .find(|t| e.io.request_contexts.plan_timer(7) != Some(*t));
-        if let Some(timer) = timer {
-            e.handle(0.5, Event::TimerFired { timer });
-        }
+        let timer = e.venue.timer.expect("venue timer");
+        e.handle(1., Event::TimerFired { timer });
         reply(&mut e, token, STEP_MS, "ok:a");
         actions = e.drain_actions().collect();
         let token = prepared(&actions).unwrap();
@@ -1035,7 +1098,8 @@ mod serial_plans {
             .sum::<usize>();
         assert!(text <= 64 * 1024, "retained refusal text {text}");
         assert!(writes.rejections().count() < 29_999, "stream-and-retire");
-        let (actions, _) = drive(&mut e, now, ["reject"]);
+        assert_eq!(writes.refusal_count(), 29_999, "the count stays exact");
+        let (actions, _) = drive_from(&mut e, actions, now, ["reject"]);
         assert_eq!(done(&actions).as_deref(), Some("[]"));
     }
 
@@ -1252,7 +1316,12 @@ mod serial_plans {
             .sum::<usize>();
         assert!(text <= 64 * 1024);
         assert!(writes.rejections().count() < 59_999);
-        let (actions, _) = drive(&mut e, now, ["reject"]);
+        assert_eq!(
+            writes.refusal_count(),
+            59_999,
+            "mixed batches share the count"
+        );
+        let (actions, _) = drive_from(&mut e, actions, now, ["reject"]);
         assert_eq!(done(&actions).as_deref(), Some("[]"));
     }
 
@@ -1513,6 +1582,171 @@ mod serial_plans {
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result }) if result == "[]")));
         assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(_))));
+    }
+
+    // RED19 stops. A provider refusing the next call's credential stops the
+    // chain at that call's own failure custody, even when the venue does nothing.
+    #[test]
+    fn serial_19_a_credential_refusal_stops_the_chain_with_every_streamed_id() {
+        let mut e = engine(Serial {
+            total: 5,
+            idle_failures: true,
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let (actions, now) = drive(&mut e, 0., ["ok:a", "ok:b"]);
+        let token = prepared(&actions).expect("the third call is prepared");
+        e.http_prepared(
+            now,
+            token,
+            Prepared {
+                id: token.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let signing = e.drain_actions().collect::<Vec<_>>();
+        let (attempt, _) = work(&signing);
+        e.handle(
+            now,
+            Event::Signed {
+                attempt,
+                result: Err(crate::signing::SignError::Refused),
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let error = failed(&actions).expect("one terminal at the refused call's custody");
+        assert_eq!(error.partial.unwrap().order_ids, ["a", "b"]);
+        assert_ne!(
+            error.outcome,
+            Some(crate::Outcome::Unknown),
+            "nothing live was released"
+        );
+        assert!(
+            prepared(&actions).is_none(),
+            "nothing after the stop is sent"
+        );
+        assert!(
+            e.io.request_contexts.plan_timer(7).is_none(),
+            "the Plan is gone"
+        );
+    }
+
+    #[test]
+    fn serial_07_refusals_past_the_text_budget_are_marked_in_the_failure() {
+        let bodies = vec!["reject"; 7_000];
+        let actions = refusals(false, false, &bodies);
+        let error = failed(&actions).expect("all-refused without the flag fails");
+        assert_eq!(error.outcome, Some(crate::Outcome::Rejected));
+        assert!(error.message.contains("[truncated: "), "{}", error.message);
+    }
+
+    #[test]
+    fn serial_17_a_provider_refused_read_cannot_retry() {
+        let mut e = engine(Serial {
+            total: 2,
+            first: Some(read()),
+            retry_failed_reads: true,
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let token = prepared(&actions).unwrap();
+        e.http_prepared(
+            0.,
+            token,
+            Prepared {
+                id: token.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let signing = e.drain_actions().collect::<Vec<_>>();
+        let (attempt, _) = work(&signing);
+        e.handle(
+            0.,
+            Event::Signed {
+                attempt,
+                result: Err(crate::signing::SignError::Refused),
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(e.venue.failures, 1);
+        assert_eq!(
+            e.venue.continued,
+            [Err(Error::Revoked)],
+            "a Read that never reached the venue cannot retry"
+        );
+        assert!(prepared(&actions).is_none(), "no fresh Read");
+        assert_eq!(
+            failed(&actions).unwrap().outcome,
+            Some(crate::Outcome::NotSent)
+        );
+    }
+
+    #[test]
+    fn serial_17_a_mutation_failure_never_takes_the_read_retry() {
+        let mut e = engine(Serial {
+            total: 3,
+            retry_failed_reads: true,
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let token = prepared(&actions).unwrap();
+        release(&mut e, token, 0.);
+        e.handle(
+            STEP_MS,
+            Event::HttpFailed {
+                request: token.attempt().request,
+                error: "reset",
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            matches!(e.venue.continued.first(), Some(Err(_))),
+            "{:?}",
+            e.venue.continued
+        );
+        assert!(prepared(&actions).is_none());
+        assert_eq!(
+            failed(&actions).unwrap().outcome,
+            Some(crate::Outcome::Unknown)
+        );
+    }
+
+    // A serial slot never parks on a Session, so retiring one mid-chain strands
+    // nothing and the chain finishes on its own custody.
+    #[test]
+    fn serial_19_b_session_retirement_strands_nothing_in_a_serial_plan() {
+        let mut e = engine(Serial {
+            total: 3,
+            ..Default::default()
+        });
+        e.start(0.);
+        let session = Cx {
+            now: 0.,
+            store: &mut e.store,
+            io: &mut e.io,
+        }
+        .open_session(crate::request_context::SessionPolicy {
+            credential: None,
+            repeat_safe: true,
+            private_egress: None,
+        })
+        .unwrap();
+        e.venue.session = Some(session);
+        command(&mut e, 0., None);
+        admitted(&e);
+        assert_eq!(e.venue.session_park, Some(Err(Error::State)));
+        let (actions, _) = drive(&mut e, 0., ["ok:a", "ok:b", "ok:c"]);
+        assert_eq!(
+            e.venue.session_retired,
+            Some(0),
+            "no serial call was parked"
+        );
+        assert_eq!(done(&actions).as_deref(), Some("[a,b,c]"));
     }
 
     #[test]

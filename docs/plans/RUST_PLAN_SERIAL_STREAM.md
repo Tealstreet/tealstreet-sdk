@@ -375,6 +375,44 @@ fails at an assertion.
 - claude-dazzy3 reviews each RED19 stop as a RED first: each must fail
   against the source minus its stop handling before it is GREEN.
 
+## Source notes
+
+- **Root.** A serial root's deadline is `f64::MAX`. It is finite for `Context`,
+  and it never expires by clock. When the next wake would be the root, the
+  Plan timer is cleared rather than armed at an absurd time. It is armed only
+  for a delayed continuation.
+- **Continuation.** It swaps in a fresh one-call schedule and entry. The
+  previous Slot, Context and delivery go stale. It reserves `1 + 3×attempts`
+  IDs, plus signing IDs, and returns the one Context reservation, so the Plan
+  never holds more than one.
+- **Journal.** The journal is reserved for 2 attempts. Each settled write leg
+  is compacted into `StreamedWrites`: IDs are appended exactly as received
+  and leave the per-attempt ID budget; refusals are counted, and retained
+  only while their text fits 64 KB. `refusal_count()` stays exact. A failure
+  projection with dropped refusals carries
+  `[truncated: N more refusals]`.
+- **Read calls are signed** under the Plan's admitted credential, through
+  `request_signed_managed`. A credentialed Context refuses `request_managed`.
+  A consumer needing an unsigned public read inside the chain must ask.
+- **Stops.** Credential and provider refusal (RED19a) and Session retirement
+  (RED19b) are covered. There is no engine entry today for "engine shutdown"
+  or "caller cancel", so neither has a control; caller-wait expiry is RED18.
+  Re-checking uncertainty when a delayed continuation fires is moot: no call
+  is live during the delay, so no new fact can arrive.
+- **Fixture edits from the frozen REDs** (no assertion weakened):
+  - commands are BTCUSD PlaceOrders with the order-lock guards on, since a
+    balance read takes no lock;
+  - the venue declares pacing group 1 at 0 ms;
+  - Read calls are queued signed;
+  - RED3 fires the venue's own timer;
+  - RED7 and RED14 use `drive_from`;
+  - RED8's "no write credential" case is a credential mismatch, since a
+    WriteAfterReads Preflight cannot exist without a write credential;
+  - a provider-refused (unreleased) failure is left to the engine stop.
+  Assertions added: exact `refusal_count()` in RED7 and RED14, the
+  truncation marker, a provider-refused Read that cannot retry, and a
+  Mutation failure that never takes the Read retry.
+
 ## Gates
 
 - Engine focused tests in plans, locks, sockets and default feature modes, the
