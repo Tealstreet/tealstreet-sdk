@@ -583,6 +583,56 @@ fn account_signature_transport_counter_resets_only_at_next_stage() {
 }
 
 #[test]
+fn account_transport_then_signature_error_does_not_gain_another_retry() {
+    let mut h = Harness::new();
+    let r = h.http("private/get-positions");
+    h.actions.clear();
+    h.event(Event::HttpFailed {
+        request: r.id,
+        error: "connection lost",
+    });
+    let r = h.http("private/get-positions");
+    h.respond(&r, r#"{"code":40101}"#);
+    no_private_http(&h.actions);
+    assert_eq!(
+        h.actions
+            .iter()
+            .filter(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 10000.))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn account_signature_then_transport_uses_only_remaining_counter_budget() {
+    let mut h = Harness::new();
+    let r = h.http("private/get-positions");
+    h.actions.clear();
+    h.respond(&r, r#"{"code":40101}"#);
+    let mut r = h.http("private/get-positions");
+    for attempt in 1..=3 {
+        h.event(Event::HttpFailed {
+            request: r.id,
+            error: "connection lost",
+        });
+        if attempt < 3 {
+            r = h.http("private/get-positions");
+        } else {
+            no_private_http(&h.actions);
+            assert_eq!(
+                h.actions
+                    .iter()
+                    .filter(
+                        |a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 10000.)
+                    )
+                    .count(),
+                1
+            );
+        }
+    }
+}
+
+#[test]
 fn orders_refresh_initially_and_every_fourth_account_poll() {
     let mut h = Harness::new();
     h.load();

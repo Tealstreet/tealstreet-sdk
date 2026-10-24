@@ -192,7 +192,10 @@ history fail strictly through their exact root; writes record NotSent through
 the journal; account cleanup clears its busy state and schedules native poll
 recovery once; WS follows its existing failure/reconnect lifecycle. Pin each
 separately. A late WS signing result after close/reconnect is inert; retain the
-native one-second auth handoff and no financial or subscription work before auth.
+native one-second auth handoff and post-auth subscription release. This signing
+change does not gate native REST snapshots or WS reducers on auth: private_start
+starts reconciliation immediately, and the existing pre-auth financial ingress
+policy remains intact. The negative controls fence the auth signing action only.
 
 ## Original controls and gates
 
@@ -226,3 +229,10 @@ secret erasure, empty-batch precedence, mixed retry counters, fourth-cycle order
 and regular-order snapshot retention across advanced-order retry. The first WS
 fixture attempted to install the provider after startup; that setup error was
 corrected before counting its assertion RED. No runtime/map/Cargo edits.
+
+Actual5b219d4bc6725 is plain-merged at c9084cef977. Request/credential ratchets
+and both checker test targets (15/8) plus banned-pattern checks pass. The original
+26 controls retain13RED/13GREEN on that engine. Two added account same-stage
+mixed-error controls pass, bringing the current target to13RED/15GREEN/0ignored;
+the26 earlier bodies remain unchanged. Shared setup/checker hold is lifted;
+the explicit core Plan-constructor review remains required before source.
