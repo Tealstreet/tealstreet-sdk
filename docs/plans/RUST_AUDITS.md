@@ -3098,3 +3098,15 @@ Preparation refusals are strict. Candidate construction, parsing and private
 account/signing paths remain unchanged. Exact inventory identity3->0/family33->30
 removes one physical request and two numeric terminals, with no rename prune or
 new engine helper. Original plan/API receipts do not substitute for source review.
+
+
+## Hyperliquid local setting terminal authority
+
+Nine local numeric terminals use shared LocalSetting success or genuine Mutation
+admission plus fail_context. The Store one-way projection is inside the sealed
+local-setting closure; all validation and key-check precedence remain native.
+Only trading22->15 and trading/schedule3->1 inventory occurrences change, family
+31->22, with every retained hash count and foreign manifest byte preserved.
+Valid writes, queues, signatures, nonces, account, History, Builder and sockets
+remain exact. Original checks precede source and expose custody gaps, not new
+financial outcome defects or an altered signing model.

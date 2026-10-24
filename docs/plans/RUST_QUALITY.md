@@ -1780,3 +1780,15 @@ The32 focused tests pass, including all four deployment wires, four-candidate
 order, first-row/first-present-field precedence, retained capacity recovery,
 clock refusal, caller expiry and released physical-timeout continuation. Local
 checks are scoped with four jobs; broader builds and performance remain in CI.
+
+
+## Hyperliquid local settings and schedule controls
+
+Original25 controls execute12 assertion REDs/13 GREEN on unchanged9d344 source.
+The exact target, strengthened before production to validate all255 retained
+peers after capacity recovery, now passes25/25 without ignored controls. Ten
+capacity cases cover nine lexical sites, including both commands sharing the
+merged-spot success line. Native result/error/Store, duplicate-owner, invalid
+clock, zero-wait and schedule4999/5000/None boundary assertions are retained.
+The existing trading, spot and schedule targets pass unchanged. No broad local
+workspace/all-feature or WASM/performance build substitutes for exact-head CI.

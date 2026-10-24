@@ -7400,3 +7400,20 @@ while that exact original root remains live; preparation refusal cannot. Existin
 native status/row/error/referrer semantics remain unchanged. The single checked
 companion diagnostic and command terminal use that root. No new caller parameter,
 credential, Session, signer or private lifecycle activity is needed.
+
+
+## Hyperliquid local settings and schedule validation
+
+Standalone spot1x/cross and merged-spot leverage/margin no-ops still complete []
+without credentials or writes. One-way mode still projects hedged=false; shared
+LocalSetting admission now precedes that Store change and the single terminal.
+These Context-free successes consume only the local command owner transaction,
+not an HTTP Context or write journal. A full command-owner registry, invalid
+clock or caller receipt now gives one shared typed refusal before projection.
+
+Hedged mode, unsupported standalone spot leverage/margin, spot scheduleCancel and
+invalid schedule time retain native precedence, exact messages, kinds and NotSent.
+Each refusal first admits its genuine Mutation owner; shared admission rejection
+supersedes the native diagnostic with its typed NotSent terminal. Schedule time
+<now+5000 refuses; equality and None disarm still reach the unchanged signed path.
+No caller parameter, signing/selection change, valid write, retry or timer is added.
