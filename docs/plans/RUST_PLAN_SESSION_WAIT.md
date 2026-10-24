@@ -96,6 +96,19 @@ lineage are preserved: nothing is consumed while parked.
   - The engine never fails the Plan itself.
   - Each owner is visited once, with storage reserved at park.
   - This is the same queued fan-out shape as Bearer R10, so both use one flush.
+- **Retire ordering (shared with Bearer R10).** One Plan can hold both a
+  parked unit and another leg's bound unreleased packet on the same Session.
+  The shared queued flush runs per owner, in a fixed order:
+  1. Bound-packet attempt failures first, through the common
+     preparation-failure path. That may seal the Plan.
+  2. Then the parked pendings. If the Plan is still unsealed,
+     `on_plan_session_wait_ended` runs in its ready custody. If it is sealed,
+     the seal has already retired the parked unit, and its pending goes back
+     once through `on_session_wait_expired` with NotSent. That runs with no
+     custody and grants nothing, but it means a pending is never stranded.
+  Storage for both lists is reserved before any effect, and the flush runs
+  after the retiring callback exits. The result is exactly one terminal per
+  owner and no custody callback after a seal.
 - **Projection.** Parking adds no outcome. A wait that ends unissued is NotSent
   for that attempt only. The command terminal still comes from
   `failure_projection`, so prior released attempts and #2016's inherited fact
@@ -152,6 +165,10 @@ New-contract REDs follow the API review:
 - N6: custody. Parking outside Plan custody, on an execution or Background
   Plan, on a group Slot, twice on one Slot, or with a foreign or stale Session
   gives `Revoked`/`State`/`Duplicate`. Each refusal spends no IDs or timers.
+- N8 (mirrors Bearer R10b): a Plan with one parked Slot plus one bound
+  unreleased leg on the same Session, then retire. The bound failure seals the
+  Plan (one terminal), there is no `on_plan_session_wait_ended`, the parked
+  pending comes back once via `on_session_wait_expired`, and there is no HTTP.
 - N7: Preflight. A parked read resumes as a fresh read context under the same
   Preflight generation, with the predecessor equal to the drain delivery.
 
