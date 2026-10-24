@@ -1051,3 +1051,26 @@ selected a broken stable rustc sysroot before venue compilation; reruns pin
 Cargo, rustc and rustdoc to the installed 1.99.0 toolchain. The subsequent
 21/22 context result exposed the timer-retirement fixture assumption above;
 all six existing native identity controls passed on that attempt.
+
+
+Registry owner CLEARed the narrowed validation inputs (993228c8): the helper
+receives native configuration validation plus a borrowed seed and cannot read
+the key. Applied checker output removes identity read_credentials 1 and lib
+read_credentials 4->3, with no new sign.rs credential site. Signing inventory
+replaces only lib fingerprint536cfd15 count1 with cca861a2 count1: the old
+startup temporary cloned the raw read key, while the stored constructor gate
+only borrows the seed. This is an explicitly reviewed relocation, not a new
+holder or exemption. Remove cca861a2 with the later raw account/socket provider
+cutover; it must not survive as a permanent baseline. Three existing account/
+trading test literals receive only the two new None fields; assertions remain.
+
+
+Current applied-tree execution after the local target cleanup: Backpack209 PASS,
+0 FAIL, 1 pre-existing ignored; identity-context22/22, native identity7/7 and
+registry provider11/11. Backpack all-target strict Clippy PASS. The initial
+combined registry all-target check hit a pre-existing unguarded Hyro import
+under backpack-only features, so registry strict is scoped to its library and
+backpack_admission target; the full feature matrix remains CI's responsibility.
+Signing checker and its one control PASS after the reviewed one-for-one swap.
+A later full bans run sees only a foreign OKX inventory prune from the moving
+landing; no current Backpack inventory mismatch remains.
