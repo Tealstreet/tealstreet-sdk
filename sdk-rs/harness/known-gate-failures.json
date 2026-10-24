@@ -17554,17 +17554,6 @@
             "checkpoint 4 account.orders[1].symbol",
             "checkpoint 4 account.orders[2]"
           ]
-        },
-        {
-          "divergence": "Private protocol/authentication/stream coverage is incomplete in this fixture; this known FAIL is not authenticated lifecycle or complete private parity evidence.",
-          "keys": [
-            "rust: missing GRVT private stream: v1.fill",
-            "rust: missing GRVT private stream: v1.order",
-            "rust: missing GRVT private stream: v1.position",
-            "ts: missing GRVT private stream: v1.fill",
-            "ts: missing GRVT private stream: v1.order",
-            "ts: missing GRVT private stream: v1.position"
-          ]
         }
       ]
     },

@@ -2837,3 +2837,16 @@ Original test-only5a0303:4GREEN/15assertionRED/0ignored; all19 nowPASS. Native
 validation and credential-presence precedence remain unchanged; shared entry
 refusal owns capacity/clock failure without numeric fallback. Exact inventory
 history10->3, Lighter41->34occurrences; remote paging/auth/source untouched.
+
+## GRVT replay coverage diagnostic proof
+
+The final-capture controls retain two original assertion REDs and eight working
+controls against the exact pre-correction shared module. The corrected shared
+API passes ten new controls plus 14 existing GRVT controls. Fresh authenticated
+raw pairs from runs 40037292055/40040892521 differ only in metrics and protocol
+errors: TS3/Rust6 error occurrences become empty arrays, covering six unique
+keys. The remaining 27 ordered failures, fixers and strict FAIL stay exact.
+Independent raw receipt `/tmp/codex-grvt-replay-evidence/independent-review.json`
+SHA256 `0b1de5f1261505a046f5cd10647a02f5ea4b6f1f56e16b3f4a7bbf2e0f5d1b10`.
+Only the six-key current-tape group is pruned; all other manifest bytes remain.
+This one-pair proof does not claim five-repeat or final-head CI qualification.

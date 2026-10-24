@@ -1480,3 +1480,14 @@ reuse and invalid-clock recovery. Native result/error precedence, all four
 Lighter/Robinhood deployments, duplicate custody, repeated immediate completion
 and saturated remote byte/schema controls remain covered. All19 focused tests
 PASS after original4GREEN/15RED. No shared policy, timer, wrapper or scanner change.
+
+## GRVT final-coverage replay controls
+
+Healthy final completion, pre-ACK checkpoint observation, genuine earlier
+private-data faults, late selector faults and incomplete replacement generations
+are controlled through the real shared audit/capture APIs. The scoped GRVT and
+declaration-policy run passes 32 tests. Verification of the authenticated reports
+with the narrowed manifest retains one public PASS and one declared private FAIL,
+zero unexpected failures and zero unobserved declarations. Five-pair repeatability
+and fresh composed CI remain separate qualification work; no native parity is
+implied by protocol coverage.

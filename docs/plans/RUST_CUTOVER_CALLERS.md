@@ -6558,3 +6558,12 @@ capacity and reused ownership produce one engine refusal without a financial
 outcome. Both Lighter and Robinhood, on mainnet/testnet, keep the same contract.
 Remote history requests, pagination, authentication and byte-level query/codec
 behavior are unchanged; this slice issues no remote-fallthrough Context.
+
+## GRVT replay protocol coverage at final capture
+
+GRVT replay reports evaluate private-stream coverage at the logical end of the
+lifecycle. An interim observation before authentication acknowledgement does not
+leave missing-stream diagnostics after the valid subscriptions complete. Genuine
+unsubscribed private data, wrong subaccount selectors and missing coverage on an
+active replacement generation remain final failures. Execution identity and
+order/caller-identity differences remain strict account diagnostics.
