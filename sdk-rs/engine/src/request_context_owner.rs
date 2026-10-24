@@ -150,3 +150,20 @@ impl HttpOwnerRetirement {
         &self.preflight
     }
 }
+
+/// Release handle for a serial Plan parked on a venue condition. It carries the
+/// Plan's issuer and command generation, so it grants nothing by itself.
+// The RED stubs never construct one; the source reads both fields.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct ConditionWait {
+    pub(crate) plan: Plan,
+    pub(crate) wait: u64,
+}
+
+/// The parked owner whose engine-bounded condition wait expired.
+#[derive(Clone, Debug)]
+pub enum ConditionOwner {
+    Preflight(Preflight),
+    Plan(Plan),
+}

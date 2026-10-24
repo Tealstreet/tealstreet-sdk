@@ -1870,6 +1870,9 @@ mod history;
 #[path = "request_context_serial_plan.rs"]
 mod serial;
 
+#[path = "request_context_condition_wait.rs"]
+mod condition_wait;
+
 #[cfg(all(test, not(feature = "http-mutation-barriers")))]
 #[path = "request_context_group_disabled_tests.rs"]
 mod disabled_barrier_tests;

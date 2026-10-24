@@ -16,7 +16,8 @@ pub mod plan;
 mod ownership;
 #[cfg(feature = "http-plans")]
 pub use ownership::{
-    HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
+    ConditionOwner, ConditionWait, HttpOwnerRetirement, Plan, PlanPolicy, Preflight,
+    PreflightPolicy, PreflightPurpose,
 };
 
 #[path = "http_evidence.rs"]

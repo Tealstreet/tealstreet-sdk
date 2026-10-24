@@ -36,12 +36,14 @@ It holds no I/O, no live call and no venue timer.
 
 ```rust
 impl<P> Cx<'_, P> {
-    /// Before admission, in genuine entry or Preflight-ready custody.
-    pub fn preflight_condition_wait(
+    /// Park a WriteAfterReads Preflight in genuine entry or Preflight-ready
+    /// custody. `None` is unbounded; `Some(ms)` expires into
+    /// `on_condition_wait_expired`. Release with `request_preflight_ready`.
+    pub fn park_preflight_for(
         &mut self,
         preflight: &Preflight,
         bound_ms: Option<u32>,
-    ) -> Result<ConditionWait, Error>;
+    ) -> Result<(), Error>;
 
     /// Between serial calls, from the current call's exact custody under the
     /// same checks as `continue_serial_plan` (definitive fact, no
@@ -55,10 +57,22 @@ impl<P> Cx<'_, P> {
     ) -> Result<ConditionWait, Error>;
 
     /// From any callback, borrowed included. Grants nothing directly: it
-    /// schedules the owner's ready callback in its own custody, in this flush.
+    /// schedules the Plan's `on_http_plan_ready`, in this flush.
     pub fn release_condition_wait(&mut self, wait: &ConditionWait) -> Result<(), Error>;
 }
+
+pub struct ConditionWait { /* Plan, wait generation */ }
+pub enum ConditionOwner { Preflight(Preflight), Plan(Plan) }
+
+trait Venue {
+    /// Failure custody; a hook that returns without a terminal is sealed once
+    /// as NotSent.
+    fn on_condition_wait_expired(&mut self, cx, owner: &ConditionOwner, error: VenueError) {}
+}
 ```
+
+The existing `park_preflight` keeps its signature (Initial custody,
+unbounded); every addition is a new item, with a default Venue hook.
 
 - **Release.** `release_condition_wait` checks only the handle's generation.
   The engine then delivers the existing ready hook in proper custody:
