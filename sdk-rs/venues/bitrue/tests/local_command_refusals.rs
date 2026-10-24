@@ -357,3 +357,49 @@ fn valid_private_wire_does_not_admit_a_local_refusal_owner() {
     );
     assert_eq!(e.venue().held.len(), 256);
 }
+
+#[test]
+fn duplicate_owner_and_fixed_clock_id_reuse_keep_one_terminal() {
+    for (keyed, public_only) in [(false, false), (true, false), (true, true)] {
+        let mut e = seeded(keyed, public_only);
+        e.store_mut().set_hedged(true);
+        let before = snapshot(&e);
+        assert!(control(&mut e, Some("hold-next")).is_empty());
+        assert!(
+            run(
+                &mut e,
+                Command::FetchLeverage {
+                    command: COMMAND,
+                    symbol: SYMBOL.into()
+                }
+            )
+            .is_empty()
+        );
+        for case in [Case::Margin, Case::Hedged, Case::Planning] {
+            let actions = run(&mut e, case.command());
+            assert!(
+                matches!(&actions[..], [Action::Notice(Notice::Event(event))]
+                if event.code == safe_cex_engine::log::code::COMMAND_DUPLICATE),
+                "{actions:?}"
+            );
+            assert_eq!(snapshot(&e), before);
+            assert!(e.venue().original.is_some());
+        }
+        let actions = control(&mut e, Some("finish-original"));
+        assert!(
+            matches!(&actions[..], [Action::Notice(Notice::CommandDone { command: COMMAND, result })]
+            if result == "\"original\""),
+            "{actions:?}"
+        );
+        assert!(e.venue().original.is_none());
+        for _ in 0..270 {
+            for case in [Case::Margin, Case::Hedged, Case::Planning] {
+                assert_eq!(
+                    failure(&run(&mut e, case.command())),
+                    &case.expected(keyed, public_only)
+                );
+            }
+        }
+        assert_eq!(snapshot(&e), before);
+    }
+}

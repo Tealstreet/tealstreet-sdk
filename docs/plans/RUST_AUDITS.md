@@ -2757,3 +2757,11 @@ two-attempt retrieval budget with socket recovery. Exact artifact size/digest,
 producer/source, archive and restored-runtime ownership are unchanged. The failed
 Bybit attempt remains failed and supplies no timing or mean; transport recovery
 creates no physical retry or third sample.
+
+## Bitrue initial local refusal ownership
+
+Three initial synchronous numeric failure occurrences now use shared Mutation
+entry and Context failure. Bitrue shrinks 33 to 30 occurrences and 20 to 18
+fingerprints. The repeated planning-error fingerprint decreases only 2 to 1;
+the queued remote-flow error remains. Signing and successful local settings are
+held for their separately owned migrations/seam.

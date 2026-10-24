@@ -85,3 +85,15 @@ production. All three capacity assertions fail for the intended native-error
 versus shared-Capacity mismatch; three working controls pass for credential
 ordering/Store preservation, keyless one-way success and valid signed wire under
 real registry saturation. Zero tests are ignored.
+
+Implementation evidence: all three original capacity REDs now pass. The isolated
+suite has seven passing controls after adding original-owner duplicate protection
+and 270 fixed-clock ID reuses. The exact singleton removals and 2 -> 1 decrement
+are verified by an independent scanner review. Source/adversarial, caller and
+full-map reviews are CLEAR; valid remote queueing and native successful one-way
+mode remain unchanged. Focused gates and CI remain separate below.
+
+Focused verification: Bitrue 178 tests across 14 targets PASS, strict Clippy
+all-targets and scoped fmt PASS, Binance request-context 23 PASS, request-context
+checker and its 15 tests PASS. The three independent reviews are CLEAR. Full CI
+and the assigned guarded train window remain required before any merge.

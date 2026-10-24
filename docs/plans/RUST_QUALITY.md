@@ -1369,3 +1369,11 @@ regressions are committed: 5 RED with 16 working controls. The observed
 metadata/log/ordinary bounds, 4 GiB overflow, empty response recovery/exhaustion,
 mixed socket/empty budgets and CDN credential stripping remain explicit controls.
 Routing tests cover every registered suite and reject unknown runtime names.
+
+## Bitrue initial refusal regression controls
+
+Three original compiling capacity assertion REDs pass after shared entry
+adoption. Seven isolated controls also pin keyed/keyless/public-only ordering,
+Store preservation, capacity recovery, successful native one-way mode, saturated
+signed wire and genuine duplicate-owner protection with 270 fixed-clock reuses.
+No original test is ignored or rewritten to claim a legacy removal.
