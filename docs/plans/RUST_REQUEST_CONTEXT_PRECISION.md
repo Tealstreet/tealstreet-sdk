@@ -353,3 +353,9 @@ entries:
 
 The tip's prunes, #2066's ApeX removals among them, are already absent from
 the tip manifest, so they are not counted as precision drops.
+
+Then #2070 landed (`10f3348569e`) and pruned Phemex request sites, so it is
+plain-merged as well. Recount against its 648 entries:
+- kept byte-identical: 581 in prod and 12 in test;
+- dropped: 55 precision drops, the same breakdown as above;
+- nothing grows.

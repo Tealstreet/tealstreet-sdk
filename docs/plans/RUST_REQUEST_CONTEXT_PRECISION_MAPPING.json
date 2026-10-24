@@ -980,10 +980,6 @@
     }
   },
   "venues/phemex/src/account.rs": {
-    "kept": {
-      "35203e2192556d58fa9706bd22bddc7b92206b18106905b5af0b39aefd365d1c": 1,
-      "db7b6dc88f90361d5d57c041003af076c94d051c673d00cec046198eb9441f98": 1
-    },
     "dropped": {
       "ee694d9fd31f8bcf8dd1202488b242081189214dd143f90fc6bb10d6fd6fe886": {
         "count": 1,
@@ -1004,13 +1000,6 @@
         "count": 1,
         "reason": "macro"
       }
-    }
-  },
-  "venues/phemex/src/identity.rs": {
-    "kept": {
-      "0d4f7749bb0b24c084131b4f15d0e612c9b03378700f1ea465dfa856113e17e9": 1,
-      "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-      "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
     }
   },
   "venues/phemex/src/income.rs": {
