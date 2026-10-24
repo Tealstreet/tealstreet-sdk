@@ -6925,6 +6925,61 @@ Empty order/cancel jobs and the asynchronous legacy trade terminals remain for
 the later managed-write conversion. Exactly eight request inventory occurrences
 are removed (Crypto.com 21 to 13); credential-selection inventory is unchanged.
 
+## WEEX public order-book query Read custody
+
+`FetchOrderBook` retains the original caller receipt across the native shared
+rate pause and one unsigned managed HTTP call. It needs no credentials, market
+or subscription; native URL/limit, row order, aliases, cumulative base amounts
+and exact version output remain unchanged and never publish subscription depth.
+The physical call retains 20 s, capped by the original caller wait.
+
+A query parked behind a pause now ends at that receipt deadline instead of
+waiting without a venue whole-query bound. Root expiry rejects once with typed
+Timeout and no write outcome; an expired/revoked 429 cannot extend the shared
+pause, whereas live 429 classification and delay are preserved. A local host
+listener timeout alone still does not cancel the engine command. Native
+HTTP/codec errors retain their original fields, including explicit NotSent.
+Released Network failure, engine physical Timeout and engine integrity failure
+keep their actual typed Read cause and outcome None (legacy wrapped host or
+non-UTF8 delivery failures as Network/NotSent).
+Pre-release managed preparation refusals keep typed NotSent and cannot infer
+credential failure from this public route. Stale generations cannot complete,
+pause or otherwise affect a reused command ID or an unrelated live query.
+
+
+## Backpack fixed-setting refusals
+
+SetMarginType and SetPositionMode keep their native keyless Unsupported/NotSent
+refusals ("Backpack only supports cross margin" and "Backpack position mode is
+fixed") for either requested value. The genuine shared Mutation entry checks
+the caller's receipt, clock and capacity before reporting the native refusal.
+An invalid or unavailable receipt reports the shared typed refusal; an expired
+receipt times out without renewing its bound. Duplicate commands retain their
+existing owner's rights and eventual reply. No credential, signing, HTTP, socket,
+timer or Store update is created by these refusals, and the command ID is
+reusable after completion. No fixed-setting success or new venue capability is
+added.
+
+
+## BingX local candle refusals use command Read authority
+
+FetchCandles keeps unknown-market, unsupported-interval and invalid-range
+validation in that order, before credentials, with its exact native untyped
+error on an admissible entry. Only these three local branches acquire an
+immediate credential-free Read Context and finish it through fail_context;
+there is no physical request, signer, timer or auth evidence. Valid signed and
+keyless remote candle issuance and all selection sites are unchanged.
+
+Capacity now supersedes the selected local error with the canonical Read
+capacity refusal. A missing receipt from an invalid/nonadvancing clock rejects
+as Revoked: "Request context was revoked", InvalidInput, no outcome. An expired
+own receipt uses the existing Read Timeout rejection. No default receipt or
+numeric fallback is fabricated. Duplicate live IDs preserve their diagnostic
+and original owner, and local completion releases authority for immediate ID
+reuse. Native absent kind/outcome remain absent; these refusals do not use the
+ReadCompletion string-to-Internal projection. No TypeScript, host, CLI or AWS
+production caller signature changes are required.
+
 
 ## Crypto.com public discovery Background custody
 
