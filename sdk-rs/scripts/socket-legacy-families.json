@@ -21,7 +21,6 @@
     "mexc": "venues/mexc/src/",
     "orderly": "venues/orderly/src/",
     "paradex": "venues/paradex/src/",
-    "phemex": "venues/phemex/src/",
     "polymarket": "venues/polymarket/src/",
     "weex": "venues/weex/src/",
     "woo": "venues/woo/src/"
