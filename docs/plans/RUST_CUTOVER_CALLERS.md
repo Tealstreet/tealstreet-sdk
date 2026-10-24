@@ -6710,6 +6710,26 @@ expired/sub-ms waits before that projection or success. It adds no Context,
 HTTP, signer, timer or journal. Duplicate live ids retain the original owner
 and diagnostic; SetPositionMode(true) retains its Unsupported/NotSent refusal.
 
+## WEEX account-cycle reads use Background authority
+
+WEEX's recurring balance, positions, normal/algo orders and account/symbol
+configuration reads now use the shared managed preparation and final claim
+with one Background Read Context per physical request. Credential selection,
+sorted query bytes, streamed row shapes, snapshot joins and native revision
+fences are preserved. A paused continuation admits its fresh 20-second Context
+only at eligible dequeue, with no transport retry or re-sign.
+
+Provider/preparation refusal retires the physical Context and follows the
+native failed-read path without auth evidence or deactivation. A physical
+Timeout or transport failure retains last-good snapshots and permits a later
+poll; native settings backoff still independently holds the configuration reads.
+Exact Background delivery is checked before row decode and publication, and
+stale cycle/seed deliveries have no snapshot or credential-auth side effects;
+429 still preserves the native global pause for other reads.
+No command completion, metadata group, history or trading policy is changed.
+The remaining legacy shared signing helper and STAGING entry stay for their
+other callers; this semantic caller conversion has zero lexical inventory delta.
+
 ### Bybit cancel by symbol-qualified refs
 
 | Change | Command outcome | NX handling |
