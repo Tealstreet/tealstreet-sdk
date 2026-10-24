@@ -44,8 +44,10 @@ book snapshot mutation. Do not copy issuer/attempt/expiry checks into venue code
 Native generation, current subscription, envelope and financial validation remain
 necessary independently. A terminal success retires the exact Context only after
 its final DATA validation. Submission, preparation, transport, parse and timeout
-failures retire through `finish_http_context` before the native failure path;
-expired current handles may retire, revoked handles cannot touch newer work.
+failures attempt retirement through `finish_http_context` before the native
+failure path. An already-engine-admitted terminal callback still runs native
+recovery when sibling issuance has pruned expired retirement metadata; native
+generation fences and the engine callback prevent it from touching newer work.
 Failure ownership is not DATA authority. No command terminal or auth-health
 outcome is created for these credential-free Background operations.
 
@@ -136,3 +138,14 @@ MEXC tests, strict Clippy/fmt, bans and both inventory checks passing.
 Public fixture glue drives the existing shared prepare/bind/final-claim executor;
 no local signer, validator or dispatcher is introduced. Runtime reviews and CI
 remain separate gates; no readiness, family-byte or performance claim yet.
+
+## Review ordering regressions
+
+Runtime review reproduced two additional assertion REDs in a separate target,
+committed before their fix: unrelated Background issuance prunes an expired depth
+handle before its timer callback, and255 live Background peers exhaust admission
+while an accepted catalogue retains its final slot. Engine-admitted failure now
+keeps native recovery even when retirement metadata was already pruned. Accepted
+catalogue DATA retires before account/ticker successor admission. Neither change
+grants DATA authority or touches a different generation; the new controls require
+fresh recovery, peer preservation and ticker admission at full occupancy.

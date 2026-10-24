@@ -607,10 +607,10 @@ impl MexcFutures {
         );
     }
     fn failure(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Some(context) = pending.public_context()
-            && cx.finish_http_context(context).is_err()
-        {
-            return;
+        if let Some(context) = pending.public_context() {
+            // Engine-admitted failure still owns native cleanup after expiry
+            // pruning has removed the Context's retirement metadata.
+            let _ = cx.finish_http_context(context);
         }
         match pending {
             Pending::Identity(command) => self.identity_failed(cx, command, error),
@@ -901,6 +901,7 @@ impl Venue for MexcFutures {
             return;
         }
         let background = pending.public_context().cloned();
+        let mut start_account_and_tickers = false;
         (|| match pending {
             Pending::Identity(command) => self.identity_response(cx, command, response),
             Pending::Account(request) => {
@@ -945,8 +946,7 @@ impl Venue for MexcFutures {
                 if refresh {
                     return;
                 }
-                self.account_start(cx);
-                self.discovery_read(cx, true);
+                start_account_and_tickers = true;
             }
             Pending::Tickers {
                 mut rows, failed, ..
@@ -1053,6 +1053,10 @@ impl Venue for MexcFutures {
         })();
         if let Some(context) = background {
             let _ = cx.finish_http_context(&context);
+        }
+        if start_account_and_tickers {
+            self.account_start(cx);
+            self.discovery_read(cx, true);
         }
     }
     fn on_stream_error(
