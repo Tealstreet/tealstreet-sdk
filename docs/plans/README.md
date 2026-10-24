@@ -48,7 +48,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Backpack signer admission | Option B approved; implemented | Before changing Backpack registry identity, signer setup or the custody of Backpack key material. | [RUST_BACKPACK_SIGNER_ADMISSION.md](RUST_BACKPACK_SIGNER_ADMISSION.md) |
 | Selected signed reads | Plan; draft PR | Before adding or changing a venue's managed signed-read adapter, read-key slot choice or Read policy wrapper (BingX, WEEX, OKX, Bitget, KuCoin). | [RUST_SELECTED_SIGNED_READ.md](RUST_SELECTED_SIGNED_READ.md) |
 | Lighter Schnorr signer recipe | Part 1 implemented (#1967); signer-owner review clear | Before changing Lighter signing, the SchnorrDigest contract, or Lighter public-key or remote recipes. | [RUST_LIGHTER_SCHNORR_RECIPE.md](RUST_LIGHTER_SCHNORR_RECIPE.md) |
-| Backpack public-only read provider | Plan and REDs, local; stacked on #2078 and #2073 | Before changing what Backpack installs in public-only mode, or how its history signs with a saved read key. | [RUST_BACKPACK_PUBLIC_READ_PROVIDER.md](RUST_BACKPACK_PUBLIC_READ_PROVIDER.md) |
 | Declared read-key policy | Plan; REDs next; consumers Crypto.com and Backpack | Before ignoring, validating-only or public-mode-installing a venue's read key, or changing how read-key material reaches the provider. | [RUST_READ_KEY_POLICY.md](RUST_READ_KEY_POLICY.md) |
 | Credential selection and nonce authority | Active shared-core plan; review pending | Before choosing a credential slot, read key, account subject, auth evidence tag or signing nonce in venue code. | [RUST_CREDENTIAL_SELECTION.md](RUST_CREDENTIAL_SELECTION.md) |
 | Error classification | Active engine standardization plan; inventory ranked | Before classifying venue errors, native code tables, status-to-outcome rules, partial batch failures or error-driven resends. | [RUST_ERROR_CLASSIFICATION.md](RUST_ERROR_CLASSIFICATION.md) |
@@ -393,9 +392,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | TxFlow command candle snapshot | Managed source under review; 19 dedicated controls pass | Before managing the unsigned command candle read; excludes initial local refusals, discovery and account. | [RUST_TXFLOW_CANDLE_CONTEXT.md](RUST_TXFLOW_CANDLE_CONTEXT.md) |
 | BloFin managed HMAC dispatch recipe | Plan and original native controls | Before preparing the signing-entropy nonce and opaque Secondary-or-Primary GET recipe for FetchLeverage. | [RUST_BLOFIN_HMAC_DISPATCH_RECIPE.md](RUST_BLOFIN_HMAC_DISPATCH_RECIPE.md) |
 
-<<<<<<< HEAD
-| Backpack supported-history Read custody | Plan and original controls under review | Before moving four history routes onto one caller-bound Read owner and activating publicRead. | [RUST_BACKPACK_HISTORY_READ_CUSTODY.md](RUST_BACKPACK_HISTORY_READ_CUSTODY.md) |
-=======
 | Command-owned Read-Plan history authority | Implemented; source reviews and focused checks clear, CI pending | Before accepting Plan pages, settling Slots with accepted rows or recovering a released transport failure through the same Plan terminal. | [RUST_READ_PLAN_HISTORY_AUTHORITY.md](RUST_READ_PLAN_HISTORY_AUTHORITY.md) |
 
 | Independent Mutation Plan calls | Plan-first engine follow-up after #1932 | Before continuing independent native batch siblings after a delivered unproven 408/5xx. | [RUST_PLAN_INDEPENDENT_FAILURES.md](RUST_PLAN_INDEPENDENT_FAILURES.md) |
@@ -415,4 +411,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | CPU evidence transport retrieval retry | Plan and originals | Before changing GitHub evidence retrieval retries; provenance and CPU verdicts stay exact. | [RUST_CPU_EVIDENCE_TRANSPORT_RETRY.md](RUST_CPU_EVIDENCE_TRANSPORT_RETRY.md) |
 | Coinbase local command custody | Draft adoption; ten sites and original controls pass | Before adopting immediate local completions or distinguishing deferred/queued public-read gates. | [RUST_COINBASE_LOCAL_CONTEXT.md](RUST_COINBASE_LOCAL_CONTEXT.md) |
->>>>>>> origin/feat/rust-rewrite
+
+| Backpack public-only read provider | Plan and REDs, local; stacked on #2078 and #2073 | Before changing what Backpack installs in public-only mode, or how its history signs with a saved read key. | [RUST_BACKPACK_PUBLIC_READ_PROVIDER.md](RUST_BACKPACK_PUBLIC_READ_PROVIDER.md) |
+
+| Backpack supported-history Read custody | Plan and original controls under review | Before moving four history routes onto one caller-bound Read owner and activating publicRead. | [RUST_BACKPACK_HISTORY_READ_CUSTODY.md](RUST_BACKPACK_HISTORY_READ_CUSTODY.md) |
