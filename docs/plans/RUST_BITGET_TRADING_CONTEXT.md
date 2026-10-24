@@ -152,6 +152,17 @@ whole command has no input-count cap; request count is
    streamed accepted ID, that batch's included.
 7. One scratch CI WASM measurement with `http-plans` enabled (gate 3).
 
+8. Queue: each command queued behind the active job is its own
+   WriteAfterReads Preflight, parked with no I/O (`park_preflight`) and
+   woken with `request_preflight_ready` when the active job ends, FIFO in
+   the same turn. There is no engine bound and no receipt binding, so a
+   parked command survives a 25-minute job. On detection expiry the venue
+   wakes each queued Preflight and fails it NotSent in its ready custody
+   (fe7lgm RED12). A re-park after promotion happens in ready custody.
+   Capacity: each parked Preflight counts against the engine-wide 256
+   concurrent commands; native's queue is unbounded. Pending overseer
+   ruling: disclose as a new Capacity refusal, or exempt parked Preflights.
+
 ## Gates before production
 
 1. **Streamed serial Plan** (fe7lgm), landed with the contract above,
