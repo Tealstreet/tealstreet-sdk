@@ -284,4 +284,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Replay protocol audit finalization | Shared harness correction | Before changing checkpoint capture, terminal protocol coverage or the final replay boundary. | [RUST_REPLAY_AUDIT_FINALIZATION.md](RUST_REPLAY_AUDIT_FINALIZATION.md) |
 | OKX history request custody | Plan and original REDs; waits for #1945 | Before converting OKX history transport, native soft failure or caller-root deadlines. | [RUST_OKX_HISTORY_REQUEST_CONTEXT.md](RUST_OKX_HISTORY_REQUEST_CONTEXT.md) |
+| Crypto.com read command Contexts | Planned | Before public candle or local history adoption; exact nine-occurrence/seven-entry shrink and original RED controls | [RUST_CRYPTOCOM_READ_COMMAND_CONTEXT.md](RUST_CRYPTOCOM_READ_COMMAND_CONTEXT.md) |
+| Crypto.com public candle and local history Contexts | Implementation under review | Before converting unsigned candles and synchronous history terminals or pruning their seven inventory keys. | [RUST_CRYPTOCOM_PUBLIC_READ_CONTEXT.md](RUST_CRYPTOCOM_PUBLIC_READ_CONTEXT.md) |
 | MEXC local write refusal Contexts | Implementation under review | Before converting pre-I/O validation/missing-key refusals or deleting the duplicate unreachable Err terminal. | [RUST_MEXC_LOCAL_WRITE_CONTEXT.md](RUST_MEXC_LOCAL_WRITE_CONTEXT.md) |

@@ -6513,6 +6513,41 @@ EEA composite cap/stall still rejects. Only successful native51603 is definitive
 lookup absence. FetchClosedPositions/okxJournal remains its separate unchanged
 source. Discovery still uses the retained legacy list/sign funnel.
 
+## Crypto.com candle and local-history read ownership
+
+fetchCandles uses unsigned Public managed HTTP with one physical attempt and a
+20-second engine deadline spanning preparation and response. Custom transports
+must drive prepare, bind and the final engine claim before sending; this candle
+path supplies no legacy-request fallback. Legacy unsigned
+HTTP relied on the host timeout after dispatch; preparation now consumes the
+same immutable command bound. Expiry/transport failures preserve typed Timeout/
+Network with public-read NotSent. Initial invalid-time/capacity refusals retain
+typed InvalidInput/Internal and no outcome. Native URL/timeframe mapping, raw
+bounds and candle timestamps/order, ignored limit and numeric-string parsing
+remain unchanged. Native HTTP/envelope/row/missing-list errors retain full string
+error fields and auth-health isolation; no public401/403/40101 auth retry is added.
+Undecodable text remains the native stream-list string at200 and HTTP string at500.
+
+Only five synchronous history terminals borrow shared entry and finalize a
+Context. Finite native errors/[] and validation order stay exact; invalid engine
+time or owner-capacity exhaustion gives one typed engine refusal instead.
+fetchHistoricalFills/fetchHistoricalOrders, fetchIncomeHistory/fetchIncomeHistoryRange,
+fetchPublicTrades and findOrderByClientOrderId consumers retain all successful
+native history signing/pagination/coverage paths. Explicitly bounded income
+with caller limit0 still dispatches native HTTP. This is not managed network
+history or signer adoption.
+
+### Crypto.com current shared failure contract
+
+Managed delivered text without the expected list at HTTP200 retains the native
+message and now carries the shared engine Internal kind, with the established
+public-read NotSent outcome. HTTP500 retains its native HTTP-error string.
+This follows the existing typed undecodable-response seam; the adapter does not
+demote the kind to mimic legacy string-only callbacks. The20s Context lifetime
+is explicitly a new admission-through-preparation/response whole-command bound,
+distinct from the old host's physical HTTP timeout fallback. Raw candle t/order
+and malformed numeric-string-to-zero coercion remain unchanged.
+
 ## MEXC local write refusal custody
 
 Low-level write commands whose native step construction fails retain the same
