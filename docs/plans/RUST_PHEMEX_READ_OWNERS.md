@@ -267,3 +267,31 @@ current-landing integration must recheck this before publication.
 These are local source results; independent source reviews and fresh PR CI
 remain pending. The retired generic-request Orders selection arm was removed;
 History lookup selection and its native sender remain unchanged.
+
+## Compiled host fixture handoff
+
+PR head `906bd894561` failed the existing WASM host job in two fixture setup
+assertions: `actions.test.mjs` and `public-feed.test.mjs` expected account-position
+HTTP directly after metadata. Those currency reads now correctly await managed
+preparation. The later missing replay measurements are downstream failures,
+not independent parity regressions or infrastructure flakes.
+
+The test-only `managed-http-fixture.mjs` driver gives each genuine Prepare an
+exact resource, validates Bind tokens against it and calls the real httpClaim.
+It makes an HTTP packet observable only on Released and drains subsequent work
+after that handoff. Denial emits no HTTP; unknown phases, pacing waits, parked
+routes and external signing fail the fixture instead of taking a raw fallback.
+Both existing test files change only their HTTP action collection. Every
+socket/authentication/UTF-8/public-policy and financial-frame assertion stays
+byte-identical. Production, signer setup/refusal and recipe code do not change.
+
+A scoped Phemex family WASM build with Rust1.99.0, bindgen0.2.129 and Binaryen132
+reproduces exactly two assertion REDs and one working public-feed GREEN on the
+old fixtures. With the collector change the same three selected tests pass,
+zero ignored; the artifact SHA256 is unchanged:
+`fdaca6084b1c40afb431147b599563a72134907253499ae802137ef1adb4e8d6`.
+Node22.23.3 matches CI's declared major. The unrelated Binance options fixture
+is outside this single-family invocation; full combined-host coverage remains
+the PR CI gate. Logs: `/tmp/codex-phemex-read-owner-host-original.log` and
+`/tmp/codex-phemex-read-owner-host-green.log`. Current landing integration and
+fresh one-head PR CI remain separate from this focused same-artifact receipt.
