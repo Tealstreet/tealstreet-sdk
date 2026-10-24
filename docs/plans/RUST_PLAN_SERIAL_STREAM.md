@@ -192,6 +192,41 @@ recorded refusals. Only the native continue-and-finish path (OKX code 2) calls
 Default (`false`), as for every declared Plan, the projection is unchanged.
 No consumer fallback, fabricated acceptance or numeric terminal.
 
+## Bitget slice 3 fit (proposed, pending ruling)
+
+Native facts from claude-4yjlw0 (`venues/bitget/src/trading.rs` at
+`49f7d1857b6`) change three parts of this plan. Each needs a ruling from
+claude-ddi2il before the REDs freeze.
+
+- **No whole-job bound (F8).** Native's serial queue runs until the last call
+  settles. The legacy funnel sets no request deadline. A 10,000-lot order
+  takes about 25 min at 150 ms per call, against the 120 s default caller
+  wait. A root capped at the receipt refuses native maximum orders. Proposed:
+  the serial root has no wall-clock deadline of its own. Each call is bounded by
+  `now + timeout_ms`, and the chain advances only from DATA, so the Plan always
+  terminates and every interval is bounded, as native's is. The caller receipt
+  keeps its existing meaning. If ruled so, the receipt binding (RED13) is not
+  needed for serial admission and is dropped.
+- **One resend (40009).** `SerialCall` gains `attempts` (1 or 2). A second
+  attempt goes through the existing `plan_resend_context` grant from that
+  call's DATA custody. Its terms are fixed at continuation, as for a declared
+  leg.
+- **Reads in the chain, with delayed retry.** `SerialCall` gains `operation`
+  (Read or Mutation) under the admitted credential. This covers amend
+  ResolveAmend GETs and the re-reads after a 40085 promotion. Native retries a
+  read up to 3 times at 250×n ms. Proposed:
+  `continue_serial_plan_after(plan, slot, context, delay_ms, next)` arms the
+  Plan's existing timer, so there is still one timer and no venue timer. Its
+  callback is the next call's custody, and the root stays one Context. The
+  pacing refusal (F4) still applies to policy pacing.
+- **Replan on promotion (40085).** A serial Plan declares no calls, so a
+  replan is the next continuation with different calls. Nothing is sealed or
+  re-admitted. This meets the "second admission from DATA custody" ruling
+  without a second root.
+- **Partial batch is terminal (Classic).** A KnownPartial batch followed by
+  `fail_plan` projects failure with every streamed accepted ID, including that
+  batch's. Native keeps the success IDs and then fails the job.
+
 ## Original REDs and controls (before source)
 
 The engine fixture admits a serial Plan from a genuine WriteAfterReads Preflight
@@ -251,6 +286,12 @@ fails at an assertion.
     at `TEXT_BYTES`, the count is exact, and `done_plan("[]")` succeeds.
 15. An empty native job ends through `done_empty_plan` with no Plan, Context
     or attempt.
+16. A KnownPartial batch, then `fail_plan`: failure projected with that batch's
+    accepted IDs after all earlier ones.
+17. (If ruled.) A two-attempt call resends once through `plan_resend_context`
+    and refuses a third. A Read call inside a mutation chain. A delayed
+    continuation fires from the Plan timer, refuses outside that callback, and
+    keeps one Context and one timer.
 9. A max-size control for CPU: 30,000 continued calls (one bracketed max input)
    with per-call work O(1). Time is reported on the PR as the CPU
    certification input, not asserted.
