@@ -2757,3 +2757,11 @@ two-attempt retrieval budget with socket recovery. Exact artifact size/digest,
 producer/source, archive and restored-runtime ownership are unchanged. The failed
 Bybit attempt remains failed and supplies no timing or mean; transport recovery
 creates no physical retry or third sample.
+
+## Selected root and physical page custody
+
+The shared selected-read module now couples one original caller-receipt Read
+root with immutable selected page children. Snapshot mismatch is rejected before
+shared root/leg delivery validation. Child construction cannot select a new key
+or renew the original root, and no per-venue expiry/finalizer is introduced.
+No venue inventory or Plan authority finding is closed by these engine controls.

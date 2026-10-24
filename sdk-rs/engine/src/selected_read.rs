@@ -8,7 +8,8 @@ use crate::request_context::{
     RetryPolicy, Scope,
 };
 use crate::signing::Identity;
-use crate::{AccountReadScope, Cx, Method, RequestId, SignStep, VenueError};
+use crate::{AccountReadScope, CredentialSlot, Cx, Method, RequestId, SignStep, VenueError};
+use std::sync::Arc;
 
 pub enum ReadRole {
     Read {
@@ -76,6 +77,48 @@ pub struct AdmittedRead {
     context: Context,
 }
 
+/// An original signed command Read bounded by the genuine caller receipt.
+/// Only this wrapper derives physical pages; borrowed Context authority is unchanged.
+///
+/// ```compile_fail,E0599
+/// use safe_cex_engine::selected_read::ReadRoot;
+/// fn copy(root: ReadRoot) { let _ = root.clone(); }
+/// ```
+#[must_use]
+pub struct ReadRoot {
+    selected: Arc<SelectedRead>,
+    context: Context,
+}
+
+/// One physical page, including a native re-send, under an original Read root.
+///
+/// ```compile_fail,E0599
+/// use safe_cex_engine::{Cx, selected_read::{ReadLeg, ReadLegPolicy}};
+/// fn grandchild(leg: ReadLeg, cx: &mut Cx<'_, ()>) {
+///     let _ = leg.leg(cx, ReadLegPolicy { timeout_ms:20_000, pacing:None });
+/// }
+/// ```
+/// ```compile_fail,E0599
+/// use safe_cex_engine::{Cx, request_context::RetryEvidence, selected_read::ReadLeg};
+/// fn resend(leg: ReadLeg, cx: &Cx<'_, ()>) {
+///     let _ = leg.retry(cx, RetryEvidence::ReadFailure, ());
+/// }
+/// ```
+/// ```compile_fail,E0599
+/// use safe_cex_engine::{request_context::Context, selected_read::ReadLeg};
+/// fn external(context: Context) { let _ = ReadLeg::from(context); }
+/// ```
+#[must_use]
+pub struct ReadLeg {
+    selected: Arc<SelectedRead>,
+    context: Context,
+}
+
+pub struct ReadLegPolicy {
+    pub timeout_ms: u32,
+    pub pacing: Option<Pacing>,
+}
+
 #[must_use]
 pub struct RetryRefusal<T> {
     pub read: AdmittedRead,
@@ -111,18 +154,44 @@ impl SelectedRead {
             .map_err(CommandReadError::Entry)?;
         match selected {
             Ok(selected) => Ok(AdmittedRead { selected, context }),
-            Err(_) => {
-                let terminal = missing
-                    .diagnostic
-                    .map_or(Ok(()), |diagnostic| {
-                        cx.command_error_context(&context, diagnostic)
-                    })
-                    .and_then(|()| cx.fail_context(&context, missing.error.clone()));
-                Err(CommandReadError::LocalRefusal {
-                    error: missing.error,
-                    terminal,
-                })
-            }
+            Err(_) => Err(Self::refuse_missing(cx, &context, missing)),
+        }
+    }
+
+    /// Capture the exact original receipt once; no timeout override or renewal.
+    /// Expired/unstamped caller handling stays with the shared Fresh-entry APIs.
+    pub fn command_root<P>(
+        cx: &mut Cx<'_, P>,
+        selected: Result<Self, CredentialUnavailable>,
+        missing: LocalRefusal,
+    ) -> Result<ReadRoot, CommandReadError> {
+        let credential = selected.as_ref().ok().map(Self::credential);
+        let context = cx
+            .admit_caller_read_root(credential, None)
+            .map_err(CommandReadError::Entry)?;
+        match selected {
+            Ok(selected) => Ok(ReadRoot {
+                selected: Arc::new(selected),
+                context,
+            }),
+            Err(_) => Err(Self::refuse_missing(cx, &context, missing)),
+        }
+    }
+
+    fn refuse_missing<P>(
+        cx: &mut Cx<'_, P>,
+        context: &Context,
+        missing: LocalRefusal,
+    ) -> CommandReadError {
+        let terminal = missing
+            .diagnostic
+            .map_or(Ok(()), |diagnostic| {
+                cx.command_error_context(context, diagnostic)
+            })
+            .and_then(|()| cx.fail_context(context, missing.error.clone()));
+        CommandReadError::LocalRefusal {
+            error: missing.error,
+            terminal,
         }
     }
 
@@ -162,22 +231,14 @@ impl AdmittedRead {
         let step = recipe(&self.selected.identity);
         let scope = self.selected.scope;
         let slot = self.selected.selection.slot();
-        let pending = pending(self);
-        let id = cx.request_signed_managed(
+        queue_read(
+            cx,
             context,
-            request.method,
-            request.url,
-            request.body,
+            request,
             step,
-            pending,
-        )?;
-        if let Some(at) = request.stream {
-            cx.stream_response(id, at);
-        }
-        if let Some(scope) = scope {
-            cx.tag_account_read(id, slot, scope);
-        }
-        Ok(id)
+            scope.map(|scope| (slot, scope)),
+            pending(self),
+        )
     }
 
     pub fn retry<P, T>(
@@ -198,4 +259,83 @@ impl AdmittedRead {
             })),
         }
     }
+}
+
+impl ReadRoot {
+    pub fn context(&self) -> &Context {
+        &self.context
+    }
+
+    /// Mint at an eligible native dequeue, always from this original root.
+    pub fn leg<P>(&self, cx: &mut Cx<'_, P>, policy: ReadLegPolicy) -> Result<ReadLeg, Error> {
+        cx.validate_read_root_context(&self.context)?;
+        let context = cx.http_leg_context(
+            &self.context,
+            ReadPolicy {
+                timeout_ms: policy.timeout_ms,
+                pacing: policy.pacing,
+                retry: RetryPolicy::Never,
+            }
+            .policy(Some(self.selected.credential())),
+        )?;
+        Ok(ReadLeg {
+            selected: self.selected.clone(),
+            context,
+        })
+    }
+
+    /// Custody only: native body validity and shared history admission remain separate.
+    pub fn validate_delivery<P>(&self, cx: &Cx<'_, P>, leg: &ReadLeg) -> Result<(), Error> {
+        if !Arc::ptr_eq(&self.selected, &leg.selected) {
+            return Err(Error::Revoked);
+        }
+        cx.validate_read_http_delivery(&self.context, &leg.context)
+    }
+}
+
+impl ReadLeg {
+    pub fn context(&self) -> &Context {
+        &self.context
+    }
+
+    pub fn queue<P>(
+        self,
+        cx: &mut Cx<'_, P>,
+        request: ReadRequest,
+        recipe: impl FnOnce(&Identity) -> Box<dyn SignStep>,
+        pending: impl FnOnce(Self) -> P,
+    ) -> Result<RequestId, (P, Error)> {
+        let context = self.context.clone();
+        let step = recipe(&self.selected.identity);
+        let evidence = self
+            .selected
+            .scope
+            .map(|scope| (self.selected.selection.slot(), scope));
+        queue_read(cx, context, request, step, evidence, pending(self))
+    }
+}
+
+fn queue_read<P>(
+    cx: &mut Cx<'_, P>,
+    context: Context,
+    request: ReadRequest,
+    step: Box<dyn SignStep>,
+    evidence: Option<(CredentialSlot, AccountReadScope)>,
+    pending: P,
+) -> Result<RequestId, (P, Error)> {
+    let id = cx.request_signed_managed(
+        context,
+        request.method,
+        request.url,
+        request.body,
+        step,
+        pending,
+    )?;
+    if let Some(at) = request.stream {
+        cx.stream_response(id, at);
+    }
+    if let Some((slot, scope)) = evidence {
+        cx.tag_account_read(id, slot, scope);
+    }
+    Ok(id)
 }

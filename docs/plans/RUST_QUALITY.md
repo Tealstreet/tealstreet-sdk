@@ -1369,3 +1369,12 @@ regressions are committed: 5 RED with 16 working controls. The observed
 metadata/log/ordinary bounds, 4 GiB overflow, empty response recovery/exhaustion,
 mixed socket/empty budgets and CDN credential stripping remain explicit controls.
 Routing tests cover every registered suite and reject unknown runtime names.
+
+## Selected multi-page Read contract controls
+
+New-contract Engine controls cover exact receipt bounds, distinct page legs,
+immutable selection, wrong-root/foreign-engine delivery, queue/provider refusal,
+discard/requeue, streamed order, stale staged rows, typed root retirement and
+physical-timeout recovery. Existing single-leg controls remain unchanged. API
+privacy doctests distinguish original roots from children without claiming that
+borrowed Contexts lose generic core authority. Native consumers remain separate.
