@@ -8,7 +8,6 @@ use crate::request_context::{
     Waiter, WriteResult,
 };
 use crate::{ErrorKind, Outcome, VenueError};
-use std::collections::HashMap;
 
 const SESSIONS: usize = 64;
 
@@ -24,14 +23,14 @@ enum Write {
 struct State {
     policy: SessionPolicy,
     /// Mutation legs by logical identity: one physical attempt per operation.
-    writes: HashMap<u64, Write>,
+    writes: crate::IdMap<u64, Write>,
     /// A released write had no proven outcome. Only retirement clears it.
     unresolved: bool,
 }
 
 #[derive(Default)]
 pub(super) struct Sessions {
-    live: HashMap<u64, State>,
+    live: crate::IdMap<u64, State>,
 }
 
 impl Sessions {
@@ -57,7 +56,7 @@ impl Sessions {
             generation,
             State {
                 policy,
-                writes: HashMap::new(),
+                writes: Default::default(),
                 unresolved: false,
             },
         );
@@ -168,7 +167,7 @@ impl Sessions {
 
     /// Bound per-operation records by live logical handles. In-flight attempts
     /// keep theirs until the physical attempt settles.
-    pub(super) fn prune(&mut self, contexts: &HashMap<u64, Context>) {
+    pub(super) fn prune(&mut self, contexts: &crate::IdMap<u64, Context>) {
         for state in self.live.values_mut() {
             state.writes.retain(|leg, write| {
                 contexts.contains_key(leg)
@@ -476,6 +475,25 @@ impl<P> Cx<'_, P> {
         self.io
             .request_contexts
             .issue_session(identity, generation, policy, self.now, None)
+    }
+
+    /// A new physical leg of a session operation, keeping its exact raw bound.
+    /// A Read leg can never become a Mutation; any other owner is refused.
+    pub fn session_leg_context(
+        &mut self,
+        parent: &Context,
+        policy: Policy,
+    ) -> Result<Context, Error> {
+        self.io.request_contexts.validate_legacy(parent)?;
+        self.io.request_contexts.validate_send(parent, self.now)?;
+        let Owner::Session { generation } = parent.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.session_scope()?;
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        self.io
+            .request_contexts
+            .issue_session(identity, generation, policy, self.now, Some(parent))
     }
 
     /// Work owned by a command or the background that carries this session's

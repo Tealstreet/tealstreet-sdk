@@ -13,6 +13,13 @@ pub(super) struct Call {
     pub(super) selected: u16,
     pub(super) admission: Admission,
     pub(super) stage: Stage,
+    pub(super) released_failure: Option<ReleasedReadFailure>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::engine) enum ReleasedReadFailure {
+    Network,
+    PhysicalTimeout,
 }
 
 pub(super) enum Stage {
@@ -68,6 +75,7 @@ impl Call {
         };
         self.selected += 1;
         self.stage = Stage::Ready;
+        self.released_failure = None;
         Ok(())
     }
 }

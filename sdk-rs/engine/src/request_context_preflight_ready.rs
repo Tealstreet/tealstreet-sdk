@@ -248,6 +248,7 @@ impl<V: Venue> Engine<V> {
                 self.io.http_plan_poison = true;
                 #[cfg(feature = "order-locks")]
                 let response = self.io.order_response_token.take();
+                self.io.http_history_failure = None;
                 self.venue.on_http_preflight_ready(
                     &mut Cx {
                         now,
