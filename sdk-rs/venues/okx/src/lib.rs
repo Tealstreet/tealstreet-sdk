@@ -12,6 +12,7 @@ mod wire;
 
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
@@ -79,7 +80,7 @@ pub enum Pending {
     },
     Account(account::Request),
     History(Box<history::Request>),
-    Closed(closed::Request),
+    Closed(Box<closed::Request>),
     Trade(trading::Request),
     Markets {
         kind: InstrumentType,
@@ -376,17 +377,21 @@ impl Okx {
         );
     }
 
+    /// Both keys behind one role-based selection; each caller passes its native gate.
+    pub(crate) fn read_slots(&self, policy: SlotPolicy) -> Slots<Identity> {
+        Slots::new(
+            self.credentials.clone(),
+            self.options.read_credentials.clone(),
+            policy,
+        )
+    }
+
     /// Private reads prefer the read-only key; the primary key is the fallback.
     pub(crate) fn read_credential(&self) -> Option<Credential> {
-        let (identity, slot) = match (&self.options.read_credentials, &self.credentials) {
-            (Some(read), _) => (read, CredentialSlot::Secondary),
-            (None, Some(primary)) => (primary, CredentialSlot::Primary),
-            (None, None) => return None,
-        };
-        Some(Credential {
-            slot,
-            reference: identity.credential.clone(),
-        })
+        self.read_slots(SlotPolicy::default())
+            .select(CredentialRole::Read { scope: None })
+            .ok()
+            .map(|(selection, identity)| selection.credential(identity.credential.clone()))
     }
 
     /// One signed private GET under engine-issued Read authority. A queue
@@ -724,7 +729,7 @@ impl Okx {
         } else if let Pending::History(request) = pending {
             self.history_failed(cx, *request, error);
         } else if let Pending::Closed(request) = pending {
-            Self::closed_failed(cx, request, error);
+            Self::closed_failed(cx, *request, error);
         } else if let Pending::Candles { root, .. } = pending {
             // Native soft shape for any post-send failure, deadline included.
             // Not gated on read delivery: an expired leg would never finish.
@@ -874,7 +879,7 @@ impl Venue for Okx {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
-            Pending::Closed(request) => Self::closed_item(request, item),
+            Pending::Closed(request) => Self::closed_item(cx, request, item),
             Pending::Markets {
                 kind,
                 rows,
@@ -1130,6 +1135,11 @@ impl Venue for Okx {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Closed(read) = &pending
+            && !read.valid_delivery(cx)
+        {
+            return;
+        }
         if let Pending::History(read) = &pending
             && !read.valid_delivery(cx)
         {
@@ -1137,6 +1147,18 @@ impl Venue for Okx {
         }
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
             let _ = cx.finish_http_context(context);
+        }
+        // An account-cycle page passes custody and generation before any codec,
+        // publishes, then retires; a stale or unauthorized one only retires.
+        let page = match &pending {
+            Pending::Account(request) => request.page_context().cloned(),
+            _ => None,
+        };
+        if let Pending::Account(request) = &pending
+            && !self.account_delivery_current(cx, request)
+        {
+            account::retire(cx, page.as_ref());
+            return;
         }
         if let Pending::Account(account::Request::Config { .. }) = &pending
             && self.config_rejected(cx, response.body)
@@ -1181,10 +1203,13 @@ impl Venue for Okx {
         }
         match pending {
             Pending::SocketRefresh { .. } => (),
-            Pending::Account(request) => self.account_response(cx, request, response),
+            Pending::Account(request) => {
+                self.account_response(cx, request, response);
+                account::retire(cx, page.as_ref());
+            }
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, *request, response),
-            Pending::Closed(request) => self.closed_response(cx, request),
+            Pending::Closed(request) => self.closed_response(cx, *request),
             Pending::Markets {
                 kind,
                 rows,
@@ -1410,7 +1435,7 @@ impl Venue for Okx {
     ) {
         match pending {
             Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
-            Pending::Closed(request) => Self::closed_sign_failed(cx, request, error),
+            Pending::Closed(request) => Self::closed_sign_failed(cx, *request, error),
             Pending::Account(account::Request::Leverage { context, .. }) => {
                 let _ = cx.fail_context(&context, error);
             }
@@ -1428,6 +1453,7 @@ impl Venue for Okx {
         _pending: Vec<Pending>,
     ) {
         self.retire_history(owner);
+        self.retire_closed(owner);
     }
 
     /// The managed leverage read keeps the engine's typed failure, e.g. Timeout.
@@ -1439,6 +1465,7 @@ impl Venue for Okx {
     ) {
         match pending {
             Pending::History(read) => self.history_failed(cx, *read, error),
+            Pending::Closed(read) => Self::closed_http_failed(cx, *read, error),
             Pending::Account(account::Request::Leverage { context, .. }) => {
                 let _ = cx.fail_context(&context, error);
             }
