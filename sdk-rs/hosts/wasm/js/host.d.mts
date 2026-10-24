@@ -260,12 +260,12 @@ export interface SigningIdentity {
   /** Trusted caller-assigned identity/nonce scope; never a key hash or slot name. */
   stableId?: string;
   /** Additional provider-owned signing refs; never an identity or nonce scope. */
-  extra?: { zklinkSeed?: string };
+  extra?: { zklinkSeed?: string; l1Wallet?: string };
 }
 export interface SigningIdentities { primary?: SigningIdentity; secondary?: SigningIdentity }
 export interface LocalIdentityMetadata {
   stableId?: string;
-  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
+  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text' | 'base58';
   trimCredential?: boolean;
 }
 /** Trusted local setup metadata; credential strings arrive on the setup channel. */

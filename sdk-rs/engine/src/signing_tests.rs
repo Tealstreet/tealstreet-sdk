@@ -1958,3 +1958,65 @@ fn public_operations_validate_refs_algorithms_and_exact_result_widths() {
         );
     }
 }
+
+#[test]
+fn l1_wallet_role_is_primary_only_for_injected_refs_and_policies() {
+    use crate::signing::{
+        CredentialSetupPolicy, ExtraFieldPolicy, ExtraKey, ExtraKeyPolicy, Identities, Identity,
+        IdentitySetupPolicy,
+    };
+    let wallet = Some(IdentitySetupPolicy {
+        extra: Some(ExtraKeyPolicy {
+            key: ExtraKey::L1Wallet,
+            field: ExtraFieldPolicy::RequiredForPrivate,
+            encoding: None,
+        }),
+        ..Default::default()
+    });
+    let identity = |extra: bool| Identity {
+        credential: KeyRef("credential".into()),
+        signing: KeyRef("signing".into()),
+        passphrase: None,
+        stable_id: None,
+        extra: extra
+            .then(|| (ExtraKey::L1Wallet, KeyRef("wallet".into())))
+            .into_iter()
+            .collect(),
+    };
+    // The role's one algorithm is the L1 digest signature.
+    assert_eq!(ExtraKey::L1Wallet.algorithm(), Algorithm::Secp256k1Digest);
+    assert_eq!(ExtraKey::ZklinkSeed.algorithm(), Algorithm::ZkLinkContract);
+    let primary = CredentialSetupPolicy {
+        primary: wallet,
+        secondary: None,
+    };
+    let mut ok = Identities {
+        primary: Some(identity(true)),
+        secondary: None,
+    };
+    assert_eq!(primary.apply_to_identities(&mut ok, false), Ok(()));
+    // A secondary declaration is invalid policy, even with no secondary identity.
+    let secondary = CredentialSetupPolicy {
+        primary: None,
+        secondary: wallet,
+    };
+    for secondary_identity in [None, Some(identity(true))] {
+        let mut ids = Identities {
+            primary: Some(identity(false)),
+            secondary: secondary_identity,
+        };
+        assert_eq!(
+            secondary.apply_to_identities(&mut ids, false),
+            Err(SignError::InvalidRequest)
+        );
+    }
+    // An injected secondary wallet ref without any declaration is refused too.
+    let mut injected = Identities {
+        primary: Some(identity(true)),
+        secondary: Some(identity(true)),
+    };
+    assert_eq!(
+        primary.apply_to_identities(&mut injected, false),
+        Err(SignError::InvalidRequest)
+    );
+}
