@@ -198,6 +198,104 @@ fn native_split_bound_applies_per_input_not_to_whole_command() {
     )));
 }
 
+fn regular_request_boundary(engine: &mut Engine<Okx>, last_amount: u32) {
+    small_lots(engine);
+    place(
+        engine,
+        vec![
+            order(10_000),
+            order(10_000),
+            order(10_000),
+            order(10_000),
+            order(last_amount),
+        ],
+    );
+}
+
+#[test]
+fn ruled_2048_call_boundary_remains_native_admissible() {
+    let mut engine = trading_engine();
+    regular_request_boundary(&mut engine, 960);
+    let output = prepared(&mut engine, 5.);
+    post(&output);
+    assert!(!output.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+    )));
+}
+
+#[test]
+fn ruled_2049_call_boundary_refuses_before_any_progress_or_release() {
+    let mut engine = trading_engine();
+    regular_request_boundary(&mut engine, 980);
+    let output: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(
+        output
+            .iter()
+            .filter(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command: OWNER, error })
+                    if error.kind == Some(ErrorKind::Internal)
+                        && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+            ))
+            .count(),
+        1,
+        "2049 calls must refuse atomically under the ruled contract"
+    );
+    assert!(!output.iter().any(|a| matches!(
+        a,
+        Action::Http(_)
+            | Action::Sign { .. }
+            | Action::Notice(Notice::CommandProgress { command: OWNER, .. })
+    )));
+    assert!(engine.store().orders().is_empty());
+}
+
+#[test]
+fn native_maximum_plain_split_returns_all_ten_thousand_accepted_ids() {
+    let mut engine = trading_engine();
+    small_lots(&mut engine);
+    place(&mut engine, vec![order(10_000)]);
+    let mut output = prepared(&mut engine, 5.);
+    for batch in 0..500 {
+        let Action::Http(request) = post(&output) else {
+            unreachable!()
+        };
+        let payload: Vec<serde_json::Value> =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.len(), 20);
+        let rows: Vec<_> = (batch * 20..batch * 20 + 20)
+            .map(|id| format!(r#"{{"ordId":"{id}","sCode":"0","sMsg":""}}"#))
+            .collect();
+        let now = 6. + f64::from(batch);
+        reply(
+            &mut engine,
+            post(&output),
+            &format!(r#"{{"code":"0","data":[{}]}}"#, rows.join(",")),
+            now,
+        );
+        output = prepared(&mut engine, now);
+        assert!(!output.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+        )));
+    }
+    let results: Vec<_> = output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandDone {
+                command: OWNER,
+                result,
+            }) => Some(result),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(results.len(), 1);
+    let ids: Vec<String> = serde_json::from_str(results[0]).unwrap();
+    assert_eq!(ids.len(), 10_000);
+    assert!(ids.iter().enumerate().all(|(i, id)| *id == i.to_string()));
+    assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
+}
+
 #[test]
 fn native_all_refused_cancels_report_each_row_continue_then_finish_empty() {
     let mut engine = trading_engine();

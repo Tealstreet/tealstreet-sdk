@@ -78,25 +78,48 @@ The OKX crate must opt into `http-plans` explicitly at implementation time.
 ## Shared and behavior gates before production
 
 1. **Physical-credit bound:** `PlanBound::from_steps` enforces 256 attempts.
-   The overseer ruled no new 257-call refusal: native successful inputs stay
-   supported. fe7lgm owns sizing the shared increase and memory/WASM/CPU cost.
+   The latest overseer ruling authorizes **2048 attempts per command**, refusing
+   larger jobs before send. This supersedes the earlier no-new-limit direction.
+   fe7lgm owns the shared increase and memory/WASM/CPU cost. The consumer must
+   record this new caller-visible bound in CALLERS and pin 2048/2049 controls.
    One plain input order permits 10000 split lots, or 500 twenty-row calls;
    both protections make 30000 calls (entry, stop, take-profit per lot).
    Important: that bound is per input order. `CommandIn::PlaceOrders.orders`
    is a Vec decoded directly by serde, and `plan_place` has no input-count cap.
    Thus 30000 is not a finite whole-command maximum. Report this distinction
-   to the shared owner before choosing a replacement bound. No chunking,
-   renewed authority or private limit is authorized.
+   to the shared owner when sizing retention. No chunking, renewed authority
+   or additional private limit is authorized.
 2. **Independent cancellation:** at this actual base `PlanPolicy` has no
    `independent_calls` field. The prerequisite is #1956 landing (combo-6b),
    carrying #1939; its non-landing frozen pin is `3745a230887`. Obtain its
    actual source and disposition for mixed/all-refused cancellation before implementation.
    Do not copy a proposed flag or simulate journal success in the venue.
-3. **Terminal projection:** resolve the native all-refused `done[]` case with
-   the shared journal owner and overseer. The owner confirms that an all-refused
-   journal currently projects failure, whereas native code can finish `[]`.
-   Native continuation alone does not prove matching final outcome. Preserve
-   the original witness; no terminal bypass is authorized.
+3. **Terminal projection:** the overseer rules native all-refused cancellation
+   must retain per-row diagnostics and `done[]`. Record every refusal in the
+   shared journal, then override only this cancellation terminal through a
+   reviewed shared completion API. The current G2b journal projects failure;
+   the exact supported completion path is a source gate with the Plan owner.
+   No numeric completion fallback or fabricated accepted write is authorized.
+4. **Context reservation:** the actual registry reserves one Context per
+   logical call against global capacity 256, independently of the journal's
+   attempt cap. Raising the attempt constant alone cannot admit 500 calls.
+   The overseer assigns the engine owner checked peak-concurrency reservation:
+   one for this serial chain, held until completion, with settlement returning
+   each slot to that Plan reservation. This is shared admission/issue/settle
+   work requiring its own original controls; no venue implementation here.
+5. **Accepted-ID retention:** the shared evidence budget retains at most 4096
+   IDs and 256 KiB of ID storage, whereas one native maximum plain split can
+   return 10000 accepted IDs. Raising call capacity alone changes the caller
+   result by truncating the native output. The latest overseer ruling requires
+   full ID evidence in fe7lgm's shared prerequisite; no truncation is authorized.
+
+For sizing, if plain inputs yield P unprotected lots, protected inputs yield
+L_i lots with b_i enabled protections (one or two), and there are A standalone
+algo inputs, the native request count is
+`ceil(P / 20) + sum(L_i * (1 + b_i)) + A`.
+Every L_i is individually capped at 10000; input count is not capped here.
+Cancellation uses ceil(R / 20) + ceil(G / 10) for deduplicated regular/algo IDs.
+These formulas describe current job construction, not new admissibility limits.
 
 These gates also apply to the Bitget write consumer. Missing shared machinery
 is reported to its owner and built once; this branch changes no engine source.
@@ -113,6 +136,8 @@ Record actual assertion failures independently from working native witnesses.
 - Duplicate live legacy ID cannot replace a retained job or its terminal.
 - Native per-input-order split maximum (10000 lots) and maximum plus one,
   plus two maximum inputs proving that the cap is not whole-command scope.
+- The ruled whole-command limit: 2048 physical requests admit when resources
+  permit; 2049 refuses once, NotSent, before Store/progress/provider or I/O.
 - Native bracket entry/stop/take-profit order and Primary signed bytes.
 - Native all-refused cancellation diagnostics, final output and later sibling
   continuation, plus mixed rows and dependent replacement refusal.
@@ -140,3 +165,11 @@ Working controls pin 10000/10001 lots, two maximum inputs in one command,
 all-refused cancellation diagnostics/continuation/`done[]`, and code 50004
 stopping the protective chain while reconciliation starts without write retry.
 These are original-source receipts, not managed implementation proof.
+
+After the 2048-attempt ruling, the expanded target executes nine controls:
+**three assertion REDs, six GREEN, zero ignored**. Original six control bodies
+are unchanged. The additive RED pins the newly ruled 2049-call refusal; native
+2048-call admission is a working positive. Another working control drives all
+500 native plain-order requests and requires the complete 10000-ID result in
+native order, without truncation. The full target runs in 0.32 seconds locally;
+this is a native fixture receipt, not a managed Plan CPU certification.
