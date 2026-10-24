@@ -116,3 +116,38 @@ On unchanged production at `508b24a080b`, the file has 3 assertion REDs,
 The two passing controls are the exact URLs with the read key on GETs, and
 balance and positions committing together.
 
+## Implementation receipt
+
+The source pin follows the API-fit review by codex-cxxyqr (CLEAR at `fef6facac7e`).
+
+- **Admission.** `account_read` builds a transient `Slots` (primary, read key,
+  `SlotPolicy::default()`) and calls `SelectedRead::select(ReadRole::Read {
+  scope: None })`. It adds no auth evidence, because the native list path had
+  none. Then `SelectedRead::background` (20 s, Never, no pacing) and
+  `AdmittedRead::queue`, which carries the OKX dispatch recipe with the demo
+  header and an `EnvelopeField("data")` stream.
+  - A missing selection, admission refusal or queue refusal goes to
+    `account_failed`. That retires only the matching join or order owner and
+    leaves the native backoff to run.
+- **Custody.** Each page Context lives on its `Request::{Balance, Positions,
+  Orders}`.
+  - `account_item` and `on_response` gate on
+    `validate_background_read_http_delivery` before any decode.
+  - A response runs `account_response` (publish), then retires the page.
+  - A continuation retires the settled page before `account_read` admits the
+    next one.
+  - `account_failed` retires first; failures, sign errors and timeouts all reach
+    it.
+  - The generation, version and join rules are unchanged and separate from
+    delivery custody.
+- **Fixtures.** Account, product and trading tests now drain through the managed
+  handshake (`prepared` at the event's time), and their assertions are
+  unchanged. Two exceptions:
+  - `complete_fresh` answers at 10 s, not 30 s, inside the new per-page deadline.
+  - The #1943 subscribe-before-refresh test now matches the managed Prepare as
+    the refresh's earliest staging.
+- **Tests.** The 3 REDs pass and all 4 controls pass. That includes 2 new
+  readiness controls: a managed orders cursor page, and a walk longer than 20 s
+  completing page by page. All OKX tests and strict all-target Clippy pass.
+  There is zero inventory delta.
+

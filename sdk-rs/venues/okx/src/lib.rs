@@ -1133,6 +1133,17 @@ impl Venue for Okx {
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
             let _ = cx.finish_http_context(context);
         }
+        // An account-cycle page publishes only its exact delivery, then retires.
+        let page = match &pending {
+            Pending::Account(request) => request.page_context().cloned(),
+            _ => None,
+        };
+        if let Some(context) = &page
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            let _ = cx.finish_http_context(context);
+            return;
+        }
         if let Pending::Account(account::Request::Config { .. }) = &pending
             && self.config_rejected(cx, response.body)
         {
@@ -1176,7 +1187,10 @@ impl Venue for Okx {
         }
         match pending {
             Pending::SocketRefresh { .. } => (),
-            Pending::Account(request) => self.account_response(cx, request, response),
+            Pending::Account(request) => {
+                self.account_response(cx, request, response);
+                account::retire(cx, page.as_ref());
+            }
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, request, response),
             Pending::Closed(request) => self.closed_response(cx, request),

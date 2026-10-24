@@ -271,3 +271,53 @@ fn balance_and_positions_commit_together() {
     assert!(cycle.engine.store().loaded().balance);
     assert!(cycle.engine.store().loaded().positions);
 }
+
+const ORDER_ROW: &str = r#"{"instId":"BTC-USDT-SWAP","ordId":"ID","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"38000","lever":"10","reduceOnly":"false","clOrdId":""}"#;
+
+fn full_orders_page(start: usize) -> String {
+    let rows: Vec<String> = (start..start + 100)
+        .map(|n| ORDER_ROW.replace("\"ID\"", &format!("\"{n}\"")))
+        .collect();
+    format!(r#"{{"code":"0","msg":"","data":[{}]}}"#, rows.join(","))
+}
+
+#[test]
+fn an_orders_cursor_continuation_is_its_own_managed_page() {
+    let mut cycle = Cycle::started(false);
+    cycle.answer("orders-pending", &full_orders_page(1), 5.0);
+    let next = cycle
+        .requests
+        .iter()
+        .find(|r| r.url.contains("orders-pending") && r.url.contains("after=100"))
+        .unwrap_or_else(|| panic!("no cursor page: {:?}", cycle.urls()));
+    assert!(
+        cycle.managed.contains(&next.id),
+        "cursor page released outside custody"
+    );
+}
+
+#[test]
+fn a_walk_longer_than_one_deadline_completes_page_by_page() {
+    let mut cycle = Cycle::started(false);
+    // Each page answers 15 s after it is issued, so the walk outlasts one 20 s bound.
+    let mut at = cycle.now;
+    for page in 0..2 {
+        at += 15_000.0;
+        cycle.advance(at);
+        let body = if page == 0 {
+            full_orders_page(1)
+        } else {
+            envelope("")
+        };
+        cycle.answer("orders-pending", &body, at);
+    }
+    // The walk advanced to the next order kind, so page two was accepted.
+    assert!(
+        cycle
+            .requests
+            .iter()
+            .any(|r| r.url.contains("orders-algo-pending")),
+        "the second page was not accepted inside its own deadline: {:?}",
+        cycle.urls()
+    );
+}
