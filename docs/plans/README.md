@@ -278,4 +278,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Caller-wait Read root expiry | Plan under review (claude-fe7lgm) | Before relying on engine-owned expiry of a tracked caller-wait Read root, or refusing a missing command receipt. | [RUST_READ_ROOT_EXPIRY.md](RUST_READ_ROOT_EXPIRY.md) |
 | Store order fence domains | Keep-both documentation plan | Before changing the broad late-ACK revision or selective logical snapshot epoch. | [RUST_ORDER_FENCE_DOMAINS.md](RUST_ORDER_FENCE_DOMAINS.md) |
 
+| Replay protocol audit finalization | Shared harness correction | Before changing checkpoint capture, terminal protocol coverage or the final replay boundary. | [RUST_REPLAY_AUDIT_FINALIZATION.md](RUST_REPLAY_AUDIT_FINALIZATION.md) |
+
 - [Binance Spot replay protocol diagnostics](RUST_BINANCESPOT_REPLAY_DIAGNOSTICS.md) — source-bound audit controls and exact declaration pruning, preserving native failures.
