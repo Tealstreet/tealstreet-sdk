@@ -654,10 +654,11 @@ fn a_resumed_capped_read_cannot_release_after_the_receipt_cap() {
     }
 }
 
-/// N7 cap, without a park: a capped Preflight's ordinary read is bounded by
-/// the same receipt. An uncapped Preflight keeps its declared window.
+/// Without a park, a capped Preflight's ordinary read keeps its declared
+/// window, capped or not: a valid handoff past the receipt still delivers
+/// (`engine/tests/plan_receipt_cap.rs`). Only a parked read is bounded.
 #[test]
-fn a_capped_preflight_read_window_ends_at_the_receipt_cap() {
+fn an_ordinary_preflight_read_keeps_its_declared_window_when_capped() {
     for capped in [true, false] {
         let mut e = engine(Reads {
             capped,
@@ -665,17 +666,6 @@ fn a_capped_preflight_read_window_ends_at_the_receipt_cap() {
         });
         command(&mut e, 0., 1_000);
         let read = e.venue.read.clone().unwrap();
-        if capped {
-            let handle = e.venue.preflight.clone().unwrap();
-            let cap =
-                e.io.request_contexts
-                    .preflight_receipt_cap(&handle)
-                    .unwrap()
-                    .unwrap()
-                    .1;
-            assert!(read.deadline() <= cap);
-        } else {
-            assert!(read.deadline() > 1_000., "the declared 2 x 20 s window");
-        }
+        assert!(read.deadline() > 1_000., "the declared 2 x 20 s window");
     }
 }
