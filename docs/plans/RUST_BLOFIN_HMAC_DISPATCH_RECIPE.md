@@ -57,6 +57,8 @@ routing intent and recipe identity must agree; never separately choose a
 provider key from the HTTP method. The recipe carries the selected Identity,
 including an opaque passphrase KeyRef. Trusted setup owns absent/empty fallback
 and raw material. No plaintext passphrase, key or secret is stored by the recipe.
+Neither the HTTP recipe nor its prepared nonce/stamp state implements Debug;
+do not log them or add a Debug derive when refreshing the prototype.
 
 ## Nonce, preparation and result contract
 
@@ -103,6 +105,16 @@ These native REDs show the consumer boundary that needs adoption; a recipe alone
 cannot make the native FetchLeverage consumer managed. Preserve the originals
 when the later consumer moves construction to opaque setup/Prepare/Bind/Claim.
 Do not claim a delayed action drain as physical Claim evidence.
+
+`private_read` also serves margin/position startup and background reads. The
+FetchLeverage consumer must split its genuine command-owned branch from those
+callers; it cannot change the common sender's authority to Command or pretend
+startup belongs to this command. Its three numeric response/failure terminals
+are the prospective consumer prunes (`c5a021da` once, `c873db6f` once and
+`569abc44` once). Against this base that would be request21 to18, with the
+shared startup sender retained. This recipe checkpoint prunes nothing: signing20,
+request21 and credential-selection6 remain exact. The full family cutover has
+separate source-derived inventory proof; the component grants no bootstrap row.
 
 Before recipe source freeze, add real managed probe controls for parked
 provider, delayed route/preparation, result shape/receipt/intent mismatch,
@@ -152,3 +164,34 @@ in `/tmp/codex-blofin-hmac-original.log`,
 `/tmp/codex-blofin-hmac-original-strict.log` and
 `/tmp/codex-blofin-hmac-selection-control.log`; they are not repository files.
 No runtime/recipe implementation, push, PR, CI or landed consumer API is claimed.
+
+## Corrections requested by the independent recipe review
+
+claude-4yjlw0's review of `cc4e3b42b68` found two original-control problems before
+source. Native positives and the delayed-stamp RED now use an immediate host
+driver that retains the complete Prepare/Bind/Cancel action trace, gives each
+Prepare its exact resource, calls Claim and returns HTTP only on Released.
+The five eager/preparation REDs keep their original assertion boundaries; wire,
+signature, settings and financial assertions are unchanged. Trusted fixture
+setup now installs a LocalSigner and its actual opaque refs before startup.
+Native raw construction remains only the unchanged-source boundary to replace
+when the real consumer adopts trusted setup. Parked-provider probes deliberately
+retain undriven issuance so the immediate helper cannot hide pending work.
+
+The entropy control's old blanket ban on ManagedHttp was incompatible with
+deferred signing. It now drives real preparation, proves the failing 21-byte
+source was called exactly once and expects the existing normalized
+`SignError::Unavailable` typed NotSent terminal, no HTTP/WS/provider release.
+Exact preparation cancellation may occur. The original legacy string-only
+error is not claimed as the future typed result: this correction can expose an
+additional assertion RED on unchanged source, which is reported separately.
+
+Additive working controls pin the exact caller SetLeverage POST body and an
+independent Primary HMAC literal despite a configured Secondary, Primary's
+required passphrase even with valid Secondary, and the reachable missing-primary
+FetchLeverage result. That result is `BloFin margin mode is not loaded`, because
+the earlier native mode gate wins. `headers`' distinct `BloFin requires API
+credentials` branch remains source-inspected: immutable construction prevents
+this invalid private setup reaching it with resolved mode. Do not fabricate
+account state to claim an executed version of that branch. Native refusal order
+and texts stay a source-stage preservation requirement.
