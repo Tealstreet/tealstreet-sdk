@@ -65,7 +65,11 @@ and attaches `cx.sign_http`. Wrapper state lives in `Pending::SignedAuth`.
   - The passphrase test reads the trusted `Identity.passphrase` ref only,
     never presence of material (m26ps4 pin 2). Its comment stays, and the
     ApeX expectation in the credential-selection checker records it.
-  - Background Read with the 20 s native timeout and `RetryPolicy::Never`. The seed `Backoff` remains the sole retry, as today.
+  - Background Read with the 20 s native timeout. The signed branch carries
+    `RetryPolicy::ReadFailure` solely for its one native signature resend via
+    `http_retry_context(ReadFailure)`; it has zero transport retries. The
+    unsigned branch uses `RetryPolicy::Never`. The seed `Backoff` stays the
+    startup retry, unchanged (uufub4 finding).
   A signer refusal keeps the #2008 control behavior: `request.failed`, then
   the startup retry is scheduled, with nothing sent.
 - **Identity command.** Use `SelectedRead::command` with the original
@@ -90,7 +94,8 @@ and attaches `cx.sign_http`. Wrapper state lives in `Pending::SignedAuth`.
     `http_retry_context(ReadFailure)` under `RetryPolicy::ReadFailure`;
   - separate budgets for the two, as candles already pin
     (`signature_and_transport_read_retries_have_separate_budgets_and_one_deadline`);
-  - `Markets` never transport-retries;
+  - `Markets` never transport-retries; its ReadFailure authority covers only
+    the signature resend;
   - preparation refusal stays typed `on_http_preparation_failed`, never a
     network retry.
 - **Removal.** `Pending::SignedAuth`, `ApexOmni::signed`, `send_signed`,
@@ -104,7 +109,7 @@ and attaches `cx.sign_http`. Wrapper state lives in `Pending::SignedAuth`.
 
 Run on unchanged source `aa824213600` with
 `cargo test -p safe-cex-venue-apexomni --test read_context`:
-**7 assertion REDs, 2 GREEN controls, no compile or fixture failures.**
+**7 assertion REDs, 3 GREEN controls, no compile or fixture failures.**
 One drain counts legacy `Http` and follows the real Prepare/Bind/Claim
 handoff.
 
@@ -123,6 +128,9 @@ handoff.
    refusal fails with no third request (GREEN control).
 9. Transport loss retries three times on the same path; the fourth fails
    with no further request (GREEN control).
+10. Signed symbols re-sign once on `/v3/symbols`; a second refusal, or any
+    transport loss, sends nothing more and schedules the startup backoff
+    (GREEN control).
 
 Readiness controls to add with the source change:
 - managed counters on the signature resend, transport retries and the

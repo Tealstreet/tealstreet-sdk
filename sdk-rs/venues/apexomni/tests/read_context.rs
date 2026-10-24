@@ -333,3 +333,34 @@ fn signed_read_transport_loss_retries_three_times_then_fails() {
     assert!(failed.requests.is_empty());
     assert!(terminal(&failed, COMMAND).is_err());
 }
+
+// GREEN control: signed symbols keep the one native re-sign, then defer to
+// the startup backoff; a transport loss never retries inline.
+#[test]
+fn signed_symbols_re_sign_once_and_never_transport_retry() {
+    let mut refusal = engine(Some("pass"));
+    refusal.start(0.);
+    let first = drain(&mut refusal, 0.).requests.remove(0);
+    let resent = reply(&mut refusal, 1., &first, SIGNATURE);
+    assert_eq!(resent.requests.len(), 1);
+    signed(&resent.requests[0], "/v3/symbols");
+    let refused = reply(&mut refusal, 2., &resent.requests[0], SIGNATURE);
+    assert!(refused.requests.is_empty());
+    assert!(
+        refused
+            .actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+
+    let mut loss = engine(Some("pass"));
+    loss.start(0.);
+    let first = drain(&mut loss, 0.).requests.remove(0);
+    let lost = transport_loss(&mut loss, 1., &first);
+    assert!(lost.requests.is_empty());
+    assert!(
+        lost.actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+}
