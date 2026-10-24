@@ -64,7 +64,10 @@ fn engine() -> Engine<TxFlow> {
         })
         .unwrap();
     e.handle(NOW + 25.0, Event::TimerFired { timer });
-    startup.extend(e.drain_plain());
+    startup.extend(safe_cex_engine::test_support::prepared_actions(
+        &mut e,
+        NOW + 25.0,
+    ));
     let initial = startup;
     let node = initial
         .iter()
