@@ -74,6 +74,15 @@ None of them copies the text.
   engine options JSON. `withoutSigningCredentials` already strips the raw read
   fields.
 
+**Construction precedence.** Today `build_with_signer` refuses every venue's
+invalid read key at construction (`read.validate().map_err(invalid)`), before
+the venue arm. So a registry-built engine never reaches the venue's own startup
+notice. ValidateOnly keeps that point exactly: `read_credentials_valid ==
+Some(false)` is refused there with `ReadCredentials::status(false)`, the same
+message and kind. The venue's stored status matters only for directly
+constructed venues. Kraken Spot (validate at construction, never use) is the
+second ValidateOnly consumer.
+
 **Fail-closed checks**, enforced in `build_with_signer` and the WASM
 constructor:
 - a ValidateOnly family receiving a secondary identity, whether injected
@@ -141,10 +150,11 @@ Private mode is unchanged.
 - Private mode is unchanged.
 - Hosted admission is refused in public-only, no private startup comes from a
   read-only provider, and evidence stays read-scoped.
-- codex-mxb4mq's public-only saved-key history parity controls (`c5a8ebbd4bf`,
-  native and JS) run on this seam's prefix before managed adoption. Material
-  stripping or capsule changes therefore cannot break the still-legacy history
-  path.
+- codex-mxb4mq's public-only saved-key history parity controls run on this
+  seam's prefix before managed adoption, so material stripping or capsule
+  changes cannot break the still-legacy history path. `c5a8ebbd4bf` is
+  native-registry only (2 tests, three routes). The JS/capsule counterpart is a
+  separate required gate and is not inherited from that receipt.
 
 **Size:** the WASM delta for one ValidateOnly and one undeclared family build,
 measured with the existing size harness and reported in the PR.
