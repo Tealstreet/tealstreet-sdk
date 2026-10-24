@@ -1053,6 +1053,34 @@ impl Venue for AsterDex {
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Some(local) = self.local_read(&command) {
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let result = match local {
+                history::LocalRead::History(result) => {
+                    result.map(str::to_owned).map_err(str::to_owned)
+                }
+                history::LocalRead::Unsupported(interval) => Err(interval.unsupported("AsterDEX")),
+                history::LocalRead::Leverage(symbol) => cx
+                    .store
+                    .setting(symbol)
+                    .filter(|s| s.leverage.is_finite() && s.leverage > 0.0)
+                    .map(|s| {
+                        format!(
+                            "{{\"buyLeverage\":{},\"sellLeverage\":{}}}",
+                            num::format(s.leverage),
+                            num::format(s.leverage)
+                        )
+                    })
+                    .ok_or_else(|| format!("Aster leverage is not loaded for {symbol}")),
+            };
+            let _ = match result {
+                Ok(data) => cx.done_context(&context, data),
+                Err(error) => cx.fail_context(&context, error),
+            };
+            return;
+        }
         match command {
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
@@ -1120,13 +1148,6 @@ impl Venue for AsterDex {
                 from_ms,
                 to_ms,
             } => {
-                if !supported(interval) {
-                    let Ok(context) = cx.admit_http_command(local_read_policy()) else {
-                        return;
-                    };
-                    let _ = cx.fail_context(&context, interval.unsupported("AsterDEX"));
-                    return;
-                }
                 let mut path = format!(
                     "{}?symbol={symbol}&interval={interval}&limit={}",
                     self.path("klines"),
@@ -1165,27 +1186,6 @@ impl Venue for AsterDex {
                 self.get(cx, &path, Pending::DepthRead { command });
             }
             Command::FetchAccount { command } => self.fetch_account_info(cx, command),
-            Command::FetchLeverage { symbol, .. } => {
-                let Ok(context) = cx.admit_http_command(local_read_policy()) else {
-                    return;
-                };
-                let result = cx
-                    .store
-                    .setting(&symbol)
-                    .filter(|s| s.leverage.is_finite() && s.leverage > 0.0)
-                    .map(|s| {
-                        format!(
-                            "{{\"buyLeverage\":{},\"sellLeverage\":{}}}",
-                            num::format(s.leverage),
-                            num::format(s.leverage)
-                        )
-                    })
-                    .ok_or_else(|| format!("Aster leverage is not loaded for {symbol}"));
-                let _ = match result {
-                    Ok(data) => cx.done_context(&context, data),
-                    Err(error) => cx.fail_context(&context, error),
-                };
-            }
             Command::Query { command, query } => self.start_query(cx, command, query),
             command => self.on_trade_command(cx, command),
         }
