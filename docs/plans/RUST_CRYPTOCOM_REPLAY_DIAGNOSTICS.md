@@ -58,3 +58,35 @@ subscriptions, a genuine late missing heartbeat and the Rust-only `user.trade`
 requirement. The same twelve controls pass with reviewed #1944 capture source;
 no audit policy or native source changed. Original log:
 `/tmp/codex-cryptocom-original-capture-controls/original-capture.log`.
+
+## Bounded raw evidence
+
+Baseline run `40037292055`, artifact `12538002330`, is measured on a checkout
+whose tree equals actual #1902. Corrected run `40040892521`, artifact
+`12539701275`, measures reviewed #1944. Fresh artifact metadata, archive digests,
+producer jobs, full upload logs/windows and checkout parents/trees bind both
+roles. The full raw objects compare equal after excluding only top-level
+`metrics` and `protocolErrors`. Baseline TS four and Rust five errors disappear;
+all sixty other ordered failures and fixers remain exact, with five writes,
+nine checkpoints and zero unserved/missing-write/invalid-signature/unused-write
+failures in both receivers. The strict private report remains FAIL.
+
+Receipt: `/tmp/codex-cryptocom-replay-evidence/proof.json`, SHA256
+`c31e42bf8c3479d77ed65f41f93cffb5b30978c1aa3d639bcb8b9f8036046dc8`.
+This is one pair per role, not five-run determinism or current-head CI.
+Independent control receipt: `/tmp/codex-cryptocom-controls-review.json`, SHA256
+`abe77ce2625824ead0a6b3772b0bcf874733bcb1c79f274ab098a94c867ed97b`.
+The control asserts the final healthy result before the checkpoint result, so
+the original RED proves persistent final errors rather than an interim-only
+reporting difference.
+
+Independent raw review CLEAR: receipt
+`/tmp/codex-cryptocom-replay-evidence/independent-review.json`, SHA256
+`48ba6214cbf377a4e62656fe687e9628744e9afff47b5564c33ff708b057585c`.
+Only the exact current-tape nine-key protocol group is removed (811 bytes).
+All other manifest bytes are preserved. The real suite verifier reports two
+strict declared FAILs (public and private), zero unexpected failures and zero
+unobserved declarations; its public case was already a declared failure, rather
+than the public PASS assumed by the first local summary assertion. Correcting
+that local assertion changes no report, declaration or verifier behavior.
+Crypto/declaration-policy controls pass 20/20; the separate capture controls pass.

@@ -1382,3 +1382,15 @@ Both real replay callers and forgotten-final-flag mutations are checked.
 Native accepted-write snapshot races are separately reproduced by four REDs
 and two working controls; the identical six controls pass against queued #1788.
 Those venue changes and their tests are outside this standalone harness scope.
+
+### Crypto.com terminal audit controls
+
+Twelve real-audit controls cover healthy authentication and heartbeat exchange,
+pre-ACK checkpoint observation, persistent invalid HMAC and early subscription
+faults, a final missing heartbeat before memory collection, and the distinct
+TS four-channel/Rust five-channel requirements. The original capture has two
+assertion REDs with ten working GREEN controls; final-only capture passes all
+twelve. Full raw comparison excludes only top-level metrics and protocol errors,
+retaining all other receiver fields and the sixty ordered financial/identity
+failures. The nine removed protocol declarations each require exact current-tape
+absence; every other manifest byte is preserved.

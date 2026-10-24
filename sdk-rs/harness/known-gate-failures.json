@@ -17477,20 +17477,6 @@
             "checkpoint 8 account.orders[1].clientOrderId",
             "checkpoint 8 account.orders[2].clientOrderId"
           ]
-        },
-        {
-          "divergence": "Private protocol/authentication/stream coverage is incomplete in this fixture; this known FAIL is not authenticated lifecycle or complete private parity evidence.",
-          "keys": [
-            "rust: missing private subscription user.advance.order",
-            "rust: missing private subscription user.balance",
-            "rust: missing private subscription user.order",
-            "rust: missing private subscription user.positions",
-            "rust: missing private subscription user.trade",
-            "ts: missing private subscription user.advance.order",
-            "ts: missing private subscription user.balance",
-            "ts: missing private subscription user.order",
-            "ts: missing private subscription user.positions"
-          ]
         }
       ]
     },
