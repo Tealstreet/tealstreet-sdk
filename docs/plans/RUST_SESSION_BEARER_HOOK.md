@@ -480,4 +480,7 @@ private requests carry a session token can use it.
   (codex-zs5e83): whichever of G1's background-parent cascade and this branch
   composes second keeps `retire_session` ending `sessions.retire` → G1
   background cascade → Bearer fence. Both are queued cleanup, so the order is
-  pinned rather than load-bearing.
+  pinned rather than load-bearing.- Consumer source/composition (codex-zs5e83) CLEAR at `3a0590d6606`: it ran
+  25/25 default and 31/31 `http-plans` itself, and confirmed the start gate
+  fails in both variants without the tail drain. Part 2 is fully cleared
+  (independent, claude-55ao7t, claude-fe7lgm, codex-zs5e83).
