@@ -1,3 +1,5 @@
+// The probe pending is a whole Context, returned by refused managed requests.
+#![allow(clippy::result_large_err)]
 use super::super::super::*;
 use super::SESSIONS;
 use crate::request_context::{
@@ -23,11 +25,16 @@ struct Probe {
     refusal: Option<&'static crate::classify::CodeTable>,
     finish_first: bool,
     retire_in_response: Option<Session>,
+    command_write_fact: bool,
+    items: usize,
+    settle_in_response: Option<(crate::request_context::Context, u32)>,
+    refuse_in_response: Option<u32>,
     facts: Vec<Result<(), Error>>,
     completions: Vec<Result<(), Error>>,
     responses: Vec<(Owner, String)>,
     failures: Vec<Owner>,
     preparation_failures: Vec<(Error, Option<crate::Outcome>)>,
+    grants: Vec<bool>,
     reconciles: usize,
 }
 
@@ -41,11 +48,16 @@ impl Default for Probe {
             refusal: None,
             finish_first: false,
             retire_in_response: None,
+            command_write_fact: false,
+            items: 0,
+            settle_in_response: None,
+            refuse_in_response: None,
             facts: vec![],
             completions: vec![],
             responses: vec![],
             failures: vec![],
             preparation_failures: vec![],
+            grants: vec![],
             reconciles: 0,
         }
     }
@@ -96,6 +108,29 @@ impl Venue for Probe {
             return;
         }
         let session = matches!(pending.0.owner(), Owner::Session { .. });
+        if session && let Some((waiter, legacy)) = self.settle_in_response.take() {
+            self.facts
+                .push(cx.fail_context(&waiter, VenueError::new("login failed")));
+            cx.fail(legacy, VenueError::new("login failed"));
+        }
+        if session && let Some(managed) = self.refuse_in_response.take() {
+            self.facts
+                .push(cx.fail_context(&pending.0, VenueError::new("not a command")));
+            cx.fail(
+                managed,
+                VenueError::new("numeric completion of a managed write"),
+            );
+        }
+        if !session && self.command_write_fact && pending.0.operation() == Operation::Mutation {
+            self.facts.push(
+                cx.http_write_fact(
+                    &pending.0,
+                    crate::classify::WriteFact::Accepted { order_ids: vec![] },
+                    None,
+                )
+                .map(drop),
+            );
+        }
         if session && self.finish_first {
             cx.finish_http_context(&pending.0).unwrap();
         }
@@ -107,10 +142,11 @@ impl Venue for Probe {
                 code: crate::classify::NativeCode::Int(-2015),
                 message: "invalid API key",
             };
-            self.facts.push(
-                cx.http_write_failure(&pending.0, table, Some(&native), "refused", None)
-                    .map(drop),
-            );
+            let failure = cx.http_write_failure(&pending.0, table, Some(&native), "refused", None);
+            if let Ok((_, grant)) = &failure {
+                self.grants.push(grant.is_some());
+            }
+            self.facts.push(failure.map(drop));
         } else if pending.0.operation() == Operation::Mutation && session && self.classified {
             self.facts.push(
                 cx.http_write_fact(
@@ -146,6 +182,9 @@ impl Venue for Probe {
         if session && !self.finish_first {
             cx.finish_http_context(&pending.0).unwrap();
         }
+    }
+    fn on_item(&mut self, _: &mut Cx<'_, Pending>, _: &mut Pending, _: &str) {
+        self.items += 1;
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: &str) {
         self.failures.push(pending.0.owner());
@@ -232,6 +271,7 @@ fn open(engine: &mut Engine<Probe>, repeat_safe: bool) -> Session {
         cx.open_session(SessionPolicy {
             credential: None,
             repeat_safe,
+            private_egress: None,
         })
     })
     .unwrap()
@@ -594,6 +634,7 @@ fn session_contexts_require_the_session_credential_and_keep_their_owner() {
         cx.open_session(SessionPolicy {
             credential: Some(credential.clone()),
             repeat_safe: true,
+            private_egress: None,
         })
     })
     .unwrap();
@@ -643,6 +684,7 @@ fn bounded_sessions_and_operation_records() {
         with(&mut engine, 0., |cx| cx.open_session(SessionPolicy {
             credential: None,
             repeat_safe: true,
+            private_egress: None,
         })),
         Err(Error::Capacity)
     );
@@ -679,6 +721,7 @@ fn session_handles_carry_no_credential_material() {
                 reference: crate::signing::KeyRef("primary".into()),
             }),
             repeat_safe: true,
+            private_egress: None,
         })
     })
     .unwrap();
@@ -1251,6 +1294,11 @@ fn a_classified_session_refusal_resolves_the_operation_without_a_resend_grant() 
         );
         engine.drain_actions().for_each(drop);
         assert_eq!(engine.venue.facts, [Ok(())]);
+        assert_eq!(
+            engine.venue.grants,
+            [false],
+            "a session write is never resent"
+        );
         assert!(
             with(&mut engine, 4., |cx| cx
                 .session_context(&session, policy(Operation::Mutation)))
@@ -1374,9 +1422,554 @@ fn a_planned_command_is_refused_a_session_wait_instead_of_parking() {
     );
 }
 
-/// Session egress policy (#1833): a session operation is a root with no
-/// explicit egress (none can be declared), so routing derives from its
-/// credential; its legs inherit the root's egress and cannot widen it.
+fn prepared_intent(
+    engine: &mut Engine<Probe>,
+    context: &crate::request_context::Context,
+) -> crate::request_context::RoutingIntent {
+    with(engine, 1., |cx| {
+        cx.request_managed(
+            context.clone(),
+            Method::Post,
+            "https://venue.test/login".into(),
+            Some("{\"apiKey\":\"body-key\"}".into()),
+            Pending(context.clone()),
+        )
+    })
+    .unwrap();
+    engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { intent, .. } => Some(intent),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("prepared login")
+}
+
+fn granted() -> Option<crate::request_context::PrivateEgress> {
+    let slots = crate::credential_selection::Slots::new(Some(()), None, Default::default());
+    let (selection, _) = slots
+        .select(crate::credential_selection::CredentialRole::SessionAuth)
+        .unwrap();
+    selection.session_egress()
+}
+
+fn open_private_with(engine: &mut Engine<Probe>, repeat_safe: bool) -> Session {
+    with(engine, 0., |cx| {
+        cx.open_session(SessionPolicy {
+            credential: None,
+            repeat_safe,
+            private_egress: granted(),
+        })
+    })
+    .unwrap()
+}
+
+fn open_private(engine: &mut Engine<Probe>) -> Session {
+    open_private_with(engine, true)
+}
+
+#[test]
+fn only_a_primary_session_auth_selection_grants_private_egress() {
+    use crate::credential_selection::{CredentialRole::*, PrimaryReason, Slots};
+    assert!(granted().is_some());
+    let both = Slots::new(Some(()), Some(()), Default::default());
+    for role in [
+        Read { scope: None },
+        PrimaryRead {
+            reason: PrimaryReason::Catalog,
+            scope: None,
+        },
+        Mutation,
+    ] {
+        assert_eq!(both.select(role).unwrap().0.session_egress(), None);
+    }
+    assert_eq!(
+        both.select(SessionAuth).unwrap().0.slot(),
+        CredentialSlot::Primary,
+        "session egress never routes through the read key's proxy"
+    );
+}
+
+#[test]
+fn a_keyless_login_carrying_credentials_in_its_body_must_not_route_public() {
+    let mut engine = engine();
+    let session = open_private(&mut engine);
+    let login = with(&mut engine, 1., |cx| {
+        cx.session_context(&session, policy(Operation::Mutation))
+    })
+    .unwrap();
+    assert_eq!((login.credential(), login.route()), (None, None));
+    assert_eq!(
+        prepared_intent(&mut engine, &login),
+        crate::request_context::RoutingIntent::Primary,
+        "the body carries the API key; Public/CORS egress would leak it"
+    );
+    let leg = with(&mut engine, 2., |cx| {
+        cx.http_leg_context(&login, policy(Operation::Mutation))
+    })
+    .unwrap();
+    assert_eq!(
+        leg.egress(),
+        login.egress(),
+        "legs inherit the session egress"
+    );
+}
+
+#[test]
+fn a_keyless_session_without_private_egress_still_routes_public() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let bullet = with(&mut engine, 1., |cx| {
+        cx.session_context(&session, policy(Operation::Read))
+    })
+    .unwrap();
+    assert_eq!(
+        prepared_intent(&mut engine, &bullet),
+        crate::request_context::RoutingIntent::Public,
+        "egress is declared, never inferred from method, URL or body"
+    );
+    assert_eq!(
+        with(&mut engine, 1., |cx| cx.session_scoped_context(
+            &session,
+            Scope::Command(7),
+            policy(Operation::Read)
+        )),
+        Err(Error::Invalid),
+        "no private egress to scope"
+    );
+}
+
+#[test]
+fn work_carrying_a_session_token_rides_its_egress_without_gaining_authority() {
+    let mut engine = engine();
+    let session = open_private(&mut engine);
+    for (scope, operation) in [
+        (Scope::Command(7), Operation::Mutation),
+        (Scope::Command(8), Operation::Read),
+        (Scope::Background, Operation::Read),
+    ] {
+        let context = with(&mut engine, 1., |cx| {
+            cx.session_scoped_context(&session, scope, policy(operation))
+        })
+        .unwrap();
+        assert_ne!(context.owner(), session.owner(), "routing, not ownership");
+        assert_eq!(
+            prepared_intent(&mut engine, &context),
+            crate::request_context::RoutingIntent::Primary
+        );
+    }
+    assert_eq!(
+        with(&mut engine, 2., |cx| cx.session_scoped_context(
+            &session,
+            Scope::Background,
+            policy(Operation::Mutation)
+        )),
+        Err(Error::Invalid),
+        "session egress cannot authorize a write the scope does not own"
+    );
+    let signed = Policy {
+        credential: Some(Credential {
+            slot: CredentialSlot::Primary,
+            reference: crate::signing::KeyRef("primary".into()),
+        }),
+        ..policy(Operation::Read)
+    };
+    assert_eq!(
+        with(&mut engine, 2., |cx| cx.session_scoped_context(
+            &session,
+            Scope::Command(9),
+            signed.clone()
+        )),
+        Err(Error::Invalid),
+        "signed work keeps its credential's egress"
+    );
+    assert_eq!(
+        with(&mut engine, 2., |cx| cx.open_session(SessionPolicy {
+            credential: signed.credential.clone(),
+            repeat_safe: true,
+            private_egress: granted(),
+        })),
+        Err(Error::Invalid),
+        "a signed session declares no unsigned egress"
+    );
+}
+
+#[test]
+fn forged_and_foreign_session_egress_is_refused() {
+    let mut engine = engine();
+    let session = open_private(&mut engine);
+    let Owner::Session { generation } = session.owner() else {
+        unreachable!()
+    };
+    let forged = crate::request_context::Egress::Session(
+        crate::request_context::SessionEgress::new(generation),
+    );
+    for operation in [Operation::Read, Operation::Mutation] {
+        assert_eq!(
+            with(&mut engine, 1., |cx| cx.http_context_with_egress(
+                Scope::Command(7),
+                policy(operation),
+                forged
+            )),
+            Err(Error::Invalid),
+            "only the session core mints session egress"
+        );
+    }
+    let mut other = self::engine();
+    let foreign = open_private(&mut other);
+    assert_eq!(
+        with(&mut engine, 1., |cx| cx.session_scoped_context(
+            &foreign,
+            Scope::Command(7),
+            policy(Operation::Read)
+        )),
+        Err(Error::Revoked)
+    );
+}
+
+#[test]
+fn retirement_fences_sends_on_its_egress_but_not_sent_write_outcomes() {
+    let mut engine = engine();
+    let session = open_private(&mut engine);
+    let scoped = |engine: &mut Engine<Probe>, id| {
+        with(engine, 1., |cx| {
+            cx.session_scoped_context(&session, Scope::Command(id), policy(Operation::Mutation))
+        })
+        .unwrap()
+    };
+    let sent = scoped(&mut engine, 7);
+    let sent = {
+        let token = queue(&mut engine, &sent, 1.);
+        release(&mut engine, token, 2.)
+    };
+    let issued = scoped(&mut engine, 8);
+    let prepared = scoped(&mut engine, 9);
+    let prepared = queue(&mut engine, &prepared, 2.);
+    with(&mut engine, 3., |cx| cx.retire_session(&session)).unwrap();
+
+    // Stale generation: neither new work nor a leg may use the old egress.
+    assert_eq!(
+        with(&mut engine, 3., |cx| cx.session_scoped_context(
+            &session,
+            Scope::Command(10),
+            policy(Operation::Read)
+        )),
+        Err(Error::Revoked)
+    );
+    assert_eq!(
+        with(&mut engine, 3., |cx| cx
+            .http_leg_context(&issued, policy(Operation::Mutation))),
+        Err(Error::Revoked)
+    );
+    let queued = with(&mut engine, 3., |cx| {
+        cx.request_managed(
+            issued.clone(),
+            Method::Post,
+            "https://venue.test/order".into(),
+            None,
+            Pending(issued.clone()),
+        )
+    });
+    assert!(matches!(queued, Err((_, Error::Revoked))));
+    engine.http_prepared(
+        4.,
+        prepared,
+        Prepared {
+            id: prepared.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    assert!(engine.drain_actions().all(|action| !matches!(action,
+        Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Bind { .. }))));
+    assert_eq!(
+        engine.venue.preparation_failures.len(),
+        1,
+        "the fenced command learns its write was never sent"
+    );
+
+    respond(&mut engine, sent, 5., "{\"orderId\":1}");
+    assert!(
+        engine
+            .venue
+            .responses
+            .iter()
+            .any(|(owner, _)| matches!(owner, Owner::Command { id: 7, .. })),
+        "a write sent before retirement still delivers its outcome"
+    );
+}
+
+#[test]
+fn session_egress_exempts_no_write_from_its_journal_or_gate() {
+    let mut engine = engine();
+    let session = open_private_with(&mut engine, false);
+    // A command write riding session egress keeps the full command journal.
+    let command = with(&mut engine, 1., |cx| {
+        cx.session_scoped_context(&session, Scope::Command(7), policy(Operation::Mutation))
+    })
+    .unwrap();
+    let revision = engine.io.http_write_revision;
+    let write = {
+        let token = queue(&mut engine, &command, 1.);
+        release(&mut engine, token, 2.)
+    };
+    assert!(engine.io.http_responses.contains(write));
+    assert_ne!(engine.io.http_write_revision, revision);
+    // A session write under its egress keeps the one-unresolved-write gate.
+    let login = {
+        let token = session_write(&mut engine, &session, 3.);
+        release(&mut engine, token, 3.)
+    };
+    respond(&mut engine, login, 4., "{}");
+    assert_eq!(
+        with(&mut engine, 5., |cx| cx
+            .session_context(&session, policy(Operation::Mutation))),
+        Err(Error::State)
+    );
+}
+
+#[test]
+fn retirement_fences_claims_and_retries_but_not_streams_or_facts() {
+    let mut engine = engine();
+    engine.venue.command_write_fact = true;
+    let session = open_private(&mut engine);
+    engine.io.request_contexts.dispatch = Some((7, crate::classify::Intent::Setting));
+    let write = with(&mut engine, 1., |cx| {
+        cx.session_scoped_context(&session, Scope::Command(7), policy(Operation::Mutation))
+    })
+    .unwrap();
+    engine.io.request_contexts.dispatch = None;
+    let sent = {
+        let token = queue(&mut engine, &write, 1.);
+        release(&mut engine, token, 1.)
+    };
+    let retryable = Policy {
+        retry: RetryPolicy::ReadFailure,
+        ..policy(Operation::Read)
+    };
+    let read = with(&mut engine, 1., |cx| {
+        cx.session_scoped_context(&session, Scope::Command(8), retryable)
+    })
+    .unwrap();
+    let streamed = queue(&mut engine, &read, 1.);
+    with(&mut engine, 1., |cx| {
+        cx.stream_response(streamed.attempt().request, crate::json::ArrayAt::Root)
+    });
+    let streamed = release(&mut engine, streamed, 1.);
+    let bound = with(&mut engine, 1., |cx| {
+        cx.session_scoped_context(&session, Scope::Command(9), policy(Operation::Read))
+    })
+    .unwrap();
+    let bound = queue(&mut engine, &bound, 1.);
+    engine.http_prepared(
+        1.,
+        bound,
+        Prepared {
+            id: bound.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let permit = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        2.,
+        Event::HttpStart {
+            request: streamed,
+            status: 200,
+            headers: "",
+        },
+    );
+    with(&mut engine, 3., |cx| cx.retire_session(&session)).unwrap();
+
+    assert!(
+        engine.claim_http(3., permit).is_err(),
+        "a bound send is fenced"
+    );
+    assert_eq!(
+        with(&mut engine, 3., |cx| cx.http_retry_context(
+            &read,
+            crate::request_context::RetryEvidence::ReadFailure
+        )),
+        Err(Error::Revoked)
+    );
+    for data in [&b"[1,"[..], &b"2]"[..]] {
+        engine.handle(
+            4.,
+            Event::HttpChunk {
+                request: streamed,
+                data,
+            },
+        );
+    }
+    engine.handle(4., Event::HttpEnd { request: streamed });
+    assert_eq!(
+        engine.venue.items, 2,
+        "a stream already sent keeps delivering"
+    );
+    respond(&mut engine, sent, 5., "{}");
+    assert_eq!(
+        engine.venue.facts,
+        [Ok(())],
+        "the public write-fact path records a sent write after retirement"
+    );
+}
+
+#[test]
+fn session_egress_never_crosses_sessions_or_engines() {
+    let mut engine = engine();
+    let first = open_private(&mut engine);
+    let second = open_private(&mut engine);
+    let generation = |session: &Session| match session.owner() {
+        Owner::Session { generation } => generation,
+        _ => unreachable!(),
+    };
+    let login = with(&mut engine, 1., |cx| {
+        cx.session_context(&first, policy(Operation::Mutation))
+    })
+    .unwrap();
+    assert_eq!(
+        engine.io.request_contexts.issue_session(
+            1 << 40,
+            generation(&second),
+            policy(Operation::Mutation),
+            1.,
+            Some(&login),
+        ),
+        Err(Error::Invalid),
+        "a session leg cannot move to another session"
+    );
+    let scoped = with(&mut engine, 1., |cx| {
+        cx.session_scoped_context(&first, Scope::Command(7), policy(Operation::Read))
+    })
+    .unwrap();
+    let other = engine
+        .io
+        .request_contexts
+        .sessions
+        .egress(generation(&second));
+    assert!(other.is_some() && other != scoped.egress());
+    assert_eq!(
+        with(&mut engine, 1., |cx| cx.make_http_context(
+            Scope::Command(7),
+            policy(Operation::Read),
+            Some(&scoped),
+            other
+        )),
+        Err(Error::Invalid),
+        "a child cannot swap its parent's session egress"
+    );
+
+    let mut foreign = self::engine();
+    let theirs = open_private(&mut foreign);
+    let foreign_scoped = with(&mut foreign, 1., |cx| {
+        cx.session_scoped_context(&theirs, Scope::Command(7), policy(Operation::Read))
+    })
+    .unwrap();
+    assert_eq!(
+        with(&mut engine, 1., |cx| cx
+            .http_leg_context(&foreign_scoped, policy(Operation::Read))),
+        Err(Error::Revoked),
+        "another engine's egress-bearing context is not ours"
+    );
+
+    // Retiring one session fences only its own egress.
+    with(&mut engine, 2., |cx| cx.retire_session(&first)).unwrap();
+    assert_eq!(
+        with(&mut engine, 2., |cx| cx
+            .http_leg_context(&scoped, policy(Operation::Read))),
+        Err(Error::Revoked)
+    );
+    assert!(
+        with(&mut engine, 2., |cx| cx.session_scoped_context(
+            &second,
+            Scope::Command(8),
+            policy(Operation::Read)
+        ))
+        .is_ok()
+    );
+}
+
+#[test]
+fn a_session_callback_settles_the_commands_waiting_on_it() {
+    let mut engine = engine();
+    let session = open_private(&mut engine);
+    let waiter = with(&mut engine, 1., |cx| {
+        cx.http_context(Scope::Command(7), policy(Operation::Read))
+    })
+    .unwrap();
+    engine.venue.settle_in_response = Some((waiter, 9));
+    let login = {
+        let token = session_write(&mut engine, &session, 1.);
+        release(&mut engine, token, 1.)
+    };
+    engine.handle(
+        2.,
+        Event::HttpResponse {
+            request: login,
+            response: Response {
+                status: 401,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    let failed = engine
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command, .. }) => Some(command),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        engine.venue.facts,
+        [Ok(())],
+        "a session delivery is no command's authority, so it blocks none"
+    );
+    assert_eq!(failed, [7, 9], "managed and legacy waiters both settle");
+}
+
+#[test]
+fn a_session_callback_settles_like_a_delivery_less_callback() {
+    let mut engine = engine();
+    let session = open_private(&mut engine);
+    let write = with(&mut engine, 1., |cx| {
+        cx.http_context(Scope::Command(11), policy(Operation::Mutation))
+    })
+    .unwrap();
+    {
+        let token = queue(&mut engine, &write, 1.);
+        release(&mut engine, token, 1.);
+    }
+    engine.venue.refuse_in_response = Some(11);
+    let login = {
+        let token = session_write(&mut engine, &session, 1.);
+        release(&mut engine, token, 1.)
+    };
+    respond(&mut engine, login, 2., "{}");
+    assert_eq!(
+        engine.venue.facts,
+        [Err(Error::Invalid)],
+        "a session Context is never command authority"
+    );
+    assert!(
+        engine.io.request_contexts.commands.contains_key(&11),
+        "a managed write is never sealed numerically"
+    );
+}
+
+/// Session egress policy (#1833): a session opened without private egress
+/// issues roots with no egress, so routing derives from the credential; its
+/// legs inherit the root's egress and cannot widen it.
 #[test]
 fn session_roots_declare_no_egress_and_their_legs_inherit_it() {
     use crate::request_context::RoutingIntent;

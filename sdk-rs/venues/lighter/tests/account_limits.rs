@@ -17,7 +17,7 @@ impl Client {
         };
         client.engine.start(NOW);
         for _ in 0..30 {
-            let actions = client.engine.drain_actions().collect::<Vec<_>>();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut client.engine, NOW);
             if actions.is_empty() {
                 break;
             }
