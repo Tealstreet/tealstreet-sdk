@@ -1368,22 +1368,15 @@ impl<P> Cx<'_, P> {
 
     /// A new physical leg under the same logical authority. Preserve its exact
     /// raw deadline; integer timeout recomputation cannot round the bound up.
+    /// Session legs use `session_leg_context`, so families without Sessions
+    /// never link Session issuance.
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
         self.io.request_contexts.validate_legacy(parent)?;
         self.io.request_contexts.validate(parent, self.now)?;
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
-            Owner::Session { generation } => {
-                let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-                return self.io.request_contexts.issue_session(
-                    identity,
-                    generation,
-                    policy,
-                    self.now,
-                    Some(parent),
-                );
-            }
+            Owner::Session { .. } => return Err(Error::Invalid),
             Owner::Execution { .. } => Scope::Execution,
         };
         self.make_http_context(scope, policy, Some(parent), None)

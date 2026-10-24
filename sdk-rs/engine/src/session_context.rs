@@ -254,6 +254,24 @@ impl<P> Cx<'_, P> {
             .issue_session(identity, generation, policy, self.now, None)
     }
 
+    /// A new physical leg of a session operation, keeping its exact raw bound.
+    /// A Read leg can never become a Mutation; any other owner is refused.
+    pub fn session_leg_context(
+        &mut self,
+        parent: &Context,
+        policy: Policy,
+    ) -> Result<Context, Error> {
+        self.io.request_contexts.validate_legacy(parent)?;
+        self.io.request_contexts.validate(parent, self.now)?;
+        let Owner::Session { generation } = parent.owner() else {
+            return Err(Error::Invalid);
+        };
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        self.io
+            .request_contexts
+            .issue_session(identity, generation, policy, self.now, Some(parent))
+    }
+
     /// Discard the session's work and revoke it, with no venue callback in
     /// between: unreleased attempts emit no HTTP, and late responses find no
     /// managed entry, so they never reach venue callbacks or reducers. Its
