@@ -67,32 +67,38 @@ a second policy implementation or add a venue override after selection.
 Proposed declaration vocabulary (spelling is pending API fit):
 
 ```rust
+enum LegBinding {
+    Read(BoundSelectedRead),
+    Mutation(IdentityBinding), // Primary mutation role only
+}
 struct LegDeclaration {
-    operation: Operation,
-    selected: SelectedIdentity, // opaque shared Selection + Identity + routing
+    binding: LegBinding, // Operation derives from this checked variant
     retry: RetryPolicy, // resolved per leg, bounded by its CallBound credits
     pacing: Option<Pacing>, // resolved per leg; no callback override
 }
 // Same internal admission used by uniform, conditional and physical Plans.
-cx.admit_plan_with_legs(&preflight, steps, root_policy, legs, terminals)
+// Each recursive call declaration contains its bound and LegDeclaration.
+cx.admit_bound_plan(&preflight, declared_steps, root_policy, terminals, barriers)
 ```
 
-SelectedIdentity is a typed PLACEHOLDER, not a new key carrier or an available
-API. codex-9czdjh owns the shared Selection-managed signed-read helper;
-claude-4yjlw0 reviews its consumer/signing fit. Consume its reviewed signature
-before runtime. The intended result binds slot, exact Identity refs, subject,
-credential generation and RoutingIntent; Selection::credential(KeyRef) supplies
-the managed Context's Credential. The same selection builds the family recipe
-for request_signed_managed. There is no separate runtime Identity lookup that
-can reselect after admission.
+These are proposed types, not an available runtime API. The former
+SelectedIdentity placeholder is removed. codex-mxb4mq owns G2c #1961; its API
+proposal `59ab097cf561c616a0a7ecc0a39f088633e0dba3` defines the opaque
+IdentityBinding and BoundSelectedRead inputs. codex-9czdjh's existing
+Selection-managed helper alone does not supply their provenance. G2 retains the
+real installed binding, including the entire bound read selection, rather than
+reconstructing it from refs, Selection or Arc. The same retained selection builds
+the family recipe for request_signed_managed. No later Identity lookup reselects.
 
 Subject/config-generation provenance is an OPEN shared admission prerequisite,
 not supplied by today's Selection (slot/route/evidence) or Credential
 (slot+KeyRef). The reviewed helper must bind a trusted engine-issued configured
 identity snapshot to the exact issuer/subject/config generation, prove each ref
 belongs to it, and retain that immutable snapshot through queued dispatch. The
-setup/configuration transition must revoke that snapshot and retire its owned
-Plans before replacement. A private wrapper or a venue integer is not proof.
+setup is immutable per engine: account configuration changes create a new engine;
+old snapshot retirement happens through teardown, not live replacement. The
+final snapshot seal freezes all dependent setters even before start. A private
+wrapper or a venue integer is not proof.
 Coordinate this with codex-9czdjh's non-Clone admitted wrapper; external
 queue_existing is deferred there. Until its exact snapshot/retirement contract
 is reviewed, G2 has no source clearance and cannot promise that provenance.
@@ -110,7 +116,9 @@ read/write credential domains before any preflight I/O. Every resolved leg must
 belong to those admitted domains and the exact subject/generation snapshot;
 G2 cannot introduce a new credential domain from a later DATA callback. Read
 and Mutation bindings are immutable for retries, refusal fallback and reprepare.
-A configuration change retires the owner, never reselects its remaining legs.
+A configuration change tears down the old engine, never reselecting its remaining
+legs. Private failure-only cleanup remains available after public authority is
+retired; it grants no signing, send, retry or successful publication rights.
 
 Choose a recursive declaration attaching each binding directly to its call,
 including each fallback occurrence. Normalize it through the exact Schedule
@@ -256,3 +264,40 @@ terminal and replay inertness. No Accepted fact is fabricated for the GET.
 The two REDs remain ignored, owned by codex-hcmq3f's G2 runtime adoption; only
 fixture admission/selection changes when that reviewed API exists. This is
 original assertion evidence, not a passing mixed-leg implementation claim.
+
+## G2b integration and provenance API gate
+
+G2b reviewed implementation `a01dbc4caeeda778723aa964caf6739e9420fb1c` is
+genuinely merged at `057202251f1`. The only manual merge path is README: incoming
+rows plus this plan's row once. Every other incoming path is preserved; the
+remaining own paths are this plan and the original mixed-leg fixture. The old
+fixture receives only `independent_calls: false` to retain its original policy.
+Its two original REDs remain owned/ignored, with no changed transport oracle.
+G2b exact-head CI is still running; this is a labelled dependency, not READY or
+actual landing.
+
+On this integration the unchanged parallel compatibility assertion passes. Both
+owned REDs were explicitly executed and still fail at their original assertions:
+Verify has Mutation instead of Read, and Primary instead of Secondary refs.
+The ordinary target therefore reports one PASS and two owned ignores; no mixed
+runtime or provenance implementation is claimed. Formatting passes. The full
+merge diff also contains two inherited whitespace-only findings in incoming
+credential/signer plans; the own three-path delta has no whitespace finding.
+
+G2c draft `f39d62ed0995227923fc82d05dba253d6df12634` carries the proposed
+API above. Its owner explicitly confirms no runtime binding/source pin exists.
+The proposed Cx selection methods are select_installed_identity(role),
+bind_selected_read(selected), and validate_identity_binding(binding, context).
+G2 must retain and validate the real opaque witness at admission, Prepare,
+Bind, release, DATA and receipt custody, alongside the genuine Context. A Read
+binding cannot become Mutation; Mutation binds Primary only. Secondary must have
+the same resolved canonical trading-account domain, environment and value as
+Primary; missing subjects never establish equality.
+
+Remaining source gates belong to G2c: the final constructor seal after actual
+provider/entropy injection; atomic install and immediate dependent-setter freeze;
+native-reviewed closed subject codecs; exact issuer, installed allocation and
+liveness checks; and irreversible dispose/failEngine teardown with private
+failure-only cleanup. G2 declaration/provenance integration remains source-gated
+until its owners publish the reviewed runtime pin. No local subject, counter,
+plain compatibility witness or reconstructed binding bypasses that gate.
