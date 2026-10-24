@@ -44,7 +44,9 @@ pending payload and its legacy branches, preserving the current perps path.
 
 The20s lifecycle includes host preparation/signing-independent claim delay.
 Unreleased, expired or duplicate HTTP must neither stage candle rows nor emit
-DATA. Preparation/provider errors stay strict typed Read failures. No later
+DATA. Preparation/provider errors keep the existing perps typed metadata, including
+NotSent for an unreleased preparation failure or timeout; a released timeout has
+no financial outcome. No later
 transport error can be relabeled as a successful empty response.
 
 ## Original RED checkpoint
@@ -73,3 +75,20 @@ unchanged original assertions, native Hyperliquid/Binance checks, strict scoped
 Clippy/fmt and full request/socket ratchets. Independent source/native review,
 exact-head Rust CI, one120s watcher and an assigned venue window are separate
 gates. No source implementation is included in the plan/RED checkpoint.
+
+## Original runtime receipt
+
+Plan89a67dc915a, original test-only5012318fc91 on unchanged actual77f124 source
+and inventory: 11 compile/run, two native/duplicate working controls PASS and
+nine intended assertion REDs, zero ignored. Four Prepare controls execute every
+standalone/merged and mainnet/testnet variant; early HTTP actually published DATA
+on legacy source. Capacity and clock REDs show native local validation bypass.
+Deadline/preparation/recovery suffixes originally stop at the Prepare assertion.
+
+Two previously gated suffix expectations incorrectly assumed no outcome on
+unreleased failures. The existing perps controls independently pin NotSent on
+preparation refusal and unreleased timeout, versus None after released timeout.
+Correct only those new suffix expectations to the reused seam's actual contract;
+retain every original RED boundary assertion. No engine/metadata behavior change.
+The incidental unused legacy command binding/import-format setup errors during
+implementation were corrected and are not counted as original RED evidence.

@@ -1,4 +1,5 @@
 //! Spot and merged-spot candle requests require original Read custody.
+use safe_cex_engine::Outcome;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{
@@ -410,7 +411,14 @@ fn original_deadline_fences_preparation_and_released_callbacks() {
             assert_eq!(out.len(), 1);
             let er = out[0].as_ref().unwrap_err();
             assert_eq!(er.kind, Some(ErrorKind::Timeout));
-            assert_eq!(er.outcome, None);
+            assert_eq!(
+                er.outcome,
+                if claimed {
+                    None
+                } else {
+                    Some(Outcome::NotSent)
+                }
+            );
             assert!(!e.http_preparation_pending(p));
             reply(&mut e, NOW + 20_001., &r, 200, ROWS);
             assert!(results(&e.drain_actions().collect::<Vec<_>>(), OWNER).is_empty());
@@ -428,11 +436,12 @@ fn preparation_refusal_is_typed_and_never_empty_success() {
         Error::State,
         VenueError::new("fixture preparation refused").kind(ErrorKind::InvalidInput),
     );
-    error(
-        &e.drain_actions().collect::<Vec<_>>(),
-        "fixture preparation refused",
-        Some(ErrorKind::InvalidInput),
-    );
+    let out = results(&e.drain_actions().collect::<Vec<_>>(), OWNER);
+    assert_eq!(out.len(), 1);
+    let failure = out[0].as_ref().unwrap_err();
+    assert_eq!(failure.message, "fixture preparation refused");
+    assert_eq!(failure.kind, Some(ErrorKind::InvalidInput));
+    assert_eq!(failure.outcome, Some(Outcome::NotSent));
     reply(&mut e, NOW + 2., &r, 200, ROWS);
     assert!(results(&e.drain_actions().collect::<Vec<_>>(), OWNER).is_empty());
 }
