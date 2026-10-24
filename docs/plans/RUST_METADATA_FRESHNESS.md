@@ -896,11 +896,11 @@ The as_mut-only cleanup makes the untouched-Store Read terminal control pass
 (one GREEN). It changes no existing pending-write invalidation behavior; the
 three genuine Plan terminal controls remain the regression gate for that path.
 
-Bounded source/preservation review of6f05a0403ec is CLEAR (claude-4yjlw0):
-canonical1919 custody retained, automatic source integration, exact nine-line
+Bounded source/preservation review of `6f05a0403ec` is CLEAR (claude-4yjlw0):
+canonical #1919 custody retained, automatic source integration, exact nine-line
 BingX removal, checker/STAGING incoming-exact, no conflict markers. Its two Low
-notes are addressed by integrating actualf8163b7b852 (including Lighter8f22 and
-shared command entry2004) and a native late-failure preservation control.
+notes are addressed by integrating actual `f8163b7b852` (including Lighter `8f22` and
+shared command entry #2004) and a native late-failure preservation control.
 
 The WEEX control completes one settings write, reuses the command ID for another
 real managed write, then sends HttpFailed for the retired request. No terminal
