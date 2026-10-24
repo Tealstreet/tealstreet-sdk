@@ -125,8 +125,8 @@ Futures private open sends a PRIMARY key-only challenge request, then signs
 SHA256(challenge) with HMAC-SHA512 for each private feed subscription. Keep the
 same native challenge field/feed order,15s challenge/auth deadline, native socket
 supervision and ACK behavior. Current cached signed_challenge material must not
-become a credential-bearing replay carrier. Exact engine/session recipe fit is
-OPEN: each re-sign binds the active socket/session generation and current
+become a credential-bearing replay carrier. Exact managed-socket recipe fit is
+OPEN: each re-sign binds the active socket generation and current
 challenge; a late result for retired challenge/socket cannot subscribe or publish.
 Do not mint fake command/Read/Session authority to make a WS recipe compile.
 
@@ -284,3 +284,28 @@ pre-send repairs. Its legacy allocator probe is explicitly original fence
 exposure, not trusted mint/raw-clock/HMAC/wipe/group/repair readiness proof.
 Exact source hooks, #2024 composition, old secret-digest to stable-subject
 continuity and session-generation API fit remain review gates before production.
+
+
+## Session-owner fit and original retirement control
+
+Session owner55ao7t pins landed1832/8e4ad630253,1842/fade3aa0a41 and
+1897/58af3c0a023, all on actual5b219d. Spot GetWebSocketsToken fits existing
+open_session(SessionPolicy{credential:Some(primary),repeat_safe:true,
+private_egress:None}); issue a signed Read with session_context and
+request_signed_managed, passing no Bearer. The token remains venue-owned and is
+placed into native executions/balances WS frames; Bearer is REST-only. Retire
+that exact session in on_close or socket epoch change before reopening. No core
+API links Session retirement to socket generation automatically. Add a genuine
+socket-close/late-token original: the retired response must not reach the venue
+callback or publish subscriptions; a live-socket twin proves the fixture.
+
+Futures challenge signing is explicitly OUTSIDE Session: there is no HTTP
+session operation. Present(key) and SHA256(challenge)+HmacSha512 must bind the
+managed socket epoch/challenge and its native15s deadline. Retired socket or
+challenge provider results cannot send subscriptions. Obtain the exact managed-
+socket owner API fit and signer recipe review; do not fabricate a Session or
+issuer to compile it. A nonce claim supplies no socket/session authority.
+
+Only genuine Context-phase command owners may session_wait. WS subscriptions
+stay venue-driven. These are plan/original controls, not a token/session native
+migration receipt; no runtime is changed by this checkpoint.
