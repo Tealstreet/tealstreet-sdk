@@ -62,6 +62,8 @@ pub enum KeyEncoding {
     Pem,
     /// Key bytes are the ASCII of standard padded base64 of the input bytes.
     Base64Text,
+    /// Bitcoin-alphabet base58 (Orderly ed25519 seeds); no prefix is stripped.
+    Base58,
 }
 
 /// Closed vocabulary of additional per-identity signing material. These refs
@@ -945,8 +947,14 @@ mod setup_field_policy_tests {
                 .secret_encoding,
             Some(KeyEncoding::Base64Text)
         );
+        assert_eq!(
+            serde_json::from_str::<IdentitySetupPolicy>(r#"{"secretEncoding":"base58"}"#)
+                .unwrap()
+                .secret_encoding,
+            Some(KeyEncoding::Base58)
+        );
         assert!(
-            serde_json::from_str::<IdentitySetupPolicy>(r#"{"secretEncoding":"base58"}"#).is_err()
+            serde_json::from_str::<IdentitySetupPolicy>(r#"{"secretEncoding":"base32"}"#).is_err()
         );
     }
 
