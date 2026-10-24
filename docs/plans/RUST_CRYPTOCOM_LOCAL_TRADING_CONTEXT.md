@@ -152,3 +152,13 @@ Scoped test-target strict Clippy passes with CARGO_BUILD_JOBS=4, sequentially
 after the test; no workspace/all-feature sweep or local WASM build was run.
 The CommandError fixture-field compile error was corrected before this receipt.
 Production, existing fixtures, Cargo, checker and manifest bytes stay base-exact.
+
+
+## Actual-tip production entry checkpoint
+
+Plain-merged actual `db6fa45bbb7` at `bcfebbdfd73`, resolving only the README
+index conflict as incoming plus the exact own row once. Before any production
+edit, the same committed 26 controls execute on unchanged tip Crypto.com source:
+18 assertion RED / 8 GREEN / zero ignored. The source delta against the actual
+tip is empty. Production is now authorized for exactly the eight listed sites;
+credential-selection sites and combo-5b source files must remain byte-exact.
