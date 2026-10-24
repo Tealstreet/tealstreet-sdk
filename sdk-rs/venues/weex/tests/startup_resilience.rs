@@ -2,6 +2,7 @@
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response};
 mod support;
 use safe_cex_venue_weex::WeexFutures;
+use support::PreparedActions;
 use support::setup::Options;
 
 /// A jittered retry delay lands in `[0.75, 1.0] * nominal`.
@@ -86,7 +87,7 @@ fn private_snapshot_starts_when_a_pending_ticker_read_fails() {
     });
     engine.start(0.0);
     let catalogue = engine
-        .drain_actions()
+        .prepared_actions(0.0)
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("exchangeInfo") => Some(request),
             _ => None,
@@ -111,7 +112,7 @@ fn private_snapshot_starts_when_a_pending_ticker_read_fails() {
             .any(|part| request.url.to_ascii_lowercase().contains(part))
     };
     let seed = engine
-        .drain_actions()
+        .prepared_actions(0.0)
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -129,7 +130,7 @@ fn private_snapshot_starts_when_a_pending_ticker_read_fails() {
     );
     // ...but its first failure starts the account; retrying public reads never gate it.
     let reads = engine
-        .drain_actions()
+        .prepared_actions(1.0)
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,

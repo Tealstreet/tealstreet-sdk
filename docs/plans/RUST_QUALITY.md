@@ -1559,3 +1559,19 @@ AuthInvalid keeps its fields but supplies zero auth-health evidence.
 Clippy, scoped fmt, full bans and both provenance checks (15 checker tests) pass.
 No existing financial/identity/signature assertion changes. CI remains the
 WASM/replay/CPU/size/memory authority; no performance/readiness claim here.
+
+## KuCoin Spot fixed-setting admission evidence
+
+Ten native LocalSetting controls cover six original capacity/expired-wait REDs,
+constant projection, unknown symbols, configuration precedence, Background-only
+capacity and duplicate original-owner release. Tests use genuine command
+receipts; no missing-method compile failure or fabricated Context is evidence.
+Exact Spot trading inventory removes only the two-occurrence success row.
+
+## Bitrue local one-way setting controls
+
+Seven native controls retain two original assertion REDs plus five working
+controls: command-owner capacity/recovery, expired/sub-ms receipt, duplicate
+original owner/diagnostic, Background Context independence, all credential
+configurations, true-mode refusal and absent symbol behavior. No fabricated
+Context or missing-method compile failure is evidence.
