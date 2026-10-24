@@ -392,41 +392,8 @@ HISTORY_BOOTSTRAPS['venues/paradex/src/account.rs'] = ({'0bc0f05583257432e512c35
   'c8154248a24f58ded15a175a8afd344f331635f51e564a526d510748797ff231': 1,
   'e473c92d9c3a15cbdf8752a673c64963c9ef531ee4a7e47ae60d1abe5e32659e': 1})
 
-# Owner-authorized exact two-site recipe-factory rehash. No additional calls.
-SIGNER_POLICY_BOOTSTRAPS = {'venues/binance/src/history.rs': ({'153ef00b195a92e18337317fde397c0707f7778eadc4bfc02b2c0d2ffbf493c5': 1,
-                                    '2263b7c3975168a800233a5720729a5293adc8d79ddc822742da439875b1c927': 1,
-                                    '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 3,
-                                    '5d6691e305370ef1b5e22426e494d28b28936de80d5d5af079e9deae52eb33f2': 1,
-                                    '6a3d37fddbb5fff8f3cd2c8d2ab4958d84b5c1efd268fd69c1464b41183a0c6a': 1,
-                                    '7b98ff7fe9c2b0fba3fa2034b1d3cddb9008a47f9c7731d28364b7097fb1b66d': 1,
-                                    '896c2dc203c518dc9ae1c6b5eb51b5591da28af19f9ff2461c4c629a490fb1a5': 1,
-                                    'a2e0593410ad976880489badf3fbdf89ad9f79859b04b9860d23044f327967d3': 1,
-                                    'abe91b4dc9b434e9eb3b21058d48e235a63990574ed4431b56d81aa1bb372f49': 1,
-                                    'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 2,
-                                    'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
-                                    'f859db20866f37469af70c624ec5ad2f31c4f7bd10c1bd1b0da41299b91f7eb7': 1},
-                                   {'153ef00b195a92e18337317fde397c0707f7778eadc4bfc02b2c0d2ffbf493c5': 1,
-                                    '2263b7c3975168a800233a5720729a5293adc8d79ddc822742da439875b1c927': 1,
-                                    '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 3,
-                                    '5d6691e305370ef1b5e22426e494d28b28936de80d5d5af079e9deae52eb33f2': 1,
-                                    '6a3d37fddbb5fff8f3cd2c8d2ab4958d84b5c1efd268fd69c1464b41183a0c6a': 1,
-                                    '896c2dc203c518dc9ae1c6b5eb51b5591da28af19f9ff2461c4c629a490fb1a5': 1,
-                                    '931fea11387a3eb1ccf2c909b869b3ee559925055e436a3987df14969b35fc81': 1,
-                                    'a2e0593410ad976880489badf3fbdf89ad9f79859b04b9860d23044f327967d3': 1,
-                                    'abe91b4dc9b434e9eb3b21058d48e235a63990574ed4431b56d81aa1bb372f49': 1,
-                                    'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 2,
-                                    'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
-                                    'f859db20866f37469af70c624ec5ad2f31c4f7bd10c1bd1b0da41299b91f7eb7': 1}),
- 'venues/binance/src/lib.rs': ({'088924f3ac9b1699da1a2b0c712052ec5d14e133e51b4a93094827c12109ef7e': 1,
-                                '29866cd39178c8da46ea6e7de031a9cd684e76f2734dbc6f60a081be3980972b': 1,
-                                '5ed40af7dbe1e5b76ca8be90e29eabcbce35d0d0c768e765826c2b6525a06ada': 1,
-                                '660826b694da348256b3fbbb3d2e4429c0be08068f931faa9b0cf92bae92004d': 1,
-                                'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1},
-                               {'088924f3ac9b1699da1a2b0c712052ec5d14e133e51b4a93094827c12109ef7e': 1,
-                                '29866cd39178c8da46ea6e7de031a9cd684e76f2734dbc6f60a081be3980972b': 1,
-                                '5ed40af7dbe1e5b76ca8be90e29eabcbce35d0d0c768e765826c2b6525a06ada': 1,
-                                '931fea11387a3eb1ccf2c909b869b3ee559925055e436a3987df14969b35fc81': 1,
-                                'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1})}
+# Owner-approved exact signer-policy re-expressions, one row per file.
+SIGNER_POLICY_BOOTSTRAPS = {}
 
 # Owner-approved temporary staging sites (6cf35cca, sign_http), exactly one per family:
 # BingX legacy history and listen-key work, until cxxyqr's history bridge (#1848) and the
@@ -519,6 +486,49 @@ STAGING_BOOTSTRAPS = {'venues/apexomni/src/lib.rs': ({'0adb175953636afd100d2ddc6
  'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
  'cd66da21afeeef22b98026c1d44238cf77b537c7b5ea67ee5d4fb4464905d893': 1,
  'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 1})}
+
+# claude-ddi2il approved these exact Phemex whole-map transitions; remove before master.
+STAGING_BOOTSTRAPS['venues/phemex/src/lib.rs'] = ({'1b0b8cbc9ce44a55975ea8f3e025691cecfa45581828e95eb50ccc2f2d18e4f1': 1,
+  '1d1591136af8d3c7b891a725138b1fe1e9ef3e5d401e18f610b77d9866b877e3': 1,
+  '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 1,
+  '3707a3e4c331d8aa244ffa1fdfff00869707d624a6ed97afed2f783400c15f54': 1,
+  '3d411e9715932bdc90a7a565f468fcb4804f1d8ef3c91c122626f77b2d90df2b': 1,
+  '415cde8bbb79aec0ffd251892d668f5fea56c30150ff07e0a3a1e8d1ebb85a04': 1,
+  '4dbce16a94437affd078f0756fdc5bf35899434ebde3ba73925201568fb05469': 1,
+  '5993f99450d63ae5eb78cf2899ffc8efaaa9fd47dd066fcd1ac85a4cb8d937eb': 1,
+  '60f3aecbbb9e98af4226ed2769775e3b26ba4af804afa0def383aad527bddd1b': 1,
+  '6d16631ed954d85c787eae05eab608a09c8ce735e57abce7ab9ccfe2f305d968': 1,
+  '7b15b10003401f5b84eb1992913534cdc7868ab658ed9210e32d7230da28218c': 1,
+  '7df0ba98dfdb7e3d532ca88e6cf5e2d67158db5c27a0486c22ce18d7493f5f07': 1,
+  '8e74b914b9159816adc7eb353d1c728eaea647260ac64fac31e4b967a6dab017': 1,
+  '9eb2532ffa305903307527ed26561752ae2716a465c7347f6bb03d38987efb3d': 1,
+  'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1,
+  'f9764ec2239f809efce38c8d387de2eb9e144668ccf4e1d4193e1859c5e5e05f': 2,
+  'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 1},
+ {'1b0b8cbc9ce44a55975ea8f3e025691cecfa45581828e95eb50ccc2f2d18e4f1': 1,
+  '1d1591136af8d3c7b891a725138b1fe1e9ef3e5d401e18f610b77d9866b877e3': 1,
+  '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 1,
+  '3707a3e4c331d8aa244ffa1fdfff00869707d624a6ed97afed2f783400c15f54': 1,
+  '3d411e9715932bdc90a7a565f468fcb4804f1d8ef3c91c122626f77b2d90df2b': 1,
+  '415cde8bbb79aec0ffd251892d668f5fea56c30150ff07e0a3a1e8d1ebb85a04': 1,
+  '4dbce16a94437affd078f0756fdc5bf35899434ebde3ba73925201568fb05469': 1,
+  '5993f99450d63ae5eb78cf2899ffc8efaaa9fd47dd066fcd1ac85a4cb8d937eb': 1,
+  '60f3aecbbb9e98af4226ed2769775e3b26ba4af804afa0def383aad527bddd1b': 1,
+  '6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219': 1,
+  '6d16631ed954d85c787eae05eab608a09c8ce735e57abce7ab9ccfe2f305d968': 1,
+  '7b15b10003401f5b84eb1992913534cdc7868ab658ed9210e32d7230da28218c': 1,
+  '7df0ba98dfdb7e3d532ca88e6cf5e2d67158db5c27a0486c22ce18d7493f5f07': 1,
+  '9eb2532ffa305903307527ed26561752ae2716a465c7347f6bb03d38987efb3d': 1,
+  'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1,
+  'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 1})
+SIGNER_POLICY_BOOTSTRAPS['venues/phemex/src/trading.rs'] = ({'06d49adf719c2e5ba5712d013a8bd485f49a8559eab9fbd74b8265789e9e3c9c': 1,
+  'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1,
+  'ce2317fc0bfce16cd6c1a0f3eaaa03828eef8d6a89d120fcf4fefb51a8d6b7fd': 1,
+  'db4da6f92276f049047ceb4f85c06083f4c683531dd3d76b0a5ba44d9e2d5cb7': 1},
+ {'06d49adf719c2e5ba5712d013a8bd485f49a8559eab9fbd74b8265789e9e3c9c': 1,
+  'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1,
+  'db4da6f92276f049047ceb4f85c06083f4c683531dd3d76b0a5ba44d9e2d5cb7': 1,
+  'e6f9b79a027f31adbd5a2b4c25669770848c36a0b761835a87f5783a961f4790': 1})
 
 
 

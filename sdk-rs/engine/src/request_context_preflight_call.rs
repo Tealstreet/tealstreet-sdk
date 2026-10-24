@@ -66,7 +66,7 @@ impl State {
 }
 
 impl ContextRegistry {
-    pub(in super::super) fn preflight_receipt_cap(
+    pub(in crate::engine) fn preflight_receipt_cap(
         &self,
         preflight: &Preflight,
     ) -> Result<Option<(u64, f64)>, Error> {
@@ -106,12 +106,10 @@ impl ContextRegistry {
         &mut self,
         delivery: &Delivery,
     ) -> bool {
-        if let Owner::Command { id, generation } = delivery.context.owner()
+        if (matches!(delivery.context.owner(), Owner::Command { .. })
+            || self.physical_owner(delivery.context.owner()))
             && delivery.context.issued_by(&self.issuer)
-            && let Some(owner) = self
-                .commands
-                .get_mut(&id)
-                .filter(|owner| owner.generation == generation)
+            && let Some(owner) = self.owner_entry_mut(delivery.context.owner())
             && let CommandPhase::Planned(state) = &mut owner.phase
         {
             return state.record_failure(delivery);
@@ -159,10 +157,16 @@ impl ContextRegistry {
         &self,
         context: &Context,
     ) -> Result<(), Error> {
-        let Owner::Command { id, .. } = context.owner() else {
-            return Ok(());
+        let phase = match context.owner() {
+            Owner::Command { id, .. } => self.commands.get(&id).map(|owner| &owner.phase),
+            // The execution root shares its physical owner but is no Plan call.
+            Owner::Execution { generation } if context.leg() == generation => return Ok(()),
+            owner if self.physical_owner(owner) => {
+                self.owner_entry(owner).map(|owner| &owner.phase)
+            }
+            _ => return Ok(()),
         };
-        match self.commands.get(&id).map(|owner| &owner.phase) {
+        match phase {
             Some(CommandPhase::Preflight(state)) => {
                 if state
                     .call
@@ -210,6 +214,16 @@ impl ContextRegistry {
         context: &Context,
         delivery: Option<&Delivery>,
     ) -> Result<Option<Admission>, Error> {
+        if self.physical_owner(context.owner()) {
+            let owner = self.owner_entry(context.owner()).expect("physical owner");
+            let CommandPhase::Planned(state) = &owner.phase else {
+                return Err(Error::Revoked);
+            };
+            if !context.issued_by(&self.issuer) {
+                return Err(Error::Revoked);
+            }
+            return state.admission(context, delivery);
+        }
         let Owner::Command { id, .. } = context.owner() else {
             return Ok(None);
         };
@@ -255,10 +269,10 @@ impl ContextRegistry {
     }
 
     pub(in super::super::super) fn commit_owned_admission(&mut self, admission: &Admission) {
-        let Owner::Command { id, .. } = admission.context.owner() else {
-            unreachable!()
-        };
-        let phase = &mut self.commands.get_mut(&id).unwrap().phase;
+        let phase = &mut self
+            .owner_entry_mut(admission.context.owner())
+            .expect("validated owned admission")
+            .phase;
         if let CommandPhase::Planned(state) = phase {
             state.commit(admission);
             return;

@@ -35,6 +35,10 @@ pub struct Request {
 }
 
 impl Request {
+    pub(crate) fn sign_failed(self, cx: &mut Cx<'_, Pending>, mut error: VenueError) {
+        error.outcome = None;
+        self.owner.finish(cx, Err(error));
+    }
     pub(crate) fn reset(&mut self) {
         self.owner.discard_staged_page();
         self.seen.clear();
