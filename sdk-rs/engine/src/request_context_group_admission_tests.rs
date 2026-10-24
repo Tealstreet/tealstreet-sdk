@@ -212,6 +212,7 @@ fn check(mode: usize) {
     check_registration::<false>(mode);
 }
 fn check_registration<const NONCE: bool>(mode: usize) {
+    assert!(!Consumer::<NONCE>::dispatch_nonce());
     let mut engine = crate::test_support::seeded_engine(Consumer::<NONCE>(mode));
     engine.start(0.);
     engine.handle(

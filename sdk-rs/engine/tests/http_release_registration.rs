@@ -224,3 +224,9 @@ fn mutable_admission_error_keeps_its_original_kind() {
     assert_eq!(claims, vec![Err(Error::Invalid), Err(Error::Invalid)]);
     assert_eq!(counts.failures.load(Ordering::SeqCst), 2);
 }
+
+#[test]
+fn default_nonce_capability_preserves_venue_trait_object_compatibility() {
+    let _: Option<&dyn Venue<Pending = ()>> = None;
+    assert!(!Probe::<0>::dispatch_nonce());
+}

@@ -159,6 +159,10 @@ pub(crate) struct Pending {
     pub(crate) nonce_repairs: u8,
 }
 impl Pending {
+    #[cfg(all(test, feature = "dispatch-nonce"))]
+    pub(crate) fn install_test_nonce_claim(&mut self, authority: Arc<ClaimAuthority>) {
+        self.nonce_claim = Some(authority);
+    }
     #[cfg(feature = "dispatch-nonce")]
     pub(crate) fn has_nonce_claim(&self) -> bool {
         self.nonce_claim.is_some()

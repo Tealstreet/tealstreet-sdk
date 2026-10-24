@@ -361,6 +361,26 @@ fn fixture_with_capability<const CAPABILITY: u8>(
     count: u8,
     pacing: Option<safe_cex_engine::request_context::Pacing>,
 ) -> (Engine<NonceProbe<true, CAPABILITY>>, Vec<Route>) {
+    let mut engine = unstarted_fixture::<CAPABILITY>(subject, count, pacing);
+    engine.start(START);
+    let mut batch = drain(&mut engine);
+    assert_eq!(
+        batch.routes.len(),
+        if CAPABILITY == 1 {
+            0
+        } else {
+            usize::from(count)
+        }
+    );
+    assert!(batch.work.is_empty() && batch.bound.is_empty());
+    batch.routes.sort_by_key(|r| r.owner);
+    (engine, batch.routes)
+}
+fn unstarted_fixture<const CAPABILITY: u8>(
+    subject: &'static str,
+    count: u8,
+    pacing: Option<safe_cex_engine::request_context::Pacing>,
+) -> Engine<NonceProbe<true, CAPABILITY>> {
     let mut engine = safe_cex_engine::test_support::seeded_engine(NonceProbe::<true, CAPABILITY> {
         subject,
         count,
@@ -380,20 +400,9 @@ fn fixture_with_capability<const CAPABILITY: u8>(
             secondary: None,
         })
         .unwrap();
-    engine.start(START);
-    let mut batch = drain(&mut engine);
-    assert_eq!(
-        batch.routes.len(),
-        if CAPABILITY == 1 {
-            0
-        } else {
-            usize::from(count)
-        }
-    );
-    assert!(batch.work.is_empty() && batch.bound.is_empty());
-    batch.routes.sort_by_key(|r| r.owner);
-    (engine, batch.routes)
+    engine
 }
+
 fn ready<const CAPABILITY: u8>(
     engine: &mut Engine<NonceProbe<true, CAPABILITY>>,
     route: &Route,
@@ -1078,7 +1087,38 @@ fn disabled_nonce_capability_refuses_before_preparation_or_provider_work() {
 #[test]
 fn a_changed_nonce_selector_refuses_before_release_without_advancing_the_floor() {
     use std::sync::atomic::Ordering;
+    struct RestoreSelector;
+    impl Drop for RestoreSelector {
+        fn drop(&mut self) {
+            NONCE_SELECTOR.store(true, Ordering::SeqCst);
+        }
+    }
+    let _restore = RestoreSelector;
+    NONCE_SELECTOR.store(false, Ordering::SeqCst);
+    let mut initially_disabled =
+        unstarted_fixture::<2>("nonce-capability/capture-ceiling", 1, None);
     NONCE_SELECTOR.store(true, Ordering::SeqCst);
+    initially_disabled.start(START);
+    let denied = drain(&mut initially_disabled);
+    assert!(denied.routes.is_empty() && denied.work.is_empty() && denied.bound.is_empty());
+    assert!(
+        initially_disabled
+            .venue()
+            .trace
+            .lock()
+            .unwrap()
+            .prepared
+            .is_empty()
+    );
+    assert_eq!(initially_disabled.venue().errors.len(), 1);
+    assert_eq!(
+        initially_disabled.venue().errors[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        initially_disabled.venue().errors[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
     let subject = "nonce-capability/changed-selector";
     let (mut earlier, routes) = fixture(subject, Allocation::PrepareProbe, 1);
     let work = ready(&mut earlier, &routes[0], START);
