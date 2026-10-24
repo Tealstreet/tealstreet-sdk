@@ -1,0 +1,195 @@
+# Bitrue dispatch signing migration
+
+Owner: codex-9czdjh, reassigned from claude-4yjlw0's #1718 queue. This
+plan/test-only branch is feat/rust-bitrue-signer-migration, cut exactly from
+actual 85e155faebb5b1b4925b1806875ac6581167b9c0. Production stays held.
+The inherited HMAC plan33967696978 is historical; source below was re-derived.
+
+## Inventory, collision map and cutover gates
+
+The checker inventory is33occurrences/20fingerprints/four source files. Own
+#1993 removes three occurrences/two fingerprints from trading.rs (33/20->30/18).
+It owns trading.rs and tests/local_command_refusals.rs until landing; this branch
+will not edit them. The first checkpoint changes only this plan/index and a NEW
+isolated tests/dispatch_signer_adoption.rs. No source, manifest, capability,
+construction, remote-signing admission or checker exception changes now.
+
+Current shared claims include registry/src/lib.rs in #1891/#1915/#1974/#1990;
+check-request-context.py and check-signing.py in #1915/#1974. Recheck all open PR
+file lists before later source phases. Production waits for actual #1993,
+reviewed prerequisite APIs and an authorized shared-file composition window.
+No active unpublished Bitrue source holds remain with the previous HMAC owner.
+The successful one-way no-op remains with shared #1989; signing does not bypass it.
+
+| Path relative to sdk-rs | Occurrences | Fingerprints |
+| --- | ---: | ---: |
+| venues/bitrue/src/account.rs | 8 | 8 |
+| venues/bitrue/src/lib.rs | 11 | 2 |
+| venues/bitrue/src/secondary_tests.rs | 2 | 2 |
+| venues/bitrue/src/trading.rs | 12 | 8 |
+
+The exact baseline below includes conservative pending.request fields and macro
+matches; these are not eleven physical sends. Keep native assertions and
+continuations. No rename/move may be claimed as a genuine request-site prune.
+
+| Source path | SHA-256 fingerprint | Count |
+| --- | --- | ---: |
+| venues/bitrue/src/account.rs | 187ae7a49b233001f96c827642f4839ad9e3ea4fd81b9b62848d3900055afced | 1 |
+| venues/bitrue/src/account.rs | 1b3029882eb1af7175e494797938adedfb4b3c6cbd38573c98c2e4940415d89b | 1 |
+| venues/bitrue/src/account.rs | 4f19e9de3124938051c48304f8476b059f9928dd6f790df05a27c9f821512d93 | 1 |
+| venues/bitrue/src/account.rs | 985d5251ce2c2f3e0d27d6c46def63a68db127135e27d9e2917a1923e354a48f | 1 |
+| venues/bitrue/src/account.rs | adebf191cda07505ad7d8529e3d1e50353f7a3251988cfcd01ba53d93563b444 | 1 |
+| venues/bitrue/src/account.rs | c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548 | 1 |
+| venues/bitrue/src/account.rs | c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa | 1 |
+| venues/bitrue/src/account.rs | df3c1d81952c8a455f966081ae19fcca364d48093c5893e69a82108cac16906d | 1 |
+| venues/bitrue/src/lib.rs | 34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc | 1 |
+| venues/bitrue/src/lib.rs | 8d7195dd58da632e34e4dc75d236e49b6d1b89cc10c243ec7e670ec59b511d26 | 10 |
+| venues/bitrue/src/secondary_tests.rs | 14ff7b932a6042d0adee80518f703a27a5e51c41add140215703e93820dc3475 | 1 |
+| venues/bitrue/src/secondary_tests.rs | 496bfb28799c729f0f335ccce50062d6a9ba06a581527e6a36a638ac44c84dc8 | 1 |
+| venues/bitrue/src/trading.rs | 09d284b47513158ba424efe6b85ef618c3f2649072f4211be5a3ec043ecc0e88 | 1 |
+| venues/bitrue/src/trading.rs | 2f0770d2ea5f5246cd2ddcd35b614bce738e564c2d95193ff5a84eb8479811e5 | 2 |
+| venues/bitrue/src/trading.rs | 5e1ebc068cca89013b259957b834e34abaec73947a047f535da9894eb0b5c254 | 1 |
+| venues/bitrue/src/trading.rs | 6d2c051bb24db8acd1986f4e47c2b6dbede5aa9dfff7fb877e64ef194107bd53 | 4 |
+| venues/bitrue/src/trading.rs | afb3c3744f13da9606f5f456bd95797992a932cf227eb74b2fe4405e3c64ee98 | 1 |
+| venues/bitrue/src/trading.rs | b780b823ba70712169e1be98fecae4d2a2655f7ca35f27bea4b99f09bd684696 | 1 |
+| venues/bitrue/src/trading.rs | cb0a44751a1560cceb6c0a90e523713002ad5efbdf5418c58f0132ef2c94fce0 | 1 |
+| venues/bitrue/src/trading.rs | dcb84cef5dcb71801d2b1b9562fcfc84b0431681917a0b6b9d2314f2e050630e | 1 |
+
+## Native canonical bytes and atomic recipe
+
+Actual source: sign.rs:12-18 signature; lib.rs:269-340 send/issue;
+lib.rs:824-839 response resend and905-942 streamed-failure resend/transport retry;
+account.rs:534 listen POST,814 keepalive PUT,1755-1804 token acceptance/retirement.
+
+One SignRequest and one receipt per physical preparation:
+1. Present the selected Identity.credential API-key ref.
+2. Sign HmacSha256 using its signing ref over timestamp text + UPPERCASE METHOD
+   + exact canonical path/query + exact body (empty when body is absent).
+3. Encode the32raw MAC bytes as lowercase Hex at header rendering only.
+
+No passphrase presentation or MAC is used; a configured read passphrase has no
+signing role here. API key/secret bytes are untrimmed. The initial native timestamp
+is cx.now.max(0) as u64: truncate nonnegative milliseconds. Recipe preparation
+uses the shared protocol clock, preserving the nonnegative/truncation boundary
+under a reviewed clock policy; no new local clock, timestamp counter or expiry.
+Keep raw scheduling time and protocol signing time separate.
+
+Relative URLs use https://fapi.bitrue.com. Native absolute listen URLs use
+https://fapiws-auth.bitrue.com; sign /user_stream/api/v1/listenKey (plus the
+validated token on PUT), not scheme/host. Native issue strips the first .com;
+the recipe binds the two real native origins and their exact canonical suffixes,
+without broadening URLs or percent-decoding/re-encoding query bytes. Preserve
+raw values, duplicate/empty query components, plus and Unicode wherever native
+builders permit them; do not fabricate an endpoint to exercise a genuine caller.
+
+Ordered unsigned headers: Content-Type:application/json, X-Referer:Tealstreet.
+Ordered signed suffix: X-CH-APIKEY, X-CH-TS, recvWindow, X-CH-SIGN.
+recvWindow is HEADER-ONLY: default20000, registry normalization1..60000, and no
+new recipe-side clamp or addition to the prehash. Before prepare AND apply,
+attest the exact method, allowed origin/full URL, body, native static header order
+and empty signer_headers. Validate exact receipt/count/key bytes/MAC size and
+Deny callback-header policy before applying any result. Delayed, malformed or
+refused provider output must release no partially signed request.
+
+## Trusted selection and native ordering
+
+Ordinary private GETs use secondary only when primary key+secret are present;
+without a read key they use primary. Writes/DELETE/listen POST+PUT use primary.
+Catalogues are explicitly PrimaryRead(Catalog), even though GET; this is an
+operation declaration, not a new method-based selector. Use shared Slots and
+SelectedRead for eligible plain command/background reads. Root/page consumers
+use actual #1983 (a2533f5761f) and actual #1976 receipt expiry where appropriate;
+unsigned/public reads never enter missing-selection private refusals.
+
+Native markets always force Primary egress, including keyless and public-only
+startup. Keyed public-only catalogue STILL has primary signing headers; private
+startup stays suppressed. Native other request routes are None; declared
+Selection egress is an intentional policy transition that needs exact approved
+SIGNER_POLICY_BOOTSTRAPS maps. Missing primary material with a configured read
+key still leaves catalogue unsigned and suppresses private startup. Preserve
+read-key validation before ALL startup I/O, even public-only. Empty/partial
+primary Options edge cases must be pinned against trusted construction before
+cutover rather than silently reclassified. Registry currently forwards raw
+Options; construction has no Bitrue-specific dispatch admission declaration.
+
+The valid FetchMaxLeverage path checks symbol before private credentials and
+then issues one bracket GET. FetchLeverage joins a positions/account read;
+retain its per-owner group lifetime, projection and deadline requirements using
+fe7lgm's background execution API, not a local fan-out authority. Fills is one
+native recent-page read with row/coverage validation, no invented pager.
+
+## Resend, lifetime, session and error gates
+
+Native -1022 currently triggers one signature resend on parsed response code,
+INCLUDING unsafe408/5xx; streamed list errors also recover by parsing a formatted
+engine failure string. These are recorded P0/P2 debt, not approved semantics.
+Managed production must use one Bitrue CodeTable and the shared classifier facts:
+only an eligible RefusedResend permits resend;408/5xx/transport remain unknown,
+not a local status ladder. Keep accepted IDs as structured journal Partial;
+malformed2xx is unproven/Unknown, not None (classification rows8/21/22).
+Move existing parsing solely to native-code/message extraction, never classification
+from engine-formatted strings. Negative controls pin -1022+HTTP500 emits no resend.
+
+For each eligible resend native uses max(nonnegative now, previous timestamp+1),
+including a fixed/backward clock. Each attempt needs a NEW atomic preparation,
+fresh receipt and MAC, never cached headers. A previous value must come from the
+exact genuine shared SigningRelease receipt for the released attempt, with original
+selection/account/generation/egress retained. Existing DispatchContext.stamp_ms
+alone cannot express the fixed-clock+1 rule. The exact trusted receipt-bound
+minimum-stamp API needs shared clock/dispatcher review before production; do not
+implement a venue-owned timestamp allocator or infer retry permission from metadata.
+
+Native retry flags are independent: one signature resend and up to3transport
+retries for GETs or listen POST only; no generic uncertain write/PUT replay.
+The two budgets do not reset one another. Native per-attempt HTTP default is20s;
+a request can physically issue up to5times. A single20s SelectedRead root would
+narrow that chain. Freeze the native physical/root/queue declaration with core
+review before conversion, with near20s response/retry controls; do not assume a
+new100s root or renew a root by renaming work. Keep retries explicit staging
+until the reviewed shared policy fits. History keeps its original caller root.
+
+Listen acquisition and keepalive are SESSION mutations, never disguised Read or
+public requests. Session/generation owns token_pending and restart; preserve valid
+alphanumeric/-/_ token bytes, generation mismatch discard,30minute keepalive,
+20s supervisor idle and native reconnect/poll cadence. Preserve public suppression,
+private startup independence,2s account polling, order backoff/queues and settings
+revision fences. No separate WS HMAC login exists; WS URL carries the issued token.
+The public socket codec/subscription/FIFO read implementation stays untouched.
+Any session/Plan/background lifetime gap returns to its shared owner; signing is
+not readiness for zero legacy, Plan history or G2 provenance.
+
+## Phases, original controls and exact transition gate
+
+1. Commit this native plan/inventory; independent HMAC, source/adversarial, caller
+   and full-map reviews. Production remains held on #1993 and shared gaps.
+2. Commit compiling original genuine-engine assertion REDs before wiring: keyed
+   primary catalogue; secondary bracket read; primary setting POST; absolute listen
+   POST and PUT; fixed/backward-clock -1022 fresh provider preparation; refusal of
+   -1022/500 replay. Working controls pin exact native HMAC vectors/header order,
+   selected keys/routes, static unsigned keyless catalogue, no recvWindow in MAC,
+   read validation/public-only behavior, one eligible resend, token keepalive and
+   both method/body bytes. Installed trusted RecordingSigner must have an independent
+   positive work control so provider0 cannot be blamed on a broken fixture.
+   These tests use existing public APIs; missing-API compilation is not RED evidence.
+3. Test-only recipe/oracles may proceed after plan review. Production custody and
+   caller adoption wait for actual #1993, shared clock/selection/lifetime fit and
+   claimed shared files. No raw REST fallback, signer-only carrier or disabled path.
+4. Freeze ACTUAL full OLD->NEW fingerprint maps before requesting explicit owner
+   approval for STAGING_BOOTSTRAPS and its approved-transition test. Current issue
+   already has one stable cx.request(method,url,headers,body,pending) expression
+   (34b6cbe60cec x1). Adding cx.sign_http(id,Box::new(recipe)) would add
+   6cf35cca0977 x1: CANDIDATE ONLY33/20->34/21, after #1993 30/18->31/19.
+   Managed read adoption may change that candidate. No growth or exception is
+   authorized by this plan. Keep native request expression stable for real later
+   pruning; recipe-factory rehashes require separately approved SIGNER_POLICY maps.
+5. Coherent opaque custody cutover removes every production raw material/MAC site,
+   includes Bitrue sign modules in signing ratchet and preserves test oracles without
+   hiding their matches. Hosted compatibility family/TS guard remain disabled unless
+   separately approved and proven; generic atomic RemoteSigner positive is a different
+   contract. Independent reviews, focused Bitrue+Binance, strict/fmt/ratchets, fresh
+   full CI and family WASM size/replay evidence precede any assigned guarded merge.
+
+Architecture gate: no per-venue fix of a cross-cutting concern. Shared provider,
+Selection, clock, lifecycle, classifier, session, execution and history cores own
+authority. The venue owns canonical bytes, codecs and native continuation data.
+No local Context maker, completion wrapper, retry engine or signer provider.
