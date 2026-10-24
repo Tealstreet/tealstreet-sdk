@@ -117,3 +117,13 @@ previous test, inventory/checker, selection/nonce and held5b file is byte-exact.
 Hcmq3f confirmed ownership release for this plan/index/new-test-only scope;
 production is held until actual5b and separate authorization/review. No push,
 PR, CI, source adoption, READY or final composed count is claimed here.
+
+## Initial production checkpoint after the hold
+
+Actual `47eaad285db` is plain-merged with incoming docs preserved. The one
+unsigned seed sender now uses Background Read admission and exact delivery and
+failure cleanup; all eleven original tests pass unchanged, zero ignored.
+Log: /tmp/codex-orderly-public-seed-source.log. This local checkpoint remains
+unpublished while the scoped source-stage pressure, stream and credit controls,
+fixture collection, inventory update and source reviews are completed. No CI,
+READY or full native-suite claim is made by this checkpoint.
