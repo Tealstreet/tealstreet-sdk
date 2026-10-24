@@ -243,6 +243,38 @@ fn catalogue_at_deadline_cannot_publish_without_timer_ingress() {
     no_command_or_auth(&output);
 }
 #[test]
+fn live_catalogue_prefix_followed_by_expired_stream_end_cannot_publish() {
+    let (mut e, read) = markets();
+    e.handle(
+        1.,
+        Event::HttpStart {
+            request: read.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        2.,
+        Event::HttpChunk {
+            request: read.id,
+            data: INSTRUMENTS.as_bytes(),
+        },
+    );
+    assert!(!e.store().loaded().markets);
+    e.drain_actions().for_each(drop);
+    e.handle(20_000., Event::HttpEnd { request: read.id });
+    assert!(
+        !e.store().loaded().markets,
+        "a live streamed prefix cannot cross the expiry boundary"
+    );
+    let output: Vec<_> = e.drain_actions().collect();
+    assert!(!output.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::ManagedHttp(_) | Action::WsConnect { .. }
+    )));
+    no_command_or_auth(&output);
+}
+#[test]
 fn catalogue_deadline_timer_then_response_cannot_publish() {
     let mut e = new();
     e.start(0.);
@@ -406,6 +438,18 @@ fn native_usable_catalogue_peers_commit_and_private_reads_start_before_tickers()
         output
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("/private/")))
+    );
+    let ticker = output
+        .iter()
+        .position(|a| matches!(a, Action::Http(r) if r.url.ends_with("/public/get-tickers")))
+        .unwrap();
+    let private = output
+        .iter()
+        .position(|a| matches!(a, Action::Http(r) if r.url.contains("/private/")))
+        .unwrap();
+    assert!(
+        ticker < private,
+        "ticker request precedes private startup; ticker success is not required"
     );
     assert!(!e.store().loaded().tickers);
 }

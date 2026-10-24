@@ -33,8 +33,8 @@ No credential health evidence, signer or command terminal belongs to discovery.
 Store publication, malformed-market/index maps and all row diagnostics retain
 the original validity/ordering. Preserve usable-peer partial catalogue commit,
 listed-market retention, malformed exposure coverage, partial reread bound,
-independent ticker recovery and existing startup side effects. Private snapshot
-starts after successful initial catalogue while the ticker is pending; public
+independent ticker recovery and existing startup side effects. Ticker discovery is queued first after successful initial catalogue, then
+private snapshot startup runs while that ticker response is pending; public
 socket/channel initialization still waits for successful tickers. Failed or
 empty ticker lists retain prior quotes. Do not change status/native envelope
 policy or invent a venue error-code ladder.
@@ -125,3 +125,16 @@ The initial fixture compile mistakes (nonexistent Store setter, then missing
 FetchCandles limit) were corrected before this executable receipt; neither is
 RED evidence. Production, existing fixtures/tests, Cargo, checkers, key selection
 and inventories remain byte-exact to the requested actual tip.
+
+
+## Caller-review original stream boundary
+
+A caller review requested the real stream-end boundary before production. Added
+one control with live HttpStart/HttpChunk followed by HttpEnd at exact expiry;
+it fails by publishing the native live prefix. The complete unchanged-production
+target now executes 16 controls: 9 assertion RED / 7 GREEN / zero ignored.
+The native startup positive additionally asserts ticker request issuance before
+private reads, while ticker success remains pending. Earlier 15 assertion bodies
+remain intact; new fixture code uses the actual HttpChunk data field, corrected
+before the executed receipt. Plan source/custody and full-map review were CLEAR
+at 97ee7fe30ca; caller delta closure is required for this successor.
