@@ -11,6 +11,8 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Polymarket public read custody | Draft adoption; local checks pass | Before adopting public books/candles and local completion or pruning their inventory. | [RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md](RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md) |
+| Kraken public discovery and local custody | Draft adoption; local checks and independent reviews clear | Before managing unsigned discovery reads or local command terminals in Futures/Spot. | [RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md](RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md) |
 | Subscription handoff and native read continuation | Shared ordering correction | Before issuing native reads after managed subscription frames or changing final drain/timer custody. | [RUST_SOCKET_INTEREST_HANDOFF.md](RUST_SOCKET_INTEREST_HANDOFF.md) |
 | Hyperliquid whole-family managed sockets | Plan and original-source controls | Before moving the multiplexed perps/spot public and private socket lifecycle or changing subscription-to-refresh ordering. | [RUST_HYPERLIQUID_MANAGED_SOCKETS.md](RUST_HYPERLIQUID_MANAGED_SOCKETS.md) |
 | Caller command wait in the engine | Plan under review (claude-fe7lgm) | Before bounding engine work by the caller's `rustCommandTimeoutMs` or reading `Cx::command_wait()`. | [RUST_COMMAND_TIMEOUT.md](RUST_COMMAND_TIMEOUT.md) |
@@ -294,4 +296,8 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | GRVT synchronous history Read terminals | Plan; original REDs next | Before changing local history refusal custody or pruning its seven sites. | [RUST_GRVT_LOCAL_HISTORY_CONTEXT.md](RUST_GRVT_LOCAL_HISTORY_CONTEXT.md) |
 | KuCoin local command refusals | Implemented; focused checks/reviews clear, CI pending | Before migrating the eight synchronous pre-I/O refusals while preserving valid signed paths and successful local setting policy. | [RUST_KUCOIN_LOCAL_COMMAND_REFUSALS.md](RUST_KUCOIN_LOCAL_COMMAND_REFUSALS.md) |
 | Bitrue local command refusals | Implemented; focused checks/reviews clear, CI pending | Before migrating three initial synchronous trading refusals while preserving the queued/private path and successful one-way setting. | [RUST_BITRUE_LOCAL_COMMAND_REFUSALS.md](RUST_BITRUE_LOCAL_COMMAND_REFUSALS.md) |
+| GRVT replay diagnostics | Plan and local controls | Before narrowing exact tape-bound protocol declarations; preserve genuine final errors and all other diagnostics. | [RUST_GRVT_REPLAY_DIAGNOSTICS.md](RUST_GRVT_REPLAY_DIAGNOSTICS.md) |
+| Crypto.com replay diagnostics | Plan and local controls | Before narrowing exact private-stream declarations; preserve receiver-specific channels and genuine final errors. | [RUST_CRYPTOCOM_REPLAY_DIAGNOSTICS.md](RUST_CRYPTOCOM_REPLAY_DIAGNOSTICS.md) |
+
+- [Binance Spot replay protocol diagnostics](RUST_BINANCESPOT_REPLAY_DIAGNOSTICS.md) — source-bound audit controls and exact declaration pruning, preserving native failures.
 | Flat-position realized PnL evidence | Shared harness correction | Before projecting unavailable native PnL or pruning inverse flat-position diagnostics. | [RUST_FLAT_POSITION_PNL_EVIDENCE.md](RUST_FLAT_POSITION_PNL_EVIDENCE.md) |
