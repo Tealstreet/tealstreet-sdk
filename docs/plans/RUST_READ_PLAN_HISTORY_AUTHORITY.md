@@ -88,9 +88,10 @@ The ordinary nonterminal operation accepts a page and settles its Slot together.
 The terminal DATA operation is distinct: it prepares the final accepted page and
 the common Plan seal BEFORE any `finish_plan_call` could release its DATA anchor.
 It retires unissued suffix contexts/credits in that same terminal transaction.
-An unresolved issued sibling must not be silently counted as accepted or lend
-its delivery; the exact early-terminal eligibility rule is a required Plan-core
-review point. No schedule or credit geometry may be shrunk to evade it.
+Early completion refuses if an issued sibling remains unresolved; it consumes
+neither that sibling's credits nor its delivery authority. The exact eligibility
+and retirement validator is a required Plan-core source review point. No
+schedule or credit geometry may be shrunk to evade it.
 
 ## Transport-only accepted-prefix recovery
 
@@ -111,6 +112,9 @@ on callback exit and unrelated/nested callback boundaries. It cannot be cloned,
 stored by a venue, borrowed by a readiness callback or reused after settlement.
 Every consuming operation revalidates current generation, latest attempt and
 caller liveness. It grants completion preparation only, never send or retry.
+Install that proof and invoke the exact Read failure callback before the default
+Read-Plan failure tail can auto-seal. This adds no Mutation independent-failure
+policy and lends no broad callback or registry authority.
 
 While the exclusive guard owns accepted storage and Cx, mint a private non-Clone
 AcceptedPrefix witness only from a nonempty accepted Vec, bound to the exact
