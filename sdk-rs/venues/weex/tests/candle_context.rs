@@ -129,6 +129,31 @@ fn timeout(actions: &[Action], id: u32) {
     assert_eq!(errors, vec![(Some(ErrorKind::Timeout), None)]);
     assert_eq!(actions.iter().filter(|a| terminal(a, id)).count(), 1);
 }
+fn failure_message(actions: &[Action], id: u32, message: &str) {
+    assert_eq!(actions.iter().filter(|a| terminal(a, id)).count(), 1);
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed {command, error}) if *command == id && error.message == message
+    )));
+    warning(actions, message);
+}
+fn warning(actions: &[Action], message: &str) {
+    let warnings = actions.iter().filter(|a| matches!(a,
+        Action::Notice(Notice::Event(event)) if event.level == safe_cex_engine::Level::Warn && event.code == safe_cex_engine::log::code::REQUEST_FAILED && event.message == format!("WEEX: {message}")
+    )).count();
+    assert_eq!(warnings, 1, "one native candle request warning");
+}
+fn internal(actions: &[Action], id: u32) {
+    let causes: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command, error }) if *command == id => {
+                Some((error.kind, error.outcome))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(causes, vec![(Some(ErrorKind::Internal), None)]);
+}
 fn wire(out: &Output, historical: bool) {
     assert_eq!(out.requests.len(), 1);
     let request = &out.requests[0];
@@ -190,6 +215,7 @@ fn pause(e: &mut Engine<WeexFutures>) {
         Action::Notice(Notice::CommandFailed {command: 7, error}) if error.message == "HTTP 429: busy"
     )));
     assert!(out.requests.is_empty());
+    warning(&out.actions, "HTTP 429: busy");
 }
 fn pause_timer(out: &Output) -> TimerId {
     out.actions
@@ -303,4 +329,67 @@ fn live_candle_query_resumes_after_the_native_pause() {
     assert_eq!(out.requests.len(), 1);
     let out = reply(&mut e, &out.requests.remove(0), 4002., 200, "", "[]");
     success(&out.actions, 8, "[]");
+}
+
+#[test]
+fn a_missing_streamed_array_keeps_its_message_and_delivered_internal_cause() {
+    let mut e = engine();
+    let request = ask(&mut e, 1000., 7, 120_000, false).requests.remove(0);
+    let out = reply(&mut e, &request, 1001., 200, "", "{}");
+    failure_message(
+        &out.actions,
+        7,
+        "response did not contain the expected list: {}",
+    );
+    internal(&out.actions, 7);
+}
+
+#[test]
+fn a_broken_stream_keeps_its_message_and_delivered_internal_cause() {
+    let mut e = engine();
+    let request = ask(&mut e, 1000., 7, 120_000, false).requests.remove(0);
+    e.handle(
+        1001.,
+        Event::HttpStart {
+            request: request.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        1002.,
+        Event::HttpChunk {
+            request: request.id,
+            data: b"{",
+        },
+    );
+    e.handle(
+        1003.,
+        Event::HttpEnd {
+            request: request.id,
+        },
+    );
+    let out = drain(&mut e, 1003.);
+    failure_message(
+        &out.actions,
+        7,
+        "response did not contain the expected list: {",
+    );
+    internal(&out.actions, 7);
+}
+
+#[test]
+fn a_malformed_candle_row_preserves_its_native_error_and_warning() {
+    let mut e = engine();
+    let request = ask(&mut e, 1000., 7, 120_000, false).requests.remove(0);
+    let out = reply(&mut e, &request, 1001., 200, "", "[[1]]");
+    failure_message(&out.actions, 7, "malformed REST row");
+}
+
+#[test]
+fn a_non_rate_limited_http_error_preserves_its_native_error_and_warning() {
+    let mut e = engine();
+    let request = ask(&mut e, 1000., 7, 120_000, false).requests.remove(0);
+    let out = reply(&mut e, &request, 1001., 500, "", "bad");
+    failure_message(&out.actions, 7, "HTTP 500: bad");
 }

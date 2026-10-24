@@ -10,7 +10,8 @@ is `sdk-rs/venues/weex/src/lib.rs`; new tests live in
 `sdk-rs/venues/weex/tests/candle_context.rs`. This checkpoint changes only this
 standalone plan and the new test, with no shared README index edit.
 
-The local `train/combo-5b` file set was checked against the base. Its only BingX
+The local `train/combo-5b` three-dot diff was checked against the base:
+`git diff --name-only be710b3f2d7...train/combo-5b`. Its only BingX
 or WEEX source path is `bingx/src/account.rs`; WEEX lib and the two new files are
 disjoint. Recheck the auditor's actual frozen file list before implementation.
 Other pending WEEX slices (#2003 and #2035) do touch lib.rs: they remain separate
@@ -49,6 +50,9 @@ timestamp conversion and numeric handling. Keep malformed-row rejection,
 ascending timestamp sort and the exact serialized Candle output. Empty arrays
 succeed. Querying candles does not subscribe or publish candle-cache/WS state.
 Existing native HTTP and malformed-row error messages remain unchanged.
+For every live native candle failure, retain Warn REQUEST_FAILED with message
+`WEEX: {error}`, including the 429 failure before another query parks. No warning
+is emitted by a stale/revoked callback that the engine has already discarded.
 
 ## Landed authority and ordering
 
@@ -75,7 +79,7 @@ The no-Cx `read_root_retired` hook removes only the matching Owner/generation's
 deferred candle query. Its old venue timer cannot be cleared by that hook and
 must later no-op. An old DATA/error/timer must not affect reused IDs or peers.
 
-## Caller-visible changes to record at production
+## Caller-visible changes for RUST_CUTOVER_CALLERS.md at production
 
 Parked commands were previously unbounded inside the venue; they now end at the
 original configured caller receipt deadline (default 120 s). The physical call
@@ -92,6 +96,20 @@ released transport/physical expiry preserves Network/Timeout and Read outcome
 None; pre-release typed failures retain their exact fields/NotSent where supplied.
 No credential auth evidence, signer call or deactivation is introduced. Host
 listener timeout does not grant engine cancellation or detach authority.
+
+Streamed failures are distinct from transport. A complete 2xx envelope without
+the expected root array reaches `on_stream_error`: validate exact live root,
+leg and delivery before warning/rejecting with Internal, outcome None and the
+native `response did not contain the expected list: {body}` message. A broken
+stream reaches `on_stream_malformed` and then typed `on_http_failed`: retire its
+physical Context and strictly reject with the supplied Internal/outcome None and
+unchanged engine error message. Do not require a still-live physical deadline
+for a typed failure callback; reject the exact retained root while it is live,
+and let already-retired generations drop inertly. Root expiry never recovers.
+The ordinary response gate still precedes malformed-row handling
+(`malformed REST row`) and non-429 HTTP handling (`HTTP {status}: {body}`).
+Retain each of those native messages and warnings, without adding a new kind
+to native row/status errors. No streamed failure can publish staged candles.
 
 ## Original assertion checkpoint
 
@@ -134,3 +152,11 @@ The drain expects successful Claim and does not certify held-claim refusal.
 Only this plan and the new test change; source, existing tests, manifests,
 checker/STAGING and combo-5b files remain base-exact. No native adoption or CI
 claim follows from these original assertions.
+
+The native review follow-up adds two independent streamed-ingress assertions
+and two preservation controls. Missing-array and broken-stream routes first
+pass their exact native message and warning assertions, then fail only on the
+missing Internal kind: `(None, None)` versus `(Some(Internal), None)`. Malformed
+row and non-429 HTTP message/warning controls pass. The pause helper additionally
+pins one native Warn REQUEST_FAILED. Total: eight assertion REDs and eight
+GREEN controls, zero ignored or setup failures; production remains base-exact.
