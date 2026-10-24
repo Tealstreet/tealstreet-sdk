@@ -43,9 +43,11 @@ API-key index as an account identity. A numeric index plus one address makes
 three candidates. Two DISTINCT addresses make FOUR, not three. Repeated
 addresses are deduplicated. No endpoint is retried in place.
 
-Keep GET URL/parameter order, no body, empty headers and public routing on all
+Native selects .next() BEFORE row validation, and account_index.or(index).or(legacy_index)
+chooses field presence BEFORE parsing. An invalid first row/field never skips to
+a later valid row/field. Keep GET URL/parameter order, no body, empty headers and public routing on all
 four production/testnet Lighter/Robinhood deployments. Preserve code/success
-handling, current and legacy response fields, first eligible row, exact integer
+handling, current and legacy response fields, first row in the native precedence chain, exact integer
 indices through i64::MAX, own-row referrer selection and omitted absent referrer.
 Preserve HTTP/status/parse/missing-row candidate fallback order and final error
 text, one command-scoped companion diagnostic before failure, no Store or frame
@@ -99,3 +101,33 @@ RED evidence. Use CARGO_BUILD_JOBS=4 and one scoped local build at a time; CI ow
 workspace/all-feature/WASM/performance checks. Independent plan/native/API review
 and unchanged original controls precede any production authorization. This task
 stops at committed plan and original REDs, with no production cutover or PR claim.
+
+
+## Original execution checkpoint
+
+Plan6360872a572 precedes the dedicated target. Native-plan review by9cz is CLEAR;
+its first-row/field-presence clarification above is retained. Auditor8x and m26
+independently confirm the combo5b file boundary. API-owner review is requested.
+
+The final original target compiles and executes17 controls on unchanged actual
+be710 production:11 intended assertion REDs,6 GREEN, zero ignored. The existing
+native identity target also passed all8 controls in the preceding scoped run.
+Four deployment REDs independently show eager raw HTTP. Other executed REDs pin
+unclaimed DATA publication, ignored caller cap, absent engine root timer, renewed
+fallback cap, pre-credential capacity diagnostic and remote capacity bypass.
+Preparation-failure, timeout/cancellation and recovery suffixes gated behind the
+first Prepare/cap assertion remain unexecuted source-cutover gates; no deeper
+coverage is claimed. Duplicate entry is already a GREEN common-engine control.
+
+Six working controls preserve all-four-host exact wire/rows/duplicate response,
+four-candidate ordering, missing-selector/key-index refusal, a later physical
+window after19s, and first-row/field-presence validation. Snapshot comparison uses
+one identical frame clock, avoiding timestamp bytes masquerading as Store changes.
+Initial missing Probe trait delegations and the frame-clock mismatch were fixture
+setup corrections before this receipt, not intended RED evidence. Invalid-clock,
+stale-generation/held-claim and complete post-cutover cleanup coverage remain
+source-certification work. No production adoption is included or authorized.
+
+Scoped strict Clippy on this new test target and scoped rustfmt/diff checks pass.
+Only this plan and the dedicated target differ from the assigned base; both are
+new paths absent from combo5b. Local tests used four jobs, sequentially.
