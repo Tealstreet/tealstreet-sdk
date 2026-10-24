@@ -220,3 +220,76 @@ fn separate_physical_bounds_do_not_cap_the_whole_seed_walk() {
     assert!(e.store().loaded().tickers);
     assert_eq!(e.store().tickers().len(), 2);
 }
+
+#[test]
+fn deadline_data_progresses_the_next_asset_once_and_retries_its_own_key() {
+    let second = r#",{"index":2,"name":"ETH-USDC","baseCurrency":"ETH","quoteCurrency":"USDC","currencyType":"usdc","basePrecision":"0.0001","priceTick":"0.1","maxLeverage":50,"haltTrading":false,"delisted":false,"useNotionalMargin":false}"#;
+    let metadata = META.replace("}]}}", &format!("}}{second}]}}}}"));
+    let mut e = metadata_ready(&metadata);
+    let old = ticker(&mut e, NOW);
+    response(&mut e, &old, NOW + 20_000., TICKER);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let next = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_025. => Some(*timer),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let retry = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms }
+                if support::jittered(*at_ms - NOW - 20_000., 1000.) =>
+            {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(next.len(), 1, "exactly one native continuation");
+    assert_eq!(retry.len(), 1, "exactly one retry for the expired asset");
+    assert!(!e.store().loaded().tickers);
+    assert!(e.store().tickers().is_empty());
+    response(&mut e, &old, NOW + 20_001., TICKER);
+    e.handle(
+        NOW + 20_001.,
+        Event::HttpFailed {
+            request: old.id,
+            error: "late duplicate",
+        },
+    );
+    let duplicate = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !duplicate.iter().any(|a| matches!(
+            a,
+            Action::SetTimer { .. } | Action::Http(_) | Action::ManagedHttp(_)
+        )),
+        "no duplicate progression"
+    );
+    e.handle(NOW + 20_025., Event::TimerFired { timer: next[0] });
+    let second = ticker(&mut e, NOW + 20_025.);
+    assert_eq!(
+        second.body.as_deref(),
+        Some(r#"{"type":"activeAssetCtx","coin":"2"}"#)
+    );
+    response(
+        &mut e,
+        &second,
+        NOW + 20_026.,
+        &TICKER.replace("\"instrumentId\":1", "\"instrumentId\":2"),
+    );
+    advance_25ms(&mut e, NOW + 20_026.);
+    assert!(!e.store().loaded().tickers);
+    e.drain_actions().for_each(drop);
+    e.handle(retry[0].1, Event::TimerFired { timer: retry[0].0 });
+    let recovered = ticker(&mut e, retry[0].1);
+    assert_eq!(
+        recovered.body, old.body,
+        "backoff retains the failed asset key"
+    );
+    response(&mut e, &recovered, retry[0].1, TICKER);
+    advance_25ms(&mut e, retry[0].1);
+    assert!(e.store().loaded().tickers);
+    assert_eq!(e.store().tickers().len(), 2);
+}

@@ -7,6 +7,8 @@ struct Fixture {
     peers: Vec<HttpContext>,
     pressure: bool,
     recovered_credits: usize,
+    response_callbacks: usize,
+    failures: Vec<safe_cex_engine::VenueError>,
 }
 fn policy() -> Policy {
     Policy {
@@ -58,6 +60,7 @@ impl Venue for Fixture {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        self.response_callbacks += 1;
         self.inner.on_response(cx, pending, response);
     }
     fn on_http_preparation_failed(
@@ -76,6 +79,7 @@ impl Venue for Fixture {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
+        self.failures.push(error.clone());
         self.inner.on_http_failed(cx, pending, error);
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -104,6 +108,8 @@ fn engine(pressure: bool, now: f64) -> Engine<Fixture> {
         peers: Vec::new(),
         pressure,
         recovered_credits: 0,
+        response_callbacks: 0,
+        failures: Vec::new(),
     });
     e.start(now);
     e
@@ -360,6 +366,67 @@ fn unclaimed_bind_cannot_release_at_the_physical_bound() {
     let actions = e.drain_actions().collect::<Vec<_>>();
     no_send(&actions);
     assert!(e.venue().inner.ticker_contexts.is_empty());
+    command(&mut e, 21000., "credits");
+    assert_eq!(e.venue().recovered_credits, 256);
+}
+
+#[test]
+fn deadline_data_uses_typed_timeout_without_entering_the_data_callback() {
+    let mut e = engine(false, 1000.);
+    let (preparation, request) = preparation(&mut e);
+    e.http_prepared(
+        1001.,
+        preparation,
+        Prepared {
+            id: 1,
+            expires_at: None,
+        },
+    );
+    let permit = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(
+        e.claim_http(1001., permit),
+        Ok(Claim::Released(_))
+    ));
+    e.drain_actions().for_each(drop);
+    for _ in 0..2 {
+        e.handle(
+            21000.,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"success":true,"code":0,"data":{"instrumentId":1}}"#,
+                },
+            },
+        );
+    }
+    assert_eq!(e.venue().response_callbacks, 0);
+    assert_eq!(e.venue().failures.len(), 1);
+    assert_eq!(
+        e.venue().failures[0].kind,
+        Some(safe_cex_engine::ErrorKind::Timeout)
+    );
+    assert!(e.venue().inner.ticker_contexts.is_empty());
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    no_send(&actions);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 21025.))
+            .count(),
+        1
+    );
+    assert_eq!(actions.iter().filter(|a| matches!(a, Action::SetTimer { at_ms, .. } if (21750. ..=22000.).contains(at_ms))).count(), 1);
     command(&mut e, 21000., "credits");
     assert_eq!(e.venue().recovered_credits, 256);
 }

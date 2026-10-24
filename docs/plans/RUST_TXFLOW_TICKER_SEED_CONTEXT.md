@@ -123,3 +123,21 @@ failure; it now pins exactly one native retry notice and one cadence timer,
 retaining both real diagnostics. These are fixture corrections, not production
 REDs. Scoped native/strict/fmt/bans and exact committed reviews are recorded at
 the freeze candidate; CI owns family size/performance and workspace checks.
+
+
+### Exact-deadline progression review closure
+
+55ao7t required explicit proof that rejected current DATA still advances native
+work. The engine handle_received calls admit_http_event before venue delivery;
+at now >= the managed deadline it invokes expire_http_timer and refuses DATA.
+A released attempt is delivered as on_http_failed with Timeout exactly once,
+so the defensive venue DATA guard is not the equality cleanup path.
+
+Two additive genuine-engine controls pin this directly without production
+changes: zero venue response callbacks versus one typed Timeout failure, one
+25 ms successor and one keyed Backoff, all credits reclaimed; and a two-asset
+walk where deadline DATA cannot publish, duplicate DATA/failure cannot arm more
+work, the next asset succeeds, then only the failed asset retries and the whole
+seed completes. The existing eight original bodies remain an exact prefix.
+Both targets pass: 16 library tests and nine ticker controls, zero ignored.
+This is scoped new-control execution, separate from the earlier 159-test run.
