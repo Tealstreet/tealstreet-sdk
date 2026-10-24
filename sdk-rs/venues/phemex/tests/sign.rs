@@ -1,5 +1,5 @@
 //! Fixed HMAC vectors generated independently with Python hashlib/hmac.
-#[path = "../src/sign.rs"]
+#[path = "support/native_sign.rs"]
 mod sign;
 use sign::Credentials;
 #[test]
