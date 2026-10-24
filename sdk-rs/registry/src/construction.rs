@@ -39,6 +39,8 @@ struct Rule {
 pub enum SetupMapping {
     /// Version-resolved V1/V3 slots and the read agent's primary-wallet alias.
     Asterdex,
+    /// The OmniKey seed as the primary's zkLink role; no read credentials.
+    ApexOmni,
 }
 
 struct BridgeRule {
