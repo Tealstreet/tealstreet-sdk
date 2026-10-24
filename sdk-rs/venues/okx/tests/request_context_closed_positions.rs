@@ -615,3 +615,184 @@ fn host_invalid_clock_is_refused_without_dispatch_or_notice() {
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert!(engine.drain_actions().next().is_none());
 }
+
+#[test]
+fn page_child_is_minted_at_dequeue_and_its_live_root_can_recover_timeout() {
+    for released in [false, true] {
+        let mut engine = ready();
+        fetch(&mut engine, NOW, None, Some(60_000));
+        let first = request(&prepared(&mut engine, NOW));
+        let accepted = rows(0);
+        reply(&mut engine, &first, NOW + 15_000.0, &page(&accepted));
+        let native = pacing(&prepared(&mut engine, NOW + 15_000.0), NOW + 15_100.0);
+        engine.handle(NOW + 15_100.0, Event::TimerFired { timer: native });
+        let output: Vec<_> = if released {
+            prepared(&mut engine, NOW + 15_100.0)
+        } else {
+            engine.drain_actions().collect()
+        };
+        if released {
+            let _ = request(&output);
+        }
+        let deadline = output
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 35_100.0 => Some(*timer),
+                _ => None,
+            })
+            .expect("the20s page window begins at native dequeue, not the prior response");
+        engine.handle(NOW + 35_100.0, Event::TimerFired { timer: deadline });
+        let output = prepared(&mut engine, NOW + 35_100.0);
+        assert_eq!(
+            done(&output),
+            Some(format!("[{}]", accepted.join(",")).as_str())
+        );
+        assert!(incomplete(&output));
+        assert!(failures(&output).is_empty());
+        no_dispatch(&output);
+    }
+}
+
+#[test]
+fn first_child_expiry_retains_timeout_kind_and_release_outcome() {
+    for released in [false, true] {
+        let mut engine = ready();
+        fetch(&mut engine, NOW, None, Some(60_000));
+        let output: Vec<_> = if released {
+            prepared(&mut engine, NOW)
+        } else {
+            engine.drain_actions().collect()
+        };
+        let deadline = output
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000.0 => Some(*timer),
+                _ => None,
+            })
+            .expect("physical child deadline before the60s caller root");
+        engine.handle(NOW + 20_000.0, Event::TimerFired { timer: deadline });
+        let output = prepared(&mut engine, NOW + 20_000.0);
+        let errors = failures(&output);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].kind, Some(ErrorKind::Timeout));
+        assert_eq!(errors[0].outcome, (!released).then_some(Outcome::NotSent));
+        assert!(done(&output).is_none());
+        assert!(!incomplete(&output));
+        no_dispatch(&output);
+    }
+}
+
+#[test]
+fn preparation_refusal_preserves_metadata_or_native_accepted_output() {
+    for accepted_prefix in [false, true] {
+        let mut engine = ready();
+        fetch(&mut engine, NOW, None, Some(60_000));
+        let accepted = rows(0);
+        let (output, at) = if accepted_prefix {
+            let first = request(&prepared(&mut engine, NOW));
+            reply(&mut engine, &first, NOW + 10.0, &page(&accepted));
+            let timer = pacing(&prepared(&mut engine, NOW + 10.0), NOW + 110.0);
+            engine.handle(NOW + 110.0, Event::TimerFired { timer });
+            (engine.drain_actions().collect::<Vec<_>>(), NOW + 111.0)
+        } else {
+            (engine.drain_actions().collect(), NOW + 1.0)
+        };
+        let preparation = output
+            .iter()
+            .find_map(|a| match a {
+                Action::ManagedHttp(action) => match action.as_ref() {
+                    HttpAction::Prepare { preparation, .. } => Some(*preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("actual managed route preparation");
+        engine.http_preparation_failed(
+            at,
+            preparation,
+            safe_cex_engine::request_context::Error::State,
+            safe_cex_engine::VenueError::new("route refused")
+                .kind(ErrorKind::AuthInvalid)
+                .venue_code("native-code")
+                .venue_message("native detail"),
+        );
+        let output = prepared(&mut engine, at);
+        no_dispatch(&output);
+        if accepted_prefix {
+            assert_eq!(
+                done(&output),
+                Some(format!("[{}]", accepted.join(",")).as_str())
+            );
+            assert!(incomplete(&output));
+            assert!(failures(&output).is_empty());
+        } else {
+            let errors = failures(&output);
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].kind, Some(ErrorKind::AuthInvalid));
+            assert_eq!(errors[0].message, "route refused");
+            assert_eq!(errors[0].venue_code.as_deref(), Some("native-code"));
+            assert_eq!(errors[0].venue_message.as_deref(), Some("native detail"));
+            assert_eq!(errors[0].outcome, Some(Outcome::NotSent));
+            assert!(done(&output).is_none());
+            assert!(!incomplete(&output));
+        }
+    }
+}
+
+#[test]
+fn equal_deadline_timer_and_response_orders_have_one_strict_terminal() {
+    for response_first in [false, true] {
+        let mut engine = ready();
+        fetch(&mut engine, NOW, None, Some(50));
+        let initial = prepared(&mut engine, NOW);
+        let first = request(&initial);
+        let timer = initial
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 50.0 => Some(*timer),
+                _ => None,
+            })
+            .expect("tracked caller deadline");
+        let mut output = Vec::new();
+        for response in [response_first, !response_first] {
+            if response {
+                reply(&mut engine, &first, NOW + 50.0, &page(&[row(99, 1000)]));
+            } else {
+                engine.handle(NOW + 50.0, Event::TimerFired { timer });
+            }
+            output.extend(prepared(&mut engine, NOW + 50.0));
+        }
+        root_expired(&output);
+    }
+}
+
+#[test]
+fn longer_caller_wait_survives_the_default_root_bound_without_renewal() {
+    let mut engine = ready();
+    fetch(&mut engine, NOW, None, Some(180_000));
+    let mut current = request(&prepared(&mut engine, NOW));
+    let mut accepted = Vec::new();
+    for number in 0..13 {
+        let at = NOW + (number as f64 + 1.0) * 10_000.0;
+        let next = if number == 12 {
+            Vec::new()
+        } else {
+            rows(number)
+        };
+        reply(&mut engine, &current, at, &page(&next));
+        accepted.extend(next);
+        let output = prepared(&mut engine, at);
+        if number == 12 {
+            assert_eq!(
+                done(&output),
+                Some(format!("[{}]", accepted.join(",")).as_str())
+            );
+            assert!(failures(&output).is_empty());
+            assert!(!incomplete(&output));
+            return;
+        }
+        let timer = pacing(&output, at + 100.0);
+        engine.handle(at + 100.0, Event::TimerFired { timer });
+        current = request(&prepared(&mut engine, at + 100.0));
+    }
+}

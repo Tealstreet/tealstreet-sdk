@@ -2862,3 +2862,14 @@ entry and Context failure. Bitrue shrinks 33 to 30 occurrences and 20 to 18
 fingerprints. The repeated planning-error fingerprint decreases only 2 to 1;
 the queued remote-flow error remains. Signing and successful local settings are
 held for their separately owned migrations/seam.
+
+## OKX closed-position request ownership
+
+Closed pages now consume shared SelectedRead command roots/legs and the original
+ReadCompletion/ReadCursorHistory authority. Delivery admission precedes raw row
+count, oldest timestamp, staging and cursor changes. The engine owns whole-call
+expiry; exact-Owner retirement removes native delayed pages, with no local root
+timer or numeric terminal fallback. Native accepted-prefix provider/physical
+recovery remains separate from strict root/local refusal. Shared list/sign
+consumer deletion is deferred to the remaining account/discovery/write owners;
+this conversion does not remove or relax any staging/checker inventory row.

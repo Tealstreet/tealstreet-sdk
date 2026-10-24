@@ -204,3 +204,27 @@ Clippy, scoped fmt and both request-context checks (15 checker controls) now
 pass. All three independent source/adversarial, caller and full-map reviews
 are CLEAR at that pin, architecture gate No. Exactly three own paths differ
 from actual landing; runtime, existing tests/fixtures and all maps stay exact.
+
+## Managed implementation checkpoint
+
+The implementation genuinely merges actual `59f50e4f37b` at `7a38d717dfd`.
+Closed now uses SelectedRead's immutable caller root and signed ReadLeg children,
+with ReadCompletion/ReadCursorHistory attached to that exact root. Native local
+empty results also require genuine Read admission. The existing history-only
+retirement hook additionally drops delayed Closed work by exact Owner.
+
+All16 original controls pass, including the previously unreachable reuse-tail
+assertions, and all9 existing closed-position tests pass with only managed
+preparation and forward-moving native timer fixture glue. Five additional real
+managed controls pass: dequeue-relative20s child expiry with accepted-prefix
+recovery, first-child typed timeout and release outcome, preparation metadata
+versus native prefix recovery, both root-equality event orders, and an explicit
+180s caller wait completing after130s. No original assertion is removed.
+
+Direct manifest shrink remains0. No checker, inventory, staging allowance,
+account/discovery/write path or engine source changes. The shared list/sign
+funnel remains for #1991/#1996/#1919; its final prune is separate. Native
+provider/preparation recovery is preserved, while root expiry and local child
+admission/submission refusal strictly settle the exact root. Full native,
+strict, provenance, bounded source reviews and CI are recorded separately as
+they complete; these focused results do not certify WASM size or replay gates.

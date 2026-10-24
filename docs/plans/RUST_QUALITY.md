@@ -1506,3 +1506,16 @@ adoption. Seven isolated controls also pin keyed/keyless/public-only ordering,
 Store preservation, capacity recovery, successful native one-way mode, saturated
 signed wire and genuine duplicate-owner protection with 270 fixed-clock reuses.
 No original test is ignored or rewritten to claim a legacy removal.
+
+## OKX closed-position managed controls
+
+Ten original compiling assertion REDs and six native working controls now pass
+through the managed adapter. Five additional managed controls pin dequeue-time
+child bounds, release-aware typed timeout fields, provider/preparation metadata
+and accepted-prefix recovery, reversed equal-deadline ingress order, and an
+explicit180s caller receipt completing after the default120s boundary. All21
+controls and all9 existing closed-position tests pass without ignored tests or
+removed financial assertions. Existing fixtures only drive managed preparation
+and advance each native100ms page clock. Capacity uses genuine retained peers;
+reuse controls now reach and pass their stale-timer/DATA assertions. Family
+WASM/replay/CPU/memory certification remains CI's responsibility.
