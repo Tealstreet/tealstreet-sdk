@@ -152,6 +152,7 @@ impl Grvt {
     pub(crate) fn candle_send(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         let context = request.leg.clone();
         let pending = Pending {
+            context: None,
             path: "/lite/v1/kline",
             body: request.body.clone(),
             job: Job::Candles(Box::new(request)),

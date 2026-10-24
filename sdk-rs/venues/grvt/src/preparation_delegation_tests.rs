@@ -48,6 +48,7 @@ impl Venue for Probe {
                 "https://market-data.grvt.io/lite/v1/book".into(),
                 Some("{}".into()),
                 Pending {
+                    context: None,
                     path: "/lite/v1/book",
                     body: "{}".into(),
                     job: Job::BookQuery { command: COMMAND },
