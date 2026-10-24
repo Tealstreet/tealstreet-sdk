@@ -121,7 +121,9 @@ ad5455a0093aba156f0ad8f96ec18c599add648c4de5dbe3b2059ea1fbbc43aa.
 WS public/auth with no params:
 0e9d20117ab7df8097634d022b6241c57cc2eba952e8685cbb2240e43efa48fb.
 Both are committed as literals in the original target, separate from the native
-recipe's own calculation. Native same-ms and MAX-u64 rendering are also pinned.
+calculation. They and the same-ms check were first pinned on Credentials; before
+deleting that signer, the controls are ported to real Engine/LocalSigner recipe
+prepare/apply, including the actual DispatchContext stamp. MAX-u64 is pinned too.
 
 ## Request owners and policy
 
@@ -234,5 +236,11 @@ Actual5b219d4bc6725 is plain-merged at c9084cef977. Request/credential ratchets
 and both checker test targets (15/8) plus banned-pattern checks pass. The original
 26 controls retain13RED/13GREEN on that engine. Two added account same-stage
 mixed-error controls pass, bringing the current target to13RED/15GREEN/0ignored;
-the26 earlier bodies remain unchanged. Shared setup/checker hold is lifted;
+at16a376f668c the26 earlier bodies remained unchanged. Shared setup/checker hold is lifted;
 the explicit core Plan-constructor review remains required before source.
+
+The subsequent review closure ports only the two vector/stamp oracle factories
+to real recipe dispatch while preserving their literal/output assertions, and
+strengthens the capacity control to check all256 exact pending preparations
+before/after identity entry. There is no Credentials import in the new target.
+Both recipe controls remain GREEN; the full target remains13RED/15GREEN.

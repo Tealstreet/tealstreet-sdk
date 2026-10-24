@@ -7,10 +7,7 @@ use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Outcome, Query,
     ReadCredentials, Response, VenueError,
 };
-use safe_cex_venue_cryptocom::{
-    Cryptocom, Options,
-    sign::{Credentials, Params},
-};
+use safe_cex_venue_cryptocom::{Cryptocom, Options, sign::Params};
 use std::sync::Arc;
 use support::Harness;
 
@@ -167,6 +164,7 @@ fn duplicate_identity_entry_cannot_send_a_second_request() {
 #[test]
 fn identity_capacity_refusal_preserves_all_live_public_peers() {
     let mut e = engine(options());
+    let mut peers = vec![];
     for command in 1..=256 {
         e.handle(
             NOW,
@@ -176,12 +174,23 @@ fn identity_capacity_refusal_preserves_all_live_public_peers() {
                 limit: None,
             }),
         );
-        assert!(
-            e.drain_actions()
-                .any(|a| matches!(a, Action::ManagedHttp(_)))
-        );
+        let preparation = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(action) => match *action {
+                    safe_cex_engine::request_context::HttpAction::Prepare {
+                        preparation, ..
+                    } => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("genuine public peer preparation");
+        peers.push(preparation);
     }
+    assert!(peers.iter().all(|p| e.http_preparation_pending(*p)));
     let a = ask(&mut e, NOW);
+    assert!(peers.iter().all(|p| e.http_preparation_pending(*p)));
     no_private_http(&a);
     let t = terminals(&a);
     assert_eq!(t.len(), 1);
@@ -430,10 +439,6 @@ fn invalid_secondary_identity_error_precedes_public_only_and_missing_primary() {
 }
 #[test]
 fn native_rest_and_ws_hmac_match_independent_python_literals() {
-    let credentials = Credentials {
-        key: "fixture-primary-key".into(),
-        secret: "fixture-primary-material".into(),
-    };
     let params = Params::default()
         .strings("exec_inst", vec!["REDUCE_ONLY".into(), "POST_ONLY".into()])
         .text("instrument_name", "BTCUSD-PERP")
@@ -453,7 +458,7 @@ fn native_rest_and_ws_hmac_match_independent_python_literals() {
         ),
     ] {
         let body: serde_json::Value =
-            serde_json::from_str(&credentials.envelope(method, &params, NOW, auth)).unwrap();
+            serde_json::from_str(&recipe_envelope(method, params, NOW, auth)).unwrap();
         assert_eq!(body["sig"], expected);
         assert_eq!(body["nonce"], NOW as u64);
         assert_eq!(body["id"], body["nonce"]);
@@ -466,24 +471,101 @@ fn native_rest_and_ws_hmac_match_independent_python_literals() {
 }
 #[test]
 fn native_same_millisecond_reissues_keep_the_same_stamp_without_counter() {
-    let credentials = Credentials {
-        key: "fixture-primary-key".into(),
-        secret: "fixture-primary-material".into(),
-    };
-    let params = Params::default();
-    let first = credentials.envelope("private/get-accounts", &params, NOW + 0.1, false);
+    let first = recipe_envelope("private/get-accounts", Params::default(), NOW + 0.1, false);
     assert_eq!(
         first,
-        credentials.envelope("private/get-accounts", &params, NOW + 0.9, false)
+        recipe_envelope("private/get-accounts", Params::default(), NOW + 0.9, false)
     );
-    let later: serde_json::Value = serde_json::from_str(&credentials.envelope(
+    let later: serde_json::Value = serde_json::from_str(&recipe_envelope(
         "private/get-accounts",
-        &params,
+        Params::default(),
         NOW + 1.,
         false,
     ))
     .unwrap();
     assert_eq!(later["nonce"], NOW as u64 + 1);
+}
+
+fn recipe_envelope(method: &'static str, params: Params, now: f64, auth: bool) -> String {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
+    use safe_cex_engine::test_support::ProbeVenue;
+    use safe_cex_venue_cryptocom::{Pending, sign::Envelope};
+    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
+        primary: Some(LocalIdentity {
+            key: Secret::new("fixture-primary-key".into()),
+            secret: Secret::new("fixture-primary-material".into()),
+            ..Default::default()
+        }),
+        secondary: None,
+    })
+    .unwrap();
+    let identity = identities.primary.unwrap();
+    let venue = ProbeVenue::new(
+        Cryptocom::new(Options::default()),
+        move |_: &mut Cryptocom, cx: &mut safe_cex_engine::Cx<'_, _>| {
+            if auth {
+                let url = "wss://stream.crypto.com/exchange/v1/user";
+                let socket = cx.connect(url);
+                cx.send_signed(
+                    socket,
+                    String::new(),
+                    Box::new(Envelope::ws_auth(identity.clone(), url)),
+                );
+            } else {
+                let url = format!("https://api.crypto.com/exchange/v1/{method}");
+                let context = cx
+                    .http_context(
+                        Scope::Background,
+                        Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 20000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        },
+                    )
+                    .unwrap();
+                // This oracle carrier exercises real recipe prepare/apply only.
+                // Actual consumer custody is covered by the command controls above.
+                let request = cx.request(
+                    Method::Post,
+                    url.clone(),
+                    vec![("Content-Type", "application/json".into())],
+                    None,
+                    Pending::Tickers {
+                        context,
+                        rows: vec![],
+                        skipped: Default::default(),
+                    },
+                );
+                cx.sign_http(
+                    request,
+                    Box::new(Envelope::http(
+                        identity.clone(),
+                        method,
+                        params.clone(),
+                        &url,
+                    )),
+                );
+            }
+        },
+    );
+    let mut e = Engine::new(
+        venue,
+        Some(safe_cex_engine::test_support::seeded_entropy(7)),
+    )
+    .unwrap();
+    e.set_signer(Some(Arc::new(provider))).unwrap();
+    e.start(now);
+    safe_cex_engine::test_support::prepared_actions(&mut e, now)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if !auth => r.body,
+            Action::WsSend { text, .. } if auth => Some(text),
+            _ => None,
+        })
+        .expect("real provider recipe envelope")
 }
 
 #[test]
