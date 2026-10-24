@@ -1,6 +1,13 @@
 use safe_cex_engine::{Action, Event, Response};
 use safe_cex_venue_polymarket::{Options, Polymarket};
 
+fn released(
+    engine: &mut safe_cex_engine::Engine<Polymarket>,
+    now: f64,
+) -> std::vec::IntoIter<Action> {
+    safe_cex_engine::test_support::prepared_actions(engine, now).into_iter()
+}
+
 /// A jittered retry delay lands in `[0.75, 1.0] * nominal`.
 fn jittered(actual: f64, nominal: f64) -> bool {
     (0.75 * nominal..=nominal).contains(&actual)
@@ -15,8 +22,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         ..Options::default()
     }));
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = released(&mut engine, 0.)
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -32,7 +38,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
                 error: "scripted public failure",
             },
         );
-        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let actions = released(&mut engine, now).collect::<Vec<_>>();
         assert!(
             !actions.iter().any(|action| matches!(
                 action,
@@ -56,8 +62,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
             .expect("bounded public discovery backoff");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = released(&mut engine, now)
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -68,7 +73,7 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
     engine.handle(now, Event::HttpResponse { request: request.id, response: Response { status: 200, headers: "", body: r###"{"markets":[{"conditionId":"0x123","slug":"election","question":"Who wins?","description":"Test outcome","endDate":"2026-12-31","clobTokenIds":"[\"107505882767731489358349912513945399560393482969656700824895970500493757150417\",\"2\"]","outcomes":"[\"Yes\",\"No\"]","orderPriceMinTickSize":0.01,"orderMinSize":"","active":true,"closed":false,"negRisk":true},{"broken":{"unexpected":true}}]}"### } });
     assert!(engine.store().loaded().markets);
     assert_eq!(engine.store().markets().len(), 2);
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let actions = released(&mut engine, now).collect::<Vec<_>>();
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
@@ -79,8 +84,7 @@ fn private_start_is_independent_of_ticker_seed_responses() {
         ..Options::default()
     }));
     engine.start(0.0);
-    let request = engine
-        .drain_actions()
+    let request = released(&mut engine, 0.)
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -89,7 +93,7 @@ fn private_start_is_independent_of_ticker_seed_responses() {
     engine.handle(0.0, Event::HttpResponse { request: request.id, response: Response { status: 200, headers: "", body: r###"{"markets":[{"conditionId":"0x123","slug":"election","question":"Who wins?","description":"Test outcome","endDate":"2026-12-31","clobTokenIds":"[\"107505882767731489358349912513945399560393482969656700824895970500493757150417\",\"2\"]","outcomes":"[\"Yes\",\"No\"]","orderPriceMinTickSize":0.01,"orderMinSize":"","active":true,"closed":false,"negRisk":true},{"broken":{"unexpected":true}}]}"### } });
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let actions = released(&mut engine, 0.).collect::<Vec<_>>();
     assert!(
         actions
             .iter()
@@ -109,8 +113,7 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
         };
         let mut previous = safe_cex_engine::test_support::seeded_engine(Polymarket::new(options()));
         previous.start(0.0);
-        let seed = previous
-            .drain_actions()
+        let seed = released(&mut previous, 0.)
             .find_map(|action| match action {
                 Action::Http(request) => Some(request),
                 _ => None,
@@ -140,8 +143,7 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
                 .set_prediction_markets(previous.store().prediction_markets().unwrap().to_vec());
         }
         engine.start(0.0);
-        let request = engine
-            .drain_actions()
+        let request = released(&mut engine, 0.)
             .find_map(|action| match action {
                 Action::Http(request) => Some(request),
                 _ => None,
@@ -161,7 +163,7 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
         );
         assert_eq!(engine.snapshot_frame(0.0), before);
         assert_eq!(engine.store().loaded().markets, seeded);
-        let actions: Vec<_> = engine.drain_actions().collect();
+        let actions: Vec<_> = released(&mut engine, 0.).collect();
         assert!(
             !actions
                 .iter()
@@ -182,8 +184,7 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
             })
             .unwrap();
         engine.handle(1000.0, Event::TimerFired { timer });
-        let recovered = engine
-            .drain_actions()
+        let recovered = released(&mut engine, 1000.)
             .find_map(|action| match action {
                 Action::Http(request) => Some(request),
                 _ => None,

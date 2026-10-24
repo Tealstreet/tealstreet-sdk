@@ -2524,6 +2524,8 @@ impl<P> Cx<'_, P> {
             panic!("HTTP owner retirement bookkeeping failed");
         }
         self.io.untrack_read_root(command);
+        #[cfg(feature = "metadata-freshness")]
+        self.store.metadata_write_finished(command);
         #[cfg(feature = "order-locks")]
         {
             if write_sealed
