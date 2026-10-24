@@ -2,11 +2,11 @@
 mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId,
+    Action, Command, Event, HttpRequest, Method, Notice, Response, SocketId,
 };
 use safe_cex_venue_phemex::PhemexPerpetuals;
 use serde_json::{Value, json};
-use support::Options;
+use support::{Options, PreparedEngine as Engine};
 
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"error":null,"result":[{"symbol":"BTCUSDT","bidRp":"69000","askRp":"69001","lastRp":"69000","markRp":"69000","indexRp":"69000","openRp":"69000","openInterestRv":"250","fundingRateRr":"0.0001","volumeRq":"10"}]}"#;
@@ -76,7 +76,7 @@ fn command(e: &mut Engine<PhemexPerpetuals>, c: Command) -> Vec<Action> {
 }
 
 fn engine_with_socket(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
-    let mut e = support::engine(Options {
+    let mut e = support::prepared_engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
@@ -1438,7 +1438,7 @@ fn malformed_rejected_and_ambiguous_create_never_retry() {
 
 #[test]
 fn unknown_context_and_public_only_fail_closed() {
-    let mut e = support::engine(Options {
+    let mut e = support::prepared_engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
@@ -1452,7 +1452,7 @@ fn unknown_context_and_public_only_fail_closed() {
     );
     assert!(done(&a).is_err());
     assert!(writes(&a).is_empty());
-    let mut e = support::engine(Options {
+    let mut e = support::prepared_engine(Options {
         public_data_only: true,
         key: Some("key".into()),
         secret: Some("secret".into()),

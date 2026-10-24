@@ -3,17 +3,18 @@
 ## Scope and hold
 
 Owner codex-5c57jl; branch `feat/rust-phemex-read-owners`, exact native base
-`17e93c3038ef98e0f3d0d4580527cfd37660bcaf`. This checkpoint is plan plus
-original-source assertion REDs only. Production waits for actual #1974 landing,
-then genuine integration, reviewed composition and fresh CI. Frozen #1970/#1974
-and the MEXC lane remain unchanged. No shared-core prerequisite is proposed.
+`17e93c3038ef98e0f3d0d4580527cfd37660bcaf`. The original checkpoint was plan plus
+assertion REDs. Production now integrates actual #1974 and the complete combo-5b
+landing `219d4bc6725`; bounded source reviews and fresh CI remain pending.
+No shared-core prerequisite is proposed.
 
 Two separately reviewable slices: (1) FetchAccount identity, (2) recurring account
 currency reads and uncertain-order reconciliation. ih35js cleared identity,
 account and lib regions for this phase and retains history/income issuance,
 Pending branches and retirement. Preserve actual unsigned PublicTrades #1969.
-The phase edits only this plan/index and new dedicated tests. No source, Cargo,
-existing fixture, checker or inventory changes. No history/income adoption.
+The original phase edited only this plan/index and new dedicated tests. The
+implementation below adopts the three planned read owners. No history/income
+adoption or checker change is included.
 
 ## Native contract and destination
 
@@ -213,3 +214,56 @@ read adoption: production, inventories and the history/income/PublicTrades paths
 are unchanged. Actual #1974 integration and the managed failure matrix above
 remain required before production certification. This scratch branch is local;
 no production PR, push or landing is claimed.
+
+
+## Production on actual combo-5b
+
+Plain integration `f2d0a6b37f5` has actual `219d4bc6725` as its second parent;
+actual #1974 `c80cf9cecbd` is also an ancestor. Only shared docs required manual
+resolution, with incoming content retained before the exact own suffix once.
+
+Identity now retains a SelectedRead command root and one 20s ReadLeg. Currency
+and reconciliation requests retain independently admitted Background reads plus
+the native cycle/currency or symbol/read custody. Every item and response checks
+live DATA authority before parsing, publication or common 429 effects. Failure
+cleanup retires its exact handle before native cleanup and does not require a
+live DATA scope. Native 20s cycle cleanup also retires both outstanding handles.
+
+Immutable opaque slots are assembled once from the existing constructor inputs;
+all three owners use the canonical SelectedRead selector. The existing secondary
+field remains for held native history/income callers. No raw key is introduced,
+no credential-selection site or checker predicate changes, and no fallback
+sender is added. Existing unsigned PublicTrades, managed candles, private login,
+accepted-login AOP/ping order, snapshot proof and financial reducers are retained.
+
+Against actual 219d, the request map removes only the five fingerprints named
+above: family **33F/36O -> 28F/31O**. The account diagnostic remains. History,
+income and generic legacy requests remain genuinely used; their entries are not
+pruned by this slice.
+
+Immediate native fixture collectors now drive real Prepare/Bind/Claim at their
+most recent engine ingress time. Boundary/parked-provider controls retain raw
+Engine access. Two old Primary route assertions now inspect the actual managed
+Prepare intent before releasing the request: managed routing intent lives in the
+Prepare envelope, rather than the legacy HttpRequest.route field. Exact HMAC,
+URL/body/header, financial and outcome assertions remain in place.
+
+The original nineteen controls reach their final assertions on managed transport.
+Additive controls exercise preparation refusal, parked-provider refusal/expiry,
+real signing-queue pressure, partial Context pressure, stale host/provider events,
+native retry/poll recovery and repeated credit reuse. Queue peers are real signed
+requests under a trusted paused provider, not fabricated financial or read state.
+Native source-stage results and independent reviews are recorded separately from
+CI; no broad workspace or all-feature sweep is run locally.
+
+
+Local source checkpoint: all **286 Phemex tests pass, zero ignored**, including
+27 dedicated read-owner controls. Scoped all-target Clippy with `-D warnings`,
+rustfmt and the regular bans/ratchets passed on actual219d with jobs4, one Cargo
+process at a time. A subsequent checker rerun after the remote advanced reports
+foreign GRVT account inventory growth against origin; own source/map matches
+actual219d except the five declared Phemex removals. No override was used;
+current-landing integration must recheck this before publication.
+These are local source results; independent source reviews and fresh PR CI
+remain pending. The retired generic-request Orders selection arm was removed;
+History lookup selection and its native sender remain unchanged.

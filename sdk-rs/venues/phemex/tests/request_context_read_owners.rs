@@ -1,4 +1,4 @@
-//! Original native handoff and lifecycle controls; production is held on actual #1974.
+//! Read-owner handoff, native financial behavior, expiry and failure recovery.
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::HttpAction;
 use safe_cex_engine::{
@@ -24,6 +24,41 @@ fn requests(actions: &[Action]) -> Vec<HttpRequest> {
             }
         })
         .collect()
+}
+
+fn release<V: safe_cex_engine::Venue>(
+    e: &mut Engine<V>,
+    now: f64,
+    actions: Vec<Action>,
+) -> Vec<Action> {
+    use safe_cex_engine::request_context::{Claim, Prepared};
+    let mut out = Vec::new();
+    let mut queue = std::collections::VecDeque::from(actions);
+    while let Some(action) = queue.pop_front() {
+        match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => e.http_prepared(
+                    now,
+                    preparation,
+                    Prepared {
+                        id: preparation.attempt().request.0,
+                        expires_at: None,
+                    },
+                ),
+                HttpAction::Bind {
+                    permit, request, ..
+                } => {
+                    if matches!(e.claim_http(now, permit), Ok(Claim::Released(_))) {
+                        out.push(Action::Http(request));
+                    }
+                }
+                HttpAction::Cancel { .. } => {}
+            },
+            other => out.push(other),
+        }
+        queue.extend(e.drain_actions());
+    }
+    out
 }
 
 fn response(e: &mut Engine<PhemexPerpetuals>, now: f64, id: RequestId, status: u16, body: &str) {
@@ -54,6 +89,15 @@ fn envelope(currency: &str, total: f64, used: f64, rows: &str) -> String {
 }
 
 fn started() -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
+    started_with(true)
+}
+fn started_with(release: bool) -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
+    started_config(release, None)
+}
+fn started_config(
+    release: bool,
+    gate: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
     let mut e = support::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
@@ -64,12 +108,26 @@ fn started() -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
         }),
         ..Options::default()
     });
+    if let Some(gate) = gate {
+        let provider = e.signer().unwrap();
+        e.set_signer(Some(std::sync::Arc::new(failures::Gated {
+            inner: provider,
+            paused: gate,
+        })))
+        .unwrap();
+    }
     e.start(NOW);
     let a: Vec<_> = e.drain_actions().collect();
     response(&mut e, NOW, request(&a, "products").id, 200, PRODUCTS);
-    let mut a: Vec<_> = e.drain_actions().collect();
-    response(&mut e, NOW, request(&a, "24hr/all").id, 200, DAILY);
-    a.extend(e.drain_actions());
+    let mut a: Vec<_> = if release {
+        safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+    } else {
+        e.drain_actions().collect()
+    };
+    if release {
+        response(&mut e, NOW, request(&a, "24hr/all").id, 200, DAILY);
+        a.extend(e.drain_actions());
+    }
     let socket = a
         .iter()
         .filter_map(|a| {
@@ -143,6 +201,9 @@ fn opts(id: &str) -> PlaceOrderOpts {
 }
 
 fn identity(read: bool) -> (Engine<PhemexPerpetuals>, Vec<Action>) {
+    identity_with(read, true)
+}
+fn identity_with(read: bool, release: bool) -> (Engine<PhemexPerpetuals>, Vec<Action>) {
     let mut e = support::engine(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
@@ -154,7 +215,11 @@ fn identity(read: bool) -> (Engine<PhemexPerpetuals>, Vec<Action>) {
         ..Default::default()
     });
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    let actions = e.drain_actions().collect();
+    let actions = if release {
+        safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+    } else {
+        e.drain_actions().collect()
+    };
     (e, actions)
 }
 fn prepares(actions: &[Action], path: &str) -> usize {
@@ -171,7 +236,16 @@ fn no_numeric_terminal(actions: &[Action]) {
     );
 }
 fn uncertain() -> (Engine<PhemexPerpetuals>, Vec<Action>, f64) {
-    let (mut e, actions, socket) = started();
+    uncertain_with(true)
+}
+fn uncertain_with(release: bool) -> (Engine<PhemexPerpetuals>, Vec<Action>, f64) {
+    uncertain_config(release, None)
+}
+fn uncertain_config(
+    release: bool,
+    gate: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> (Engine<PhemexPerpetuals>, Vec<Action>, f64) {
+    let (mut e, actions, socket) = started_config(true, gate);
     seed(&mut e, &actions);
     authenticate(&mut e, socket);
     e.handle(
@@ -219,7 +293,11 @@ fn uncertain() -> (Engine<PhemexPerpetuals>, Vec<Action>, f64) {
         })
         .expect("native write-expiry plus clock-skew reconciliation fence");
     e.handle(wake, Event::TimerFired { timer });
-    let actions = e.drain_actions().collect();
+    let actions = if release {
+        safe_cex_engine::test_support::prepared_actions(&mut e, wake)
+    } else {
+        e.drain_actions().collect()
+    };
     (e, actions, wake)
 }
 fn revealed() -> &'static str {
@@ -227,7 +305,7 @@ fn revealed() -> &'static str {
 }
 #[test]
 fn identity_requires_managed_preparation_before_signing_or_transport() {
-    let (_, actions) = identity(true);
+    let (_, actions) = identity_with(true, false);
     assert_eq!(prepares(&actions, "/g-accounts/accountPositions"), 1);
     assert!(requests(&actions).is_empty(), "no eager signed HTTP bypass");
 }
@@ -252,7 +330,7 @@ fn identity_at_leg_deadline_without_timer_cannot_return_response_identity() {
 }
 #[test]
 fn both_currency_reads_require_background_managed_preparation() {
-    let (_, actions, _) = started();
+    let (_, actions, _) = started_with(false);
     assert_eq!(prepares(&actions, "/g-accounts/accountPositions"), 2);
     assert!(
         requests(&actions)
@@ -280,7 +358,7 @@ fn currency_response_at_cycle_deadline_cannot_publish_without_timer() {
 }
 #[test]
 fn uncertain_order_read_requires_primary_background_managed_preparation() {
-    let (_, actions, _) = uncertain();
+    let (_, actions, _) = uncertain_with(false);
     assert_eq!(prepares(&actions, "/g-orders/activeList"), 1);
     assert!(
         requests(&actions)
@@ -418,7 +496,7 @@ fn native_cycle_timer_revokes_late_currency_and_retains_successful_slice() {
         })
         .unwrap();
     e.handle(NOW + 22_000., Event::TimerFired { timer: refresh });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 22_000.);
     assert_eq!(
         requests(&actions)
             .iter()
@@ -429,9 +507,10 @@ fn native_cycle_timer_revokes_late_currency_and_retains_successful_slice() {
 }
 #[test]
 fn native_uncertain_read_is_primary_and_can_reveal_a_live_order() {
-    let (mut e, actions, wake) = uncertain();
+    let (mut e, actions, wake) = uncertain_with(false);
+    assert!(actions.iter().any(|action| matches!(action,Action::ManagedHttp(action) if matches!(action.as_ref(),HttpAction::Prepare { intent:safe_cex_engine::request_context::RoutingIntent::Primary, request,.. } if request.url.contains("activeList")))));
+    let actions = release(&mut e, wake, actions);
     let r = request(&actions, "activeList");
-    assert_eq!(r.route, Some(RequestRoute::Primary));
     assert!(
         r.headers
             .iter()
@@ -501,7 +580,7 @@ fn retired_currency_429_cannot_pause_the_next_native_cycle() {
     response(&mut e, NOW + 20_001., expired.id, 429, "rate limited");
     e.drain_actions().for_each(drop);
     e.handle(NOW + 22_000., Event::TimerFired { timer: refresh });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 22_000.);
     assert_eq!(
         requests(&actions)
             .iter()
@@ -725,7 +804,7 @@ fn native_both_currency_failures_release_pending_and_schedule_one_poll() {
         assert!(e.drain_actions().next().is_none());
         let (timer, at) = polls[0];
         e.handle(at, Event::TimerFired { timer });
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, at);
         assert_eq!(
             requests(&actions)
                 .iter()
@@ -736,3 +815,6 @@ fn native_both_currency_failures_release_pending_and_schedule_one_poll() {
         no_numeric_terminal(&actions);
     }
 }
+
+#[path = "support/read_owner_failures.rs"]
+mod failures;

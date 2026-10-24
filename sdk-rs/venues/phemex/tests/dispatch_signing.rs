@@ -250,7 +250,56 @@ fn parked(paused: bool) -> (Arc<Parked>, Provider) {
     )
 }
 fn actions(e: &mut Engine<Probe>, now: f64) -> Vec<Action> {
-    safe_cex_engine::test_support::prepared_actions(e, now)
+    e.prepare_dispatch(now);
+    let initial = e.drain_actions().collect();
+    drive_routes(e, now, initial)
+}
+fn drive_routes(e: &mut Engine<Probe>, now: f64, initial: Vec<Action>) -> Vec<Action> {
+    use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+    let mut queue = std::collections::VecDeque::from(initial);
+    let mut out = Vec::new();
+    let mut count = 0;
+    while let Some(action) = queue.pop_front() {
+        count += 1;
+        assert!(count < 65_536);
+        if let Action::ManagedHttp(action) = action {
+            match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => {
+                    assert_eq!(request.id, preparation.attempt().request);
+                    if e.http_preparation_pending(preparation) {
+                        e.http_prepared(
+                            now,
+                            preparation,
+                            Prepared {
+                                id: request.id.0,
+                                expires_at: None,
+                            },
+                        );
+                    }
+                }
+                HttpAction::Bind {
+                    permit, request, ..
+                } => match e.claim_http(now, permit) {
+                    Ok(Claim::Released(_)) => out.push(Action::Http(request)),
+                    Ok(Claim::WaitUntil(_)) => {
+                        panic!("native immediate route cannot wait for pacing")
+                    }
+                    Err(_) => {}
+                },
+                HttpAction::Cancel { .. } => {}
+            }
+        } else {
+            out.push(action);
+        }
+        for action in e.drain_actions().collect::<Vec<_>>().into_iter().rev() {
+            queue.push_front(action);
+        }
+    }
+    out
 }
 fn physical(actions: &[Action], path: &str) -> HttpRequest {
     let mut requests: Vec<_> = actions
@@ -768,11 +817,12 @@ fn native_active_orders_repair_uses_primary_even_with_secondary_credentials() {
         })
         .expect("native unproven write schedules repair after signed expiry plus skew");
     e.handle(wake, Event::TimerFired { timer });
-    let output = actions(&mut e, wake);
+    let prepared: Vec<_> = e.drain_actions().collect();
+    assert!(prepared.iter().any(|a|matches!(a,Action::ManagedHttp(a) if matches!(a.as_ref(),safe_cex_engine::request_context::HttpAction::Prepare {intent:safe_cex_engine::request_context::RoutingIntent::Primary,request,..} if request.url.contains("activeList")))));
+    let output = drive_routes(&mut e, wake, prepared);
     let read = physical(&output, "/g-orders/activeList");
     assert_eq!(read.method, Method::Get);
     assert_eq!(token(&read), "key");
-    assert_eq!(read.route, Some(safe_cex_engine::RequestRoute::Primary));
 }
 
 #[test]
