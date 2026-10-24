@@ -77,3 +77,15 @@ assertion or runtime changed. That compile failure is excluded from RED counts.
 The outer ManagedHttp action boxes HttpAction; the next compile-only correction
 uses `action.as_ref()` before matching Prepare. This second fixture type error
 is also excluded from RED evidence.
+
+## Executable original receipt
+
+The corrected, unchanged-source target executes eight tests: three intended
+assertion REDs, five GREEN working controls, zero ignored. The REDs are eager
+physical HTTP, absent admission-expiry timer before Prepare and ticker seed
+publication at the exact proposed 20-second deadline. Wire/PublicCors/headers,
+financial projection, identity mismatch rejection, native 25ms progression,
+keyed network-failure recovery and the 38-second two-leg walk are GREEN.
+Scoped new-target strict Clippy and package formatting pass. The two type-only
+fixture corrections above are not execution evidence. Every production, prior
+fixture, Cargo, inventory and selection blob remains exact actual a109.
