@@ -4,6 +4,7 @@
     "privateEligible": [["canSign"]]
   },
   "venues": {
+    "cryptocom": {"bridge": {"dispatchSigning": true, "readCredentials": "validateOnly"}},
     "bitrue": {"bridge": {"dispatchSigning": true}},
     "weex": {"bridge": {"dispatchSigning": true}, "signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
     "okx": {"bridge": {"dispatchSigning": true}, "signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}, "remoteSigning": {"enabled": true, "payloadSupported": false, "protectedHeaders": ["OK-ACCESS-KEY", "OK-ACCESS-SIGN", "OK-ACCESS-TIMESTAMP", "OK-ACCESS-PASSPHRASE"], "wire": {"exchangeName": "okx", "extraData": "secondsTimestamp", "secondsSuffix": {"method": "GET", "path": "/users/self/verify"}}, "signatureEncoding": "base64", "passphraseHeader": "OK-ACCESS-PASSPHRASE"}},
@@ -24,6 +25,7 @@
     "hyperliquid": {"privateEligible": [["vault", "applicationId", "key"]]},
     "asterdex": {"canSign": [["key"], ["remoteSigner", "asterLocalAuth"]], "bridge": {"isolatedBookSubscriptions": true, "dispatchSigning": true}, "setupMapping": "asterdex"},
     "bingx": {"bridge": {"dispatchSigning": true}},
+    "apexomni": {"bridge": {"dispatchSigning": true}, "setupMapping": "apexomni", "signerSetup": {"primary": {"secretEncoding": "base64Text", "passphrase": "optional", "extra": {"key": "zklinkSeed", "field": "optional", "encoding": "hex"}}}},
     "phemex": {"bridge": {"dispatchSigning": true}},
     "bybit": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"wire": {"exchangeName": "bybit", "extraData": "bybitExpiry"}, "enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
     "bybitinverse": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"wire": {"exchangeName": "bybit", "extraData": "bybitExpiry"}, "enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},

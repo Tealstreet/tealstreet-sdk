@@ -126,8 +126,8 @@ fn refusal(dispatch: Dispatch) -> Vec<Action> {
         extracting: true,
     });
     engine.start(NOW);
-    let catalog = engine
-        .drain_actions()
+    let catalog = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,

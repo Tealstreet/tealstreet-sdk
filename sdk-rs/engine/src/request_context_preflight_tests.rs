@@ -756,3 +756,122 @@ fn delivery_scope_outlives_temporary_marker_removal_owner_retirement_and_reuse()
     e.io.request_contexts.exit_delivery(&delivery);
     assert_eq!(e.io.request_contexts.delivery_depth, 0);
 }
+
+/// Control (RUST_PLAN_SESSION_WAIT C2): a retained Preflight read cannot park
+/// on a Session.
+#[test]
+fn a_preflight_read_cannot_park_on_a_session_today() {
+    use crate::request_context::plan::{CallTerms, RetryWindow};
+    let mut engine = engine();
+    let owner = begin(&mut engine, 7, PreflightPurpose::ReadOnly);
+    cx(&mut engine, 1., |cx| {
+        let session = cx
+            .open_session(crate::request_context::SessionPolicy {
+                credential: None,
+                repeat_safe: true,
+                private_egress: None,
+            })
+            .unwrap();
+        let read = cx
+            .preflight_read_context(
+                &owner,
+                read_policy(),
+                CallTerms {
+                    wait_ms: 0,
+                    timeout_ms: 100,
+                    attempts: 1,
+                    retry_window: RetryWindow::FreshAttempt,
+                },
+            )
+            .unwrap();
+        let (ids, timers) = (cx.io.next_id, cx.io.timers.len());
+        let refused = cx.session_wait(&session, &read, ());
+        assert_eq!(refused.map_err(|(_, error)| error), Err(Error::State));
+        assert_eq!((cx.io.next_id, cx.io.timers.len()), (ids, timers));
+        assert!(cx.session_ready(&session).is_empty());
+    });
+}
+
+fn failed_outcome(engine: &mut Engine<Probe>) -> Option<crate::Outcome> {
+    engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error.outcome),
+            _ => None,
+        })
+        .expect("command failure")
+}
+
+#[test]
+fn inherited_uncertainty_seals_a_sendless_write_preflight_unknown() {
+    for inherited in [false, true] {
+        let mut engine = engine();
+        let owner = begin(&mut engine, 7, PreflightPurpose::WriteAfterReads);
+        cx(&mut engine, 1., |cx| {
+            if inherited {
+                // Set before any read is admitted, then repeated: idempotent.
+                cx.inherit_preflight_uncertainty(&owner).unwrap();
+                cx.inherit_preflight_uncertainty(&owner).unwrap();
+            }
+            cx.fail_preflight(&owner, "earlier send not reconciled")
+                .unwrap();
+        });
+        let expected = if inherited {
+            crate::Outcome::Unknown
+        } else {
+            crate::Outcome::NotSent
+        };
+        assert_eq!(failed_outcome(&mut engine), Some(expected));
+        assert!(engine.venue.retired[0].matches_preflight(&owner));
+    }
+}
+
+#[test]
+fn inherited_uncertainty_requires_live_write_preflight_custody_and_mutates_nothing() {
+    let mut engine = engine();
+    let read = begin(&mut engine, 7, PreflightPurpose::ReadOnly);
+    let ids = engine.io.next_id;
+    let actions = engine.io.actions.len();
+    cx(&mut engine, 1., |cx| {
+        assert_eq!(cx.inherit_preflight_uncertainty(&read), Err(Error::Invalid));
+    });
+    assert_eq!((engine.io.next_id, engine.io.actions.len()), (ids, actions));
+    cx(&mut engine, 1., |cx| cx.fail_preflight(&read, "read only")).unwrap();
+    engine.drain_actions().for_each(drop);
+
+    let write = begin(&mut engine, 8, PreflightPurpose::WriteAfterReads);
+    let mut foreign_engine = self::engine();
+    let foreign = begin(&mut foreign_engine, 8, PreflightPurpose::WriteAfterReads);
+    cx(&mut engine, 1., |cx| {
+        assert_eq!(
+            cx.inherit_preflight_uncertainty(&foreign),
+            Err(Error::Revoked)
+        );
+        cx.fail_preflight(&write, "sealed").unwrap();
+        assert_eq!(
+            cx.inherit_preflight_uncertainty(&write),
+            Err(Error::Revoked)
+        );
+    });
+    // The refused calls left the plain projection untouched.
+    let outcome = engine.drain_actions().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { command: 8, error }) => Some(error.outcome),
+        _ => None,
+    });
+    assert_eq!(outcome, Some(Some(crate::Outcome::NotSent)));
+
+    // A reused command number gets a new generation; the old handle is stale.
+    let reused = begin(&mut engine, 8, PreflightPurpose::WriteAfterReads);
+    cx(&mut engine, 2., |cx| {
+        assert_eq!(
+            cx.inherit_preflight_uncertainty(&write),
+            Err(Error::Revoked)
+        );
+        cx.fail_preflight(&reused, "fresh generation").unwrap();
+    });
+    let outcome = engine.drain_actions().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { command: 8, error }) => Some(error.outcome),
+        _ => None,
+    });
+    assert_eq!(outcome, Some(Some(crate::Outcome::NotSent)));
+}

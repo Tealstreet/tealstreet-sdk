@@ -7,7 +7,7 @@ pub const TICKERS: &str = r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC
 pub const ORDER: &str = r#"{"order_id":9007199254740993,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"NEW","price":50000,"quantity":1,"total_executed_quantity":0,"executed":0,"visible_quantity":1,"reduce_only":false,"margin_mode":"CROSS","client_order_id":"caller-42"}"#;
 pub const POSITIONS: &str = r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","position_qty":1,"average_open_price":50000,"mark_price":51000,"margin_mode":"CROSS","leverage":10},{"symbol":"PERP_BTC_USDC","position_qty":-0.5,"average_open_price":52000,"mark_price":51000,"margin_mode":"ISOLATED","leverage":5,"margin":6000}],"total_collateral_value":10000,"free_collateral":7000}}"#;
 pub fn actions(e: &mut Driver) -> Vec<Action> {
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, 1000.0)
 }
 /// Tracks armed timers so tests can advance time instead of firing timer IDs.
 pub struct Clock {
@@ -31,7 +31,7 @@ impl Clock {
         }
     }
     pub fn drain(&mut self, e: &mut Driver) -> Vec<Action> {
-        let out = actions(e);
+        let out = safe_cex_engine::test_support::prepared_actions(e, self.now);
         self.track(&out);
         out
     }
