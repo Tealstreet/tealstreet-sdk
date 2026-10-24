@@ -17,21 +17,12 @@ use std::collections::HashMap;
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-    pub passphrase: Option<String>,
-    pub omni_key_seed: Option<String>,
+    /// The provider identity for every signed request: opaque refs only. The
+    /// venue holds no key material; the zkLink seed is its `zklinkSeed` role.
+    pub identity: Option<safe_cex_engine::signing::Identity>,
     pub tick_interval_ms: Option<f64>,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        safe_cex_crypto::secrets::erase(&mut self.passphrase);
-        safe_cex_crypto::secrets::erase(&mut self.omni_key_seed);
-    }
-}
 
 pub enum Pending {
     Candles(public::Candles),
@@ -49,7 +40,7 @@ pub enum Pending {
 }
 
 pub struct ApexOmni {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     rest: &'static str,
     contracts: HashMap<String, public::ContractConfig>,
     public: public::Public,
@@ -127,7 +118,6 @@ fn api_response(response: Response<'_>) -> ApiResponse {
 
 impl ApexOmni {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             rest: if options.testnet {
                 "https://testnet.omni.apex.exchange/api"
@@ -162,14 +152,29 @@ impl ApexOmni {
         legacy: bool,
         retries: u8,
     ) -> Result<RequestId, (String, Box<Pending>)> {
-        // A signing failure hands the pending request back so its caller can complete it.
-        let signed = match sign::request(&self.options, cx.now, &request, legacy) {
-            Ok(signed) => signed,
-            Err(error) => return Err((error, Box::new(pending))),
+        // Klines carry no authentication. Symbols is signed, as legacy did, when
+        // the identity has a passphrase ref; otherwise it stays public discovery.
+        let symbols = request.path == "/v3/symbols";
+        let identity = if sign::is_unsigned(&request) {
+            None
+        } else {
+            match self.options.identity.clone() {
+                Some(identity) if symbols && identity.passphrase.is_none() => None,
+                Some(identity) => Some(identity),
+                None if symbols => None,
+                // A signing failure hands the pending request back so its caller can complete it.
+                None => {
+                    return Err((
+                        "ApeX API key, signing key and passphrase are required".into(),
+                        Box::new(pending),
+                    ));
+                }
+            }
         };
-        let url = format!("{}{}", self.rest, signed.path);
+        let url = format!("{}{}", self.rest, sign::request_path(&request));
         let stream = at;
         let method = request.method;
+        let step = identity.map(|identity| sign::Http::new(identity, request.clone(), legacy));
         let pending = Pending::SignedAuth {
             request,
             pending: Box::new(pending),
@@ -177,11 +182,16 @@ impl ApexOmni {
             retries,
             at,
         };
-        Ok(if let Some(at) = stream {
-            cx.request_streamed_body(method, url, signed.headers, signed.body, at, pending)
+        let id = if let Some(at) = stream {
+            cx.request_streamed_body(method, url, vec![], None, at, pending)
         } else {
-            cx.request(method, url, signed.headers, signed.body, pending)
-        })
+            cx.request(method, url, vec![], None, pending)
+        };
+        // The provider signs at dispatch; the recipe owns headers and body.
+        if let Some(step) = step {
+            cx.sign_http(id, Box::new(step));
+        }
+        Ok(id)
     }
 
     fn response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -288,6 +298,56 @@ impl ApexOmni {
 }
 
 impl Venue for ApexOmni {
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(delivery) => trading::capture_reconciliation(delivery),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Pending::Trade(request) = pending {
+            trading::capture_unproven(request, response, evidence);
+        }
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.trading_retired(owner)
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.trading_ready(cx, preflight);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
+    }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        self.failed(cx, pending, error);
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -361,6 +421,7 @@ impl Venue for ApexOmni {
     ) {
         match pending {
             Pending::Candles(pending) => self.candle_transport_failed(cx, pending, error),
+            Pending::Trade(request) => self.trading_failed(cx, request, error),
             pending => self.transport_failed(cx, pending, &error.message),
         }
     }
@@ -373,14 +434,12 @@ impl Venue for ApexOmni {
     ) {
         match pending {
             Pending::Candles(pending) => Self::candle_failed(cx, pending, error),
+            Pending::Trade(request) => self.trading_failed(cx, request, error),
             pending => self.on_sign_error(cx, pending, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if !self.public_timer(cx, timer)
-            && !self.account_timer(cx, timer)
-            && !self.trading_timer(cx, timer)
-        {
+        if !self.public_timer(cx, timer) && !self.account_timer(cx, timer) {
             self.history_timer(cx, timer);
         }
     }
