@@ -17,10 +17,13 @@ The registry arm passes raw material straight into venue `Options`:
   which MACs with the raw secret.
 - **Private WS login** calls `sign::ws_login(&options, …)`.
 - **Account start** checks the raw seed with `sign::validate_seed`.
-- **Credential presence** is checked on raw fields: `account.rs:575, 1227`,
-  `history.rs:361` and `trading.rs:677`.
+- **Credential presence** is checked on raw fields: `account.rs:575, 1227`
+  and `history.rs:361`.
 - **Trading** is converted by #1891 (managed writes, signing at send time
-  through the provider). It adds `Options.identity`.
+  through the provider; owner codex-hcmq3f). It adds `Options.identity`.
+  At its reviewed head `6eaca6d94d4`, `trading.rs` has no raw-field reads and
+  no legacy `sign::request`/`ws_login` call. It uses the `public_data_only`
+  gate, the selected identity and per-command `cx.can_sign`.
 
 The signing inventory (`scripts/signing-legacy-sites.json`) counts
 `account.rs` 1, `history.rs` 1, `lib.rs` 9 and `trading.rs` 1 fingerprints.
@@ -55,13 +58,31 @@ through the provider at dispatch.
      `cx.sign_http(id, sign::Http::new(identity, …))`. The unsigned
      `/v3/symbols` path is unchanged.
    - **Private WS login:** `sign::WsLogin` through the signed-send seam.
-   - **Seed check:** `validate_seed` at start becomes
-     `Cx::can_sign(primary, ZkLinkContract on the zklinkSeed role)` (#1899).
-     A missing or unsupported role is typed not-ready before any I/O.
-   - **Presence checks:** each becomes "a complete `identity` is present"
-     (credential, signing, passphrase and the zklinkSeed role).
+   - **Seed check:** the exact 65-byte width (an optional lowercase `0x` and
+     130 hex characters) is enforced at trusted setup, not at the first order.
+     The registry arm runs a probe `ZkLinkContract` sign on the role, as
+     Backpack's Ed25519 probe does, and refuses setup with the legacy message
+     "Invalid OmniKey seed: expected 65-byte Ethereum signature".
+     `Cx::can_sign` (#1899) on the role then gates start: a missing or
+     unsupported role is typed not-ready before any I/O. (claude-m26ps4 F1.)
+   - **Presence checks** in account, history and start: each becomes "a
+     complete `identity` is present" (credential, signing, passphrase and the
+     zklinkSeed role). Trading keeps #1891's own gates. This plan adds no
+     trading presence or extra-map gate, and preserves
+     `sign::REST_NEEDS`/`CONTRACT_NEEDS` and the per-command
+     `can_sign`/refusal (codex-hcmq3f).
+   - **No secondary.** ApeX has no read credentials. The policy declares no
+     secondary, so a supplied secondary is refused at setup rather than
+     ignored, and the TS mapping never produces one. (claude-m26ps4 F4.)
    - **Erasure:** `EraseSecrets` and `Sensitive` are removed from `Options`,
      since nothing secret remains. That removes the `lib.rs` fingerprints.
+
+## Encoding
+
+`KeyEncoding::Hex` accepts `0x` or `0X` (since #1893), while legacy accepted
+only lowercase `0x`. The uppercase prefix becomes accepted, which CALLERS
+records as a behaviour change. Neither path trims the seed, and a test pins
+that. (claude-m26ps4 F2.)
 
 ## Typed not-ready gate
 
@@ -69,6 +90,11 @@ Until a family path is admitted, a private request with no identity or no
 provider refuses typed (`NotReady`/`unsupported`, `notSent`) before any I/O.
 This covers keyless and remote accounts until P8 #1926. Public data is
 unaffected. There is no raw-material fallback and no dual custody.
+
+The gate is safe only because the TS factory keeps keyless and remote-signer
+ApeX accounts on TS (`runsOnRustEngine`), so remote signing keeps working
+there. A control pins that a keyless ApeX account still routes to TS and is
+not refused at Rust start. (claude-m26ps4 F3.)
 
 ## Custody
 
@@ -79,11 +105,11 @@ Remote signing of zkLink (P8) stays out of scope.
 
 ## Dependencies and order
 
-- **#1891.** This PR changes `trading.rs`'s presence check and removes the
-  `Options` fields that #1891's trading still reads at its pin `43ee893a9f1`.
-  #1891's current head `6eaca6d94d4` contains that pin. So this lands after
-  #1891, stacked on its landed head, and touches `trading.rs` only where #1891
-  leaves raw-field reads behind.
+- **#1891** (owner codex-hcmq3f). This stacks on its reviewed head
+  `6eaca6d94d4`, which contains `43ee893a9f1`, and lands after it. It does not
+  touch `trading.rs`; that source window stays codex-hcmq3f's. The fields are
+  removed only once account, startup, history and WS login have all adopted
+  the provider.
 - **Landed:** #1841 recipes, #1899 `can_sign`/`set_identities`, #1964
   Backpack pattern.
 - **Unaffected:** #1990 key typing, since ApeX signs HMAC on an undeclared ref
@@ -95,15 +121,22 @@ Remote signing of zkLink (P8) stays out of scope.
 - **R1 (registry):** `build("apexomni", key, secret, passphrase, seed)`
   installs no provider and no identities today. It must install both, with
   the identity's `zklinkSeed` role present.
-- **R2 (refs-only account read):** `build_with_signer` with a provider and
-  refs, but no raw fields, cannot sign `/v3/account` today; it reports missing
-  credentials. It must release a request whose `APEX-SIGNATURE`, `APEX-API-KEY`,
-  `APEX-PASSPHRASE` and `APEX-TIMESTAMP` equal an independent HMAC vector.
-- **R3 (refs-only WS login):** the private login frame through the provider
-  equals the legacy `ws_login` bytes for the same material.
-- **R4 (gate):** a refs-only account without the `zklinkSeed` role refuses
-  private start typed, with no HTTP. Today it fails on the raw seed check
-  with an untyped error.
+- **R2 (registry refs):** refs without a provider must refuse "Engine signing
+  provider is required". Each raw field beside refs (key, signing material,
+  passphrase, `omniKeySeed`; one test each) must refuse "ApeX credentials
+  belong in signer setup, not engine options". Today every one of these
+  reports "Injected signing is not supported for this venue yet".
+- **R5 (seed width, F1):** a 64-byte seed must be refused at setup with the
+  legacy message. Today setup accepts it.
+- **Venue REDs**, on the #1891 base, because they need `Options.identity`:
+  - **R3:** a refs-only `/v3/account` read releases headers equal to an
+    independent Node-computed HMAC literal over the legacy canonical text,
+    from the raw secret. The vector is not computed through `base64Text` or
+    the provider (F5).
+  - **R4:** the refs-only private WS login frame equals the legacy
+    `ws_login` bytes for the same material.
+  - **R6:** without the `zklinkSeed` role, private start refuses typed with
+    no HTTP.
 
 ## Tests
 
