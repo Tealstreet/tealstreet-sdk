@@ -139,16 +139,19 @@ fn new_contract_broker_role_refuses_every_other_algorithm() {
         signer.can_sign(&broker, Algorithm::HmacSha256),
         Capability::Supported
     );
-    for algorithm in [
-        Algorithm::HmacSha512,
-        Algorithm::Sha256SecretSuffix,
-        Algorithm::Ed25519,
-        Algorithm::Es256,
-        Algorithm::Secp256k1Digest,
-        Algorithm::StarkDigest,
-        Algorithm::SchnorrDigest,
-        Algorithm::ZkLinkContract,
-    ] {
+    let algorithms =
+        std::iter::successors(Some(Algorithm::HmacSha256), |algorithm| match algorithm {
+            Algorithm::HmacSha256 => Some(Algorithm::HmacSha512),
+            Algorithm::HmacSha512 => Some(Algorithm::Sha256SecretSuffix),
+            Algorithm::Sha256SecretSuffix => Some(Algorithm::Ed25519),
+            Algorithm::Ed25519 => Some(Algorithm::Es256),
+            Algorithm::Es256 => Some(Algorithm::Secp256k1Digest),
+            Algorithm::Secp256k1Digest => Some(Algorithm::StarkDigest),
+            Algorithm::StarkDigest => Some(Algorithm::SchnorrDigest),
+            Algorithm::SchnorrDigest => Some(Algorithm::ZkLinkContract),
+            Algorithm::ZkLinkContract => None,
+        });
+    for algorithm in algorithms.skip(1) {
         let request = SignRequest {
             receipt: Default::default(),
             context: Default::default(),
@@ -224,4 +227,15 @@ fn new_contract_broker_alias_debug_contains_only_opaque_refs() {
         ids.primary.as_ref().unwrap().extra.get(&role()),
         ids.secondary.as_ref().unwrap().extra.get(&role())
     );
+}
+
+#[test]
+fn new_contract_secondary_without_primary_has_no_broker_alias() {
+    let input = serde_json::json!({
+        "secondary": {"key": "read-key", "secret": "read-secret"}
+    });
+    let (_, ids) = LocalSigner::from_json_with_policy(input.to_string(), policy())
+        .expect("secondary-only setup succeeds without a primary broker to alias");
+    assert!(ids.primary.is_none());
+    assert!(!ids.secondary.unwrap().extra.contains_key(&role()));
 }

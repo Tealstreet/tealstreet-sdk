@@ -263,7 +263,8 @@ must have redacted Debug: opaque names may appear, key/secret/passphrase/broker
 material must not. Test this at native Options and installed alias boundaries,
 matching existing Sensitive/credential redaction; no raw provider material Debug.
 
-Current tests at checkpoint5759e49f654 execute on unchanged77f production:
+Native tests at checkpoint5759e49f654 and the broker review delta below execute
+on unchanged77f production:
 
 - With Spot: 15 compiling tests, **5 assertion REDs / 10 working GREENs**, zero
   ignored. Four REDs observe zero provider batches where one is required:
@@ -271,7 +272,7 @@ Current tests at checkpoint5759e49f654 execute on unchanged77f production:
   The Futures write 400005 reissue RED observes zero batches instead of two.
 - Without Spot: 13 compiling tests, **4 assertion REDs / 9 working GREENs**,
   zero ignored. The two Spot-specific controls are not compiled in that mode.
-- Isolated broker role: 9 compiling tests, **7 NEW-CONTRACT runtime schema
+- Isolated broker role: 10 compiling tests, **8 NEW-CONTRACT runtime schema
   REDs / 2 existing working GREENs**, zero ignored. The first missing
   `kucoinBroker` role/policy decode rejects; downstream trim/alias/MAC assertions
   have NOT executed and are not claimed as independent semantic defect proofs.
@@ -284,7 +285,9 @@ Current tests at checkpoint5759e49f654 execute on unchanged77f production:
 
 Strict test-target Clippy passes for both packages after correcting two
 get-then-check assertion-style warnings; test meanings are unchanged. The role
-algorithm matrix covers all eight non-HmacSha256 variants in the current enum.
+algorithm matrix uses an exhaustive successor match over every Algorithm variant;
+a new variant requires a match arm before the target can compile. It covers all
+eight current non-HmacSha256 alternatives.
 Full local banned-patterns and request/signing/socket ratchets, whitespace checks
 and prose/test secret scans pass. No full native suite, WASM build, replay, size,
 production provider integration or actual broker landing is inferred here.
@@ -414,3 +417,23 @@ non-blocking documentation findings are resolved above: current counts replace
 the earlier receipt and claude-ddi2il is named as bootstrap grant authority. No
 source, credential policy, checker predicate or inventory change is part of this
 draft.
+
+## Role/setup review follow-up
+
+Role/setup at dffc84bb849 is CLEAR from claude-m26ps4, including independently
+recomputed broker vectors and the schema-RED distinction. Both non-blocking
+control requests are addressed without production changes:
+
+- Secondary-only setup with AliasPrimary succeeds, leaves primary absent and
+  creates no broker ref. This expectation matches the reviewed setup insertion
+  and optional alias validation in62377e9368e. The new test currently fails at
+  policy decode; its downstream assertions have not executed on the landing.
+- The algorithm matrix derives its sequence from an exhaustive Algorithm match,
+  so adding an enum variant requires an explicit test update at compile time.
+
+The refreshed isolated target compiles: **8 schema REDs / 2 working GREENs**,
+10 tests, zero ignored. Native test files remain byte-identical to the HMAC
+reviewed checkpoint; their 5/10 and 4/9 receipts are unchanged. Scoped strict
+Clippy and whitespace checks pass. Independent test-delta review is CLEAR,
+architecture gate No. Actual shared prerequisites or explicit composition still
+gate production; this is no claim that the broker contract executes successfully.
