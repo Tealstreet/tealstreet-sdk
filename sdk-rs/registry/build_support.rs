@@ -123,14 +123,17 @@ struct ExtraKeyPolicy {
     field: ExtraFieldPolicy,
     #[serde(default)]
     encoding: Option<KeyEncoding>,
+    #[serde(default)]
+    trim: bool,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 enum ExtraFieldPolicy {
     #[default]
     Optional,
     RequiredForPrivate,
+    AliasPrimary,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,6 +141,7 @@ enum ExtraFieldPolicy {
 enum ExtraKey {
     ZklinkSeed,
     L1Wallet,
+    KucoinBroker,
 }
 
 #[derive(Debug, Deserialize)]
@@ -229,8 +233,8 @@ fn rule(value: &Rule) -> String {
                         |encoding| format!("Some(safe_cex_engine::signing::KeyEncoding::{encoding:?})"),
                     );
                     format!(
-                        "Some(safe_cex_engine::signing::ExtraKeyPolicy {{ key: safe_cex_engine::signing::ExtraKey::{:?}, field: safe_cex_engine::signing::ExtraFieldPolicy::{:?}, encoding: {encoding} }})",
-                        extra.key, extra.field
+                        "Some(safe_cex_engine::signing::ExtraKeyPolicy {{ key: safe_cex_engine::signing::ExtraKey::{:?}, field: safe_cex_engine::signing::ExtraFieldPolicy::{:?}, encoding: {encoding}, trim: {} }})",
+                        extra.key, extra.field, extra.trim
                     )
                 },
             );
@@ -292,6 +296,16 @@ pub fn generate(json: &str) -> Result<String, String> {
         return Err("default signing and private conditions are required".into());
     }
     for policy in std::iter::once(&rules.default).chain(rules.venues.values()) {
+        // An alias names the primary's ref, so only a secondary may declare one.
+        if policy
+            .signer_setup
+            .primary
+            .as_ref()
+            .and_then(|primary| primary.extra.as_ref())
+            .is_some_and(|extra| extra.field == ExtraFieldPolicy::AliasPrimary)
+        {
+            return Err("aliasPrimary is valid only on a secondary extra policy".into());
+        }
         if policy
             .remote_signing
             .passphrase_header
@@ -406,7 +420,30 @@ mod tests {
         let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
             "p":{"signerSetup":{"primary":{"extra":{"key":"l1Wallet","field":"requiredForPrivate","encoding":"hex"}}}}
         }}"#).unwrap();
-        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::L1Wallet, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
+        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::L1Wallet, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex), trim: false })"));
+    }
+
+    // KuCoin broker role: trim and a secondary alias compile; a primary alias fails closed.
+    #[test]
+    fn kucoin_broker_trim_and_secondary_alias_compile() {
+        let output = generate(
+            r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "k":{"signerSetup":{
+                "primary":{"extra":{"key":"kucoinBroker","encoding":"utf8","trim":true}},
+                "secondary":{"extra":{"key":"kucoinBroker","field":"aliasPrimary"}}}}
+        }}"#,
+        )
+        .unwrap();
+        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::KucoinBroker, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: Some(safe_cex_engine::signing::KeyEncoding::Utf8), trim: true })"));
+        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::KucoinBroker, field: safe_cex_engine::signing::ExtraFieldPolicy::AliasPrimary, encoding: None, trim: false })"));
+        assert!(
+            generate(
+                r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "k":{"signerSetup":{"primary":{"extra":{"key":"kucoinBroker","field":"aliasPrimary"}}}}
+        }}"#
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -415,8 +452,8 @@ mod tests {
             "v":{"signerSetup":{"primary":{"secretEncoding":"base64Text","extra":{"key":"zklinkSeed","field":"requiredForPrivate","encoding":"hex"}}}},
             "o":{"signerSetup":{"primary":{"extra":{"key":"zklinkSeed"}}}}
         }}"#).unwrap();
-        assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
-        assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None })"));
+        assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex), trim: false })"));
+        assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None, trim: false })"));
         for field in [
             r#"{"secretEncoding":"base58"}"#,
             r#"{"extra":{"key":"unknownRole"}}"#,

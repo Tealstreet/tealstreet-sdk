@@ -6377,3 +6377,17 @@ the Polymarket conversion (#1882) adopts it. Caller-visible changes:
   identity (no L2 key or secret yet) is valid pre-import setup.
 - **Types.** The TS `ExtraKeyPolicy.key` union and `host.d.mts`
   `SigningIdentity.extra` gain `l1Wallet`.
+
+### KuCoin broker signing role (credential core)
+
+Plan: [RUST_KUCOIN_BROKER_ROLE.md](RUST_KUCOIN_BROKER_ROLE.md). These changes are
+additive. No family's runtime behaviour changes until KuCoin's cutover declares
+the policy.
+
+| Change | tealstreet-next file:line | Old usage | New usage | Impact |
+| --- | --- | --- | --- | --- |
+| `ExtraKey::KucoinBroker` (`kucoinBroker`), bound to `HmacSha256` | none today | n/a | a role ref; never presented or interpolated as a credential | none |
+| `ExtraKeyPolicy.trim` (Rust `str::trim`; blank optional material is absent) | construction-rules `signerSetup` extras | no trimming | opt-in per family; ApeX unchanged | none |
+| `ExtraFieldPolicy::AliasPrimary` (secondary only) | construction-rules `signerSetup` secondary extras | no cross-slot extra | the read identity names the primary's one ref; its own material is refused; a primary alias fails codegen and setup | none |
+| TS `ExtraKeyPolicy`/`SecondaryExtraKeyPolicy`, `host.d.mts` `SigningIdentity.extra.kucoinBroker` | custom hosts reading `extra` | `zklinkSeed`, `l1Wallet` | plus `kucoinBroker` | add |
+

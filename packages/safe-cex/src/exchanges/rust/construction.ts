@@ -6,14 +6,22 @@ import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex
 
 export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'requiredWithPrimaryFallback';
 export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
-export type ExtraKeyPolicy = { key: 'zklinkSeed' | 'l1Wallet'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
+export type ExtraKeyPolicy = {
+  key: 'zklinkSeed' | 'l1Wallet' | 'kucoinBroker'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding;
+  /** Native Rust `str::trim` before decoding; blank optional material is absent. */
+  trim?: boolean;
+};
+/** Secondary only: the read identity names the primary's one installed ref. */
+export type SecondaryExtraKeyPolicy = Omit<ExtraKeyPolicy, 'field'> & { field?: ExtraKeyPolicy['field'] | 'aliasPrimary' };
 /** Asymmetric only: a declared signing ref may answer public operations (P4). */
 export type SigningAlgorithm = 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest';
-export type IdentitySetupPolicy = {
-  trimCredential?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
+export type IdentitySetupPolicy<Extra = ExtraKeyPolicy> = {
+  trimCredential?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: Extra;
   signingAlgorithm?: SigningAlgorithm;
 };
-export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
+/** Either slot's policy; only the secondary's extra may be `aliasPrimary`. */
+export type AnyIdentitySetupPolicy = IdentitySetupPolicy<SecondaryExtraKeyPolicy>;
+export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: AnyIdentitySetupPolicy };
 export type CredentialPresence = Readonly<{ key: boolean; secret: boolean }>;
 export type RemoteSigningPolicy = Readonly<{
   enabled?: boolean;

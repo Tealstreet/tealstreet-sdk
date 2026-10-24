@@ -64,12 +64,17 @@ refused.
       #1990's shared binding and #1973's role semantics;
     - (d) Rust setup, codegen and TS accept `AliasPrimary` only on the
       secondary's extra policy.
-- KuCoin construction rules (`kucoin` and `kucoinspot`), in `signerSetup`:
+- `build_support` codegen accepts `kucoinBroker`, `trim` and `aliasPrimary`,
+  and refuses `aliasPrimary` on a primary slot. The TS rule types
+  (`ExtraKeyPolicy`, the secondary-only `SecondaryExtraKeyPolicy`) and
+  `host.d.mts` `SigningIdentity.extra` gain them too.
+- **The KuCoin rows are not added here.** KuCoin has no `dispatchSigning` row
+  yet, so a `signerSetup` would be inert. codex-9czdjh's cutover adds
+  `dispatchSigning` together with:
   - primary `extra: {key: kucoinBroker, field: optional, encoding: utf8,
     trim: true}`;
-  - secondary `extra: {key: kucoinBroker, field: aliasPrimary}`.
-- `build_support` codegen and the TS `LocalSignerSetup` rule types accept
-  both. codex-9czdjh's cutover supplies the material in setup.
+  - secondary `extra: {key: kucoinBroker, field: aliasPrimary}`;
+  and supplies the material in setup.
 
 ## REDs (each shown failing first)
 

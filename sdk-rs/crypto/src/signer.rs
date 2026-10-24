@@ -2,8 +2,9 @@
 //! This module alone owns key material; engine/venue state receives opaque refs.
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
-    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef,
-    Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
+    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraFieldPolicy, ExtraKey, Identities,
+    Identity, KeyRef, Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult,
+    Signer,
 };
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::{BTreeMap, HashMap};
@@ -250,11 +251,33 @@ impl LocalSigner {
                 if let Some(encoding) = rule.and_then(|rule| rule.secret_encoding) {
                     identity.secret_encoding = encoding;
                 }
-                if let Some(extra) = rule.and_then(|rule| rule.extra)
-                    && let Some(encoding) = extra.encoding
-                    && let Some(material) = identity.extra.0.get_mut(&extra.key)
-                {
-                    material.encoding = encoding;
+                if let Some(extra) = rule.and_then(|rule| rule.extra) {
+                    // An alias names the primary's one copy; it never carries its own.
+                    if extra.field == ExtraFieldPolicy::AliasPrimary
+                        && identity.extra.0.contains_key(&extra.key)
+                    {
+                        return Err(SignError::InvalidRequest);
+                    }
+                    if let Some(material) = identity.extra.0.get_mut(&extra.key) {
+                        if let Some(encoding) = extra.encoding {
+                            material.encoding = encoding;
+                        }
+                        if extra.trim {
+                            let trimmed = material.value.0.trim().to_owned();
+                            material.value = Secret::new(trimmed);
+                        }
+                    }
+                    // Blank-after-trim optional material is absent, not an error.
+                    if extra.trim
+                        && extra.field == ExtraFieldPolicy::Optional
+                        && identity
+                            .extra
+                            .0
+                            .get(&extra.key)
+                            .is_some_and(|material| material.value.0.is_empty())
+                    {
+                        identity.extra.0.remove(&extra.key);
+                    }
                 }
             }
         }
@@ -313,6 +336,15 @@ impl LocalSigner {
                 return Err(SignError::InvalidRequest);
             }
             secondary.signing = primary.signing.clone();
+        }
+        // An aliased extra names the primary's installed ref: one copy, one role.
+        if let Some(extra) = policy.secondary.and_then(|rule| rule.extra)
+            && extra.field == ExtraFieldPolicy::AliasPrimary
+            && let (Some(primary), Some(secondary)) =
+                (identities.primary.as_ref(), identities.secondary.as_mut())
+            && let Some(reference) = primary.extra.get(&extra.key)
+        {
+            secondary.extra.insert(extra.key, reference.clone());
         }
         // The same policy validates bytes and opaque refs. Empty decoded material
         // is represented only in temporary validation metadata as an invalid ref.
@@ -1333,6 +1365,7 @@ mod tests {
                     key: ExtraKey::ZklinkSeed,
                     field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate,
                     encoding: Some(KeyEncoding::Hex),
+                    trim: false,
                 }),
                 ..Default::default()
             }),
@@ -1548,6 +1581,65 @@ mod tests {
         )
         .unwrap();
         assert!(ids.secondary.unwrap().extra.is_empty());
+    }
+
+    /// R4: the broker role signs only HMAC-SHA256 (its table row), is never
+    /// presented or interpolated, and an ordinary ref is never a broker.
+    #[test]
+    fn kucoin_broker_role_serves_only_its_algorithm() {
+        let (signer, ids) = LocalSigner::from_json_with_policy(
+            kucoin_setup(Some("broker-secret"), serde_json::Value::Null).to_string(),
+            kucoin_policy(),
+        )
+        .unwrap();
+        let primary = ids.primary.unwrap();
+        let broker = primary.extra[&broker_role()].clone();
+        let request = |operation: Operation| SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![operation],
+        };
+        for algorithm in [
+            Algorithm::HmacSha512,
+            Algorithm::Sha256SecretSuffix,
+            Algorithm::Ed25519,
+        ] {
+            assert_eq!(
+                signer.sign_now(&request(Operation::Sign {
+                    algorithm,
+                    key: broker.clone(),
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: b"m".to_vec()
+                    }],
+                })),
+                Err(SignError::InvalidRequest),
+                "{algorithm:?}"
+            );
+        }
+        assert_eq!(
+            signer.sign_now(&request(Operation::Present {
+                key: broker.clone()
+            })),
+            Err(SignError::InvalidRequest)
+        );
+        assert_eq!(
+            broker_sign(&signer, &primary.credential, &broker),
+            Err(SignError::InvalidRequest),
+            "a broker ref is never interpolated as a Credential"
+        );
+        // The ordinary API secret signs its own HMAC, never as the broker's.
+        assert_ne!(
+            broker_sign(&signer, &primary.signing, &primary.credential),
+            Ok(hmac_of(b"broker-secret"))
+        );
+        assert_eq!(
+            signer.can_sign(&broker, Algorithm::HmacSha256),
+            Capability::Supported
+        );
+        assert_eq!(
+            signer.can_sign(&broker, Algorithm::HmacSha512),
+            Capability::Unsupported
+        );
     }
 
     /// Condition (d): an alias is a secondary-only policy; the primary has

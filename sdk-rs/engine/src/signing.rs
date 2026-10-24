@@ -39,6 +39,10 @@ pub struct ExtraKeyPolicy {
     /// Declared decoding of the extra material; authoritative over caller metadata.
     #[serde(default)]
     pub encoding: Option<KeyEncoding>,
+    /// Trim the material with Rust `str::trim` before decoding; an optional
+    /// field that is blank after trimming is absent, not an error.
+    #[serde(default)]
+    pub trim: bool,
 }
 
 /// Extra refs never fall back across slots, so there is no fallback variant.
@@ -48,6 +52,9 @@ pub enum ExtraFieldPolicy {
     #[default]
     Optional,
     RequiredForPrivate,
+    /// Secondary only: name the primary's one installed ref (an alias, not a
+    /// fallback). Secondary-supplied material is refused; none without one.
+    AliasPrimary,
 }
 
 /// Trusted setup decoding of supplied key material. Nothing here is inferred.
@@ -75,12 +82,16 @@ pub enum ExtraKey {
     ZklinkSeed,
     /// Polymarket L1 wallet: the raw 32-byte secp256k1 scalar; primary only.
     L1Wallet,
+    /// KuCoin broker attribution secret: HMAC-SHA256 over stamp, partner and
+    /// the selected API key. Optional; a read key aliases the primary's.
+    KucoinBroker,
 }
 impl ExtraKey {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ZklinkSeed => "zklinkSeed",
             Self::L1Wallet => "l1Wallet",
+            Self::KucoinBroker => "kucoinBroker",
         }
     }
     /// The one algorithm a role ref serves, for `Sign` and public operations.
@@ -88,6 +99,7 @@ impl ExtraKey {
         match self {
             Self::ZklinkSeed => Algorithm::ZkLinkContract,
             Self::L1Wallet => Algorithm::Secp256k1Digest,
+            Self::KucoinBroker => Algorithm::HmacSha256,
         }
     }
     /// The L1 wallet derives the session identity, which is primary only.
@@ -123,7 +135,11 @@ impl CredentialSetupPolicy {
             (identities.secondary.as_ref(), self.secondary, false),
         ] {
             let declared = policy.and_then(|policy| policy.extra);
-            if !primary && declared.is_some_and(|declared| declared.key.primary_only()) {
+            if !primary && declared.is_some_and(|declared| declared.key.primary_only())
+                || primary
+                    && declared
+                        .is_some_and(|declared| declared.field == ExtraFieldPolicy::AliasPrimary)
+            {
                 return Err(SignError::InvalidRequest);
             }
             let Some(identity) = identity else { continue };
@@ -136,7 +152,7 @@ impl CredentialSetupPolicy {
             }
             if let Some(declared) = declared {
                 let required = match declared.field {
-                    ExtraFieldPolicy::Optional => false,
+                    ExtraFieldPolicy::Optional | ExtraFieldPolicy::AliasPrimary => false,
                     ExtraFieldPolicy::RequiredForPrivate => !(primary && public_data_only),
                 };
                 if required
@@ -820,6 +836,7 @@ mod setup_field_policy_tests {
                     key: ExtraKey::ZklinkSeed,
                     field,
                     encoding: None,
+                    trim: false,
                 }),
                 ..Default::default()
             }),
