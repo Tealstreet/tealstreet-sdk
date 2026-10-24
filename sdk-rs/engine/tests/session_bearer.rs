@@ -7,7 +7,7 @@ use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::request_context::{
     Claim, Context, Credential, Egress, Error, HttpAction, Operation, Owner, Permit, Policy,
     Preparation, Prepared, RetryEvidence, RetryPolicy, RoutingIntent, Scope, SecretHeaderValue,
-    Session, SessionBearer, SessionHeaders, SessionPolicy,
+    Session, SessionBearer, SessionHeaders, SessionPlacement, SessionPolicy, Waiter,
 };
 use safe_cex_engine::signing::{
     Algorithm, KeyRef, Operation as SignOperation, PayloadPart, SignError, SignReceipt,
@@ -77,6 +77,12 @@ struct Shared {
     announce_timer: Option<TimerId>,
     /// The announcing callback also issues a new bound Background read.
     issue_on_announce: bool,
+    /// This FetchAccount parks on `session_wait` instead of issuing.
+    wait_command: Option<u32>,
+    /// The venue-declared placement of its Session headers.
+    placement: SessionPlacement,
+    /// Unsigned recipe headers without Content-Type.
+    recipe_accept: bool,
     /// Token the venue caches for the generation it opens on retire.
     next_generation_token: Option<&'static str>,
     bearer: bool,
@@ -156,6 +162,9 @@ impl Shared {
             retire_timer: None,
             announce_timer: None,
             issue_on_announce: false,
+            wait_command: None,
+            placement: SessionPlacement::First,
+            recipe_accept: false,
             next_generation_token: None,
             bearer: true,
             bind_retired: false,
@@ -212,6 +221,9 @@ impl Shared {
     /// The Session's header set: a lone Authorization, or a GRVT-style session
     /// id plus its cookie.
     fn headers(&self, token: &str) -> SessionHeaders {
+        self.bundle(token).placed(self.placement)
+    }
+    fn bundle(&self, token: &str) -> SessionHeaders {
         if self.cookie_session {
             SessionHeaders::new(vec![
                 (
@@ -260,6 +272,9 @@ impl SignStep for Recipe {
             return Err(SignError::InvalidRequest);
         };
         request.body = Some(format!("{{\"stamp\":{}}}", context.stamp_ms()));
+        request
+            .headers
+            .push(("Content-Type", "application/json".into()));
         Ok(SignRequest {
             receipt: SignReceipt::default(),
             operations: vec![SignOperation::Sign {
@@ -336,6 +351,7 @@ fn policy(retry: bool, signed: bool) -> Policy {
     }
 }
 const JSON: &[(&str, &str)] = &[("Content-Type", "application/json")];
+const ACCEPT: &[(&str, &str)] = &[("Accept", "application/json")];
 const RECIPE_COOKIE: &[(&str, &str)] =
     &[("cookie", "recipe=1"), ("Content-Type", "application/json")];
 const RECIPE_AUTHORIZATION: &[(&str, &str)] = &[
@@ -466,6 +482,8 @@ impl Probe {
                 RECIPE_COOKIE
             } else if shared.crowded {
                 CROWDED
+            } else if shared.recipe_accept {
+                ACCEPT
             } else {
                 JSON
             };
@@ -706,6 +724,16 @@ impl Venue for Probe {
             (None, None) => cx.http_context(Scope::Command(command), policy(retry, signed)),
         }
         .unwrap();
+        if self.shared.borrow().wait_command == Some(command) {
+            let session = self.shared.borrow().session.clone().expect("live Session");
+            let pending = Pending {
+                context: root.clone(),
+            };
+            cx.session_wait(&session, &root, pending)
+                .map_err(|(_, error)| error)
+                .unwrap();
+            return;
+        }
         if sibling {
             let leg = cx.http_leg_context(&root, policy(false, false)).unwrap();
             let session = {
@@ -735,8 +763,12 @@ impl Venue for Probe {
         }
         if self.shared.borrow().announce_timer == Some(timer) {
             let session = self.shared.borrow().session.clone().expect("live Session");
-            let waiters = cx.session_ready(&session);
-            assert!(waiters.is_empty(), "no venue waiters in these probes");
+            for waiter in cx.session_ready(&session) {
+                match waiter {
+                    Waiter::Ready(context, _) => self.issue(cx, context, false),
+                    Waiter::Failed(_, _, error) => self.shared.borrow_mut().failures.push(error),
+                }
+            }
             if self.shared.borrow().issue_on_announce {
                 let context = cx
                     .http_context(Scope::Background, policy(false, false))
@@ -2235,4 +2267,113 @@ fn p13_a_call_issued_in_the_announcing_callback_binds_after_its_prepare() {
         assert_eq!(authorization(&packet), Some("Bearer A"));
     }
     assert!(shared.borrow().failures.is_empty());
+}
+
+/// P12: parked call A and a waiter B handed back by the same `session_ready`,
+/// whose callback issues B. Both prepare and bind on the new revision and A
+/// keeps its call; only FIFO among parked calls is promised, so the observed
+/// Prepare order is recorded, not asserted.
+#[test]
+fn p12_a_parked_call_and_a_waiter_from_the_same_announce_both_bind() {
+    let (mut e, shared) = engine(|shared| {
+        shared.token = None;
+        shared.wait_command = Some(2);
+    });
+    let parked = ask(&mut e, 1);
+    parks(&mut e, &shared, NOW + 1., parked[0].0);
+    e.handle(
+        NOW + 1.,
+        Event::Command(Command::FetchAccount { command: 2 }),
+    );
+    assert!(
+        prepare_actions(e.drain_actions().collect()).is_empty(),
+        "B waits"
+    );
+    shared.borrow_mut().refresh(Some("A"));
+    let woken = prepare_actions(announce(&mut e, &shared, NOW + 2.));
+    assert_eq!(woken.len(), 2, "parked A and waiter B");
+    let order: Vec<_> = woken.iter().map(|(p, _)| p.attempt().request).collect();
+    assert!(
+        order.contains(&parked[0].0.attempt().request),
+        "A keeps its call"
+    );
+    eprintln!(
+        "P12 observed Prepare order: {order:?} (A = {:?})",
+        parked[0].0.attempt().request
+    );
+    for (preparation, _) in woken {
+        let (_, packet) = prepared(&mut e, NOW + 3., preparation).expect("bound packet");
+        assert_eq!(authorization(&packet), Some("Bearer A"));
+    }
+    assert!(shared.borrow().failures.is_empty());
+}
+
+fn names(request: &HttpRequest) -> Vec<String> {
+    request
+        .headers
+        .iter()
+        .map(|(name, _)| name.to_ascii_lowercase())
+        .collect()
+}
+/// O1: `After("Content-Type")` puts the bundle, in its own order, right after
+/// Content-Type on unsigned and signed packets.
+#[test]
+fn o1_after_content_type_places_the_bundle_after_it() {
+    for signed in [false, true] {
+        let (mut e, _) = engine(|shared| {
+            shared.cookie_session = true;
+            shared.signed = signed;
+            shared.placement = SessionPlacement::After("content-type");
+        });
+        let issued = ask(&mut e, 1);
+        let (_, packet) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound packet");
+        let names = names(&packet);
+        assert_eq!(
+            names[..3],
+            ["content-type", "x-ts-grvt-session", "cookie"],
+            "signed={signed}: {names:?}"
+        );
+    }
+}
+/// O2: the default stays First.
+#[test]
+fn o2_default_placement_is_first() {
+    for signed in [false, true] {
+        let (mut e, _) = engine(|shared| {
+            shared.cookie_session = true;
+            shared.signed = signed;
+        });
+        let issued = ask(&mut e, 1);
+        let (_, packet) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound packet");
+        assert_eq!(names(&packet)[..2], ["x-ts-grvt-session", "cookie"]);
+    }
+}
+/// O3: `After` with no anchor on the packet places the bundle first.
+#[test]
+fn o3_after_without_its_anchor_falls_back_to_first() {
+    let (mut e, _) = engine(|shared| {
+        shared.cookie_session = true;
+        shared.recipe_accept = true;
+        shared.placement = SessionPlacement::After("Content-Type");
+    });
+    let issued = ask(&mut e, 1);
+    let (_, packet) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound packet");
+    assert_eq!(names(&packet), ["x-ts-grvt-session", "cookie", "accept"]);
+}
+/// O4: collision and limits still apply after placement.
+#[test]
+fn o4_placement_keeps_collision_and_limit_refusals() {
+    for (cookie, crowded) in [(true, false), (false, true)] {
+        let (mut e, shared) = engine(|shared| {
+            shared.cookie_session = true;
+            shared.recipe_cookie = cookie;
+            shared.crowded = crowded;
+            shared.placement = SessionPlacement::After("Content-Type");
+        });
+        let issued = ask(&mut e, 1);
+        assert!(bind(route(&mut e, NOW + 1., issued[0].0)).is_none());
+        let shared = shared.borrow();
+        assert_eq!(shared.failures.len(), 1);
+        assert_eq!(shared.failures[0].outcome, Some(Outcome::NotSent));
+    }
 }

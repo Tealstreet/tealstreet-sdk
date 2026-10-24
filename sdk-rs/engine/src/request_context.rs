@@ -157,9 +157,24 @@ impl std::fmt::Debug for SecretHeaderValue {
 /// The headers one Session generation attaches to a bound request, e.g. a
 /// lone `Authorization`, or a session id plus its cookie. At most
 /// `MAX_SESSION_HEADERS` distinct venue-declared names; transport-owned names
-/// are refused. Values stay secret; the engine inserts them at prepare.
+/// are refused. Values stay secret; the engine inserts them at prepare, where
+/// the venue's declared `SessionPlacement` puts them in its native order.
 #[derive(Debug)]
-pub struct SessionHeaders(Vec<(&'static str, SecretHeaderValue)>);
+pub struct SessionHeaders {
+    entries: Vec<(&'static str, SecretHeaderValue)>,
+    placement: SessionPlacement,
+}
+
+/// Where shared assembly puts the Session headers among a packet's own: a
+/// venue-wide wire property declared with the bundle.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SessionPlacement {
+    #[default]
+    First,
+    /// Immediately after the first packet header with this name (ignoring
+    /// case), or first when the packet carries none.
+    After(&'static str),
+}
 
 pub const MAX_SESSION_HEADERS: usize = 4;
 
@@ -198,7 +213,10 @@ impl SessionHeaders {
                     && crate::signing_headers::validate_unsigned(&[(name, value.expose())]).is_ok()
             });
         if valid {
-            Ok(Self(entries))
+            Ok(Self {
+                entries,
+                placement: SessionPlacement::First,
+            })
         } else {
             Err(Error::Invalid)
         }
@@ -206,11 +224,19 @@ impl SessionHeaders {
 
     /// The common single-header case.
     pub fn authorization(value: SecretHeaderValue) -> Self {
-        Self(vec![("Authorization", value)])
+        Self {
+            entries: vec![("Authorization", value)],
+            placement: SessionPlacement::First,
+        }
+    }
+
+    pub fn placed(mut self, placement: SessionPlacement) -> Self {
+        self.placement = placement;
+        self
     }
 
     pub(crate) fn entries(&self) -> &[(&'static str, SecretHeaderValue)] {
-        &self.0
+        &self.entries
     }
 }
 
