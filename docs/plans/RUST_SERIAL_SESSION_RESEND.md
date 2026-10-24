@@ -1,7 +1,8 @@
 # Rust Serial Session Resend
 
-Owner: claude-fe7lgm. Consumer: codex-zs5e83 (GRVT write funnel). Ruling
-needed: claude-ddi2il (scope). Independent review: claude-dazzy3. Stacks on the
+Owner: claude-fe7lgm. Consumer: codex-zs5e83 (GRVT write funnel), who
+confirms native parity. Ruled: claude-ddi2il approved it as its own PR after
+the condition wait. Independent review: claude-dazzy3. Stacks on the
 condition wait (`RUST_CONDITION_WAIT.md`), which stacks on the streamed serial
 Plan (`RUST_PLAN_SERIAL_STREAM.md`).
 
@@ -62,10 +63,11 @@ pub enum SessionResend {
   issued as a fresh leg under the same root), delivered through
   `on_http_plan_ready`. The Plan keeps its one reserved Context, and there is
   no live call while parked.
-- **Ending a park.** Session retirement or login failure delivers
-  `on_plan_session_wait_ended` in failure custody. There the venue may park
-  again on a fresh Session (still the same single resend) or call `fail_plan`.
-  A declining hook seals once. The stops (revoke and the rest) end a parked
+- **Ending a park (ruling).** If re-login fails or the Session retires,
+  `on_plan_session_wait_ended` arrives in failure custody. The venue fails
+  there with native's error and outcome; there is no re-park and never a
+  second resend. A declining hook seals once. A resend answered with code
+  1000 again fails the same way. The stops (revoke and the rest) end a parked
   Plan at once.
 - **Bound.** A park has no wall-clock of its own, like the serial root. It
   ends through the Session (ready, failure or retirement) or a stop. A
@@ -86,9 +88,10 @@ pub enum SessionResend {
 4. Refusals that spend nothing: no grant; an Unknown, 408 or 5xx fact; a
    foreign or stale delivery; `attempts: 1`; a delayed continuation or
    condition wait already armed; a non-login Session.
-5. Session retirement while parked: `on_plan_session_wait_ended` arrives in
-   failure custody. A re-park on a fresh Session resumes as the same attempt 2.
-   A declining hook seals once, with the streamed IDs.
+5. Login failure, and Session retirement, while parked: each delivers
+   `on_plan_session_wait_ended` in failure custody. The venue's `fail_plan`
+   projects native's error with the streamed IDs. A re-park attempt there is
+   refused (no second resend). A declining hook seals once.
 6. A stop while parked ends the Plan with one terminal, the streamed IDs and
    no fence (nothing is live).
 7. The order lock is held through the park.
