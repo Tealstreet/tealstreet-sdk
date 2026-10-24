@@ -127,6 +127,33 @@ So the Preflight form adds no new release or expiry API.
 The serial-Plan form below is new: a Plan with released calls cannot be
 failed from a loan-free callback today (`validate_plan_seal_origin`).
 
+## Review pins (claude-dazzy3)
+
+- **Sequential waits.** "One per owner" means at once. Once a release has been
+  delivered, the same owner may wait again (Bitget re-parks after a
+  promotion), with one Context throughout.
+- **No re-entry.** A release, even from the callback that parked or from any
+  callback of the same owner, only queues. Ready is delivered after the
+  current callback returns, in the same flush.
+- **Declining expiry hook.** If `on_condition_wait_expired` neither fails nor
+  re-parks, the engine seals once with a NotSent projection (the
+  declining-handler precedent). An owner is never left parked.
+- **Timer precedence.** A parked WriteAfterReads Preflight has no other engine
+  timer (no receipt binding), so the bound is its only timer. The serial form
+  occupies the Plan's single timer and is refused while a delayed
+  continuation is armed. Either way there is exactly one terminal.
+- **Locks.** A parked WriteAfterReads Preflight or serial Plan keeps its order
+  lock, so later commands queue as in native, and releases it only through
+  its terminal. A parked expiry arms no fence, because nothing is live.
+- **Authority.** The Preflight form releases through the issuer-bound
+  Preflight handle. The serial form's handle carries the same issuer and
+  command generation, so another engine's or generation's handle is Revoked.
+  A release is accepted from any callback: `on_response`, socket
+  `on_message` or a timer.
+- **Validation.** `bound_ms: Some(0)` is Invalid and spends nothing. A bound is
+  accepted only on WriteAfterReads Preflights and serial Plans; a ReadOnly
+  `park_preflight` stays as today, unbounded, until a consumer needs a bound.
+
 ## Capacity
 
 Each parked Preflight is a live command owner, so it counts against the
@@ -174,6 +201,22 @@ the limit.
     failure.
 14. With 256 commands parked, the 257th is refused Capacity, NotSent, before
     any send, and the parked 256 are unaffected.
+15. Sequential waits: park, release, ready, continue, park again, release,
+    done, with one Context throughout.
+16. A release from the parking callback itself does not re-enter. Ready
+    arrives after that callback returns, in the same flush.
+17. A declining expiry hook gives one engine NotSent seal, with nothing left
+    parked.
+18. Under order-locks, a parked owner holds its lock and a later command
+    queues behind it. Expiry releases the lock through the terminal, with no
+    fence.
+19. Releases from a socket `on_message` and from a timer callback succeed. A
+    handle from a reused generation or another engine is Revoked.
+20. `bound_ms: Some(0)` and a bound on a ReadOnly Preflight are Invalid and
+    spend nothing.
+21. In RED2 and RED6, the native message ("Bitget account detection did not
+    complete") passes through unchanged. A stop racing a queued, undelivered
+    release gives one terminal and no ready.
 10. A mid-Plan expiry after an earlier released and accepted call: `fail_plan`
     projects the accepted IDs and a failure that is not NotSent (native
     `trade_fail` keeps the IDs once anything was effective).
