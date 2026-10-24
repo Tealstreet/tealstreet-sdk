@@ -162,6 +162,11 @@ class RequestContextBan(unittest.TestCase):
 
 
 
+# Venue helpers whose matching parameter is unambiguously Cx-typed.
+HELPERS = ("fn request(&mut self, cx: &mut Cx<'_, P>, command: u64) {} "
+           "fn fail(&mut self, cx: &mut Cx<'_, P>, command: u64, error: E) {} ")
+
+
 def in_cx_fn(body, name='cx'):
     return ('fn handle(&mut self, account: &mut Account, ' + name + ": &mut Cx<'_, Pending>) { "
             + body + ' }')
@@ -185,7 +190,7 @@ class PrecisionRed(unittest.TestCase):
         ]:
             with self.subTest(body=body):
                 self.assertTrue(ban.fingerprints(in_cx_fn(body)))
-                self.assertFalse(self.prod(in_cx_fn(body)))
+                self.assertFalse(self.prod(HELPERS + in_cx_fn(body)))
 
     def test_receiver_is_resolved_by_type_not_name(self):
         call = 'c.done(command, "null".into());'
@@ -246,6 +251,30 @@ class PrecisionRed(unittest.TestCase):
                          'other(&mut *cx);', 'return helper(cx);', 'let t = cx.now;']:
             with self.subTest(analysed=analysed):
                 self.assertFalse(self.prod(in_cx_fn(analysed + ' ' + unrelated)))
+
+    def test_a_cx_beside_another_non_literal_argument_needs_an_unambiguous_cx_parameter(self):
+        # ESCAPE clause (1): sole non-literal argument, or every same-named fn takes a Cx there.
+        generic = 'fn stash<T>(v: &mut Vec<T>, t: T) {} '
+        unrelated = ' h.done(1);'
+        for body in ['let vr = &mut v; stash(vr, cx); v[0].request(1);',
+                     'stash(&mut *vr, cx); v[0].request(1);', 'stash(v.as_mut(), cx); v[0].request(1);']:
+            with self.subTest(body=body):
+                self.assertEqual(sum(self.prod(generic + in_cx_fn(body + unrelated)).values()), 2)
+        # A generic stash shadowed by a Cx-typed stash elsewhere is still ambiguous.
+        shadowed = generic + "fn stash(v: &mut Vec<u8>, cx: &mut Cx<'_, P>) {} "
+        self.assertEqual(sum(self.prod(shadowed + in_cx_fn('stash(vr, cx);' + unrelated)).values()), 1)
+        # Unresolved names escape; an unambiguous Cx parameter or a sole argument is analysed.
+        self.assertEqual(sum(self.prod(in_cx_fn('unknown(vr, cx);' + unrelated)).values()), 1)
+        typed = "fn record(v: &mut Vec<u8>, cx: &mut Cx<'_, P>) {} "
+        self.assertFalse(self.prod(typed + in_cx_fn('record(vr, cx);' + unrelated)))
+        self.assertFalse(self.prod(in_cx_fn('unknown(cx, 1, "x");' + unrelated)))
+
+    def test_closure_escapes_taint_the_enclosing_function(self):
+        unrelated = ' h.done(1);'
+        for body in ['let mut g = |c| v.push(c); g(cx); v[0].request(1);',
+                     'run(cx, |c| v.push(c)); v[0].request(1);']:
+            with self.subTest(body=body):
+                self.assertEqual(sum(self.prod(in_cx_fn(body + unrelated)).values()), 2)
 
     def test_a_generic_escape_counts(self):
         # A venue generic identity returns the Cx under another name.

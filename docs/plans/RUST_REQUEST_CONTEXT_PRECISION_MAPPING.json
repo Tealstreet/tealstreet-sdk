@@ -92,6 +92,7 @@
   "venues/asterdex/src/request.rs": {
     "kept": {
       "62abd564684b5b7a37d3ab5857b7821dc0313083590a954182d36a279a45e22d": 1,
+      "839e82acc52aa01a5ce1c76a582a9b6b4976082960b8c35c3335a05598552c1b": 1,
       "88bdec8ef506ecbd68261b35ee606556be07fe3c55808a6207547bfa573be0e0": 1,
       "a672a578fda69c95c5b016d238bdf330892623a317a07c7efdb3b610655836b0": 1,
       "ab7a36dd0d4c9264d6d2d56fa06128c1e3c698f0021edc1a95f6219b668377a7": 1,
@@ -110,10 +111,6 @@
       "2e908d557ef24aa75d796f94a1bc279fc2f16a87ff26abd28b5353594331da01": {
         "count": 1,
         "reason": "member"
-      },
-      "839e82acc52aa01a5ce1c76a582a9b6b4976082960b8c35c3335a05598552c1b": {
-        "count": 1,
-        "reason": "macro"
       },
       "963a7509aa2658d9ea3fe731b6517baad6a71f0e96dcf6310adac3cc8d57078a": {
         "count": 2,
@@ -260,22 +257,17 @@
   "venues/bingx/src/account.rs": {
     "kept": {
       "29e80488342dd1d485fc314630b169041c758cdb285d6713600ce2c41bdf9bca": 1,
-      "b8981ba6ded29689d47b26a8a93c34eb801bdbb171693c719f0eef8a920e632c": 1
+      "4fd69fe1e61d7806268e180e1316430a4f1412b5b180eee8a9d78451ac57c7d9": 1,
+      "5a3ecde1bdd5b82ea5d3f97b6da8fa145ee3d7db5f208cc0f5157b22ac098f3c": 1,
+      "b8981ba6ded29689d47b26a8a93c34eb801bdbb171693c719f0eef8a920e632c": 1,
+      "f025fc43a750a2590ced1ab109e5ee504164bf8505fdfb4ffec28b246dacd511": 1
     },
     "test": {
       "8907f38dcee7367c011ac797732f8780004c6710d7395d59812584ac876a5ddc": 1
     },
     "dropped": {
-      "4fd69fe1e61d7806268e180e1316430a4f1412b5b180eee8a9d78451ac57c7d9": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "5a3ecde1bdd5b82ea5d3f97b6da8fa145ee3d7db5f208cc0f5157b22ac098f3c": {
-        "count": 1,
-        "reason": "macro"
-      },
       "f025fc43a750a2590ced1ab109e5ee504164bf8505fdfb4ffec28b246dacd511": {
-        "count": 2,
+        "count": 1,
         "reason": "macro"
       }
     }
@@ -355,36 +347,31 @@
   "venues/bitrue/src/lib.rs": {
     "kept": {
       "34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc": 1,
-      "8d7195dd58da632e34e4dc75d236e49b6d1b89cc10c243ec7e670ec59b511d26": 1
+      "8d7195dd58da632e34e4dc75d236e49b6d1b89cc10c243ec7e670ec59b511d26": 4
     },
     "dropped": {
       "8d7195dd58da632e34e4dc75d236e49b6d1b89cc10c243ec7e670ec59b511d26": {
-        "count": 4,
+        "count": 1,
         "reason": "field"
       }
     }
   },
   "venues/bitrue/src/secondary_tests.rs": {
-    "dropped": {
-      "14ff7b932a6042d0adee80518f703a27a5e51c41add140215703e93820dc3475": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "496bfb28799c729f0f335ccce50062d6a9ba06a581527e6a36a638ac44c84dc8": {
-        "count": 1,
-        "reason": "macro"
-      }
+    "test": {
+      "14ff7b932a6042d0adee80518f703a27a5e51c41add140215703e93820dc3475": 1,
+      "496bfb28799c729f0f335ccce50062d6a9ba06a581527e6a36a638ac44c84dc8": 1
     }
   },
   "venues/bitrue/src/trading.rs": {
     "kept": {
       "2f0770d2ea5f5246cd2ddcd35b614bce738e564c2d95193ff5a84eb8479811e5": 1,
+      "6d2c051bb24db8acd1986f4e47c2b6dbede5aa9dfff7fb877e64ef194107bd53": 3,
       "b780b823ba70712169e1be98fecae4d2a2655f7ca35f27bea4b99f09bd684696": 1,
       "dcb84cef5dcb71801d2b1b9562fcfc84b0431681917a0b6b9d2314f2e050630e": 1
     },
     "dropped": {
       "6d2c051bb24db8acd1986f4e47c2b6dbede5aa9dfff7fb877e64ef194107bd53": {
-        "count": 4,
+        "count": 1,
         "reason": "macro"
       },
       "afb3c3744f13da9606f5f456bd95797992a932cf227eb74b2fe4405e3c64ee98": {
@@ -433,17 +420,9 @@
   "venues/blofin/src/history.rs": {
     "kept": {
       "4f41451eb1e1a039f8b647eaee00abfdc9027246d230dff2fad9129e9919c3e7": 1,
-      "d7f5d65d34ca3d770c22743829f9f73e57682c52d8b63bb54030b167abb8fa43": 1
-    },
-    "dropped": {
-      "60ad9d1f92b48483572276a3a75cf6e7c6579a0c8d0118a9f9f51688b851c9aa": {
-        "count": 3,
-        "reason": "macro"
-      },
-      "f33c5fe4590c54205bbed83f2a6cf21ba3ccfd0cbdab18d6832e43ae0c4d36a0": {
-        "count": 2,
-        "reason": "macro"
-      }
+      "60ad9d1f92b48483572276a3a75cf6e7c6579a0c8d0118a9f9f51688b851c9aa": 3,
+      "d7f5d65d34ca3d770c22743829f9f73e57682c52d8b63bb54030b167abb8fa43": 1,
+      "f33c5fe4590c54205bbed83f2a6cf21ba3ccfd0cbdab18d6832e43ae0c4d36a0": 2
     }
   },
   "venues/blofin/src/trading.rs": {
@@ -629,13 +608,8 @@
   },
   "venues/cryptocom/src/account.rs": {
     "kept": {
-      "83c6b712d19379913a85bf575a1a1834358d1b5f84d4c7a04a2f241487399a9c": 1
-    },
-    "dropped": {
-      "a77d14858a6b097716fd945cddafa2c827e671194bbe1122e95c60b698c56006": {
-        "count": 1,
-        "reason": "macro"
-      }
+      "83c6b712d19379913a85bf575a1a1834358d1b5f84d4c7a04a2f241487399a9c": 1,
+      "a77d14858a6b097716fd945cddafa2c827e671194bbe1122e95c60b698c56006": 1
     }
   },
   "venues/cryptocom/src/history.rs": {
@@ -658,79 +632,44 @@
   },
   "venues/grvt/src/account.rs": {
     "kept": {
+      "190dc4fe24cd734ffc175ff98e58994db3f141d0443164b8dd1a5d9200125834": 1,
       "1a500310d6ed84a8168e03b0b0e5ad5c7c62303e2788fa0bdbc19c57d193e16e": 1,
       "2b1d9411d14819314659a0f77a4c9f2787fd17e551adb57d5ca62d67877a7d37": 1,
+      "4af7a34a26fa068b8b111070a3d7acd3609e74ff418c63314de028697c099f13": 1,
       "5dcc3ef2d5d2fc61a53a8e99f5df87d9a5678caece10fe1966cb422429db3b54": 1,
+      "6aacde9b4fe06f78fb74e0ffb2c12f8facb0863949c2daf6afff48c82298ce59": 1,
+      "b038db835bf8ea1ec66ac21973347c06e0589312a876cb038495794bc4271cd0": 1,
+      "b2484206c084e77bdc1752247eb37ee88a35a6844eee77dc2d8d8076872cde71": 1,
       "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-      "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-    },
-    "dropped": {
-      "190dc4fe24cd734ffc175ff98e58994db3f141d0443164b8dd1a5d9200125834": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "4af7a34a26fa068b8b111070a3d7acd3609e74ff418c63314de028697c099f13": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "6aacde9b4fe06f78fb74e0ffb2c12f8facb0863949c2daf6afff48c82298ce59": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "b038db835bf8ea1ec66ac21973347c06e0589312a876cb038495794bc4271cd0": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "b2484206c084e77bdc1752247eb37ee88a35a6844eee77dc2d8d8076872cde71": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "d96e9e03d819f6c10890e79fbfe0b40b14b08b64f9e311649fd8da33c4111cc5": {
-        "count": 1,
-        "reason": "helper"
-      }
+      "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
+      "d96e9e03d819f6c10890e79fbfe0b40b14b08b64f9e311649fd8da33c4111cc5": 1
     }
   },
   "venues/grvt/src/history.rs": {
     "kept": {
       "5694172a506b48e37a66cc80e38560361ec75b97447d4a687ae99811e66fd516": 1,
+      "5806755b2e4365a0cce4c02f6f5a15ec7fab6beaa6b0218ae5ccfa2fb93a8892": 1,
       "706e12027f633d2c581b43201426e9539f4b9ecd03159693d03873420a41cd61": 1,
       "b075739674bf080c2089eea7c5fb0d89b2aea115d27b532da2ff55f1c32280c1": 1
-    },
-    "dropped": {
-      "5806755b2e4365a0cce4c02f6f5a15ec7fab6beaa6b0218ae5ccfa2fb93a8892": {
-        "count": 1,
-        "reason": "helper"
-      }
     }
   },
   "venues/grvt/src/identity.rs": {
     "kept": {
+      "4f71a50a9bb95a943c3dcc1007169dbeb5a0ae6dfadd7a6d5844792e1df7214a": 1,
       "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
       "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-    },
-    "dropped": {
-      "4f71a50a9bb95a943c3dcc1007169dbeb5a0ae6dfadd7a6d5844792e1df7214a": {
-        "count": 1,
-        "reason": "helper"
-      }
     }
   },
   "venues/grvt/src/lib.rs": {
     "kept": {
       "37f10b45c2b2138eda25c5042d0405e3e994a042185fdeffbd4896279c57c341": 1,
+      "7f179c914a5bbc8e6e8e7df1c90d04c0c10713495d542a0b5c719caf776b76c1": 1,
       "a7249d615c64308b35ec03f88b7ecb8075fdbd1bd83eade5bdf461c97141c8f7": 1,
       "bfcdb38d1528a6090a59eb123fc288423fd2ce7a45cf8179d786b7dafb8a5b2c": 1,
       "cab66fc0399e6d1f53504198a9a5df6893df31bad853bf84c1dcd416c2326cdd": 1,
       "d378cf6b03a38047ea106b9344672d153498eb2f0f1aa48f79efcdfeb037c3f9": 1,
       "e07ada86cc9703007c75cb7854613a6f0e06595d48f73b548db979e1357746f3": 1,
       "f3480e96608be14fe36ce5e8a4f738b47d6488334a3d7f62295a6f0379cfe305": 1
-    },
-    "dropped": {
-      "7f179c914a5bbc8e6e8e7df1c90d04c0c10713495d542a0b5c719caf776b76c1": {
-        "count": 1,
-        "reason": "helper"
-      }
     }
   },
   "venues/grvt/src/trading.rs": {
@@ -764,27 +703,16 @@
     "kept": {
       "06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3": 1,
       "15cc6440b7566dc72beef44f387ae96cc04b08d17e2883baafbce9053644bcc1": 1,
+      "16c49568201f97eb3ad29a92965a3ae28aef816fa3cb85ebb9da40a2a294f375": 1,
       "4310c56cdb4207e078977e5ecfb03800099cc6b8559b1e4cd4c0ef98cc4de727": 1,
+      "48fcd9334c7ffae618c7070d2136a3aa98a9d1de4790ef057c21d7dd7f5a782a": 2,
       "49dcc4f8d42f742545ab6f94e17ba1a375b08a7ce52e4193dca9744a1a78c841": 1,
       "50ff9b0e2bb5b55c33177ff30f41cb338a1fdd72e85a2497a6b4cd14eafdeb30": 1,
       "84bc0552279614503b71afa7b750f8fcea1a266db05309c07d88a08c6b55b760": 1,
       "ae3209100adb7617d3a60abc05d13961f6b17901cc02551743ff77b75e18b37f": 3,
       "ca0d380912387fca3067308dbe2b5388d6d23fea1793f726dba47fff4173b2fb": 1,
+      "dc655ef7211a7714e84df0611ec1eb50c5732fa25e3cab129eb4f5db4b1987c6": 1,
       "e0159b3732cafa0c96d1dfcb7403825d472d00b7312b7b991d19bbfdff0f5080": 1
-    },
-    "dropped": {
-      "16c49568201f97eb3ad29a92965a3ae28aef816fa3cb85ebb9da40a2a294f375": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "48fcd9334c7ffae618c7070d2136a3aa98a9d1de4790ef057c21d7dd7f5a782a": {
-        "count": 2,
-        "reason": "macro"
-      },
-      "dc655ef7211a7714e84df0611ec1eb50c5732fa25e3cab129eb4f5db4b1987c6": {
-        "count": 1,
-        "reason": "macro"
-      }
     }
   },
   "venues/hyperliquid/src/trading/schedule.rs": {
@@ -860,48 +788,29 @@
     }
   },
   "venues/kucoin/src/account.rs": {
-    "dropped": {
-      "0763c380b5595f2dd5a739dc559d90a93fad2f0d4ea0c72dd26854c9a87c14e7": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "0cb27533973d0ad65fbf7717bc8f06498a1449efee8ca32173d60c0db9ac46b1": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "c22f9a403657e792ba5fc1ff078bc6061bfbb345e9724d6ebc11213628568639": {
-        "count": 1,
-        "reason": "macro"
-      }
+    "kept": {
+      "0763c380b5595f2dd5a739dc559d90a93fad2f0d4ea0c72dd26854c9a87c14e7": 1,
+      "0cb27533973d0ad65fbf7717bc8f06498a1449efee8ca32173d60c0db9ac46b1": 1,
+      "c22f9a403657e792ba5fc1ff078bc6061bfbb345e9724d6ebc11213628568639": 1
     }
   },
   "venues/kucoin/src/funding.rs": {
-    "dropped": {
-      "8c5c5f6e886f77e292bbb10a99aaf8c16333fdd60c7af0fb4880afcc0f040560": {
-        "count": 1,
-        "reason": "macro"
-      }
+    "kept": {
+      "8c5c5f6e886f77e292bbb10a99aaf8c16333fdd60c7af0fb4880afcc0f040560": 1
     }
   },
   "venues/kucoin/src/history.rs": {
+    "test": {
+      "6dc8ff5c9a3f54afd832946af7fc2e777f459ef0ebb8da410821660b9044f481": 1,
+      "770f2dcac9b528f2bacfc9329e543f5215a004fb671054775207c827e04764a8": 1,
+      "ae699603109cbd1c71356f8a3a96c279698017af0d318744b47d63a2bf08aef4": 1
+    },
     "dropped": {
-      "6dc8ff5c9a3f54afd832946af7fc2e777f459ef0ebb8da410821660b9044f481": {
-        "count": 1,
-        "reason": "macro"
-      },
       "76cccead438e68521694435ebb3adb21716e5c650bdd63ae55312345486336e3": {
         "count": 1,
         "reason": "macro"
       },
-      "770f2dcac9b528f2bacfc9329e543f5215a004fb671054775207c827e04764a8": {
-        "count": 1,
-        "reason": "macro"
-      },
       "782dad616e9bbc6860101de1c4c5458533faa67d9b51a888ebd1dbfd205aa1ec": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "ae699603109cbd1c71356f8a3a96c279698017af0d318744b47d63a2bf08aef4": {
         "count": 1,
         "reason": "macro"
       }
@@ -923,12 +832,16 @@
     }
   },
   "venues/kucoin/src/secondary_tests.rs": {
+    "test": {
+      "0597ddd241d06b439fbe4e473127392d5b647a9d4437fc1a4b903b974f21bf94": 1,
+      "159f5704bcac34411f65ad8cc4e2e106a4d8575fedd68580800396d53c3c9ce7": 1,
+      "7af1094316bcf84e9fbbbf0a9424df23be5feac988016338a63a93369f08ae3b": 1,
+      "856927040f21fefa7ac348eca86cf760ea2b34f71b2a42785d71a7eaf490b319": 1,
+      "8eef6157c4aa384dd6cf16bd4fb4d8f28963578b97454ea94d8d63d988497812": 1,
+      "a7295c3cde6850a230bb760a9465683ccd718556f87cab40a9283bb16899df53": 1
+    },
     "dropped": {
       "0597ddd241d06b439fbe4e473127392d5b647a9d4437fc1a4b903b974f21bf94": {
-        "count": 2,
-        "reason": "macro"
-      },
-      "159f5704bcac34411f65ad8cc4e2e106a4d8575fedd68580800396d53c3c9ce7": {
         "count": 1,
         "reason": "macro"
       },
@@ -936,23 +849,7 @@
         "count": 1,
         "reason": "macro"
       },
-      "7af1094316bcf84e9fbbbf0a9424df23be5feac988016338a63a93369f08ae3b": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "856927040f21fefa7ac348eca86cf760ea2b34f71b2a42785d71a7eaf490b319": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "8eef6157c4aa384dd6cf16bd4fb4d8f28963578b97454ea94d8d63d988497812": {
-        "count": 1,
-        "reason": "macro"
-      },
       "a65fdc4b75f9441e9693fd7c31ac9019dbf1d2ca3215e6e557105b2e9223db3f": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "a7295c3cde6850a230bb760a9465683ccd718556f87cab40a9283bb16899df53": {
         "count": 1,
         "reason": "macro"
       },
@@ -964,55 +861,31 @@
   },
   "venues/kucoin/src/spot/mod.rs": {
     "kept": {
+      "2485f9b0677fc07b9dc4f3202a0dbfc7dd3b13e82476cd509be3282e8ce4d863": 1,
       "417cd86311e6261c7b1911896dc467829c4cfafd1fc48956cfbce153fbc17582": 1,
+      "44284ddcfc94ad5da1cd7f5576dc01737ad7eeb0f75aa49c95bf42849d08790a": 1,
       "520659ca128f10f1f3f1a724ed704b116b8f56da364dcd28fd6aaabfc25c5872": 1,
       "b7236676fb5159713524fe49af418c62b87162e905dab02bef27a1b2badde5a3": 1,
+      "bf606094d92ae7fcf6e97dd3f9f690ff00d2954558e1c92671c1c455c0535065": 1,
       "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
       "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 2,
+      "de4e8a9f01fa2526af01b897df7e71eb6422d5bda2faabb22527e73503e6a5a6": 1,
       "f9cbb2adfc98c4ca1e0d379b2b1c90b52a3e91fd61f8beaebb998423812ddf8d": 1
-    },
-    "dropped": {
-      "2485f9b0677fc07b9dc4f3202a0dbfc7dd3b13e82476cd509be3282e8ce4d863": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "44284ddcfc94ad5da1cd7f5576dc01737ad7eeb0f75aa49c95bf42849d08790a": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "bf606094d92ae7fcf6e97dd3f9f690ff00d2954558e1c92671c1c455c0535065": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "de4e8a9f01fa2526af01b897df7e71eb6422d5bda2faabb22527e73503e6a5a6": {
-        "count": 1,
-        "reason": "helper"
-      }
     }
   },
   "venues/kucoin/src/spot/trading.rs": {
     "kept": {
       "06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3": 1,
       "33e21f13f871bdbb7268e01da0006a69a903f16f2d8daa34972b49211d81ee6f": 1,
+      "d0677fb68bd1966d34f4d686f19ab321881f696d903f33b76f0ad52aac4b3902": 1,
       "fc46e4dc9fea9911455ee3e3f7822ea0a3c903d8314f5fa82214941c0a64d9f0": 1
-    },
-    "dropped": {
-      "d0677fb68bd1966d34f4d686f19ab321881f696d903f33b76f0ad52aac4b3902": {
-        "count": 1,
-        "reason": "helper"
-      }
     }
   },
   "venues/kucoin/src/trading.rs": {
     "kept": {
       "a3929c62720c7893d6477453bb8092ee1dc649a8b5024ffd9867b8715c3afc2f": 1,
-      "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-    },
-    "dropped": {
-      "e2059285572e975717f09275846f33678d7bf1e78ddd4d40100025ab825c118f": {
-        "count": 1,
-        "reason": "macro"
-      }
+      "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
+      "e2059285572e975717f09275846f33678d7bf1e78ddd4d40100025ab825c118f": 1
     }
   },
   "venues/lighter/src/account.rs": {
@@ -1026,17 +899,9 @@
   },
   "venues/lighter/src/history.rs": {
     "kept": {
+      "2cb4373904a9bd645f5f03689ee4a667afacb9de41ec48ddb42d1b05efe59004": 1,
+      "5b3fa60c35b90d7d54c1c78a6208717da15fe27f3581b790ac0bc0f5cc640ca1": 1,
       "7d9792a0676bccdf20b899bb81c8f19bdf33402d56972457af968a5c4f3f433c": 1
-    },
-    "dropped": {
-      "2cb4373904a9bd645f5f03689ee4a667afacb9de41ec48ddb42d1b05efe59004": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "5b3fa60c35b90d7d54c1c78a6208717da15fe27f3581b790ac0bc0f5cc640ca1": {
-        "count": 1,
-        "reason": "macro"
-      }
     }
   },
   "venues/lighter/src/limits.rs": {
@@ -1136,28 +1001,17 @@
     "kept": {
       "34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc": 1,
       "52fcbacda7a2458c4b46b68b74a5abaa4c98e0ed70483d61e3355d902185b5be": 1,
-      "bc5f847684d65a7bfaed0fc4a8e698698d9211c65a7e41a191f62947a5f63cfb": 1
-    },
-    "dropped": {
-      "bc5f847684d65a7bfaed0fc4a8e698698d9211c65a7e41a191f62947a5f63cfb": {
-        "count": 1,
-        "reason": "macro"
-      }
+      "bc5f847684d65a7bfaed0fc4a8e698698d9211c65a7e41a191f62947a5f63cfb": 2
     }
   },
   "venues/orderly/src/history.rs": {
     "kept": {
       "0f623534a32ada3423ea1fe1ccd852cf3bd5237f515be8a1f08018fa15a4de90": 1,
       "7bd36708a9596838f653589ae2971e4fe046d9107525c6704cfb150dd2b7aee5": 1,
+      "87480f92c8dda27618b06cb4ee557eb45f297fdeff2f340b0450c00c20da9cea": 1,
       "b07e6724c898034bb4084ef20fac4722593134810001c58e1b5bd211d86b3eb0": 1,
       "b32729dd8c0c41f6dd0d8557bdb782e763de5ca285d586d8b1ca03194460f52c": 1,
       "bad9cf77c482cf6477032904a15a598d91f505233d85763ff12bfe2c52612098": 1
-    },
-    "dropped": {
-      "87480f92c8dda27618b06cb4ee557eb45f297fdeff2f340b0450c00c20da9cea": {
-        "count": 1,
-        "reason": "macro"
-      }
     }
   },
   "venues/orderly/src/lib.rs": {
@@ -1186,64 +1040,30 @@
   "venues/paradex/src/account.rs": {
     "kept": {
       "0bc0f05583257432e512c356c6a5b41046e2a70d3cfe6eb8190238c9514faba2": 1,
+      "29a6633fa3f6e05f04f534c0e675690014adde1e8a26e93c3769e8618602c13c": 1,
       "3205be4fd57aee0c1cacd8fdd9fa48f9d000e9bbb2b7f53409ca39c64f0edc4a": 1,
       "388c9f66c40d488788f2f4a9808088e22a0425615dfd2818c9d63d58675392d1": 1,
+      "395b8568f2efae46398fc76c6b422807900a928734749cdd4f8bd60b42366d19": 1,
+      "85a7a04ae14d4df7bd123dd4837791701bbb02dc615d4e9f24060a2161f7ba3e": 1,
       "a5c107b3d98e73b4c73ebd13c21dcf8cb307a0041bc896cc3e6e808fb63cf446": 1,
+      "ac42e25ca2de115b1eb59cc4913e6fd26670c4dfb47f17ed56fc0d1f34272fd9": 1,
       "c8154248a24f58ded15a175a8afd344f331635f51e564a526d510748797ff231": 1
-    },
-    "dropped": {
-      "29a6633fa3f6e05f04f534c0e675690014adde1e8a26e93c3769e8618602c13c": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "395b8568f2efae46398fc76c6b422807900a928734749cdd4f8bd60b42366d19": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "85a7a04ae14d4df7bd123dd4837791701bbb02dc615d4e9f24060a2161f7ba3e": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "ac42e25ca2de115b1eb59cc4913e6fd26670c4dfb47f17ed56fc0d1f34272fd9": {
-        "count": 1,
-        "reason": "helper"
-      }
     }
   },
   "venues/paradex/src/history.rs": {
-    "dropped": {
-      "156d12f0af1aa73d997695a9ee5ae2f0b10efdaf05fbf3c5a44b49c0b8c67eb3": {
-        "count": 4,
-        "reason": "macro"
-      },
-      "4f41451eb1e1a039f8b647eaee00abfdc9027246d230dff2fad9129e9919c3e7": {
-        "count": 2,
-        "reason": "macro"
-      },
-      "552d45a1b59d0f22ccc9a74886bba18ab8ed7ed63abbbaf21329272a874b4ace": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "60ad9d1f92b48483572276a3a75cf6e7c6579a0c8d0118a9f9f51688b851c9aa": {
-        "count": 1,
-        "reason": "macro"
-      },
-      "a81744f9afdaf13c609cee0a6b18b04c80c9fa876308896b9d619fd75c8c7b9c": {
-        "count": 1,
-        "reason": "member"
-      }
+    "kept": {
+      "156d12f0af1aa73d997695a9ee5ae2f0b10efdaf05fbf3c5a44b49c0b8c67eb3": 4,
+      "4f41451eb1e1a039f8b647eaee00abfdc9027246d230dff2fad9129e9919c3e7": 2,
+      "552d45a1b59d0f22ccc9a74886bba18ab8ed7ed63abbbaf21329272a874b4ace": 1,
+      "60ad9d1f92b48483572276a3a75cf6e7c6579a0c8d0118a9f9f51688b851c9aa": 1,
+      "a81744f9afdaf13c609cee0a6b18b04c80c9fa876308896b9d619fd75c8c7b9c": 1
     }
   },
   "venues/paradex/src/identity.rs": {
     "kept": {
       "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-      "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-    },
-    "dropped": {
-      "d04c9c210338abd029de862338a9937ff19e38f96097cbfba0efb4bbf2728caf": {
-        "count": 1,
-        "reason": "member"
-      }
+      "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
+      "d04c9c210338abd029de862338a9937ff19e38f96097cbfba0efb4bbf2728caf": 1
     }
   },
   "venues/paradex/src/public.rs": {
@@ -1259,8 +1079,10 @@
     "kept": {
       "06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3": 1,
       "1477aae8aee24cd4b02439b7b83caafb3d96bfa9c8e3f36a92a98019cc564283": 1,
+      "1dbbda3e437f9c8cf16d7a9484f766e3e1e6caee6e87b49d901623b1ba0ca0ee": 2,
       "4310c56cdb4207e078977e5ecfb03800099cc6b8559b1e4cd4c0ef98cc4de727": 1,
       "4ada6c6855acc366bcebdec0d513cbd75e093c2d0370d90d63518324067264fa": 1,
+      "5b8e2cf8afd1c07e2519c23ec48a6e71507c064e521e622302925fd78fdc2e59": 1,
       "6ac1d501912009ef984d7ec4253af4a40cf5f968674394d53b23cf8c1e2a8924": 1,
       "7cf89c50bfeffaac54a620d887d14879fca5f73e4ff4f4a65b5b8be20f9c4677": 1,
       "875f1a6284bd44b2cb2a0162e6552aa3452fb40a08d59ca048d6ac203ab4bd71": 2,
@@ -1268,28 +1090,14 @@
       "ae3209100adb7617d3a60abc05d13961f6b17901cc02551743ff77b75e18b37f": 1,
       "b4ba438587075e63cacec774fb985b089d5333b56a39444d8f95e98da3dd1d92": 1,
       "e4578488db238a03f4d95805575986f0310d866963219d31eacc194020c4eb0e": 1
-    },
-    "dropped": {
-      "1dbbda3e437f9c8cf16d7a9484f766e3e1e6caee6e87b49d901623b1ba0ca0ee": {
-        "count": 2,
-        "reason": "macro"
-      },
-      "5b8e2cf8afd1c07e2519c23ec48a6e71507c064e521e622302925fd78fdc2e59": {
-        "count": 1,
-        "reason": "macro"
-      }
     }
   },
   "venues/phemex/src/account.rs": {
+    "kept": {
+      "35203e2192556d58fa9706bd22bddc7b92206b18106905b5af0b39aefd365d1c": 1,
+      "db7b6dc88f90361d5d57c041003af076c94d051c673d00cec046198eb9441f98": 1
+    },
     "dropped": {
-      "35203e2192556d58fa9706bd22bddc7b92206b18106905b5af0b39aefd365d1c": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "db7b6dc88f90361d5d57c041003af076c94d051c673d00cec046198eb9441f98": {
-        "count": 1,
-        "reason": "helper"
-      },
       "ee694d9fd31f8bcf8dd1202488b242081189214dd143f90fc6bb10d6fd6fe886": {
         "count": 1,
         "reason": "macro"
@@ -1298,20 +1106,14 @@
   },
   "venues/phemex/src/history.rs": {
     "kept": {
-      "139c5990615d19868461cf9c3fc7c97d895017fced401b219198883e89eeefd1": 1,
+      "007e1c20fd9ad3fe2cb38a2646b5f0910bcced3498841d2ec9362b0da3b4e4f8": 1,
+      "139c5990615d19868461cf9c3fc7c97d895017fced401b219198883e89eeefd1": 2,
       "5d6691e305370ef1b5e22426e494d28b28936de80d5d5af079e9deae52eb33f2": 2,
+      "a25ed19569db55f160c6e07637c3dfe1a7151e2722da2780fb332e3fe3cab917": 1,
       "aa71c1d92e34443bf9b99a67bc669e086e750105b16ed6b6d1835d2e7f2c2c0f": 1
     },
     "dropped": {
-      "007e1c20fd9ad3fe2cb38a2646b5f0910bcced3498841d2ec9362b0da3b4e4f8": {
-        "count": 1,
-        "reason": "helper"
-      },
       "139c5990615d19868461cf9c3fc7c97d895017fced401b219198883e89eeefd1": {
-        "count": 2,
-        "reason": "macro"
-      },
-      "a25ed19569db55f160c6e07637c3dfe1a7151e2722da2780fb332e3fe3cab917": {
         "count": 1,
         "reason": "macro"
       }
@@ -1319,34 +1121,27 @@
   },
   "venues/phemex/src/identity.rs": {
     "kept": {
+      "0d4f7749bb0b24c084131b4f15d0e612c9b03378700f1ea465dfa856113e17e9": 1,
       "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
       "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-    },
-    "dropped": {
-      "0d4f7749bb0b24c084131b4f15d0e612c9b03378700f1ea465dfa856113e17e9": {
-        "count": 1,
-        "reason": "helper"
-      }
     }
   },
   "venues/phemex/src/income.rs": {
-    "dropped": {
-      "891103f78a8eca3e3afa6df1d04856f35db60eaddb365f9e92293271fa46c893": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "f208d33f03a5291e0ba68dd6417e98dd3fd08398627717ab367d630192c297c2": {
-        "count": 1,
-        "reason": "macro"
-      }
+    "kept": {
+      "891103f78a8eca3e3afa6df1d04856f35db60eaddb365f9e92293271fa46c893": 1,
+      "f208d33f03a5291e0ba68dd6417e98dd3fd08398627717ab367d630192c297c2": 1
     }
   },
   "venues/phemex/src/lib.rs": {
     "kept": {
+      "1b0b8cbc9ce44a55975ea8f3e025691cecfa45581828e95eb50ccc2f2d18e4f1": 1,
       "1d1591136af8d3c7b891a725138b1fe1e9ef3e5d401e18f610b77d9866b877e3": 1,
       "34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc": 1,
       "3707a3e4c331d8aa244ffa1fdfff00869707d624a6ed97afed2f783400c15f54": 1,
+      "3d411e9715932bdc90a7a565f468fcb4804f1d8ef3c91c122626f77b2d90df2b": 1,
       "415cde8bbb79aec0ffd251892d668f5fea56c30150ff07e0a3a1e8d1ebb85a04": 1,
+      "4dbce16a94437affd078f0756fdc5bf35899434ebde3ba73925201568fb05469": 1,
+      "5993f99450d63ae5eb78cf2899ffc8efaaa9fd47dd066fcd1ac85a4cb8d937eb": 1,
       "60f3aecbbb9e98af4226ed2769775e3b26ba4af804afa0def383aad527bddd1b": 1,
       "6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219": 1,
       "6d16631ed954d85c787eae05eab608a09c8ce735e57abce7ab9ccfe2f305d968": 1,
@@ -1356,22 +1151,6 @@
       "fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6": 1
     },
     "dropped": {
-      "1b0b8cbc9ce44a55975ea8f3e025691cecfa45581828e95eb50ccc2f2d18e4f1": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "3d411e9715932bdc90a7a565f468fcb4804f1d8ef3c91c122626f77b2d90df2b": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "4dbce16a94437affd078f0756fdc5bf35899434ebde3ba73925201568fb05469": {
-        "count": 1,
-        "reason": "helper"
-      },
-      "5993f99450d63ae5eb78cf2899ffc8efaaa9fd47dd066fcd1ac85a4cb8d937eb": {
-        "count": 1,
-        "reason": "helper"
-      },
       "7df0ba98dfdb7e3d532ca88e6cf5e2d67158db5c27a0486c22ce18d7493f5f07": {
         "count": 1,
         "reason": "macro"
@@ -1382,13 +1161,8 @@
     "kept": {
       "06d49adf719c2e5ba5712d013a8bd485f49a8559eab9fbd74b8265789e9e3c9c": 1,
       "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
-      "db4da6f92276f049047ceb4f85c06083f4c683531dd3d76b0a5ba44d9e2d5cb7": 1
-    },
-    "dropped": {
-      "e6f9b79a027f31adbd5a2b4c25669770848c36a0b761835a87f5783a961f4790": {
-        "count": 1,
-        "reason": "helper"
-      }
+      "db4da6f92276f049047ceb4f85c06083f4c683531dd3d76b0a5ba44d9e2d5cb7": 1,
+      "e6f9b79a027f31adbd5a2b4c25669770848c36a0b761835a87f5783a961f4790": 1
     }
   },
   "venues/polymarket/src/account.rs": {
@@ -1467,6 +1241,7 @@
     "kept": {
       "067aa233d0ebbb24c837ae5cb4549d6aa68e9f29bf4bdde0ba0630bda9f466c1": 1,
       "1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43": 1,
+      "1805af84e51e32d19a267749aeea1b85d4e801cb4df04d796274edac35db929d": 1,
       "61034a5650efd3373a0ab46c4948145e4c4022d60a9c7f0898563e273d100159": 1,
       "6f0b47296411f75eb3a85b182bf43c08378b387a1a584d8848b0e811f29b01f9": 1,
       "869f03854972431807651e3f560b5dbb7232088a7fcc89705e7a58f747bb3e2a": 1,
@@ -1474,12 +1249,6 @@
       "a40239e5961362c920c8e84905898477b16673e64c7d94eacaa5b51ba63a1152": 1,
       "ab3206b428125b95aea7df47c71c9bfb8cef1809ff9c4432ba4ab8f34db5bac9": 1,
       "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-    },
-    "dropped": {
-      "1805af84e51e32d19a267749aeea1b85d4e801cb4df04d796274edac35db929d": {
-        "count": 1,
-        "reason": "helper"
-      }
     }
   },
   "venues/woo/src/account.rs": {
