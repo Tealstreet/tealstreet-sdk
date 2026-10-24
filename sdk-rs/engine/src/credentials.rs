@@ -34,10 +34,16 @@ impl ReadCredentials {
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.key.is_empty() || self.secret.is_empty() {
-            Err("Secondary read credentials require a nonempty key and secret")
-        } else {
+        Self::status(!self.key.is_empty() && !self.secret.is_empty())
+    }
+
+    /// `validate`'s result from a flag trusted setup computed once, so a host
+    /// can drop unused read material and still report the native error.
+    pub fn status(valid: bool) -> Result<(), &'static str> {
+        if valid {
             Ok(())
+        } else {
+            Err("Secondary read credentials require a nonempty key and secret")
         }
     }
 }
@@ -64,6 +70,16 @@ mod tests {
         assert!(read.validate_passphrase(Some("primary-pass")).is_err());
         read.secret.clear();
         assert!(read.validate().is_err());
+    }
+    #[test]
+    fn a_validation_flag_carried_without_the_material_reproduces_validate_exactly() {
+        let valid: ReadCredentials =
+            serde_json::from_str(r#"{"key":"read","secret":"secret"}"#).unwrap();
+        let invalid: ReadCredentials = serde_json::from_str(r#"{"key":"read"}"#).unwrap();
+        for read in [valid, invalid] {
+            let result = read.validate();
+            assert_eq!(ReadCredentials::status(result.is_ok()), result);
+        }
     }
     #[test]
     fn secondary_credentials_debug_never_exposes_signing_material() {
