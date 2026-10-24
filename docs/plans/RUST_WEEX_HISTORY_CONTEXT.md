@@ -265,3 +265,11 @@ No shared API, signer recipe, account-cycle code, inventory or STAGING is change
 ReadCompletion, ReadCursorHistory and ReadRangeHistory are named explicitly in
 production so no legacy authority alias obscures the cutover. Exact native/source
 review and fresh strict/CI/WEEX size/replay results remain required.
+
+Native re-review at `50c676196ba` is CLEAR with three Low findings. The
+non-expiry revocation control first proves a genuine parked Read, then one exact
+root failure, and reproduces the stale native reads entry as one assertion RED
+with no compile/setup failure. Delay cancellation is asserted after that failing
+comparison and is not claimed executed until the fix. Remove the dead History
+deferred_gets cleanup and make any subsequent history-admission refusal retire
+the physical leg and take the strict typed root path instead of waiting for expiry.
