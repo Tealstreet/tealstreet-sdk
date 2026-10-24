@@ -174,3 +174,241 @@ replacement/removal before startup in an unregistered engine. It is evidence
 for the NEW-CONTRACT boundary, not a fabricated snapshot RED. Reconfiguration
 remains teardown plus a new engine; existing external nonce evidence and
 per-engine reseed contracts remain unchanged.
+
+## Concrete API proposal for core and teardown review
+
+Handoff owner is now codex-mxb4mq. This proposal is based on local integration
+`31de004fd11` (actual `59f50e4f37b`); no runtime API below exists yet. Reviewers
+are claude-fe7lgm and codex-uufub4. G1's proposed constructor at `cb4bb676cca`
+still accepts plain `SelectedRead` and proves no subject/configuration facts.
+This proposal adds that witness; it does not retroactively strengthen G1.
+
+### Construction and immutable witness
+
+Names and signatures proposed for `engine::identity_snapshot`:
+
+```rust
+pub struct IdentitySetup {
+    pub identities: signing::Identities,
+    pub provider: Option<signing::Provider>,
+    pub credential_policy: signing::CredentialSetupPolicy,
+    pub host_algorithms: Option<Vec<signing::Algorithm>>,
+    pub private_feed: signing_policy::PrivateFeedPolicy,
+    pub public_feed: PublicFeedPolicy,
+    pub account_startup: bool,
+    pub subjects: SubjectSlots,
+}
+pub struct SubjectSlots {
+    pub primary: Option<AccountSubject>,
+    pub secondary: Option<AccountSubject>,
+}
+pub struct AccountSubject {
+    // All fields are private; constructed by the reviewed subject codec.
+    signer: Option<SubjectId>,
+    trading_account: SubjectId,
+    fee_subject: Option<SubjectId>,
+    public_id: Option<SubjectId>,
+}
+pub struct SubjectId { /* private codec domain, environment, canonical bytes */ }
+pub struct IdentitySnapshot { /* private Arc<InstalledSetup> */ }
+pub enum SetupError {
+    Started, AlreadyInstalled, Retired, MissingIdentity, InvalidIdentity,
+    MissingSubject, SubjectConflict, UnsupportedCodec, Policy, Capability,
+}
+impl<V: Venue> Engine<V> {
+    pub fn install_identity_snapshot(&mut self, setup: IdentitySetup)
+        -> Result<IdentitySnapshot, SetupError>;
+    pub fn identity_snapshot(&self) -> Option<IdentitySnapshot>;
+}
+```
+
+`IdentitySnapshot` may be cloned as a read-only witness, with no public fields,
+constructor, serde implementation or caller-supplied issuer/version. Its private
+allocation owns the final tuple and an irreversible live/retired bit. Every
+binding references that same allocation. A retained `Arc` never proves liveness;
+validation checks retirement and pointer identity with this engine's installed
+snapshot, in addition to the existing Context issuer. One slot/subject cannot
+be swapped into a witness after construction. Installation mints no HTTP IDs,
+owner credits, deadlines, nonce reservations or provider signing jobs.
+
+Validate a temporary complete tuple, applying `CredentialSetupPolicy` to a local
+copy of identities, resolving any declared fallback once, checking required refs
+and supported capabilities, and matching subjects to the complete slots. Only
+then replace the engine's final identities/provider/policies and install the
+snapshot together. The final identities must be exactly the refs passed to the
+venue constructor by registry setup; a differing tuple refuses. No observable
+partial registration or frozen setter survives failure. A second install always
+refuses, including an identical tuple; there is no replace/uninstall/revive API.
+A public-only empty-identity engine needs no provenance witness. An identity
+without required resolved subject metadata cannot opt into provenance yet.
+
+### Exact dependent-setter inventory
+
+All configuration refusal guards use one common predicate: startup has begun,
+a snapshot is installed, or identity teardown has begun. They refuse before
+mutation and preserve existing post-start error contracts where already typed.
+
+| Existing Engine setter | Installed-snapshot behavior | Constructor consequence |
+| --- | --- | --- |
+| `set_signer(Option<Provider>) -> Result<(), VenueError>` | Refuse replacement and removal, even before start | Provider is installed by the atomic tuple |
+| `set_identities(Identities) -> Result<(), VenueError>` | Refuse every later registration | Registry's existing final trusted refs converge on that tuple |
+| `set_host_algorithms(Option<Vec<Algorithm>>) -> Result<(), VenueError>` | Refuse capability replacement/removal | Capture host declaration with the provider |
+| `set_private_feed_policy(PrivateFeedPolicy) -> Result<(), VenueError>` | Refuse | Capture final private-feed policy |
+| `set_public_feed_policy(PublicFeedPolicy) -> Result<(), &'static str>` | Refuse, retaining its current error type | Capture final egress/feed ownership |
+| `set_account_startup(bool) -> ()` | Change to `Result<(), VenueError>` and refuse | Update `registry::finish` and the two engine unit-test callers; never silently ignore |
+| `set_entropy(Fill) -> Result<(), VenueError>` | Refuse replacement | Finish identity RNG injection before install; do not reseed at install |
+| `set_signing_entropy(Fill) -> Result<(), VenueError>` | Refuse replacement | Preserve independent signing RNG and per-family initial seeds |
+
+`set_log_level` and `set_book_deltas` remain mutable: neither selects a credential,
+account subject, provider, private read source or setup capability. Protocol-clock
+calibration, Store financial rows and runtime market caches remain runtime data;
+they cannot mutate the installed tuple. No public setup-policy setter exists in
+this source: credential policy becomes an immutable installation input. Any new
+subject/selection/capability setter must use the same predicate. Host `with_signer`
+and entropy builders retain their pre-install meaning and propagate refusal.
+Provider capability checks at release remain independent; snapshot installation
+does not guarantee that an external provider will remain available.
+
+Registry source map: the existing trusted setup paths registering identities at
+`registry/src/lib.rs` near 1183, 1274 and 1436, and shared `finish` near 195, must
+converge rather than registering a second tuple. The registry resolves subjects
+before the one install and before `visitor.visit(engine)` exposes the engine.
+Absent codec/discovery metadata blocks that family's provenance adoption; this
+PR does not claim its private reads are newly available. The constructor owners
+must review those hooks before source edits; no source has been changed here.
+
+### Subject codec and canonical account relation
+
+Proposed codec boundary:
+
+```rust
+pub enum SubjectCodec { CoinbasePortfolio, GrvtTradingAccount }
+pub struct AccountSubjectInput {
+    pub environment: String,
+    pub signer: Option<String>,
+    pub trading_account: Option<String>,
+    pub fee_subject: Option<String>,
+    pub public_id: Option<String>,
+}
+pub fn resolve_subject(codec: SubjectCodec, input: AccountSubjectInput)
+    -> Result<AccountSubject, SetupError>;
+```
+
+These are candidate native codecs for review, not cleared family adoptions.
+Do not add a generic `String -> SubjectId` constructor. Codec domain and network/
+environment are part of identity: same text in another venue/environment never
+matches. The codec validates lengths, format and native canonical representation;
+it must retain native case sensitivity unless the existing protocol explicitly
+normalizes. No generic lowercase, Unicode normalization, wallet-versus-vault
+substitution, address-derived signer hash or HTTP-method inference is allowed.
+Coinbase's portfolio and GRVT's trading-account ID remain distinct domains.
+Native codec owners must approve exact accepted forms before implementation.
+Other families return `UnsupportedCodec` until separately reviewed; no default.
+
+An absent or empty required trading-account input refuses. A missing optional
+signer/fee/public field remains absent and cannot substitute for trading account.
+Secondary account reads compare both resolved trading-account domains,
+environments and canonical values against Primary; signer and fee equality are
+not account equality. Neither two missing subjects nor matching opaque key refs
+satisfy this relation. Preserve source-specific native account identifiers; do
+not infer them from `Identity.stable_id`, API-key labels or local counters. No
+async discovery, new key derivation, new signing or network call occurs here.
+
+### Selection, G1 retention and G2 validation seam
+
+```rust
+pub struct IdentityBinding { /* private snapshot, slot, role, refs, subject */ }
+pub struct BoundSelectedRead { /* private Arc<SelectedRead>, IdentityBinding */ }
+pub enum BindingError { MissingSnapshot, Retired, Foreign, Identity, Subject, Role }
+impl<'a, P> Cx<'a, P> {
+    pub fn bind_selected_read(&self, selected: SelectedRead)
+        -> Result<BoundSelectedRead, BindingError>;
+    pub fn select_installed_identity(&self, role: CredentialRole)
+        -> Result<IdentityBinding, BindingError>;
+    pub fn validate_identity_binding(&self, binding: &IdentityBinding, context: &Context)
+        -> Result<(), request_context::Error>;
+}
+```
+
+Read binding consumes the exact existing `SelectedRead`, checking its complete
+Identity (credential, signing, explicit passphrase, extras and stable nonce ID),
+slot, route intent and account scope against the installed tuple. It never
+reselects. Mutation selection always binds Primary; asking Secondary to mutate
+refuses before allocating any ID. Validation checks this snapshot is live and
+installed by this engine, exact role/operation, slot/refs/routing, and genuine
+current Context owner/leg. It cannot convert a foreign, expired or retired
+Context into authority. Secondary account relation is checked before admission.
+Existing API cannot accept a caller-provided subject or binding constructor.
+
+G1 follow-on changes its registration argument from plain `SelectedRead` to
+`BoundSelectedRead` after coordinated source review. The task retains the same
+bound read for its whole lifetime and every child; a fresh child Plan still has
+a fresh owner budget, but not a fresh subject/configuration witness. No optional
+witness, anchor credential or `Arc`-only compatibility token satisfies G2c.
+G2b remains hcmq3f's source: its declarations/Prepare/Bind/DATA/receipt paths
+borrow this witness through reviewed hooks; this PR does not edit those hunks
+before agreement. Released writes retain Unknown/partial-ID/budget evidence.
+
+### Failure-only teardown and host ordering
+
+```rust
+pub struct IdentityRetirement { /* private, engine-minted, failure-only */ }
+impl<V: Venue> Engine<V> {
+    pub fn retire_identity_snapshot(&mut self) -> IdentityRetirement;
+}
+// Private engine/registry hook; never a Cx or public Context capability.
+fn finish_identity_teardown(&mut self, retirement: &IdentityRetirement);
+// WASM administrative export, called by the host's private teardown path:
+// WasmEngine.retireIdentitySnapshot() -> void
+```
+
+Retirement is idempotent and starts by irreversibly rejecting new normal engine
+entries, snapshot bindings, owner admission and outgoing I/O. The private
+retirement witness permits only existing failure/cancellation cleanup, even
+when normal Context checks now reject the snapshot. It grants no signing,
+transport, retry, success publication or new owner IDs. The registry retires
+current owners, prepared/provider claims, sessions/groups, sockets and timers
+through existing authority; it does not invent a successful write terminal.
+All retained snapshot/binding handles then fail validation permanently. A new
+engine, even with the same refs/subjects and matching numeric handles, has a
+new issuer and cannot revive any old witness or consumed grant.
+
+WASM order: `EngineHost.dispose()` fences public ingress (`disposed=true`) first;
+a private direct call to `engine.retireIdentitySnapshot()` then retires native
+authority before abort/transport cleanup, before clearing signer handles, and
+before an owned engine is freed. This call must not go through `invoke`, which
+correctly rejects disposed hosts, or dispatch actions/callbacks from teardown.
+Cleanup attempts all remaining releases if one throws. It runs once for BOTH
+borrowed and owned hosts; `ownsEngine=false` only controls `free`, not retirement.
+A missing hook on a test double does not permit a snapshot-aware production host
+to silently skip retirement; exact construction capability detection is a source
+review gate. Current older fake engines without snapshots retain cleanup tests.
+
+Native `Host::run` already returns its engine after stopping. Fence inbox/command
+admission before invoking the same engine retirement hook, then abort existing
+managed/provider/socket/timer resources before returning that retained engine.
+Drop/unwind paths need the same retirement guarantee; do not perform normal
+venue callbacks from Drop. Proposed private cleanup does not rely on a disposed
+JS wrapper to prove Rust liveness. Native owned and retained-engine controls,
+plus WASM borrowed/owned controls, are required before runtime readiness.
+
+### New-contract control ledger and review gates
+
+Existing three native tests remain GREEN compatibility evidence, not REDs.
+The next controls are explicitly NEW-CONTRACT. First executable REDs can test
+actual `EngineHost.dispose` with a declared `retireIdentitySnapshot` spy: borrowed
+and owned hosts must call it once after the public fence and before any resource
+cleanup/free. A working control proves public ingress already refuses during
+cleanup; another proves owned versus borrowed `free` behavior is preserved.
+These are boundary-call contract tests, not proof of the unimplemented Rust
+snapshot or an assertion of an existing wrong-account exploit.
+
+After exact signatures are approved, native install/freeze/codec tests require a
+compiled API scaffold that fails closed; they must reach assertions rather than
+count missing methods as an original regression. No test-only epoch/state shim
+may be claimed as an installed runtime witness. Cover failed atomic install and
+subsequent legal setters, each of eight setter refusals before/after start,
+foreign issuer and refs, absent/conflicting domains, genuine Secondary relation,
+Primary-only mutation, same binding through G1 activations and teardown of old
+Prepare/Bind/DATA/timers while released-write evidence remains conservative.
+Exact host/registry/G2b hooks remain reviewer source gates before implementation.
