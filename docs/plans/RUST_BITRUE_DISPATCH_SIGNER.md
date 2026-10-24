@@ -230,3 +230,50 @@ The overseer assigned the shared receipt-floor prerequisite to claude-m26ps4.
 Its proposed StampFloor from SigningRelease and DispatchContext::stamp_after is
 consumer-fit CLEAR in direction only; no reviewed source pin exists. The native
 negative-to-zero initial stamp boundary remains an explicit shared-fit question.
+
+## Executed original native checkpoint
+
+The isolated dispatch_signer_adoption target compiles and runs against unchanged
+production85e155faebb:25controls,8intended assertion REDs,17working GREENs,
+0ignored. Five REDs observe native provider-use count0 where1 is required
+(catalogue, bracket, setting, listen POST, keepalive PUT); two require fresh
+signature/transport retry batches (0vs2/4); the eighth exposes a setting POST
+replayed after HTTP500/-1022. Later receipt/operation/terminal assertions after
+a failing count or replay check are prospective requirements, not executed
+production proof. The independent injected provider signs the expected canonical
+atomic work successfully. Initial wrong rustfmt path and a missingCommand.side
+fixture field were corrected before execution; neither is semantic RED evidence.
+
+Working controls include independent Python HMAC vectors (including absolute
+listen POST/PUT), static/ordered headers, header-only recvWindow, validation and
+keyless/keyed-public-only catalogue behavior, fixed/backward timestamps, genuine
+streamed fills malformed-list/invalid-byte failures with an empty-list positive,
+unknown-write terminal/unchanged Store after an already spent signature budget,
+and both interleaved retry-budget witnesses. Transport->signature->remaining
+transports proves signature retry cannot reset transport count; signature->
+transport->second signature refusal proves transport cannot renew that budget.
+The HTTP500 negative forbids the same setting POST/provider preparation while
+allowing native reconciliation GETs. No local native lifecycle source changes.
+
+Scoped strict all-feature Clippy, package fmt and15checker unit tests PASS.
+The conservative scanner against the EXACT frozen85 baseline passes33occurrences/
+20fingerprints; all production, existing tests, checkers and inventories remain
+byte-identical to that baseline. The full bans command against moving origin
+reports only incoming Bitget/OKX prunes missing from this intentionally frozen
+base; no global full-bans PASS or exemption is claimed. Later actual integration
+must preserve those incoming entries/prunes and run the normal checks again.
+
+Source/adversarial, caller and full-map reviews are CLEAN after replacing the
+fabricated-error-string fixture with genuine codec events and strengthening the
+Unknown terminal, exact diagnostic and retry interleavings. HMAC owner review
+of664d8ac0032 is CLEAR, with shared StampFloor source review still separate.
+
+Shared API-fit update: claude-m26ps4 owns the receipt-floor prerequisite. Proposed
+StampFloor is minted only by genuine SigningRelease; stamp_after(floor) applies
+max(0,stamp_ms(),previousReleasedStamp+1), with safe-integer overflow refusal.
+None means max(0,stamp_ms()), preserving the native negative-to-zero boundary
+without changing other families' stamp_ms(). The floor is metadata only, not
+retry/owner/credential authority. Constructor/source freeze and actual landing
+remain gates. Production stays held on #1993, that reviewed shared seam and the
+existing shared-file and lifecycle/transition approvals. No new STAGING row,
+raw REST fallback, inventory delta, pushed branch or migrated-family claim.
