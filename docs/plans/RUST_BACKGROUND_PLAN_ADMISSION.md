@@ -531,3 +531,13 @@ reservation fit. A foreground-only or intrinsically oversized reservation keeps
 plain Capacity. Saturation must emit one correlated failure, borrow no child
 credit, and succeed when retried after child retirement. The internal refusal
 variant and shared retry hint require uufub4's API review before source wiring.
+
+### Physical-owner map size refinement
+
+The foundation retains `HashMap<u64, CommandOwner>` for both command and physical
+entries. Each physical entry stores its full `Owner`, and immutable/mutable
+lookup, terminal retirement and Execution-only projection compare that exact
+variant. This avoids a new `HashMap<Owner, CommandOwner>` instantiation without
+relying on cross-variant numeric uniqueness. The same-generation adversarial
+control covers both directions, including denied mutable access and retirement.
+No family WASM size result is claimed before CI.

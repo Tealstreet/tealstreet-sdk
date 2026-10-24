@@ -536,6 +536,7 @@ impl<P> Cx<'_, P> {
         let execution = match (moved, founder_root) {
             (Some((identity, _)), Some(root)) => {
                 let physical = CommandOwner {
+                    physical: Some(handle.owner()),
                     generation: identity,
                     phase: CommandPhase::Planned(State { body }),
                     last_deadline: deadline,
@@ -559,7 +560,7 @@ impl<P> Cx<'_, P> {
                 };
                 owner.last_deadline = deadline;
                 registry.contexts.insert(root.leg(), root.clone());
-                registry.physical.insert(handle.owner(), physical);
+                registry.physical.insert(identity, physical);
                 registry.plan_index.push(handle.owner());
                 Some((identity, root))
             }

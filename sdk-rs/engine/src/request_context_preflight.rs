@@ -57,6 +57,7 @@ impl ContextRegistry {
         self.commands.insert(
             command,
             CommandOwner {
+                physical: None,
                 generation,
                 phase: CommandPhase::Preflight(State::new(policy)),
                 last_deadline: now,
@@ -153,8 +154,8 @@ impl ContextRegistry {
             Owner::Command { id, .. } => {
                 self.commands.remove(&id);
             }
-            Owner::Execution { .. } | Owner::Background { .. } => {
-                self.physical.remove(&owner);
+            Owner::Execution { generation } | Owner::Background { generation } => {
+                self.physical.remove(&generation);
             }
             _ => return false,
         }

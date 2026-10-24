@@ -373,7 +373,7 @@ impl ContextRegistry {
             .iter()
             .find(|(_, root)| **root == execution)
             .and_then(|(identity, _)| {
-                self.physical.get(&Owner::Execution {
+                self.owner_entry(Owner::Execution {
                     generation: *identity,
                 })
             })
@@ -649,13 +649,14 @@ impl ContextRegistry {
     /// fails it outside any delivery so nothing more is sent or published.
     #[cfg(feature = "http-plans")]
     pub(in crate::engine) fn orphaned_plan(&self) -> Option<crate::request_context::Plan> {
-        self.physical.iter().find_map(|(physical, owner)| {
-            let Owner::Execution {
-                generation: identity,
-            } = physical
-            else {
+        self.physical.iter().find_map(|(identity, owner)| {
+            if owner.physical
+                != Some(Owner::Execution {
+                    generation: *identity,
+                })
+            {
                 return None;
-            };
+            }
             let orphan = self
                 .executions
                 .roots
