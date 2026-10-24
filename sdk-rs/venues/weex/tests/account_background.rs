@@ -56,6 +56,9 @@ fn drain_at(e: &mut Engine<WeexFutures>, releases: &mut Releases, now: f64) {
                     releases.claimed += usize::from(account(&request.url));
                     releases.requests.push(request);
                 }
+                HttpAction::BindGroup { .. } => {
+                    panic!("WEEX background reads declare no Mutation barriers")
+                }
                 HttpAction::Cancel { .. } => {}
             },
             action => releases.other.push(action),
