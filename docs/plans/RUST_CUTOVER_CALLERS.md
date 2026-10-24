@@ -7994,7 +7994,10 @@ login/snapshot behavior, request wire and credential-selection policy are retain
 
 ## Session-bound requests (Bearer hook)
 
-Plan: RUST_SESSION_BEARER_HOOK.md. A managed request bound to a Session takes
+Plan: RUST_SESSION_BEARER_HOOK.md. This applies to venues that enable the
+`session-bearer` engine feature; without it a Session-bound request is refused
+`Invalid` at issue, before any effect, and an owning Plan fails "Session-bound
+requests require the session-bearer feature". A managed request bound to a Session takes
 its session headers just in time from the venue's `session_bearer`. That hook
 returns a bounded `SessionHeaders` set at the venue's declared
 `SessionPlacement`, fenced by one revision. Caller-visible behaviour for a

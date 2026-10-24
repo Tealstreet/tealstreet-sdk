@@ -939,3 +939,46 @@ Shape:
 Consumers: claude-fe7lgm's `serial-session-resend` will require
 `session-bearer` plus `serial-plans`. Paradex, BreakoutProp DXAPI and GRVT
 enable `session-bearer` when they adopt, with their own budget review.
+
+### Phase 5 source (`3f366a44dd1`)
+
+- Without `session-bearer`, `Bearer` is an uninhabited enum with the same
+  methods, each a `match *self {}`. A managed call's `Option<Bearer>` is
+  always `None` and zero-sized, so every binding branch (Bind read, attach,
+  park, claim fence, reprepare) is unreachable and compiles out. Explicit
+  `cfg` gates remain only where code would otherwise run:
+  - `resolve_bearer` (the off variant refuses `Some`);
+  - the leg-binding match in `queue_managed`;
+  - the Bearer index push at issue and its reservation;
+  - the park-entry removals in `take_managed_with_cancel` and
+    `reprepare_http`;
+  - the retire fence (`bearer_fenced` reservation and
+    `fence_bearer_generation`);
+  - the `session_ready` announce record (`bearer_woken`);
+  - the flush body;
+  - the registry's `bearer_legs` and `session_generation_live`;
+  - `admit` and `wake_bearer_parks`.
+- The off-mode refusal is `Invalid` at issue, before any effect. Through
+  `fail_owned_admission` an owning Plan's terminal is named
+  "Session-bound requests require the session-bearer feature" (dazzy3 F3).
+  It is distinct from the group refusal, which needs both `session-bearer`
+  and `http-mutation-barriers`.
+- Tests:
+  - `session_bearer.rs`, the Bearer unit tests, R10b and R10b' and the group
+    refusal test require the feature. The feature-modes row
+    `("http-mutation-barriers", "http-plans", "session-bearer",
+    "test-support")` runs them, since no family links the feature yet.
+  - `session_bearer_off.rs` (`not(session-bearer)`) is the OFF control.
+    `request_managed`, `request_managed_with_headers` and
+    `request_signed_managed` each issue unbound (Ok) and bound (Invalid,
+    their own pending back); only the three unbound calls prepare, and no
+    `Sign` action appears (dazzy3 F4). Under `http-plans`, a Plan-owned bound
+    leg fails its command once with the named message; a Read Plan carries
+    no financial outcome.
+  - The OFF control runs in the baseline and every Plan family row, which
+    stay without the feature after an adopter enables it (F2).
+- Results:
+  - OFF: lib 877; session_bearer_off 1 (default), 2 (http-plans, barriers).
+  - ON: session_bearer 55 / 61, lib 1092, barrier 14.
+  - Clippy `-D warnings` clean in five modes: none, http-plans,
+    barriers + test-support, session-bearer, and the full ON row.
