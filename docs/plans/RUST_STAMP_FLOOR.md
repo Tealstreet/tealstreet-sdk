@@ -118,3 +118,18 @@ final max result against MAX_SAFE_INTEGER. No legacy stamp_ms, release hook,
 receipt validation, retry counter, scheduling, clock allocator or venue changes.
 The current-clock matrix includes MAX+1, MAX+2 and f64::MAX, with and without a
 floor. Maximum-safe and finite-negative working controls remain unchanged.
+
+## Focused verification and review receipt
+
+On the correction source: signing-focused engine controls 98 all-features and
+94 with optional features off PASS; existing genuine release compatibility
+controls 10 in each mode PASS. Both StampFloor positive/privacy doctests PASS.
+Scoped strict Clippy in both modes, fmt, bans, both request-context checks
+(15 scanner controls) and whitespace PASS. No WASM/replay build ran locally;
+fresh full CI is separate and remains the shared-source merge gate.
+
+M26 source/API/custody review is CLEAR on `b9e358ba003` and bounded doc correction
+`3e45ce19dba`. Independent source/adversarial, caller and full-map reviews are
+CLEAR. Caller review corrected the old draft's claim about legacy definitive
+retry: only the actual operation-specific resend/declared Read path grants that
+permission. Tests and production bodies are unchanged by that doc correction.
