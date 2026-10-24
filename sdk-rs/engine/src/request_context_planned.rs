@@ -34,6 +34,8 @@ struct Entry {
     call: Option<Call>,
     eligible_at: Option<f64>,
     notified: bool,
+    /// Reserved behind a login Session; issued only at its resume.
+    parked: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -401,6 +403,7 @@ impl<P> Cx<'_, P> {
                 call: None,
                 eligible_at: None,
                 notified: false,
+                parked: false,
             });
         }
         for slot in schedule.available() {
@@ -588,10 +591,8 @@ impl<P> Cx<'_, P> {
             .map_err(|_| Error::Capacity)?;
         for slot in body.schedule.available() {
             let index = body.schedule.ordinal(&slot)?;
-            if body.entries[index]
-                .eligible_at
-                .is_some_and(|at| at <= self.now)
-            {
+            let entry = &body.entries[index];
+            if !entry.parked && entry.eligible_at.is_some_and(|at| at <= self.now) {
                 slots.push(slot);
             }
         }
@@ -601,8 +602,222 @@ impl<P> Cx<'_, P> {
 
 impl<P> Cx<'_, P> {
     /// Consume one declared slot using only resources reserved at plan admission.
+    /// Park an unissued, eligible Slot on a login Session before it consumes an
+    /// attempt. `session_ready` issues its leg with a fresh window under the
+    /// same Plan root and Slot; nothing is spent while parked.
+    pub fn plan_session_wait(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        intent: Option<crate::classify::Intent>,
+        session: &crate::request_context::Session,
+        pending: P,
+    ) -> Result<(), (P, Error)> {
+        let checked = (|| {
+            let generation = self.io.request_contexts.validate_session(session)?;
+            if !matches!(plan.owner(), Owner::Command { .. }) {
+                return Err(Error::State);
+            }
+            let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+            let index = body.schedule.ordinal(slot)?;
+            let entry = &body.entries[index];
+            if entry.parked
+                || entry.credit != Credit::Unissued
+                || !body
+                    .schedule
+                    .available()
+                    .any(|candidate| body.schedule.ordinal(&candidate) == Ok(index))
+                || !entry.eligible_at.is_some_and(|at| at <= self.now)
+                || !self.plan_issue_custody(plan, body)
+            {
+                return Err(Error::Revoked);
+            }
+            if self.io.session_waits.len() >= super::CAPACITY {
+                return Err(Error::Capacity);
+            }
+            self.io.session_waits.reserve_ended()?;
+            let parked = self.io.session_waits.parked_units();
+            self.io
+                .session_resumed
+                .try_reserve(parked + 1)
+                .map_err(|_| Error::Capacity)?;
+            Ok((generation, index))
+        })();
+        let (generation, index) = match checked {
+            Ok(checked) => checked,
+            Err(error) => return Err((pending, error)),
+        };
+        self.io
+            .request_contexts
+            .plan_body_mut(plan)
+            .expect("validated parked Plan")
+            .entries[index]
+            .parked = true;
+        self.io
+            .session_waits
+            .park_slot(generation, plan.clone(), slot.clone(), intent, pending);
+        Ok(())
+    }
+
+    /// Park a failed Read call's declared retry on a login Session, in the
+    /// failed delivery's custody, without selecting the next attempt. The
+    /// resume selects it under the existing evidence, budget and window.
+    pub fn plan_retry_session_wait(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        evidence: RetryEvidence,
+        session: &crate::request_context::Session,
+        pending: P,
+    ) -> Result<(), (P, Error)> {
+        let checked = (|| {
+            let generation = self.io.request_contexts.validate_session(session)?;
+            if !matches!(plan.owner(), Owner::Command { .. }) {
+                return Err(Error::State);
+            }
+            // Only a Read retry; a write keeps its classified resend grant.
+            if evidence == RetryEvidence::DefinitiveRefusal
+                || context.operation() != Operation::Read
+            {
+                return Err(Error::RetryForbidden);
+            }
+            context.retry(evidence, self.now)?;
+            let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+            self.io.request_contexts.validate(context, self.now)?;
+            let index = body.schedule.ordinal(slot)?;
+            let entry = &body.entries[index];
+            let call = entry
+                .call
+                .as_ref()
+                .filter(|call| call.context == *context)
+                .ok_or(Error::Revoked)?;
+            // The failed delivery's own callback, or a re-park of an ended
+            // retry from the Plan's ready custody.
+            let delivered = self.io.http_delivery.as_ref().is_some_and(|delivery| {
+                call.matches(delivery) && matches!(call.stage, Stage::Active { .. })
+            });
+            let reparked =
+                matches!(call.stage, Stage::Parked) && self.plan_issue_custody(plan, body);
+            if entry.parked || !(delivered || reparked) {
+                return Err(Error::Revoked);
+            }
+            if call.selected >= call.terms.attempts {
+                return Err(Error::RetryForbidden);
+            }
+            call.window.physical_deadline(self.now)?;
+            if self.io.session_waits.len() >= super::CAPACITY {
+                return Err(Error::Capacity);
+            }
+            self.io.session_waits.reserve_ended()?;
+            let parked = self.io.session_waits.parked_units();
+            self.io
+                .session_resumed
+                .try_reserve(parked + 1)
+                .map_err(|_| Error::Capacity)?;
+            Ok((generation, index))
+        })();
+        let (generation, index) = match checked {
+            Ok(checked) => checked,
+            Err(error) => return Err((pending, error)),
+        };
+        self.io.retire_http_leg(context);
+        let entry = &mut self
+            .io
+            .request_contexts
+            .plan_body_mut(plan)
+            .expect("validated parked Plan")
+            .entries[index];
+        entry.parked = true;
+        entry.call.as_mut().expect("validated call").stage = Stage::Parked;
+        self.io.session_waits.park_retry(
+            generation,
+            plan.clone(),
+            slot.clone(),
+            context.clone(),
+            pending,
+        );
+        Ok(())
+    }
+
+    /// Select a parked retry's next attempt at its Session's resume, under the
+    /// drain's delivery, inside the existing budget and declared window.
+    pub(in crate::engine) fn resume_plan_retry(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<Context, Error> {
+        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        self.io.request_contexts.validate(context, self.now)?;
+        let index = body.schedule.ordinal(slot)?;
+        let entry = &body.entries[index];
+        let call = entry
+            .call
+            .as_ref()
+            .filter(|call| call.context == *context && matches!(call.stage, Stage::Parked))
+            .ok_or(Error::Revoked)?;
+        if !entry.parked {
+            return Err(Error::Revoked);
+        }
+        if call.selected >= call.terms.attempts {
+            return Err(Error::RetryForbidden);
+        }
+        call.window.physical_deadline(self.now)?;
+        let predecessor = self.io.http_delivery.clone();
+        let body = self.io.request_contexts.plan_body_mut(plan)?;
+        body.schedule
+            .retry(slot)
+            .expect("remaining declared credit");
+        let entry = &mut body.entries[index];
+        entry.parked = false;
+        entry
+            .call
+            .as_mut()
+            .expect("validated call")
+            .select(self.now, predecessor)
+            .expect("validated retry");
+        self.note_session_resume(plan, context);
+        Ok(context.clone())
+    }
+
+    /// Issue a parked Slot's leg at its Session's resume, under the drain's
+    /// delivery, with a window that starts now.
+    pub(in crate::engine) fn resume_plan_slot(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        intent: Option<crate::classify::Intent>,
+    ) -> Result<Context, Error> {
+        let leg = self.make_plan_leg_context(plan, slot, intent, true)?;
+        self.note_session_resume(plan, &leg);
+        Ok(leg)
+    }
+
+    /// A resume drained with no delivery is the resumed attempt's custody for
+    /// the rest of this event only.
+    fn note_session_resume(&mut self, plan: &Plan, leg: &Context) {
+        if self.io.http_delivery.is_some() {
+            return;
+        }
+        let body = self
+            .io
+            .request_contexts
+            .plan_body(plan)
+            .expect("resumed Plan");
+        let request = body
+            .entries
+            .iter()
+            .find_map(|entry| entry.call.as_ref().filter(|call| call.context == *leg))
+            .expect("resumed call")
+            .admission
+            .attempt
+            .request;
+        self.io.session_resumed.push(request);
+    }
+
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, None)
+        self.make_plan_leg_context(plan, slot, None, false)
     }
 
     /// Narrow a write leg using the common engine intent rules before its first
@@ -613,40 +828,48 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: crate::classify::Intent,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, Some(intent))
+        self.make_plan_leg_context(plan, slot, Some(intent), false)
     }
 
+    /// Handoff, initial or ready custody over this Plan's next issue.
+    fn plan_issue_custody(&self, plan: &Plan, body: &Body) -> bool {
+        self.io
+            .http_delivery
+            .as_ref()
+            .is_some_and(|delivery| body.handoff.as_ref() == Some(delivery))
+            || (body.initial_custody
+                && self.io.http_delivery.is_none()
+                && self.io.http_plan_ready.is_none()
+                // A ready founder's own physical Plan counts as the ready owner.
+                && self.validate_preflight_ready_owner(plan.owner()).is_ok())
+            || (self.io.http_delivery.is_none()
+                && self
+                    .io
+                    .http_plan_ready
+                    .as_ref()
+                    .is_some_and(|ready| ready.same_plan(plan)))
+    }
+
+    /// A parked Slot's resume stands in for Plan custody; nothing else may
+    /// issue a parked Slot.
     fn make_plan_leg_context(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
+        resumed: bool,
     ) -> Result<Context, Error> {
         let body = self.io.request_contexts.validate_plan(plan, self.now)?;
         let index = body.schedule.ordinal(slot)?;
         let entry = &body.entries[index];
         if entry.credit != Credit::Unissued
+            || entry.parked != resumed
             || !body
                 .schedule
                 .available()
                 .any(|candidate| body.schedule.ordinal(&candidate) == Ok(index))
             || !entry.eligible_at.is_some_and(|at| at <= self.now)
-            || !(self
-                .io
-                .http_delivery
-                .as_ref()
-                .is_some_and(|delivery| body.handoff.as_ref() == Some(delivery))
-                || (body.initial_custody
-                    && self.io.http_delivery.is_none()
-                    && self.io.http_plan_ready.is_none()
-                    // A ready founder's own physical Plan counts as the ready owner.
-                    && self.validate_preflight_ready_owner(plan.owner()).is_ok())
-                || (self.io.http_delivery.is_none()
-                    && self
-                        .io
-                        .http_plan_ready
-                        .as_ref()
-                        .is_some_and(|ready| ready.same_plan(plan))))
+            || !(resumed || self.plan_issue_custody(plan, body))
         {
             return Err(Error::Revoked);
         }
@@ -712,6 +935,7 @@ impl<P> Cx<'_, P> {
         let body = self.io.request_contexts.plan_body_mut(plan).unwrap();
         body.schedule.start(slot).expect("available plan slot");
         body.entries[index].notified = true;
+        body.entries[index].parked = false;
         body.entries[index].credit = Credit::Issued;
         body.entries[index].call = Some(call);
         self.io.request_contexts.reserved_contexts -= 1;
@@ -1053,13 +1277,26 @@ impl Body {
     fn next_wake(&self) -> f64 {
         self.entries
             .iter()
-            .filter(|entry| entry.credit == Credit::Unissued && !entry.notified)
+            .filter(|entry| entry.credit == Credit::Unissued && !entry.notified && !entry.parked)
             .filter_map(|entry| entry.eligible_at)
             .fold(self.handle.deadline(), f64::min)
     }
 }
 
 impl ContextRegistry {
+    pub(in super::super) fn plan_registered(&self, plan: &Plan) -> bool {
+        self.plan_body(plan).is_ok()
+    }
+
+    /// Return a parked Slot to ordinary availability; a sealed Plan is a no-op.
+    pub(in super::super) fn unpark_plan_slot(&mut self, plan: &Plan, slot: &Slot) {
+        if let Ok(body) = self.plan_body_mut(plan)
+            && let Ok(index) = body.schedule.ordinal(slot)
+        {
+            body.entries[index].parked = false;
+        }
+    }
+
     pub(in super::super) fn plan_timer(&self, command: CommandId) -> Option<TimerId> {
         let CommandPhase::Planned(state) = &self.commands.get(&command)?.phase else {
             return None;
@@ -1197,6 +1434,7 @@ impl ContextRegistry {
             for entry in &mut body.entries {
                 if entry.credit == Credit::Unissued
                     && !entry.notified
+                    && !entry.parked
                     && entry.eligible_at.is_some_and(|at| at <= now)
                 {
                     entry.notified = true;

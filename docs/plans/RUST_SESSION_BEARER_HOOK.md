@@ -484,3 +484,13 @@ private requests carry a session token can use it.
   25/25 default and 31/31 `http-plans` itself, and confirmed the start gate
   fails in both variants without the tail drain. Part 2 is fully cleared
   (independent, claude-55ao7t, claude-fe7lgm, codex-zs5e83).
+
+**Stacked on #2037 (overseer, draft PR).** The branch merges #2037's pushed
+head `c768f28b6d0` so the draft is mergeable onto it. That merge applies the
+pinned composition: the `flush_http_plans` tail runs `flush_bearer_fences`,
+then `flush_plan_session_waits`, then `session_resumed.clear()`; each
+session-wait pass ends with a Bearer drain, because the expired-wait callback
+has no ready custody and may retire a Session; `retire_session` keeps the
+reservation ahead of `drain_waits`. Held from READY until #2037 (with N7 and
+its cap fix) and G2b land; R10b, R10b' (including the parked-Preflight case)
+and R11 follow then.

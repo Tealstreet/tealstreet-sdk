@@ -759,3 +759,38 @@ fn delivery_scope_outlives_temporary_marker_removal_owner_retirement_and_reuse()
     e.io.request_contexts.exit_delivery(&delivery);
     assert_eq!(e.io.request_contexts.delivery_depth, 0);
 }
+
+/// Control (RUST_PLAN_SESSION_WAIT C2): a retained Preflight read cannot park
+/// on a Session.
+#[test]
+fn a_preflight_read_cannot_park_on_a_session_today() {
+    use crate::request_context::plan::{CallTerms, RetryWindow};
+    let mut engine = engine();
+    let owner = begin(&mut engine, 7, PreflightPurpose::ReadOnly);
+    cx(&mut engine, 1., |cx| {
+        let session = cx
+            .open_session(crate::request_context::SessionPolicy {
+                credential: None,
+                repeat_safe: true,
+                private_egress: None,
+            })
+            .unwrap();
+        let read = cx
+            .preflight_read_context(
+                &owner,
+                read_policy(),
+                CallTerms {
+                    wait_ms: 0,
+                    timeout_ms: 100,
+                    attempts: 1,
+                    retry_window: RetryWindow::FreshAttempt,
+                },
+            )
+            .unwrap();
+        let (ids, timers) = (cx.io.next_id, cx.io.timers.len());
+        let refused = cx.session_wait(&session, &read, ());
+        assert_eq!(refused.map_err(|(_, error)| error), Err(Error::State));
+        assert_eq!((cx.io.next_id, cx.io.timers.len()), (ids, timers));
+        assert!(cx.session_ready(&session).is_empty());
+    });
+}
