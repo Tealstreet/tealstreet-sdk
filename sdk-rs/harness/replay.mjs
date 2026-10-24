@@ -15,7 +15,7 @@ import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { idleLoadedBaseline, measureBeforeCapture, retainedMemory, settledMemory } from './memory.mjs';
 import { currencyBalances, lookupResult } from './account-shapes.mjs';
-import { finalizeReplay } from './replay-finalize.mjs';
+import { captureReplayState, finalizeReplay } from './replay-finalize.mjs';
 import { credentialValues, findNoticeLeaks } from './notice-leaks.mjs';
 import { continuousReplayStartup, deterministicReplay, frozenReplayStartup, replayTransportReady } from './polling.mjs';
 import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, captureRustFill, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
@@ -333,7 +333,7 @@ async function runRust() {
   for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
   let lastFlush = -Infinity;
   const flushTimer = isPrivate ? setInterval(() => host.flush(), 250) : undefined;
-  const capture = (frames = 0) => {
+  const capture = (frames = 0, final = false) => {
     const marketRows = [];
     for (let i = 0; i < (markets?.count ?? 0); i++) {
       marketRows.push({
@@ -387,7 +387,7 @@ async function runRust() {
       bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
     }
     const account = isPrivate ? rustAccount({ markets, orders, positions, positionGreeks, balance, settings, status, fills }) : undefined;
-    return {
+    return captureReplayState({
       frames,
       unserved: tape.unserved,
       missingWrites: tape.missingWrites,
@@ -396,7 +396,6 @@ async function runRust() {
       writes: tape.writes,
       subscriptions: [...tape.subscriptions].sort(),
       unusedWrites: tape.unusedWrites(),
-      protocolErrors: tape.audit?.errors() ?? [],
       wsRequests: [...tape.sentRequests].sort(),
       store: { markets: marketRows, tickers: tickerRows },
       books: bookRows,
@@ -404,7 +403,7 @@ async function runRust() {
       commands: tape.results,
       notices,
       transportReceipt: tape.transportReceipt(),
-    };
+    }, tape.audit, { final });
   };
   const checkpoints = [];
   const frames = await tape.play(
@@ -437,7 +436,7 @@ async function runRust() {
   clearInterval(flushTimer);
   host.flush();
   const finish = values.performance ? measureBeforeCapture : finalizeReplay;
-  const result = await finish(() => ({ ...capture(frames), checkpoints }), () => measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark, wasmBeforeBytes, loadMetrics));
+  const result = await finish(() => ({ ...capture(frames, true), checkpoints }), () => measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark, wasmBeforeBytes, loadMetrics));
   if (values.performance) tape.assertWritesConsumed();
   host.dispose();
   clock?.restore();
@@ -758,7 +757,7 @@ async function runTs() {
   // Model the worker posting each subscribed book to main every 250 ms.
   let lastFlush = -Infinity;
   const mainBooks = {};
-  const capture = (frames = 0) => {
+  const capture = (frames = 0, final = false) => {
     const receiver = values['no-egress'] ? store : mainStore;
     const snapshot = {
       markets: receiver.markets.map((m) => ({ ...m })),
@@ -800,7 +799,7 @@ async function runTs() {
           fills: executions.map(captureTsFill),
         }
       : undefined;
-    return {
+    return captureReplayState({
       frames,
       unserved: tape.unserved,
       missingWrites: tape.missingWrites,
@@ -809,14 +808,13 @@ async function runTs() {
       writes: tape.writes,
       subscriptions: [...tape.subscriptions].sort(),
       unusedWrites: tape.unusedWrites(),
-      protocolErrors: tape.audit?.errors() ?? [],
       wsRequests: [...tape.sentRequests].sort(),
       store: snapshot,
       books: bookCopies,
       account,
       commands: tape.results,
       transportReceipt: tape.transportReceipt(),
-    };
+    }, tape.audit, { final });
   };
   const checkpoints = [];
   const frames = await tape.play(
@@ -859,7 +857,7 @@ async function runTs() {
   if (!values['no-egress'])
     for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
   const finish = values.performance ? measureBeforeCapture : finalizeReplay;
-  const result = await finish(() => ({ ...capture(frames), checkpoints }), () => measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark, 0, loadMetrics));
+  const result = await finish(() => ({ ...capture(frames, true), checkpoints }), () => measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark, 0, loadMetrics));
   if (values.performance) tape.assertWritesConsumed();
   exchange.dispose();
   clock?.restore();
