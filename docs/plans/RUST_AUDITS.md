@@ -3023,6 +3023,17 @@ new-test metadata expectations were corrected to the existing perps NotSent
 contract; primary RED boundaries and native wire/result assertions are retained.
 
 
+## Crypto.com local trading admission
+
+Immediate cancel/amend validation, leverage validation, unsupported margin,
+missing primary key and placement-plan errors now consume actual Mutation entry
+authority before their existing NotSent projection. Fixed position mode uses
+shared LocalSetting with no financial Store change. Rejected admission supplies
+the only failure; revoked custody adds no fallback. Credential-free local errors
+do not count as remote auth evidence. Remote jobs/signing/classification and all
+other venue files remain unchanged; no engine or key-selection algorithm added.
+
+
 ## Hyperliquid local setting terminal authority
 
 Nine local numeric terminals use shared LocalSetting success or genuine Mutation

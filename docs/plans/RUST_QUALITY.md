@@ -1667,6 +1667,25 @@ retain native assertions while driving managed preparation. The new probe opens
 no socket, so it makes no standalone socket-composition claim.
 
 
+## Crypto.com immediate trading managed controls
+
+Plan and original controls were committed before production. Re-executed on
+actual db6fa45bbb7 with unchanged source, the dedicated target produced 18
+assertion REDs and 8 working GREEN controls. After adoption all 26 pass, including
+all three non-finite clocks, full genuine-owner capacity and recovery, duplicate
+live owners, native validation/key precedence, missing-key auth-health isolation,
+fixed-mode Store preservation from either initial value, warning order, repeated
+slot reuse, private placement bytes/progress and legacy empty jobs. No ignored
+tests, removed financial assertion or fabricated custody; broad replay and
+WASM/CPU/memory checks belong to CI.
+
+The scoped Crypto.com suite passes 174 tests across 16 targets; strict all-target
+Clippy, formatting, bans and the 15 request inventory tests pass. Read-only
+credential scanning confirms no key-selection term change, and all production
+outside Crypto.com trading.rs stays base-exact. Original controls remain
+byte-identical to their RED checkpoint. CI is still required before readiness.
+
+
 ## Hyperliquid local settings and schedule controls
 
 Original25 controls execute12 assertion REDs/13 GREEN on unchanged9d344 source.
