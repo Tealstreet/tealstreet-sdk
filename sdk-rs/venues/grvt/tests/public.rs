@@ -239,8 +239,8 @@ fn candle_requires_complete_valid_ohlc_and_nanosecond_time() {
             to_ms: None,
         }),
     );
-    let r = e
-        .drain_actions()
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 1700000000003.)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)

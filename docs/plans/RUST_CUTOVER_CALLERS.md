@@ -7418,6 +7418,125 @@ supersedes the native diagnostic with its typed NotSent terminal. Schedule time
 <now+5000 refuses; equality and None disarm still reach the unchanged signed path.
 No caller parameter, signing/selection change, valid write, retry or timer is added.
 
+## HTTP pacing sets and signing eligibility
+
+A venue declares primitive floors through `http_pacing()` and optional immutable
+flat sets through `http_pacing_sets()`. `PacingSet { group, constraints }` gives a
+set its own declaration ID; member references name primitive IDs only. Sets share
+primitive release clocks and cannot nest, duplicate members or collide with
+primitive IDs. Engine construction validates and resolves bounded member indices.
+
+A Context's existing `Pacing { group, minimum_gap_ms }` selects one primitive or
+one set. Its outer minimum extends each member floor. For WOO, a set containing
+global100/algo500 with outer0 charges both on algo POST; ordinary writes select
+global100, PUT global200. Ordinary interleaving does not reset the algo clock.
+All bounds pass before one admission; only Released charges all members. Failed
+admission, stale/expired requests and waits consume none. Raw deadlines remain
+immutable through signing waits and route reprepare.
+
+Signed HTTP now retains a prepared resource without invoking its recipe/provider
+while any selected primitive is blocked. Its existing timer wakes at the earliest
+eligibility, route-expiry or physical-deadline boundary. Final Claim rechecks all
+bounds, including releases made by other requests after signing. Hosts continue
+to prepare, bind and Claim through the existing protocol; no wire change.
+Admission paths requiring no pacing must use `SendPacing::validate_zero`, which
+expands registered sets and checks every effective floor, including outer0 sets.
+G2b's owner composes its zero-pacing helper onto this resolver before IDs; this
+section does not claim that unlanded G2b adoption has occurred.
+
+### Kraken Futures unsigned PublicTrades cursor ownership
+
+PublicTrades admits one genuine caller-receipt Read root, retained by shared
+ReadCursorHistory through its native 50-page cursor walk. Every physical page
+uses a fresh Read/Never child from that original root and the existing unsigned
+wire. Exact root/child/Attempt DATA admission precedes codec/progress/staging;
+the physical child retires before a successor. Only the root completes.
+
+The 20s per-child admission-to-expiry bound is NEW (the old raw packet declared
+no timeout). It covers route/Prepare/Bind and transport, capped by the exact
+original caller receipt. It adds neither a logical walk timeout nor a retry.
+Typed preparation/queue failures are strict and retain shared fields/local
+NotSent even after accepted pages. Root expiry is strict engine-owned Timeout,
+with no rows or INCOMPLETE marker. Released Network/physical Timeout under a
+live root and native later HTTP503/malformed DATA preserve accepted-only recovery
+and the owned marker; failed-page staging never appears. First released failure
+retains its typed cause (Network/Timeout), plus the native message prefix.
+
+Unsigned native egress, sorted form, limits, exact IDs/millisecond timestamps,
+row economics, descending sort, deduplication and cursor/stall rules remain.
+No signing, private history, key selection, Spot or candle behavior changes.
+Root plus current child require two Context slots; a child Capacity refusal
+strictly retires the admitted root without I/O or a leaked reservation.
+
+### Receipt-bound stamp floor (dispatch signing)
+
+Plan: [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md). This is an additive engine API.
+No family's stamps change until a recipe opts in.
+
+| Change | tealstreet-next file:line | Old usage | New usage | Impact |
+| --- | --- | --- | --- | --- |
+| `StampFloor` (opaque), `SigningRelease::stamp_floor()` | none | n/a | minted only from a genuine released receipt stamp | none |
+| `DispatchContext::stamp_after(floor)` = `max(0, stamp_ms(), floor + 1)`, refusing past the safe-integer range | Rust venue recipes only | `stamp_ms()` | resend recipes keep stamps monotonic on fixed or backward clocks; `stamp_ms()` is unchanged | none |
+
+StampFloor's opt-in helper also refuses a non-finite current clock before
+clamping and any final stamp beyond the safe-integer range, even without a
+floor. This does not change stamp_ms or opt any venue into the helper. A reused
+floor is metadata only; each consumer must retain its real original owner and
+released-attempt association, and separately obtain genuine resend authority.
+
+## Bitrue dispatch signer and managed bracket Read
+
+Bitrue REST signing now consumes trusted opaque Identity refs through one atomic
+provider recipe. API key bytes, exact body/query bytes, six-header order and native
+recvWindow remain. Selected identity, slot, egress and evidence stay coupled across
+signature and transport reissues; each uses the exact previous release's StampFloor.
+Keyless catalogue remains unsigned on Primary; keyed public-only catalogue remains
+primary-signed. Hosted signing compatibility is not enabled. Provider refusal emits
+no partially signed request and cannot trigger a raw fallback or transport resend.
+
+FetchMaxLeverage captures the genuine caller wait once and derives a fresh 20s/Never
+physical leg per native eligible reissue. Near-20s retries keep the original root,
+selection and deadline; strict caller expiry publishes one Timeout without changing
+limits. Only the original root completes. HTTP500/408 signature errors no longer
+replay an uncertain write. Native one-signature/three-transport budgets remain
+independent. Catalogue/account/coalesced reads, sessions, history and trade-owned
+work retain explicit legacy ownership until their shared owner adoptions; signing
+does not provide Mutation journal/ResendGrant or Plan/history authority. The stable
+legacy request funnel remains a remove-before-master obligation. SDK/NX history
+outer-wait behavior is unchanged by this single command-read adoption.
+
+
+## Backpack initial local history refusals
+
+Backpack rejects unsupported client-order-ID lookup, non-funding income kinds,
+invalid history time bounds and unknown requested markets through the original
+command receipt and a keyless Read Context. Missing or expired receipts use the
+shared rejection causes; valid admission preserves each native message, absent
+kind and absent write outcome. The Read policy has a 20-second maximum, no
+pacing and Never retry. Refusals create no transport or paging work, and retain
+native validation precedence. Supported history requests use their existing
+selection, signing, paging and completion paths.
+
+
+## GRVT unsigned FetchCandles caller bounds
+
+FetchCandles retains the original caller receipt through one unsigned Read Plan,
+with initial plus five immediate transport attempts. The explicit 20 s attempt
+bound (including route, Prepare, Bind and physical transport) and derived 120 s
+logical ceiling are NEW caller contracts: native Candles set timeout_ms=None.
+The original caller deadline always wins; retries never renew it, and a late
+selected attempt has a shortened window or refuses below 1 ms remaining.
+Unclaimed DATA, expired callers and stale attempts cannot publish candle rows.
+
+Status, malformed data and preparation refusals stay strict. Only released
+transport failures or physical timeouts can select a declared Read retry. The
+sixth failure terminates with no seventh request; rows staged by a failed attempt
+are discarded. Preparation errors retain shared typed fields and NotSent. Local
+interval/market/bounds precedence, wire, sorting and native errors are unchanged.
+The public request selects no credentials and waits on no Session or signer.
+All non-Candles preparation failures retain the inherited engine callback chain.
+The second integrator of this slice and #1905 runs its login-specific control.
+
 ## GRVT fixed local settings
 
 Both margin requests and hedged mode retain their exact Unsupported/NotSent

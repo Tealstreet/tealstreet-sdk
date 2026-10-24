@@ -2402,3 +2402,7 @@ fn session_headers(response: &Response<'_>) -> (Option<String>, Option<String>) 
         .map(str::to_owned);
     (cookie, account)
 }
+
+#[cfg(test)]
+#[path = "login_preparation_tests.rs"]
+mod login_preparation_tests;
