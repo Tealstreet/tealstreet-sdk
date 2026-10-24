@@ -369,3 +369,123 @@ fn a_refused_contracts_preparation_backs_off_and_retries_through_managed_custody
         "the retry is managed too"
     );
 }
+
+/// Drives `attempts` real contracts preparations, each refused with full venue evidence.
+fn refused_preparations(attempts: usize) -> Vec<Action> {
+    use safe_cex_engine::{ErrorKind, VenueError};
+    let mut engine = crate::support::engine(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    let mut now = 0.0;
+    engine.start(now);
+    let mut actions: Vec<_> = engine.drain_actions().collect();
+    for attempt in 0..attempts {
+        let preparation = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::ManagedHttp(http) => match &**http {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } if request.url == MARKETS => Some(*preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("real contracts Prepare");
+        assert!(engine.http_preparation_pending(preparation));
+        engine.http_preparation_failed(
+            now,
+            preparation,
+            safe_cex_engine::request_context::Error::Invalid,
+            VenueError::new("route refused")
+                .kind(ErrorKind::InvalidInput)
+                .venue_code("ROUTE_REFUSED")
+                .venue_message("policy declined"),
+        );
+        assert!(!engine.http_preparation_pending(preparation));
+        actions = engine.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+        assert!(!actions.iter().any(|action| matches!(
+            action,
+            Action::ManagedHttp(http) if matches!(&**http, HttpAction::Bind { .. })
+        )));
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 1, "one native retry, with the read retired");
+        if attempt + 1 < attempts {
+            now = timers[0].1;
+            engine.handle(now, Event::TimerFired { timer: timers[0].0 });
+            actions = engine.drain_actions().collect();
+        }
+    }
+    actions
+}
+
+fn degraded(actions: &[Action]) -> &safe_cex_engine::LogEvent {
+    actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.code == "startup.degraded" => Some(event),
+            _ => None,
+        })
+        .expect("six real preparation failures reach native degradation")
+}
+
+#[test]
+fn an_invalid_preparation_retires_and_backs_off_without_release() {
+    let actions = refused_preparations(1);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::Event(event)) if event.code == "request.failed"
+            ))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn an_invalid_preparation_keeps_its_typed_cause_into_degradation() {
+    let actions = refused_preparations(6);
+    let event = degraded(&actions);
+    assert!(
+        event.fields.contains(&(
+            "kind",
+            safe_cex_engine::ErrorKind::InvalidInput.as_str().into()
+        )),
+        "{:?}",
+        event.fields
+    );
+}
+
+#[test]
+fn an_invalid_preparation_keeps_its_venue_evidence_into_degradation() {
+    let actions = refused_preparations(6);
+    let event = degraded(&actions);
+    assert!(
+        event
+            .fields
+            .contains(&("venueCode", "ROUTE_REFUSED".into())),
+        "{:?}",
+        event.fields
+    );
+    assert!(
+        event
+            .fields
+            .contains(&("venueMessage", "policy declined".into()))
+    );
+}

@@ -60,8 +60,10 @@ managed Read per physical read.
   markets, `start_private` and the socket connects. A follow-up read admits its
   own fresh Context.
 - **Failures.** The failure paths are `on_request_failed`, `on_http_failed`,
-  `on_sign_error` (unreachable for unsigned reads, but routed the same) and
-  `on_stream_malformed`. Each retires the Context first, then calls
+  `on_sign_error` and `on_stream_malformed`. Discovery reads are never
+  cryptographically signed, but a managed preparation refusal still enters
+  `on_sign_error`, and its typed error, including venue code and message, goes to
+  `public_failed` unchanged. Each retires the Context first, then calls
   `public_failed`.
   - These failure callbacks are not custody-gated. A read's own expired 20 s
     deadline must still reach `public_failed`, which schedules the native
