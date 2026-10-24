@@ -1223,6 +1223,7 @@ fn setting_provider_failure_is_not_sent_only_before_any_attempt_release() {
 #[test]
 fn malformed_signature_code_cannot_replay_a_mutating_post() {
     for token in [
+        r#""\"-1022\"""#,
         r#""-01022""#,
         r#""-001022""#,
         r#"" -1022""#,
@@ -1263,6 +1264,7 @@ fn malformed_signature_code_cannot_replay_a_mutating_post() {
 #[test]
 fn malformed_signature_code_cannot_reissue_a_streamed_read() {
     for token in [
+        r#""\"-1022\"""#,
         r#""-01022""#,
         r#""-001022""#,
         r#""-1022.0""#,
