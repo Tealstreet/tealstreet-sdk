@@ -170,3 +170,22 @@ actual composition. #2075's pre-status ticker guard and generic failure fallback
 must likewise remain when that actual source is integrated. No pending venue
 head is described as an actual dependency or consumed for this checkpoint.
 Committed full-map/fixture preservation reviews and fresh CI remain gates.
+
+### Actual command-candle composition checkpoint
+
+Plain-merged actual #2071 through landing 2caa80214f06. m26ps4 and 5c57jl
+cleared exact source-union patch
+`039ff692f25f0202dd5f2c7b784d0733f1fa46091a6016d7a38b6cd513a6a734`
+before application; complete lib blob is
+`7569644a6170c4d9929cbb157c4100253442e207`. The Account and Candles DATA guards
+remain independent early returns before common status/codec. Incoming handlers
+keep typed candle failures first, with the native sign-error/request-failure
+fallback retaining Setting exact-owner retirement and its 100 ms continuation.
+
+The new same-engine `setting_candle_failures` target drives both preparation
+refusals and released failures. Both controls pass, pinning one typed candle
+terminal (InvalidInput/NotSent or Network/no outcome), no immediate HTTP or
+Prepare retry, exactly one native 100 ms Setting continuation, and the second
+coin's real managed request without candle retry. The unchanged setting11 and
+candle19 targets also pass. Final actual ticker-seed composition, scoped strict
+checks and composed CI remain gates before readiness.
