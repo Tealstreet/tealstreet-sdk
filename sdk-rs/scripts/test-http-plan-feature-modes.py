@@ -20,7 +20,12 @@ def modes():
     if not families:
         raise RuntimeError('expected at least one venue family')
     closures = {}
-    grouped = {(): ['engine baseline'], ('order-locks', 'test-support'): ['explicit CI control']}
+    grouped = {
+        (): ['engine baseline'],
+        ('order-locks', 'test-support'): ['explicit CI control'],
+        # dispatch-nonce OFF control keeps ordinary Plan/read signing enabled.
+        ('http-plans', 'order-locks', 'test-support'): ['dispatch nonce OFF control'],
+    }
     grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'order-locks', 'test-support')] = ['explicit nonce control']
     for family in families:
         tree = subprocess.check_output([

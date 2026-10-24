@@ -445,3 +445,8 @@ strict checks across ordinary dispatch paths. This is a function-level outlining
 choice, with no compiler-profile or feature-on behavior change; pinned Bitget
 measurement recovers another 478 bytes. Final receipts report residual public
 API compatibility cost against the pre-nonce baseline rather than byte equality.
+
+The seeded CI feature-mode dictionary also names an explicit dispatch-nonce OFF
+control (`http-plans,order-locks,test-support`), alongside the existing seeds and
+the explicit nonce ON control. This runs ordinary selected reads and strict
+feature-off refusal without depending on family closure feature unification.
