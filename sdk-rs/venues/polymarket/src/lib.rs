@@ -77,6 +77,7 @@ pub enum Pending {
         limit: Option<u32>,
     },
     Markets {
+        context: Context,
         count: usize,
         rows: Vec<Market>,
         metadata: Vec<PredictionMarket>,
@@ -135,6 +136,7 @@ pub struct Polymarket {
     pub(crate) address: Option<String>,
     pub(crate) connections: [Connection; 2],
     books: HashMap<String, BookState>,
+    catalogue_context: Option<Context>,
     market_ids: HashSet<String>,
     market_cursors: HashSet<String>,
     market_symbols: HashSet<String>,
@@ -183,6 +185,7 @@ impl Polymarket {
             credentials: None,
             account: Default::default(),
             trading: Default::default(),
+            catalogue_context: None,
             market_ids: Default::default(),
             market_cursors: Default::default(),
             market_symbols: Default::default(),
@@ -237,18 +240,43 @@ impl Polymarket {
         if let Some(cursor) = &cursor {
             url.push_str(&format!("&after_cursor={}", encode(cursor)));
         }
-        cx.request_streamed(
+        let context = match cx.http_context(Scope::Background, public_read::policy(Operation::Read))
+        {
+            Ok(context) => context,
+            Err(reason) => {
+                self.markets_failed(cx, &reason.to_string());
+                return;
+            }
+        };
+        self.catalogue_context = Some(context.clone());
+        match cx.request_managed(
+            context.clone(),
+            None,
             Method::Get,
             url,
-            vec![],
-            ArrayAt::Field("markets"),
+            None,
             Pending::Markets {
+                context,
                 count: 0,
                 rows,
                 metadata,
                 skipped: vec![],
             },
-        );
+        ) {
+            Ok(request) => cx.stream_response(request, ArrayAt::Field("markets")),
+            Err((pending, reason)) => self.on_request_failed(cx, pending, &reason.to_string()),
+        }
+    }
+    fn catalogue_current(&self, context: &Context) -> bool {
+        self.catalogue_context.as_ref() == Some(context)
+    }
+    fn finish_catalogue(&mut self, cx: &mut Cx<'_, Pending>, context: &Context) -> bool {
+        let current = self.catalogue_current(context);
+        let _ = cx.finish_http_context(context);
+        if current {
+            self.catalogue_context = None;
+        }
+        current
     }
     fn markets_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
@@ -841,6 +869,13 @@ impl Venue for Polymarket {
         {
             return;
         }
+        if let Pending::Markets { context, .. } = &pending
+            && (!self.catalogue_current(context)
+                || cx.validate_background_read_http_delivery(context).is_err())
+        {
+            self.finish_catalogue(cx, context);
+            return;
+        }
         if let Err(e) = success(response) {
             self.on_request_failed(cx, pending, &e);
             return;
@@ -848,6 +883,7 @@ impl Venue for Polymarket {
         match pending {
             Pending::Account(_) | Pending::Trade(_) | Pending::Book { .. } => unreachable!(),
             Pending::Markets {
+                context,
                 count,
                 rows,
                 metadata,
@@ -866,6 +902,7 @@ impl Venue for Polymarket {
                     self.walk_skipped_slugs.extend(skipped);
                 }
                 if count > GAMMA_PAGE {
+                    self.finish_catalogue(cx, &context);
                     self.markets_failed(cx, "Oversized Polymarket Gamma page");
                     return;
                 }
@@ -876,10 +913,12 @@ impl Venue for Polymarket {
                     next_cursor: Option<std::borrow::Cow<'a, str>>,
                 }
                 let Ok(page) = serde_json::from_str::<Page>(response.body) else {
+                    self.finish_catalogue(cx, &context);
                     self.markets_failed(cx, "Invalid Polymarket keyset envelope");
                     return;
                 };
                 if !page.markets.is_empty() {
+                    self.finish_catalogue(cx, &context);
                     self.markets_failed(cx, "Unstreamed Polymarket market page");
                     return;
                 }
@@ -888,17 +927,21 @@ impl Venue for Polymarket {
                         || self.market_cursors.len() >= 10000
                         || !self.market_cursors.insert(cursor.to_string())
                     {
+                        self.finish_catalogue(cx, &context);
                         self.markets_failed(cx, "Polymarket market cursor did not advance");
                         return;
                     }
+                    self.finish_catalogue(cx, &context);
                     self.markets(cx, Some(cursor.into_owned()), rows, metadata);
                     return;
                 }
                 if count == GAMMA_PAGE {
+                    self.finish_catalogue(cx, &context);
                     self.markets_failed(cx, "Polymarket market page is missing its next cursor");
                     return;
                 }
                 if rows.is_empty() {
+                    self.finish_catalogue(cx, &context);
                     cx.notice(
                         Level::Warn,
                         code::REQUEST_FAILED,
@@ -928,6 +971,7 @@ impl Venue for Polymarket {
                 }
                 self.midpoint_failed.clear();
                 self.midpoint_next = Some(0);
+                self.finish_catalogue(cx, &context);
                 self.public_ready(cx);
                 self.midpoints(cx, 0);
             }
@@ -1066,11 +1110,18 @@ impl Venue for Polymarket {
         match pending {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets {
+                context,
                 count,
                 rows,
                 metadata,
                 skipped,
             } => {
+                if !self.catalogue_current(context)
+                    || cx.validate_background_read_http_delivery(context).is_err()
+                {
+                    self.finish_catalogue(cx, context);
+                    return;
+                }
                 *count += 1;
                 let gm = match serde_json::from_str::<Gamma>(item) {
                     Ok(gm) => gm,
@@ -1224,7 +1275,12 @@ impl Venue for Polymarket {
                 read.failed(cx, VenueError::new(error));
                 return;
             }
-            Pending::Markets { .. } => Some(None),
+            Pending::Markets { context, .. } => {
+                if !self.finish_catalogue(cx, &context) {
+                    return;
+                }
+                Some(None)
+            }
             Pending::Midpoints { context, offset } => {
                 if self.finish_midpoints(cx, offset, &context) {
                     self.midpoints_failed(cx, offset, true);
