@@ -2,6 +2,25 @@
 use crate::request_context::{Error, ReleaseTime};
 use crate::signing::SignReceipt;
 
+/// The stamp a resend must exceed: the genuine released receipt's stamp. Only
+/// `SigningRelease::stamp_floor` makes one, so a venue cannot mint it from a
+/// response, a header or a clock. It constrains a stamp and grants nothing.
+/// ```
+/// // Control: the exported type itself is nameable outside the engine.
+/// let none: Option<safe_cex_engine::StampFloor> = None;
+/// assert!(none.is_none());
+/// ```
+/// ```compile_fail
+/// let forged = safe_cex_engine::StampFloor(5.);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StampFloor(f64);
+impl StampFloor {
+    pub(crate) fn millis(self) -> f64 {
+        self.0
+    }
+}
+
 /// Metadata only: neither delivery evidence nor authority to send or retry.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SigningRelease {
@@ -16,6 +35,10 @@ impl SigningRelease {
     }
     pub fn time(&self) -> ReleaseTime {
         self.time
+    }
+    /// The floor for a resend of this release, when its receipt carried a stamp.
+    pub fn stamp_floor(&self) -> Option<StampFloor> {
+        self.receipt.stamp_ms.map(StampFloor)
     }
     /// Uncapped signature expiry in raw time, independent of the HTTP deadline.
     pub fn raw_expiry_ms(&self) -> Option<f64> {
