@@ -67,6 +67,10 @@ the same immutable root and do not create another caller wait.
    dispatch::Http recipe, exact path/query/body and stream selector. Unsigned
    trades use http_leg_context and request_managed_with_headers, preserving the
    existing static headers. No child is minted while parked.
+   A local child-mint or queue-admission refusal strictly rejects the exact live
+   root with its typed Read error, retiring its read and pacing state; it never
+   enters accepted-prefix recovery. Only proven already-revoked owners drop
+   inertly. Add controls for both refusals after an accepted page.
 4. Each Pending retains its exact leg and original Owner generation. Check the
    exact current owner and delivery before any item decode, skipped-row event,
    raw-row counter, envelope codec, identity, staging, coverage or publication.
@@ -162,3 +166,8 @@ fixture, missing-request, selection, wire-body or parsing failure counts as RED.
 These pin the pre-cutover behavior only. The draft must not merge this RED
 checkpoint. Signed production and new root/leg controls wait for actual #1983;
 all six assertions must turn GREEN through the real shared path before READY.
+
+codex-uufub4 cleared bounded bridge/core fit at plan `a80c8ac5f7d`, including
+the actual #1983 dependency, retained original root and exact page/attempt
+admission. The child-mint/queue-refusal source gate above folds in that review;
+it is not a runtime or CI clearance.
