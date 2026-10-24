@@ -99,3 +99,10 @@ CLEARED the narrow correction: pin the historical after-map to immutable actual
 77f124 and additionally require the live map be its subset via unchanged check().
 Both historical 10/10 hashes and every regrowth negative remain. The production
 checker and bootstrap rows are unchanged; this is not an inventory exception.
+
+Authority review claude-fe7lgm and native/source review codex-9czdjh CLEAR at
+551a79938cf, with cleanup-order follow-up8592354fb5c CLEAR from both. Successful
+config publication now precedes its single retirement. Checker-owner review
+claude-m26ps4 CLEAR for f193dd5d055's test-only historical pin and live subset.
+Existing history/startup fixtures now settle startup config or drive genuine
+managed preparation; every existing assertion and both original test blobs stay.

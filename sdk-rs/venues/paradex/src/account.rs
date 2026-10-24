@@ -1215,11 +1215,11 @@ impl Account {
         request: Request,
         response: Response<'_>,
     ) {
-        if let Request::Config(context) = &request {
-            if cx.validate_background_read_http_delivery(context).is_err() {
-                let _ = cx.finish_http_context(context);
-                return;
-            }
+        if let Request::Config(context) = &request
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            let _ = cx.finish_http_context(context);
+            return;
         }
         if let Err(error) = crate::success(response) {
             self.on_failed(cx, request, &error);
