@@ -182,3 +182,32 @@ fn remote_wire_policy_rejects_unknown_codecs_labels_and_unbound_fixed_ids() {
     ))
     .unwrap();
 }
+
+#[test]
+fn seconds_timestamp_wire_requires_exactly_one_declared_method_path_suffix() {
+    let rules = |wire: &str| {
+        format!(
+            r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"remoteSigning":{{"wire":{wire}}}}}}}}}"#
+        )
+    };
+    for family in ["/users/self/verify", "/user/verify"] {
+        build_support::generate(&rules(&format!(
+            r#"{{"exchangeName":"v","extraData":"secondsTimestamp","secondsSuffix":{{"method":"GET","path":"{family}"}}}}"#
+        )))
+        .unwrap();
+    }
+    for wire in [
+        r#"{"exchangeName":"v","extraData":"secondsTimestamp"}"#,
+        r#"{"exchangeName":"v","secondsSuffix":{"method":"GET","path":"/user/verify"}}"#,
+        r#"{"exchangeName":"v","extraData":"bybitExpiry","secondsSuffix":{"method":"GET","path":"/user/verify"}}"#,
+        r#"{"exchangeName":"v","extraData":"secondsTimestamp","secondsSuffix":{"method":"get","path":"/user/verify"}}"#,
+        r#"{"exchangeName":"v","extraData":"secondsTimestamp","secondsSuffix":{"method":"","path":"/user/verify"}}"#,
+        r#"{"exchangeName":"v","extraData":"secondsTimestamp","secondsSuffix":{"method":"GET","path":"user/verify"}}"#,
+        r#"{"exchangeName":"v","extraData":"secondsTimestamp","secondsSuffix":{"method":"GET","path":"/user verify"}}"#,
+        r#"{"exchangeName":"v","extraData":"secondsTimestamp","secondsSuffix":{"method":"GET","path":"/user/verify\r\n"}}"#,
+        r#"{"exchangeName":"v","extraData":"secondsTimestamp","secondsSuffix":{"method":"GET","path":"/user/verify","typo":1}}"#,
+        r#"{"exchangeName":"v","extraData":"okxTimestamp"}"#,
+    ] {
+        assert!(build_support::generate(&rules(wire)).is_err(), "{wire}");
+    }
+}
