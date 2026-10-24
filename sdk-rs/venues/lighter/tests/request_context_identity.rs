@@ -645,3 +645,44 @@ fn physical_timeout_advances_a_different_candidate_while_the_original_root_lives
     );
     assert_eq!(outcomes(&actions), [Ok(r#"{"userId":"5"}"#.into())]);
 }
+
+#[test]
+fn root_equality_expiry_never_falls_through_to_another_native_candidate() {
+    let mut e = engine(Options {
+        application_id: Some(ADDRESS_A.into()),
+        public_data_only: true,
+        ..Default::default()
+    });
+    let actions = ask(&mut e, NOW, 20_000);
+    let (first, _) = prep(&actions);
+    let timers: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    assert!(!timers.is_empty());
+    let (permit, request) = bind(&mut e, NOW, first);
+    assert!(matches!(e.claim_http(NOW, permit), Ok(Claim::Released(_))));
+    let mut actions = vec![];
+    for timer in timers.into_iter().rev() {
+        e.handle(NOW + 20_000., Event::TimerFired { timer });
+        actions.extend(e.drain_actions());
+    }
+    assert!(!actions.iter().any(|action| match action {
+        Action::Http(_) => true,
+        Action::ManagedHttp(action) => matches!(
+            action.as_ref(),
+            HttpAction::Prepare { .. } | HttpAction::Bind { .. }
+        ),
+        _ => false,
+    }));
+    let results = outcomes(&actions);
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0].as_ref().unwrap_err().kind,
+        Some(ErrorKind::Timeout)
+    );
+    assert!(outcomes(&reply(&mut e, NOW + 20_001., &request, 200, ROW)).is_empty());
+}

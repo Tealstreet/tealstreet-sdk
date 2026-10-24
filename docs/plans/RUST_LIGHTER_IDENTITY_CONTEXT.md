@@ -149,13 +149,28 @@ zero ignored. Production, existing fixtures, Cargo and maps remain exactbe710.
 The scope includes ordinary Read refusal None, and retained shared preparation
 failure NotSent (the existing engine contract), without changing either policy.
 
-API review detail still pending: validate_read_http_delivery rejects an expired
-physical child even while the caller root lives. The exact physical-timeout
-callback's authority for advancing a DIFFERENT native candidate must be confirmed
-by the core owner before source. Do not convert that rejection into publication
-rights, infer release from text, renew the root or invent a failure validator.
+API review detail resolved by fe7/uuf: validate_read_http_delivery rejects an expired
+physical child even while the caller root lives. The exact typed released failure callback itself supplies failure-only custody.
+In order: validate_read_root_context(root), finish_http_context(exact old child),
+http_leg_context(root,unsigned20s/Never), then request_managed for the DIFFERENT
+candidate. Never call validate_read_http_delivery on that failed child or treat
+its rejection as authority. Root validation/retirement refusal stops immediately,
+with no metadata, Store or candidate effects. Preparation failures have their own
+strict callback and never enter this path. No new failure validator is needed.
 
 A twentieth original control pins real released physical-timeout fallback under
 a live longer root; it currently fails at the eager-HTTP/Prepare boundary. Its
 real timer/next-candidate suffix remains gated, not a claimed failure-validator
 proof. The current complete target executes14 intended REDs/6 GREEN/0ignored.
+
+Fe7's bounded plan/original/API review is CLEAR at97e909, matching uuf's sanctioned
+failure-only continuation. The root-equality sibling is added before source: a
+released first candidate with20s root, all captured deadline timers delivered at
+equality (physical first), no new Prepare/Bind, exactly one engine Timeout and
+late DATA inert. Pending-private fields remain private; exact internal validation
+and retirement order are source-review gates, while the public control certifies
+real timer dispatch, bounded next Prepare and terminal effects without an accessor.
+
+The root-equality sibling executes as the21st compiling original: current
+source reports15 intended assertion REDs/6 GREEN/0ignored. Its first failure is
+also Prepare, so the same-event timer/terminal suffix remains a source gate.
