@@ -195,6 +195,12 @@ class PrecisionRed(unittest.TestCase):
         self.assertFalse(self.prod('fn f(c: &mut Other) { ' + call + ' }'))
         # The innermost binding wins: a typed non-Cx closure parameter shadows.
         self.assertFalse(self.prod(in_cx_fn('each(|c: &mut Row| { ' + call + ' });', 'c')))
+        # An inferred closure type is untyped, so it is counted.
+        for kind in ['_', '&mut _', "&'a mut _"]:
+            self.assertEqual(self.prod('fn f() { each(|c: ' + kind + '| { ' + call + ' }); }'), lexical)
+        # One predicate allows the type and resolves the receiver, lifetimes included.
+        for kind in ["&'a Cx<'_, P>", "&'a mut Cx<'_, P>", "&Cx<'_, P>"]:
+            self.assertEqual(self.prod('fn f<\'a>(c: ' + kind + ') { ' + call + ' }'), lexical)
         # Real sites keep their exact fingerprint, so the rebaseline is a subset.
         real = 'cx.request(Method::Get, "https://venue/read", pending);'
         self.assertEqual(self.prod(in_cx_fn(real)), ban.fingerprints(real))
@@ -218,7 +224,6 @@ class PrecisionRed(unittest.TestCase):
             in_cx_fn('let all = [cx];'),
             in_cx_fn('match cx { c => c.done(1, row) }'),
             in_cx_fn('if let c = cx { c.done(1, row); }'),
-            'fn f() { each(|c, row| { let d = c; d.done(1, row); }); }',
             "use safe_cex_engine::Cx as Ctx;",
             "type Alias<'a> = Cx<'a, Pending>;",
             "struct Holder<'a> { cx: &'a mut Cx<'a, Pending> }",
@@ -232,6 +237,31 @@ class PrecisionRed(unittest.TestCase):
         ban.context_fingerprints(in_cx_fn('let t = cx.now; helper(cx, 1); other(&mut *cx); each(cx, |cx, row| cx.done(1, row));'))
         ban.context_fingerprints("fn f(apply: impl FnMut(&mut Cx<'_, Pending>, Row)) {}")
 
+    def test_cx_flowing_through_expressions_and_bindings_is_counted(self):
+        for body in [
+            'pass(cx).request(1);', 'Wrap(cx).0.done(1, row);', 'cells[index(cx)].fail(1, e);',
+            'let c = Some(cx).unwrap(); c.request(1);', 'let c: _ = pass(cx); c.done(1, row);',
+            'for c in [pass(cx)] { c.fail(1, e); }', 'if let Some(c) = wrap(cx) { c.done(1, row); }',
+            'match wrap(cx) { Some(c) => c.done(1, row), None => {} }',
+            'each(|c, row| { let d = c; d.done(1, row); });',
+        ]:
+            with self.subTest(body=body):
+                self.assertEqual(sum(self.prod(in_cx_fn(body)).values()), 1)
+        # Members of a Cx field are not Cx calls; field reads are not calls at all.
+        for body in ['cx.store.done(1);', 'let s = cx.now; s.done(1);', 'if read.request.done { }']:
+            with self.subTest(body=body):
+                self.assertFalse(self.prod(in_cx_fn(body)))
+
+    def test_a_macro_cannot_carry_a_cx_value(self):
+        source = 'macro_rules! id { ($e:expr) => { $e } } ' + in_cx_fn('id!(cx).fail(1, e);')
+        with self.assertRaises(ValueError):
+            ban.context_fingerprints(source)
+        for body in ['m!(cx);', 'm![cx, 1];', 'm! { cx }']:
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                ban.context_fingerprints(in_cx_fn(body))
+        # Calls and members inside a macro are ordinary uses.
+        self.assertFalse(self.prod(in_cx_fn('let s = format!("{}", label(cx, 1)); log!(cx.now);')))
+
     def test_test_regions_are_listed_separately(self):
         call = 'cx.done(command, "null".into());'
         expected = ban.fingerprints(call)
@@ -242,7 +272,10 @@ class PrecisionRed(unittest.TestCase):
         ]:
             with self.subTest(source=source):
                 self.assertEqual(ban.context_fingerprints(source), ({}, expected))
-        self.assertEqual(ban.context_fingerprints('#[cfg(feature = "x")] ' + in_cx_fn(call)), (expected, {}))
+        for attribute in ['#[cfg(feature = "x")]', '#[cfg(any(test, feature = "x"))]',
+                          '#[cfg(not(test))]', '#[cfg_attr(test, allow(dead_code))]']:
+            with self.subTest(attribute=attribute):
+                self.assertEqual(ban.context_fingerprints(attribute + ' ' + in_cx_fn(call)), (expected, {}))
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             src = root / 'venues/reference/src'
@@ -255,16 +288,25 @@ class PrecisionRed(unittest.TestCase):
             (src / 'secondary_tests').mkdir()
             (src / 'secondary_tests/nested.rs').write_text(in_cx_fn(call))
             (src / 'undeclared_tests.rs').write_text(in_cx_fn(call))
+            # #[path] resolves from the declaring file; a prod declaration keeps a file prod.
+            (src / 'support').mkdir()
+            (src / 'support/shared.rs').write_text(in_cx_fn(call))
+            (src / 'support/only_tests.rs').write_text(in_cx_fn(call))
+            (src / 'wire.rs').write_text('#[cfg(test)] #[path = "support/only_tests.rs"] mod only; '
+                                        '#[path = "support/shared.rs"] mod shared; '
+                                        '#[cfg(test)] #[path = "support/shared.rs"] mod shared_tests;')
+            (src / 'lib.rs').write_text('mod history; mod wire; #[cfg(test)] mod secondary_tests; ' + in_cx_fn(call))
             with mock.patch.object(ban, 'ROOT', root):
                 prod, test = ban.request_sites()
             digest = dict(expected)
             self.assertEqual(prod, {p: digest for p in [
                 'venues/reference/src/history/shape.rs', 'venues/reference/src/lib.rs',
-                'venues/reference/src/undeclared_tests.rs']})
+                'venues/reference/src/support/shared.rs', 'venues/reference/src/undeclared_tests.rs']})
             self.assertEqual(test, {p: digest for p in [
                 'venues/reference/src/history/family_tests.rs',
                 'venues/reference/src/secondary_tests.rs',
-                'venues/reference/src/secondary_tests/nested.rs']})
+                'venues/reference/src/secondary_tests/nested.rs',
+                'venues/reference/src/support/only_tests.rs']})
 
 
 if __name__ == '__main__':

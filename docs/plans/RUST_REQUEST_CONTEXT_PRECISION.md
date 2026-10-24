@@ -124,3 +124,51 @@ Controls kept green: formatting/comment/literal invariance, raw/qualified/
 generic forms (now inside a `Cx` fn), `macro_rules!`/`include!` refusal,
 malformed input, the exact shrink ratchet, the strict schema, base/event refs
 and the real-git baseline.
+
+## Review revision (claude-4yjlw0, plan `e71c051f37e`)
+
+- **P1, expression receivers.** A legacy method call also counts when its
+  receiver expression uses a Cx-flow value outside member access:
+  `pass(cx).request(..)`, `Wrap(cx).0.done(..)`, `cells[index(cx)].fail(..)`.
+  Untyped `let`/`if let`/`while let`/`for`/`match` bindings whose initializer,
+  iterable or scrutinee uses a Cx-flow value are Cx-bound ("derived") within
+  their scope, so `let c = Some(cx).unwrap(); c.request(..)` counts. That
+  replaces the closure-rebinding refusal: `|c| { let d = c; d.done() }`
+  counts. A Cx value that is a macro's own argument (`id!(cx)`, `m![cx]`) is
+  refused. A call argument or member access inside a macro (`format!("{}",
+  label(cx))`) is an ordinary use. Field reads (`read.request.done`) and
+  members of Cx fields (`cx.store.done()`) are not calls on a Cx.
+- **P2.** An inferred closure type (`_`, `&mut _`, `&'a mut _`) is untyped and
+  counted. One predicate (`cx_type`) both allows the type name and resolves the
+  receiver, and covers `&'a Cx<..>`, `&'a mut Cx<..>` and `&Cx<..>`. Only an
+  exact `#[cfg(test)]` marks a test item; `cfg(any(test, ..))`,
+  `cfg(not(test))` and `cfg_attr(test, ..)` stay prod. `#[path]` modules
+  resolve from the declaring file. A file that any prod declaration reaches
+  stays prod, and only test-only files move.
+- **P3.** At a ref with no `request-legacy-test-sites.json`, the test
+  inventory is bounded by that ref's prod manifest (`previous_manifests(TEST,
+  MANIFEST)`), so the split cannot add a site that a predating ref never held.
+
+The new controls (`test_cx_flowing_through_expressions_and_bindings_is_counted`,
+`test_a_macro_cannot_carry_a_cx_value`, and the extended type, region and
+`#[path]` cases) were written after the fix in the same revision. They pass
+against it; they are controls, not pre-fix REDs.
+
+## Rebaseline at the actual base `49f7d1857b6`
+
+The base manifest has 712 entries. Of these, 463 are kept in prod
+byte-identical and 1 (BingX `account.rs`) moves byte-identical to the test
+manifest. That total of 464 equals the lexical count of called legacy members
+on a `cx`/`ctx` receiver. The other 248 are dropped:
+
+| reason | count |
+| --- | --- |
+| macro | 176 |
+| helper call on `self` | 46 |
+| field read | 18 |
+| other member | 5 |
+| qualified path | 3 |
+
+Every drop is listed by path, digest, count and reason in
+`RUST_REQUEST_CONTEXT_PRECISION_MAPPING.json`. Each new map is a per-digest
+subset of the base map. The socket inventory is unchanged.
