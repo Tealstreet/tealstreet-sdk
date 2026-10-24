@@ -7670,6 +7670,65 @@ late timers cannot settle reused IDs or alter unrelated live queries. No signer
 or credential-auth evidence is introduced. Legacy TypeScript/AWS behavior stays
 on its existing path until the Rust implementation is selected.
 
+## ApeX managed trade plans (#1891)
+
+Trade commands retain their native successful result bytes, cancellation order,
+client-ID receipts, multipart leverage fields and racing-fill replacement rules.
+Their HTTP requests pass through trusted Prepare/Bind/Claim and provider signing
+at release. Callers using native Options must supply an opaque identity and
+register the same trusted identity with the engine; raw legacy Options alone no
+longer authorize managed writes. Startup/account/session conversion and SDK
+admission are separate obligations.
+
+Released 408/5xx, malformed successful ACKs and unlisted native codes produce
+explicit Unknown failures through the shared classifier/journal. Earlier accepted
+native effect/reconciliation IDs survive a later failure; these include confirmed
+cancellation targets and must not all be interpreted as newly placed orders.
+Only exact native 20016 refusal can earn one resend;
+text containing "sign" and bare statuses cannot. Capability refusal before a
+contract-bearing Amend prevents its cancel too. Local zkLink works through the
+provider; remote zkLink remains gated by P8 (#1926). Native async remote HMAC
+cancel and multipart-setting controls pin independent Node vectors, remote-only
+credential/MAC sentinels and exact timestamp/body/header bytes. SDK/browser wire
+proof and registry admission remain open; local capability fixtures prove neither.
+
+## ApeX Omni signer admission (#2008)
+
+ApeX now signs only through the provider at dispatch
+(`RUST_APEXOMNI_SIGNER_ADMISSION.md`). Caller-visible changes:
+
+- **`Options` holds no key material.** `key`, `secret`, `passphrase` and
+  `omni_key_seed` are gone; `identity` (opaque refs) is the only signing input.
+  Native callers either pass raw fields to the registry, whose trusted setup
+  installs the provider, or inject refs plus a provider. Raw fields beside refs,
+  and refs without a provider, refuse.
+- **The OmniKey seed is the primary's `zklinkSeed` role.** The construction row
+  declares `dispatchSigning` and `setupMapping: apexomni`. TS `LocalSignerSetup`
+  carries the seed as `extra.zklinkSeed`, and `withoutSigningCredentials` drops
+  `omniKeySeed` for every venue. A wrong-width seed refuses setup with the
+  legacy "Invalid OmniKey seed" message.
+- **No secondary.** ApeX has no read credentials, so a supplied secondary
+  refuses setup.
+- **Public symbols are unsigned**, even for private accounts.
+- **Keyless and remote-signer ApeX accounts stay on TS** (`runsOnRustEngine`)
+  until P8.
+- **`sign::request` and `sign::ws_login`** are legacy test oracles taking
+  `sign::LegacyCredentials`; the venue never calls them.
+
+
+### CPU producer step metadata convergence
+
+CPU artifact authentication now waits for every step in its exact completed,
+successful attempt1 producer to become terminal. The command shares at most
+twenty complete metadata inventory refreshes, thirty seconds apart, across all
+artifact bindings, including valid empty step lists. Exhaustion reports the
+run, physical job and pending steps or the explicit empty-inventory cap;
+HTTP refusals, changed identity and retry aliases fail closed. This is an API
+metadata wait, not a replay/measurement retry or a new timing sample. Exact
+upload/checkout windows, ZIP/digest checks, raw observations and final
+provenance validation remain enforced. No venue policy or legacy non-Rust
+production changes. Plan: RUST_CPU_PRODUCER_STEP_METADATA.md.
+
 ### TxFlow unsigned account-setting polls
 
 Each activeAssetData setting poll retains one keyless Background Read Context

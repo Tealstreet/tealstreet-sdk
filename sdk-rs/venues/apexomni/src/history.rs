@@ -357,10 +357,7 @@ impl ApexOmni {
                 to_ms,
                 limit,
             } => {
-                if self.options.public_data_only
-                    || self.options.key.as_deref().is_none_or(str::is_empty)
-                    || self.options.secret.as_deref().is_none_or(str::is_empty)
-                {
+                if self.options.public_data_only || self.options.identity.is_none() {
                     cx.done(command, "[]".into());
                     return Ok(());
                 }
