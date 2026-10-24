@@ -48,6 +48,8 @@ otherwise GET uses Primary. Writes use Primary. Absent Secondary passphrase
 inherits Primary; explicit empty does not fall back. Start-time secondary
 validation remains earlier than discovery. The component does not introduce
 new credential selection, bypass public-only policy, or reinterpret strings.
+Private startup still requires Primary's passphrase even when Secondary has
+its own; do not relax that prerequisite while resolving the fallback.
 
 Use the existing canonical Slots/SelectedRead choice once in the consumer,
 then pass that same opaque Identity to the recipe. The context credential,
@@ -119,3 +121,34 @@ gate: shared dispatcher/custody adoption, not a venue implementation of it.
 Run one scoped Cargo target at a time with CARGO_BUILD_JOBS=4. CI owns broad
 feature/workspace and performance checks. Commit the plan before the originals;
 commit executable evidence separately and request both bounded reviews.
+
+## Original-source checkpoint
+
+Plan `dfdf00db95c` precedes test commit `ea5ec84ee69`. The dedicated target
+executes thirteen tests on unchanged actual production: five intended assertion
+REDs, eight GREEN controls, zero ignored and no compile/setup failure. REDs are
+the missing Secondary and Primary managed Prepare packets, eager nonce entropy,
+private HTTP bypassing a genuinely installed parked provider, and the old stamp
+after an 800 ms delayed action handoff. That last observation is not a physical
+route/Claim proof; real managed timing remains a source-stage requirement.
+
+GREENs pin independently computed literal HMAC values and native header order,
+GET fallback including absent Secondary passphrase, explicit-empty rejection
+before discovery, Primary-required/public-only policy, one 21-byte nonce draw
+with both filtered symbols, an actual entropy refusal without HTTP/provider
+work, and the leverage result/settings with no position creation. The existing
+`secondary_get_keeps_primary_mutations` library control also passes unchanged,
+pinning Primary for POST/PUT/DELETE. Dedicated strict Clippy and scoped package
+format checks pass; one Cargo process at a time, CARGO_BUILD_JOBS=4.
+
+codex-zs5e83 handed over exact `2d1cb21ea0b9cc4c4db2c3d7ca4a8032483096aa`,
+confirmed no unpublished recipe/production hold and requested reuse of that
+single prototype. Its historical eight ignored REDs/eleven working controls
+are distinct from this new unignored thirteen-test execution. Actual #2022's
+two local leverage refusals, PublicTrades/candle entry, every prior fixture,
+all production/Cargo/maps/checkers and every other incoming path are unchanged.
+The three own paths are the new plan, index row and original target. Logs live
+in `/tmp/codex-blofin-hmac-original.log`,
+`/tmp/codex-blofin-hmac-original-strict.log` and
+`/tmp/codex-blofin-hmac-selection-control.log`; they are not repository files.
+No runtime/recipe implementation, push, PR, CI or landed consumer API is claimed.
