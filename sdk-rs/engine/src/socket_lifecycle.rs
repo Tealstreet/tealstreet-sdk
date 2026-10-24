@@ -319,6 +319,14 @@ struct Feed {
     interests: Interests,
 }
 
+/// A native subscription encoder, called through one shared vtable.
+type Encode<'a> = dyn FnMut(
+        bool,
+        &[Interest],
+        &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+    ) -> Result<(), SocketError>
+    + 'a;
+
 // A canonical replay retains immutable rows without recreating their strings.
 // Both sources still pass through the same validation and transaction below.
 enum InterestInput {
@@ -730,7 +738,8 @@ impl Lifecycle {
             &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
         ) -> Result<(), SocketError>,
     ) -> Result<u64, SocketError> {
-        self.replace_with_repair(feed, InterestInput::Proposed(interests), &[], encode)
+        let mut encode = encode;
+        self.replace_with_repair(feed, InterestInput::Proposed(interests), &[], &mut encode)
     }
     pub(crate) fn repair_interests(
         &mut self,
@@ -745,7 +754,8 @@ impl Lifecycle {
         if keys.len() > MAX_INTERESTS {
             return Err(SocketError::Capacity);
         }
-        self.replay_with_repair(feed, keys, encode)
+        let mut encode = encode;
+        self.replay_with_repair(feed, keys, &mut encode)
     }
     pub(crate) fn replay_interests(
         &mut self,
@@ -756,17 +766,14 @@ impl Lifecycle {
             &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
         ) -> Result<(), SocketError>,
     ) -> Result<u64, SocketError> {
-        self.replay_with_repair(feed, &[], encode)
+        let mut encode = encode;
+        self.replay_with_repair(feed, &[], &mut encode)
     }
     fn replay_with_repair(
         &mut self,
         feed: FeedId,
         keys: &[String],
-        encode: impl FnMut(
-            bool,
-            &[Interest],
-            &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
-        ) -> Result<(), SocketError>,
+        encode: &mut Encode<'_>,
     ) -> Result<u64, SocketError> {
         let rows = self
             .feeds
@@ -779,16 +786,13 @@ impl Lifecycle {
             .collect();
         self.replace_with_repair(feed, InterestInput::Retained(rows), keys, encode)
     }
+    /// Non-generic: every native encoder shares this one copy.
     fn replace_with_repair(
         &mut self,
         feed: FeedId,
         interests: InterestInput,
         repair: &[String],
-        mut encode: impl FnMut(
-            bool,
-            &[Interest],
-            &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
-        ) -> Result<(), SocketError>,
+        encode: &mut Encode<'_>,
     ) -> Result<u64, SocketError> {
         let f = self.feeds.get(feed.0).ok_or(SocketError::Stale)?;
         if f.stopped {
@@ -863,10 +867,12 @@ impl Lifecycle {
             .ok_or(SocketError::Capacity)?;
         // Reuse immutable rows only when both key and native arguments match.
         // Changed arguments keep a distinct released row until unsubscribe.
-        let desired: BTreeMap<_, _> = match interests {
-            InterestInput::Proposed(rows) => rows
-                .into_iter()
-                .map(|i| {
+        // Inserted one by one: `collect` would sort and bulk-build a separate
+        // copy of the tree code for every input shape.
+        let mut desired = BTreeMap::new();
+        match interests {
+            InterestInput::Proposed(rows) => {
+                for i in rows {
                     let i = i.canonicalize();
                     let row = f
                         .interests
@@ -875,14 +881,19 @@ impl Lifecycle {
                         .filter(|previous| previous.as_ref() == &i)
                         .cloned()
                         .unwrap_or_else(|| Arc::new(i));
-                    (row.key.clone(), row)
-                })
-                .collect(),
-            InterestInput::Retained(rows) => {
-                rows.into_iter().map(|row| (row.key.clone(), row)).collect()
+                    desired.insert(row.key.clone(), row);
+                }
             }
-        };
-        let forced: BTreeSet<_> = repair.iter().map(String::as_str).collect();
+            InterestInput::Retained(rows) => {
+                for row in rows {
+                    desired.insert(row.key.clone(), row);
+                }
+            }
+        }
+        let mut forced = BTreeSet::new();
+        for key in repair {
+            forced.insert(key.as_str());
+        }
         if forced.len() != repair.len() || forced.iter().any(|k| !desired.contains_key(*k)) {
             return Err(SocketError::InvalidInterest);
         }
@@ -906,7 +917,10 @@ impl Lifecycle {
             if items.is_empty() {
                 continue;
             }
-            let expected: BTreeSet<_> = items.iter().map(|i| i.key.as_ref()).collect();
+            let mut expected = BTreeSet::new();
+            for item in &items {
+                expected.insert(item.key.as_ref());
+            }
             let mut covered = BTreeSet::new();
             let mut failure = None;
             let result = {
