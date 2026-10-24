@@ -533,3 +533,31 @@ Reviewed-seam verification checkpoint: all thirteen corrected lifecycle/native c
 
 
 Final reviewed-stack ratchet receipt: actual Lighter #1807 (`8e0726f7675`) is genuinely integrated at 11bf92f61ef. Bans and both request checks exit zero there, including all fourteen scanner controls; only the intended three Backpack fingerprints are removed. The entire owned Backpack, reviewed engine, crypto and Binance trees remain byte-identical to the 447-test/strict-Clippy/fmt verified source. The earlier premature gate statement was corrected before this receipt. Actual #1857 and fresh final CI/guard remain mandatory; no merge readiness is claimed.
+
+
+## Candle slice adoption and actual-seam integration, 2026-10-24
+
+The overseer transferred #1870 from hcmq3f to mxb4mq; hcmq3f confirmed the
+handoff and stopped edits. `4a82e0e1ee0` plain-merges actual `be710b3f2d7` into
+`0399ba95a3b`. Actual #1857 `867896f3e25` is an ancestor of that landing, so
+the earlier reviewed-stack blocker is historical and is now satisfied. All
+incoming engine/registry/private trading changes are retained. The only source
+conflict kept the incoming Trade failure arm first and the original Candles
+Context failure arm verbatim, as source-cleared by the previous owner. Shared
+plan/CALLERS conflicts retain incoming first plus the exact candle suffix once.
+
+The six own paths and exact three one-count lib.rs removals remain the scope;
+all other manifest maps and unowned paths equal the incoming landing. Corrected
+regression controls are byte-identical to `52077fd6268` (SHA-256
+`ebd8db948d29c1256f3160a931ef8527f47e86dbf9b1686a9f3e46d82d179505`).
+The preserved original-source receipt records all 13 assertion REDs on
+`0d3f1dfa9bf`; the current integrated source passes those same 13 controls.
+No assertion or native candle behavior is changed during adoption.
+
+Local verification is scoped to Backpack with CARGO_BUILD_JOBS=4 under the
+overloaded-machine instruction, superseding the earlier broad two-crate local
+suite. The Backpack suite passes 173 tests with zero failures; one pre-existing
+trading repair control remains ignored under its separate Plan migration gate.
+Formatting and bans (including inventory scanner/ratchet controls) pass. Fresh
+full CI and exact committed preservation review remain readiness gates; no
+merge window or source-equivalent CI claim is inferred from old evidence.
