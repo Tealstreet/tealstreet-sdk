@@ -330,6 +330,7 @@ impl<P> Cx<'_, P> {
         result
     }
 
+    #[cfg_attr(feature = "dispatch-nonce", inline(never))]
     #[allow(clippy::too_many_arguments)]
     fn queue_managed_admitted(
         &mut self,

@@ -538,3 +538,31 @@ the generic queue body out of inlined request wrappers identified by Twiggy,
 without changing any OFF code, API, admission, ownership or bind-once order.
 Measure the same combined artifact and retain it only if the complete result
 helps. Obtain bounded source review and run the same queue/Claim controls.
+
+
+Queue outlining measures 14,164,573 bytes, saving 600 but remaining 8,797
+over. Retain its unchanged-body boundary and pursue the planned type-level
+capability fallback, without adding further inline hints.
+
+Add `Venue::DISPATCH_NONCE: bool = false`, an immutable associated constant.
+It is independent of Cargo feature unification and of the once-captured release
+registration. Engine construction permits nonce authority only when both this
+constant and the captured NonceUnscheduled mode agree. The queue uses that
+captured permission and keeps its existing pre-ID refusal and binding order.
+Existing ordinary and pure non-nonce venues remain supported with the default.
+
+With the feature ON, `claim_http` uses the concrete nonce-capable helper only
+for a venue whose constant is true; false uses the ordinary release path. A
+false-capability request with any declared claim or recorded reservation refuses
+State before ordinary Lifecycle admission, so no hidden authority can bypass
+the floor. True retains the exact reviewed pair matrix, floor and repair path.
+Generation and Bearer fences remain earlier than either branch. OFF code is
+unchanged. Tests and the real-WASM recipe fixture explicitly opt in; native
+Kraken adoption remains a separate consumer gate, with no funnel switched here.
+
+Controls must cover default-capability denial before IDs/provider/reservation,
+pure non-nonce work with the default, and explicit-capability nonce success.
+The capability adds no authority: trusted mint, installed identity, captured
+registration, reservation and final floor checks remain required. Obtain plan
+and source review, then measure the exact combined pair and rerun the existing
+ON/OFF/native/real-WASM controls. This is local only; budgets remain fixed.
