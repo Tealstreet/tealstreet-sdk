@@ -781,9 +781,9 @@ fn corpus() -> Vec<String> {
     out
 }
 
-/// Outer fields, the nested payload key, its inner fields, and whether the
-/// inner object is the first element of an array.
-type Nest = (Fields, &'static str, Fields, bool);
+/// Outer fields, the nested payload key, its inner fields, and the payload
+/// template the inner object replaces `@` in.
+type Nest = (Fields, &'static str, Fields, &'static str);
 type Fields = Vec<(&'static str, &'static str)>;
 
 /// The same per-field mutations one level down: inside the first element of a
@@ -795,22 +795,35 @@ fn nested_corpus(values: &[&str]) -> Vec<String> {
         ("side", r#""buy""#),
         ("amount", "1"),
         ("price", "100"),
+        ("triggerPrice", "99"),
+        ("maxSlippagePct", "0.5"),
+        ("stopLoss", "90"),
+        ("takeProfit", "110"),
         ("reduceOnly", "false"),
         ("timeInForce", r#""GoodTillCancel""#),
+        ("triggerType", r#""mark_price""#),
+        ("tpTriggerType", r#""last_price""#),
+        ("slTriggerType", r#""index_price""#),
+        ("clientOrderId", r#""client-1""#),
+        ("close", "false"),
+        ("stpMode", r#""EXPIRE_TAKER""#),
+        ("bybitBbo", r#"{"sideType":"Queue","level":1}"#),
+        ("bybitSlippageToleranceTicks", "2"),
+        ("impliedVolatility", "0.5"),
     ];
     #[allow(unused_mut)]
     let mut nests: Vec<Nest> = vec![(
         vec![("op", r#""placeOrders""#), ("command", "2")],
         "orders",
         order,
-        true,
+        "[@]",
     )];
     #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
     nests.push((
         vec![("op", r#""cancelOrdersWithSymbols""#), ("command", "25")],
         "orders",
         vec![("id", r#""7""#), ("symbol", r#""BTCUSDT""#)],
-        true,
+        "[@]",
     ));
     #[cfg(feature = "command-options")]
     nests.push((
@@ -822,20 +835,32 @@ fn nested_corpus(values: &[&str]) -> Vec<String> {
             ("right", r#""put""#),
             ("strikeMin", "90000"),
         ],
-        false,
+        "@",
+    ));
+    // Third level: the Bybit BBO object inside an order.
+    nests.push((
+        vec![("op", r#""placeOrders""#), ("command", "2")],
+        "orders",
+        vec![("sideType", r#""Queue""#), ("level", "1")],
+        r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"bybitBbo":@}]"#,
     ));
     let mut out = Vec::new();
-    for (outer, key, inner, array) in nests {
+    for (outer, key, inner, template) in nests {
         let inner: Vec<(&str, String)> = inner.iter().map(|(k, v)| (*k, (*v).to_owned())).collect();
         let wrap = |fields: &[(&str, String)]| {
             let object = render(fields);
-            let value = if array { format!("[{object}]") } else { object };
+            let value = template.replacen('@', &object, 1);
             let mut whole: Vec<(&str, String)> =
                 outer.iter().map(|(k, v)| (*k, (*v).to_owned())).collect();
             whole.push((key, value));
             render(&whole)
         };
-        out.push(wrap(&inner));
+        let base = wrap(&inner);
+        assert!(
+            serde_json::from_str::<legacy::CommandIn>(&base).is_ok(),
+            "nested template must be valid: {base}"
+        );
+        out.push(base);
         for value in values {
             let mut unknown = inner.clone();
             unknown.push(("zz", (*value).to_owned()));
