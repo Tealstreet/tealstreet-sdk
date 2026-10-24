@@ -690,7 +690,10 @@ impl<V: Venue> Engine<V> {
                         text,
                     ),
                 };
-                let other = matches!(control, Control::Other);
+                let other = matches!(
+                    control,
+                    Control::Other | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
+                );
                 let ready = self.venue.socket_startup_ready(&self.store);
                 self.assert_live();
                 let work = self.io.socket_driver.observe_control(now, epoch, &control);
@@ -1751,6 +1754,113 @@ mod tests {
         );
         assert_eq!(e.io.socket_driver.state.desired(feed).unwrap().len(), 1);
     }
+    #[test]
+    fn auth_progress_invalid_deadlines_leave_watch_and_auth_bound_unchanged() {
+        for now in [f64::NAN, f64::INFINITY, f64::MAX] {
+            let (mut e, _) = engine();
+            let mut supervisor = crate::socket::Supervisor::new(Config {
+                auth_timeout_ms: Some(15_000.),
+                ..Config::default()
+            });
+            {
+                let mut cx = Cx {
+                    now: 0.,
+                    store: &mut e.store,
+                    io: &mut e.io,
+                };
+                supervisor.connecting(&mut cx);
+                supervisor.opened(&mut cx);
+            }
+            let actions = e.io.actions.len();
+            let timers = e.io.timers.clone();
+            supervisor.authentication_progress(&mut Cx {
+                now,
+                store: &mut e.store,
+                io: &mut e.io,
+            });
+            assert_eq!(e.io.actions.len(), actions);
+            assert_eq!(e.io.timers, timers);
+            assert_eq!(
+                supervisor.expired(15_000.),
+                Some(crate::socket::Timeout::Auth)
+            );
+        }
+    }
+
+    #[test]
+    fn auth_progress_overflow_cannot_replace_the_existing_watch() {
+        let (mut e, _) = engine();
+        let mut supervisor = crate::socket::Supervisor::new(Config {
+            auth_timeout_ms: Some(f64::MAX),
+            ..Config::default()
+        });
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            supervisor.connecting(&mut cx);
+            supervisor.opened(&mut cx);
+        }
+        let actions = e.io.actions.len();
+        let timers = e.io.timers.clone();
+        supervisor.authentication_progress(&mut Cx {
+            now: f64::MAX / 2.,
+            store: &mut e.store,
+            io: &mut e.io,
+        });
+        assert_eq!(e.io.actions.len(), actions);
+        assert_eq!(e.io.timers, timers);
+        assert_eq!(
+            supervisor.expired(60_000.),
+            Some(crate::socket::Timeout::Idle)
+        );
+    }
+
+    #[test]
+    fn auth_progress_timer_exhaustion_is_fatal_before_replacing_the_old_bound() {
+        let (mut e, _) = engine();
+        let mut supervisor = crate::socket::Supervisor::new(Config {
+            auth_timeout_ms: Some(15_000.),
+            ..Config::default()
+        });
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            supervisor.connecting(&mut cx);
+            supervisor.opened(&mut cx);
+        }
+        let actions = e.io.actions.len();
+        let timers = e.io.timers.clone();
+        e.io.next_id =
+            crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID + 1);
+        let trapped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            supervisor.authentication_progress(&mut Cx {
+                now: 14_000.,
+                store: &mut e.store,
+                io: &mut e.io,
+            });
+        }));
+        assert!(trapped.is_err());
+        assert!(e.failed());
+        assert_eq!(e.io.actions.len(), actions);
+        assert_eq!(e.io.timers, timers);
+        assert_eq!(
+            supervisor.expired(15_000.),
+            Some(crate::socket::Timeout::Auth)
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                e.drain_actions().for_each(drop);
+            }))
+            .is_err()
+        );
+    }
+
     struct Step;
     impl crate::SignStep for Step {
         fn prepare(

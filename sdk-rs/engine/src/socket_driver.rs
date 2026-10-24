@@ -524,6 +524,12 @@ impl Driver {
         let first = !self.state.authenticated(epoch.feed());
         match self.state.auth(epoch, evidence, startup_ready) {
             AuthTransition::Ignored => Vec::new(),
+            AuthTransition::Progress(epoch) => {
+                self.runtime_mut(epoch.feed())
+                    .supervisor
+                    .authentication_progress(cx);
+                Vec::new()
+            }
             AuthTransition::Accepted {
                 epoch,
                 ready,

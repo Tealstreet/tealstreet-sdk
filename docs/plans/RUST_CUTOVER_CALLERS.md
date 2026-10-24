@@ -7570,3 +7570,15 @@ capability refusal; its unreachable native arm stays held. Physical HTTP,
 pagination, signed writes, queues, account/socket state and financial reducers
 are outside this slice. Inventory decreases from25 to10; #2031's ticker CPU
 change lands first and must be preserved on actual integration before freeze.
+
+### Managed socket intermediate authentication progress
+
+AuthEvidence::Progress renews only a current Required-auth Authenticating feed's
+existing OPEN-origin auth window. It grants no Ready, Accepted, interests or
+HTTP authority. The exact admitted text then reaches the existing native message
+handler to retain its accepted challenge and request epoch-bound authentication
+signing. Existing auth evidence dispatch and default feeds remain unchanged.
+Both original and renewed equality fences run before native codec/publication
+or final signed send; independent CONNECT snapshot and payload bounds remain.
+The Supervisor allocates its prospective replacement watch before changing the
+old watch or origin, and existing fatal exhaustion prevents partial output.

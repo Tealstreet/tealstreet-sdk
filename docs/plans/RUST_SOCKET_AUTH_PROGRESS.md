@@ -135,3 +135,35 @@ socket clock gate; the plan now retains its existing monotonic host-clock
 contract rather than adding an unrelated chronological ledger. That exploratory
 assertion is not part of the five adoption REDs. Scoped source-stage strict
 Clippy and reviewer/API clearance remain pending. No push or CI is claimed.
+
+## Source checkpoint
+
+Runtime consumes the reviewed payload-free Progress evidence only for a current
+Required-auth Authenticating feed. The private Supervisor hook computes the
+candidate watch using a prospective auth origin, checks finite advancing auth
+arithmetic and the existing expiry predicate, then allocates the new watch
+before replacing the old watch/origin. Resource exhaustion follows the existing
+fatal engine boundary with the prior bound intact. Snapshot, idle and ping
+bounds remain inputs to the same watch calculation.
+
+Progress text is forwarded to the existing native message handler after the
+core control transition and a current-epoch check. Other authentication evidence
+keeps its prior consumed-control behavior. This forwarding lets the native
+handler retain the accepted immutable challenge and request signed auth frames;
+no challenge state, reducer or signing operation is duplicated in the core.
+The first implementation run exposed this missing forwarding (9 PASS/9 assertion
+failures including new controls); the correction preserves every original
+contract assertion and yields 18 PASS/0 ignored in the dedicated target.
+
+Five additional actual-Engine controls directly exercise Progress under None,
+Observe and already-Accepted policies, parked provider release immediately before
+and at renewed equality, completed-provider delayed final drain at equality, and
+old signer completion after genuine reconnect. Three private unit controls pin
+invalid/non-advancing clocks, overflow and exhausted timer identities. All three
+pass; the exhaustion control also proves the engine is permanently failed and
+cannot drain partial output. No venue/host/signing/HTTP/map changes are included.
+
+Scoped socket regressions pass 130 tests; the independent snapshot-barrier target
+passes all 16 controls. The first normal bans run found the newly landed #2074
+Breakout inventory ahead of this branch, so freeze must first carry that actual
+landing and rerun normal ratchets. No exemption or foreign map repair is used.

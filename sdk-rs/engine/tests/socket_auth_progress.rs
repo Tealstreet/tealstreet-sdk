@@ -10,8 +10,7 @@ use safe_cex_engine::{Action, Cx, Engine, Event, SocketChannel, SocketId, Store,
 use std::collections::HashMap;
 
 fn progress_evidence() -> Control {
-    // No existing control expresses accepted intermediate authentication progress.
-    Control::Other
+    Control::Auth(AuthEvidence::Progress)
 }
 struct Native {
     feed: Option<FeedId>,
@@ -25,6 +24,7 @@ struct Native {
     authenticated: usize,
     messages: usize,
     epochs: Vec<Epoch>,
+    signed_auth: bool,
 }
 impl Venue for Native {
     type Pending = ();
@@ -60,6 +60,9 @@ impl Venue for Native {
         cx.connect_socket(feed, "wss://auth-progress.test").unwrap();
     }
     fn socket_control(&self, _: &Store, _: FeedId, authenticated: bool, text: &str) -> Control {
+        if text == "direct-progress" {
+            return progress_evidence();
+        }
         if text
             .strip_prefix("challenge:")
             .is_some_and(|s| !s.is_empty())
@@ -130,7 +133,11 @@ impl Venue for Native {
             self.waiting_challenge = false;
             self.challenge = true;
             self.accepted_challenges += 1;
-            cx.send(socket, "auth-subscription");
+            if self.signed_auth {
+                cx.send_signed(socket, "auth-subscription".into(), Box::new(AuthRecipe));
+            } else {
+                cx.send(socket, "auth-subscription");
+            }
         }
         if text == "ack" && self.challenge {
             self.acks += 1;
@@ -160,6 +167,9 @@ impl Harness {
         Self::policy(AuthMode::Required, false)
     }
     fn policy(auth: AuthMode, snapshot: bool) -> Self {
+        Self::configured(auth, snapshot, false)
+    }
+    fn configured(auth: AuthMode, snapshot: bool, signed_auth: bool) -> Self {
         let mut engine = support::seeded_engine(Native {
             feed: None,
             auth,
@@ -172,6 +182,7 @@ impl Harness {
             authenticated: 0,
             messages: 0,
             epochs: vec![],
+            signed_auth,
         });
         engine.start(0.);
         let mut h = Self {
@@ -438,4 +449,145 @@ fn nonfinite_challenge_clocks_cannot_grant_progress() {
         assert!(h.closed(h.socket));
         assert_eq!(h.sends("ordinary-interest"), 0);
     }
+}
+
+struct AuthRecipe;
+impl safe_cex_engine::SignStep for AuthRecipe {
+    fn prepare(
+        &mut self,
+        _: &mut Action,
+        _: &safe_cex_engine::DispatchContext<'_>,
+    ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::{
+            Algorithm, Context, KeyRef, Operation, PayloadPart, SignRequest,
+        };
+        Ok(SignRequest {
+            receipt: Default::default(),
+            context: Context::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: KeyRef("fixture-auth".into()),
+                payload: vec![PayloadPart::Bytes {
+                    bytes: b"accepted-challenge".to_vec(),
+                }],
+            }],
+        })
+    }
+    fn freshness_ms(&self) -> f64 {
+        60_000.
+    }
+    fn apply(
+        &mut self,
+        _: &mut Action,
+        _: &safe_cex_engine::signing::SignResult,
+    ) -> Result<(), safe_cex_engine::signing::SignError> {
+        Ok(())
+    }
+}
+fn parked_auth() -> (Harness, safe_cex_engine::RequestId) {
+    let mut h = Harness::configured(AuthMode::Required, false, true);
+    h.open(0.);
+    h.message(14_000., "challenge:nonce");
+    let attempt = h
+        .output
+        .iter()
+        .find_map(|a| match a {
+            Action::Sign { attempt, .. } => Some(*attempt),
+            _ => None,
+        })
+        .expect("real parked external signing attempt");
+    assert_eq!(h.sends("auth-subscription"), 0);
+    assert_eq!(h.sends("ordinary-interest"), 0);
+    (h, attempt)
+}
+fn signed(attempt: safe_cex_engine::RequestId) -> Event<'static> {
+    Event::Signed {
+        attempt,
+        result: Ok(safe_cex_engine::signing::SignResult::new(
+            vec![vec![0; 32]],
+            Default::default(),
+        )),
+    }
+}
+#[test]
+fn direct_progress_is_inert_for_none_and_observe_policies() {
+    for auth in [AuthMode::None, AuthMode::Observe] {
+        let mut h = Harness::policy(auth, false);
+        h.open(0.);
+        let timers = h.timers.clone();
+        let ready = h.engine.venue().ready;
+        h.message(14_000., "direct-progress");
+        assert_eq!(h.timers, timers, "ignored evidence cannot rearm a watch");
+        assert_eq!(h.engine.venue().ready, ready);
+        assert_eq!(h.engine.venue().authenticated, 0);
+        assert_eq!(h.sends("ordinary-interest"), 1);
+        h.message(15_000., "ordinary-data");
+        assert_eq!(h.closed(h.socket), auth == AuthMode::Observe);
+    }
+}
+#[test]
+fn direct_progress_after_accepted_does_not_rearm_or_release() {
+    let mut h = Harness::new();
+    h.open(0.);
+    h.message(1_000., "challenge:nonce");
+    h.message(2_000., "ack");
+    h.message(2_001., "ack");
+    let timers = h.timers.clone();
+    h.message(14_000., "direct-progress");
+    assert_eq!(h.timers, timers);
+    assert_eq!(h.sends("ordinary-interest"), 1);
+    assert_eq!(h.engine.venue().authenticated, 1);
+    assert_eq!(h.engine.venue().ready, 1);
+}
+#[test]
+fn parked_provider_release_checks_the_renewed_equality_boundary() {
+    for at in [28_999., 29_000.] {
+        let (mut h, attempt) = parked_auth();
+        h.event(at, signed(attempt));
+        assert_eq!(h.sends("auth-subscription"), usize::from(at < 29_000.));
+        assert_eq!(h.closed(h.socket), at == 29_000.);
+        assert_eq!(h.sends("ordinary-interest"), 0);
+        assert_eq!(h.engine.venue().ready, 0);
+    }
+}
+#[test]
+fn completed_provider_still_checks_auth_at_the_final_delayed_drain() {
+    let (mut h, attempt) = parked_auth();
+    h.engine.handle(28_999., signed(attempt));
+    h.engine.prepare_dispatch(29_000.);
+    h.collect();
+    assert_eq!(h.sends("auth-subscription"), 0);
+    assert!(h.closed(h.socket));
+    assert_eq!(h.sends("ordinary-interest"), 0);
+}
+#[test]
+fn parked_old_signer_cannot_release_after_real_reconnect() {
+    let (mut h, attempt) = parked_auth();
+    let old = h.socket;
+    h.event(
+        14_001.,
+        Event::WsClosed {
+            socket: old,
+            code: 1006,
+        },
+    );
+    let (&retry, &at) = h.timers.iter().min_by(|a, b| a.1.total_cmp(b.1)).unwrap();
+    h.event(at, Event::TimerFired { timer: retry });
+    h.socket = h
+        .output
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } if *socket != old => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.open(at + 1.);
+    let messages = h.engine.venue().messages;
+    h.event(at + 2., signed(attempt));
+    assert_eq!(h.engine.venue().messages, messages);
+    assert_eq!(h.sends("auth-subscription"), 0);
+    assert_eq!(h.sends("ordinary-interest"), 0);
+    assert!(!h.closed(h.socket));
+    assert_ne!(h.engine.venue().epochs[0], h.engine.venue().epochs[1]);
 }
