@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { EngineHost } from '../hosts/wasm/js/host.mjs';
+import { prepareRecordedHttp } from './recorded-http.mjs';
 import type { HttpResponse, Transport } from '../hosts/wasm/js/host.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 import { FrameApplier } from '../../packages/safe-cex/src/store/frameApplier.ts';
@@ -48,6 +49,8 @@ function rig(reply?: (request: Request) => Promise<HttpResponse> | HttpResponse,
   const host = new EngineHost(engine, {
     now: () => now,
     connect() { assert.fail('BreakoutProp must never open an exchange socket'); },
+    // Login and reads are managed: canned replies need an immediate route.
+    prepareHttp: prepareRecordedHttp,
     async request(request) {
       requests.push(request);
       if (reply) return reply(request);

@@ -1632,6 +1632,16 @@ and advance each native100ms page clock. Capacity uses genuine retained peers;
 reuse controls now reach and pass their stale-timer/DATA assertions. Family
 WASM/replay/CPU/memory certification remains CI's responsibility.
 
+### Phemex full signer cutover evidence
+
+Original signer test checkpoint17b9ee461cb had6GREEN/16assertionRED/0ignored.
+All22 are now GREEN with the same assertions, plus2 malformed-provider controls
+and the trusted-setup security control. Native256 and extended signer24/security2,
+registry3 and SDK constructor5 pass; strict Phemex Clippy passes. The exact
+combined staging map is17F/18O ->16F/16O, with one temporary sign_http; trading
+stays4F/4O via its approved release-metadata re-expression. No checker predicate
+or negative assertion is weakened. Actual #1970/#1974 and final CI remain gates.
+
 ## MEXC unsigned Background Read verification
 
 Plan3690a27236f precedes original controlsc58c123d68c:18 executed controls,
@@ -1684,3 +1694,76 @@ Clippy, formatting, bans and the 15 request inventory tests pass. Read-only
 credential scanning confirms no key-selection term change, and all production
 outside Crypto.com trading.rs stays base-exact. Original controls remain
 byte-identical to their RED checkpoint. CI is still required before readiness.
+
+
+## Crypto.com public discovery managed controls
+
+Plan preceded original compiling controls: 8 assertion RED/7 GREEN, then a
+caller-review live-prefix/expired-stream-end RED produced 9 RED/7 GREEN.
+All 16 now pass, covering Public preparation, parked expiry and late readiness,
+exact deadline in both ingress orders, cached quote preservation, genuine owner
+capacity/recovery, catalogue-to-ticker slot handoff, native wire/values/backoff,
+private startup ordering and expired-metadata sibling recovery.
+
+Two no-I/O assertions were corrected to permit only shared ManagedHttp::Cancel
+cleanup, after a diagnostic proved Cancel was their sole unexpected action;
+Http/Prepare/Bind/WsConnect remain forbidden, and Store assertions stay exact.
+Existing financial and signing assertions remain. Fixture preparation uses
+existing event times; cancelled deadlines are removed from the fixture's active
+timer list as a host would. Signer probes gain a genuine unused carrier Context,
+with no new managed-signing claim. Broad CI gates remain pending.
+
+
+Discovery closure adds a seventeenth managed control: raw ticker preparation
+remains parked while native private startup proceeds, then real prepare/bind/
+claim releases the ticker and publishes quotes. The overseer accepted this
+independence; CALLERS names the physical-order consequence. All three bounded
+reviews are CLEAR at a9282a7e787. Refreshed scoped suite: 165 tests/16 targets,
+zero ignored; strict all-target Clippy passes. Actual landing integration retains
+all incoming foreign changes and only the discovery singleton inventory prune.
+
+### Kraken Futures candle custody controls
+
+Twenty-eight isolated controls pin command/background Prepare before HTTP, exact
+fractional caller deadline, original-root and live-root child expiry, stuck
+Prepare/Bind under a longer live root, typed metadata and inert late completion,
+second-page strict failure with no prefix/third page, duplicate/clock/capacity
+refusal and exact surviving-peer recovery. Native working controls cover wire,
+codec/default bounds, sorting/duplicates, ten-page/no-progress limits, empty
+success, five-second polling, stale subscription generations and validation
+precedence. All28 and47 unchanged native controls pass; strict/fmt and inventory
+checks are scoped locally, with full workspace/WASM/replay proof delegated to CI.
+
+The CI unit-fixture correction changes only the secondary probe's pending
+constructor fields, preserving every original assertion. Scoped unit tests and
+all-target Clippy now cover this constructor as well as integration targets.
+
+
+## Crypto.com PublicTrades original and managed controls
+
+Plan preceded original compiling controls on actual1e2458b1c98. The expanded
+original checkpoint ran21 controls:10 assertion RED/11 working GREEN/0ignored;
+code/message40101 collisions are pinned separately from transport retry limits.
+The two new failure boundaries drive actual preparation refusal and actual
+physical-child deadline, with their first original failure gates identified.
+Adoption coverage adds delayed prepare/final-claim10ms pacing, expired readiness,
+reused-id late DATA and credential-free typed auth metadata/health isolation.
+All original financial/wire assertions remain. Broad size/CPU/replay gates and
+independent implementation reviews remain CI/review requirements.
+
+
+PublicTrades validation refresh:27 dedicated and218 scoped Crypto.com tests
+across18 targets pass, zero ignored; strict all-target Clippy/fmt, bans and both
+request-context checks pass on actual landing integration. Two raw/escaped
+missing-array hint controls pass on an independently archived native source;
+one exposed the candidate's narrower decoded-field retry projection. The fix
+retains the exact approved minimum compatibility input, not a new retry policy.
+Source/caller closure is CLEARf0ecc; full-map carryover is pending for that delta.
+
+### Paradex config and initial local entry
+
+Original e743120ab7b compiles with 22 intended REDs/four controls on actual77f124;
+all26 pass unchanged after implementation. Exact request inventory shrinks seven
+occurrences (account10->9/trading21->15/family48->41), with no bootstrap/shared
+engine/signing edit. Config expiry now includes host preparation; typed entry
+refusals and LocalSetting receipt enforcement are caller-visible boundaries.
