@@ -314,7 +314,12 @@ fn identity_request(e: &mut Driver) -> safe_cex_engine::HttpRequest {
     );
     request
 }
-fn identity_response(e: &mut Driver, request: u32, now: f64, body: &str) -> Vec<Action> {
+fn identity_response(
+    e: &mut Driver,
+    request: safe_cex_engine::RequestId,
+    now: f64,
+    body: &str,
+) -> Vec<Action> {
     e.handle(
         now,
         Event::HttpResponse {

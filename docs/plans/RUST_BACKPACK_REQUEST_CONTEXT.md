@@ -677,8 +677,8 @@ Target is the two numeric terminal occurrences in identity.rs finish:
 
 | Existing call | Fingerprint, one occurrence each |
 | --- | --- |
-| cx.done(command, data) | c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa |
-| cx.fail(command, error) | c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548 |
+| cx.done(command, data) | c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548 |
+| cx.fail(command, error) | c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa |
 
 The numeric command_error alongside failure also needs genuine custody, but is
 not a counted scanner site. Actual Backpack inventory has6paths/15fingerprints/
@@ -734,3 +734,10 @@ actual observed result, without inventing a missing API or claiming assertions
 past the first failure ran. Scoped tests use CARGO_BUILD_JOBS=4, one local
 build at a time. Applied source, two prunes, independent source review, draft
 and fresh full CI all require the later implementation stage.
+
+Control compilation checkpoint: the first compile found a fixture response
+helper typed as u32 instead of the existing RequestId newtype. Correct only
+that signature; this compile failure is excluded from RED evidence. Canonical
+scanner verification also corrected the plan table's swapped done/fail labels;
+the two actual fingerprints and their counts were already exact. Production
+and every inventory remain unchanged.
