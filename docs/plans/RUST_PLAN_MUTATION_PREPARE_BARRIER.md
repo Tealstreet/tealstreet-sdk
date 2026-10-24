@@ -433,3 +433,35 @@ handoff; no token/custody execution PASS is claimed at this checkpoint.
 The exact orchestration artifact is under core/signer review before editing
 its parent hooks. Native and WASM host handoff remain separate implementation
 and review gates. These local checkpoints are not pushed or READY.
+
+## Orchestration and host review checkpoint
+
+Exact unapplied orchestration artifact `f2da17c652fb` corrects owner review of
+`84deebbd1528`: re-export visibility and Admission qualification compile;
+nonfinite claim time refuses before reservation/failure effects. An announced
+member whose host binding has not been acknowledged by the exact whole claim
+fails through the common Plan projection on Stale, without reprepare or HTTP.
+An acknowledged claim may reprepare only its stale member and retain siblings.
+Retirement drops queued group packets; a retired admission cannot issue again.
+No group path invents a NotSent terminal or erases earlier/inherited uncertainty.
+
+Independent review also corrected route expiry before any recipe activation,
+retained bound metadata on every recoverable Stale path, and sticky poison
+through all commits and deferred recipe destruction. Scratch archive of exact
+base `28e1bb36f3e` plus the corrected artifact passes the engine library check
+and strict Clippy with http-plans/order-locks, plus feature-off library check.
+These are library results, not test-support, native/WASM or whole-group proof.
+
+Groups intentionally skip the mutable on_http_release hook. An adopter that
+stamps Pending there must move that native state before group admission or use
+the committed on_signing_release observation; the pure group hook cannot mutate
+Pending. Do not opt a family into groups while silently dropping its stamping.
+
+A separate unapplied WASM/JS handoff artifact has 21 passing original/group host
+model controls in scratch. It checks every resource before a single claim,
+uses preallocated per-member output bounds and scalar status, refuses external
+invoke/run/dispose/cleanup/cancel reentry through the last handoff, and delivers
+postcommit failures only after sibling sends. Claim/output-copy exceptions are
+fail-stop, never a precommit refusal. Exact owner review, Rust ABI controls,
+retained-sibling controls, native host and full engine adoption remain open.
+Neither artifact is applied to held runtime hooks or claimed READY.
