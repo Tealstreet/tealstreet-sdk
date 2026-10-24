@@ -267,3 +267,25 @@ fn native_setting_refresh_can_run_a_minute_after_the_first_read() {
     assert_eq!(first.body, renewed.body);
     assert_eq!(e.store().setting("BTC-USDC").unwrap().leverage, 7.);
 }
+
+#[test]
+fn setting_prepare_keeps_primary_account_egress_without_credentials() {
+    let mut e = private_at_settings();
+    let preparation = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Prepare {
+                    intent, request, ..
+                } if is_setting(&request) => Some((intent, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("managed wallet query needs explicit account routing before transport");
+    assert_eq!(
+        preparation.0,
+        safe_cex_engine::request_context::RoutingIntent::Primary
+    );
+    assert!(preparation.1.route.is_none());
+}

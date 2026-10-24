@@ -112,3 +112,11 @@ egress plan/control delta is reviewed. The new Prepare-intent assertion is a
 managed-adoption contract, not a claim about a legacy routing breach. All ten
 prior original control bodies remain unchanged; no runtime or inventory change
 is present in this correction.
+
+
+The corrected checkpoint executes eleven controls on unchanged actual49f:
+three original adoption-bound assertion REDs plus one new managed Primary-intent
+assertion RED, seven native GREENs, zero ignored and no compile/fixture failures.
+All ten prior control bodies remain an exact prefix. The new test first fails
+because no managed preparation exists; its exact Primary-intent and bound-route
+assertions remain gated until adoption. Scoped strict Clippy and formatting pass.
