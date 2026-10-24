@@ -63,6 +63,8 @@ Trusted setup supplies identical non-secret Identity.stable_id for equal API
 keys, including different Primary/Secondary secrets and shared Futures/Spot
 keys. Each slot still MACs with its own KeyRef. Different stable IDs are separate
 subjects; venue code never compares keys/secrets or computes a secret digest.
+Kraken retains its native secondary_requires_primary:true Slots policy; engine
+minting does not broaden which roles can select that secondary.
 Missing/invalid stable_id uses existing InvalidRequest -> InvalidInput/NotSent
 configuration projection before IDs, reservation, provider or private I/O.
 No fallback subject, slot-derived subject or new credential chooser is allowed.
@@ -92,8 +94,10 @@ decimal string. Accept ASCII digits only, no sign/whitespace/leading zero except
 "0", and checked u64 range. Reject malformed provider results as InvalidResult;
 never truncate or round. Rust, native, WASM, JS and remote result validators must
 compare the exact nonce receipt, request preimage and applied wire value.
-Unchanged receipts without a nonce remain compatible. Numeric JSON nonces are
-refused, even when currently safe, to keep one exact wire representation.
+A receipt without a nonce remains compatible only for a claim-free attempt.
+A claim-bearing result that omits or changes the reserved nonce refuses
+InvalidResult before apply. Numeric JSON nonces are refused, even when currently
+safe, to keep one exact wire representation.
 
 stamp_ms/expiry_ms retain their existing safe-f64 integer rules. #2024 StampFloor
 and stamp_after concern only stamp_ms. Nonce allocation/floor/release never
@@ -110,7 +114,7 @@ During each eligible recipe prepare, reserve once and record private exact
 attempt/generation/claim/nonce metadata in the dispatcher. Preserve the existing
 &DispatchContext SignStep interface; exact bounded recorder storage/interior
 borrowing and fallible preparation ordering are source-stage gates. A second
-claim/domain within one preparation refuses; a failed or abandoned reservation
+claim/domain within one preparation refuses InvalidRequest/NotSent; a failed or abandoned reservation
 leaves a gap and is never rolled back or reused.
 
 Reservation alone never supersedes another request. Supersession means a stale
@@ -120,7 +124,9 @@ without repair. If B never releases, it cannot prevent A from releasing.
 
 Before provider apply, reject superseded work and wipe dropped signed output.
 Before final Claim, recheck the exact current reservation, issuer/attempt,
-selection, route, immutable deadline and released floor. All fallible resource,
+selection, route, immutable deadline and released floor. Any Session generation
+and #2012 Bearer revision fence runs first (dead generation Revoked, moved
+revision Stale). All fallible resource,
 pacing and owner admissions must finish before release commits. The global
 check-and-floor update is one critical section at Released; floor becomes
 max(floor, nonce), never rolls back, and no callback executes under the mutex.
@@ -146,7 +152,12 @@ completion resets that count. Check expiry before every repair/provider call.
 
 Exhaustion is Internal/NotSent, exactly one normal failure terminal, no wire,
 physical retry, fresh command receipt, extra Plan credit or auth-health change.
-Provider refusal remains its existing typed pre-send refusal. No repair creates
+Provider refusal remains its existing typed pre-send refusal. A genuine permitted transport retry or definitive-refusal ResendGrant creates a
+new physical attempt: its own prepare reserves a fresh larger nonce and its
+nonce-repair counter starts at zero. A Bearer/route reprepare reserves fresh but
+does not consume the eight nonce repairs; count only nonce supersession.
+Whichever prerequisite lands second must test a Bearer Stale and nonce
+supersession together in one attempt. No repair creates
 a business retry grant; nothing sent or uncertain can enter this loop. Reserve
 and release changes are metadata, never read delivery or session authority.
 
@@ -185,6 +196,9 @@ Required controls before runtime readiness:
    clocks are exact. Protocol offset and StampFloor do not alter the nonce floor.
 6. Canonical decimal receipt round-trip including u64::MAX; deny numeric/sign/
    whitespace/leading-zero/overflow forms and mismatched provider/wire nonces.
+   A claim-bearing provider result with an omitted nonce is InvalidResult before
+   apply; a genuine granted physical resend reserves greater than its refused
+   attempt, without reusing the old nonce or resetting a live repair budget.
 7. Missing/foreign subject, route/selection swaps, stale same-attempt provider,
    cancel/expiry/reprepare, eight-repair exhaustion and no late provider action.
    Add compile-fail/API-shape coverage for unforgeable/non-Clone claims only once
