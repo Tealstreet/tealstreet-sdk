@@ -2846,3 +2846,11 @@ controls PASS and15 assertion REDs; all19 pass after adoption. Genuine retained
 owners pin capacity, reuse and duplicate custody; real login fixtures preserve
 native session/validation precedence without private-state mutation. History
 inventory11F/11O becomes4F/4O; family53F/56O becomes46F/49O. Remote source is exact.
+
+## KuCoin local command refusal ownership
+
+Eight numeric local failure sites now use shared genuine command admission and
+Context failure, reducing KuCoin from 56 to 48 lexical occurrences (51 to 43
+fingerprints). No signer, private request helper, successful no-I/O setting or
+remote completion is converted. Source and inventory reviews found no venue-local
+retry, classifier, owner registry or completion algorithm.

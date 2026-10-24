@@ -1489,3 +1489,12 @@ native precision/error-precedence checks on both deployments. Saturated public
 trades retains exact legacy POST route, headers, body and nonempty output schema.
 All19 focused tests pass after15 original assertion failures. Existing source
 outside the seven branches, held fixtures and foreign inventory stay unchanged.
+
+## KuCoin refusal admission controls
+
+Ten original assertion REDs cover eight lexical local refusals, including all
+three Spot unsupported variants. They pass after admission conversion, alongside
+native error/credential ordering, UUID entropy, Store preservation and public
+wire controls. Duplicate ownership and more than 256 fixed-clock reuses pin
+retirement; saturated-registry valid private wire controls pin unchanged signed
+fallthrough. The isolated suite contains 18 executed controls, with no ignores.
