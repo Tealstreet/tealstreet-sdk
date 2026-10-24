@@ -1,0 +1,110 @@
+# Crypto.com unsigned PublicTrades Read custody
+
+Plan-first base: actual landing 1e2458b1c98. Owner: codex-ih35js. Scope is
+unsigned PublicTrades only; implement after/stacked on reviewed #2052, as ruled
+by claude-ddi2il. This checkpoint contains no production changes.
+
+## Exact inventory and ownership
+
+The real checker fingerprints the sole unsigned history GET at
+venues/cryptocom/src/history.rs as
+073a9daacf5c0553bfb2650ddc8db7b942b5f6a0c8125261daff7479814953b7 (one occurrence).
+Remove that singleton only. At the base, Crypto.com has 12 fingerprints and
+13 occurrences; #2052 removes the discovery singleton, leaving 11/12. This
+slice then leaves 10/11. History itself goes from 4 fingerprints/5 occurrences
+to 3/4. Its remaining lexical witnesses belong to private paging, not this read.
+
+Open-PR file audit at the base: only own #2052 touches Crypto.com lib.rs and
+shared test preparation; no other Crypto source claim. Original controls use a
+new standalone test file and do not change existing fixtures. Future lib.rs
+edits are restricted to a distinct PublicTrades Pending and History routing,
+typed failure and exact-owner retirement arms; stack after #2052. No signing,
+key-selection, engine, Cargo, private account/trading or combo-5b source changes.
+Raw secrets and legacy private signing remain outside this unsigned adoption.
+The signer owner confirms no full-custody private Crypto.com pin exists.
+
+## Native contract
+
+Query::PublicTrades bypasses the private credential requirement. Native time
+range validation still precedes remote work; limit zero and equal bounds retain
+the existing managed synchronous empty result. With positive limit the endpoint
+is unsigned GET {rest}/public/get-trades?instrument_name=<encoded>&count=<n>.
+Default requested limit is 25; wire count is min(limit,150). Both production and
+testnet use empty headers/body, Public routing and no signer/auth evidence.
+Unknown symbols are sent verbatim; no market lookup or startup requirement.
+
+The endpoint returns one streamed result.data page. Preserve input order and
+repeated trade IDs; truncate at the caller limit, never sort/dedupe or walk a
+cursor. Preserve existing id parsing, side mapping, timestamp milliseconds,
+price/quantity parsing and quoteQty=price*qty. A malformed row rejects the whole
+unaccepted page; no accepted prefix or INCOMPLETE marker exists for this one
+page. Existing history.rs and tests/history.rs public positives remain intact.
+
+The native per-path next_by_path queue spaces submissions by 10ms across callers.
+Charge that slot only after successful child issuance/submission. Do not add a
+scheduler: retain native timers/queue while the engine owns root/child lifetime.
+Transport failure has at most three retries/four requests, each after exactly
+1000ms; failed streamed staging is discarded before retry. The existing 40101
+native-response case grants one retry after 1000ms and stays unsigned. Other
+HTTP/native failures are not retried. Do not introduce substring-based auth
+health evidence or new status ladders; retain existing native policy, with any
+required shared classifier decision reviewed before implementation. Public
+40101 must never produce AccountAuth or increment auth health.
+
+## Shared authority and callback shape
+
+Use genuine admit_caller_read_root(None,None) at command entry, then
+ReadCompletion::from_context plus ReadHistoryRows for the one response. One
+immutable receipt deadline spans path-queue wait and all native retries; absent
+host timeout is already stamped with the SDK default. Missing receipt refuses
+through shared admission, never a local default/root or numeric fallback.
+
+Mint each credential-free Read/20s/Never child via http_leg_context from the
+original root at eligible native dequeue, capped by that root. Each physical
+request uses request_managed and the same result.data stream location. Route
+preparation is inside the child bound; no retry renews the root or reuses an old
+physical delivery. Use actual ReadHistoryRows admission before parsing or
+staging, before accepting a page, and before success/error response policy.
+Use the original root for terminal completion. Retire each child before retry;
+failed staging is discarded without accepting it. A denied local child or
+submission is strict through that exact live root, with no copied authority
+checks, new native timer or numeric fallback. Genuine revoked owners are inert.
+
+Engine root retirement drops only that exact Owner's queued PublicTrades work
+through read_root_retired; do not clear another command or reused numeric ID.
+Root expiry is strict typed Timeout with no rows/marker/finalizer and no later
+send, even while queued or parked. An expired physical child under a live root
+retains native transport retry policy, bound by the root. Matching typed failure
+owns cleanup only, never DATA. Uufub4 API-fit confirmation is required before
+production; this plan does not claim the retry composition is already reviewed.
+Private CursorHistory and signed calls retain their existing implementation.
+
+## Original controls before source
+
+Commit this plan, then add compiling real-Engine controls on the unchanged
+PublicTrades sender. Record each genuine assertion failure separately from
+working native controls. Never claim compile failures as RED evidence.
+
+1. Public preparation blocks physical release; exact unsigned URL/count/network,
+   routing and real prepare/bind/claim stay pinned.
+2. Explicit short caller wait caps a child, including route parking and native
+   10ms queue wait; both expiry ingress orders, equality and late readiness deny
+   data and terminal reuse. Missing clock and genuine owner capacity deny work.
+3. Root retirement while queued or waiting for retry prevents sends; unrelated
+   live callers survive. Duplicate live numeric IDs cannot create a second read.
+4. Stream a live prefix then end/fail at the deadline; no partial rows/marker.
+   Reused ID plus stale old response cannot settle the new owner.
+5. Native positives: exact escaped wire on both networks, default/large/zero
+   limit, duplicate IDs/order/financial values, malformed whole-page failure,
+   10ms queue cadence, transport four-attempt schedule and prefix reset,
+   unsigned 40101 one-retry/no-auth, other native refusal/no retry.
+
+After review, implementation is a separate checkpoint. Prune only the singleton;
+run scoped Crypto.com tests and strict Clippy sequentially with CARGO_BUILD_JOBS=4,
+fmt, request checker/test pair and bans. No local workspace/WASM/replay sweep.
+Independent source/adversarial, caller and full-map reviews are required. Push a
+small draft and let CI certify family bytes/CPU/replay. No merge without GO.
+
+Architecture gate: No if shared entry/root/leg/row algorithms suffice. If native
+retry composition needs a new engine seam, stop and report before source rather
+than add a per-venue issuer, lifetime, finalizer or retry-authority algorithm.
