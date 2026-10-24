@@ -73,12 +73,26 @@ pub enum KeyEncoding {
 pub enum ExtraKey {
     /// ApeX Omni zkLink seed: the exact 65-byte packed Ethereum signature.
     ZklinkSeed,
+    /// Polymarket L1 wallet: the raw 32-byte secp256k1 scalar; primary only.
+    L1Wallet,
 }
 impl ExtraKey {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ZklinkSeed => "zklinkSeed",
+            Self::L1Wallet => "l1Wallet",
         }
+    }
+    /// The one algorithm a role ref serves, for `Sign` and public operations.
+    pub const fn algorithm(self) -> Algorithm {
+        match self {
+            Self::ZklinkSeed => Algorithm::ZkLinkContract,
+            Self::L1Wallet => Algorithm::Secp256k1Digest,
+        }
+    }
+    /// The L1 wallet derives the session identity, which is primary only.
+    pub const fn primary_only(self) -> bool {
+        matches!(self, Self::L1Wallet)
     }
 }
 
@@ -109,6 +123,9 @@ impl CredentialSetupPolicy {
             (identities.secondary.as_ref(), self.secondary, false),
         ] {
             let declared = policy.and_then(|policy| policy.extra);
+            if !primary && declared.is_some_and(|declared| declared.key.primary_only()) {
+                return Err(SignError::InvalidRequest);
+            }
             let Some(identity) = identity else { continue };
             if identity
                 .extra
@@ -800,7 +817,8 @@ mod setup_field_policy_tests {
         assert!(json.contains(r#""extra":{"zklinkSeed":"primary.extra.zklinkSeed"}"#));
         assert_eq!(serde_json::from_str::<Identity>(&json).unwrap(), seeded);
         assert!(
-            serde_json::from_str::<Identity>(&json.replace("zklinkSeed\"", "l1Wallet\"")).is_err()
+            serde_json::from_str::<Identity>(&json.replace("zklinkSeed\"", "unknownRole\""))
+                .is_err()
         );
         let mut invalid = seeded.clone();
         invalid
