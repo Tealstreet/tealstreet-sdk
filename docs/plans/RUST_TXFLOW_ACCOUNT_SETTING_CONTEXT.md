@@ -120,3 +120,53 @@ assertion RED, seven native GREENs, zero ignored and no compile/fixture failures
 All ten prior control bodies remain an exact prefix. The new test first fails
 because no managed preparation exists; its exact Primary-intent and bound-route
 assertions remain gated until adoption. Scoped strict Clippy and formatting pass.
+
+## Managed source checkpoint
+
+The corrected plan/original checkpoint 72c7 is CLEAR from m26ps4 (API/core) and
+5c57jl (native/caller). Both independently clear runtime artifact SHA256
+fa32fd1684191b99348805f84147c028216de13df64259015aec14dedf4fbae4.
+Only account.rs and lib.rs change production: genuine explicit Primary Background
+Read admission, current generation/Context custody before generic status/DATA,
+exact failure-only retirement and the original settings revision/body/reducers.
+The new physical Context retires before native cadence and on disconnect.
+Queue refusal returns its actual Pending into the same current-owner cleanup.
+
+All eleven original controls remain byte-exact and now pass. Eight added unit
+controls execute real engine contexts and host handshakes around the private
+sender: 256-peer pressure, one-credit recovery and all-credit reclamation;
+nonfinite refusal; typed precommit failure; old preparation/released DATA versus
+replacement generation; revision-stale current delivery; released Network and
+Timeout; and engine Context retirement without native follow-up. These helper
+controls do not fabricate a successful startup or economic facts. The separate
+originals/native account tests cover startup, actual setting publication and
+write/socket revision plus hedge rails. Precommit local NotSent is preserved;
+released Read failures retain no Mutation outcome. An initial unit expectation
+incorrectly stripped precommit outcome and was corrected to the shared typed
+NotSent contract, without a runtime change. Missing Venue import and required
+fixture book methods were compile-only corrections, excluded from RED evidence.
+
+Scoped native TxFlow passes 183 tests, zero ignored, with strict all-target
+Clippy and package formatting passing at jobs=4. Initial existing account tests
+dropped the managed setting request; five collectors now perform real managed
+handshakes at the same fixture cause clocks. All 166 assertion invocations in
+those files are token-exact, and the existing financial account assertion file
+is untouched. The WASM fixture also receives the same two-line required
+prepareRecordedHttp hook approved for #2075; all its original assertions remain
+byte-exact and no readiness wait or runtime fallback is added. No local WASM
+build is claimed for this setting source; CI owns the composed artifact proof.
+
+Only the account.rs count-one sender is pruned, actual inventory 10 to 9. Foreign,
+signing and selection maps remain incoming-exact. Existing CPU hints/cache,
+account state/orders/fills, history, trade serialization, wire, signer, sockets,
+engine, registry, Cargo, profiles and budgets are unchanged.
+
+Composition pin from m26: #2071 adds typed Candles failure arms to the same
+on_http_preparation_failed/on_http_failed pair. Whoever integrates second must
+retain one pair of overrides, handling Candles through read.failed with the full
+typed error before generic on_request_failed fallback for setting cleanup. A
+same-engine managed candle plus setting failure control is mandatory at that
+actual composition. #2075's pre-status ticker guard and generic failure fallback
+must likewise remain when that actual source is integrated. No pending venue
+head is described as an actual dependency or consumed for this checkpoint.
+Committed full-map/fixture preservation reviews and fresh CI remain gates.
