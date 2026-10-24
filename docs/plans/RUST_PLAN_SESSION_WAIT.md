@@ -235,6 +235,12 @@ New-contract REDs follow the API review:
   `flush_http_plans`, so it runs at every outer Plan flush: after delivery
   exit, on the Plan-root timer path and at the end of the event scope. A login
   response or a Plan expiry gets its dispositions in that same `handle` call.
+- **Bearer order lives inside the loop (m26ps4).** `flush_http_plans` also runs
+  at sites with no preceding owner-retirement flush: delivery exit, the
+  Plan-root timer and `drain_actions`. A callback inside this loop can also
+  retire a Session. So each pass of `flush_plan_session_waits` must drain the
+  Bearer bound-failure queue first, then the sealed sweep, then ended.
+  Whichever of #2037 and the Bearer hook lands second wires that per-pass call.
 - **Resume without a delivery.** A Session proven from a socket message or a
   timer drains with no `http_delivery`. The resumed leg then records no
   predecessor and must be queued in that same callback, which also has no
