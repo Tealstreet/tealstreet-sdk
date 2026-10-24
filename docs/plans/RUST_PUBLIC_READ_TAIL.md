@@ -165,3 +165,20 @@ retained; only the transport drain expression in one fallback assertion changes.
 Exact manifest shrink is four singletons, with all foreign bytes preserved.
 Architecture gate: No. CI/replay/size/timing and a green authorized venue train
 window remain separate gates; no merge has been requested or performed.
+
+CI run `40044171632` found a real recorded-transport fixture gap: all 22
+Lighter/Robinhood WASM boundary cases timed out because their transport lacked
+`prepareHttp`. Managed catalog work correctly refuses that unsupported
+transport. The Binance measurement job includes these boundary tests, so its
+missing measurement then caused CPU certification and the later replay gates
+to fail; those are not separate native regressions.
+
+The existing shared `prepareRecordedHttp` helper is now attached to that
+fixture. Every request response and assertion remains unchanged. Independently
+re-executed two original public/empty-secret cases against the run's exact
+Lighter browser-family artifact: two timeouts before the fix, all 22 boundary
+tests pass after it. The downloaded manifest binds source
+`e9e0583da27cd82fa2ab31316bd965750287921c` and run `40044171632`; the JS and
+WASM hashes match it. This is scoped correctness testing with a CI-built
+artifact, not a local WASM build or a full replay/performance claim. Temporary
+Node loader adaptation and artifacts stay outside the committed change.
