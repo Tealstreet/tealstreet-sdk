@@ -1,7 +1,7 @@
 //! Lossless host preparation tokens; claiming never drains engine actions.
 use super::*;
 use safe_cex_engine::request_context::{
-    Claim, Error, HttpAction, Permit, Preparation, Prepared, RoutingIntent,
+    Claim, Error, GroupClaim, GroupPermit, HttpAction, Permit, Preparation, Prepared, RoutingIntent,
 };
 
 #[derive(Serialize)]
@@ -43,6 +43,12 @@ impl<'a> From<&'a safe_cex_engine::HttpRequest> for HttpPacket<'a> {
 }
 
 #[derive(Serialize)]
+pub(super) struct GroupMemberOut<'a> {
+    preparation: String,
+    packet: Option<HttpPacket<'a>>,
+}
+
+#[derive(Serialize)]
 #[serde(tag = "phase", rename_all = "camelCase")]
 pub(super) enum HttpPhaseOut<'a> {
     Prepare {
@@ -54,6 +60,10 @@ pub(super) enum HttpPhaseOut<'a> {
         preparation: String,
         permit: String,
         packet: HttpPacket<'a>,
+    },
+    BindGroup {
+        permit: String,
+        members: Vec<GroupMemberOut<'a>>,
     },
     Cancel {
         preparation: String,
@@ -86,6 +96,16 @@ impl<'a> From<&'a HttpAction> for HttpPhaseOut<'a> {
                 preparation: preparation.to_wire(),
                 permit: permit.to_wire(),
                 packet: HttpPacket::from(request),
+            },
+            HttpAction::BindGroup { permit, members } => Self::BindGroup {
+                permit: permit.to_wire(),
+                members: members
+                    .iter()
+                    .map(|member| GroupMemberOut {
+                        preparation: member.preparation.to_wire(),
+                        packet: member.request.as_ref().map(HttpPacket::from),
+                    })
+                    .collect(),
             },
             HttpAction::Cancel {
                 preparation,
@@ -166,6 +186,40 @@ impl WasmEngine {
             safe_cex_engine::VenueError::new("HTTP transport preparation failed").kind(kind),
         );
         Ok(self.flush())
+    }
+
+    #[wasm_bindgen(js_name = httpGroupPending)]
+    pub fn http_group_pending(&self, permit: &str) -> bool {
+        GroupPermit::from_wire(permit).is_ok_and(|token| self.inner.http_group_pending(&token))
+    }
+
+    /// Fixed output storage precedes claim: 0 denied, 1 released, 2 wait at slot 0.
+    #[wasm_bindgen(js_name = httpClaimGroup)]
+    pub fn http_claim_group(&mut self, permit: &str, now: f64, bounds: &mut [f64]) -> u32 {
+        let Ok(token) = GroupPermit::from_wire(permit) else {
+            return 0;
+        };
+        if bounds.len() != token.members().len() {
+            return 0;
+        }
+        match self.inner.claim_http_group(now, token) {
+            Ok(GroupClaim::Released(releases)) => {
+                assert_eq!(
+                    releases.len(),
+                    bounds.len(),
+                    "group claim output cardinality"
+                );
+                for (bound, release) in bounds.iter_mut().zip(releases) {
+                    *bound = release.send_before;
+                }
+                1
+            }
+            Ok(GroupClaim::WaitUntil(until)) => {
+                bounds[0] = until;
+                2
+            }
+            Err(_) => 0,
+        }
     }
 
     /// No flush, provider invocation or other work before the host API handoff.

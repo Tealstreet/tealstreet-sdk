@@ -495,3 +495,24 @@ consumed before group admission can support aliases; outer zero alone is not
 proof of expanded zero pacing. The #2016 inherited-uncertainty group control
 remains a named dependency control until that reviewed witness is composed;
 this checkpoint creates no substitute witness or hardcoded NotSent projection.
+
+## Reviewed JS handoff applied
+
+Core owner independently reconstructed and cleared exact host artifact
+`c0d3afc933ae` with 33/33 original/group Node controls. That artifact is now
+applied locally, with formatting only in Rust wrappers. Applied Node controls
+also pass 33/33; the native-platform compilation of the WASM ABI wrapper passes
+with bitunix and Plans/locks. This is not a wasm32 or browser proof. Host calls
+from a bound transport cannot dispose/cancel/reenter the engine between group
+claim and the last handoff. Captured socket control/text and timer notifications
+are deferred whole; borrowed binary or overflow fails after all handoffs and
+before replay. Ordinary binary delivery outside the burst is unchanged.
+
+Two additional genuine engine controls pass: reverse route/provider completion
+still draws both 21-byte entropy samples in declaration order, and an exact
+bound Stale claim re-prepares only the expired member, retaining the sibling
+packet and re-announcing once. The first stale fixture gave both signatures the
+same validity window, so both correctly expired; the corrected fixture declares
+distinct recipe validity windows to isolate one expired member. Dedicated
+integration controls now pass nine with none ignored. Native host and shared
+pacing-set composition remain open gates before push/readiness.

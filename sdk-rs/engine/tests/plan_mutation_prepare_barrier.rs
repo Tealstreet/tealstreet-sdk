@@ -104,20 +104,31 @@ impl Signer for Provider {
         Box::pin(std::future::pending())
     }
 }
-struct Recipe(KeyRef);
+type EntropyLog = Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+struct Recipe(KeyRef, f64, Option<EntropyLog>);
 impl SignStep for Recipe {
     fn freshness_ms(&self) -> f64 {
-        5_000.
+        self.1
     }
     fn prepare(
         &mut self,
-        _: &mut Action,
+        outbound: &mut Action,
         cx: &DispatchContext<'_>,
     ) -> Result<SignRequest, SignError> {
+        if let Some(log) = &self.2 {
+            let Action::Http(request) = outbound else {
+                return Err(SignError::InvalidRequest);
+            };
+            let mut nonce = vec![0; 21];
+            cx.signing_bytes(&mut nonce)?;
+            log.lock()
+                .unwrap()
+                .push((request.body.clone().unwrap(), nonce));
+        }
         Ok(SignRequest {
             receipt: SignReceipt {
                 stamp_ms: Some(cx.stamp_ms()),
-                expiry_ms: Some(cx.stamp_ms() + 5_000.),
+                expiry_ms: Some(cx.stamp_ms() + self.1),
             },
             context: Default::default(),
             operations: vec![
@@ -157,6 +168,8 @@ struct Consumer {
     attack_results: Vec<safe_cex_engine::request_context::Error>,
     failures: usize,
     reconciles: usize,
+    stagger_freshness: bool,
+    entropy_log: Option<EntropyLog>,
 }
 impl Consumer {
     fn issue(&mut self, cx: &mut Cx<'_, Context>) {
@@ -197,7 +210,15 @@ impl Consumer {
                 method,
                 format!("https://openapi.blofin.com{path}"),
                 body,
-                Box::new(Recipe(reference)),
+                Box::new(Recipe(
+                    reference,
+                    if self.stagger_freshness && self.contexts.len() == 2 {
+                        10_000.
+                    } else {
+                        5_000.
+                    },
+                    self.entropy_log.clone(),
+                )),
                 context,
             )
             .unwrap();
@@ -701,4 +722,186 @@ fn committed_independent_503_keeps_the_accepted_sibling_id() {
     );
     assert_eq!(engine.venue().failures, 1);
     assert_eq!(engine.venue().replies, 1);
+}
+
+#[test]
+fn a_bound_stale_member_reprepares_without_replacing_its_sibling() {
+    use safe_cex_engine::request_context::{Error, GroupClaim, HttpAction, Prepared};
+    let (mut engine, old, mut retained) = announced(
+        Consumer {
+            pair: true,
+            stagger_freshness: true,
+            ..Default::default()
+        },
+        4_999.,
+    );
+    assert!(matches!(
+        engine.claim_http_group(5_003., old.clone()),
+        Err(Error::Stale)
+    ));
+    let mut preparations = Vec::new();
+    for action in engine.drain_actions() {
+        if let Action::ManagedHttp(action) = action {
+            match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => {
+                    assert_eq!(request.id, old.members()[0].attempt().request);
+                    preparations.push(preparation);
+                }
+                HttpAction::BindGroup { .. } => panic!("reannounce before stale member prepares"),
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(preparations.len(), 1);
+    let token = preparations[0];
+    assert!(!engine.http_group_pending(&old));
+    engine.http_prepared(
+        5_003.,
+        token,
+        Prepared {
+            id: 100,
+            expires_at: None,
+        },
+    );
+    engine.prepare_dispatch(5_003.);
+    let work: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((attempt, work)),
+            Action::Http(_) => panic!("stale partial release"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(work.len(), 1);
+    signed(&mut engine, &work[0], 5_004.);
+    engine.prepare_dispatch(5_004.);
+    let mut groups = Vec::new();
+    for action in engine.drain_actions() {
+        if let Action::ManagedHttp(action) = action {
+            if let HttpAction::BindGroup { permit, members } = *action {
+                groups.push((permit, members));
+            }
+        }
+    }
+    assert_eq!(groups.len(), 1);
+    let (permit, mut members) = groups.pop().unwrap();
+    assert!(members[0].request.is_some());
+    assert!(members[1].request.is_none());
+    assert_eq!(members[1].preparation, retained[1].preparation);
+    let sibling = retained[1].request.take().unwrap();
+    let fresh = members[0].request.take().unwrap();
+    assert_eq!(sibling.signer_headers, fresh.signer_headers);
+    assert!(
+        matches!(engine.claim_http_group(5_005., permit), Ok(GroupClaim::Released(releases)) if releases.len() == 2)
+    );
+    assert!(matches!(
+        engine.claim_http_group(5_005., old),
+        Err(Error::Revoked)
+    ));
+    assert_eq!(engine.venue().replies, 0);
+}
+
+#[test]
+fn reverse_routes_and_providers_preserve_declaration_order_entropy() {
+    use safe_cex_engine::request_context::{GroupClaim, HttpAction, Prepared};
+    let log = EntropyLog::default();
+    let mut engine = start_consumer(Consumer {
+        pair: true,
+        entropy_log: Some(log.clone()),
+        ..Default::default()
+    });
+    let routes: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(routes.len(), 2);
+    engine.http_prepared(
+        2.,
+        routes[1],
+        Prepared {
+            id: 102,
+            expires_at: None,
+        },
+    );
+    engine.prepare_dispatch(2.);
+    assert!(log.lock().unwrap().is_empty());
+    assert!(
+        engine
+            .drain_actions()
+            .all(|a| !matches!(a, Action::Sign { .. } | Action::Http(_)))
+    );
+    engine.http_prepared(
+        3.,
+        routes[0],
+        Prepared {
+            id: 101,
+            expires_at: None,
+        },
+    );
+    engine.prepare_dispatch(3.);
+    let work: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((attempt, work)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(work.len(), 2);
+    let entries = log.lock().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(
+        entries[0].0,
+        "{\"instId\":\"BTC-USDT\",\"leverage\":\"5\",\"positionSide\":\"long\"}"
+    );
+    assert_eq!(
+        entries[1].0,
+        "{\"instId\":\"BTC-USDT\",\"leverage\":\"5\",\"positionSide\":\"short\"}"
+    );
+    let mut state = 29_u64;
+    for (_, nonce) in entries.iter() {
+        let expected: Vec<_> = (0..21)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state as u8
+            })
+            .collect();
+        assert_eq!(*nonce, expected);
+    }
+    drop(entries);
+    signed(&mut engine, &work[1], 4.);
+    engine.prepare_dispatch(4.);
+    assert!(
+        engine
+            .drain_actions()
+            .all(|a| !matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+    );
+    signed(&mut engine, &work[0], 5.);
+    engine.prepare_dispatch(5.);
+    let groups: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::BindGroup { permit, members } => Some((permit, members)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(groups.len(), 1);
+    assert!(
+        matches!(engine.claim_http_group(5., groups[0].0.clone()), Ok(GroupClaim::Released(releases)) if releases.len() == 2)
+    );
+    assert_eq!(log.lock().unwrap().len(), 2);
 }
