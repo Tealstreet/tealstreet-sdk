@@ -1,7 +1,6 @@
 //! One bounded physical read chain under a retained preflight generation.
 use super::super::owned_call::{Admission, Call, Stage};
 use super::*;
-use crate::TimerId;
 use crate::request_context::{RetryPolicy, plan::CallTerms};
 
 pub(in super::super) struct State {
@@ -683,29 +682,16 @@ impl<P> Cx<'_, P> {
                 .expect("preflighted signing call")
         });
         let predecessor = self.io.http_delivery.clone();
-        let mut call = Call {
-            context: context.clone(),
+        let call = Call::open(
+            context.clone(),
             terms,
             window,
             ids,
             signing,
-            selected: 0,
-            admission: Admission {
-                context: context.clone(),
-                attempt: Attempt {
-                    request: RequestId(0),
-                    generation: 0,
-                },
-                timer: TimerId(0),
-                signing: None,
-                deadline: window.deadline(),
-                predecessor: None,
-            },
-            stage: Stage::Ready,
-            released_failure: None,
-        };
-        call.select(self.now, predecessor)
-            .expect("validated initial physical window");
+            self.now,
+            predecessor,
+        )
+        .expect("validated initial physical window");
         let state = self
             .io
             .request_contexts
