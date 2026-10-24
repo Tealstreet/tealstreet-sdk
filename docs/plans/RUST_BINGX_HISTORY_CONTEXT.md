@@ -76,10 +76,11 @@ admit_caller_read_root(None, None). Root deadline is immutable through all
 200 ms delays, seven-day windows, RangeWalk chunks and signature resends.
 
 Retain root/selected snapshot and ReadCompletion in native state. Use
-ReadHistoryRows for the custom fill pager and single-response path, with the
-existing FillPages policy retained under validated row admission; use
-ReadRangeHistory for the existing RangeWalk. No second authoritative row list,
-coverage policy or terminal owner. Staging/filtering/identity/page acceptance
+ReadHistoryRows for every native pager, with FillPages and the existing
+RangeWalk retained under validated row admission. ReadRangeHistory records
+coverage for partial success but exposes no strict truncation verdict; using it
+here would change BingX policy. The native RangeWalk is the sole geometry and
+coverage state, with no copied policy, second row list or terminal owner. Staging/filtering/identity/page acceptance
 must borrow the exact root/physical Context/Attempt admission. Validate before
 row codecs, count/progress mutation, envelope side effects and publication.
 
@@ -184,3 +185,9 @@ pin zero legacy and one Prepare/Claim on both page-2 and signature resend after
 conversion; use a separate refusal-aware host driver for deferred claim-refusal
 controls, since the original evidence drain intentionally asserts Released.
 Do not change the original expected values to disguise these missing controls.
+
+Implementation refinement before source: retain native RangeWalk plus one
+ReadHistoryRows owner because BingX must reject truncation only at Finished,
+whereas ReadRangeHistory owns partial-success coverage. A RowsAdmission borrow
+guards native range page/progress and accepted output together. No new shared
+getter, callback or coverage policy is introduced.
