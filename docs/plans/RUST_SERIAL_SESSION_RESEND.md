@@ -130,6 +130,24 @@ pub enum SessionResend {
   there is no signed-bytes cache and no fabricated grant. The engine's own
   per-attempt signing reservation does not touch the venue's payload nonce.
 
+## Rulings since review (claude-ddi2il, via codex-zs5e83)
+
+- **Explicit auth refusal grants the single resend at any HTTP status.** GRVT
+  parses code 1000 as an explicit venue authentication refusal that proves
+  nothing executed, including on a 408 or 503. This PR adds a narrow
+  venue-declared grant: the venue codec classifies that parsed refusal as
+  `RefusedResend` through `classify_write`, whatever the status. This is not a
+  generic 408/5xx widening. Any other code on a 408 or 5xx stays Unknown,
+  with no resend.
+- **Wait for a newer header revision, not merely Ready.** GRVT's refresh keeps
+  the same engine Session Ready and only moves the header revision (#2069).
+  The park records the revision the refused attempt used, and resumes only
+  when `SessionBearer::Ready` carries a newer one. A Ready Session with the old
+  or no revision does not resume it. New calls admitted mid-refresh wait at
+  Bind through #2069's NotReady wait (proposed to claude-m26ps4), not here.
+- **Journal owns the terminal.** The shared write journal projects the
+  terminal even where native `trade_finish` strips fields.
+
 ## REDs (before source)
 
 1. A Mutation refused with code 1000 (a RefusedResend grant) parks on a
@@ -170,6 +188,12 @@ pub enum SessionResend {
     custody (no timer). A Mutation `next`, an unreleased failure, or a
     Mutation call's failure is refused, spending nothing. Six chained
     immediate retries then succeed.
+
+15. A Mutation answered 503 (and 408) with parsed code 1000: the venue grant
+    makes it RefusedResend, the park resumes it once, and it is accepted. The
+    same status with any other code is Unknown and refuses the resend.
+16. Revision gate: parking while the Session is Ready on the refused
+    attempt's revision does not resume it; a newer revision resumes it once.
 
 RED1 also asserts that attempt 1's fact is a definitive refusal (not Unknown)
 and that, once attempt 2 succeeds, it is absent from `rejections()` and the
