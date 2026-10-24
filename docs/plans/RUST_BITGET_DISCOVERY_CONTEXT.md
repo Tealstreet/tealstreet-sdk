@@ -66,6 +66,9 @@ managed Read per physical read.
 - **Refusals.** An admission or queue refusal is a prompt pre-send failure
   through `public_failed`, so the native backoff applies. There is no retry
   inside the read.
+  - A queue refusal retires its already-admitted Context before
+    `public_failed`.
+  - An admission refusal has no Context to retire.
 - **Unchanged:**
   - URLs, the product and testnet mapping, and the header.
   - Row codecs and skipped-row accounting.
@@ -115,19 +118,30 @@ time.
 4. A markets response delivered after its read expired publishes nothing. There
    is no `set_markets` and no tickers read; only the retry from RED 3 stands.
 
-GREEN controls on the native path:
+The five original GREEN controls cover only what they actually execute. The
+`Cycle` driver forces `public_data_only`.
 
-- Exact URLs per product and testnet, and the header.
-- Unsigned requests.
-- The empty-catalogue `VenueUnavailable`.
-- Envelope and HTTP error text.
-- Skipped rows.
-- The order markets, then tickers, then `start_private`.
-- `live_tickers` begin/finish.
+- Exact URLs per product and testnet, the header, and unsigned requests.
+- Contracts, then tickers, then the public sockets, in native order.
+- Empty-catalogue and HTTP-error backoff with no publication.
+
+These source-time gates are deferred and are not claimed by the original
+evidence:
+
+- private `start_private` after markets;
+- skipped-row counts;
+- full error fields and text (`discovery_error`, `public_response_error`);
+- the `live_tickers` merge;
+- missing-Context fail-closed;
+- malformed, UTF-8 and claim-refusal routes;
+- the exact 20 s deadline. RED 3 proves a retry by 50 s, not the exact
+  bound. At cutover, pin the exact deadline timer, equality at 20 000 ms and no
+  early expiry.
 
 ## Callers (tealstreet-next)
 
 The TS-visible startup results are unchanged. One new behaviour: an unanswered
 discovery read now fails at 20 s with a typed Timeout and retries on the native
-schedule. Before, it hung with no deadline. This goes into
+schedule. Before, it hung with no deadline. The new 20 s bound runs from
+admission to expiry and includes route, Prepare and Bind time. This goes into
 `RUST_CUTOVER_CALLERS.md` at production time.
