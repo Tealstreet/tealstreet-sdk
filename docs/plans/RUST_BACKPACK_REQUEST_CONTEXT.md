@@ -873,3 +873,21 @@ support Options initializer. Includes genuine selected Read/provider queue,
 exact Context DATA validation before parsing, typed terminal ownership, and
 primary-window inheritance. Sent to m26ps4 and hcmq3f for exact source/API fit;
 no compile, source readiness or runtime execution claim for this proposal.
+
+Registry-owner final review CLEAR for corrected Slots proposal
+/tmp/codex-backpack-identity-slots.patch, SHA-256
+3fa0b31bf33749116cba7efb9adf8ffe0c7a767f6f4107eb86a787f863353d66.
+Only identity.rs changes from c396: remove the raw credential-availability
+probe; normal Missing comes only from Slots with the native unavailable text;
+configured read identity not installed remains distinct. Both LocalRefusals
+carry plain messages with absent kind/outcome. Raw primary credentials are
+consulted only for the inherited native signing window. m26ps4 verified the
+other four proposal blobs unchanged. hcmq3f full-fit review remains before apply.
+
+Added native working control17fae4e3bf6 pins an unregistered direct constructor
+with raw keys: native unavailable message and absent kind/outcome, no work or
+Store mutation. Combined identity controls execute18:11GREEN/7originalRED,
+0ignored. Source proposals remain unapplied and local. Planned fixture wiring
+installs the real local provider and uses shared Prepare/Bind/Claim; original
+wire assertions stay exact, including request.route None. Managed route choice
+is sealed as RoutingIntent::Secondary, not a fabricated explicit route override.
