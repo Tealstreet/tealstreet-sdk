@@ -1721,3 +1721,62 @@ independence; CALLERS names the physical-order consequence. All three bounded
 reviews are CLEAR at a9282a7e787. Refreshed scoped suite: 165 tests/16 targets,
 zero ignored; strict all-target Clippy passes. Actual landing integration retains
 all incoming foreign changes and only the discovery singleton inventory prune.
+
+### Kraken Futures candle custody controls
+
+Twenty-eight isolated controls pin command/background Prepare before HTTP, exact
+fractional caller deadline, original-root and live-root child expiry, stuck
+Prepare/Bind under a longer live root, typed metadata and inert late completion,
+second-page strict failure with no prefix/third page, duplicate/clock/capacity
+refusal and exact surviving-peer recovery. Native working controls cover wire,
+codec/default bounds, sorting/duplicates, ten-page/no-progress limits, empty
+success, five-second polling, stale subscription generations and validation
+precedence. All28 and47 unchanged native controls pass; strict/fmt and inventory
+checks are scoped locally, with full workspace/WASM/replay proof delegated to CI.
+
+The CI unit-fixture correction changes only the secondary probe's pending
+constructor fields, preserving every original assertion. Scoped unit tests and
+all-target Clippy now cover this constructor as well as integration targets.
+
+
+## Crypto.com PublicTrades original and managed controls
+
+Plan preceded original compiling controls on actual1e2458b1c98. The expanded
+original checkpoint ran21 controls:10 assertion RED/11 working GREEN/0ignored;
+code/message40101 collisions are pinned separately from transport retry limits.
+The two new failure boundaries drive actual preparation refusal and actual
+physical-child deadline, with their first original failure gates identified.
+Adoption coverage adds delayed prepare/final-claim10ms pacing, expired readiness,
+reused-id late DATA and credential-free typed auth metadata/health isolation.
+All original financial/wire assertions remain. Broad size/CPU/replay gates and
+independent implementation reviews remain CI/review requirements.
+
+
+PublicTrades validation refresh:27 dedicated and218 scoped Crypto.com tests
+across18 targets pass, zero ignored; strict all-target Clippy/fmt, bans and both
+request-context checks pass on actual landing integration. Two raw/escaped
+missing-array hint controls pass on an independently archived native source;
+one exposed the candidate's narrower decoded-field retry projection. The fix
+retains the exact approved minimum compatibility input, not a new retry policy.
+Source/caller closure is CLEARf0ecc; full-map carryover is pending for that delta.
+
+### Paradex config and initial local entry
+
+Original e743120ab7b compiles with 22 intended REDs/four controls on actual77f124;
+all26 pass unchanged after implementation. Exact request inventory shrinks seven
+occurrences (account10->9/trading21->15/family48->41), with no bootstrap/shared
+engine/signing edit. Config expiry now includes host preparation; typed entry
+refusals and LocalSetting receipt enforcement are caller-visible boundaries.
+
+
+## Lighter identity Read controls
+
+The21 compiling originals at445754db356 executed15 assertion REDs and6 working
+controls on unchangedbe710 production, with no ignored tests. All21 are retained
+byte-for-byte and pass after adoption; three added controls cover strict
+preparation/unclaimed-permit failures and stale candidate replies. Eight existing
+identity tests retain their assertions through a real shared preparation driver.
+The32 focused tests pass, including all four deployment wires, four-candidate
+order, first-row/first-present-field precedence, retained capacity recovery,
+clock refusal, caller expiry and released physical-timeout continuation. Local
+checks are scoped with four jobs; broader builds and performance remain in CI.
