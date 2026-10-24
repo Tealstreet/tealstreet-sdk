@@ -275,6 +275,53 @@ impl Hyperliquid {
                 return;
             }
             let read = self.account.reads.pop_front().unwrap();
+            let read = match read {
+                QueuedRead {
+                    body,
+                    request: ReadContinuation::History(mut history),
+                    streamed,
+                    weight,
+                } => {
+                    let leg = match cx.http_leg_context(
+                        history.root(),
+                        safe_cex_engine::request_context::Policy {
+                            operation: safe_cex_engine::request_context::Operation::Read,
+                            credential: None,
+                            timeout_ms: 20_000,
+                            pacing: None,
+                            retry: safe_cex_engine::request_context::RetryPolicy::Never,
+                        },
+                    ) {
+                        Ok(leg) => leg,
+                        Err(error) => {
+                            self.reject_history(cx, *history, error.read_venue_error());
+                            continue;
+                        }
+                    };
+                    history.leg = Some(leg.clone());
+                    match cx.request_managed_with_headers(
+                        leg,
+                        Method::Post,
+                        format!("{}/info", self.rest()),
+                        &[("Content-Type", "application/json")],
+                        Some(body),
+                        Pending::History(history),
+                    ) {
+                        Ok(id) => {
+                            self.account.read_weight += weight;
+                            if streamed {
+                                cx.stream_response(id, ArrayAt::Root);
+                            }
+                        }
+                        Err((Pending::History(history), error)) => {
+                            self.reject_history(cx, *history, error.read_venue_error())
+                        }
+                        Err(_) => unreachable!("history submission returns its own pending"),
+                    }
+                    continue;
+                }
+                read => read,
+            };
             self.account.read_weight += read.weight;
             if read.streamed {
                 self.info(cx, read.body, ArrayAt::Root, read.request.pending());
@@ -288,6 +335,15 @@ impl Hyperliquid {
                 );
             }
         }
+    }
+    pub(crate) fn discard_history_owner(&mut self, owner: safe_cex_engine::request_context::Owner) {
+        self.account.reads.retain(|read| match read {
+            QueuedRead {
+                request: ReadContinuation::History(history),
+                ..
+            } => history.root().owner() != owner,
+            _ => true,
+        });
     }
     /// TS synthesises no position (and so no leverage row) for a merged spot pair.
     pub(crate) fn has_setting(&self, m: &Market) -> bool {
