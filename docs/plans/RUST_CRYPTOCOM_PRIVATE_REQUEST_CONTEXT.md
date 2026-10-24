@@ -313,8 +313,12 @@ a separately approved shared bound extension; this cutover does not request it.
 
 done_plan delegates all-failed, partial and unknown aggregation and accepted IDs
 to the journal. Native ids/first_error/effective state cannot override it. The
-actual PlanPolicy has no independent_calls field: no copied flag or readiness
-claim for forthcoming independent-call behavior is part of this plan.
+reviewed219d PlanPolicy had no independent_calls field. Actual6b composition
+declares independent_calls: job.best_effort for Mutation trading Plans: native
+continue-per-row batches opt in, while coupled jobs such as leverage do not.
+This permits exact failed-call settlement and sibling continuation only; it
+grants no DATA, retry, acceptance or journal erasure. Read Plans must use false.
+The root bound, native20ms eligibility, FIFO and aggregate journal remain intact.
 
 ## Production sequence and review boundaries
 

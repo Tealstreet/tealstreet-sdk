@@ -7953,3 +7953,11 @@ The native build API refuses a caller-preset readCredentialsValid result as
 "Unexpected read credential validation result" (InvalidInput, no outcome).
 Trusted host setup may carry its computed false result, which retains the
 native secondary-credentials validation error before venue construction.
+
+Crypto.com actual6b composition declares independent Mutation calls only for
+native best-effort trading batches. A released failed row settles through its
+exact failure custody, then the next sibling becomes eligible after20ms; the
+failed call is never resent. Coupled jobs, including leverage, remain strict.
+This declaration does not grant DATA or erase failure evidence: all-failed jobs
+fail, partial jobs retain accepted IDs, and the original Plan root still wins
+at expiry before the native final20ms timer. Read Plans do not opt in.

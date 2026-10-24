@@ -578,7 +578,7 @@ impl Cryptocom {
                 credential: Some(credential),
                 pacing: None,
                 retry: RetryPolicy::DefinitiveRefusal,
-                independent_calls: false,
+                independent_calls: job.best_effort,
             },
         ) {
             Ok(plan) => {
