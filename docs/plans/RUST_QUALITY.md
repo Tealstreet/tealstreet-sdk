@@ -986,7 +986,7 @@ assertion failures on native dispatch). Fixture correction6311e52cfe0 preserves
 the existing testnet REST host; all original admission assertions remain. All
 seven pass after managed adoption: exact aliases/networks, no preclaim publish,
 original deadline, strict transport/malformed cleanup, stale generation/revision,
-capacity isolation/recovery and 300 retirements. All33 focused public/depth tests
+capacity isolation/recovery and300 retirements. All33 focused public/depth tests
 pass, with six original supervision tests and held candle fixtures unchanged.
 Unheld public drivers use shared prepared_actions at their existing event clocks,
 retaining every old data/error/continuity assertion. No local transport helper,
@@ -1138,7 +1138,7 @@ same-deadline timer fires at its original raw timestamp; all ten candle controls
 pass on legacy ticker source with every original assertion retained. Ticker
 controls preserve native fields/aliases/partial-row semantics and symbol-specific
 WS precedence through actual prepare/bind/claim, reject preclaim publication,
-discard failed prefixes, and prove failure/capacity recovery and 300 Background
+discard failed prefixes, and prove failure/capacity recovery and300 Background
 retirements without completing unrelated commands. Existing fixture drains use
 shared preparation at original event times only where the new ticker requires it.
 No runtime timer/retry policy or production ordering workaround is introduced.
