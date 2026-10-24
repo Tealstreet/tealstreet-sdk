@@ -33,7 +33,9 @@ pub const BITRUE: CodeTable = CodeTable {
 
 pub fn resend(response: &Response<'_>) -> bool {
     let envelope = serde_json::from_str::<crate::wire::Envelope<'_>>(response.body).ok();
-    let code = envelope.as_ref().and_then(|e| e.code.parse::<i64>().ok());
+    let code = envelope
+        .as_ref()
+        .and_then(|e| classify::decode_int(&e.code));
     let native = code.map(|code| Native {
         code: NativeCode::Int(code),
         message: envelope.as_ref().map_or("", |e| e.msg.as_ref()),

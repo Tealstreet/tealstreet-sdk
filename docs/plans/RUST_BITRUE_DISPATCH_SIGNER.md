@@ -358,3 +358,26 @@ choose native continuation without parsing engine-formatted diagnostic strings.
 Existing legacy terminal error/Partial ladders remain debt for the later genuine
 Mutation owner/journal conversion; rows #21/#22 and accepted-ID aggregation are
 not claimed closed by this signer cutover.
+
+## Independent source review corrections
+
+The first source pin727f had one stale accounting assertion: its extra floor
+field access meant22/14, while the prose said21/14. Follow-up7dcba separates
+stamp-floor metadata from the native prior-attempt flags and makes actual source,
+scanner and manifest21/14. This is not a new migration claim.
+
+Caller and source review found noncanonical code strings accepted by parse::<i64>
+(e.g. "-01022"), and an Inspect GET receipt incorrectly promoting a later provider
+refusal to Unknown without any write. Committed compiling controls a1459ae75d1
+reproduced three assertion REDs with31working controls before correction. Native
+code extraction now uses shared classify::decode_int; canonical numeric/string
+-1022 positives remain. Provider failure uncertainty follows actual mutating
+Effect plus retained native plan effects/accepted IDs, never StampFloor metadata.
+An Inspect-only chain stays NotSent; a previously released mutation stays Unknown.
+
+Full-map review also restored the existing history witness: a valid execution ROW
+is staged before invalid bytes, with no interim publication/retry, then one strict
+failure with no Partial. Missing-list is a separate real stream case. No synthetic
+HttpFailed error string supplies classification evidence. Exact incoming5653-path
+and all25original-assertion preservation review was independently completed on727;
+final bounded delta review and CI remain separate gates.

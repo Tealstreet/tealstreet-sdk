@@ -865,13 +865,7 @@ fn signature_retry_does_not_replenish_get_retry_budget() {
 
 #[test]
 fn utf8_and_missing_list_fail_without_retry_or_prefix_publication() {
-    for (bytes, expected) in [
-        (&[0xff, 0xfe][..], "response did not contain"),
-        (
-            br#"{"code":0,"data":{}}"#.as_slice(),
-            "response did not contain",
-        ),
-    ] {
+    for staged_prefix in [true, false] {
         let mut e = engine();
         query(&mut e, fills());
         let r = retry_request(&mut e);
@@ -883,6 +877,25 @@ fn utf8_and_missing_list_fail_without_retry_or_prefix_publication() {
                 headers: "",
             },
         );
+        if staged_prefix {
+            let prefix = format!(r#"{{"code":0,"data":[{ROW},"#);
+            e.handle(
+                1700000000000.,
+                Event::HttpChunk {
+                    request: r.id,
+                    data: prefix.as_bytes(),
+                },
+            );
+            assert!(
+                safe_cex_engine::test_support::prepared_actions(&mut e, 1700000000000.).is_empty(),
+                "staging a history row cannot publish or continue"
+            );
+        }
+        let bytes = if staged_prefix {
+            &[0xff, 0xfe][..]
+        } else {
+            br#"{"code":0,"data":{}}"#.as_slice()
+        };
         e.handle(
             1700000000000.,
             Event::HttpChunk {
@@ -892,7 +905,10 @@ fn utf8_and_missing_list_fail_without_retry_or_prefix_publication() {
         );
         e.handle(1700000000000., Event::HttpEnd { request: r.id });
         let error = owned_failure(&mut e);
-        assert!(error.message.contains(expected), "{error:?}");
+        assert!(error.partial.is_none());
+        if !staged_prefix {
+            assert!(error.message.contains("response did not contain"));
+        }
     }
 }
 

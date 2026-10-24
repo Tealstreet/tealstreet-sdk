@@ -1169,9 +1169,10 @@ impl Bitrue {
         cx: &mut Cx<'_, Pending>,
         request: Request,
         mut error: VenueError,
-        released: bool,
+        prior_attempt: bool,
     ) {
-        if released || request.plan.effective || !request.plan.ids.is_empty() {
+        let read = matches!(request.step.effect, Effect::Inspect(_) | Effect::Verify(_));
+        if (prior_attempt && !read) || request.plan.effective || !request.plan.ids.is_empty() {
             error.outcome = Some(Outcome::Unknown);
         }
         self.trade_failed(cx, request, error);
