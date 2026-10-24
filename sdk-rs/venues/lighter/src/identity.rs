@@ -1,6 +1,9 @@
 //! Unsigned identities do not start or alter the private account/signing lifecycle.
 use crate::{Lighter, Pending, account::Lookup};
-use safe_cex_engine::{CommandId, Cx, Method, Response};
+use safe_cex_engine::request_context::{
+    CommandEntryError, Context, Operation, Policy, RetryPolicy,
+};
+use safe_cex_engine::{Cx, Method, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 #[derive(Deserialize)]
@@ -59,20 +62,28 @@ struct Identity {
     #[serde(skip_serializing_if = "Option::is_none")]
     affiliate_id: Option<String>,
 }
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
-    let result =
-        result.and_then(|identity| serde_json::to_string(&identity).map_err(|e| e.to_string()));
+fn finish(cx: &mut Cx<'_, Pending>, root: &Context, result: Result<Identity, VenueError>) {
+    if cx.validate_read_root_context(root).is_err() {
+        return;
+    }
+    let result = result.and_then(|identity| {
+        serde_json::to_string(&identity).map_err(|error| VenueError::new(error.to_string()))
+    });
     match result {
-        Ok(data) => cx.done(command, data),
+        Ok(data) => {
+            let _ = cx.done_context(root, data);
+        }
         Err(error) => {
-            cx.command_error(command, &error);
-            cx.fail(command, error);
+            if cx.command_error_context(root, &error.message).is_ok() {
+                let _ = cx.fail_context(root, error);
+            }
         }
     }
 }
 
 pub struct Request {
-    command: CommandId,
+    root: Context,
+    leg: Context,
     candidates: VecDeque<Lookup>,
     address: bool,
 }
@@ -125,36 +136,67 @@ fn parse(response: Response<'_>, address: bool) -> Result<Identity, String> {
     })
 }
 impl Lighter {
-    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>) {
+        let root = match cx.admit_caller_read_root(None, None) {
+            Ok(root) => root,
+            Err(CommandEntryError::Rejected(_)) => return,
+            Err(CommandEntryError::Revoked) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+        };
         self.identity_next(
             cx,
-            command,
+            root,
             self.identity_candidates(),
-            "Lighter identity requires an account index or L1 address selector",
+            VenueError::new("Lighter identity requires an account index or L1 address selector"),
         );
     }
     fn identity_next(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        root: Context,
         mut candidates: VecDeque<Lookup>,
-        error: &str,
+        error: VenueError,
     ) {
+        if cx.validate_read_root_context(&root).is_err() {
+            return;
+        }
         let Some(candidate) = candidates.pop_front() else {
-            finish(cx, command, Err(error.into()));
+            finish(cx, &root, Err(error));
             return;
         };
-        cx.request(
+        let leg = match cx.http_leg_context(
+            &root,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(leg) => leg,
+            Err(error) => {
+                finish(cx, &root, Err(error.venue_error()));
+                return;
+            }
+        };
+        let pending = Pending::Identity(Request {
+            root: root.clone(),
+            leg: leg.clone(),
+            candidates,
+            address: candidate.is_address(),
+        });
+        if let Err((_pending, error)) = cx.request_managed(
+            leg,
             Method::Get,
             format!("{}/api/v1/{}", self.host(), candidate.path()),
-            vec![],
             None,
-            Pending::Identity(Request {
-                command,
-                candidates,
-                address: candidate.is_address(),
-            }),
-        );
+            pending,
+        ) {
+            finish(cx, &root, Err(error.venue_error()));
+        }
     }
     pub(crate) fn identity_response(
         &self,
@@ -162,12 +204,36 @@ impl Lighter {
         request: Request,
         response: Response<'_>,
     ) {
+        if cx
+            .validate_read_http_delivery(&request.root, &request.leg)
+            .is_err()
+        {
+            return;
+        }
         match parse(response, request.address) {
-            Ok(identity) => finish(cx, request.command, Ok(identity)),
-            Err(error) => self.identity_failed(cx, request, &error),
+            Ok(identity) => finish(cx, &request.root, Ok(identity)),
+            Err(error) => self.identity_failed(cx, request, VenueError::new(error)),
         }
     }
-    pub(crate) fn identity_failed(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        self.identity_next(cx, request.command, request.candidates, error);
+    pub(crate) fn identity_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: impl Into<VenueError>,
+    ) {
+        if cx.validate_read_root_context(&request.root).is_err()
+            || cx.finish_http_context(&request.leg).is_err()
+        {
+            return;
+        }
+        self.identity_next(cx, request.root, request.candidates, error.into());
+    }
+    pub(crate) fn identity_rejected(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        finish(cx, &request.root, Err(error));
     }
 }
