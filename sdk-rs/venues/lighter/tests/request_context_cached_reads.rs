@@ -108,8 +108,8 @@ fn candle(engine: &mut Engine<Lighter>, owner: u32) -> Preparation {
 fn started(robinhood: bool, testnet: bool) -> Engine<Lighter> {
     let mut engine = engine(robinhood, testnet);
     engine.start(NOW);
-    let request = engine
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,

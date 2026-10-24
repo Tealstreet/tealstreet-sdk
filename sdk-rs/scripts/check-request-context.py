@@ -485,7 +485,7 @@ STAGING_BOOTSTRAPS = {'venues/apexomni/src/lib.rs': ({'0adb175953636afd100d2ddc6
  'b1761cdefa174ea70037cfceab33b91ad7279e59d22ccecb872e996dd5b0c32c': 1,
  'b8eef2a79ada04918fd91d4c45f3a03a76d566ac79f733acf0c441b0fbbfc934': 1,
  'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
- 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2}),
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1}),
  'venues/weex/src/lib.rs': ({'067aa233d0ebbb24c837ae5cb4549d6aa68e9f29bf4bdde0ba0630bda9f466c1': 1,
  '0d6bbb8e01da4f9bc9a177c0e8ca9d0d015c922780050cfeda6b33807cac8e78': 1,
  '1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
