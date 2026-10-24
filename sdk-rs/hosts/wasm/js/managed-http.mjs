@@ -117,6 +117,7 @@ export class ManagedHttp {
     let response;
     try {
       if (!resource.bound.ready()) { this.fail(token, resource, 'timedOut'); return; }
+      if (!this.live(token, resource)) return;
       const result = JSON.parse(host.invoke(host.engine.httpClaim, permit, host.transport.now()));
       if (result.status === 'wait' && Number.isFinite(result.until)) {
         resource.wake = host.transport.setTimeout(() => {

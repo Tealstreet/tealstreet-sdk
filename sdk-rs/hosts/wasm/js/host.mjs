@@ -1024,6 +1024,7 @@ export class EngineHost {
                 stats.open++;
                 this.socketChanged();
               }
+              if (this.disposed) return;
               this.run(this.invoke(engine.wsOpen, id, transport.now()));
             },
             onMessage: (text) => {
@@ -1059,12 +1060,14 @@ export class EngineHost {
               if (this.deferHttpNotification(callbacks.onBinary, undefined, true)) return;
               if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
               received();
+              if (this.disposed) return;
               if (engine.wsBinary) this.run(this.invoke(engine.wsBinary, id, data, transport.now()));
               else {
                 const active = this.sockets.get(id);
                 this.sockets.delete(id);
                 this.socketClosed(id, 1003);
                 active.close();
+                if (this.disposed) return;
                 this.run(this.invoke(engine.wsClose, id, 1003, transport.now()));
               }
             },
@@ -1073,6 +1076,7 @@ export class EngineHost {
               if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
               this.sockets.delete(id);
               this.socketClosed(id, code ?? 1006);
+              if (this.disposed) return;
               this.run(this.invoke(engine.wsClose, id, code ?? 1006, transport.now()));
             },
           };

@@ -6866,6 +6866,10 @@ retirement failure fences the engine. A dead host never enters an engine export
 or frees its WASM engine; host-owned cancellation still preserves Unknown/IDs.
 Managed-HTTP post-release bookkeeping stops at the host disposal fence before
 evaluating engine callbacks; already released send evidence is retained.
+Socket open, binary-data and close continuations stop before looking up engine
+callbacks if an observer disposes the host. Standalone HTTP Claim checks the
+same live resource again after provider readiness; a retired or replaced
+resource cannot proceed to Claim. Healthy event delivery is unchanged.
 
 G2c snapshot installation will freeze all dependent identities, provider and setup
 policy setters immediately, including before startup. Account construction must

@@ -708,3 +708,19 @@ resource-retirement and healthy-delivery assertions pass. The already captured
 text-message continuation is GREEN. These are property reads, not demonstrated
 post-poison WASM calls. Exact fixes are four post-observer disposal checks and
 one live-resource revalidation after bound.ready, with group source unchanged.
+
+
+The exact five-fence proposal (SHA-256
+`a94ac2c9800a3d16dc28ec48505843049a9bdee5dce48cbe4a344f62b2d691f5`)
+is applied after fe7lgm and G2b-owner source/API review. Four socket continuations
+stop after an observer disposes the host; standalone Claim rechecks the exact
+live resource after ready. The original five assertion REDs are committed in
+`b06b8d9545b`; the same controls plus all 25 group controls pass after the fix:
+47 PASS, zero failures or skips. Healthy delivery and release evidence remain
+covered, and group source is byte-identical to the RED head.
+
+P3(a) is closed only for these five paths and the earlier managed post path.
+Remaining callback-site review stays OPEN for transport abort/fetch continuations,
+timer and signing continuations, and observer reentrancy outside these socket
+paths; no blanket zero-property-access audit is claimed. Rust installation,
+native teardown and deferred whole-group completion remain separate source gates.
