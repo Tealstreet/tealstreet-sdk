@@ -187,4 +187,49 @@ mod tests {
         assert!(stamped(None).stamp_floor().is_none());
         assert_eq!(dispatch(0.).stamp_after(floor(42.)), Ok(43.));
     }
+
+    #[test]
+    fn stamp_after_refuses_an_unsafe_current_clock_with_or_without_floor() {
+        const MAX: f64 = 9_007_199_254_740_991.;
+        for now in [MAX + 1., MAX + 2., f64::MAX] {
+            for selected_floor in [None, floor(42.)] {
+                assert_eq!(
+                    dispatch(now).stamp_after(selected_floor),
+                    Err(crate::signing::SignError::InvalidRequest)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stamp_after_refuses_nonfinite_current_clocks_before_clamping() {
+        for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for selected_floor in [None, floor(42.)] {
+                assert_eq!(
+                    dispatch(now).stamp_after(selected_floor),
+                    Err(crate::signing::SignError::InvalidRequest)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stamp_after_keeps_the_maximum_safe_current_clock() {
+        const MAX: f64 = 9_007_199_254_740_991.;
+        for selected_floor in [None, floor(42.), floor(MAX - 1.)] {
+            assert_eq!(dispatch(MAX).stamp_after(selected_floor), Ok(MAX));
+        }
+    }
+
+    #[test]
+    fn stamp_ms_is_unchanged_by_the_opt_in_floor_helper() {
+        let negative = dispatch(-1.5);
+        assert_eq!(negative.stamp_ms(), -2.);
+        assert_eq!(negative.stamp_after(None), Ok(0.));
+        assert_eq!(negative.stamp_ms(), -2.);
+        let current = dispatch(1_000.75);
+        assert_eq!(current.stamp_ms(), 1_000.);
+        assert_eq!(current.stamp_after(floor(1_000.)), Ok(1_001.));
+        assert_eq!(current.stamp_ms(), 1_000.);
+    }
 }
