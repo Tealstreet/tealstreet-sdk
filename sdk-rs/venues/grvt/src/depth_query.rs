@@ -221,6 +221,7 @@ impl Grvt {
             &preflight,
             &steps,
             PlanPolicy {
+                independent_calls: false,
                 operation: Operation::Read,
                 credential: None,
                 pacing: None,
