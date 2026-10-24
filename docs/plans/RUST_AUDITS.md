@@ -3228,3 +3228,18 @@ commands before venue entry; the fallback unsupported arm only supplies match
 exhaustiveness. Foreign inventory bytes/order and signing/selection stay exact.
 Scoped123 controls and strict Clippy pass; independent source and exact-head CI
 remain separate gates.
+
+## AsterDEX local Read command custody
+
+Seven synchronous history terminals, the unsupported candle interval and both
+cached-leverage outcomes use shared genuine entry and Context completion.
+The original unchanged-source checkpoint records20 assertion REDs and six native
+positives; the managed target passes all26. Full-capacity controls retain256
+genuine peer roots and validate their liveness before/after refusal, then free
+one through its actual timer and verify admission succeeds. Exact inventory
+shrink is five complete fingerprints and ten occurrences; remote request, clock,
+retry, paging, signing and write paths stay explicit legacy targets.
+
+Architecture gate: No. The adapter consumes engine admission, typed refusal and
+terminal authority directly, with one pure policy declaration and no local
+issuer, owner map, timer, retry loop or numeric completion fallback.
