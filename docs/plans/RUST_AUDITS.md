@@ -3122,6 +3122,16 @@ recovers only previously accepted rows. The new 20s child policy and typed first
 released failure are disclosed in CALLERS. Sole intended request inventory
 change: history.rs 6->5, family23->22. Bounded source review/CI remain separate.
 
+## Receipt-bound StampFloor shared primitive
+
+Opaque release-derived stamp metadata and one opt-in dispatch helper replace no
+venue source in this slice. Only SigningRelease mints the floor from its validated
+receipt; it grants no retry, owner, account, credential or transport authority.
+Inherited new-API compile REDs are distinct from two executed assertion REDs
+against the inherited implementation's unsafe-current/NaN boundaries. Existing
+stamp_ms and other families' recipes are unchanged. Bitrue adoption remains a
+separate consumer migration after actual shared landing.
+
 
 ## GRVT candle managed ownership checkpoint
 

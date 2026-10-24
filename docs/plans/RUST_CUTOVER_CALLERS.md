@@ -7468,6 +7468,22 @@ No signing, private history, key selection, Spot or candle behavior changes.
 Root plus current child require two Context slots; a child Capacity refusal
 strictly retires the admitted root without I/O or a leaked reservation.
 
+### Receipt-bound stamp floor (dispatch signing)
+
+Plan: [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md). This is an additive engine API.
+No family's stamps change until a recipe opts in.
+
+| Change | tealstreet-next file:line | Old usage | New usage | Impact |
+| --- | --- | --- | --- | --- |
+| `StampFloor` (opaque), `SigningRelease::stamp_floor()` | none | n/a | minted only from a genuine released receipt stamp | none |
+| `DispatchContext::stamp_after(floor)` = `max(0, stamp_ms(), floor + 1)`, refusing past the safe-integer range | Rust venue recipes only | `stamp_ms()` | resend recipes keep stamps monotonic on fixed or backward clocks; `stamp_ms()` is unchanged | none |
+
+StampFloor's opt-in helper also refuses a non-finite current clock before
+clamping and any final stamp beyond the safe-integer range, even without a
+floor. This does not change stamp_ms or opt any venue into the helper. A reused
+floor is metadata only; each consumer must retain its real original owner and
+released-attempt association, and separately obtain genuine resend authority.
+
 
 ## GRVT unsigned FetchCandles caller bounds
 
