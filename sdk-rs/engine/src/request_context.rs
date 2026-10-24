@@ -122,6 +122,49 @@ impl Session {
     }
 }
 
+/// The venue's current session token as one full `Authorization` value.
+/// Bounded, redacted in `Debug` and wiped on drop; it never enters a Context.
+pub struct SecretHeaderValue(String);
+
+impl SecretHeaderValue {
+    /// Refuses (and wipes) an empty, oversized or non-header-safe value.
+    pub fn new(mut value: String) -> Result<Self, Error> {
+        if value.is_empty()
+            || crate::signing_headers::validate_unsigned(&[("Authorization", &value)]).is_err()
+        {
+            zeroize::Zeroize::zeroize(&mut value);
+            return Err(Error::Invalid);
+        }
+        Ok(Self(value))
+    }
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Drop for SecretHeaderValue {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
+
+impl std::fmt::Debug for SecretHeaderValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SecretHeaderValue(<redacted>)")
+    }
+}
+
+/// A venue's answer for one Session generation at managed prepare.
+#[derive(Debug)]
+pub enum SessionBearer {
+    /// `revision` is monotonic within the generation and never reused.
+    Ready {
+        value: SecretHeaderValue,
+        revision: u64,
+    },
+    NotReady,
+}
+
 /// A continuation parked behind a session, returned when the venue drains it.
 #[derive(Debug)]
 pub enum Waiter<P> {

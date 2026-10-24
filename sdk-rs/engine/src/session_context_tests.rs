@@ -245,6 +245,7 @@ fn queue(
     with(engine, now, |cx| {
         cx.request_managed(
             context.clone(),
+            None,
             Method::Post,
             "https://venue.test/listenKey".into(),
             None,
@@ -445,6 +446,7 @@ fn retired_and_foreign_sessions_issue_nothing() {
     let queued = with(&mut engine, 2., |cx| {
         cx.request_managed(
             context.clone(),
+            None,
             Method::Post,
             "https://venue.test/bullet".into(),
             None,
@@ -476,6 +478,7 @@ fn one_physical_attempt_per_session_mutation() {
     let resend = with(&mut engine, 4., |cx| {
         cx.request_managed(
             context.clone(),
+            None,
             Method::Post,
             "https://venue.test/listenKey".into(),
             None,
@@ -704,6 +707,7 @@ fn queue_result(
     with(engine, now, |cx| {
         cx.request_managed(
             context.clone(),
+            None,
             Method::Post,
             "https://venue.test/login".into(),
             None,
@@ -902,6 +906,7 @@ fn queued_session_packets_redact_the_listen_key() {
     with(&mut engine, 1., |cx| {
         cx.request_managed(
             context.clone(),
+            None,
             Method::Put,
             "https://venue.test/listenKey?listenKey=secret-key".into(),
             None,

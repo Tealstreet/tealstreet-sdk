@@ -1176,6 +1176,7 @@ impl Venue for MexcFutures {
                 }
                 if let Err((pending, error)) = cx.request_managed(
                     context.clone(),
+                    None,
                     Method::Get,
                     format!("{REST}{path}"),
                     None,

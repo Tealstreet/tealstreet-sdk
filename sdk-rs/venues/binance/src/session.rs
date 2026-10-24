@@ -71,6 +71,7 @@ impl BinanceFutures {
         };
         let queued = cx.request_signed_managed(
             context.clone(),
+            None,
             method,
             format!("{}{}", self.urls.account_rest, self.paths.listen_key),
             None,

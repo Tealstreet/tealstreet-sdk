@@ -53,7 +53,7 @@ mod planned_calls {
     ) -> Result<RequestId, (Context, Error)> {
         if signed {
             cx.request_signed_managed(
-                context.clone(),
+                context.clone(), None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,
@@ -62,7 +62,7 @@ mod planned_calls {
             )
         } else {
             cx.request_managed(
-                context.clone(),
+                context.clone(), None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -303,7 +303,7 @@ mod planned_calls {
                 }
                 if self.bad_retry {
                     let result = cx.request_signed_managed(
-                        context.clone(),
+                        context.clone(), None,
                         Method::Post,
                         "https://venue.test/write".into(),
                         None,

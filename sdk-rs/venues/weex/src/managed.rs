@@ -52,6 +52,7 @@ pub(crate) fn read(
     if cx
         .request_signed_managed(
             context.clone(),
+            None,
             method,
             url,
             body,

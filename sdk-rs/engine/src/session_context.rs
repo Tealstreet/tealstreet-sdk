@@ -221,7 +221,12 @@ impl State {
 }
 
 impl ContextRegistry {
-    fn validate_session(&self, session: &Session) -> Result<u64, Error> {
+    pub(in crate::engine) fn session_generation_live(&self, generation: u64) -> bool {
+        self.sessions.live(generation)
+    }
+
+    /// Issuer plus liveness only; binding a Bearer takes no session scope.
+    pub(in crate::engine) fn validate_session(&self, session: &Session) -> Result<u64, Error> {
         let Owner::Session { generation } = session.owner() else {
             unreachable!("session handles always carry a session owner");
         };
@@ -257,13 +262,18 @@ impl<P> Cx<'_, P> {
     /// Discard the session's work and revoke it, with no venue callback in
     /// between: unreleased attempts emit no HTTP, and late responses find no
     /// managed entry, so they never reach venue callbacks or reducers. Its
-    /// waiters come back to the caller as NotSent failures.
+    /// waiters come back to the caller as NotSent failures. Unreleased packets
+    /// other owners bound to its Bearer fail after the current callback.
     #[must_use = "returned waiters must be failed or re-dispatched"]
     pub fn retire_session(
         &mut self,
         session: &Session,
     ) -> Result<Vec<(Context, P, VenueError)>, Error> {
         let generation = self.io.request_contexts.validate_session(session)?;
+        let bound = self.io.bearer_bound.get(&generation).map_or(0, Vec::len);
+        if self.io.bearer_fenced.try_reserve(bound).is_err() {
+            return Err(Error::Capacity);
+        }
         let waiters = self.drain_waits(generation, VenueError::new("Session retired"));
         self.io.retire_http_owner(session.owner());
         let registry = &mut self.io.request_contexts;
@@ -271,6 +281,7 @@ impl<P> Cx<'_, P> {
         registry
             .contexts
             .retain(|_, context| context.owner() != session.owner());
+        self.io.fence_bearer_generation(generation);
         Ok(waiters)
     }
 

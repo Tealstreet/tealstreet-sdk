@@ -116,6 +116,7 @@ impl Venue for Probe {
             .unwrap();
         cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             "https://receipt.test/jwt".into(),
             None,
@@ -173,6 +174,7 @@ impl Venue for Probe {
                             let context = cx.plan_leg_context(&plan, &slot).unwrap();
                             cx.request_managed(
                                 context.clone(),
+                                None,
                                 Method::Get,
                                 "https://receipt.test/page".into(),
                                 None,

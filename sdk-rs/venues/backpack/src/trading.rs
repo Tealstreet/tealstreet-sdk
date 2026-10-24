@@ -906,6 +906,7 @@ impl Backpack {
         );
         if let Err((Pending::Trade(delivery), error)) = cx.request_signed_managed(
             delivery.managed.as_ref().unwrap().context.clone(),
+            None,
             method,
             format!("{REST}{path}"),
             Some(body),

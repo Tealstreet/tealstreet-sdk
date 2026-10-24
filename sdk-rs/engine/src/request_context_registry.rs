@@ -199,6 +199,9 @@ pub(super) struct ContextRegistry {
     contexts: HashMap<u64, Context>,
     commands: HashMap<CommandId, CommandOwner>,
     sessions: session::Sessions,
+    /// Session generation each Bearer-bound leg carries; same-leg retries and
+    /// resends inherit it. Leg identities are never reused.
+    bearer_legs: HashMap<u64, u64>,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
     executions: execution::Executions,
@@ -671,6 +674,18 @@ impl ContextRegistry {
             .get(&id)
             .and_then(|owner| owner.writes.as_ref())
             .is_some_and(|writes| writes.superseded(context.leg()))
+    }
+
+    pub(super) fn leg_bearer(&self, context: &Context) -> Option<u64> {
+        self.bearer_legs.get(&context.leg()).copied()
+    }
+
+    pub(super) fn bind_leg_bearer(&mut self, leg: u64, generation: u64) {
+        if self.bearer_legs.len() >= CAPACITY {
+            let contexts = &self.contexts;
+            self.bearer_legs.retain(|leg, _| contexts.contains_key(leg));
+        }
+        self.bearer_legs.insert(leg, generation);
     }
 
     pub(super) fn validate(&self, context: &Context, now: f64) -> Result<(), Error> {

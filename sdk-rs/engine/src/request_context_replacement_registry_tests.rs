@@ -751,6 +751,7 @@ impl crate::Venue for PhysicalReplacement {
         if self.signed {
             cx.request_signed_managed(
                 root.clone(),
+                None,
                 crate::Method::Post,
                 "https://replacement.test/write".into(),
                 None,
@@ -761,6 +762,7 @@ impl crate::Venue for PhysicalReplacement {
         } else {
             cx.request_managed(
                 root.clone(),
+                None,
                 crate::Method::Post,
                 "https://replacement.test/write".into(),
                 None,
@@ -830,6 +832,7 @@ impl crate::Venue for PhysicalReplacement {
             for _ in 0..255 {
                 cx.request_managed(
                     background.clone(),
+                    None,
                     crate::Method::Get,
                     "https://replacement.test/unrelated".into(),
                     None,
@@ -841,6 +844,7 @@ impl crate::Venue for PhysicalReplacement {
             let failure = cx
                 .request_managed(
                     child.clone(),
+                    None,
                     crate::Method::Post,
                     "https://replacement.test/refused-child".into(),
                     None,
@@ -861,6 +865,7 @@ impl crate::Venue for PhysicalReplacement {
             for child in &self.children {
                 cx.request_signed_managed(
                     child.clone(),
+                    None,
                     crate::Method::Post,
                     "https://replacement.test/single".into(),
                     None,

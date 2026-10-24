@@ -98,13 +98,14 @@ impl BinanceFutures {
         let queued = match read.credentials {
             Some(credentials) => cx.request_signed_managed(
                 context,
+                None,
                 Method::Get,
                 read.url,
                 None,
                 Box::new(self.signed_recipe(credentials, read.query)),
                 pending,
             ),
-            None => cx.request_managed(context, Method::Get, read.url, None, pending),
+            None => cx.request_managed(context, None, Method::Get, read.url, None, pending),
         };
         match queued {
             Ok(request) => {

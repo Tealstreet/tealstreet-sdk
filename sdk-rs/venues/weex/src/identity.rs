@@ -128,6 +128,7 @@ impl WeexFutures {
         if cx
             .request_signed_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 url,
                 body,

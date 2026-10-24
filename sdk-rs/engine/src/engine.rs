@@ -1472,6 +1472,10 @@ struct Io<P> {
     #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
+    /// Managed requests bound to each Session generation's Bearer.
+    bearer_bound: HashMap<u64, Vec<RequestId>>,
+    /// Bound preparations a Session retire fenced, failed after the callback.
+    bearer_fenced: Vec<crate::request_context::Preparation>,
     http_pacing: crate::request_context::SendPacing,
     http_responses: crate::request_context::ReconciliationResponses,
     http_write_revision: u64,
@@ -1571,6 +1575,8 @@ impl<P> Default for Io<P> {
             http_responses: Default::default(),
             http_write_revision: 0,
             managed_http: HashMap::new(),
+            bearer_bound: HashMap::new(),
+            bearer_fenced: Vec::new(),
             http_pacing: Default::default(),
             entropy: None,
             #[cfg(feature = "order-locks")]
@@ -2609,6 +2615,18 @@ pub trait Venue {
         _data: &crate::request_context::ReconciliationData,
         _response: Response<'_>,
     ) {
+    }
+
+    /// Called only while preparing a Session-bound managed request: the one
+    /// place the token is copied. No I/O, `Cx` or state change.
+    fn session_bearer(&self, _generation: u64) -> crate::request_context::SessionBearer {
+        crate::request_context::SessionBearer::NotReady
+    }
+
+    /// The claim-time fence: the current revision only, or `None` when not
+    /// ready. It must not touch, clone or allocate the token.
+    fn session_bearer_revision(&self, _generation: u64) -> Option<u64> {
+        None
     }
 
     /// Fixed per-engine send-group floors; individual attempts may only extend
@@ -3914,6 +3932,7 @@ impl<V: Venue> Engine<V> {
 
     fn finish_event_scope(&mut self, now: f64) {
         self.io.request_contexts.end_plan_admission();
+        self.flush_bearer_fences(now);
         self.flush_http_owner_retirements();
         self.finish_deferred_commands(now);
         self.restore_shared_tickers(false, now);

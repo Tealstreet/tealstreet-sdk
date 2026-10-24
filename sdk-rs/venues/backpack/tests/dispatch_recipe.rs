@@ -71,6 +71,7 @@ impl Venue for Issue {
         };
         cx.request_signed_managed(
             context,
+            None,
             self.request.method,
             self.route.clone().unwrap_or_else(|| {
                 format!("https://api.backpack.exchange{}{suffix}", self.request.path)

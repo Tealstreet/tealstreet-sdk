@@ -390,6 +390,7 @@ impl ApexOmni {
     fn queue_candles(&mut self, cx: &mut Cx<'_, Pending>, request: Candles) {
         if let Err((pending, error)) = cx.request_managed(
             request.context.clone(),
+            None,
             Method::Get,
             request.url.clone(),
             None,
