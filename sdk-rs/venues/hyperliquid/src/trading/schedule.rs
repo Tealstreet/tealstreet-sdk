@@ -1,5 +1,6 @@
 //! Signed dead-man control: no account reconciliation can prove arming.
 use super::{Hyperliquid, Job, Pending, Step, not_sent, unproven};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{CommandId, Cx, ErrorKind, Outcome, Response, VenueError};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -24,8 +25,17 @@ impl Hyperliquid {
         time: Option<f64>,
     ) {
         if self.spot {
-            cx.fail(
-                command,
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Mutation,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
                 not_sent("scheduleCancel is not supported by Hyperliquid spot")
                     .kind(ErrorKind::Unsupported),
             );
@@ -34,7 +44,16 @@ impl Hyperliquid {
         let time_ms = match deadline(time, cx.now) {
             Ok(time) => time,
             Err(error) => {
-                cx.fail(command, not_sent(error).kind(ErrorKind::InvalidInput));
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Mutation,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
+                let _ = cx.fail_context(&context, not_sent(error).kind(ErrorKind::InvalidInput));
                 return;
             }
         };

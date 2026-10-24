@@ -1,20 +1,24 @@
 mod support;
 
 use safe_cex_engine::{Action, Event, HttpRequest, PublicFeedPolicy, SocketChannel, SocketId};
-use safe_cex_venue_apexomni::{ApexOmni, Options};
+use safe_cex_venue_apexomni::Options;
 use support::*;
 
 const ACCOUNT: &str = r#"{"code":0,"data":{"id":"611779989544632629","positions":[{"symbol":"BTC-USDT","side":"LONG","entryPrice":"100","size":"2","customImr":"0.1","unrealisedPnl":"4"},{"symbol":"BTC-USDT","side":"SHORT","entryPrice":"120","size":"1","customImr":"0.1","unrealisedPnl":"3"}],"contractAccount":{"makerFeeRate":"0.0002","takerFeeRate":"0.0005"}}}"#;
 const BALANCE: &str = r#"{"code":0,"data":{"totalEquityValue":"1000","availableBalance":"800","initialMargin":"100","maintenanceMargin":"20"}}"#;
 
 fn pending(policy: PublicFeedPolicy) -> (TestEngine, SocketId, Option<SocketId>, Vec<HttpRequest>) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("passphrase".into()),
-        omni_key_seed: Some("11".repeat(65)),
-        ..Default::default()
-    }));
+    let mut engine = private_engine(
+        Options {
+            ..Default::default()
+        },
+        &Material {
+            key: "key",
+            signing: "secret",
+            passphrase: Some("passphrase"),
+            seed: Some(("11".repeat(65)).to_string()),
+        },
+    );
     engine.set_public_feed_policy(policy).unwrap();
     engine.start(0.);
     let metadata = requests(&mut engine).remove(0);

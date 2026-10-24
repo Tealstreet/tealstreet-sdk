@@ -82,6 +82,48 @@ test('workspace, image, architecture and exact Node identities fail closed befor
   assert.throws(() => api.restoreRuntime({ root: other, directory: destination, environment }), /workspace/);
 });
 
+for (const [label, current, differences] of [
+  ['runner image', { ...environment, ImageVersion: 'other-image' },
+    [{ field: 'ImageVersion', expected: 'fixture-image-1', actual: 'other-image' }]],
+  ['Node component', { ...environment, nodeVersions: { ...environment.nodeVersions, v8: 'other-v8' } },
+    [{ field: 'nodeVersions.v8', expected: 'fixture-v8', actual: 'other-v8' }]],
+  ['removed Node component', { ...environment, nodeVersions: { node: '22.1.0' } },
+    [{ field: 'nodeVersions.v8', expected: 'fixture-v8', actual: '<missing>' }]],
+  ['added Node component', { ...environment, nodeVersions: { ...environment.nodeVersions, uv: 'other-uv' } },
+    [{ field: 'nodeVersions.uv', expected: '<missing>', actual: 'other-uv' }]],
+  ['all differing fields in stable order', { ...environment, arch: 'arm64', ImageVersion: 'other-image',
+    nodeVersion: 'v22.2.0', nodeVersions: { node: '22.2.0', v8: 'other-v8' } },
+    [{ field: 'ImageVersion', expected: 'fixture-image-1', actual: 'other-image' },
+      { field: 'arch', expected: 'x64', actual: 'arm64' },
+      { field: 'nodeVersion', expected: 'v22.1.0', actual: 'v22.2.0' },
+      { field: 'nodeVersions.node', expected: '22.1.0', actual: '22.2.0' },
+      { field: 'nodeVersions.v8', expected: 'fixture-v8', actual: 'other-v8' }]],
+]) {
+  test(`environment mismatch reports ${label} before any restore writes`, (t) => {
+    const { root, destination, options } = fixture(t);
+    api.sealRuntime(options);
+    removeRuntime(root);
+    assert.throws(() => api.restoreRuntime({ root, directory: destination, environment: current }), (error) => {
+      const prefix = 'CPU runtime: environment identity mismatch: ';
+      assert.ok(error.message.startsWith(prefix), 'mismatch includes field-level evidence');
+      assert.deepEqual(JSON.parse(error.message.slice(prefix.length)), differences);
+      return true;
+    });
+    assert.deepEqual(fs.readdirSync(root), [], 'identity failure never starts restoration');
+  });
+}
+
+test('array and object environment substitutions remain rejected before restore writes', (t) => {
+  const { root, destination, options } = fixture(t);
+  api.sealRuntime(options);
+  removeRuntime(root);
+  for (const v8 of [[], {}, ['fixture-v8'], { 0: 'fixture-v8' }]) {
+    assert.throws(() => api.restoreRuntime({ root, directory: destination,
+      environment: { ...environment, nodeVersions: { ...environment.nodeVersions, v8 } } }), /invalid Node versions/);
+    assert.deepEqual(fs.readdirSync(root), []);
+  }
+});
+
 test('selection rejects traversal, overlapping roots, reserved Node and mutable cache collisions', (t) => {
   const { options } = fixture(t);
   for (const paths of [['../outside'], ['/absolute'], ['source/../source'], ['source//x'], ['source', 'source/main.mjs'], ['source', 'source-other', 'source/main.mjs'], ['.cpu-runtime'], ['cache'], ['source', 'source']]) {

@@ -3,6 +3,7 @@
 use safe_cex_engine::signing::{
     Operation, PayloadPart, Provider, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
+use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{Action, Engine, Event, Response, Venue};
 use safe_cex_venues::{Visit, build};
 use std::sync::{Arc, Mutex};
@@ -79,13 +80,14 @@ impl Visit for Logins {
             })))
             .unwrap();
         engine.start(NOW);
+        // Managed reads release at the time of the event that issued them.
+        let mut now = NOW;
         for step in 0..8 {
-            // Managed reads (OKX account config) need the prepared release handshake.
-            let out =
-                safe_cex_engine::test_support::prepared_actions(&mut engine, NOW + f64::from(step));
+            let out = prepared_actions(&mut engine, now);
             if out.is_empty() {
                 break;
             }
+            now = NOW + f64::from(step);
             for action in out {
                 if let Action::Http(http) = &action
                     && let Some(body) = body(&http.url)
