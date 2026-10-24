@@ -100,3 +100,17 @@ This is original-source evidence, not implementation or source-stage proof.
 Native registry parity remains inherited unmodified; exact managed lifecycle,
 retirement, hostile DATA and JS/capsule evidence controls remain gates. Receipt:
 /tmp/codex-backpack-history-context-originals-receipt.json.
+
+## Credential review follow-ups
+
+M26ps4 direction-CLEARed 50071fa1648/58a651987f1 without independent execution.
+Add the plan index row. Keep the native raw-helper positive unchanged; it is
+not proof of provider signing. Three separate source-stage controls use a
+real Secondary provider with seed [9;32] and raw read credentials with different
+key/seed [8;32], plus the registry's read_credentials_status: Some(Ok(())).
+Each independently pins the fills/orders/funding headers to the selected
+provider identity and demonstrates that the raw identity's signature differs.
+Only the final exact-header assertion is RED evidence; the later response
+assertion remains gated until GREEN. No primary, fake ref or keyless signed
+root is introduced. These are managed-adoption source gates, not changes to
+the preserved native public-only behavior.

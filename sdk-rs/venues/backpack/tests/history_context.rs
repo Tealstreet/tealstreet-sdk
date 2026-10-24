@@ -415,3 +415,77 @@ fn native_page_two_failure_retains_only_accepted_page_one() {
         Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
     )));
 }
+
+// Source-stage gate: the raw helper must not satisfy selected-provider custody.
+fn provider_read_identity_owns_history_signature(route: Route) {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::ReadCredentials;
+    use safe_cex_venue_backpack::{Backpack, Options};
+    let selected_seed = STANDARD.encode([9u8; 32]);
+    let raw_seed = STANDARD.encode([8u8; 32]);
+    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
+        primary: None,
+        secondary: Some(LocalIdentity {
+            key: Secret::new("provider-read-key".into()),
+            secret: Secret::new(selected_seed.clone()),
+            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+            ..Default::default()
+        }),
+    })
+    .unwrap();
+    assert!(identities.primary.is_none());
+    let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
+        public_data_only: true,
+        read_identity: identities.secondary.clone(),
+        read_credentials_status: Some(Ok(())),
+        read_credentials: Some(ReadCredentials {
+            key: "different-raw-key".into(),
+            secret: raw_seed.clone(),
+            passphrase: None,
+        }),
+        ..Default::default()
+    }));
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
+    let request = ask(&mut e, route, Some(37), 2);
+    let params = [
+        ("limit".into(), "2".into()),
+        ("sortDirection".into(), "Desc".into()),
+    ]
+    .into();
+    let selected =
+        safe_cex_venue_backpack::sign::Credentials::new("provider-read-key".into(), &selected_seed)
+            .unwrap();
+    let raw =
+        safe_cex_venue_backpack::sign::Credentials::new("different-raw-key".into(), &raw_seed)
+            .unwrap();
+    let expected = selected.headers(route.instruction(), &[params], 2000.);
+    let raw_params = [
+        ("limit".into(), "2".into()),
+        ("sortDirection".into(), "Desc".into()),
+    ]
+    .into();
+    assert_ne!(
+        expected,
+        raw.headers(route.instruction(), &[raw_params], 2000.),
+        "working oracle distinguishes the two real signing identities"
+    );
+    assert_eq!(
+        request.headers, expected,
+        "history must sign with the selected provider identity, never raw read credentials"
+    );
+    assert_eq!(done(&respond(&mut e, &request, 2036., "[]")), ["[]"]);
+}
+#[test]
+fn selected_provider_fills_signature_overrides_different_raw_read_material() {
+    provider_read_identity_owns_history_signature(Route::Fills);
+}
+#[test]
+fn selected_provider_orders_signature_overrides_different_raw_read_material() {
+    provider_read_identity_owns_history_signature(Route::Orders);
+}
+#[test]
+fn selected_provider_funding_signature_overrides_different_raw_read_material() {
+    provider_read_identity_owns_history_signature(Route::Funding);
+}
