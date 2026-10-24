@@ -39,10 +39,19 @@ One monotonic owner fact, `inherited_uncertain`, on the command owner:
   failure projection more conservative, so a caller cannot misuse it to hide
   sent effects.
 
-Out of scope: the planned-execution founder path (#1919). A Preflight carrying
-the fact that is offered to `begin_planned_execution` is refused (`Invalid`)
-before any ID, group, credit or phase work. Carrying the fact into an execution
-journal is a separate item, opened only when a consumer needs it.
+Planned executions (#1919): H2 resumes intents as Plan-backed physical
+executions with one shared journal, so the fact must carry there too (codex-uufub4).
+`begin_planned_execution` exists only in frozen #1919. Once #1919 lands, this
+PR merges the landing and adds:
+- an atomic carry of the fact into the physical owner and its journal before
+  any founder, group or credit commit;
+- retention of the fact on a refused admission;
+- the same Unknown projection for the founder and every follower;
+- no ID, attempt or budget reset, and no new grant.
+
+The fact only affects projection. It does not replace retained per-leg IDs and
+budgets, and it does not replace proof-gated uncertainty resolution. Success
+still needs H2's own proof and ledger gates.
 
 ## Original REDs (committed before the implementation)
 
@@ -60,8 +69,9 @@ journal is a separate item, opened only when a consumer needs it.
    journal and seal unchanged.
 6. Idempotent and monotonic: calling it twice does not change the projection,
    and no API clears it.
-7. `begin_planned_execution` refuses an inherited-fact Preflight before
-   spending IDs (a mirror of the capped-Preflight control).
+7. After #1919: an inherited-fact Preflight founding a planned execution
+   carries the fact into the physical journal; the founder and followers fail
+   Unknown, with no ID, attempt or budget reset.
 
 Committed REDs: the inert `inherit_preflight_uncertainty` validates custody
 only, so every inherited case below fails with NotSent or Rejected, and each
@@ -78,8 +88,9 @@ fact-free control passes.
 - `inherited_uncertainty_requires_live_write_preflight_custody_and_mutates_nothing`
   (5, control).
 
-RED 7 needs `begin_planned_execution`, which exists only in frozen #1919. It is
-added here if #1919 lands first. Otherwise #1919's next integration carries it.
+RED 7 becomes the execution carry RED. It is added after #1919 lands,
+together with the founder and follower Unknown controls. The custody and
+idempotence tests are new-contract controls, not original REDs.
 
 H2 mapping (dazzy3): RED1 (`29c154338ff`) needs no fact; it is Unknown from its
 own released journal. RED2 (`b180d0f9a31`, amended to one send per call) call 3
