@@ -1,3 +1,5 @@
+import { bindGroup } from './managed-http-group.mjs';
+
 /** Closed transport preparation errors; arbitrary provider text never crosses the wire. */
 export class HttpPreparationError extends Error {
   constructor(reason) {
@@ -30,6 +32,7 @@ export class ManagedHttp {
   }
 
   cancel(token) {
+    if (this.groupHandoff) throw new Error('HTTP group handoff cannot be interrupted');
     const resource = this.resources.get(token);
     if (!resource) return;
     this.resources.delete(token);
@@ -40,6 +43,7 @@ export class ManagedHttp {
   }
 
   dispose() {
+    if (this.groupHandoff) throw new Error('HTTP group handoff cannot be interrupted');
     for (const token of [...this.resources.keys()]) {
       try { this.cancel(token); } catch { /* Continue releasing independent resources. */ }
     }
@@ -53,6 +57,8 @@ export class ManagedHttp {
   }
 
   execute(action) {
+    if (this.groupHandoff) throw new Error('HTTP group handoff cannot be interrupted');
+    if (action.phase === 'bindGroup') { bindGroup(this, action, preparationReason); return; }
     const token = action.preparation;
     if (typeof token !== 'string') throw new Error('Invalid HTTP preparation token');
     if (action.phase === 'cancel') {
@@ -81,6 +87,7 @@ export class ManagedHttp {
   }
 
   async prepare(action) {
+    if (this.groupHandoff) throw new Error('HTTP group handoff cannot be interrupted');
     const { host } = this;
     const token = action.preparation;
     if (this.resources.has(token) || host.disposed

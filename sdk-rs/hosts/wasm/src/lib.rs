@@ -94,6 +94,19 @@ trait AnyEngine {
         _: safe_cex_engine::VenueError,
     ) {
     }
+    #[cfg(feature = "http-mutation-barriers")]
+    fn http_group_pending(&self, _: &safe_cex_engine::request_context::GroupPermit) -> bool {
+        false
+    }
+    #[cfg(feature = "http-mutation-barriers")]
+    fn claim_http_group(
+        &mut self,
+        _: f64,
+        _: safe_cex_engine::request_context::GroupPermit,
+    ) -> Result<safe_cex_engine::request_context::GroupClaim, safe_cex_engine::request_context::Error>
+    {
+        Err(safe_cex_engine::request_context::Error::Invalid)
+    }
     fn claim_http(
         &mut self,
         _: f64,
@@ -189,6 +202,19 @@ impl<V: Venue> AnyEngine for Engine<V> {
         error: safe_cex_engine::VenueError,
     ) {
         Engine::http_preparation_failed(self, now, token, reason, error);
+    }
+    #[cfg(feature = "http-mutation-barriers")]
+    fn http_group_pending(&self, permit: &safe_cex_engine::request_context::GroupPermit) -> bool {
+        Engine::http_group_pending(self, permit)
+    }
+    #[cfg(feature = "http-mutation-barriers")]
+    fn claim_http_group(
+        &mut self,
+        now: f64,
+        permit: safe_cex_engine::request_context::GroupPermit,
+    ) -> Result<safe_cex_engine::request_context::GroupClaim, safe_cex_engine::request_context::Error>
+    {
+        Engine::claim_http_group(self, now, permit)
     }
     fn claim_http(
         &mut self,
