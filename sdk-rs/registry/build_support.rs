@@ -153,6 +153,7 @@ enum ExtraFieldPolicy {
 #[serde(rename_all = "camelCase")]
 enum ExtraKey {
     ZklinkSeed,
+    L1Wallet,
 }
 
 #[derive(Debug, Deserialize)]
@@ -419,6 +420,15 @@ mod tests {
         }
     }
 
+    // P6b R3: the l1Wallet role compiles like zklinkSeed.
+    #[test]
+    fn l1_wallet_extra_key_compiles() {
+        let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "p":{"signerSetup":{"primary":{"extra":{"key":"l1Wallet","field":"requiredForPrivate","encoding":"hex"}}}}
+        }}"#).unwrap();
+        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::L1Wallet, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
+    }
+
     #[test]
     fn declared_encoding_and_extra_key_compile_and_unknown_values_fail_closed() {
         let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
@@ -429,7 +439,7 @@ mod tests {
         assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None })"));
         for field in [
             r#"{"secretEncoding":"base58"}"#,
-            r#"{"extra":{"key":"l1Wallet"}}"#,
+            r#"{"extra":{"key":"unknownRole"}}"#,
             r#"{"extra":{"key":"zklinkSeed","name":"x"}}"#,
             r#"{"extra":{"key":"zklinkSeed","field":"requiredWithPrimaryFallback"}}"#,
             r#"{"extra":{"key":"zklinkSeed","field":null}}"#,

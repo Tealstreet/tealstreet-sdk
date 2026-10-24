@@ -6149,9 +6149,10 @@ conversions adopt them. Caller-visible changes:
   different algorithm from its primary.
 - **Only a declared ref answers.** A provider answers a public operation only
   for a ref that setup policy declared for exactly that algorithm. An HMAC,
-  undeclared, credential, passphrase or extra-role ref is refused, so no
-  secret is fingerprinted. `LocalSigner::insert` drops a replaced ref's
-  declaration.
+  undeclared, credential or passphrase ref is refused, and an extra-role ref
+  answers only through its role's algorithm (P6b), so no secret is
+  fingerprinted. `LocalSigner::insert` drops a replaced ordinary ref's
+  declaration. A role ref keeps its role, which is its declaration.
 - **`Operation` gains two variants.** Exhaustive matches on
   `safe_cex_engine::signing::Operation` outside this repo must add them.
   Injected providers may refuse them (`InvalidRequest`/`Unsupported`); result
@@ -6873,3 +6874,22 @@ Lighter venue still signs eagerly until its admission PR.
 | Keys are refused, not reduced | none until Lighter admission | legacy `Signer` reduces a key at or above the group order (Go semantics) | the provider arm refuses zero or non-canonical keys with `InvalidRequest` | behaviour change at admission: an out-of-range key fails typed instead of signing |
 | Crypto `schnorr` feature | WASM family builds | n/a | only a family that signs through the provider enables it; without it `SchnorrDigest` refuses as `Unsupported` | none |
 | `host.d.mts` `'schnorrDigest'` (already in the union) | custom JS host signers | refuse | a host that implements it must use the payload's first 32 bytes as nonce entropy and never its own randomness | none until P8 |
+## L1 wallet role (P6b part 1)
+
+`ExtraKey::L1Wallet` (`l1Wallet`) is the Polymarket L1 wallet: the raw 32-byte
+secp256k1 scalar, declared by family policy (`ExtraKeyPolicy`). See
+RUST_SIGNER_REMOTE_WIRE_AND_IMPORT.md, "P6b part 1". No family declares it yet;
+the Polymarket conversion (#1882) adopts it. Caller-visible changes:
+
+- **Every role names one algorithm** (`ExtraKey::algorithm`): `zklinkSeed` is
+  `zkLinkContract`, `l1Wallet` is `secp256k1Digest`. A role ref signs and
+  answers public operations only through that algorithm. It is never
+  presented, interpolated as a credential, or used for a MAC. Exhaustive
+  matches on `ExtraKey` outside this repo must add the variant.
+- **Primary only.** A policy declaring `l1Wallet` for the secondary slot, or a
+  secondary identity carrying one, refuses setup.
+- **Address.** The wallet address comes only from `fetch_public` with
+  `PublicAddress` on `identity.extra[l1Wallet]`. A wallet-only primary
+  identity (no L2 key or secret yet) is valid pre-import setup.
+- **Types.** The TS `ExtraKeyPolicy.key` union and `host.d.mts`
+  `SigningIdentity.extra` gain `l1Wallet`.
