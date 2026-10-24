@@ -107,3 +107,14 @@ initial probe expected the later order-lock diagnostic, so that assertion is
 excluded from RED evidence and corrected to the observed native contract. The
 control must still require no second send or terminal and a successful original
 physical reply. It is a working boundary control, not an adoption regression.
+
+## Original executed receipt
+
+Unchanged production at `6521b6179de` compiles and executes seventeen controls:
+eleven genuine-entry assertion REDs, one separately labelled SetStpMode
+NEW-CONTRACT assertion RED, five GREEN controls, zero ignored. The working
+controls include the real duplicate write's successful original HTTP reply;
+the corrected diagnostic probe is not a RED. Native finite results/messages,
+settled ID reuse, pre-venue capability refusals and negative-time login remain
+GREEN. The log is `/tmp/codex-hcmq3f-breakout-original-entry-proof.log`.
+No production, request inventory or credential-selection changes are present.
