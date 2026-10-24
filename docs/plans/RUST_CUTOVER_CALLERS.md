@@ -6914,3 +6914,11 @@ success publishes quotes before retiring and opening public subscriptions.
 Usable partial catalogues, refresh/index retention, malformed-exposure coverage,
 independent ticker recovery and cached quotes keep their native behavior. One
 legacy discovery sender is removed; key-selection sites remain unchanged.
+
+Public ticker preparation and private legacy HTTP use independent dispatch
+paths. Logical order remains ticker enqueue then private startup; if the public
+route is parked, private HTTP may leave before the ticker's physical release.
+The old eager path emitted the ticker HTTP first. Private startup remains
+independent of ticker readiness/success; no venue defer queue restores physical
+ordering. A raw-action parked-route control pins this consequence explicitly;
+the immediate-route fixture proves its own ordering only.

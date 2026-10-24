@@ -162,3 +162,18 @@ all-target Clippy passes. Request inventory tests pass; the full bans check
 currently fails only on foreign stale-base BingX history and Hyperliquid lib
 entries because landing advanced during work. Genuinely integrate that landing
 and rerun the checks before push; no waiver or foreign edit is applied.
+
+
+## Independent dispatch ordering review
+
+Runtime source review caught that immediate prepared_actions glue cannot prove
+ordering across independently delayed routes. The catalogue still enqueues
+public ticker preparation first and immediately calls native private_start.
+If the public route is parked, private legacy HTTP can physically leave first;
+the eager baseline emitted ticker HTTP first. This is an explicit dispatch-
+ordering consequence of bounded public preparation, documented in CALLERS.
+Private startup remains independent of ticker readiness/success, preserving the
+native purpose of this sequence; no local queue/timer or shared workaround.
+A new raw-action managed control holds ticker preparation, observes private
+HTTP and its original nonce, then releases ticker later and verifies quotes.
+It is additional managed coverage, not an original RED execution claim.

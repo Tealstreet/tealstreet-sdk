@@ -457,3 +457,58 @@ fn native_usable_catalogue_peers_commit_and_private_reads_start_before_tickers()
     );
     assert!(!e.store().loaded().tickers);
 }
+
+#[test]
+fn parked_ticker_route_keeps_native_private_start_independent() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+        key: Some("scripted-key".into()),
+        secret: Some("scripted-secret".into()),
+        ..Default::default()
+    }));
+    e.start(0.);
+    let catalogue = packet(&actions(&mut e, 0.), "/public/get-instruments");
+    reply(&mut e, 1., &catalogue, 200, INSTRUMENTS);
+    let output: Vec<_> = e.drain_actions().collect();
+    let (ticker_index, preparation) = output
+        .iter()
+        .enumerate()
+        .find_map(|(i, a)| match a {
+            Action::ManagedHttp(a) => match a.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if request.url.ends_with("/public/get-tickers") => Some((i, *preparation)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("ticker route is still parked");
+    let (private_index, private) = output
+        .iter()
+        .enumerate()
+        .find_map(|(i, a)| match a {
+            Action::Http(read) if read.url.contains("/private/") => Some((i, read)),
+            _ => None,
+        })
+        .expect("independent native private read already leaves");
+    assert!(
+        ticker_index < private_index,
+        "logical ticker enqueue still precedes private startup"
+    );
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(read) if read.url.ends_with("/public/get-tickers")))
+    );
+    assert!(e.http_preparation_pending(preparation));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(private.body.as_deref().unwrap()).unwrap()["nonce"],
+        1
+    );
+    assert!(!e.store().loaded().tickers);
+    let ticker = release(&mut e, 500., preparation);
+    assert!(ticker.url.ends_with("/public/get-tickers"));
+    reply(&mut e, 501., &ticker, 200, TICKERS);
+    assert_eq!(e.store().tickers()[0].last, 100.);
+}
