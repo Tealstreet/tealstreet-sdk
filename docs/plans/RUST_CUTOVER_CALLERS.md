@@ -6547,3 +6547,95 @@ demote the kind to mimic legacy string-only callbacks. The20s Context lifetime
 is explicitly a new admission-through-preparation/response whole-command bound,
 distinct from the old host's physical HTTP timeout fallback. Raw candle t/order
 and malformed numeric-string-to-zero coercion remain unchanged.
+
+## Lighter synchronous history Read custody
+
+The seven native local history replies (unsupported client ID/income category,
+invalid bounds/native index/market, empty keyless history and unavailable private
+identity) retain native precedence, JSON and messages. They now borrow genuine
+shared Read command admission before publishing, so invalid clocks, full owner
+capacity and reused ownership produce one engine refusal without a financial
+outcome. Both Lighter and Robinhood, on mainnet/testnet, keep the same contract.
+Remote history requests, pagination, authentication and byte-level query/codec
+behavior are unchanged; this slice issues no remote-fallthrough Context.
+
+## GRVT synchronous history Read custody
+
+Seven native local history refusals retain their original validation order and
+error messages: unsupported income, missing session, unknown market, invalid
+bounds, range/empty order ID, client-ID syntax and missing subaccount. Publication
+now requires a genuine shared Read root. Clock/capacity rejection produces one
+typed terminal without a financial outcome. Revoked entry and live duplicate IDs
+preserve the existing owner without a second terminal. Successful local admission
+keeps the original untyped native error. Both networks preserve the same behavior.
+Remote history queries, session setup, headers, paging, completion and codecs
+remain unchanged. This slice issues no Context on remote fallthrough.
+
+## KuCoin synchronous command refusal admission
+
+Eight local futures/Spot refusal sites now acquire their genuine shared command
+owner before publishing the native error. Capacity or invalid-entry refusal can
+therefore supersede that error; duplicates cannot replace or complete another
+owner. Read admission failures carry no write outcome, while Mutation admission
+failures are NotSent. Free-capacity native error text, kind, outcome and validation
+order remain unchanged, including Unsupported/NotSent on Spot's unsupported reads.
+
+No local refusal sends HTTP or uses the signing provider. Spot placement building
+still consumes native UUID entropy before some credential/build errors; supplied
+IDs and later batch errors keep their original order. Valid private/public wire
+paths stay legacy, and KCS steady public events gain no admission work. Successful
+keyless fixed settings remain held for the shared local-setting success seam.
+
+## Bitrue initial local trading refusal admission
+
+Three synchronous trading refusals now acquire their genuine shared Mutation
+owner before returning the existing error. Shared entry refusal can supersede
+the native error, producing one NotSent terminal; duplicate callbacks retain the
+original owner. Free-capacity messages, kinds and credential/public-only ordering
+are unchanged. Refusal creates no HTTP, signing-provider work or Store effect.
+
+The queued trade_next error, native builder/entropy behavior, valid private wire
+and successful SetPositionMode(false) stay unchanged. This does not migrate the
+signer or admit keyless successful settings; that success awaits the shared seam.
+
+
+## Polymarket public reads and local completion (2026-10-24)
+
+Owner codex-hcmq3f; plan RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md. Public `/book`
+and `/prices-history` now use unsigned managed transport, requiring host
+Prepare/Bind/Claim. Their explicit new attempt bound is 20000 ms from selection,
+before preparation; command legs are additionally capped by the original caller
+receipt through landed #1976. Missing/expired receipts use shared typed refusal,
+without a new fallback cap. No retry or pacing is added. Background candle polls
+keep the native five-second schedule and require exact current delivery before
+staging or publishing. Released read failures keep typed kind without a money
+outcome; genuine preparation refusal retains its shared local NotSent fact.
+
+Local read results/refusals and unsupported STP/symbol-amend mutation refusals
+use genuine command entry and Context completion, preserving native JSON/text.
+Keyless mutation refusals now explicitly prove NotSent. Fixed-setting no-op
+SUCCESS is still legacy and remains inventoried pending #1989; no fake write
+fact, credential or Read cast is used. The exact prune is 15 fingerprints /
+20 occurrences. Discovery aggregates (G1), private account/import (P6b), private
+writes/admission/P8 and their legacy inventory remain open.
+
+## Kraken public discovery and local custody (2026-10-24)
+
+Owner codex-hcmq3f; RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md. Futures instruments and
+tickers plus Spot AssetPairs/Ticker now require managed Prepare/Bind/Claim, with
+exact current Background Read delivery before row staging, body decoding or Store
+publication. Spot keeps its existing 20000 ms timeout; Futures adds an explicit
+20000 ms admission-to-attempt-expiry bound, including time held in preparation.
+No retry is added inside an attempt. Existing native discovery backoff schedules
+fresh independent attempts after exact success/failure retirement, and failure
+clears the same attempt's busy state. Stale replies cannot publish or affect a
+new attempt. Background work emits no numeric command terminal or auth evidence.
+
+Selected local Read results/refusals and keyless Mutation refusals use genuine
+command entry and Context completion with native JSON/text/metadata. None or
+expired caller receipts use the cause-aware shared refusal. Fixed-setting
+SetPositionMode(false) SUCCESS stays legacy and inventoried pending #1989.
+Valid signed account/trading/history, separate Spot/Futures nonce domains,
+private sessions, paged Futures candle reads and existing Spot OHLC remain open
+or unchanged. This prune is 17 fingerprints / 19 occurrences; no new signing or
+whole-family custody claim is made.

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { EngineHost } from '../hosts/wasm/js/host.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
+import { prepareRecordedHttp } from './recorded-http.mjs';
 const require = createRequire(import.meta.url);
 const { WasmEngine } = require('../hosts/wasm/pkg/node/safe_cex_wasm.js');
 export const spotResponse = (body, status = 200) => ({ status, body: new TextEncoder().encode(JSON.stringify(body)) });
@@ -12,6 +13,7 @@ export function spotRig(venue, options, reply) {
   const engine = new WasmEngine(venue, JSON.stringify(options));
   const host = new EngineHost(engine, {
     now: () => now,
+    prepareHttp: prepareRecordedHttp,
     async request(request) { requests.push(request); return reply(request); },
     connect(url, handlers) {
       const socket = { url, handlers, sent: [], closed: false };
