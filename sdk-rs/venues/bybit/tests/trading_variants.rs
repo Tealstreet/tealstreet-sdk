@@ -436,11 +436,14 @@ fn hyro_lost_ack_recovers_terminal_identity_without_recreating() {
         request: create.id,
         error: "lost acknowledgement",
     });
+    // H2 (Q3): Unknown at once; the reconcile link read recovers it for the retry.
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
     h.respond("/v5/order/realtime", 200, EMPTY);
     h.respond("/v5/order/history", 200, &lookup_row(&id, "Filled"));
-    assert_eq!(h.result(1), Some(&Ok("[\"recovered\"]".into())));
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
     assert!(h.engine.store().order("recovered").is_none());
-    assert!(h.requests.is_empty());
+    assert!(!h.has_request("/v5/order/create") && !h.has_request("orderLinkId="));
 }
 
 #[test]
@@ -461,7 +464,8 @@ fn hyro_partial_recovery_publishes_authoritative_quantity_and_price() {
     );
     let row = h.engine.store().order("recovered").unwrap();
     assert_eq!((row.price, row.filled, row.remaining), (101.0, 0.4, 0.6));
-    assert!(h.requests.is_empty());
+    // H2 (Q7): only the reconcile snapshot remains beside the link read.
+    assert!(!h.has_request("/v5/order/create") && !h.has_request("orderLinkId="));
 }
 
 #[test]
@@ -528,7 +532,8 @@ fn hyro_malformed_or_cyclic_lookup_never_authorizes_replacement() {
         });
         h.respond("/v5/order/realtime", 200, malformed);
         assert!(h.result(1).unwrap().is_err());
-        assert!(h.requests.is_empty());
+        // H2 (Q7): only the reconcile snapshot remains beside the link read.
+        assert!(!h.has_request("/v5/order/create") && !h.has_request("orderLinkId="));
     }
 }
 
@@ -598,9 +603,8 @@ fn hyro_lookup_crossing_snapshot_keeps_discovered_identity_for_caller_retry() {
     h.reply(lookup.id, 200, &lookup_row(&id, "New"));
     assert!(h.result(1).unwrap().is_err());
     assert!(h.engine.store().order("recovered").is_none());
+    // H2 (Q3): the reconcile read already found it; the retry reads nothing.
     place(&mut h, 2, vec![opts]);
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
     assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
     assert!(h.requests.is_empty());
     assert!(h.engine.store().order("recovered").is_none());
@@ -617,12 +621,17 @@ fn hyro_private_terminal_observation_blocks_stale_recovered_open_row() {
         request: create.id,
         error: "lost",
     });
-    h.respond("/v5/order/realtime", 200, &lookup_row(&id, "New"));
+    // H2 (Q3): Unknown at once; the observation already resolved the link,
+    // so no link read can bring back a stale open row.
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+    assert!(!h.has_request(&format!("orderLinkId={id}")));
     assert_eq!(
         h.engine.store().order("recovered").unwrap().status,
         safe_cex_engine::model::OrderStatus::Closed
     );
-    assert_eq!(h.result(1), Some(&Ok("[\"recovered\"]".into())));
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+    assert!(!h.has_request("/v5/order/create"));
 }
 
 #[test]
@@ -647,15 +656,17 @@ fn hyro_cyclic_lookup_is_incomplete_and_keeps_unknown_outcome() {
     let mut h = ready(Variant::Hyrotrader);
     place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
     let create = h.take("/v5/order/create");
+    let id = link(&create);
     h.event(Event::HttpFailed {
         request: create.id,
         error: "lost",
     });
+    // H2 (Q7): a link-filtered page that still names another page is no absence.
     let page = r#"{"retCode":0,"result":{"list":[],"nextPageCursor":"same"}}"#;
-    h.respond("/v5/order/realtime", 200, page);
-    h.respond("/v5/order/realtime", 200, page);
+    h.respond(&format!("orderLinkId={id}"), 200, page);
     assert!(h.result(1).unwrap().is_err());
-    assert!(h.requests.is_empty());
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+    assert!(!h.has_request("/v5/order/create") && !h.has_request("orderLinkId="));
 }
 
 #[test]
@@ -1024,7 +1035,8 @@ fn hyro_recovered_rows_validate_raw_numbers_and_exact_symbol_even_when_terminal(
             };
             h.respond("/v5/order/realtime", 200, &row);
             assert!(h.result(1).unwrap().is_err(), "{status} {bad}");
-            assert!(h.requests.is_empty());
+            // H2 (Q7): only the reconcile snapshot remains beside the link read.
+            assert!(!h.has_request("/v5/order/create") && !h.has_request("orderLinkId="));
             assert!(h.engine.store().order("recovered").is_none());
         }
     }
@@ -1222,6 +1234,7 @@ fn hyro_conditional_retry_preserves_identity_and_body_after_ticker_crosses_trigg
     opts.trigger_price = Some(70000.0);
     place(&mut h, 1, vec![opts.clone()]);
     let create = h.take("/v5/order/create");
+    let id = link(&create);
     let original = body(&create).to_owned();
     assert!(original.contains("\"triggerDirection\":\"1\""));
     h.event(Event::HttpFailed {
@@ -1233,8 +1246,8 @@ fn hyro_conditional_retry_preserves_identity_and_body_after_ticker_crosses_trigg
     assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 71000.0);
     place(&mut h, 2, vec![opts]);
     assert!(!h.has_request("/v5/order/create"));
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
+    // H2 (Q7): the reconcile snapshot's order read is also out; answer the link.
+    answer_link_absent(&mut h, &id);
     let retry = h.take("/v5/order/create");
     assert_eq!(body(&retry), original);
     h.reply(
@@ -1462,9 +1475,10 @@ fn shared_hyro_failure_is_correlated_to_each_waiter_before_its_completion() {
     assert_eq!(h.command_errors[0].0, 91);
     assert_eq!(h.command_errors[1].0, 92);
     assert_eq!(h.command_errors[0].1, h.command_errors[1].1);
+    // H2: one execution's seal reports to every observer, then completes each.
     assert_eq!(
         h.command_notices,
-        [(91, "error"), (91, "done"), (92, "error"), (92, "done")]
+        [(91, "error"), (92, "error"), (91, "done"), (92, "done")]
     );
     assert!(h.result(91).unwrap().is_err());
     assert!(h.result(92).unwrap().is_err());
