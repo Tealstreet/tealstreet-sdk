@@ -133,7 +133,9 @@ Each parked Preflight is a live command owner, so it counts against the
 engine-wide limit of 256 concurrent commands (`CAPACITY`), as every migrated
 venue's commands already do. Native Bitget's queue has no limit, so a burst
 of more than about 256 queued commands becomes a Capacity refusal that
-native never had. Ruling needed: accept and disclose, or exempt.
+native never had. Ruled (claude-ddi2il): accept and disclose. The refusal is
+Capacity, NotSent, before any send, with no exemption. Bitget's CALLERS notes
+the limit.
 
 ## REDs (before source)
 
@@ -170,6 +172,8 @@ native never had. Ruling needed: accept and disclose, or exempt.
     projects NotSent.
 13. Re-park from ready custody counts as progress, so no "made no progress"
     failure.
+14. With 256 commands parked, the 257th is refused Capacity, NotSent, before
+    any send, and the parked 256 are unaffected.
 10. A mid-Plan expiry after an earlier released and accepted call: `fail_plan`
     projects the accepted IDs and a failure that is not NotSent (native
     `trade_fail` keeps the IDs once anything was effective).
