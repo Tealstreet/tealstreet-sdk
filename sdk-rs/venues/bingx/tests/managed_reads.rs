@@ -847,12 +847,10 @@ fn metadata_preparation(secondary: bool) {
     );
 }
 #[test]
-#[ignore = "original RED: paired metadata waits for the shared Plan/CallWindow seam"]
 fn paired_metadata_primary_builder_requires_managed_route_preparation() {
     metadata_preparation(false);
 }
 #[test]
-#[ignore = "original RED: paired metadata waits for the shared Plan/CallWindow seam"]
 fn paired_metadata_secondary_builder_requires_managed_route_preparation() {
     metadata_preparation(true);
 }

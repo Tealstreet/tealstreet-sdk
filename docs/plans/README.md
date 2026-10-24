@@ -11,11 +11,14 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| BreakoutProp options refusal (unreachable arm deleted) | One-site prune; engine pre-entry refusal pinned by a control | Before changing BreakoutProp options handling or its capability flags. | [RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md) |
 | BingX local candle refusal custody | Draft conversion; source review/CI pending | Before replacing the three synchronous candle refusals; remote/key-selection paths excluded. | [RUST_BINGX_LOCAL_CANDLE_CONTEXT.md](RUST_BINGX_LOCAL_CANDLE_CONTEXT.md) |
 | BingX history paging custody | Implementation under native/source review | Before moving native fill/range pages and signature resends onto one caller-wait Read root. | [RUST_BINGX_HISTORY_CONTEXT.md](RUST_BINGX_HISTORY_CONTEXT.md) |
 | WEEX public depth-query custody | Original assertions reviewed; production conversion | Before managing command-owned unsigned order-book snapshots and their four numeric terminals. | [RUST_WEEX_DEPTH_QUERY_CONTEXT.md](RUST_WEEX_DEPTH_QUERY_CONTEXT.md) |
 | Polymarket public read custody | Draft adoption; local checks pass | Before adopting public books/candles and local completion or pruning their inventory. | [RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md](RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md) |
 | Kraken public discovery and local custody | Draft adoption; local checks and independent reviews clear | Before managing unsigned discovery reads or local command terminals in Futures/Spot. | [RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md](RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md) |
+
+| WEEX caller-root history paging | Source checkpoint; actual #1983 integrated | Before converting WEEX list/income pages, paced windows or their history completion. | [RUST_WEEX_HISTORY_CONTEXT.md](RUST_WEEX_HISTORY_CONTEXT.md) |
 | Subscription handoff and native read continuation | Shared ordering correction | Before issuing native reads after managed subscription frames or changing final drain/timer custody. | [RUST_SOCKET_INTEREST_HANDOFF.md](RUST_SOCKET_INTEREST_HANDOFF.md) |
 | Hyperliquid whole-family managed sockets | Plan and original-source controls | Before moving the multiplexed perps/spot public and private socket lifecycle or changing subscription-to-refresh ordering. | [RUST_HYPERLIQUID_MANAGED_SOCKETS.md](RUST_HYPERLIQUID_MANAGED_SOCKETS.md) |
 | Caller command wait in the engine | Plan under review (claude-fe7lgm) | Before bounding engine work by the caller's `rustCommandTimeoutMs` or reading `Cx::command_wait()`. | [RUST_COMMAND_TIMEOUT.md](RUST_COMMAND_TIMEOUT.md) |
@@ -49,6 +52,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Shared execution groups | Inventory and settled API under review (claude-fe7lgm) | Before any joined-completion site (Hyro, metadata, Bitrue FetchLeverage, Bybit RefreshMarkets) or observer authority. | [RUST_EXECUTION_GROUPS.md](RUST_EXECUTION_GROUPS.md) |
 | BingX signing | Active native checkpoint | Before BingX HTTP signing, typed parameter recipes, credential setup or signature resend changes. | [RUST_BINGX_DISPATCH_SIGNER.md](RUST_BINGX_DISPATCH_SIGNER.md) |
 | Bitget signing | Active native checkpoint; hosted prerequisite pending | Before Bitget credential setup, private HTTP/WS builders or hosted signer adoption. | [RUST_BITGET_DISPATCH_SIGNER.md](RUST_BITGET_DISPATCH_SIGNER.md) |
+| Bitget caller adoption (candles, identity, account reads, trade entry) | Slice 1 implemented; history waits on #1945 | Before converting Bitget candles, FetchAccount, account-cycle reads, trade entry refusals or history to shared Context authority. | [RUST_BITGET_CALLER_ADOPTION.md](RUST_BITGET_CALLER_ADOPTION.md) |
 | Bybit signing | Active dispatch signer adoption | Before Bybit REST/probe/private WS authentication or credential setup changes. | [RUST_BYBIT_DISPATCH_SIGNER.md](RUST_BYBIT_DISPATCH_SIGNER.md) |
 | Integer protocol wire stamps | Active shared clock correction | Before formatting outbound timestamps or adopting dispatch signing recipes. | [RUST_PROTOCOL_WIRE_STAMP.md](RUST_PROTOCOL_WIRE_STAMP.md) |
 | Shared signer prerequisites | Active engine/provider plan; non-HMAC schema extension in progress | Before family signing migrations, credential decoding, extra signing refs, new provider algorithms, nonce entropy, WS upgrades or signing receipts. | [RUST_SIGNER_PREREQUISITES.md](RUST_SIGNER_PREREQUISITES.md) |
@@ -282,14 +286,11 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | OKX caller adoption (leverage, account GET, trade entry) | Plan; first no-bridge slice | Before converting OKX FetchLeverage, account config GET or trade_command entry refusals to shared Context authority. | [RUST_OKX_CALLER_ADOPTION.md](RUST_OKX_CALLER_ADOPTION.md) |
 | OKX caller adoption, slice 2 (candles) | Plan + original REDs; no production change | Before converting OKX FetchCandles (recent and history-candles legs) to shared command Context authority. | [RUST_OKX_CALLER_CANDLES.md](RUST_OKX_CALLER_CANDLES.md) |
 | Read Plan receipt cap | Receipt-cap implementation under review on frozen #1945 | Before bounding Plan admission by the original command receipt across JWT/preflight waits. | [RUST_PLAN_RECEIPT_CAP.md](RUST_PLAN_RECEIPT_CAP.md) |
-| Preflight inherited uncertainty | Plan under review (uufub4, dazzy3) | Before a WriteAfterReads retry of a maybe-sent intent seals without a released attempt. | [RUST_PREFLIGHT_INHERITED_UNCERTAINTY.md](RUST_PREFLIGHT_INHERITED_UNCERTAINTY.md) |
-| Plan session wait | Slot, retry and Preflight (N7) park implemented; N7 review pending (zs5e83, m26ps4) | Before a command Plan or retained Preflight leg must wait for a venue login Session. | [RUST_PLAN_SESSION_WAIT.md](RUST_PLAN_SESSION_WAIT.md) |
 | BingX FetchAccount selected Read | Plan; original REDs next | Before replacing identity entry/failure custody with the frozen shared selected-read helper or pruning its two terminals. | [RUST_BINGX_IDENTITY_CONTEXT.md](RUST_BINGX_IDENTITY_CONTEXT.md) |
 | Local fixed-setting Mutation success | Plan; API review before original REDs | Before replacing keyless KuCoin Spot and Bitrue fixed-setting successes with genuine-entry local completion. | [RUST_LOCAL_SETTING_SUCCESS.md](RUST_LOCAL_SETTING_SUCCESS.md) |
 | [Bitget CPU option-B follow-up](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md) | Shared second-runner CPU remeasurement, two-run mean and fail-closed certification; enabled for every CPU-gated suite, with unchanged tapes and thresholds. |
 | Caller-wait Read root expiry | Plan under review (claude-fe7lgm) | Before relying on engine-owned expiry of a tracked caller-wait Read root, or refusing a missing command receipt. | [RUST_READ_ROOT_EXPIRY.md](RUST_READ_ROOT_EXPIRY.md) |
 | Command-entry WASM size | Measured; step 1 in PR | Before adding engine code on a family's first command-entry admission, or chasing per-site entry cost. | [RUST_COMMAND_ENTRY_SIZE.md](RUST_COMMAND_ENTRY_SIZE.md) |
-| Engine core size | Session-leg split and ID-map hasher under review | Before a family's first RequestContext adoption pushes it over budget. | [RUST_ENGINE_CORE_SIZE.md](RUST_ENGINE_CORE_SIZE.md) |
 | Store order fence domains | Keep-both documentation plan | Before changing the broad late-ACK revision or selective logical snapshot epoch. | [RUST_ORDER_FENCE_DOMAINS.md](RUST_ORDER_FENCE_DOMAINS.md) |
 | Selected Read roots and page legs | Shared implementation; final dependency integration pending | Before retaining one selected caller-wait root across native physical history pages. | [RUST_SELECTED_READ_LEGS.md](RUST_SELECTED_READ_LEGS.md) |
 
@@ -341,10 +342,40 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Crypto.com public discovery ownership | Managed implementation under review | Before managing the last unsigned discovery sender and its Markets/Tickers continuations. | [RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md](RUST_CRYPTOCOM_PUBLIC_DISCOVERY_CONTEXT.md) |
 
 | Orderly initial history refusals | Implemented; bounded reviews and CI pending | Before converting the three initial history refusals; excludes combo-5b signer/source work. | [RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md](RUST_ORDERLY_LOCAL_COMMAND_CONTEXT.md) |
-| Command-owned Read-Plan history authority | Implemented; source reviews and focused checks clear, CI pending | Before accepting Plan pages, settling Slots with accepted rows or recovering a released transport failure through the same Plan terminal. | [RUST_READ_PLAN_HISTORY_AUTHORITY.md](RUST_READ_PLAN_HISTORY_AUTHORITY.md) |
 
+| Kraken Futures public candle custody | Managed adoption; focused controls pass, source review/CI pending | Before changing caller-root pages or subscription candle polling. | [RUST_KRAKEN_FUTURES_CANDLE_CONTEXT.md](RUST_KRAKEN_FUTURES_CANDLE_CONTEXT.md) |
+| Crypto.com unsigned PublicTrades custody | Plan and original controls | Before replacing the last unsigned PublicTrades history sender independently of private signing. | [RUST_CRYPTOCOM_PUBLIC_TRADES_CONTEXT.md](RUST_CRYPTOCOM_PUBLIC_TRADES_CONTEXT.md) |
+
+| Breakout immediate local command custody | Plan and original-source controls | Before adopting seven initial local terminals or changing pre-venue/selection boundaries. | [RUST_BREAKOUT_LOCAL_COMMAND_CONTEXT.md](RUST_BREAKOUT_LOCAL_COMMAND_CONTEXT.md) |
+
+| Orderly unsupported order controls | Implemented; source reviews and CI pending | Before converting the one initial Bybit BBO/TickSize refusal; no deferred-job or signer changes. | [RUST_ORDERLY_UNSUPPORTED_ORDER_CONTEXT.md](RUST_ORDERLY_UNSUPPORTED_ORDER_CONTEXT.md) |
+
+- [Paradex config/local entry](RUST_PARADEX_LOCAL_ENTRY.md) and [remaining engine seams](RUST_PARADEX_ENGINE_GAPS.md): seven-site managed/local slice after the hosted signing decision.
+
+| Lighter unsigned identity Read | Managed implementation under review | Before changing FetchAccount candidate custody, original caller expiry or the exact three-site identity prune. | [RUST_LIGHTER_IDENTITY_CONTEXT.md](RUST_LIGHTER_IDENTITY_CONTEXT.md) |
+
+| Hyperliquid local settings and schedule refusals | Shared local terminal adoption under review | Before changing the nine synchronous pre-signing local terminals or their exact inventory prune. | [RUST_HYPERLIQUID_LOCAL_SETTINGS_CONTEXT.md](RUST_HYPERLIQUID_LOCAL_SETTINGS_CONTEXT.md) |
 | Multi-constraint release pacing | Shared engine prerequisite; plan and RED phase | Before composing several HTTP rate groups at one Claim or signing after pacing waits. | [RUST_MULTI_CONSTRAINT_PACING.md](RUST_MULTI_CONSTRAINT_PACING.md) |
+
+| Kraken Futures unsigned PublicTrades ownership | Managed implementation; focused proof and source review in progress | Before changing caller-root cursor pages or accepted-only failure recovery. | [RUST_KRAKEN_FUTURES_PUBLIC_TRADES_CONTEXT.md](RUST_KRAKEN_FUTURES_PUBLIC_TRADES_CONTEXT.md) |
+
+| Receipt-bound stamp floor | Focused gates/reviews clear; full CI pending | Before monotonic per-request signature or transport reissues; floor grants no resend authority. | [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md) |
+
+| Bitrue dispatch signing | Production candidate; original REDs green, review and CI pending | Before replacing inline Bitrue HMAC, selection or native signature resend. | [RUST_BITRUE_DISPATCH_SIGNER.md](RUST_BITRUE_DISPATCH_SIGNER.md) |
+
+| GRVT unsigned candle Read Plan | Managed adoption under review | Before changing candle caller limits, streaming or the six-attempt transport budget. | [RUST_GRVT_CANDLE_CONTEXT.md](RUST_GRVT_CANDLE_CONTEXT.md) |
+
+| GRVT unsigned book command | Managed source under review; stacked after candle draft | Before changing independent FetchOrderBook command ownership, native errors or the six-attempt transport budget. | [RUST_GRVT_BOOK_QUERY_CONTEXT.md](RUST_GRVT_BOOK_QUERY_CONTEXT.md) |
+
+| TxFlow immediate local command custody | Draft adoption; original controls green | Before migrating local history/candle/trading completion or composing with the ticker CPU slice. | [RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md](RUST_TXFLOW_LOCAL_COMMAND_CONTEXT.md) |
+| OKX history selected identity | Implemented; scoped checks pass, review pending | Before removing the closed/history credential-selection legacy sites. | [RUST_OKX_HISTORY_SELECTED_IDENTITY.md](RUST_OKX_HISTORY_SELECTED_IDENTITY.md) |
+
+- [Polymarket midpoint seed custody](RUST_POLYMARKET_MIDPOINT_READ_CONTEXT.md): one unsigned Background Read site; plan and original controls before production.
+
+| Preflight inherited uncertainty | Plan under review (uufub4, dazzy3) | Before a WriteAfterReads retry of a maybe-sent intent seals without a released attempt. | [RUST_PREFLIGHT_INHERITED_UNCERTAINTY.md](RUST_PREFLIGHT_INHERITED_UNCERTAINTY.md) |
+| Plan session wait | Slot, retry and Preflight (N7) park implemented; N7 review pending (zs5e83, m26ps4) | Before a command Plan or retained Preflight leg must wait for a venue login Session. | [RUST_PLAN_SESSION_WAIT.md](RUST_PLAN_SESSION_WAIT.md) |
+| Engine core size | Session-leg split and ID-map hasher under review | Before a family's first RequestContext adoption pushes it over budget. | [RUST_ENGINE_CORE_SIZE.md](RUST_ENGINE_CORE_SIZE.md) |
+| Command-owned Read-Plan history authority | Implemented; source reviews and focused checks clear, CI pending | Before accepting Plan pages, settling Slots with accepted rows or recovering a released transport failure through the same Plan terminal. | [RUST_READ_PLAN_HISTORY_AUTHORITY.md](RUST_READ_PLAN_HISTORY_AUTHORITY.md) |
 | Independent Mutation Plan calls | Plan-first engine follow-up after #1932 | Before continuing independent native batch siblings after a delivered unproven 408/5xx. | [RUST_PLAN_INDEPENDENT_FAILURES.md](RUST_PLAN_INDEPENDENT_FAILURES.md) |
 | Parallel Mutation preparation | Engine/host and pacing reviewed; CI pending | Before releasing any parallel mutation leg while sibling preparation/signing is outstanding. | [RUST_PLAN_MUTATION_PREPARE_BARRIER.md](RUST_PLAN_MUTATION_PREPARE_BARRIER.md) |
-
 | Dispatch nonce reservation and release ordering | Plan and compiling RED phase | Before reserving a selected-key nonce in SignStep preparation or changing nonce receipt and release-floor custody. | [RUST_DISPATCH_NONCE_RESERVATION.md](RUST_DISPATCH_NONCE_RESERVATION.md) |

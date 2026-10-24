@@ -24,6 +24,7 @@ on:
       - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
       - '.github/actions/prepare-yarn/**'
+      - '.github/actions/prefetch-cargo/**'
       - '.github/actions/install-yarn/**'
   pull_request:
     paths:
@@ -32,6 +33,7 @@ on:
       - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
       - '.github/actions/prepare-yarn/**'
+      - '.github/actions/prefetch-cargo/**'
       - '.github/actions/install-yarn/**'
 
 permissions:
@@ -48,6 +50,10 @@ concurrency:
 # including the wasm stack size. Warnings are denied per command instead.
 env:
   CARGO_INCREMENTAL: 0
+  # libgit2 has dropped git-dependency fetches on transient TLS errors; the git CLI
+  # plus cargo's own retries ride those out.
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+  CARGO_NET_RETRY: '10'
 
 defaults:
   run:
@@ -109,6 +115,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-${{ matrix.check }}-
       - name: Install pinned toolchain
         run: rustup show
+      - uses: ./.github/actions/prefetch-cargo
       - uses: actions/setup-node@v4
         if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers'
         with:
@@ -132,6 +139,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-wasm-
       - name: Install pinned toolchain
         run: rustup show
+      - uses: ./.github/actions/prefetch-cargo
       - name: Build every crate for wasm32
         run: cargo build --locked --workspace --target wasm32-unknown-unknown
       - name: Lint every crate for wasm32
@@ -259,6 +267,7 @@ jobs:
           if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
+      - uses: ./.github/actions/prefetch-cargo
       - name: Install pinned binaryen (wasm-opt)
         run: bash sdk-rs/harness/install-binaryen.sh
       - uses: ./.github/actions/install-yarn
@@ -460,6 +469,7 @@ jobs:
           if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
+      - uses: ./.github/actions/prefetch-cargo
       - name: Install pinned binaryen (wasm-opt)
         run: bash sdk-rs/harness/install-binaryen.sh
       - uses: ./.github/actions/install-yarn
@@ -530,7 +540,7 @@ jobs:
         run: corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
       - name: Check the wasm size budget
         if: inputs.replay_artifact != 'combined'
-        run: corepack yarn -s rust:wasm-budget
+        run: corepack yarn -s rust:wasm-budget --venue '${{ matrix.venue }}'
       - name: Replay request normalization
         run: corepack yarn rust:test-harness
       - name: Credentialed lifecycle runner (scripted transport only)

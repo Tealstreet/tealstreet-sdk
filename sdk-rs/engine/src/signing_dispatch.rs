@@ -63,6 +63,22 @@ impl<'a> DispatchContext<'a> {
     pub fn stamp_ms(&self) -> f64 {
         crate::time::wire_stamp_ms(self.now_ms)
     }
+    /// A wire stamp never negative and, with a floor, strictly after the
+    /// released stamp it came from, even on a fixed or backward clock. Without
+    /// a floor it is `stamp_ms()` on valid nonnegative clocks.
+    pub fn stamp_after(&self, floor: Option<crate::StampFloor>) -> Result<f64, SignError> {
+        const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.;
+        let current = self.stamp_ms();
+        if !current.is_finite() {
+            return Err(SignError::InvalidRequest);
+        }
+        let next = floor.map_or(0., |floor| floor.millis() + 1.);
+        let stamp = current.max(0.).max(next);
+        if stamp > MAX_SAFE_INTEGER {
+            return Err(SignError::InvalidRequest);
+        }
+        Ok(stamp)
+    }
     /// Draw anew on every preparation. Failure clears even partial output.
     pub fn signing_bytes(&self, bytes: &mut [u8]) -> Result<(), SignError> {
         use zeroize::Zeroize;
