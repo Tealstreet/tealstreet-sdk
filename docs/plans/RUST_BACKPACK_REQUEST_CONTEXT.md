@@ -761,6 +761,206 @@ binding only. This compile failure is not an original RED. Original six
 controls remain unchanged. Fresh CI is required for this source composition;
 the older163a CI stays historical.
 
+## Next plan/RED slice: local history-query refusals, 2026-10-24
+
+Owner mxb4mq. Fresh branch `fix/rust-backpack-local-history-refusals` starts at
+actual `557de7ae7fbf6d2a00fdd3cbf1d0a962bd7fc570`. Plan + original REDs only at
+this checkpoint; no production, inventory, key-selection or shared-source edit.
+The open-PR file map leaves Backpack history.rs and the new local test path
+unoccupied. Both the original combo-5b and its current `989603e75a4` refresh
+change no Backpack runtime file. #1870/#2044/#2047 remain frozen separately.
+
+Four initial-only numeric refusals in history_command are in scope, before any
+page owner, credential choice, signed request or public transport is constructed:
+
+| Native branch | Exact fingerprint, each count one |
+| --- | --- |
+| OrderByClientId unsupported | dfd77b4e5b63c20a2980a0daf2a87b52d71b54e7389a0b8ab4b83cc09f4e9c44 |
+| Non-funding Income kind unsupported | 9b3adb3b1766d2dc6999e2d6032c71c0af3cd853931092aa839972828fe32016 |
+| Invalid history bounds | 3305fa21e56e82fd162910828b2249d986e2b5557f6c0e7b8475dccd31d4e12f |
+| Requested market absent | 465c0d77039125ad56cc26f76f44ea3cdc2befb62f5d1badbb8062f48908811c |
+
+Thus this is four occurrences/four fingerprints. Base Backpack totals are six
+paths, 19 fingerprints and 20 occurrences; this slice alone would yield six
+paths, 15 fingerprints and 16 occurrences. Retain the fifth history fingerprint
+0451c299... (legacy signed-request preparation failure), every numeric delivered
+history completion in shared owners and every other map. Do not copy the three
+other queued branches' removals into this one.
+
+Preserve the exact four native messages, their existing absent kind and absent
+write outcome on valid keyless public/private entry, and validation precedence:
+unsupported lookup/kind before bounds, bounds before market lookup. No HTTP,
+managed preparation, signing, socket, timer, CursorHistory row/page or Store
+effect may be created by refusal. Zero supported history feature, paging,
+filtering, completion, retry or signing behavior is changed. Valid public trades
+and signed fills/orders/funding keep their current source. No key-selection
+site, key map, selected credential or registry setup changes until combo-5b.
+
+Future source proposal is a thin native rejection helper using existing shared
+receipt APIs: None -> reject_unstamped_command(Read), Expired ->
+reject_expired_command(Read), Remaining -> genuine keyless Read admission with
+20-second maximum/no pacing/Never retry, then fail_context(original message).
+Only a genuine initial command entry can reject; Rejected already emitted its
+terminal and Revoked grants no fallback. This proposes no venue-local issuer,
+policy engine, callback wrapper or shared API. Production waits review and a
+separate authorization after this checkpoint.
+
+Commit the plan first, then new controls on unchanged actual source. Working
+controls pin all four messages/fields with keyless public/private setup, no I/O
+or Store/row changes, native precedence, duplicate owner real book delivery and
+immediate command reuse. Each branch gets its own invalid-clock assertion RED
+(shared InvalidInput without outcome) and capacity assertion RED (shared
+Internal without outcome at the 256-owner bound). Preserve successful prior
+owner delivery after refusal as a post-cutover gate; do not claim assertions
+past a failing original kind check ran. Label only reproduced assertion failures;
+compile errors and missing APIs are not REDs.
+
+Execute only the new test file with CARGO_BUILD_JOBS=4 and no concurrent local
+Cargo build. Freeze the plan/control commit, send bounded review, and report the
+slice/count. No production application, manifest prune, push, PR or extra CI is
+part of this plan/RED checkpoint. Existing three CI watchers remain sole at
+120-second intervals; no new watcher is needed here.
+
+Original-source checkpoint: plan `781734ad009` precedes separate original
+controls `740d55a3b04`. On unchanged actual `557de7ae7fb` source, the single
+scoped file compiles and executes twelve cases: four GREEN, eight assertion
+RED, zero ignored. All four native branches report absent kind rather than
+shared InvalidInput at invalid command clocks, and absent kind rather than
+shared Internal at capacity. Native messages/fields, precedence, no I/O/Store,
+real duplicate prior-owner delivery and immediate ID reuse are working controls.
+Capacity delivery past each failing kind assertion remains a mandatory GREEN
+post-cutover gate, not original execution evidence. Only this plan and the new
+test file differ from base; production, all inventories, key-selection and
+combo-5b source are unchanged. No runtime implementation or prune is applied.
+
+
+Production authorization and plan/control review checkpoint: the overseer
+approved the four-site implementation after hcmq3f's bounded review of exact
+53cf1c7aac3. Actual candle adoption #1870 10d01de52795 is now genuinely merged
+in f15c0e601a5; history.rs and the original twelve controls are unchanged by
+that integration. The source patch is SHA-256
+eba3e3f9fbc5c6835cca4e25691867de77dd9df9e5160fb11765aa445e01a51d.
+It replaces only the four initial refusals with the full receipt-aware Read
+helper above. Inventory removes only the four one-count history fingerprints;
+the signed preparation failure 0451c299 remains, as do all incoming candle
+prunes and every other inventory map. Applied-source preservation review and
+fresh CI remain separate from the cleared plan/control evidence.
+
+Applied-source local evidence: all twelve original controls are byte-identical
+to 740d55a3b04 and now PASS, including all four capacity prior-owner real
+Prepare/Bind/Claim/response deliveries. Scoped Backpack native tests pass
+185 with zero failures and one pre-existing ignored repair control. Strict
+all-target Clippy and formatting pass with CARGO_BUILD_JOBS=4, one local Cargo
+job at a time. The entire history source matches the prepared patch result;
+exactly five own paths differ from actual #1870, with every other source and
+map preserved. This is local execution/preservation evidence; independent
+applied-source review and fresh CI remain separate readiness gates.
+Bans and all inventory scanner/ratchet controls also pass on this tree.
+
+
+## Next plan/RED slice: subscribed-book REST seed custody, 2026-10-24
+
+Owner mxb4mq, branch fix/rust-backpack-book-seed-context from actual
+7501c8c4412629ec74292035cba3bb49cd907c6c. Identity plan/control is CLEAR but
+its private composition still waits actual5b; this unsigned slice has no such
+credential dependency. Existing2054/2047/2053 watches remain sole120s watchers.
+
+Target ONE occurrence/fingerprint in lib.rs public get's non-streaming branch:
+9d039db0b83b2ae54446aa0bc9e3aff9127670a816554104c007a106d268becd,
+count1, cx.request(Method::Get, url, headers, None, pending). Only snapshot()
+passes false, producing Pending::Depth for a subscribed book's REST seed.
+All startup catalogue/ticker/mark and public-trade history callers stream.
+Actual Backpack totals6paths/15fingerprints/15occurrences; this slice alone
+would yield6/14/14. Keep all queued interval/history/identity prunes separate.
+
+Future source: snapshot uses existing http_context(Background, Read/keyless/
+20s/no pacing/Never), request_managed_with_headers with exactX-Broker-Id1200,
+and retains that real Context with Pending::Depth. Validate exact background
+HTTP delivery before native status/body/book callbacks; retire the context
+on every terminal path, including a stale native generation. Preparation/
+bind/claim/deadline/physical failure comes through existing engine callbacks,
+then the existing native recover_book policy for the current generation.
+No command root, fake issuer, WS authority, signer or selected key is minted.
+The20s admission-to-expiry policy is NEW for this currently unmanaged path.
+
+Remove the now-orphaned get stream flag/non-streaming branch in the same
+change, since all remaining get calls stream. This needs a mechanical argument
+removal at history_request's public-trades get call, not a history owner,
+selection, parser or paging change. Other call sites are in lib.rs. #2053
+owns different initial history-refusal hunks; integrate its actual if it lands
+first. #2047's lib interval branch is separate; preserve its actual source
+before final CI if it lands first. Open-PR map shows no other depth/book
+production owner. Combo5b/engine/key-choice/signing/account/trading source
+and all credential/selection maps remain outside scope.
+
+Preserve exact GET depth URL/symbol query/static header/no body/no auth and
+native lastUpdateId/generation filtering, bridge/sequence rules, buffered
+deltas, zero-quantity deletes, subscriber reference counts, book publication,
+reconnect/cache rules and recovery/backoff. No subscribe-frame/HTTP ordering
+change or socket migration; preserve current order as a working control.
+Retain raw startup/public-trade streaming path and every native row assertion.
+Existing depth public fixtures may use shared test_support::prepared_actions
+at the explicit native cause clock for genuine route Prepare/Bind/Claim, without changing
+economic assertions or inventing opens/clocks.
+
+Plan first, original controls next on unchanged production. Working controls
+pin native wire/book output, buffered bridge and unsubscribe/resubscribe
+generation rejection. Original adoption RED targets: zero physical HTTP before
+Prepare/Bind/Claim, invalid background clock refusal before physical work,
+and no book publication from DATA beyond the proposed20s bound. Clearly label
+any compile-only fixture correction, genuinely executed assertions and any
+gated suffixes. Scoped Cargo jobs4, one local build; no broad local sweep.
+After bounded plan/original review CLEAR, standing authorization permits
+production then draft push/full CI parallel with exact source review. No
+prune or source edit belongs to this plan/original checkpoint.
+
+Book-seed control compile checkpoint: protocol_now belongs to Cx rather than
+the public Engine fixture API. Replace that mistaken helper lookup with an
+explicit clock argument equal to each native cause time; no runtime/API change
+or fabricated clock. Exclude this compile error from original RED evidence.
+
+
+Book-seed original evidence: plan1039ba4acc4 precedes original controls
+8cf5b2bf795 and explicit fixture-clock compile correctionee63cde52bc.
+Unchanged actual7501 source executes6 cases:3GREEN/3assertionRED/0ignored.
+Wire/static header/native subscription-before-HTTP order, native buffered
+bridge/deletion output and unsubscribe/resubscribe generation rejection are
+working controls. REDs are physical raw depth HTTP before provider handoff,
+raw depth HTTP at NaN background clock, and publication of native book DATA
+after the NEW proposed20s bound. These are adoption targets, not claims of
+an existing managed-root vulnerability. The Prepare-count assertion after the
+first raw-release failure and the no-Prepare/book assertions after the NaN
+failure are unexecuted until GREEN. Only plan+new controls differ from7501;
+all production, inventories, keys and combo5b files remain byte-identical.
+
+Book-seed bounded plan/original/native fit CLEAR at c06a3d35410 from hcmq3f,
+read-only/no builds. Standing authorization permits implementation and draft
+CI parallel with exact applied-source review. Source implements the proposed
+Background Read directly in snapshot, retains Context in Pending::Depth,
+validates before DATA parsing and retires on every terminal/stale-generation
+path. The native book application body is moved intact to a private helper so
+its early returns cannot bypass Context retirement. The obsolete get flag/raw
+branch and only always-true arguments are removed; public history changes by
+one mechanical argument deletion only. Manifest removes only9d039db0 count1.
+
+All six original controls now pass with their assertions unchanged. Four
+additional source-stage controls pin typed precommit Unsupported/NotSent
+metadata plus original1000ms recovery, released Network/Timeout with no write
+outcome, shared Context capacity refusal and exact stale/current Context
+retirement through engine-minted background reservations. All10 pass with
+jobs4/0ignored. Extra-control fixture shadowing/borrow compile corrections
+are excluded from RED evidence. No engine source or public API was added.
+
+Book-seed scoped compatibility: existing public and public-supervision action
+collectors now use shared prepared_actions at the actual event/timer clock.
+Retry responses follow their emitted timer bound rather than backdating to0.
+All original wire, book, recovery and socket assertions remain in place.
+The scoped Backpack suite passes, including all10 book controls; one existing
+ignored trading control is retained. Scoped strict Clippy and fmt pass.
+Local bans execution on this older integration reports only incoming Orderly
+and Phemex request/socket prunes against the advancing landing; no Backpack
+map discrepancy. Genuine actual-tip integration remains required before CI.
+
 
 ## Next plan/RED slice: FetchAccount identity custody, 2026-10-24
 

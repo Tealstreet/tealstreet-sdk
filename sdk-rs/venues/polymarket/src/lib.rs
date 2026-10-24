@@ -13,6 +13,7 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, Interval, Limits, Market, MinMax, Precision, PredictionMarket, Ticker,
 };
+use safe_cex_engine::request_context::{Context, Operation, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
@@ -82,6 +83,7 @@ pub enum Pending {
         skipped: Vec<String>,
     },
     Midpoints {
+        context: Context,
         offset: usize,
     },
     Candles {
@@ -145,7 +147,7 @@ pub struct Polymarket {
     public_retry: safe_cex_engine::startup::Backoff<Option<usize>>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     midpoint_next: Option<usize>,
-    midpoint_inflight: HashSet<usize>,
+    midpoint_inflight: HashMap<usize, Context>,
     midpoint_failed: HashSet<usize>,
     quote_times: HashMap<String, f64>,
     trade_times: HashMap<String, f64>,
@@ -304,7 +306,7 @@ impl Polymarket {
     }
     fn midpoints(&mut self, cx: &mut Cx<'_, Pending>, offset: usize) {
         let rows = cx.store.markets();
-        if offset >= rows.len() || !self.midpoint_inflight.insert(offset) {
+        if offset >= rows.len() || self.midpoint_inflight.contains_key(&offset) {
             return;
         }
         self.live_tickers.begin();
@@ -319,13 +321,60 @@ impl Polymarket {
                 .collect::<Vec<_>>(),
         )
         .expect("token list");
-        cx.request(
-            Method::Post,
-            format!("{REST}/midpoints"),
-            vec![("Content-Type", "application/json".into())],
-            Some(body),
-            Pending::Midpoints { offset },
+        let context = match cx.http_context(Scope::Background, public_read::policy(Operation::Read))
+        {
+            Ok(context) => context,
+            Err(_) => {
+                self.midpoints_failed(cx, offset, false);
+                return;
+            }
+        };
+        self.midpoint_inflight.insert(offset, context.clone());
+        if cx
+            .request_managed_with_headers(
+                context.clone(),
+                Method::Post,
+                format!("{REST}/midpoints"),
+                &[("Content-Type", "application/json")],
+                Some(body),
+                Pending::Midpoints {
+                    context: context.clone(),
+                    offset,
+                },
+            )
+            .is_err()
+        {
+            self.finish_midpoints(cx, offset, &context);
+            self.midpoints_failed(cx, offset, false);
+        }
+    }
+    fn finish_midpoints(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        offset: usize,
+        context: &Context,
+    ) -> bool {
+        if self.midpoint_inflight.get(&offset) != Some(context) {
+            return false;
+        }
+        self.midpoint_inflight.remove(&offset);
+        let _ = cx.finish_http_context(context);
+        true
+    }
+    fn midpoints_failed(&mut self, cx: &mut Cx<'_, Pending>, offset: usize, advance: bool) {
+        self.midpoint_failed.insert(offset);
+        cx.notice(
+            Level::Warn,
+            code::REQUEST_FAILED,
+            "Polymarket midpoint read failed",
         );
+        self.public_retry.failed(cx, Some(offset));
+        // An unissued refusal backs off instead of recursively exhausting every
+        // offset while shared admission or queue capacity remains unavailable.
+        if advance {
+            self.advance_midpoints(cx, offset);
+        }
+        self.flush_midpoints(cx);
     }
     fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.books.is_empty() {
@@ -778,6 +827,13 @@ impl Venue for Polymarket {
             self.book_response(cx, read, &token, limit, response);
             return;
         }
+        if let Pending::Midpoints { context, offset } = &pending
+            && (self.midpoint_inflight.get(offset) != Some(context)
+                || cx.validate_background_read_http_delivery(context).is_err())
+        {
+            let _ = cx.finish_http_context(context);
+            return;
+        }
         if let Pending::Candles { read, .. } = &pending
             && !read.validate(cx)
         {
@@ -865,14 +921,15 @@ impl Venue for Polymarket {
                     .collect();
                 self.seed_tickers = tickers;
                 self.seeded_tokens.clear();
-                self.midpoint_inflight.clear();
+                for (_, context) in self.midpoint_inflight.drain() {
+                    let _ = cx.finish_http_context(&context);
+                }
                 self.midpoint_failed.clear();
                 self.midpoint_next = Some(0);
                 self.public_ready(cx);
                 self.midpoints(cx, 0);
             }
-            Pending::Midpoints { offset } => {
-                self.midpoint_inflight.remove(&offset);
+            Pending::Midpoints { context, offset } => {
                 let requested: HashSet<String> = cx
                     .store
                     .markets()
@@ -932,12 +989,13 @@ impl Venue for Polymarket {
                     Err(_) => {
                         self.on_request_failed(
                             cx,
-                            Pending::Midpoints { offset },
+                            Pending::Midpoints { context, offset },
                             "Invalid Polymarket midpoints",
                         );
                         return;
                     }
                 }
+                self.finish_midpoints(cx, offset, &context);
                 // CLOB omits tokens without a book: an omitted token is unseeded, not a
                 // failed batch, even when every token is omitted. Only rejected rows retry.
                 if rejected {
@@ -1165,17 +1223,10 @@ impl Venue for Polymarket {
                 return;
             }
             Pending::Markets { .. } => Some(None),
-            Pending::Midpoints { offset } => {
-                self.midpoint_inflight.remove(&offset);
-                self.midpoint_failed.insert(offset);
-                cx.notice(
-                    Level::Warn,
-                    code::REQUEST_FAILED,
-                    "Polymarket midpoint read failed",
-                );
-                self.public_retry.failed(cx, Some(offset));
-                self.advance_midpoints(cx, offset);
-                self.flush_midpoints(cx);
+            Pending::Midpoints { context, offset } => {
+                if self.finish_midpoints(cx, offset, &context) {
+                    self.midpoints_failed(cx, offset, true);
+                }
                 return;
             }
         };

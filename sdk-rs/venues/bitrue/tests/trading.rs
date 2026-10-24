@@ -1,10 +1,12 @@
 //! Scripted orders from Bitrue's documented v2 futures payloads.
+mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId, TimerId,
 };
-use safe_cex_venue_bitrue::{Bitrue, Options};
+use safe_cex_venue_bitrue::Bitrue;
+use support::Options;
 const CONTRACT: &str = r#"[{"symbol":"E-BTC-USDT","pricePrecision":1,"multiplier":0.001,"minOrderVolume":1,"maxMarketVolume":10,"maxLimitVolume":10,"minOrderMoney":5,"status":1,"side":1,"type":"E","multiplierCoin":"BTC"}]"#;
 enum Trace {
     Progress(u32, Vec<OrderIdentityReceipt>),
@@ -21,11 +23,11 @@ struct Harness {
 }
 impl Harness {
     fn new() -> Self {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
+        let mut e = support::engine(Options {
             key: Some("replay-key".into()),
             secret: Some("replay-secret".into()),
             ..Options::default()
-        }));
+        });
         e.start(0.0);
         let mut h = Self {
             e,
@@ -56,7 +58,8 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.e.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.e, 100.).into_iter()
+        {
             match &action {
                 Action::Http(r) => self.trace.push(Trace::Http(r.id)),
                 Action::Notice(Notice::CommandProgress { command, receipts }) => {
