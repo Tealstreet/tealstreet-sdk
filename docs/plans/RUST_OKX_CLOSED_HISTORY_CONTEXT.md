@@ -73,8 +73,10 @@ No manifest, checker, exemption or fingerprint rehash belongs in this checkpoint
   the output. Recovery depends on accepted output, not a page-number heuristic.
 - Native closed_sign_failed uses the same recovery: first/no-accepted-output
   provider refusal is strict, while a refusal after accepted rows recovers that
-  prefix. Preserve this distinction and the provider fields without retry or
-  auth inference. A strict-provider transplant from #1950 would change policy.
+  prefix. Pin this original baseline separately. The subsequent explicit
+  overseer ruling changes provider/preparation refusals to strict through the
+  exact root, consistent with #1950; preserve provider fields without retry or
+  auth inference. This is an intentional change, not native parity.
 
 ## Managed geometry and caller changes
 
@@ -107,13 +109,19 @@ Local child-mint/submission refusal strictly rejects the still-live original
 root without prefix recovery, typed through shared Read projection. Only a
 proven revoked owner is inert. A released child timeout while the root remains
 live uses native accepted-output recovery; engine root expiry stays strict.
-Provider refusal after accepted output keeps its separate native recovery above.
+Provider/preparation refusal strictly rejects the exact live root even after
+accepted output, per the overseer ruling. Preserve typed kind/message/native
+metadata; do not soften it to rows or emit an INCOMPLETE marker. Ordinary
+transport/HTTP/live-child-timeout failures retain accepted-output recovery.
 
-CALLERS must describe new invalid-clock/capacity local refusals and the immutable
-whole-command bound. SDK fetchClosedPnl/fetchReportedClosedPnl and okxJournal
-consume fetchClosedPositionRows. Its existing report/catch behavior and
-copyHistoryCompleteness/OKX row mapping remain unchanged. All OKX aliases share
-the same native operation; no capability or SDK timeout configuration changes.
+CALLERS must describe new invalid-clock/capacity local refusals, the immutable
+whole-command bound and strict provider/preparation failure after accepted rows.
+SDK fetchClosedPnl/fetchReportedClosedPnl catches/reports command failure and
+returns[]; fetchHistoricalPositions/okxJournal uses report:false and propagates
+rejection. Both consume fetchClosedPositionRows; recovered physical failures
+remain marked through copyHistoryCompleteness. These existing catches and OKX
+mapping stay unchanged. All OKX aliases share the same native operation; no
+capability or SDK timeout configuration changes.
 
 ## Original controls and review gates
 
@@ -131,8 +139,12 @@ After this plan commit add real Engine<Okx> tests, running unchanged production:
    drops accepted output. Expired command reuse plus old timer/DATA cannot
    publish into or retire the new owner.
 6. Native working controls pin raw wire/rows, keyless precedence, Secondary
-   selection, first failure versus accepted-prefix recovery, rejected staged
-   rows, and provider failure before/after nonempty accepted output. Existing
+   selection, first failure versus accepted-prefix recovery and rejected staged
+   rows. Preserve a working original provider-prefix baseline plus a separate
+   desired strict-provider RED after accepted output. The implementation will
+   update that one baseline expectation for the ruled policy, retaining this
+   original checkpoint; no ignored contradictory tests. First provider refusal
+   remains a working typed/no-output control. Existing
    cap/cycle/unknown-time controls remain untouched and run independently.
 7. After adoption add exact child-deadline/preparation metadata and live child-
    timeout controls through the real managed adapter, keeping original RED
