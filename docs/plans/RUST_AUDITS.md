@@ -3066,3 +3066,23 @@ Source-stage recovery suffix correction records the required root+child two-slot
 geometry without altering the original initial-capacity assertions. The28 now
 pass, plus47 existing public/startup/socket/local-context controls. Architecture
 gate No; bounded source review and full family CI remain pending.
+
+
+## Crypto.com PublicTrades authority
+
+The unsigned PublicTrades endpoint now owns an exclusive ReadHistoryRows
+completion rooted at the caller receipt. Shared admission precedes native wait;
+DATA admission precedes codec/staging and final response policy. The public
+legacy cursor branch is removed rather than retained beside a managed terminal.
+Exact-owner retirement drops only its queued work. Private cursor history stays
+legacy; no signer or key-selection migration is claimed. Three public lexical
+fingerprints/four occurrences are removed; history retains its private witness.
+
+### Paradex config/local-entry original controls
+
+Plan b29ea97d0d4, original e743120ab7b: 22 compiling assertion REDs and four
+working controls against unchanged actual77f124 source/map, zero ignored.
+All26 original assertions pass with the seven-site implementation. This receipt
+covers real retained-peer capacity, native metadata, duplicate custody, receipt
+expiry and config Prepare/Bind/Claim/expiry/retry; CI and independent source
+review are separate gates.
