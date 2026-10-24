@@ -113,3 +113,20 @@ Architecture gate: No. Direct existing shared Mutation entry/refusal, diagnostic
 and terminal authority; no local journal, classifier, timer, credential-counting,
 issuer/finalizer wrapper or numeric fallback. Remote write adoption stays held
 for its complete signer/queue/journal migration.
+
+## Original checkpoint
+
+All three independent plan gates are CLEAR. The test-only actual-Engine target
+request_context_local_writes compiles and executes13 controls on byte-exact
+actual production: nine behavioral assertion REDs plus four native positives,
+zero ignored. Four input shapes cover the two reachable branches, including
+valid UUID entropy before a later validation error or missing-key refusal.
+Both capacity and invalid-clock controls assert the entropy prefix was executed.
+Actual managed book peers fill256 owners; liveness and recovery are pinned.
+
+An initial diagnostic assertion mistook native CommandError for a generic Event;
+that fixture mistake is corrected before counting REDs. The four working native
+controls pin exact error/diagnostic order,300 synchronous ID reuses, duplicate
+managed-owner isolation and the exact accepted legacy private Mode POST/body.
+The ninth RED records the intentional shared credential-free auth-health change.
+No production/manifest edit belongs to this checkpoint.
