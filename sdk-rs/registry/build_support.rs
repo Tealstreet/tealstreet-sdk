@@ -40,6 +40,8 @@ struct Rule {
 #[serde(rename_all = "camelCase")]
 enum SetupMapping {
     Asterdex,
+    #[serde(rename = "apexomni")]
+    ApexOmni,
 }
 
 #[derive(Default, Deserialize)]
