@@ -172,3 +172,29 @@ fn only_bounded_valid_public_only_requests_reach_any_provider() {
         assert_eq!(fixed.calls.load(Ordering::SeqCst), 0);
     }
 }
+
+/// P6b: the L1 wallet address through the real provider and its extra ref.
+/// The `asterdex` feature is what enables the crypto secp256k1 arm here.
+#[cfg(feature = "asterdex")]
+#[test]
+fn l1_wallet_address_comes_from_its_extra_ref() {
+    use safe_cex_engine::signing::{CredentialSetupPolicy, ExtraKey};
+    let wallet = "11".repeat(32);
+    let policy: CredentialSetupPolicy = serde_json::from_value(serde_json::json!({
+        "primary": {"extra": {"key": "l1Wallet", "field": "requiredForPrivate", "encoding": "hex"}}
+    }))
+    .unwrap();
+    let setup = serde_json::json!({"primary": {
+        "extra": {"l1Wallet": {"value": wallet, "encoding": "hex"}}
+    }});
+    let (signer, ids) =
+        safe_cex_crypto::signer::LocalSigner::from_json_with_policy(setup.to_string(), policy)
+            .unwrap();
+    let role = ids.primary.unwrap().extra[&ExtraKey::L1Wallet].clone();
+    let provider: Provider = Arc::new(signer);
+    let values = fetch_public(&provider, vec![Operation::PublicAddress { key: role }]).unwrap();
+    let expected = safe_cex_crypto::ethereum::private_key_address(&wallet).unwrap();
+    let expected = &expected.to_ascii_lowercase()[2..];
+    let actual: String = values[0].iter().map(|byte| format!("{byte:02x}")).collect();
+    assert_eq!(actual, expected);
+}
