@@ -1,6 +1,7 @@
 //! Legacy Breakout DXtrade: authenticated REST polling, with no exchange socket.
 mod account;
 mod history;
+mod local_context;
 mod session;
 mod trading;
 pub(crate) mod wire;
@@ -10,6 +11,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::Operation as RequestOperation;
 use safe_cex_engine::{
     Command, Cx, ErrorKind, Method, Outcome, Response, SocketId, TimerId, Venue, VenueError,
 };
@@ -1335,11 +1337,19 @@ impl Venue for BreakoutProp {
                 ..
             } => {
                 if wire::interval(interval).is_none() {
-                    cx.fail(command, interval.unsupported("DXtrade"));
+                    local_context::complete(
+                        cx,
+                        RequestOperation::Read,
+                        Err(interval.unsupported("DXtrade").into()),
+                    );
                 } else if from_ms.is_some_and(|value| wire::iso_time(value).is_err())
                     || to_ms.is_some_and(|value| wire::iso_time(value).is_err())
                 {
-                    cx.fail(command, "Invalid DXtrade candle request");
+                    local_context::complete(
+                        cx,
+                        RequestOperation::Read,
+                        Err("Invalid DXtrade candle request".into()),
+                    );
                 } else {
                     self.schedule(
                         cx,
@@ -1366,17 +1376,32 @@ impl Venue for BreakoutProp {
                 self.on_trade_command(cx, command);
             }
             Command::Query { command, query } => history::query(cx, command, query),
-            Command::FetchLeverage { command, .. } => cx.done(command, "null".into()),
-            Command::FetchMaxLeverage { command, .. } => cx.fail(
-                command,
-                "Maximum leverage queries are unavailable for DXtrade",
+            Command::FetchLeverage { .. } => {
+                local_context::complete(cx, RequestOperation::Read, Ok("null".into()))
+            }
+            Command::FetchMaxLeverage { .. } => local_context::complete(
+                cx,
+                RequestOperation::Read,
+                Err("Maximum leverage queries are unavailable for DXtrade".into()),
             ),
-            Command::AmendOrderWithSymbol { command, .. }
-            | Command::FetchStpMode { command }
-            | Command::SetStpMode { command, .. }
-            | Command::FetchAccount { command }
-            | Command::FetchOrderBook { command, .. } => {
-                cx.fail(command, "Unsupported BreakoutProp command");
+            unsupported @ (Command::AmendOrderWithSymbol { .. }
+            | Command::FetchStpMode { .. }
+            | Command::SetStpMode { .. }
+            | Command::FetchAccount { .. }
+            | Command::FetchOrderBook { .. }) => {
+                let operation = if matches!(
+                    unsupported,
+                    Command::AmendOrderWithSymbol { .. } | Command::SetStpMode { .. }
+                ) {
+                    RequestOperation::Mutation
+                } else {
+                    RequestOperation::Read
+                };
+                local_context::complete(
+                    cx,
+                    operation,
+                    Err("Unsupported BreakoutProp command".into()),
+                );
             }
         }
     }
