@@ -669,3 +669,11 @@ the source fix in `a5c469704c5`. Source checks: 97 focused provenance/signing/fa
 controls and 65 host/managed-HTTP compatibility controls PASS. G2b group fence
 controls run separately; no group source or completion API is changed. Rust
 installed snapshot/registry/native hooks remain unimplemented in this slice.
+
+Late-callback source review retains the stricter zero-property-access boundary.
+A managed HTTP control now poisons the host synchronously inside a real bound
+dispatch, then verifies resources/timers are retired and no engine callbacks ran.
+Its final assertion exposes one late prepareDispatch property read in post-release
+bookkeeping. The proposed fix is an early disposed check in ManagedHttp::post,
+not a change to group claim, bound readiness or dispatch; that exact shared-host
+hunk goes to the G2b owner before applying.

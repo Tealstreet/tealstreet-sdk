@@ -10,7 +10,7 @@ const packet = { request: 7, method: 'POST', url: 'https://venue.test/read', hea
 const prepare = { op: 'managedHttp', phase: 'prepare', preparation: token, intent: 'public', packet };
 const bind = { op: 'managedHttp', phase: 'bind', preparation: token, permit, packet };
 const cancel = { op: 'managedHttp', phase: 'cancel', preparation: token };
-function rig(prepareHttp) {
+function rig(prepareHttp, wrapEngine = (engine) => engine) {
   const events = [], timers = new Map();
   let now = 0, next = 0, until;
   const engine = {
@@ -30,7 +30,7 @@ function rig(prepareHttp) {
     setTimeout(fn, ms) { const id = ++next; timers.set(id, { fn, at: now + ms }); return id; },
     clearTimeout(id) { timers.delete(id); },
   };
-  const host = new EngineHost(engine, transport);
+  const host = new EngineHost(wrapEngine(engine), transport);
   return { host, events, timers, at(value) { now = value; }, wait(value) { until = value; } };
 }
 
@@ -156,4 +156,33 @@ test('default fetch validates before handoff and invokes fetch synchronously exa
   assert.throws(() => bound.dispatch());
   assert.equal((await response).status, 200);
   assert.equal(typeof nativeTransport().prepareHttp, 'function');
+});
+
+test('post-handoff bookkeeping never reads an engine property after synchronous poison', async () => {
+  let poisoned = false;
+  let sends = 0;
+  const accesses = [];
+  let r;
+  r = rig(() => ({ bind: () => ({
+    ready: () => true,
+    dispatch() {
+      sends++;
+      poisoned = true;
+      r.host.failEngine(new WebAssembly.RuntimeError('transport callback poisoned engine'));
+      return new Promise(() => {});
+    },
+  }) }), engine => new Proxy(engine, {
+    get(target, property, receiver) {
+      if (poisoned) accesses.push(String(property));
+      return Reflect.get(target, property, receiver);
+    },
+  }));
+  r.host.execute(prepare);
+  await tick();
+  assert.equal(sends, 1);
+  assert.equal(r.host.dead, true);
+  assert.equal(r.host.managedHttp.resources.size, 0);
+  assert.equal(r.timers.size, 0);
+  assert.equal(r.events.some(([event]) => ['drain', 'start', 'chunk', 'end', 'httpFailed'].includes(event)), false);
+  assert.deepEqual(accesses, [], 'late post callback must check the host fence before reading prepareDispatch');
 });
