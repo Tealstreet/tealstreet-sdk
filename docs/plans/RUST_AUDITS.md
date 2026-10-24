@@ -3043,3 +3043,12 @@ prefix. Shared Context cleanup is separate from DATA admission: already-admitted
 failure keeps its native retry even after sibling issuance prunes expired
 retirement metadata. Completed catalogue retires before successor admission so
 capacity cannot strand ticker startup. No local issuer/timer/selection algorithm.
+
+### Phemex dispatch-signing custody candidate
+
+Full native funnel and WS auth now use opaque provider recipes, removing14
+legacy lib credential/material fingerprints. Typed signer refusal preserves
+accepted-prefix IDs and native rollback revisions; actual-release raw expiry
+is accumulated as a maximum before the native5s reconciliation skew. Production
+wire/financial controls pass. Independent source/caller reviews are CLEAR;
+full-map/HMAC review, final CI and the combined #1970/#1974 landing remain gates.
