@@ -109,3 +109,48 @@ test('working control: untrusted redirect is a fatal verdict, never a transport 
   } });
   await assert.rejects(reader.getArtifactBytes(700), /untrusted/); assert.equal(calls, 1); assert.deepEqual(delays, []);
 });
+
+for (const [sequence, expectedCalls, succeeds] of [
+  [['empty', 'network', 'server'], 3, false],
+  [['server', 'empty'], 2, false],
+  [['network', 'server', 'success'], 3, true],
+  [['empty', 'server', 'success'], 3, true],
+  [['server', 'network', 'server'], 3, false],
+]) test(`mixed retrieval budget: ${sequence.join(' then ')}`, async () => {
+  let calls = 0; const delays = [];
+  const reader = createGithubReader({ repository: 'org/repo', sleep: async ms => delays.push(ms), fetch: async () => {
+    const next = sequence[calls++]; assert.notEqual(next, undefined, 'no retrieval outside the shared cap');
+    if (next === 'network') throw epipe();
+    return new Response(next === 'empty' ? null : next === 'server' ? 'temporary' : 'complete archive', { status: next === 'server' ? 502 : 200 });
+  } });
+  if (succeeds) {
+    assert.equal((await reader.getArtifactBytes(700)).toString(), 'complete archive');
+    assert.equal((await reader.getArtifactBytes(700)).toString(), 'complete archive', 'only complete original bytes are cached');
+  } else await assert.rejects(reader.getArtifactBytes(700));
+  assert.equal(calls, expectedCalls); assert.deepEqual(delays, expectedCalls === 3 ? [1000, 2000] : [1000]);
+  assert.equal(reader.snapshots().responses.length, succeeds ? 1 : 0);
+});
+
+for (const failure of [new TypeError('unknown body failure', { cause: { code: 'OTHER' } }),
+  new Error('provenance mismatch', { cause: { code: 'EPIPE' } })]) test(`working body control: ${failure.message} is never transport recovery`, async () => {
+  let calls = 0; const delays = [];
+  const reader = createGithubReader({ repository: 'org/repo', sleep: async ms => delays.push(ms), fetch: async () => {
+    calls++; return { status: 200, arrayBuffer: async () => { throw failure; } };
+  } });
+  await assert.rejects(reader.getRun(1000), error => error === failure);
+  assert.equal(calls, 1); assert.deepEqual(delays, []); assert.equal(reader.snapshots().responses.length, 0);
+});
+
+test('CDN HTTP5xx exhaustion shares three authority attempts and strips authentication each time', async () => {
+  const calls = [], delays = [];
+  const reader = createGithubReader({ repository: 'org/repo', token: 'fixture-token', sleep: async ms => delays.push(ms), fetch: async (url, options) => {
+    calls.push({ url, options });
+    if (url.startsWith('https://api.github.com/')) return new Response(null, { status: 302, headers: { location: 'https://fixture.blob.core.windows.net/archive' } });
+    return new Response('temporary', { status: 503 });
+  } });
+  await assert.rejects(reader.getArtifactBytes(700), /GitHub evidence unavailable \(503\)/);
+  assert.equal(calls.length, 6); assert.deepEqual(delays, [1000, 2000]);
+  for (const i of [0, 2, 4]) assert.deepEqual(calls[i], calls[0]);
+  for (const i of [1, 3, 5]) assert.equal(calls[i].options.headers, undefined);
+  assert.equal(reader.snapshots().responses.length, 0);
+});
