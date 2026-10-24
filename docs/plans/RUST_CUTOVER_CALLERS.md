@@ -7728,3 +7728,15 @@ metadata wait, not a replay/measurement retry or a new timing sample. Exact
 upload/checkout windows, ZIP/digest checks, raw observations and final
 provenance validation remain enforced. No venue policy or legacy non-Rust
 production changes. Plan: RUST_CPU_PRODUCER_STEP_METADATA.md.
+
+### Managed socket intermediate authentication progress
+
+AuthEvidence::Progress renews only a current Required-auth Authenticating feed's
+existing OPEN-origin auth window. It grants no Ready, Accepted, interests or
+HTTP authority. The exact admitted text then reaches the existing native message
+handler to retain its accepted challenge and request epoch-bound authentication
+signing. Existing auth evidence dispatch and default feeds remain unchanged.
+Both original and renewed equality fences run before native codec/publication
+or final signed send; independent CONNECT snapshot and payload bounds remain.
+The Supervisor allocates its prospective replacement watch before changing the
+old watch or origin, and existing fatal exhaustion prevents partial output.

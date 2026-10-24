@@ -124,6 +124,8 @@ impl FeedPolicy {
 #[derive(Clone, Debug)]
 pub enum AuthEvidence {
     Accepted,
+    /// Accepted intermediate proof; renews authentication without readiness.
+    Progress,
     Rejected(VenueError),
     Malformed,
 }
@@ -237,6 +239,7 @@ pub(crate) enum Admission {
 #[derive(Clone, Debug)]
 pub(crate) enum AuthTransition {
     Ignored,
+    Progress(Epoch),
     Accepted {
         epoch: Epoch,
         ready: bool,
@@ -589,6 +592,16 @@ impl Lifecycle {
             || f.policy.auth == AuthMode::None
         {
             return AuthTransition::Ignored;
+        }
+        if matches!(evidence, AuthEvidence::Progress) {
+            return if f.policy.auth == AuthMode::Required
+                && f.phase == Phase::Authenticating
+                && !f.authenticated
+            {
+                AuthTransition::Progress(epoch)
+            } else {
+                AuthTransition::Ignored
+            };
         }
         if matches!(evidence, AuthEvidence::Accepted) {
             if f.authenticated {
