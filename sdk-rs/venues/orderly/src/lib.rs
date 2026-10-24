@@ -316,6 +316,7 @@ impl Orderly {
         };
         match cx.request_managed(
             context,
+            None,
             Method::Get,
             format!("{}{path}", self.rest()),
             None,
