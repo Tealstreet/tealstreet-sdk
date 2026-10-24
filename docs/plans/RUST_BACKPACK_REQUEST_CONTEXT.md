@@ -729,7 +729,7 @@ Store changes, immediate ID reuse, genuine prior book-owner delivery, and
 ordinary valid identity success/failure bytes. Original assertion RED targets
 are shared invalid-clock/capacity rejection per failure cause and zero
 diagnostic/terminal leakage into a duplicate prior owner. Also probe delivery
-after the original20s maximum using a real signed native request; retain its
+after the proposed NEW20s admission-to-expiry limit using a real signed native request; retain its
 actual observed result, without inventing a missing API or claiming assertions
 past the first failure ran. Scoped tests use CARGO_BUILD_JOBS=4, one local
 build at a time. Applied source, two prunes, independent source review, draft
@@ -769,3 +769,18 @@ Every production source, inventory, key-selection map and combo5b file remains
 byte-identical. Scoped Cargo uses4jobs; no full workspace or extra CI started.
 The private-path selected authority/delivery composition remains an explicit
 source gate before a two-terminal implementation or either fingerprint prune.
+
+
+Bounded PLAN/control/native-fit review CLEAR: hcmq3f reviewed exact
+c51d9c3c9aba1aefdb09a3a73e277c710fee673a read-only, with no independent
+build claim. Native entry/precedence/messages/diagnostic ordering, signed
+secondary choice and integer parser were traced; the test blob is SHA-256
+538f497937c16464ddea5cbae4549dc068ade4e93749a447e03cebaa209e11e0.
+The20s admission-to-expiry limit is a NEW policy of the planned adoption,
+not evidence of a vulnerability in an existing managed root. During eventual
+managed implementation, replace the fixture's raw Action::Http collector with
+genuine provider Prepare/Bind/Claim; preserve URL/method/body/read key, exact
+high-precision JSON and late-response assertions. The overseer approved the
+two-occurrence slice only after this review AND actual5b; exact private-path
+selection/provider/DATA hooks remain separately source-gated. No production,
+prune, push or API readiness follows from this bounded plan review.
