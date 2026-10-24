@@ -4,6 +4,7 @@ import { setImmediate } from 'node:timers/promises';
 import { test } from 'node:test';
 import { authenticatedBundle, evidenceEndCheck } from './cpu-ci.mjs';
 import { CPU_COHORT_STEPS, createGithubReader } from './cpu-cohort.mjs';
+import { CPU_REMEASURE_SUITES } from './cpu-rollout.mjs';
 
 const checkout = 'a'.repeat(40);
 const at = second => `2026-10-24T00:00:${String(second).padStart(2, '0')}.000Z`;
@@ -133,6 +134,7 @@ test('empty-inventory original: empty then pending steps cannot bind an intermed
   const result = await settle(t, value.read);
   assert.ifError(result.error);
   assert.equal(value.calls.jobs, 3);
+  assert.equal(value.context.producerStepRefreshes, 2);
   assert.deepEqual(result.value.job, value.jobs[2]);
   assert.deepEqual(value.context.bindings[0].job, value.jobs[2]);
 });
@@ -140,9 +142,9 @@ test('empty-inventory original: empty then pending steps cannot bind an intermed
 test('empty-inventory original: an empty list exhausts the same bounded refresh budget', async t => {
   const value = fixture([job => { job.steps = []; }]);
   const result = await settle(t, value.read);
-  assert.match(result.error?.message ?? '', /producer steps not terminal after 6 refreshes/);
+  assert.match(result.error?.message ?? '', /empty inventory after 6 refreshes/);
   assert.match(result.error.message, /run 1000, job 100 Rust \/ replay measurement \(bitget\)/);
-  assert.match(result.error.message, /step inventory empty/);
+  assert.match(result.error.message, /empty step inventory/);
   assert.equal(value.calls.jobs, 7);
   assert.equal(value.context.producerStepRefreshes, 6);
   assert.equal(value.context.bindings.length, 0);
@@ -151,6 +153,7 @@ test('empty-inventory original: an empty list exhausts the same bounded refresh 
 
 for (const [name, mutate, expected] of [
   ['absent list', job => { delete job.steps; }, /missing producer step inventory/],
+  ['null list', job => { job.steps = null; }, /missing producer step inventory/],
   ['non-array list', job => { job.steps = {}; }, /missing producer step inventory/],
   ['malformed step', job => { job.steps.push(null); }, /missing producer step inventory/],
   ['nonempty list without upload', job => { job.steps.pop(); }, /missing unique successful step/],
@@ -161,6 +164,23 @@ for (const [name, mutate, expected] of [
   assert.equal(value.context.producerStepRefreshes ?? 0, 0);
   assert.equal(value.context.bindings.length, 0);
   assert.equal(value.context.bundles.size, 0);
+});
+
+test('empty-inventory original: one refresh materializes all 32 original producers for later bindings', async t => {
+  assert.equal(CPU_REMEASURE_SUITES.length, 32);
+  const value = fixture([() => {}], {
+    extraProducers: CPU_REMEASURE_SUITES.filter(suite => suite !== 'bitget'),
+    mutateJobs: (rows, read) => { if (read === 0) for (const row of rows) row.steps = []; },
+  });
+  const result = await settle(t, async () => {
+    for (const suite of CPU_REMEASURE_SUITES) await value.readSuite(suite);
+  });
+  assert.ifError(result.error);
+  assert.equal(value.calls.jobs, 2, 'one complete refresh serves all later producers');
+  assert.equal(value.context.producerStepRefreshes, 1);
+  assert.equal(value.context.bindings.length, 32);
+  assert.equal(value.context.bundles.size, 32);
+  assert.ok(value.context.bindings.every(binding => binding.job.steps.length === 3));
 });
 
 test('empty-inventory working control: HTTP 502 is not a convergence retry', async () => {
