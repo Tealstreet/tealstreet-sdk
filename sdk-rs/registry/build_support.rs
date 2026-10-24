@@ -175,6 +175,17 @@ struct BridgeRule {
     api_key_index_required: bool,
     isolated_book_subscriptions: bool,
     dispatch_signing: bool,
+    read_credentials: ReadCredentialsPolicy,
+}
+
+/// What trusted setup does with a family's read key; absent installs it.
+#[derive(Default, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum ReadCredentialsPolicy {
+    #[default]
+    Install,
+    ValidateOnly,
+    PublicRead,
 }
 
 #[derive(Default, Debug, Deserialize)]
@@ -219,14 +230,15 @@ fn rule(value: &Rule) -> String {
     };
     let bridge = &value.bridge;
     let bridge = format!(
-        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {} }}",
+        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {}, read_credentials: ReadCredentialsPolicy::{:?} }}",
         bridge.spot,
         bridge.demo,
         bridge.primary_credentials_only,
         bridge.payload_signing,
         bridge.api_key_index_required,
         bridge.isolated_book_subscriptions,
-        bridge.dispatch_signing
+        bridge.dispatch_signing,
+        bridge.read_credentials
     );
     let slot = |value: &Option<IdentitySetupPolicy>| match value {
         Some(value) => {
@@ -451,6 +463,29 @@ mod tests {
                 r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"signerSetup":{{"primary":{field}}}}}}}}}"#
             );
             assert!(generate(&rules).is_err());
+        }
+    }
+
+    #[test]
+    fn read_credentials_policy_compiles_and_unknown_values_fail_closed() {
+        let output = generate(
+            r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "validated":{"bridge":{"readCredentials":"validateOnly"}},
+            "public":{"bridge":{"readCredentials":"publicRead"}},
+            "plain":{}
+        }}"#,
+        )
+        .unwrap();
+        for variant in ["ValidateOnly", "PublicRead", "Install"] {
+            assert!(output.contains(&format!(
+                "read_credentials: ReadCredentialsPolicy::{variant}"
+            )));
+        }
+        for value in [r#""ignore""#, "true", "null"] {
+            let rules = format!(
+                r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"bridge":{{"readCredentials":{value}}}}}}}}}"#
+            );
+            assert!(generate(&rules).is_err(), "{value}");
         }
     }
 
