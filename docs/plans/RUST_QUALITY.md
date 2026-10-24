@@ -1869,3 +1869,17 @@ lookup/signer/root suites pass89 tests across7 targets; strict all-target Clippy
 formatting and request/credential ratchets cover the scoped change. Existing
 financial assertions and fixtures are unchanged. Independent source/caller/map
 reviews and fresh exact-head CI remain required before READY.
+
+
+## GRVT local command tail controls
+
+The revised18 compiling original controls pass after production, including
+all previously gated capacity recovery suffixes: retire the exact first of256
+genuine Command Read peers, repeat the native refusal and validate255 survivors.
+Read None / approved Mutation NotSent, raw text and absent kind/code/hint,
+configured/public-only precedence, external NaN, zero caller wait and duplicate
+ownership are pinned. Actual engine symbol-amend rejection counts zero forwarded
+entries, followed by a reachable positive. Nine safe real commands prove earlier
+dispatch before the deleted private-phase diagnostic. Library7 and trading42
+also pass, for67 scoped tests with no ignored controls. Strict GRVT all-target
+Clippy/fmt and full ratchets PASS; broad workspace/WASM/performance stay in CI.

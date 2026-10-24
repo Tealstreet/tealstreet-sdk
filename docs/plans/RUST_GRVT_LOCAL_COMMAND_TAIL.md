@@ -101,3 +101,29 @@ cases and configured/public-only loops reaching their Mutation outcome check
 (None versus NotSent); the original eight capacity/NaN REDs are unchanged.
 The prior native-None evidence remains immutable at2161420eaec. No production,
 fixture setup or non-outcome expectation changed during this supersession.
+
+
+
+## Production checkpoint
+
+The new unsupported_command helper takes only the command-classified operation.
+It derives owner identity from genuine dispatch through admit_http_command,
+uses keyless20s/Never/no pacing and returns on shared refusal. fail_context
+keeps native raw text and absent kind/code/hint, Read None and approved Mutation
+NotSent. No numeric ID is borrowed. The earlier dispatch blocks are unchanged;
+the dead private-phase arm is removed and exhaustive generic coverage retained.
+
+Exactly two singleton lib hashes disappear: bfcdb38d1528a6090a59eb123fc288423fd2ce7a45cf8179d786b7dafb8a5b2c
+and d378cf6b03a38047ea106b9344672d153498eb2f0f1aa48f79efcdfeb037c3f9.
+Both are1->0, lib8->6 on this base; the separate catalog owns different hashes.
+Foreign raw inventory bytes/order and all other maps stay unchanged.
+
+All18 revised originals now PASS, including the earlier gated recovery and
+255-peer validation suffixes; library7 and trading42 also PASS (67total).
+No existing fixture changes or further original assertion changes were needed.
+The initial helper compile found an unused numeric ID parameter; it was removed
+before the successful run and is not counted as an assertion RED. Source review
+and intended-head CI remain required before READY.
+
+Strict scoped GRVT all-target Clippy -D warnings, rustfmt and full bans/ratchets
+PASS sequentially with CARGO_BUILD_JOBS=4.

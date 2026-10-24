@@ -14,6 +14,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
@@ -335,6 +336,18 @@ impl Grvt {
                 let _ = cx.fail_plan(&request.plan, "GRVT candle read failed");
             }
         }
+    }
+    fn unsupported_command(cx: &mut Cx<'_, Pending>, operation: Operation) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        let _ = cx.fail_context(&context, "Unsupported GRVT command");
     }
     fn fetch_markets(&mut self, cx: &mut Cx<'_, Pending>) {
         self.request(
@@ -1350,24 +1363,22 @@ impl Venue for Grvt {
             } => {
                 self.fetch_candles(cx, symbol, timeframe, limit, from_ms, to_ms);
             }
-            Command::PlaceOrders { command, .. }
-            | Command::CancelOrders { command, .. }
-            | Command::AmendOrder { command, .. }
-            | Command::CancelSymbolOrders { command, .. }
-            | Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. }
-            | Command::FetchLeverage { command, .. }
-            | Command::Query { command, .. } => cx.fail(command, "GRVT private phase pending"),
-            Command::CancelOrdersWithSymbols { command, .. }
-            | Command::FetchMaxLeverage { command, .. }
-            | Command::AmendOrderWithSymbol { command, .. }
-            | Command::FetchStpMode { command }
-            | Command::SetStpMode { command, .. }
-            | Command::FetchAccount { command }
-            | Command::FetchOrderBook { command, .. } => {
-                cx.fail(command, "Unsupported GRVT command")
-            }
+            Command::FetchMaxLeverage { .. }
+            | Command::FetchStpMode { .. }
+            | Command::FetchAccount { .. }
+            | Command::FetchOrderBook { .. }
+            | Command::FetchLeverage { .. }
+            | Command::Query { .. } => Self::unsupported_command(cx, Operation::Read),
+            Command::CancelOrdersWithSymbols { .. }
+            | Command::AmendOrderWithSymbol { .. }
+            | Command::SetStpMode { .. }
+            | Command::PlaceOrders { .. }
+            | Command::CancelOrders { .. }
+            | Command::AmendOrder { .. }
+            | Command::CancelSymbolOrders { .. }
+            | Command::SetLeverage { .. }
+            | Command::SetMarginType { .. }
+            | Command::SetPositionMode { .. } => Self::unsupported_command(cx, Operation::Mutation),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {
