@@ -99,3 +99,37 @@ controls, nothing ignored. The tickers custody RED is now its own test.
 The two passing controls are unsigned public URLs with no private read, and
 the demo header being kept.
 
+## Implementation receipt
+
+This is stacked on #1991, whose managed-drain fixture conversion it reuses.
+
+- **Admission.** `discovery_read` gives each physical instruments or tickers
+  read one Background Read (20 s, Never).
+  - Public reads use `http_context(Scope::Background, credential None)` and
+    `request_managed_with_headers`, with the native static demo header (`[]`
+    otherwise).
+  - The EEA `account/instruments` read uses
+    `SelectedRead::select(ReadRole::Read { scope: None })`, then `background`,
+    then `queue`, with the OKX recipe and the demo header.
+  - A refused admission or queue goes to `public_failed` and the native backoff.
+- **Delivery gate.** `on_item` and `on_response` gate on
+  `validate_background_read_http_delivery` before codecs, skipped-row and cache
+  effects, the envelope, the reducer and publication. A stale delivery only
+  retires. The 429 discovery pause is applied before the gate.
+- **Retirement.** A response publishes, then retires. A chain continuation
+  retires the old read before admitting the next. The empty-catalogue failure
+  retires first.
+- **Failures.** Transport, stream and sign failures, including a read's own
+  20 s deadline, retire the Context first and then take the native
+  `public_failed` path.
+  - They are not stale-gated. A first cut that did gate them dropped the live
+    read's own timeout, and the deadline RED caught it.
+- **Fixtures.** The remaining raw drains (`public`, `startup`, `startup_degraded`,
+  `history`, `lookup`, `closed_positions`, `dispatch_signer` and the lib.rs
+  price-index unit tests) now release through the managed handshake at each
+  event's time. `take_http` picks the first HTTP action past the deadline timers
+  that admission arms.
+- **Tests.** The 4 original REDs pass and both controls pass. All OKX tests,
+  strict all-target Clippy and both ratchets pass. There is zero inventory
+  delta.
+

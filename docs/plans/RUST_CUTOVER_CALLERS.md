@@ -6339,3 +6339,12 @@ This covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`. [Plan](RUST_OKX_ACCOUNT_C
   short, because every page has its own 20 s.
 - URLs, the demo header, row decoding, the balance and positions join, order
   paging, product order and rate-limit backoff are unchanged.
+
+### OKX discovery under Background Context
+
+The instruments catalogue and ticker seed walks (SWAP then FUTURES) are now one
+managed Background read per product: 20 s, no retry. Public reads stay unsigned
+and keep the demo header. The EEA account catalogue is signed with the read key
+when one is configured, otherwise the primary key. An unanswered read ends at
+20 s and startup discovery retries on its native backoff. URLs, row decoding,
+partial-catalogue rules, the seeded ticker count and the 429 pause are unchanged.

@@ -329,7 +329,7 @@ fn malformed_xperp_row_is_skipped_without_withholding_the_catalog() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     let a = take_http(&mut prepared(&mut e, 1.0));
     reply(
@@ -363,7 +363,7 @@ fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     let a = take_http(&mut prepared(&mut e, 1.0));
     reply(
@@ -397,7 +397,7 @@ fn malformed_xperp_catalogue_row_does_not_discard_valid_swaps() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     let a = take_http(&mut prepared(&mut e, 1.0));
     reply(
@@ -554,7 +554,7 @@ fn blank_untraded_xperp_ticker_fields_do_not_abort_other_seeded_markets() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     let a = take_http(&mut prepared(&mut e, 1.0));
     reply(&mut e, &a, &envelope(&future()), 2.0);
@@ -593,7 +593,7 @@ fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers()
             ..Options::default()
         });
         e.start(0.0);
-        let a = actions(&mut e).remove(0);
+        let a = take_http(&mut prepared(&mut e, 0.0));
         reply(&mut e, &a, &envelope(MARKET), 1.0);
         let a = take_http(&mut prepared(&mut e, 1.0));
         reply(&mut e, &a, &envelope(&future()), 2.0);
@@ -628,7 +628,7 @@ fn unparseable_xperp_ticker_row_keeps_valid_swap_peers_and_logs_the_row() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     let a = take_http(&mut prepared(&mut e, 1.0));
     reply(&mut e, &a, &envelope(&future()), 2.0);
@@ -1098,7 +1098,7 @@ mod product_semantics {
             ..Options::default()
         });
         e.start(0.0);
-        let request = actions(&mut e).remove(0);
+        let request = take_http(&mut prepared(&mut e, 0.0));
         reply(&mut e, &request, &envelope(INVERSE), 1.0);
         let request = take_http(&mut prepared(&mut e, 1.0));
         reply(
@@ -1520,7 +1520,7 @@ mod product_semantics {
         let row = include_str!("fixtures/crml-preopen.json");
         let mut e = crate::support::engine(Options::default());
         e.start(0.0);
-        let request = actions(&mut e).remove(0);
+        let request = take_http(&mut prepared(&mut e, 0.0));
         reply(
             &mut e,
             &request,
@@ -1548,7 +1548,7 @@ mod product_semantics {
             row["maxTriggerSz"] = value.into();
             let mut e = crate::support::engine(Options::default());
             e.start(0.0);
-            let request = actions(&mut e).remove(0);
+            let request = take_http(&mut prepared(&mut e, 0.0));
             reply(
                 &mut e,
                 &request,
@@ -1587,7 +1587,7 @@ mod product_semantics {
             ..Options::default()
         });
         e.start(0.0);
-        let request = actions(&mut e).remove(0);
+        let request = take_http(&mut prepared(&mut e, 0.0));
         reply(&mut e, &request, &envelope(MARKET), 1.0);
         let request = take_http(&mut prepared(&mut e, 1.0));
         reply(
@@ -1642,7 +1642,7 @@ mod product_semantics {
         for last in ["garbage", "NaN", "inf"] {
             let mut e = crate::support::engine(Options::default());
             e.start(0.0);
-            let request = actions(&mut e).remove(0);
+            let request = take_http(&mut prepared(&mut e, 0.0));
             reply(&mut e, &request, &envelope(MARKET), 1.0);
             let request = take_http(&mut prepared(&mut e, 1.0));
             reply(

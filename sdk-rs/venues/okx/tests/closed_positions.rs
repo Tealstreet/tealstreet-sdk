@@ -95,7 +95,7 @@ fn rows_page_backwards_by_the_oldest_close_time_and_pass_through_verbatim() {
     );
     let last = [row(100, 1_709_400_000_000)];
     reply(&mut e, &second, &page(&last), NOW);
-    let result = done(&actions(&mut e)).unwrap().unwrap();
+    let result = done(&prepared(&mut e, NOW + 100.0)).unwrap().unwrap();
     let got: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
     let expected: Vec<serde_json::Value> = rows
         .iter()
@@ -261,7 +261,7 @@ fn failed_later_page_returns_only_validated_rows_with_owned_completeness() {
         row(999, 1_709_400_000_000)
     );
     reply(&mut e, &second, &failed, NOW);
-    let out = actions(&mut e);
+    let out = prepared(&mut e, NOW + 100.0);
     assert!(
         matches!(done(&out), Some(Ok(_))),
         "later failure must retain accepted rows"

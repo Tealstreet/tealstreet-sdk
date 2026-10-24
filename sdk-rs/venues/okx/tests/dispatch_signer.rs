@@ -8,7 +8,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use support::{actions, envelope, prepared, reply, trading_engine_configure};
+use support::{envelope, prepared, reply, trading_engine_configure};
 
 struct Gate {
     provider: Provider,
@@ -58,7 +58,7 @@ fn place(engine: &mut Engine<Okx>, bracket: bool) -> Vec<Action> {
             orders: vec![serde_json::from_str(text).unwrap()],
         }),
     );
-    actions(engine)
+    prepared(engine, 5.)
 }
 fn attempt(out: &[Action]) -> RequestId {
     assert!(
@@ -86,7 +86,7 @@ fn first_write_provider_refusal_is_not_sent_and_completes_once() {
             result: Err(SignError::Refused),
         },
     );
-    let out = actions(&mut engine);
+    let out = prepared(&mut engine, 6.);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     let failures: Vec<_> = out
         .iter()
@@ -104,7 +104,7 @@ fn first_write_provider_refusal_is_not_sent_and_completes_once() {
             result: Err(SignError::Refused),
         },
     );
-    assert!(!actions(&mut engine).iter().any(|a| matches!(
+    assert!(!prepared(&mut engine, 7.).iter().any(|a| matches!(
         a,
         Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
     )));
@@ -124,7 +124,7 @@ fn later_bracket_sign_failure_preserves_the_accepted_entry_effect() {
         &envelope(r#"{"ordId":"accepted-entry","sCode":"0","sMsg":""}"#),
         6.,
     );
-    let id = attempt(&actions(&mut engine));
+    let id = attempt(&prepared(&mut engine, 6.));
     engine.handle(
         7.,
         Event::Signed {
@@ -132,7 +132,7 @@ fn later_bracket_sign_failure_preserves_the_accepted_entry_effect() {
             result: Err(SignError::Refused),
         },
     );
-    let out = actions(&mut engine);
+    let out = prepared(&mut engine, 7.);
     let failure = out
         .iter()
         .find_map(|a| match a {
@@ -161,7 +161,7 @@ fn primary_lookup_provider_refusal_never_becomes_definitive_absence() {
             },
         }),
     );
-    let id = attempt(&actions(&mut engine));
+    let id = attempt(&prepared(&mut engine, 5.));
     engine.handle(
         6.,
         Event::Signed {
@@ -169,7 +169,7 @@ fn primary_lookup_provider_refusal_never_becomes_definitive_absence() {
             result: Err(SignError::Refused),
         },
     );
-    let out = actions(&mut engine);
+    let out = prepared(&mut engine, 6.);
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 42, error }) if error.outcome == Some(Outcome::NotSent))));
     assert!(!out.iter().any(|a| matches!(
         a,
@@ -197,7 +197,7 @@ fn delayed_real_write_reprepares_stamp_without_changing_intent_or_route() {
             result: Ok(old.clone()),
         },
     );
-    let out = actions(&mut engine);
+    let out = prepared(&mut engine, 6006.);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     let (new_attempt, new_work) = out
         .into_iter()
@@ -217,7 +217,7 @@ fn delayed_real_write_reprepares_stamp_without_changing_intent_or_route() {
         },
     );
     assert!(
-        !actions(&mut engine)
+        !prepared(&mut engine, 6007.)
             .iter()
             .any(|a| matches!(a, Action::Http(_)))
     );
@@ -228,7 +228,7 @@ fn delayed_real_write_reprepares_stamp_without_changing_intent_or_route() {
             result: local.sign_ready(&new_work).unwrap(),
         },
     );
-    let out = actions(&mut engine);
+    let out = prepared(&mut engine, 6007.);
     let http = out
         .into_iter()
         .find_map(|a| match a {

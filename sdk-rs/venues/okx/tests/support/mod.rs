@@ -70,17 +70,17 @@ pub fn envelope(row: &str) -> String {
 pub fn public(options: Options) -> (Engine<Okx>, SocketId, SocketId) {
     let mut engine = engine(options);
     engine.start(1_709_209_849_123.0);
-    let request = actions(&mut engine)
+    let request = prepared(&mut engine, 1_709_209_849_123.0)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap();
     reply(&mut engine, &request, &envelope(MARKET), 1.0);
-    let request = actions(&mut engine)
+    let request = prepared(&mut engine, 1.0)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap();
     reply(&mut engine, &request, &envelope(TICKER), 2.0);
-    let sockets: Vec<_> = actions(&mut engine)
+    let sockets: Vec<_> = prepared(&mut engine, 2.0)
         .into_iter()
         .filter_map(|a| {
             if let Action::WsConnect { socket, url, .. } = a {

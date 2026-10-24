@@ -441,15 +441,13 @@ impl Okx {
         }
     }
 
-    /// Settle a discovery delivery's Context: retire it, and report whether the
-    /// delivery still belongs to it (a stale one has no native effect).
-    fn discovery_current(cx: &mut Cx<'_, Pending>, pending: &Pending) -> bool {
-        let Some(context) = discovery_context(pending) else {
-            return true;
-        };
-        let current = cx.validate_background_read_http_delivery(&context).is_ok();
-        let _ = cx.finish_http_context(&context);
-        current
+    /// Retire a failed discovery read's Context before the native failure path.
+    /// A failure (including its own deadline) always belongs to that read; only
+    /// successful deliveries are gated on live custody.
+    fn retire_discovery(cx: &mut Cx<'_, Pending>, pending: &Pending) {
+        if let Some(context) = discovery_context(pending) {
+            let _ = cx.finish_http_context(&context);
+        }
     }
 
     /// Product chains carry earlier products' rows so a later failure republishes nothing.
@@ -1541,9 +1539,7 @@ impl Venue for Okx {
         error: &str,
     ) {
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
-            if !Self::discovery_current(cx, &pending) {
-                return;
-            }
+            Self::retire_discovery(cx, &pending);
             self.public_failed(
                 cx,
                 matches!(pending, Pending::Markets { .. }),
@@ -1562,9 +1558,7 @@ impl Venue for Okx {
         if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
             let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
-            if !Self::discovery_current(cx, &pending) {
-                return;
-            }
+            Self::retire_discovery(cx, &pending);
             self.public_failed(
                 cx,
                 matches!(pending, Pending::Markets { .. }),
@@ -1617,11 +1611,9 @@ impl Venue for Okx {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        // A failed discovery read retires first; a stale one has no other effect.
-        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. })
-            && !Self::discovery_current(cx, &pending)
-        {
-            return;
+        // A failed discovery read retires first, then takes the native failure path.
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            Self::retire_discovery(cx, &pending);
         }
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
             let _ = cx.finish_http_context(context);
@@ -1931,7 +1923,8 @@ mod price_index_tests {
 
     const MARKET: &str = r#"{"instId":"BTC-USDT-SWAP","instType":"SWAP","ctType":"linear","ctVal":"0.01","ctValCcy":"BTC","settleCcy":"USDT","lotSz":"0.01","tickSz":"0.1","minSz":"0.01","maxIcebergSz":"1000","maxLmtSz":"1000","maxMktSz":"1000","maxStopSz":"1000","maxTriggerSz":"1000","maxTwapSz":"1000","lever":"100"}"#;
     fn request(e: &mut Engine<Okx>) -> safe_cex_engine::HttpRequest {
-        e.drain_actions()
+        safe_cex_engine::test_support::prepared_actions(e, 1.0)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
