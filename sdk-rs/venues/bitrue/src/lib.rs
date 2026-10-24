@@ -1056,9 +1056,12 @@ impl Venue for Bitrue {
             return;
         }
         match pending.job {
-            Job::Trade(request) => {
-                self.trade_sign_failed(cx, request, error, pending.request.floor.is_some())
-            }
+            Job::Trade(request) => self.trade_sign_failed(
+                cx,
+                request,
+                error,
+                pending.signature_resent || pending.attempts > 0,
+            ),
             Job::History(request) => request.sign_failed(cx, error),
             _ => self.on_request_failed(cx, pending, &error.message),
         }
