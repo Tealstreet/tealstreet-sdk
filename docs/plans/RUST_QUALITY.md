@@ -1891,3 +1891,24 @@ market-before-account precedence, public-only/configured-but-unestablished,
 checked zero-wait and duplicate-owner assertions are retained. All44 existing
 account controls pass unchanged. Local Cargo remains scoped with four jobs;
 workspace/features, WASM and performance are CI gates.
+
+
+## GRVT catalog publication and deadline controls
+
+All26 original controls now pass, including the formerly gated Prepare/Bind,
+capacity recovery with255 surviving peers, timeout cleanup, fresh retry/refresh
+roots and stale stream-error suffixes. The real mid-stream item then expired
+final DATA control passes. A27th source-stage control pins unanswered catalog
+HTTP timeout/backoff under Shared public-feed mode without socket actions.
+Selected native account/login/products/refresh/public/startup and library targets
+bring the scoped total to123PASS/0ignored. Scoped all-target Clippy -D warnings
+passes with four jobs. Existing fixture transport collectors drive genuine
+Prepare/Bind/Claim; native assertions remain, with the socket-only fixture now
+servicing its allowed REST refresh. Workspace/features/WASM/performance remain
+CI gates; no local broad-build or full-CI claim.
+
+Post-review fixture check: the entire GRVT crate executes292PASS/0ignored.
+Depth-query startup also required the same genuine prepared_actions collector;
+only that bootstrap changes, with every assertion retained. The source-stage
+Shared-feed control now checks no socket actions at startup, timeout and retry.
+Production source remains byte-exact to0e0393051d5.
