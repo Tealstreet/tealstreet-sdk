@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Request-context inventory precision | Implementation and rebaseline; review pending | Before changing `check-request-context.py`, its manifests, or what counts as a legacy `Cx` call. | [RUST_REQUEST_CONTEXT_PRECISION.md](RUST_REQUEST_CONTEXT_PRECISION.md) |
 | BreakoutProp options refusal (unreachable arm deleted) | One-site prune; engine pre-entry refusal pinned by a control | Before changing BreakoutProp options handling or its capability flags. | [RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md) |
 | BingX local candle refusal custody | Draft conversion; source review/CI pending | Before replacing the three synchronous candle refusals; remote/key-selection paths excluded. | [RUST_BINGX_LOCAL_CANDLE_CONTEXT.md](RUST_BINGX_LOCAL_CANDLE_CONTEXT.md) |
 | WEEX candle query Read custody | Draft source; scoped controls pass | Before managing candle HTTP/completions or interpreting caller deadline and streamed failure changes. | [RUST_WEEX_CANDLE_CONTEXT.md](RUST_WEEX_CANDLE_CONTEXT.md) |
@@ -399,6 +400,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | AsterDEX local trading refusal custody | Implemented; native/strict/reviews clear, CI pending | Before converting the three shared Read/Mutation refusals or moving acknowledged cleanup behind admission. | [RUST_ASTERDEX_LOCAL_TRADE_REFUSALS.md](RUST_ASTERDEX_LOCAL_TRADE_REFUSALS.md) |
 | Phemex identity and recurring account read owners | Implemented on actual combo-5b; source review and CI pending | Before SelectedRead identity, Background currency cycles or Primary order reconciliation. | [RUST_PHEMEX_READ_OWNERS.md](RUST_PHEMEX_READ_OWNERS.md) |
 
+| Managed socket authentication progress | Plan before original REDs; runtime pending review | Before Kraken challenge progress renews auth without granting readiness; whole-family consumer remains held. | [RUST_SOCKET_AUTH_PROGRESS.md](RUST_SOCKET_AUTH_PROGRESS.md) |
 
 
 
