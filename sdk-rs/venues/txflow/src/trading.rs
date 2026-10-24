@@ -137,6 +137,11 @@ struct Envelope<'a> {
 
 impl TxFlow {
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let stp_operation = if matches!(&command, Command::SetStpMode { .. }) {
+            safe_cex_engine::request_context::Operation::Mutation
+        } else {
+            safe_cex_engine::request_context::Operation::Read
+        };
         let (id, built) = match command {
             Command::PlaceOrders { command, orders } => (command, self.place_steps(cx, &orders)),
             Command::CancelOrders { command, ids } => {
@@ -259,7 +264,7 @@ impl TxFlow {
                 };
                 (command, steps)
             }
-            Command::FetchLeverage { command, symbol } => {
+            Command::FetchLeverage { symbol, .. } => {
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Leverage {
@@ -285,31 +290,36 @@ impl TxFlow {
                         .ok_or_else(|| {
                             format!("TxFlow account leverage is not confirmed for {symbol}")
                         });
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, VenueError::new(error)),
-                }
+                crate::local_context::complete(
+                    cx,
+                    safe_cex_engine::request_context::Operation::Read,
+                    result.map_err(VenueError::new),
+                );
                 return;
             }
             Command::FetchAccount { command } => {
                 cx.fail(command, not_sent("TxFlow account query completion is not implemented; use live account state").kind(ErrorKind::Unsupported));
                 return;
             }
-            Command::FetchOrderBook { command, .. } => {
-                cx.fail(
-                    command,
-                    not_sent(
+            Command::FetchOrderBook { .. } => {
+                crate::local_context::complete(
+                    cx,
+                    safe_cex_engine::request_context::Operation::Read,
+                    Err(not_sent(
                         "TxFlow order book queries are not implemented; use the book subscription",
                     )
-                    .kind(ErrorKind::Unsupported),
+                    .kind(ErrorKind::Unsupported)),
                 );
                 return;
             }
-            Command::FetchStpMode { command } | Command::SetStpMode { command, .. } => {
-                cx.fail(
-                    command,
-                    not_sent("TxFlow does not document configurable self-trade prevention")
-                        .kind(ErrorKind::Unsupported),
+            Command::FetchStpMode { .. } | Command::SetStpMode { .. } => {
+                crate::local_context::complete(
+                    cx,
+                    stp_operation,
+                    Err(
+                        not_sent("TxFlow does not document configurable self-trade prevention")
+                            .kind(ErrorKind::Unsupported),
+                    ),
                 );
                 return;
             }
@@ -322,14 +332,21 @@ impl TxFlow {
             } else {
                 ErrorKind::AuthInvalid
             };
-            cx.fail(
-                id,
-                not_sent("TxFlow trading requires an authenticated testnet account").kind(kind),
+            crate::local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Mutation,
+                Err(
+                    not_sent("TxFlow trading requires an authenticated testnet account").kind(kind),
+                ),
             );
             return;
         }
         match built {
-            Err(error) => cx.fail(id, not_sent(error)),
+            Err(error) => crate::local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Mutation,
+                Err(not_sent(error)),
+            ),
             Ok(steps) => {
                 self.trading.queue.push_back(Job {
                     command: id,
