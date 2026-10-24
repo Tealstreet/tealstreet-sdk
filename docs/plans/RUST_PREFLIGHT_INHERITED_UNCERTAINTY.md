@@ -19,7 +19,8 @@ That is false: the earlier attempt may have landed.
 
 One monotonic owner fact, `inherited_uncertain`, on the command owner:
 
-- `Cx::inherit_preflight_uncertainty(&Preflight) -> Result<(), Error>`.
+- `Cx::inherit_preflight_uncertainty(&Preflight) -> Result<(), Error>`, valid
+  at any point in genuine custody, including before any read is admitted.
   - It requires genuine custody (`preflight_owner`) and
     `PreflightPurpose::WriteAfterReads`. A ReadOnly Preflight gets `Invalid`;
     a stale, revoked or foreign handle gets `Revoked`.
@@ -62,7 +63,28 @@ journal is a separate item, opened only when a consumer needs it.
 7. `begin_planned_execution` refuses an inherited-fact Preflight before
    spending IDs (a mirror of the capped-Preflight control).
 
-dazzy3's H2 RED1 and RED2 are linked here once confirmed against this API.
+Committed REDs: the inert `inherit_preflight_uncertainty` validates custody
+only, so every inherited case below fails with NotSent or Rejected, and each
+fact-free control passes.
+
+- `inherited_uncertainty_seals_a_sendless_write_preflight_unknown` (1, 6;
+  the fact is set before any read, twice).
+- `inherited_uncertainty_survives_the_central_read_admission_refusal` (2).
+- `inherited_uncertainty_survives_an_engine_sealed_read_failure` (H2: the
+  retained ledger says Unknown, the read fails).
+- `inherited_uncertainty_survives_plan_admission_without_a_released_attempt`
+  and `inherited_uncertainty_is_not_masked_by_an_effects_free_rejection` (3).
+- `inherited_uncertainty_leaves_a_proven_plan_success_successful` (4, control).
+- `inherited_uncertainty_requires_live_write_preflight_custody_and_mutates_nothing`
+  (5, control).
+
+RED 7 needs `begin_planned_execution`, which exists only in frozen #1919. It is
+added here if #1919 lands first. Otherwise #1919's next integration carries it.
+
+H2 mapping (dazzy3): RED1 (`29c154338ff`) needs no fact; it is Unknown from its
+own released journal. RED2 (`b180d0f9a31`, amended to one send per call) call 3
+re-reads with two sends spent, sends nothing, and fails its Preflight. That
+failure is this fact's case.
 
 ## Gates
 

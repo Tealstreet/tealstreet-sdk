@@ -36,6 +36,7 @@ mod planned_calls {
         responses: usize,
         timers: usize,
         retired: usize,
+        inherited: bool,
         // A delivered call reports itself as a complete order read.
         #[cfg(feature = "order-locks")]
         reconcile_reads: bool,
@@ -145,6 +146,9 @@ mod planned_calls {
                     },
                 )
                 .unwrap();
+            if self.inherited {
+                cx.inherit_preflight_uncertainty(&owner).unwrap();
+            }
             let timeout = if self.timeout == 0 {
                 20_000
             } else {
@@ -237,6 +241,18 @@ mod planned_calls {
                 assert_eq!(fact.verdict(), if expected == crate::classify::Intent::Cancel {
                     Verdict::Satisfied(SatisfiedIntent::Cancel)
                 } else { Verdict::Unknown(None) });
+            }
+            if response.body == "reject" {
+                cx.http_write_result(
+                    &context,
+                    crate::request_context::WriteResult::Rejected(
+                        VenueError::new("order refused").outcome(crate::Outcome::Rejected),
+                    ),
+                )
+                .unwrap();
+                cx.finish_plan_call(&plan, &slot, &context).unwrap();
+                cx.fail_plan(&plan, "order refused").unwrap();
+                return;
             }
             if response.body == "replace" {
                 cx.http_write_result(
@@ -1401,5 +1417,57 @@ mod planned_calls {
         cx.fail_plan(&plan, "explicit failure").unwrap();
         e.drain_actions().for_each(drop);
         assert_eq!(e.venue.retired, 1);
+    }
+    fn plan_outcome(actions: &[Action]) -> Option<crate::Outcome> {
+        actions.iter().find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error.outcome),
+            _ => None,
+        }).expect("command failure")
+    }
+    #[test]
+    fn inherited_uncertainty_survives_plan_admission_without_a_released_attempt() {
+        for inherited in [false, true] {
+            let mut e = crate::test_support::seeded_engine(Plans {
+                write: true, idle: true, inherited, ..Default::default()
+            });
+            start(&mut e, 0.);
+            let plan = e.venue.plan.clone().unwrap();
+            let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+            cx.fail_plan(&plan, "re-read left nothing to send").unwrap();
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(_))));
+            assert_eq!(plan_outcome(&actions), Some(if inherited {
+                crate::Outcome::Unknown } else { crate::Outcome::NotSent }));
+        }
+    }
+    #[test]
+    fn inherited_uncertainty_is_not_masked_by_an_effects_free_rejection() {
+        for inherited in [false, true] {
+            let mut e = crate::test_support::seeded_engine(Plans {
+                write: true, inherited, ..Default::default()
+            });
+            start(&mut e, 0.);
+            let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+            release(&mut e, first, 0.);
+            response(&mut e, first, 1., "reject");
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert_eq!(plan_outcome(&actions), Some(if inherited {
+                crate::Outcome::Unknown } else { crate::Outcome::Rejected }));
+        }
+    }
+    #[test]
+    fn inherited_uncertainty_leaves_a_proven_plan_success_successful() {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            write: true, inherited: true, ..Default::default()
+        });
+        start(&mut e, 0.);
+        for now in [1., 2.] {
+            let (token, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+            release(&mut e, token, now);
+            response(&mut e, token, now, "ok");
+        }
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. }))));
     }
 }

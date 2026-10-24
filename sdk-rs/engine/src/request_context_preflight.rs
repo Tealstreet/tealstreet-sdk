@@ -108,6 +108,17 @@ impl ContextRegistry {
         }
     }
 
+    fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
+        let owner = self.preflight_owner(preflight)?;
+        let CommandPhase::Preflight(state) = &owner.phase else {
+            unreachable!()
+        };
+        if state.policy.purpose != PreflightPurpose::WriteAfterReads {
+            return Err(Error::Invalid);
+        }
+        Ok(())
+    }
+
     pub(crate) fn has_retirements(&self) -> bool {
         !self.retirements.is_empty()
     }
@@ -235,6 +246,15 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         };
         self.finish_sealed_command(id, Some(result), seal)
+    }
+
+    /// Record that an earlier attempt of this intent may have reached the venue.
+    /// Monotonic: every later failure of this command projects at least Unknown.
+    /// It grants no send, resend, renewal, import or success authority.
+    pub fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
+        self.io
+            .request_contexts
+            .inherit_preflight_uncertainty(preflight)
     }
 
     /// Failure before any plan was admitted proves no write reached the venue.
