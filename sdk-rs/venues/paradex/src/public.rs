@@ -1266,9 +1266,27 @@ impl Paradex {
                 ..
             } => {
                 if interval_ms(interval).is_none() {
-                    cx.fail(command, interval.unsupported("Paradex"));
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) else {
+                        return None;
+                    };
+                    let _ = cx.fail_context(&context, interval.unsupported("Paradex"));
                 } else if cx.store.market(&symbol).is_none() {
-                    cx.fail(command, "Unknown Paradex candle market");
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) else {
+                        return None;
+                    };
+                    let _ = cx.fail_context(&context, "Unknown Paradex candle market");
                 } else {
                     self.fetch_candles(
                         cx,

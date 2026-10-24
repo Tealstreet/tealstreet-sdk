@@ -1,6 +1,8 @@
 //! Rare queries stay explicit: an upstream endpoint is not a safe-cex contract.
+use crate::public_read::{self, Read};
 use crate::{Pending, Polymarket};
-use safe_cex_engine::{Command, CommandId, Cx, Method, Query, Response};
+use safe_cex_engine::request_context::Operation;
+use safe_cex_engine::{Command, Cx, Method, Query, Response};
 
 #[derive(serde::Deserialize)]
 struct BookSnapshot {
@@ -61,33 +63,38 @@ fn book_side(
 impl Polymarket {
     pub(crate) fn read_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
-            Command::FetchOrderBook {
-                command,
-                symbol,
-                limit,
-            } => {
+            Command::FetchOrderBook { symbol, limit, .. } => {
                 if limit == Some(0) {
-                    cx.fail(command, "Invalid Polymarket order-book limit");
+                    public_read::local(
+                        cx,
+                        Operation::Read,
+                        Err("Invalid Polymarket order-book limit".into()),
+                    );
                     return;
                 }
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.fail(command, "Unknown Polymarket symbol");
+                    public_read::local(
+                        cx,
+                        Operation::Read,
+                        Err("Unknown Polymarket symbol".into()),
+                    );
                     return;
                 };
                 let token = market.id.clone();
-                cx.request(
+                let Some(read) = Read::new(cx, true) else {
+                    return;
+                };
+                if let Err((Pending::Book { read, .. }, reason)) = cx.request_managed(
+                    read.context.clone(),
                     Method::Get,
                     format!("{}/book?token_id={}", crate::REST, crate::encode(&token)),
-                    vec![],
                     None,
-                    Pending::Book {
-                        command,
-                        token,
-                        limit,
-                    },
-                );
+                    Pending::Book { read, token, limit },
+                ) {
+                    read.failed(cx, reason.venue_error());
+                }
             }
-            Command::FetchAccount { command } => {
+            Command::FetchAccount { .. } => {
                 #[derive(serde::Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Account<'a> {
@@ -100,26 +107,35 @@ impl Polymarket {
                         affiliate_id: None,
                     })
                     .map_err(|error| error.to_string());
-                    match result {
-                        Ok(data) => cx.done(command, data),
-                        Err(error) => cx.fail(command, error),
-                    }
+                    public_read::local(cx, Operation::Read, result)
                 };
             }
-            Command::FetchStpMode { command } | Command::SetStpMode { command, .. } => {
-                cx.fail(
-                    command,
-                    "Polymarket self-trade prevention settings are unsupported",
+            command @ (Command::FetchStpMode { .. } | Command::SetStpMode { .. }) => {
+                let operation = if matches!(command, Command::SetStpMode { .. }) {
+                    Operation::Mutation
+                } else {
+                    Operation::Read
+                };
+                public_read::local(
+                    cx,
+                    operation,
+                    Err("Polymarket self-trade prevention settings are unsupported".into()),
                 );
             }
-            Command::FetchLeverage { command, .. } => {
-                cx.done(command, r#"{"buyLeverage":1,"sellLeverage":1}"#.into())
+            Command::FetchLeverage { .. } => public_read::local(
+                cx,
+                Operation::Read,
+                Ok(r#"{"buyLeverage":1,"sellLeverage":1}"#.into()),
+            ),
+            Command::FetchMaxLeverage { .. } => {
+                public_read::local(cx, Operation::Read, Ok("1".into()))
             }
-            Command::FetchMaxLeverage { command, .. } => cx.done(command, "1".into()),
-            Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. } => cx.done(command, "[]".into()),
-            Command::Query { command, query } => {
+            Command::SetLeverage { .. }
+            | Command::SetMarginType { .. }
+            | Command::SetPositionMode { .. } => {
+                let _ = cx.done_local_setting("[]".into(), |_| {});
+            }
+            Command::Query { query, .. } => {
                 let result: Result<String, String> = match query {
                     Query::OrderByClientId { .. } => {
                         Ok(r#"{"found":false,"definitive":false}"#.into())
@@ -135,10 +151,7 @@ impl Polymarket {
                         Err("Polymarket public trades are unsupported".into())
                     }
                 };
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
-                }
+                public_read::local(cx, Operation::Read, result)
             }
             _ => unreachable!("only rare reads and immutable account settings"),
         }
@@ -147,7 +160,7 @@ impl Polymarket {
     pub(crate) fn book_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        read: Read,
         token: &str,
         limit: Option<u32>,
         response: Response<'_>,
@@ -156,6 +169,9 @@ impl Polymarket {
         struct OrderBook {
             bids: Vec<BookLevel>,
             asks: Vec<BookLevel>,
+        }
+        if !read.validate(cx) {
+            return;
         }
         let result = (|| {
             if !(200..300).contains(&response.status) {
@@ -175,9 +191,6 @@ impl Polymarket {
             };
             serde_json::to_string(&book).map_err(|error| error.to_string())
         })();
-        match result {
-            Ok(data) => cx.done(command, data),
-            Err(error) => cx.fail(command, error),
-        };
+        read.finish(cx, result);
     }
 }
