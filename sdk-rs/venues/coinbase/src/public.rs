@@ -1444,8 +1444,12 @@ impl Coinbase {
             )
         {
             if self.public.deferred.len() >= 256 {
-                if let Command::FetchCandles { command, .. } = command {
-                    cx.fail(command, "Coinbase public startup command queue is full");
+                if let Command::FetchCandles { .. } = command {
+                    crate::local_context::complete(
+                        cx,
+                        safe_cex_engine::request_context::Operation::Read,
+                        Err("Coinbase public startup command queue is full".into()),
+                    );
                 }
                 cx.notice(
                     Level::Warn,

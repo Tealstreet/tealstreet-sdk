@@ -7748,6 +7748,8 @@ production changes. Plan: RUST_CPU_PRODUCER_STEP_METADATA.md.
 
 
 
+
+
 ## WEEX local leverage refusals use command Read authority
 
 FetchLeverage preserves unknown-market, active shared-pause, then missing-read-
@@ -7910,6 +7912,154 @@ SDK RustExchange callers keep their existing capability behavior: Aster's
 Settings leverage path can return cache/null without a low-level FetchLeverage,
 and clientOrderLookup=false uses the existing open-order fallback. This entry
 describes the low-level command terminals, not additional SDK dispatches.
+
+
+
+
+
+## WEEX leverage initial managed admission preserves shared Read causes
+
+After the existing unknown-market, shared-pause and credential-selection checks,
+FetchLeverage now admits its signed symbolConfig read through the initial
+SelectedRead command transaction. Registry capacity returns the canonical Read
+Capacity error with outcome None, rather than the venue lifecycle Internal/NotSent
+fallback. An unavailable or invalid receipt returns the shared cause; invalid or
+nonadvancing clocks give Revoked / "Request context was revoked", InvalidInput
+and no outcome. An expired own receipt uses the existing Read Timeout helper.
+Admission owns the failure terminal, without a numeric fallback or a new receipt.
+
+Read selection, the selected identity and passphrase, URL/query/signature, native
+settings revision and publication remain unchanged. The physical policy stays
+20 seconds, Never and no pacing, including when the outer host wait is shorter;
+this does not add a tracked caller-wait history root. Queue and provider refusals
+keep their existing typed fields. Duplicate ownership, original-peer completion
+and fresh ID reuse keep shared engine semantics. No auth evidence is added.
+
+## AsterDEX local trading refusal ownership
+
+Synchronous Aster job-construction, credential/auth-shape and acknowledged-routing
+capacity failures now admit the genuine command operation before diagnostics or
+cleanup. FetchStpMode is Read even for V1's unsupported-plan failure; all trading
+writes are Mutation. Valid entries preserve native CommandError then failure,
+message/kind and error precedence. Mutation remains NotSent; local STP Read
+failures now have outcome None instead of legacy NotSent. Credential-free local
+auth failures preserve fields without counting account auth-health evidence.
+
+Invalid clock or full actual owner capacity returns one shared typed refusal
+before any diagnostic, acknowledged cleanup, job insertion, timer, I/O or Store
+effect. Read admission has outcome None; Mutation admission is NotSent. Native
+CancelSymbolOrders planning uses an immutable projection, preserving Store-first
+then live-ack routing without duplicates. After successful local admission its
+native cleanup still runs, including before missing-key refusal. Failed admission
+leaves both earlier planning and placement-capacity cleanup untouched.
+
+Valid native remote jobs acquire no extra managed root and retain their queue,
+reservations, signed role, wire and completion behavior. Existing SDK STP, order,
+cancel and setting dispatch remains; no successful capability is added. The
+exact prune is3 fingerprints/3 occurrences, family43F/67O to40F/64O at this base;
+remaining remote trading/refusal/history/session consumers stay inventoried.
+
+## ApeX managed reads (#2066)
+
+Every ApeX non-trading read now passes managed host preparation
+([plan](RUST_APEXOMNI_READ_CONTEXT.md)). Symbols, the snapshot legs, balance and
+heal refreshes are Background Reads under the native snapshot generation;
+FetchAccount is a command Read; fills and the history-orders fallback are legs of
+the caller's original root, so expiry is a strict Timeout with no partial rows.
+The one-time signature resend and the three-retry transport budget are unchanged
+native counters authorised by `http_retry_context(ReadFailure)` or a fresh leg;
+only a typed Network failure spends a transport retry.
+**NEW bounds:** each read's 20 s timeout now runs from admission to expiry, so it
+covers host preparation, binding and signing as well as the HTTP exchange.
+Retries keep that deadline; each history page is a fresh 20 s leg clipped to the
+caller's original deadline.
+The ApeX request-provenance staging row is removed.
+
+
+## Phemex identity and recurring account read ownership
+
+FetchAccount uses one original caller Read root and one selected signed Read leg.
+The native account cycle uses independent USDT/USDC Background reads sharing its
+existing cycle origin; uncertain-order reconciliation uses an explicitly Primary
+Background read with its existing signed-write-expiry plus 5s eligibility fence.
+Each physical read now has a 20s admission bound, including parked preparation or
+provider work. Identity also retains the original caller deadline.
+
+Live DATA/stream/common-429 effects require exact shared delivery plus native
+cycle or symbol/read custody. Typed failures and expired-current handles instead
+retire exact ownership and run matching native cleanup/backoff once; they cannot
+clear newer work. Partial currency publication, native poll/retry, revision and
+uncertain-write semantics remain native. History/income, PublicTrades, socket
+login/snapshot behavior, request wire and credential-selection policy are retained.
+
+### Managed socket intermediate authentication progress
+
+AuthEvidence::Progress renews only a current Required-auth Authenticating feed's
+existing OPEN-origin auth window. It grants no Ready, Accepted, interests or
+HTTP authority. The exact admitted text then reaches the existing native message
+handler to retain its accepted challenge and request epoch-bound authentication
+signing. Existing auth evidence dispatch and default feeds remain unchanged.
+Both original and renewed equality fences run before native codec/publication
+or final signed send; independent CONNECT snapshot and payload bounds remain.
+The Supervisor allocates its prospective replacement watch before changing the
+old watch or origin, and existing fatal exhaustion prevents partial output.
+
+
+## TxFlow ticker seeds retain per-attempt Read custody
+
+Unsigned activeAssetCtx seeds now wait for managed Prepare/Bind/Claim with
+explicit PublicCors egress and unchanged POST body/header order. Each physical
+attempt has a new 20-second admission-to-expiry bound, including a stalled host;
+there is no aggregate seed-walk deadline. Expired or stale DATA cannot decode or
+publish a seed. Failure cleanup retires only its exact current Context before
+native keyed Backoff and the independent 25 ms successor cadence. Admission
+pressure takes that bounded failure path once; nonfinite clocks cannot create
+HTTP or recovery timers. Complete-seed publication, live overlays, financial
+projection/CPU row hints and private-startup eligibility are preserved. This
+removes only the count-one ticker sender; the shared account/history/metadata
+info sender remains outside this slice.
+
+
+## GRVT remaining local Unsupported command custody
+
+The reachable CancelOrdersWithSymbols, FetchMaxLeverage, FetchStpMode and
+SetStpMode generic refusals now take genuine keyless command admission before
+fail_context. Read and Mutation policies use20s, no pacing and Never; there is
+no HTTP, signer, key selection or queued work. Native Unsupported GRVT command
+text and absent kind/code/retry hint remain. Shared capacity, invalid clocks,
+caller receipt and duplicate ownership precede that native diagnostic. A shared
+rejection owns its one terminal, with no numeric fallback or second failure.
+
+Explicit approved outcome change: native CancelOrdersWithSymbols and SetStpMode
+refusals had no outcome. They now carry NotSent because nothing was released.
+This follows the established shared pre-release Read None / Mutation NotSent
+contract and the [Breakout immediate local command precedent](#breakout-immediate-local-command-custody),
+whose local unsupported SetStpMode also adds NotSent while preserving native
+text and absent kind. Read refusals retain outcome None. Original native-None
+evidence remains at216142; only that Mutation assertion was superseded at7e39
+after the overseer's ruling, before source. No shared projection override exists.
+
+DELETION, not adoption: the private-phase-pending match arm was unreachable;
+all nine variants return through earlier real dispatch. Its deletion retains
+exhaustiveness in the generic match without changing those earlier paths.
+Symbol-aware amendment remains an engine pre-entry refusal; identity, BookQuery,
+query/history and valid trading remain on their own paths. Two singleton lib
+removals comprise one reachable refusal adoption and one dead-arm deletion.
+The independent catalog slice and its two inventory removals are separate.
+
+
+### Coinbase immediate local command custody
+
+Ten initial-entry completion sites now use shared Read ownership or keyless
+Mutation refusal: portfolio lookup, cached/unavailable leverage, initial
+history validation, startup queue capacity and trading validation/refusals.
+Native messages, JSON, Unsupported/NotSent metadata, validation order and the
+256-entry warning remain intact. Invalid or expired caller entry is rejected
+before local completion through the cause-aware shared API. No physical I/O,
+signed/private custody, FIFO pacing or deferred callback is adopted. The three
+candle validation sites, Instruments discovery and Daily seed remain held for
+retained command ownership and coordinated native REST release. Coinbase's
+legacy inventory decreases from 34 to 24 occurrences.
 
 
 ## Orderly unsigned startup seed custody
