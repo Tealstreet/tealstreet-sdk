@@ -88,6 +88,16 @@ through the shared construction model. Exact fit for these partial configuration
 is OPEN to the construction review; any missing credential-only shared seam is
 owned in credential/registry core, not solved by retaining raw keys in GRVT.
 
+Before source, construction originals must separately pin a missing API key,
+an empty supplied key, a whitespace-only key and a nonblank key, each with and
+without a scalar and with public-only intent. Native login checks Option
+presence while fetch_identity checks trim().is_empty(); one generic ref-presence
+test cannot prove both. Record the native startup/login/identity diagnostic and
+I/O precedence before changing setup, and obtain m26ps4's shared disposition
+for representing these facts without a synthetic signing ref or raw key holder.
+Any refused legacy configuration that changes its failure boundary needs an
+explicit behavior ruling; this plan does not silently collapse those cases.
+
 Adoption will enable dispatch-signing for the GRVT registry family, declare its
 setup policy in the existing shared construction table, and use the existing
 native/WASM provider bootstrap. A public address can be fetched through trusted
@@ -272,3 +282,13 @@ when source adopts; this plan adds no new timeout, retry or metadata ruling.
 No Cargo, tests, WASM, size builds or CI were run for this plan-only checkpoint.
 Source remains gated on reviewed originals, exact installed-constructor fit,
 shared source landings/refreeze and a fresh production scope instruction.
+
+## Bounded native plan review
+
+9czdjh's read-only review at ca7d5c67782 is CLEAR for the stated native/recipe
+direction: schema, domain, integer units, entropy, login bytes/header order,
+atomic same-ref operations, parity conversion and immutable Step requirements.
+No GRVT build was run for that review. Credential-only installed construction
+and deterministic external-provider full-body resend both remain OPEN. This
+receipt is neither installed-constructor nor production/source clearance;
+LocalSigner alone cannot discharge the external-provider gate.
