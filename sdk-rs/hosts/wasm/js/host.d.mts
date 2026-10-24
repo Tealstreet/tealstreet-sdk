@@ -379,6 +379,8 @@ export interface EngineBridgeConstruction {
   apiKeyIndexRequired: boolean;
   isolatedBookSubscriptions: boolean;
   dispatchSigning:boolean;
+  /** Declared read-key policy; absent installs the read key as before. */
+  readCredentials?: 'validateOnly' | 'publicRead';
 }
 
 export interface EngineConstruction {
@@ -427,6 +429,8 @@ export interface WasmEngineLike {
   httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;
   /** Scalar status only: never drain work before the synchronous handoff. */
   httpClaim?(permit: string, now: number): string;
+  httpGroupPending?(permit: string): boolean;
+  httpClaimGroup?(permit: string, now: number, bounds: Float64Array): 0 | 1 | 2;
   /** Headers are name:value lines, with no added whitespace. */
   requiresExternalSigner?(): boolean;
   useExternalSigner?(algorithmsJson?: string): void;

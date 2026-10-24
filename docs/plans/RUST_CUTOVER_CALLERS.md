@@ -7418,6 +7418,22 @@ supersedes the native diagnostic with its typed NotSent terminal. Schedule time
 <now+5000 refuses; equality and None disarm still reach the unchanged signed path.
 No caller parameter, signing/selection change, valid write, retry or timer is added.
 
+## Command Read-Plan history authority (#2011)
+
+`PlanReadCompletion::from_plan` binds one freshly admitted command Read Plan
+with a retained command receipt cap before any Slot is selected or settled.
+Use `PlanHistoryRows::admit` in exact DATA custody, stage through its exclusive
+guard, then `accept_page` or `finish_with`; standalone public Plan terminals and
+Slot settlement refuse after binding. The guard exposes no Cx accessor.
+
+`admit_failure` requires the exact latest released Network/physical Timeout
+Attempt in its engine callback and a live original Plan. Recovery uses only
+nonempty accepted rows and discards the failed page; preparation/provider,
+logical expiry and integrity failures remain strict. `reject` uses the same
+prepared Plan seal and is inert during that Plan's engine expiry callback.
+No numeric completion, Context-root cast, external finalizer, owner renewal,
+Background/Execution Plan, or native consumer cutover is introduced.
+
 ## HTTP pacing sets and signing eligibility
 
 A venue declares primitive floors through `http_pacing()` and optional immutable
@@ -7728,6 +7744,151 @@ metadata wait, not a replay/measurement retry or a new timing sample. Exact
 upload/checkout windows, ZIP/digest checks, raw observations and final
 provenance validation remain enforced. No venue policy or legacy non-Rust
 production changes. Plan: RUST_CPU_PRODUCER_STEP_METADATA.md.
+
+
+
+
+## WEEX local leverage refusals use command Read authority
+
+FetchLeverage preserves unknown-market, active shared-pause, then missing-read-
+credentials precedence. Admissible local failures keep the exact native plain
+messages with absent kind/outcome/retry_after; the pause failure remains an
+immediate local refusal, without deferral or a RateLimited classification.
+
+These three branches now require a genuine receipt and credential-free initial
+Read Context, completed immediately through fail_context. Capacity supersedes
+the selected local message with canonical Read Capacity; an invalid/nonadvancing
+receipt clock gives Revoked / "Request context was revoked", InvalidInput and
+no outcome. An expired own receipt uses the sole Read Timeout helper. No new
+receipt default, numeric fallback, signer, transport, timer or auth evidence is
+created. Native absent error metadata is not normalized to Internal.
+
+Existing Read selection remains byte-identical, including Secondary-only use;
+the valid symbolConfig path, signatures, settings response/publication, metadata
+revision fences and managed-setup error branch are unchanged. No Store mutation
+occurs on a local refusal. Duplicate live ownership and immediate ID reuse keep
+the shared engine rules. #1747 metadata writes and all account/trading flows
+remain separate; TypeScript and legacy AWS production callers are unchanged.
+
+## GRVT fixed local settings
+
+Both margin requests and hedged mode retain their exact Unsupported/NotSent
+refusals before credential use. One-way still returns [] and sets Store
+hedged=false without a key or remote call. Shared admission, command-owner
+capacity, invalid clock and caller receipt now precede these native fixed
+results and the Store effect. Shared refusal produces one typed NotSent failure
+with no native fallback or projection; foreground-only capacity is Internal.
+One-way LocalSetting uses no HTTP Context or journal. The two local Mutation
+refusals use keyless20s/Never admission without any physical I/O. No new caller
+parameter, signer selection, remote retry or valid-write behavior is introduced.
+
+## GRVT initial FetchLeverage refusals
+
+Unknown market still precedes missing authenticated account. Both local Read
+failures keep the native text and absent kind, financial outcome, venue code and
+retry hint, including public-only and configured-but-unestablished accounts.
+Shared admission, capacity, clock, duplicate and caller receipt now precede the
+native diagnostic. Shared rejection owns one typed failure with no fallback or
+Store/private side effect: foreground-only capacity is Internal/Read outcome
+None, and invalid-clock admission is InvalidInput/None. Keyless20s/Never Read
+admission completes immediately; it adds no HTTP, Plan, retry or root renewal.
+The valid private request and account/session/signing/queue behavior are unchanged.
+
+
+## GRVT instrument catalog managed Background read
+
+Startup, native Backoff retries and300-second catalog refreshes each obtain a
+fresh unsigned Background Read Context and use managed Prepare/Bind/Claim.
+Native mainnet/testnet POST /lite/v1/all_instruments, body{}, Content-Type,
+r/result streaming, row retention/remapping, leverage rails and synchronous
+Store/metadata/socket/private-start continuation keep their native ordering.
+Every item and final DATA must validate the exact live delivery before mutation.
+Successful publication retires afterward; failure retires before native Backoff.
+
+NEW caller contract: a20-second admission-to-expiry bound covers route
+preparation, held Prepare/Bind and physical I/O. Native catalog timeout was
+unset. Shared context-capacity refusal precedes HTTP and uses the native startup
+failure/backoff path. Unclaimed or equality-expired DATA cannot publish or
+connect. Preparation/integrity/HTTP/physical-timeout failures use the existing
+startup Backoff, without an immediate transport retry or authentication refresh.
+Each later retry or refresh has a distinct root. Shared public-feed mode still
+bounds unanswered catalog HTTP and backs off failures; it only suppresses the
+public socket. The socket-supervision fixture services its REST refresh to keep
+that distinction observable; a separate unanswered-catalog-request control pins it.
+
+DELETION, not adoption: the options refusal arm was unreachable because
+capabilities.options=false rejects FetchOptionChain, FetchOptionExpiries and
+FetchAccountGreeks before command entry. Removing it keeps that exact engine
+refusal and zero venue entry; the existing unsupported arm covers exhaustiveness.
+One catalog sender plus one dead-arm deletion remove two lib inventory sites.
+Credentials, selection, signers, login, private queues and financial reducers
+retain their existing implementations.
+
+
+Backpack FetchAccount owns one genuine selected Read root and a single leg
+clipped to its original caller receipt and 20-second maximum. Exact managed DATA
+custody precedes native account-ID decoding and its one correlated terminal;
+identity reads do not publish live account state. Registry setup supplies the
+real optional secondary identity and one stored native configuration/seed
+validation result, including public-only error precedence. Secondary GET uses
+the primary native window; mutations retain Primary selection. Unadopted account
+and socket paths retain their documented dual credential custody.
+
+
+## TxFlow command candle snapshot custody
+
+FetchCandles retains its actual caller receipt and one unsigned managed Read
+for the native POST candleSnapshot. PublicCors intent and explicit route, JSON
+Content-Type then x-api-version, numeric asset/range body, streamed data and all
+OHLCV output remain unchanged. Initial local validation is separate from this
+physical slice, and subscribed candles keep their existing API socket behavior.
+
+The physical bound is now 20 seconds from admission, including stalled route
+preparation or Bind, capped by the original caller wait. This is a new bound;
+there is no retry or renewal. Exact current DATA authority precedes status,
+envelope, row decoding and command publication. Preparation and transport
+failures preserve their actual typed fields through the original root;
+precommit NotSent is not a released financial outcome. Late callbacks cannot
+retire a reused command generation. Native discovery, account/history and write
+senders remain; only three command candle terminals are removed (25 to 22 on
+this base, or 10 to 7 after the separate local-custody slice lands).
+
+## Independent Mutation Plan gateway failures
+
+PlanPolicy.independent_calls defaults to false at existing admission sites. A
+Mutation caller may opt in at admission for its native continue_on_error batch.
+An exact delivered unproven 408/5xx then reaches typed on_http_failed with the
+already-recorded Unknown fact and bounded evidence IDs; it never reaches DATA
+or grants a resend. The handler settles only an independent failed call through
+finish_plan_failed_call and advances its sibling. It declines settlement for a
+dependent follow-up, preserving the whole-Plan abort. A declining handler is
+auto-sealed once; Read admission with this flag is Invalid. Final completion
+still projects the one shared journal, including accepted IDs and uncertainty.
+
+BingX ordinary trading and Bybit #1914 adopt this in their separate caller PRs.
+The core declaration alone does not migrate either venue or remove legacy sites.
+
+## Parallel Mutation preparation barrier
+
+A caller explicitly declares each all-Mutation parallel step and implements the
+pure Unscheduled group-admission hook. The engine prepares routes and signatures
+in declaration order, then checks and commits the entire group before the host
+hands off any member. A precommit failure sends no member; the common journal
+projects NotSent only without prior released or inherited uncertain facts.
+Provider refusals are not venue auth evidence and do not create an uncertain
+order-lock fence. Resolved nonzero pacing floors refuse admission before IDs.
+
+Native and JS hosts bind/check all resources, claim once, and attempt sends in
+one turn before callbacks. After commit, a synchronous send failure or expiry is
+Unknown; remaining handoffs still run and accepted IDs remain in the projection.
+This provides no atomic execution guarantee at the venue. Independent reply
+handling requires the separate independent_calls declaration.
+
+Groups skip mutable on_http_release. A caller that stamps Pending there must
+move that state before admission or use committed on_signing_release; the pure
+hook cannot mutate Pending. Execution-owned groups, retries and fallback members
+are refused in this first slice. Later serial mixed Read/Mutation steps require
+G2. No venue is adopted and no legacy request site is removed by this seam alone.
 
 
 ## Phemex identity and recurring account read ownership
