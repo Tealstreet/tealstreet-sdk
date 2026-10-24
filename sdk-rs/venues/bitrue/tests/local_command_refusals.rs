@@ -1,12 +1,14 @@
 //! Genuine command admission for initial Bitrue refusals; queued private work stays legacy.
+mod support;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Context, Error, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, Method, Notice, Outcome, Response,
     SocketId, TimerId, Venue, VenueError,
 };
-use safe_cex_venue_bitrue::{Bitrue, Options};
+use safe_cex_venue_bitrue::Bitrue;
 use serde_json::json;
+use support::Options;
 const COMMAND: u32 = 71;
 const SYMBOL: &str = "E-BTC-USDT";
 fn policy() -> Policy {
@@ -133,17 +135,21 @@ impl<V: Venue> Venue for Probe<V> {
 }
 
 fn seeded(keyed: bool, public_only: bool) -> Engine<Probe<Bitrue>> {
+    let (venue, provider, identities) = (Options {
+        key: keyed.then(|| "fixture-key".into()),
+        secret: keyed.then(|| "fixture-secret".into()),
+        public_data_only: public_only,
+        ..Options::default()
+    })
+    .build();
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
-        inner: Bitrue::new(Options {
-            key: keyed.then(|| "fixture-key".into()),
-            secret: keyed.then(|| "fixture-secret".into()),
-            public_data_only: public_only,
-            ..Options::default()
-        }),
+        inner: venue,
         held: vec![],
         hold_next: false,
         original: None,
     });
+    e.set_signer(Some(provider)).unwrap();
+    e.set_identities(identities).unwrap();
     // Exercise the real query callback without starting unrelated feeds.
     e.store_mut().set_markets(vec![Market {
         id: "E-BTC-USDT".into(),
@@ -220,7 +226,7 @@ fn leverage(leverage: f64) -> Command {
 }
 fn run(e: &mut Engine<Probe<Bitrue>>, command: Command) -> Vec<Action> {
     e.handle(100., Event::Command(command));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, 100.)
 }
 fn control(e: &mut Engine<Probe<Bitrue>>, tag: Option<&str>) -> Vec<Action> {
     run(

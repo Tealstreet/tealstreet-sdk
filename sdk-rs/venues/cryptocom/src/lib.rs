@@ -3,6 +3,7 @@ mod account;
 mod depth_query;
 mod history;
 mod identity;
+mod public_trades;
 pub mod sign;
 mod trading;
 mod wire;
@@ -57,6 +58,7 @@ pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    PublicTrades(Box<public_trades::Request>),
     Identity(identity::Request),
     Markets {
         context: Context,
@@ -131,6 +133,7 @@ pub struct Cryptocom {
     account: account::Account,
     trading: trading::Trading,
     history: history::History,
+    public_trades: public_trades::State,
 }
 
 const TIMEFRAMES: [(Interval, &str); 10] = [
@@ -248,6 +251,7 @@ impl Cryptocom {
             account: Default::default(),
             trading: Default::default(),
             history: Default::default(),
+            public_trades: Default::default(),
             rest: if options.testnet {
                 "https://uat-api.3ona.co/exchange/v1"
             } else {
@@ -465,6 +469,9 @@ impl Cryptocom {
 }
 
 impl Venue for Cryptocom {
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        &[public_trades::PACING]
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
@@ -596,6 +603,7 @@ impl Venue for Cryptocom {
         }
         match pending {
             Pending::History(request) => self.history_item(cx, request, item),
+            Pending::PublicTrades(trade) => trade.item(cx, item),
             Pending::Trade(_) | Pending::Identity(_) | Pending::BookQuery { .. } => {}
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets {
@@ -664,6 +672,11 @@ impl Venue for Cryptocom {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::PublicTrades(trade) = &pending
+            && !trade.delivered(cx)
+        {
+            return;
+        }
         if let Some(context) = pending.discovery_context()
             && let Err(error) = cx.validate_background_read_http_delivery(context)
         {
@@ -711,6 +724,9 @@ impl Venue for Cryptocom {
             match pending {
                 Pending::Account(request) => self.account_failed(cx, request, &error, false),
                 Pending::History(request) => self.history_failed(cx, request, &error, false),
+                Pending::PublicTrades(trade) => {
+                    self.public_trades_response(cx, *trade, response, Some(error))
+                }
                 pending => self.on_request_failed(cx, pending, &error),
             }
             return;
@@ -718,6 +734,7 @@ impl Venue for Cryptocom {
         match pending {
             Pending::Trade(_) | Pending::Identity(_) | Pending::BookQuery { .. } => unreachable!(),
             Pending::History(request) => self.history_response(cx, request),
+            Pending::PublicTrades(trade) => self.public_trades_response(cx, *trade, response, None),
             Pending::Account(request) => self.account_response(cx, request),
             Pending::Markets {
                 context,
@@ -825,6 +842,24 @@ impl Venue for Cryptocom {
             }
         }
     }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        match pending {
+            Pending::PublicTrades(trade) => self.public_trades_stream_failed(cx, *trade, response),
+            pending => self.on_request_failed(
+                cx,
+                pending,
+                &format!(
+                    "response did not contain the expected list: {}",
+                    response.body
+                ),
+            ),
+        }
+    }
     fn on_sign_error(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -832,6 +867,7 @@ impl Venue for Cryptocom {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::PublicTrades(trade) => Self::public_trades_reject(cx, *trade, error),
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
@@ -848,6 +884,7 @@ impl Venue for Cryptocom {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::PublicTrades(trade) => self.public_trades_failed(cx, *trade, error, true),
             Pending::BookQuery { context } | Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
@@ -870,6 +907,12 @@ impl Venue for Cryptocom {
             Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error), None),
             Pending::History(request) => self.history_failed(cx, request, error, true),
+            Pending::PublicTrades(trade) => self.public_trades_failed(
+                cx,
+                *trade,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+                true,
+            ),
             Pending::Account(request) => self.account_failed(cx, request, error, true),
             Pending::Candles { context, .. } => {
                 if cx.validate_read_http_delivery(&context, &context).is_ok() {
@@ -880,7 +923,20 @@ impl Venue for Cryptocom {
             Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
     }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.public_trades
+            .waiting
+            .retain(|_, trade| trade.root().owner() != owner);
+    }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(trade) = self.public_trades.waiting.remove(&timer) {
+            self.public_trades_request(cx, trade);
+            return;
+        }
         if let Some(tickers) = self.discovery.on_timer(timer) {
             self.discovery_read(cx, tickers);
             return;

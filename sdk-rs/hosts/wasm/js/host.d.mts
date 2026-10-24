@@ -379,6 +379,8 @@ export interface EngineBridgeConstruction {
   apiKeyIndexRequired: boolean;
   isolatedBookSubscriptions: boolean;
   dispatchSigning:boolean;
+  /** Declared read-key policy; absent installs the read key as before. */
+  readCredentials?: 'validateOnly' | 'publicRead';
 }
 
 export interface EngineConstruction {

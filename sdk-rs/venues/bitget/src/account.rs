@@ -2,10 +2,15 @@ use crate::wire::*;
 use crate::{BitgetFutures, Pending, paths, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, row_skipped};
+use safe_cex_engine::credential_selection::{
+    CredentialRole, CredentialUnavailable, PrimaryReason, SlotPolicy, Slots,
+};
 use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Report};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Credential, Scope};
+use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor};
 use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
@@ -162,31 +167,99 @@ impl BitgetFutures {
             )
     }
 
-    pub(crate) fn signing_identity(
-        &self,
-        method: Method,
-        path: &str,
-    ) -> Option<&safe_cex_engine::signing::Identity> {
-        self.options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get && !self.primary_balance_read(path))
-            .or(self.options.credentials.as_ref())
+    /// Both keys, reachable only through a declared role.
+    fn credential_slots(&self) -> Slots<&Identity> {
+        Slots::new(
+            self.options.credentials.as_ref(),
+            self.options.read_credentials.as_ref(),
+            SlotPolicy::default(),
+        )
     }
 
+    /// The read key serves every GET except a degraded balance read, which
+    /// keeps the primary key (and primary egress); the primary key is the fallback.
+    fn read_role(&self, path: &str) -> CredentialRole {
+        if self.primary_balance_read(path) {
+            CredentialRole::PrimaryRead {
+                reason: PrimaryReason::DegradedRead,
+                scope: None,
+            }
+        } else {
+            CredentialRole::Read { scope: None }
+        }
+    }
+
+    pub(crate) fn signing_identity(&self, method: Method, path: &str) -> Option<&Identity> {
+        let role = if method == Method::Get {
+            self.read_role(path)
+        } else {
+            CredentialRole::Mutation
+        };
+        self.credential_slots()
+            .select(role)
+            .ok()
+            .map(|(_, identity)| *identity)
+    }
+
+    /// The managed read credential and the identity that signs it, from one selection.
+    pub(crate) fn read_selection(&self, path: &str) -> (Option<Credential>, Option<Identity>) {
+        match self.credential_slots().select(self.read_role(path)) {
+            Ok((selection, identity)) => (
+                Some(selection.credential(identity.credential.clone())),
+                Some((*identity).clone()),
+            ),
+            Err(CredentialUnavailable::Missing) => (None, None),
+        }
+    }
+
+    /// One physical account read under its own Background Read Context. An
+    /// issuance or queue refusal is a pre-send failure, as a provider refusal is.
     fn account_request(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         path: String,
         at: Option<ArrayAt>,
         request: Request,
     ) {
+        let (credential, identity) = self.read_selection(&path);
+        let policy = crate::read_policy(credential);
+        let context = match cx.http_context(Scope::Background, policy) {
+            Ok(context) => context,
+            Err(reason) => {
+                return self.account_sign_failed(cx, request, &reason.venue_error().message);
+            }
+        };
+        let recipe = sign::Http::new(identity, path.clone());
         let pending = Pending::Account {
             generation: self.account.generation,
+            context: context.clone(),
             request,
         };
-        let payload = at.map_or(crate::Payload::Body(None), crate::Payload::Stream);
-        self.send(cx, Method::Get, &path, payload, true, pending);
+        match cx.request_signed_managed(
+            context,
+            None,
+            Method::Get,
+            format!("{}{path}", paths::REST),
+            None,
+            Box::new(recipe),
+            pending,
+        ) {
+            Ok(id) => {
+                if let Some(at) = at {
+                    cx.stream_response(id, at);
+                }
+            }
+            // Synchronous, so no trade resume here: the caller's callback continues.
+            Err((pending, reason)) => {
+                if let Pending::Account {
+                    context, request, ..
+                } = pending
+                {
+                    let _ = cx.finish_http_context(&context);
+                    self.account_sign_failed(cx, request, &reason.venue_error().message);
+                }
+            }
+        }
     }
 
     pub(crate) fn start_private(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -419,7 +492,7 @@ impl BitgetFutures {
         );
     }
 
-    fn order_page(&self, cx: &mut Cx<'_, Pending>, mut snapshot: Box<OrderSnapshot>) {
+    fn order_page(&mut self, cx: &mut Cx<'_, Pending>, mut snapshot: Box<OrderSnapshot>) {
         snapshot.page_count = 0;
         let source = snapshot.source;
         let mut path = if self.account.uta {

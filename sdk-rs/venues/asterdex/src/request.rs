@@ -679,22 +679,9 @@ mod tests {
     impl Harness {
         fn new(method: Method, v3: bool) -> Self {
             let options = if v3 {
-                Options {
-                    key: Some("0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0".into()),
-                    secret: Some(
-                        "4fd0a42218f3eae43a6ce26d22544e986139a01e5b34a62db53757ffca81bae1".into(),
-                    ),
-                    application_id: Some("0x63DD5aCC6b1aa0f563956C0e534DD30B6dcF7C4e".into()),
-                    ..Options::default()
-                }
+                Options::v3_wallet()
             } else {
-                Options {
-                    key: Some("primary-key".into()),
-                    secret: Some("primary-secret".into()),
-                    read_key: Some("read-key".into()),
-                    read_secret: Some("read-secret".into()),
-                    ..Options::default()
-                }
+                Options::v1_with_read_agent()
             };
             let (inner, signer) = options.build();
             let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {

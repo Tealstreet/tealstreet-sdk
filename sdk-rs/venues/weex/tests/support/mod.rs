@@ -1,4 +1,5 @@
 pub use safe_cex_venue_weex::{Options as NativeOptions, WeexFutures};
+pub mod managed;
 pub mod setup;
 
 /// Native fixtures release managed work at their explicit event clock.

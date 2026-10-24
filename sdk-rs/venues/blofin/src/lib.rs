@@ -1,6 +1,8 @@
 //! BloFin linear perpetuals on the sans-I/O engine.
 mod account;
 mod closed;
+#[path = "sign/dispatch.rs"]
+pub mod dispatch_signing;
 mod history;
 mod sign;
 mod trading;
@@ -31,6 +33,9 @@ pub struct Options {
     pub key: Option<String>,
     pub secret: Option<String>,
     pub passphrase: Option<String>,
+    /// Opaque refs for the adopted FetchLeverage Read. The raw fields above
+    /// serve only unadopted paths; remove them at the family cutover.
+    pub identities: safe_cex_engine::signing::Identities,
 }
 safe_cex_crypto::redacted_debug!(Options);
 impl safe_cex_crypto::secrets::EraseSecrets for Options {
@@ -51,6 +56,7 @@ pub enum Pending {
     Closed(closed::Request),
     Trade(trading::Request),
     Account(account::Request),
+    Leverage(account::Leverage),
     Markets {
         rows: Vec<Market>,
         malformed: HashSet<String>,
@@ -749,6 +755,7 @@ impl Venue for Blofin {
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Closed(request) => Self::closed_item(request, item),
             Pending::Account(request) => self.account_item(cx, request, item),
+            Pending::Leverage(_) => {}
             Pending::Markets { rows, malformed } => {
                 match serde_json::from_str::<Instrument<'_>>(item) {
                     Ok(m)
@@ -888,6 +895,7 @@ impl Venue for Blofin {
             Pending::Account(request) => {
                 self.account_response(cx, request, response);
             }
+            Pending::Leverage(leverage) => self.leverage_response(cx, leverage, response),
             Pending::Trade(request) => {
                 self.trade_response(cx, request, response);
             }
@@ -951,12 +959,15 @@ impl Venue for Blofin {
         match pending {
             Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),
             Pending::Managed(context, pending) => self.public_failure(cx, context, *pending, error),
+            Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),
+            // The shared Network/Timeout kind stays; its text is the native message.
+            Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
@@ -986,6 +997,10 @@ impl Venue for Blofin {
             Pending::Trade(request) => {
                 let error = trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
                 self.trade_failed(cx, request, error);
+                return;
+            }
+            Pending::Leverage(leverage) => {
+                self.leverage_failed(cx, leverage, VenueError::new(error));
                 return;
             }
             other => other,
@@ -1175,7 +1190,7 @@ impl Venue for Blofin {
                     );
                 }
             }
-            Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
+            Command::FetchLeverage { symbol, .. } => self.fetch_leverage(cx, symbol),
             Command::Query { command, query } => self.start_query(cx, command, query),
             other => self.trading_command(cx, other),
         }

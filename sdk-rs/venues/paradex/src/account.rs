@@ -12,6 +12,7 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, TimeInForce,
 };
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Cx, Fill, Method, Response, SignatureTarget, SocketChannel, SocketId, TimerId, json::ArrayAt,
@@ -25,7 +26,7 @@ const POLL_MS: f64 = 10_000.;
 const AUTH_REFRESH_MS: f64 = 180_000.;
 
 pub enum Request {
-    Config,
+    Config(Context),
     Auth {
         started: f64,
     },
@@ -361,14 +362,46 @@ impl Account {
         }
         self.fetch_config(cx);
     }
-    fn fetch_config(&self, cx: &mut Cx<'_, Pending>) {
-        cx.request(
+    fn fetch_config(&mut self, cx: &mut Cx<'_, Pending>) {
+        let context = match cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(context) => context,
+            Err(_) => {
+                self.config_failed(cx, "Paradex config lifecycle is unavailable");
+                return;
+            }
+        };
+        if let Err((pending, error)) = cx.request_managed(
+            context.clone(),
+            None,
             Method::Get,
             format!("{}/system/config", self.rest()),
-            vec![],
             None,
-            Pending::Account(Request::Config),
-        );
+            Pending::Account(Request::Config(context)),
+        ) {
+            let Pending::Account(request) = pending else {
+                unreachable!("config preserves its pending value")
+            };
+            self.on_failed(
+                cx,
+                request,
+                &format!("Paradex config preparation refused: {error:?}"),
+            );
+        }
+    }
+    fn config_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+        if self.retry.is_none() {
+            self.retry = Some(cx.set_timer(2_000.));
+        }
     }
     pub fn request(
         &mut self,
@@ -1183,12 +1216,18 @@ impl Account {
         request: Request,
         response: Response<'_>,
     ) {
+        if let Request::Config(context) = &request
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            let _ = cx.finish_http_context(context);
+            return;
+        }
         if let Err(error) = crate::success(response) {
             self.on_failed(cx, request, &error);
             return;
         }
         match request {
-            Request::Config => {
+            Request::Config(context) => {
                 let credentials = serde_json::from_str::<SystemConfig>(response.body)
                     .map_err(|_| "Invalid Paradex system config".to_owned())
                     .and_then(|config| {
@@ -1221,8 +1260,9 @@ impl Account {
                             });
                         }
                         self.margins(cx, true);
+                        let _ = cx.finish_http_context(&context);
                     }
-                    Err(error) => self.on_failed(cx, Request::Config, &error),
+                    Err(error) => self.on_failed(cx, Request::Config(context), &error),
                 }
             }
             Request::Auth { started } => {
@@ -1434,11 +1474,9 @@ impl Account {
     }
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         match request {
-            Request::Config => {
-                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-                if self.retry.is_none() {
-                    self.retry = Some(cx.set_timer(2_000.));
-                }
+            Request::Config(context) => {
+                let _ = cx.finish_http_context(&context);
+                self.config_failed(cx, error);
             }
             Request::Auth { .. } => self.auth_failed(cx, error),
             Request::Margins { boot, .. } => {
