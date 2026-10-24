@@ -186,9 +186,9 @@ No ignored or weakened original assertions, no codegen by hand.
    entry/headers/unsigned routing and ReadRoot/ReadLeg, validating before Store.
    Staged issuance uses existing shared Selection.sign where truthful; do not
    clone selection, timestamp, outcome or managed-read mechanisms locally.
-4. Rescan exact candidate. Obtain an explicit grant for any new STAGING_BOOTSTRAPS
-   or SIGNER_POLICY_BOOTSTRAPS maps before editing them. No numeric shrink is
-   promised from an unbuilt funnel. Keep frozen call expressions stable for
+4. Rescan exact candidate. Obtain claude-ddi2il's explicit grant for any new
+   STAGING_BOOTSTRAPS or SIGNER_POLICY_BOOTSTRAPS maps before editing them. No
+   numeric shrink is promised from an unbuilt funnel. Keep frozen call expressions stable for
    later pruning; other families' maps and ordering remain exact.
 5. Strict touched-crate checks, Binance controls, feature-off provider controls,
    independent source/caller/full-map review and fresh full CI. Test isolated
@@ -263,14 +263,15 @@ must have redacted Debug: opaque names may appear, key/secret/passphrase/broker
 material must not. Test this at native Options and installed alias boundaries,
 matching existing Sensitive/credential redaction; no raw provider material Debug.
 
-Original tests committed c635adf7120 execute on unchanged77f production:
+Current tests at checkpoint5759e49f654 execute on unchanged77f production:
 
-- With Spot: 11 compiling tests, **4 assertion REDs / 7 working GREENs**, zero
-  ignored. Every RED observes zero provider batches where one is required:
+- With Spot: 15 compiling tests, **5 assertion REDs / 10 working GREENs**, zero
+  ignored. Four REDs observe zero provider batches where one is required:
   Futures catalogue, broker catalogue, Futures identity and Spot identity.
-- Without Spot: 9 compiling tests, **3 assertion REDs / 6 working GREENs**,
+  The Futures write 400005 reissue RED observes zero batches instead of two.
+- Without Spot: 13 compiling tests, **4 assertion REDs / 9 working GREENs**,
   zero ignored. The two Spot-specific controls are not compiled in that mode.
-- Isolated broker role: 8 compiling tests, **6 NEW-CONTRACT runtime schema
+- Isolated broker role: 9 compiling tests, **7 NEW-CONTRACT runtime schema
   REDs / 2 existing working GREENs**, zero ignored. The first missing
   `kucoinBroker` role/policy decode rejects; downstream trim/alias/MAC assertions
   have NOT executed and are not claimed as independent semantic defect proofs.
@@ -278,6 +279,8 @@ Original tests committed c635adf7120 execute on unchanged77f production:
   partial broker triplets/default/false verify, selected read-key broker MAC,
   configured Spot public unsigned behavior, keyless Futures unsigned behavior,
   a genuine atomic two-MAC provider batch, and existing ordinary/role isolation.
+  The write retry control pins stamps1234/1235, changed request/broker MACs and
+  equal passphrase MACs; raw-query vectors and native Debug redaction also pass.
 
 Strict test-target Clippy passes for both packages after correcting two
 get-then-check assertion-style warnings; test meanings are unchanged. The role
@@ -286,8 +289,10 @@ Full local banned-patterns and request/signing/socket ratchets, whitespace check
 and prose/test secret scans pass. No full native suite, WASM build, replay, size,
 production provider integration or actual broker landing is inferred here.
 
-The draft deliberately retains executed REDs. HMAC review, actual prerequisites
-or an explicit shared composition, production source review and fresh CI remain
+The draft deliberately retains executed REDs. HMAC re-review at5759e49f654 is
+CLEAR from claude-4yjlw0, including independent reproduction of all three test
+counts and the write/raw-query controls. Actual prerequisites or an explicit
+shared composition, production source review and fresh CI remain
 separate gates. No source is authorized solely by these test receipts.
 
 ## Separate signing inventory and migrated-family flip
@@ -404,6 +409,8 @@ At test checkpoint5759e49f654 on unchanged77f production:
   4y's review pass, including literal plus and space. Native Options/BrokerOptions
   redacted Debug exposes none of the synthetic primary/read/broker material.
 
-Both earlier independent scopes remain historical to their reviewed pin;
-request HMAC re-review of these corrections before any production. No source,
-credential policy, checker predicate or inventory change is part of this draft.
+HMAC re-review of checkpoint5759e49f654 is CLEAR from claude-4yjlw0. Its two
+non-blocking documentation findings are resolved above: current counts replace
+the earlier receipt and claude-ddi2il is named as bootstrap grant authority. No
+source, credential policy, checker predicate or inventory change is part of this
+draft.
