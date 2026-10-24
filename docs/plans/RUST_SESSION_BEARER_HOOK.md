@@ -421,7 +421,7 @@ retires a second Session in the same flush. Composition with combo-5b
   `session_scope` (#1896/#1897) lands that retire refuses `State`, so the test
   moves to another outer trigger, such as a retire in `start`.
 - Still waiting on dependencies: R10b/R10b' (#2037), R11 and the group gate
-  (G2b), R14's refusal half and the `Egress::Session` control (#1896/#1897).
+  (G2b).
 - Composition pin (claude-fe7lgm, CLEAR at `0644cd619e8`): whichever of #2037
   and this lands second makes the tail of `flush_http_plans` read, in order:
   1. `flush_bearer_fences(now)`;
@@ -450,3 +450,21 @@ adopts it in Paradex, together with deleting `Cx::sign_request` (row 10).
 Independent review answers "per-venue fix of a cross-cutting concern?". The
 answer here is no: it is a shared managed-lifecycle hook, and any venue whose
 private requests carry a session token can use it.
+
+**Phase 2, part 2 (after combo-5b, tip `219d4bc6725`).**
+- Integration: the 21 managed-request calls that landed in 5b take the `None`
+  bearer argument, and the keyless Bearer probe Sessions take
+  `private_egress: None`.
+- Gate moved: `session_scope` now refuses a retire inside a Plan-ready
+  callback, so the outer-path gate retires in `start` instead. `start` runs no
+  `finish_event_scope`, and the fenced Background read fails typed `NotSent`
+  before `start` returns; its queued Prepare is followed by a Cancel, and
+  routing it binds nothing. Without the `flush_http_plans` tail drain the gate
+  fails in both feature variants.
+- R14 refusal half: inside a Plan-ready scope, `open_session`,
+  `session_context` and `retire_session` each refuse `State`. The Session stays
+  live, and a later bound request still prepares Primary with the current
+  token.
+- `Egress::Session` control: a bound request whose root comes from
+  `session_scoped_context` on a private-egress Session binds and prepares
+  Primary with the token. Only explicit public egress refuses.

@@ -3,6 +3,7 @@
 //! the engine's Bearer hooks from its venue-held token cache.
 mod support;
 use safe_cex_engine::book::Book;
+use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::request_context::{
     Claim, Context, Credential, Egress, Error, HttpAction, Operation, Owner, Permit, Policy,
     Preparation, Prepared, RetryEvidence, RetryPolicy, RoutingIntent, Scope, SecretHeaderValue,
@@ -78,6 +79,11 @@ struct Shared {
     bind_retired: bool,
     /// Retire the Session from inside a response delivery.
     retire_on_response: bool,
+    /// `start` issues one bound Background read, then retires its Session.
+    retire_in_start: bool,
+    /// The Session is granted private egress, and commands issue their root
+    /// on it through `session_scoped_context`.
+    session_egress: bool,
     recipe_authorization: bool,
     crowded: bool,
     /// The sibling leg binds the same Session as the root.
@@ -100,8 +106,11 @@ struct Shared {
     plan_wait_ms: u32,
     #[cfg(feature = "http-plans")]
     plan: Option<safe_cex_engine::request_context::Plan>,
+    /// The Plan-ready callback tries to open, retire and use a Session.
     #[cfg(feature = "http-plans")]
-    retire_on_plan_ready: bool,
+    lifetimes_on_plan_ready: bool,
+    #[cfg(feature = "http-plans")]
+    scoped_refusals: Vec<Error>,
     #[cfg(feature = "http-plans")]
     plan_ready_calls: usize,
     /// An AmendOrder issues this many bound Mutation legs.
@@ -133,6 +142,8 @@ impl Shared {
             bearer: true,
             bind_retired: false,
             retire_on_response: false,
+            retire_in_start: false,
+            session_egress: false,
             recipe_authorization: false,
             crowded: false,
             sibling_bound: false,
@@ -153,7 +164,9 @@ impl Shared {
             #[cfg(feature = "http-plans")]
             plan: None,
             #[cfg(feature = "http-plans")]
-            retire_on_plan_ready: false,
+            lifetimes_on_plan_ready: false,
+            #[cfg(feature = "http-plans")]
+            scoped_refusals: Vec::new(),
             #[cfg(feature = "http-plans")]
             plan_ready_calls: 0,
             write_legs: 0,
@@ -477,11 +490,19 @@ impl Venue for Probe {
         (shared.token.is_some() && shared.serves(generation)).then_some(shared.revision)
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        let private_egress = self.shared.borrow().session_egress.then(|| {
+            Slots::new(Some(()), None, SlotPolicy::default())
+                .select(CredentialRole::SessionAuth)
+                .unwrap()
+                .0
+                .session_egress()
+                .unwrap()
+        });
         let session = cx
             .open_session(SessionPolicy {
                 credential: None,
                 repeat_safe: true,
-                private_egress: None,
+                private_egress,
             })
             .unwrap();
         let timer = cx.set_timer(60_000.);
@@ -498,6 +519,15 @@ impl Venue for Probe {
         }
         shared.session = Some(session);
         shared.retire_timer = Some(timer);
+        let retire_in_start = shared.retire_in_start;
+        drop(shared);
+        if retire_in_start {
+            let context = cx
+                .http_context(Scope::Background, policy(false, false))
+                .unwrap();
+            self.issue(cx, context, false);
+            self.retire_now(cx);
+        }
     }
     fn capture_http_reconciliation(
         &self,
@@ -512,13 +542,29 @@ impl Venue for Probe {
         _: &safe_cex_engine::request_context::Plan,
     ) {
         let _depth = self.enter();
-        let retire = {
+        let session = {
             let mut shared = self.shared.borrow_mut();
             shared.plan_ready_calls += 1;
-            shared.retire_on_plan_ready
+            shared
+                .lifetimes_on_plan_ready
+                .then(|| shared.session.clone())
+                .flatten()
         };
-        if retire {
-            self.retire_now(cx);
+        if let Some(session) = session {
+            let keyless = SessionPolicy {
+                credential: None,
+                repeat_safe: true,
+                private_egress: None,
+            };
+            let refusals = [
+                cx.open_session(keyless).err(),
+                cx.session_context(&session, policy(false, false)).err(),
+                cx.retire_session(&session).err(),
+            ];
+            self.shared
+                .borrow_mut()
+                .scoped_refusals
+                .extend(refusals.into_iter().flatten());
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -538,15 +584,28 @@ impl Venue for Probe {
             self.preflight(cx);
             return;
         }
-        let (retry, sibling, signed, egress) = {
+        let (retry, sibling, signed, egress, scoped) = {
             let shared = self.shared.borrow();
-            (shared.retry, shared.sibling, shared.signed, shared.egress)
+            let scoped = shared
+                .session_egress
+                .then(|| shared.session.clone())
+                .flatten();
+            (
+                shared.retry,
+                shared.sibling,
+                shared.signed,
+                shared.egress,
+                scoped,
+            )
         };
-        let root = match egress {
-            Some(egress) => {
+        let root = match (scoped, egress) {
+            (Some(session), _) => {
+                cx.session_scoped_context(&session, Scope::Command(command), policy(retry, signed))
+            }
+            (None, Some(egress)) => {
                 cx.http_context_with_egress(Scope::Command(command), policy(retry, signed), egress)
             }
-            None => cx.http_context(Scope::Command(command), policy(retry, signed)),
+            (None, None) => cx.http_context(Scope::Command(command), policy(retry, signed)),
         }
         .unwrap();
         if sibling {
@@ -1177,6 +1236,19 @@ fn r14_preflight_owner_binds_its_own_request() {
     assert_eq!(authorization(&request), Some("Bearer A"));
 }
 
+/// Session-egress control: a bound request on its Session's private egress
+/// (`session_scoped_context`) is private, so it binds and prepares Primary.
+#[test]
+fn bound_request_on_session_private_egress_prepares_primary() {
+    let (mut e, shared) = engine(|shared| shared.session_egress = true);
+    let issued = ask(&mut e, 1);
+    assert_eq!(shared.borrow().issue_errors, []);
+    assert_eq!(issued.len(), 1);
+    assert_eq!(issued[0].2, RoutingIntent::Primary);
+    let (_, request) = prepared(&mut e, NOW + 1., issued[0].0).expect("bound packet");
+    assert_eq!(authorization(&request), Some("Bearer A"));
+}
+
 /// R7, Preflight: a refused binding fails the owning Preflight through its
 /// admission, once and NotSent, and nothing is prepared.
 #[cfg(feature = "http-plans")]
@@ -1506,44 +1578,83 @@ fn r10_retire_fails_each_owner_once_without_http_or_reentry() {
     );
 }
 
-/// Source gate: a retire inside a Plan-ready callback on the Plan timer path,
-/// which runs no `finish_event_scope`, delivers its fence in the same
-/// `handle()` call rather than leaving it queued for a later event.
+/// R14, refusal half: inside a Plan-ready scope, opening, using or retiring a
+/// Session refuses `State`; the Session stays live and later work still binds.
 #[cfg(feature = "http-plans")]
 #[test]
-fn gate_retire_in_a_plan_ready_callback_is_fenced_in_the_same_handle() {
+fn r14_plan_ready_scope_refuses_session_lifetimes_and_keeps_the_session() {
     let (mut e, shared) = engine(|shared| {
         shared.plan_command = Some(1);
         shared.plan_legs = 1;
         shared.plan_wait_ms = 1_000;
-        shared.retire_on_plan_ready = true;
-        shared.next_generation_token = Some("C");
+        shared.lifetimes_on_plan_ready = true;
     });
-    let command = ask(&mut e, 2);
-    let (permit, _) = prepared(&mut e, NOW + 1., command[0].0).expect("bound packet");
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 1 }));
-    let timer = e
-        .drain_actions()
+    let admitted = e.drain_actions().collect::<Vec<_>>();
+    let timer = admitted
+        .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == NOW + 1_000. => Some(timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 1_000. => Some(*timer),
             _ => None,
         })
         .expect("the Plan's readiness timer");
-    shared.borrow_mut().max_depth = 0;
     e.handle(NOW + 1_000., Event::TimerFired { timer });
     {
         let shared = shared.borrow();
         assert_eq!(shared.plan_ready_calls, 1);
-        assert!(shared.retired.is_some(), "the Plan-ready callback retired");
-        assert_eq!(
-            shared.failures.len(),
-            1,
-            "the retire's fence is still queued after the Plan timer event"
-        );
-        assert_eq!(shared.max_depth, 1);
+        assert_eq!(shared.scoped_refusals, [Error::State; 3]);
+        assert!(shared.retired.is_none() && shared.session.is_some());
+        assert_eq!(shared.issue_errors, []);
     }
-    assert!(!released(&mut e, NOW + 1_001., permit));
-    let terminals = terminals_after(&mut e);
-    assert_eq!(terminals.len(), 1);
-    assert_eq!(terminals[0].0, 2);
+    let issued = ask(&mut e, 2);
+    assert_eq!(issued[0].2, RoutingIntent::Primary);
+    let (_, request) = prepared(&mut e, NOW + 1_001., issued[0].0).expect("bound packet");
+    assert_eq!(authorization(&request), Some("Bearer A"));
+}
+
+/// Source gate: `start` runs no `finish_event_scope`, so a retire there is
+/// fenced by the `flush_http_plans` tail before `start` returns.
+#[test]
+fn gate_retire_in_start_is_fenced_before_start_returns() {
+    let mut probe = Shared::new();
+    probe.retire_in_start = true;
+    let shared = Rc::new(RefCell::new(probe));
+    let mut e = support::seeded_engine(Probe {
+        shared: shared.clone(),
+    });
+    let health = e.health().clone();
+    e.start(NOW);
+    assert!(
+        shared.borrow().retired.is_some(),
+        "start retired its Session"
+    );
+    assert_eq!(shared.borrow().issue_errors, []);
+    assert!(
+        one_typed_read_failure(&shared, ErrorKind::InvalidInput),
+        "the fenced Background read failed inside start"
+    );
+    let left = e.drain_actions().collect::<Vec<_>>();
+    let managed = left
+        .iter()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(a) => Some(&**a),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let [
+        HttpAction::Prepare { preparation, .. },
+        HttpAction::Cancel {
+            preparation: cancelled,
+            ..
+        },
+    ] = managed[..]
+    else {
+        panic!(
+            "expected the queued Prepare and its Cancel, got {}",
+            managed.len()
+        );
+    };
+    assert_eq!(preparation, cancelled);
+    assert!(route(&mut e, NOW + 1., *preparation).is_empty());
+    assert_eq!(e.health(), &health);
 }
