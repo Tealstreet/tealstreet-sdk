@@ -13,8 +13,8 @@ const CANDLES: &str = r#"{"code":200,"c":[{"t":2000,"o":"2","h":"3","l":"1","c":
 fn started(options: Options) -> (Engine<Lighter>, TimerId) {
     let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(options));
     engine.start(NOW);
-    let metadata = engine
-        .drain_actions()
+    let metadata = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
