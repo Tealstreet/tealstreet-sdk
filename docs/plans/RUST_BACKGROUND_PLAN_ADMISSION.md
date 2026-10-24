@@ -507,3 +507,27 @@ review is CLEAR. The first helper run caught a duplicate fixture Context ID;
 the helper now removes its previous test root before creating the second
 table entry. No Background task admission, retry, publication or native venue
 conversion is available from this foundation alone.
+
+Quota API review now accepts 150 as the single aggregate Background share,
+subject to these source controls: one named constant beside CAPACITY, a
+compile-time assertion that it remains smaller, and the template maximum equal
+to that same constant. A later family uses the same share rather than another
+quota. At full Background occupancy, all other owners together have 106 slots:
+command Contexts, command and physical execution Plan reservations, Session
+operations and plain Background work. A foreground refusal caused by Background
+occupancy is retryable, with no outcome for a Read and NotSent for an initial
+Mutation. Foreground-only saturation keeps existing Capacity semantics. Test
+saturation of those 106 slots, exactly one further command refusal without
+borrowing Background credits, and successful admission after child retirement.
+This capacity tradeoff is disclosed in CALLERS. fe7lgm and uufub4 have cleared
+the quota direction; constructor/admission source review remains required.
+
+The overseer further requires that 150 be a cap rather than an idle reservation:
+without an active child, other owners may use all 256 slots. Test the full pool
+before admission, the residual `256 - N` during a child's exact occupancy, and
+full recovery after retirement. Foreground admission reports the distinct
+retryable refusal only when removing Background occupancy would make that same
+reservation fit. A foreground-only or intrinsically oversized reservation keeps
+plain Capacity. Saturation must emit one correlated failure, borrow no child
+credit, and succeed when retried after child retirement. The internal refusal
+variant and shared retry hint require uufub4's API review before source wiring.

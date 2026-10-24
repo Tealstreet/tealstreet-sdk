@@ -6369,3 +6369,22 @@ before reserving IDs or consuming timers/continuations. Session-ready/failed
 drains return empty; session_wait returns its pending unchanged. Read-only
 session_live and the active Plan's own APIs remain available. Ordinary Session,
 socket, timer and startup callbacks retain their existing Session authority.
+
+## Finite background Read Plans and shared admission capacity
+
+With `http-plans`, registered background Read Plans share an aggregate limit
+of 150 active plus unissued Context slots inside the engine's existing 256-slot
+pool. This is one limit across tasks, parents and venue families. Registration
+reserves no Plan slots; without an active child the full 256 remain available.
+Activation checks the share and the shared pool before
+consuming its demand or IDs. A second child that does not fit is refused.
+
+At full background occupancy, all other owners share 106 slots: command
+Contexts, command and physical execution Plan reservations, Session operations
+and plain Background work. When Background occupancy causes a foreground
+admission refusal, that refusal is typed as retryable, with NotSent for an
+initial Mutation and no financial outcome for a Read. Foreground-only saturation
+keeps the existing Capacity failure (Internal).
+Capacity returns as the corresponding work retires; background work does not
+borrow the remaining share or reset command evidence. This can refuse a
+command that would have fit without the active background child.
