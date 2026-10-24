@@ -1,10 +1,13 @@
 //! Public catalog snapshots retain their exact managed Background attempt.
 mod support;
+use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{
-    Claim, Error, HttpAction, Permit, Preparation, Prepared, RoutingIntent,
+    Claim, Context, Error, HttpAction, Operation, Permit, Policy, Preparation, Prepared,
+    RetryPolicy, RoutingIntent,
 };
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Method, Notice, TimerId, VenueError};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_engine::{Command, Cx, Response, SocketId, Venue};
+use safe_cex_venue_lighter::{Lighter, Options, Pending};
 use support::{NOW, reply_at};
 const META: &str = r#"{"code":200,"order_book_details":[{"market_id":1,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250},{"market_id":2,"symbol":"BTC","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":1,"min_base_amount":"0.0001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250},{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot"}]}"#;
 fn engine(robinhood: bool, testnet: bool) -> Engine<Lighter> {
@@ -15,7 +18,7 @@ fn engine(robinhood: bool, testnet: bool) -> Engine<Lighter> {
         ..Default::default()
     }))
 }
-fn start(e: &mut Engine<Lighter>) -> Vec<Action> {
+fn start<V: Venue<Pending = Pending>>(e: &mut Engine<V>) -> Vec<Action> {
     e.start(NOW);
     e.drain_actions().collect()
 }
@@ -57,7 +60,11 @@ fn prep(a: &[Action], fallback: bool) -> (Preparation, HttpRequest) {
     }));
     (p, r)
 }
-fn bind(e: &mut Engine<Lighter>, now: f64, p: Preparation) -> (Permit, HttpRequest) {
+fn bind<V: Venue<Pending = Pending>>(
+    e: &mut Engine<V>,
+    now: f64,
+    p: Preparation,
+) -> (Permit, HttpRequest) {
     e.http_prepared(
         now,
         p,
@@ -80,7 +87,11 @@ fn bind(e: &mut Engine<Lighter>, now: f64, p: Preparation) -> (Permit, HttpReque
         })
         .expect("catalog binds exact preparation")
 }
-fn release(e: &mut Engine<Lighter>, now: f64, p: Preparation) -> HttpRequest {
+fn release<V: Venue<Pending = Pending>>(
+    e: &mut Engine<V>,
+    now: f64,
+    p: Preparation,
+) -> HttpRequest {
     let (permit, r) = bind(e, now, p);
     assert!(matches!(e.claim_http(now, permit), Ok(Claim::Released(_))));
     r
@@ -108,7 +119,7 @@ fn wire(r: &HttpRequest, robinhood: bool, testnet: bool, fallback: bool) {
     assert!(r.signer_headers.is_empty());
     assert!(r.body.is_none());
 }
-fn snapshot(e: &Engine<Lighter>) {
+fn snapshot<V: Venue<Pending = Pending>>(e: &Engine<V>) {
     assert!(e.store().loaded().markets);
     assert_eq!(e.store().markets().len(), 2);
     let eth = e.store().market("ETH").unwrap();
@@ -118,7 +129,7 @@ fn snapshot(e: &Engine<Lighter>) {
     assert_eq!(eth.limits.leverage.max, 20.);
     assert!(e.store().market("ETH/USDC").is_none());
 }
-fn empty(e: &mut Engine<Lighter>, now: f64) {
+fn empty<V: Venue<Pending = Pending>>(e: &mut Engine<V>, now: f64) {
     assert!(!e.store().loaded().markets);
     assert!(e.store().markets().is_empty());
     assert!(e.take_frame(now).is_none());
@@ -346,4 +357,194 @@ fn completed_catalog_duplicate_response_is_inert() {
     assert!(e.drain_actions().next().is_none());
     assert!(e.take_frame(NOW + 3.).is_none());
     snapshot(&e);
+}
+
+#[test]
+fn streamed_prefix_then_transport_failure_is_discarded_before_fallback() {
+    let mut e = engine(false, false);
+    let (p, _) = prep(&start(&mut e), false);
+    let old = release(&mut e, NOW + 1., p);
+    e.handle(
+        NOW + 2.,
+        Event::HttpStart {
+            request: old.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        NOW + 2.,
+        Event::HttpChunk {
+            request: old.id,
+            data: META[..META.len() - 2].as_bytes(),
+        },
+    );
+    empty(&mut e, NOW + 2.);
+    no_command(&e.drain_actions().collect::<Vec<_>>());
+    e.handle(
+        NOW + 3.,
+        Event::HttpFailed {
+            request: old.id,
+            error: "fixture disconnected",
+        },
+    );
+    let (p, _) = prep(&e.drain_actions().collect::<Vec<_>>(), true);
+    e.handle(NOW + 4., Event::HttpEnd { request: old.id });
+    empty(&mut e, NOW + 4.);
+    assert!(e.drain_actions().next().is_none());
+    let fresh = release(&mut e, NOW + 5., p);
+    reply_at(&mut e, NOW + 6., &fresh, 200, META);
+    snapshot(&e);
+}
+struct CapacityProbe {
+    venue: Lighter,
+    roots: Vec<Context>,
+}
+impl Venue for CapacityProbe {
+    type Pending = Pending;
+    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, s: SocketId) {
+        self.venue.on_open(cx, s)
+    }
+    fn on_message(&mut self, cx: &mut Cx<'_, Pending>, s: SocketId, text: &str) {
+        self.venue.on_message(cx, s, text)
+    }
+    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, s: SocketId, code: u16) {
+        self.venue.on_close(cx, s, code)
+    }
+    fn book(&self, symbol: &str) -> Option<&Book> {
+        self.venue.book(symbol)
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        self.venue.books()
+    }
+
+    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.venue.start(cx)
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if matches!(&command,Command::FetchOrderBook{symbol,..}if symbol=="__catalog_peer__") {
+            if let Ok(root) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) {
+                self.roots.push(root);
+            }
+        } else {
+            self.venue.on_command(cx, command)
+        }
+    }
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        self.venue.on_item(cx, pending, item)
+    }
+    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        self.venue.on_response(cx, pending, response)
+    }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        self.venue.on_http_failed(cx, pending, error)
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        self.venue.on_request_failed(cx, pending, error)
+    }
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        self.venue.on_sign_error(cx, pending, error)
+    }
+    fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.venue.on_timer(cx, timer)
+    }
+}
+#[test]
+fn saturated_registry_frees_each_catalog_root_before_fallback_retry_and_success() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(CapacityProbe {
+        venue: Lighter::new(Options {
+            public_data_only: true,
+            ..Default::default()
+        }),
+        roots: vec![],
+    });
+    for command in 1..=255 {
+        e.handle(
+            NOW,
+            Event::Command(Command::FetchOrderBook {
+                command,
+                symbol: "__catalog_peer__".into(),
+                limit: None,
+            }),
+        );
+        assert!(e.drain_actions().next().is_none());
+    }
+    let (p, _) = prep(&start(&mut e), false);
+    let r = release(&mut e, NOW + 1., p);
+    e.handle(
+        NOW + 2.,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status: 500,
+                headers: "",
+                body: r#"{"code":500}"#,
+            },
+        },
+    );
+    let (p, _) = prep(&e.drain_actions().collect::<Vec<_>>(), true);
+    let r = release(&mut e, NOW + 3., p);
+    e.handle(
+        NOW + 4.,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status: 500,
+                headers: "",
+                body: r#"{"code":500}"#,
+            },
+        },
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    let (timer, at) = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms < NOW + 20000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at, Event::TimerFired { timer });
+    let (p, _) = prep(&e.drain_actions().collect::<Vec<_>>(), false);
+    let r = release(&mut e, at, p);
+    e.handle(
+        at,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: META,
+            },
+        },
+    );
+    snapshot(&e);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        at,
+        Event::Command(Command::FetchOrderBook {
+            command: 900,
+            symbol: "__catalog_peer__".into(),
+            limit: None,
+        }),
+    );
+    assert!(
+        e.drain_actions().next().is_none(),
+        "success retired the remaining catalog root before20s"
+    );
+    e.handle(
+        at,
+        Event::Command(Command::FetchOrderBook {
+            command: 901,
+            symbol: "__catalog_peer__".into(),
+            limit: None,
+        }),
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    assert!(a.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{command:901,error})if error.kind==Some(safe_cex_engine::ErrorKind::Internal))));
 }

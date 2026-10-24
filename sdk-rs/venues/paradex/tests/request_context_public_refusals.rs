@@ -259,6 +259,17 @@ fn clock(branch: Local) {
             ErrorKind::InvalidInput,
             "Invalid request context",
         );
+        if matches!(branch, Local::Book) {
+            e.handle(NOW, Event::Command(command(701, branch)));
+            assert!(
+                prepared_actions(&mut e, NOW)
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.contains("/orderbook/")))
+            );
+        } else {
+            native(&ask(&mut e, NOW, 701, branch), 701, branch);
+        }
+        assert!(e.take_frame(NOW).is_none());
     }
 }
 #[test]
