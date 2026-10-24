@@ -2650,6 +2650,21 @@ pub trait Venue {
     ) {
     }
 
+    /// A Plan Slot parked on a Session ended unissued because the Session was
+    /// retired or failed. This runs in that Plan's ready custody: re-park the Slot
+    /// on another live Session, or fail the Plan. Nothing was sent for it.
+    #[cfg(feature = "http-plans")]
+    fn on_plan_session_wait_ended(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        plan: &crate::request_context::Plan,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        let _ = plan;
+        self.on_session_wait_expired(cx, pending, error);
+    }
+
     /// A session waiter reached its owner's original deadline before the venue
     /// drained it. Nothing was sent for that owner.
     fn on_session_wait_expired(

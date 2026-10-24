@@ -39,6 +39,13 @@ mod planned_calls {
         /// Issue the first leg in admission custody but never queue it.
         issue_only: bool,
         unqueued: Option<Context>,
+        /// Park the first Slot on this Session in admission custody.
+        park_on: Option<crate::request_context::Session>,
+        park_token: Option<Context>,
+        park_result: Option<Result<(), Error>>,
+        repark_on: Option<crate::request_context::Session>,
+        wait_ended: Vec<(Context, VenueError)>,
+        wait_expired: Vec<(Context, VenueError)>,
         // A delivered call reports itself as a complete order read.
         #[cfg(feature = "order-locks")]
         reconcile_reads: bool,
@@ -206,6 +213,19 @@ mod planned_calls {
                 )
                 .unwrap(),
             );
+            if let Some(session) = self.park_on.clone() {
+                let plan = self.plan.clone().unwrap();
+                let slot = cx.plan_slots(&plan).unwrap().remove(0);
+                let token = cx
+                    .http_context(crate::request_context::Scope::Background, wait_token_policy())
+                    .unwrap();
+                self.park_token = Some(token.clone());
+                self.slot = Some(slot.clone());
+                self.park_result = Some(
+                    cx.plan_session_wait(&plan, &slot, None, &session, token)
+                        .map_err(|(_, error)| error),
+                );
+            }
             if self.issue_only {
                 let plan = self.plan.as_ref().unwrap();
                 let slot = cx.plan_slots(plan).unwrap().remove(0);
@@ -383,6 +403,24 @@ mod planned_calls {
             } else {
                 self.queue(cx)
             }
+        }
+        fn on_plan_session_wait_ended(
+            &mut self,
+            cx: &mut Cx<'_, Context>,
+            plan: &Plan,
+            pending: Context,
+            error: VenueError,
+        ) {
+            self.wait_ended.push((pending.clone(), error));
+            if let Some(session) = self.repark_on.take() {
+                let slot = cx.plan_slots(plan).unwrap().remove(0);
+                cx.plan_session_wait(plan, &slot, None, &session, pending)
+                    .map_err(|(_, error)| error)
+                    .unwrap();
+            }
+        }
+        fn on_session_wait_expired(&mut self, _: &mut Cx<'_, Context>, pending: Context, error: VenueError) {
+            self.wait_expired.push((pending, error));
         }
         fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {
             self.retired += 1
@@ -1465,5 +1503,146 @@ mod planned_calls {
             leg,
         );
         assert_eq!(queued.map(|_| ()).map_err(|(_, error)| error), Err(Error::TimedOut));
+    }
+    fn wait_token_policy() -> Policy {
+        Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 1_000_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }
+    }
+    fn open(e: &mut Engine<Plans>, now: f64) -> crate::request_context::Session {
+        Cx { now, store: &mut e.store, io: &mut e.io }
+            .open_session(crate::request_context::SessionPolicy {
+                credential: None,
+                repeat_safe: true,
+            })
+            .unwrap()
+    }
+    fn parked(now: f64) -> (Engine<Plans>, Plan, crate::request_context::Session) {
+        let mut e = crate::test_support::seeded_engine(Plans { idle: true, ..Default::default() });
+        e.start(0.);
+        let session = open(&mut e, 0.);
+        e.venue.park_on = Some(session.clone());
+        start(&mut e, now);
+        assert_eq!(e.venue.park_result, Some(Ok(())), "the eligible Slot parks in admission custody");
+        let plan = e.venue.plan.clone().unwrap();
+        (e, plan, session)
+    }
+    fn prepares(actions: &[Action]) -> usize {
+        actions.iter().filter(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. }))).count()
+    }
+    fn flush(e: &mut Engine<Plans>, now: f64) -> Vec<Action> {
+        e.handle(now, Event::TimerFired { timer: TimerId(u64::MAX - 1) });
+        e.drain_actions().collect()
+    }
+
+    /// N1: a parked Slot spends nothing; session_ready issues one fresh leg under
+    /// the same Plan root, queued in the drain, with one HTTP.
+    #[test]
+    fn a_parked_slot_resumes_as_a_fresh_leg_under_its_original_root() {
+        let (mut e, plan, session) = parked(0.);
+        let token = e.venue.park_token.clone().unwrap();
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(prepares(&actions), 0, "nothing is issued while parked");
+        let mut cx = Cx { now: 30_000., store: &mut e.store, io: &mut e.io };
+        assert!(cx.plan_slots(&plan).unwrap().is_empty(), "a parked Slot is reserved");
+        let waiters = cx.session_ready(&session);
+        assert_eq!(waiters.len(), 1);
+        let crate::request_context::Waiter::Ready(leg, pending) = waiters.into_iter().next().unwrap() else {
+            panic!("a live Plan resumes Ready");
+        };
+        assert_eq!(pending, token);
+        assert_eq!(leg.owner(), plan.owner(), "the original Plan root");
+        assert!(leg.deadline() > 30_000. + 20_000. - 1., "the window starts at resume");
+        assert!(leg.deadline() <= plan.deadline());
+        queue(&mut cx, leg, false).unwrap();
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(prepares(&actions), 1, "exactly one HTTP");
+    }
+
+    /// N3: Plan root expiry while parked: one Timeout terminal, the pending comes
+    /// back once through on_session_wait_expired, and nothing is sent.
+    #[test]
+    fn a_parked_slot_expires_with_its_plan_and_returns_its_pending_once() {
+        let (mut e, plan, _) = parked(0.);
+        let token = e.venue.park_token.clone().unwrap();
+        e.drain_actions().for_each(drop);
+        let timer = e.io.request_contexts.plan_timer(7).unwrap();
+        e.handle(plan.deadline(), Event::TimerFired { timer });
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        actions.extend(flush(&mut e, plan.deadline() + 1.));
+        assert_eq!(prepares(&actions), 0);
+        let failed = actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. }))).count();
+        assert_eq!(failed, 1, "one Plan terminal");
+        assert_eq!(e.venue.wait_expired.len(), 1, "the pending is returned once");
+        assert_eq!(e.venue.wait_expired[0].0, token);
+        assert!(e.venue.wait_ended.is_empty());
+    }
+
+    /// N4b: retire the old Session and open its replacement outside any readiness
+    /// scope; the ended callback re-parks on the new Session in ready custody,
+    /// whose login then resumes the leg.
+    #[test]
+    fn a_retired_session_ends_the_wait_in_ready_custody_for_a_repark() {
+        let (mut e, plan, old) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let replacement = open(&mut e, 1.);
+        e.venue.repark_on = Some(replacement.clone());
+        let returned = Cx { now: 1., store: &mut e.store, io: &mut e.io }
+            .retire_session(&old)
+            .unwrap();
+        assert!(returned.is_empty(), "a parked Slot is not a plain owner waiter");
+        let actions = flush(&mut e, 2.);
+        assert_eq!(prepares(&actions), 0);
+        assert_eq!(e.venue.wait_ended.len(), 1, "ended once, in ready custody");
+        assert_eq!(e.venue.wait_ended[0].1.outcome, Some(crate::Outcome::NotSent));
+        assert!(e.venue.wait_expired.is_empty());
+        let mut cx = Cx { now: 3., store: &mut e.store, io: &mut e.io };
+        let waiters = cx.session_ready(&replacement);
+        let Some(crate::request_context::Waiter::Ready(leg, _)) = waiters.into_iter().next() else {
+            panic!("the re-parked Slot resumes on the new Session");
+        };
+        assert_eq!(leg.owner(), plan.owner());
+    }
+
+    /// N6: parking needs Plan custody, an unparked Slot and a live Session, and
+    /// every refusal spends nothing.
+    #[test]
+    fn plan_session_wait_refusals_spend_nothing() {
+        let (mut e, plan, session) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let token = e.venue.park_token.clone().unwrap();
+        let slot = e.venue.slot.clone().unwrap();
+        let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+        let retired = cx.open_session(crate::request_context::SessionPolicy { credential: None, repeat_safe: true }).unwrap();
+        let _ = cx.retire_session(&retired).unwrap();
+        let before = (cx.io.next_id.clone(), cx.io.timers.len());
+        let again = cx.plan_session_wait(&plan, &slot, None, &session, token.clone());
+        assert_eq!(again.map_err(|(_, error)| error), Err(Error::Revoked), "already parked, and no custody");
+        let stale = cx.plan_session_wait(&plan, &slot, None, &retired, token);
+        assert_eq!(stale.map_err(|(_, error)| error), Err(Error::Revoked));
+        assert!(cx.io.next_id == before.0 && cx.io.timers.len() == before.1, "refusals spend nothing");
+    }
+
+    /// N8: the venue fails the Plan while a Slot is parked; one terminal, no
+    /// ended callback, and the pending comes back once.
+    #[test]
+    fn a_sealed_plan_returns_its_parked_pending_once_without_custody() {
+        let (mut e, plan, _) = parked(0.);
+        let token = e.venue.park_token.clone().unwrap();
+        e.drain_actions().for_each(drop);
+        Cx { now: 1., store: &mut e.store, io: &mut e.io }
+            .fail_plan(&plan, "venue gave up")
+            .unwrap();
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        actions.extend(flush(&mut e, 2.));
+        assert_eq!(prepares(&actions), 0);
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. }))).count(), 1);
+        assert!(e.venue.wait_ended.is_empty());
+        assert_eq!(e.venue.wait_expired.len(), 1);
+        assert_eq!(e.venue.wait_expired[0].0, token);
     }
 }

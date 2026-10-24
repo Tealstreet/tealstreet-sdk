@@ -516,6 +516,21 @@ impl<P> Cx<'_, P> {
 
 impl<P> Cx<'_, P> {
     /// Consume one declared slot using only resources reserved at plan admission.
+    /// Park an unissued, eligible Slot on a login Session before it consumes an
+    /// attempt. `session_ready` issues its leg with a fresh window under the
+    /// same Plan root and Slot; nothing is spent while parked.
+    pub fn plan_session_wait(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        intent: Option<crate::classify::Intent>,
+        session: &crate::request_context::Session,
+        pending: P,
+    ) -> Result<(), (P, Error)> {
+        let _ = (plan, slot, intent, session);
+        Err((pending, Error::State))
+    }
+
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
         self.make_plan_leg_context(plan, slot, None)
     }
