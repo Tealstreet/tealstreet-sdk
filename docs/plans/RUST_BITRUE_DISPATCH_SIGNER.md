@@ -268,7 +268,7 @@ fabricated-error-string fixture with genuine codec events and strengthening the
 Unknown terminal, exact diagnostic and retry interleavings. HMAC owner review
 of664d8ac0032 is CLEAR, with shared StampFloor source review still separate.
 
-Shared API-fit update: claude-m26ps4 owns the receipt-floor prerequisite. Proposed
+The receipt-floor prerequisite is owned by the credential-core lane. Proposed
 StampFloor is minted only by genuine SigningRelease; stamp_after(floor) applies
 max(0,stamp_ms(),previousReleasedStamp+1), with safe-integer overflow refusal.
 None means max(0,stamp_ms()), preserving the native negative-to-zero boundary
@@ -405,3 +405,19 @@ controls plus1compile-fail doc, registry3, TS construction4, and earlier305Binan
 controls on identical engine source PASS.
 Focused strict/checker/fmt gates pass; full fresh CI and HMAC-owner source review
 are still pending. No WASM/replay/size result is inferred from native tests.
+
+### CI follow-up: isolated family provider bootstrap
+
+The isolated Bitrue WASM replay failed before startup: the registry feature
+installed dispatch signing, but the WASM host's Bitrue feature omitted its own
+`dispatch-signing` gate. Combined/native feature unification hid that omission.
+Add that existing host feature to the Bitrue row only; keep the constructor and
+provider custody unchanged. Use the failed family replay as the original RED,
+compare the standalone Cargo feature closure, run scoped strict checks and let
+fresh family/replay CI prove the corrected bootstrap. The CPU-plan and replay
+failures downstream of the missing measurement are not independent timing misses.
+
+The secret scanner also flagged historical plan prose at commit 48f8b6cbe57,
+line 271 (the API-fit attribution sentence), not signing material. Reword the
+current sentence. An exact historical fingerprint allowance requires the
+maintainer's explicit approval; no broad rule/path exemption or history rewrite.
