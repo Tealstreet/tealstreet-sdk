@@ -472,8 +472,9 @@ any later engine-property lookup/export/free; later cleanup is host-only. This
 fatal catch is local to the private cleanup boundary: retirement bypasses invoke
 and disposed is already true, so failEngine's current disposed early return
 cannot be its only fatal catch. Separate controls cover RuntimeError, RangeError
-and an ordinary Error from retirement; an ordinary Error still attempts healthy
-free and later host releases, while either fatal error forbids all engine access. Direct healthy cleanup
+and an ordinary Error from retirement. Any retirement failure records terminal
+deadError before later engine access/free; every later host-owned release is
+still attempted. An ordinary Error is not proof that the snapshot retired. Direct healthy cleanup
 must also establish the public fence and respect the group guard; disposed alone
 is not its once-only guard. No captured Rust callback after poison is retained.
 
@@ -640,3 +641,20 @@ transition and no-engine-access assertions are unexecuted until retirement is
 implemented; they are gates, not evidence that a fatal retirement is handled.
 The earlier six-GREEN/five-RED review remains exact historical evidence for
 fe85831efa0, not a result claimed for these expanded controls.
+
+## First runtime source slice
+
+The first source integration is reviewed G2b `f5ab66e2819`, preserving its
+assertHttpHandoffIdle pre-effect guard. Constructor sealing and host-only
+retirement/poison cleanup are implemented first; no group-completion authority,
+Rust installed snapshot or native retirement is implied by passing JS controls.
+Exact group/native/snapshot hooks remain separately reviewed before adoption.
+
+Source review corrections: a missing required retirement hook or any thrown
+retirement error is terminal deadError and skips engine access/free, even for a
+borrowed engine. Hosted-signing cancellation must not call cancelHostedSigning
+after deadError. Trap/free compatibility tests now require zero frees after a
+trap for owned and borrowed engines, while healthy owned disposal still frees
+exactly once. Late callbacks must check the host fence before evaluating engine
+properties. The original post-poison hosted cancellation is reproduced before
+its guard; it is not an absent-snapshot-contract RED.
