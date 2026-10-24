@@ -6797,6 +6797,18 @@ and original owner. No Store change, HTTP, provider, timer or private credential
 is introduced. Valid signed leverage queries retain their original issuance,
 path, request fields, revision checks, response handling and native retries.
 
+## Polymarket and Kraken fixed settings (2026-10-24)
+
+Polymarket SetLeverage/SetMarginType/SetPositionMode and Kraken Futures
+SetPositionMode(false) adopt actual #1989 done_local_setting. They remain
+keyless Store no-ops with exact `[]` and `null` results, respectively, and no
+I/O. Success is confined to genuine Setting entry and now honors its receipt;
+an invalid clock produces typed InvalidInput/NotSent instead of numeric
+success. No Context, credential, physical attempt or signer readiness is
+created. Kraken true-mode refusal is unchanged. Inventory shrinks by two
+occurrences. See RUST_FIXED_SETTING_ADOPTION.md for the native compatibility
+and NEW-CONTRACT refusal controls.
+
 ## OKX reported closed-position caller-root custody
 
 FetchClosedPositions now owns the immutable original caller receipt deadline
