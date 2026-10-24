@@ -103,3 +103,19 @@ Clippy/fmt and all ratchets. Check the own target size before builds and clean
 between builds if over15G; no ENOSPC-window result is release evidence. CI owns
 workspace, feature, WASM and performance checks. Push only an intended freeze
 head as a draft, one PR Rust/head, then source reviews plus green CI permit READY.
+
+## Original execution checkpoint
+
+The unchanged production tree compiles and runs all15 dedicated controls:
+6 intended assertion REDs,9 working GREENs,0 ignored. The four full-capacity
+cases fail first at native success instead of refusal (one-way) or Unsupported
+instead of shared Internal (cross/isolated/hedged). The two genuine NaN Event
+cases fail at [] success or Unsupported instead of InvalidInput. These are
+runtime assertions, with no compile, fixture or missing-method failure.
+
+Working controls pin all four native variants without credentials, all four
+again in public-data-only mode, two zero-wait refusals before venue entry and
+two duplicate controls retaining the exact original Read owner. Each capacity
+recovery suffix validates all255 survivors, but remains unexecuted on original
+source after the earlier expected RED. Production, existing tests, Cargo and
+all inventories remain byte-exact7fe at this checkpoint.
