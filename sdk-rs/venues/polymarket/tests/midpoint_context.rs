@@ -237,7 +237,10 @@ fn native_hundred_token_batches_ignore_cross_batch_rows() {
         r#"{"1":"0.4","101":"0.9"}"#,
     ));
     assert_eq!(body_ids(&next), vec!["101", "102"]);
-    assert!(!engine.store().loaded().tickers);
+    assert!(
+        engine.store().loaded().tickers,
+        "native seed publishes accepted partial batches"
+    );
     assert_eq!(engine.store().tickers().len(), 1);
     assert_eq!(engine.store().tickers()[0].id, "1");
     let a = answer(&mut engine, &next, 12., r#"{"101":"0.6"}"#);

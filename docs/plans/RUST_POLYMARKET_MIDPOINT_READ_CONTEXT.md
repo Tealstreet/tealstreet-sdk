@@ -75,3 +75,12 @@ adoption requires unchanged controls GREEN, exact one-site inventory removal,
 foreign-map and credential-selection preservation, scoped native/strict checks,
 fresh CI and family size/performance. No push, production, READY or merge is
 part of this plan/RED checkpoint.
+
+## Original fixture correction
+
+The first compiled run found the three intended custody failures plus an
+incorrect working-control assumption that tickers remain unloaded between
+batches. Native flush_midpoints publishes accepted partial batches through
+set_tickers, which marks them loaded. The working control now asserts that
+existing incremental publication explicitly; no production behavior changes.
+That fixture mistake is excluded from original custody RED evidence.
