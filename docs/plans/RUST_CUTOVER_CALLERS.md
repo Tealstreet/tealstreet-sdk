@@ -6979,3 +6979,20 @@ and original owner, and local completion releases authority for immediate ID
 reuse. Native absent kind/outcome remain absent; these refusals do not use the
 ReadCompletion string-to-Internal projection. No TypeScript, host, CLI or AWS
 production caller signature changes are required.
+
+
+### Polymarket unsigned Gamma catalogue pages
+
+Unsigned Gamma /markets/keyset pages use separate keyless Background Read
+Contexts with Never retry and an explicit 20,000 ms admission-to-expiry bound,
+including stalled host Prepare/Bind. This is a new physical lifetime bound on
+the previously unbounded raw sender; it imposes no aggregate cursor-walk deadline.
+Exact current-page DATA authority precedes row/envelope parsing, walk dedup and
+publication. Final rows and prediction metadata still publish atomically; an
+expired or failed page never publishes its prefix. The native whole-walk retry
+starts from the first page after its existing jittered Backoff and clears native
+walk state there. Physical contexts retire before any next page or failure retry.
+Unissued admission/queue pressure backs off the first page without recursive
+page admission. Private startup, midpoint progression, cursor geometry, quoted
+HTTP data and signing/key selection retain their native behavior. No command or
+financial outcome is created by this Background Read adoption.

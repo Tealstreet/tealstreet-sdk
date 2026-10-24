@@ -104,3 +104,32 @@ old fixture, Cargo, inventory, selection or shared-file change is present.
 An initial extra delimiter in the new fixture stopped rustfmt/compilation;
 it was corrected before the committed executable original checkpoint and is
 excluded from all assertion-RED counts. No native assertion was relaxed.
+
+## Managed source checkpoint
+
+Both original reviews CLEAR at e91f5d6548d (uufub4 core/API, 5c57jl native/caller).
+Docs-only 4a82 narrows private-startup evidence to existing native fixtures.
+Source artifact SHA256
+2855e4062c7f31fdc5f4404c2616109e6a6b06b1a5502274571fa2be676bd806
+is independently core/API CLEAR with the unchanged twelve controls passing.
+The applied lib.rs is byte-exact to that reviewed artifact result.
+
+Own execution passes all twelve unchanged originals plus four additional real
+admission controls: 256-peer pressure backs off without recursive admission,
+releases peers and recovers; stale failed/late host callbacks cannot clear a
+new current preparation; an expired interrupted stream cannot poison retry
+dedup; malformed/empty/error cleanup can re-saturate all 256 credits before and
+after successful recovery. These use genuine engine Contexts and public
+Prepare/Bind/Claim; no fabricated witness or production seam is added.
+
+Scoped Polymarket tests pass 160/160, zero ignored, including native account,
+trading, history, public/startup, security and the doc test. Strict all-target
+Clippy and changed-file formatting pass. Existing account/trading collectors
+change only to prepared_actions at their native self.now; startup fixtures
+collect managed releases at their unchanged explicit cause clocks. All native
+wire, financial, readiness, timer and failure assertions remain unchanged.
+Private startup independent of midpoint success is covered by that existing
+startup fixture, separately from the public-only new target. The manifest
+removes only the named count-one Gamma sender; all foreign and selection
+entries remain exact. Committed source preservation, native/caller review,
+actual landing integration, CI/family size/performance and READY remain gates.
