@@ -237,3 +237,14 @@ including 30 PublicTrades controls, 29 history controls, 28 candle controls and
 all in-crate carrier matches. The first rerun hit disk exhaustion writing Cargo
 incremental cache; only this worktree's disposable incremental cache was cleared,
 then the same scoped crate run passed. No source/test failure was masked.
+
+Actual landing 0258ed21afe (including #2063 and the Backpack inventory prune)
+is plain-merged; the only manual conflict was CALLERS, resolved as incoming
+plus this slice's suffix once. Full bans, request and credential-selection
+ratchets pass locally. Foreign request-manifest bytes/order are exact incoming:
+the diff is solely the one named Kraken public sender deletion. Signing and
+credential manifests are unchanged. Scoped all-target Kraken Clippy with
+-D warnings and rustfmt pass; full-crate 320/320 and the final 30+29 rerun pass.
+The new public query constructs its lowercase symbol before vec!, avoiding a
+new incidental lexical macro match; no existing frozen binding is renamed and
+no checker/bootstrap is changed. Source reviews and the single PR run are next.

@@ -152,7 +152,8 @@ impl Kraken {
                 return;
             }
         };
-        let mut params = vec![("symbol", request.symbol.to_ascii_lowercase())];
+        let symbol = request.symbol.to_ascii_lowercase();
+        let mut params = vec![("symbol", symbol)];
         if let Some(cursor) = request.history.cursor() {
             params.push(("lastTime", cursor.to_owned()));
         }
