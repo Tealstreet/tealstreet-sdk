@@ -4,7 +4,6 @@ use crate::account_wire::*;
 use crate::{Pending, Task, WeexFutures};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
-use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -433,13 +432,8 @@ impl WeexFutures {
             String::new()
         };
         let stream = (!matches!(request.kind, Kind::Metadata)).then_some(ArrayAt::Root);
-        let slots = Slots::new(
-            self.credentials.primary.clone(),
-            self.credentials.read.clone(),
-            SlotPolicy::default(),
-        );
         let selected = SelectedRead::select(
-            &slots,
+            &self.slots,
             ReadRole::Read {
                 scope: Some(request.kind.auth_scope()),
             },
