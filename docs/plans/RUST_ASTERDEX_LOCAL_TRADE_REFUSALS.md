@@ -216,3 +216,11 @@ review findings above are fixed before runtime work. Current-tip integration
 `2ad79101a0d` genuinely merges actuale4059dc97384; both request-context checks
 (15 controls) and full bans pass after preserving its incoming inventory/prunes.
 Runtime/source maps remain unchanged; only the cfg(test) declaration is added.
+
+Bounded review closure at `9c6757bc0f6`: source/adversarial, caller/financial
+and full-map reviews are CLEAR after the two cancellation-control corrections.
+Architecture gate No. All four own paths and the33-control declaration were
+independently inspected; runtime remains incoming-exact after removing the
+cfg(test) declaration. Strict scoped Clippy/fmt pass on the expanded source.
+The exact3F/3O prune remains planned, not applied, and no adoption family-size
+claim is made. The independent reviews did not run additional builds or CI.
