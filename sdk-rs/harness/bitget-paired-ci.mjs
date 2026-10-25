@@ -67,10 +67,15 @@ export async function selectBitgetPair({ reader, runId, root, gitRead = (...args
     insist(gitRead('merge-base', '--is-ancestor', baseline, landingTip) === '' && firstParents.includes(baseline),
     'checkout base must be an actual first-parent Rust landing');
     insist(firstParents.includes(BITGET_CUMULATIVE_ANCHOR), 'fixed cumulative anchor must be on the live first-parent landing chain');
-    const graphqlBaseRefOid = await reader.getPullBaseOid(pull.number);
+    let graphqlBaseRefOid = null, graphqlError = null;
+    try {
+      graphqlBaseRefOid = await reader.getPullBaseOid(pull.number);
+    } catch (error) {
+      graphqlError = String(error?.message ?? error);
+    }
     console.log(JSON.stringify({ bitgetBaseSelection: { checkout: checkoutSha, baseline, landingTip,
       runAssociatedBase: associatedBase ?? null, pullMetadataBase: pull.base.sha ?? null,
-      graphqlBaseRefOid: graphqlBaseRefOid ?? null } }));
+      graphqlBaseRefOid: graphqlBaseRefOid ?? null, graphqlError } }));
     pull = { ...pull, base: { ...pull.base, sha: baseline } };
     mergeTree = gitRead('merge-tree', '--write-tree', baseline, pull.head.sha);
     insist(/^[a-f0-9]{40}$/.test(mergeTree), 'composition is not a clean automatic tree');

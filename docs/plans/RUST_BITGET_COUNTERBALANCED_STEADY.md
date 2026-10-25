@@ -22,7 +22,9 @@ GET git/ref/heads/feat/rust-rewrite; the fetched local ref must agree exactly.
 The run-associated base.sha, pull-metadata base.sha and GraphQL baseRefOid can
 all be stale: log all three alongside the live target and selected parent,
 without gating ancestry on any metadata SHA. A single-parent PR-head checkout
-cannot qualify.
+cannot qualify. GraphQL errors are recorded and cannot reject a selection.
+If the landing ref advances between its API read and fetch, the disagreement
+refuses; only a new authorized run can collect a fresh consistent snapshot.
 Landing push runs use the
 authenticated actual first parent. No workflow input or report may choose A or
 the tolerance. Later target landings cannot move that issued A. A changed PR

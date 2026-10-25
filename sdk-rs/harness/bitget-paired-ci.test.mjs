@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { BITGET_CUMULATIVE_ANCHOR } from './bitget-paired-steady.mjs';
 import { selectBitgetPair } from './bitget-paired-ci.mjs';
 
@@ -154,4 +154,32 @@ test('real run 40238038972 uses checkout base 035948 even though both metadata b
   assert.equal(result.baseline, landed);
   assert.equal(result.candidate, checkout);
   assert.equal(result.candidateTree, actualTree);
+});
+
+test('informational GraphQL errors and differing OIDs cannot change real checkout selection', async t => {
+  for (const throws of [true, false]) await t.test(throws ? 'GraphQL throws' : 'GraphQL OID differs', async () => {
+    const x = fixture();
+    const landed = '035948b564a9338371be2b2aef4cad073e7302a9';
+    x.state.checkout.parents[0].sha = landed;
+    x.state.localParents[0] = landed;
+    x.state.firstParents.unshift(landed);
+    x.context.reader.getPullBaseOid = async () => {
+      if (throws) throw new Error('GraphQL HTTP 503');
+      return H;
+    };
+    const original = x.context.gitRead;
+    x.context.gitRead = (...args) => args[0] === 'merge-tree' ? TREE : original(...args);
+    const lines = [];
+    const logger = mock.method(console, 'log', line => lines.push(JSON.parse(line)));
+    try {
+      const selected = await selectBitgetPair(x.context);
+      assert.equal(selected.baseline, landed);
+      const logged = lines[0].bitgetBaseSelection;
+      assert.equal(logged.graphqlBaseRefOid, throws ? null : H);
+      assert.equal(logged.graphqlError, throws ? 'GraphQL HTTP 503' : null);
+      assert.equal(logged.baseline, landed);
+    } finally {
+      logger.mock.restore();
+    }
+  });
 });
