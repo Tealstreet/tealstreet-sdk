@@ -1937,7 +1937,8 @@ impl CommandWrites {
     /// evidence. This grants no completion, retry or observer authority. The
     /// execution owner supplies presentation-only observer termination errors.
     pub fn project_failure(&self, fallback: VenueError) -> Result<VenueError, Error> {
-        self.failure_projection(fallback, None).map(|(error, _)| error)
+        self.failure_projection(fallback, None)
+            .map(|(error, _)| error)
     }
 
     fn failure_projection(
@@ -2120,13 +2121,12 @@ impl CommandWrites {
                 evidence: self.evidence,
             });
         }
-        let (error, evidence) =
-            self.failure_projection(
-                error.unwrap_or_else(|| {
-                    VenueError::new("Command writes are not all confirmed accepted")
-                }),
-                note,
-            )?;
+        let (error, evidence) = self.failure_projection(
+            error.unwrap_or_else(|| {
+                VenueError::new("Command writes are not all confirmed accepted")
+            }),
+            note,
+        )?;
         Ok(PreparedWriteSeal {
             failure: Some(error),
             evidence,
