@@ -7618,6 +7618,11 @@ that socket's only terminal: no open or close follows it. A custom host that
 ignores the flag stays bounded by the venue's backoff, but loses route
 parity.
 
+Not carried from TS: the tunnel counters (2 unauthenticated closes, 6 failed
+connects). The Rust venue cannot tell a tunnel route from a direct one. The
+hosts' existing silent-connect walk advances a tunnel that closes or never
+opens after 2 silent connects instead.
+
 ### TxFlow immediate local command custody
 
 Fifteen local occurrences now consume genuine command entry through shared Read

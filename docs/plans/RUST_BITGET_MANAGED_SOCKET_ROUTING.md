@@ -55,7 +55,7 @@ Status: dazzy3 CLEARed the legacy seam shape at `71fbebd9739`. The legacy-path s
   - Wins over `recover`.
 - **Evidence.** `AuthEvidence::RouteRefused(VenueError)` is a new pre-login control result. The driver retires the epoch with a new `RetireReason::RouteRefused`.
   - The next connect carries `reject_route`.
-  - **Backoff bound (dazzy3 A, option i).** Only the first refusal of a streak skips backoff. Every later refusal in the same streak reconnects at ordinary backoff pace, so a host that ignores `reject_route` can never hot-loop on a deterministic 40018/40024. A conforming host still walks every candidate, paying the backoff per extra route. A successful login ends the streak. The producer owns this bound: the managed driver on the managed path, the venue supervisor on the legacy path. The TS counters (2 unauthenticated closes, 6 failed connects) and exhaustion also cap the total redials before the socket stops.
+  - **Backoff bound (dazzy3 A, option i).** Only the first refusal of a streak skips backoff. Every later refusal in the same streak reconnects at ordinary backoff pace, so a host that ignores `reject_route` can never hot-loop on a deterministic 40018/40024. A conforming host still walks every candidate, paying the backoff per extra route. A successful login ends the streak. The producer owns this bound: the managed driver on the managed path, the venue supervisor on the legacy path. Exhaustion also caps the total redials before the socket stops.
   - RED: a host that ignores `rejectRoute` sees one immediate redial, then backoff-paced attempts, then a stop. It never sees a tight loop.
 - **Composition with `recover` (dazzy3 C).** `reject_route` and `recover` are orthogonal and are both carried. `reject_route` decides the candidate for that one connect: advance exactly one, and do not apply `recover`'s jump-to-last in the same connect. `recover` keeps its meaning for venue state: classic Bitget's `needs_recovery` resubscribe is still carried and honoured, so a route switch never drops recovery. In short, the host advances the route even when `recover` is set, and nothing else about `recover` changes.
   - RED: a classic route switch with `needs_recovery` set advances one candidate and still carries `recover`. The reconnect runs the classic recovery resubscribe.
@@ -80,7 +80,11 @@ Status: dazzy3 CLEARed the legacy seam shape at `71fbebd9739`. The legacy-path s
     - The venue marks the account degraded, so the account poll refreshes balance and orders every tick in place of the stopped stream.
     - The zero-reconnects RED pins all of this: exhaustion before first auth gives no `StartupFailed`, loaded startup state, one notice, and zero further private connects.
   - dazzy3 proposed instead retrying the last route under a long capped backoff (60 s or more). That is recorded as the alternative; ruling 3 stands unless the overseer reopens it.
-- **TS counters.** Carried over as data: `MAX_UNAUTHENTICATED_TUNNEL_CLOSES = 2` and `MAX_FAILED_TUNNEL_CONNECTS = 6`. Each sends `reject_route` once its threshold is met.
+- **TS tunnel counters: deferred, not implemented.** These are `MAX_UNAUTHENTICATED_TUNNEL_CLOSES = 2` and `MAX_FAILED_TUNNEL_CONNECTS = 6` (`bitget.ws-private.ts:229-230`).
+  - **Why not in the venue.** TS applies them only on a tunnel route, and the Rust venue cannot tell a tunnel route from a direct one. Counting closes on a direct-only route would send `reject_route` with no route left. Under ruling 3, that exhaustion stops a merely flaky private socket for good.
+  - **What still covers the silent case.** The hosts' existing silent-connect walk advances any route whose connect produced no non-ignored frame after 2 silent connects. That includes a tunnel that never opens or closes before a login answer. Native: `two_silent_connects_choose_passthrough_and_ignore_cosmetic_query_changes`. TS: `private frame pong counts toward stream proof`.
+  - **What is lost.** Only TS's distinct threshold of 6 for never-opening tunnels; the hosts already advance sooner.
+  - A follow-up may carry route-kind evidence from the host if exact parity is wanted.
 - **REST is unchanged.** REST 40018 keeps `AuthPermission`.
 
 ## Size (Bitget family at engine s; local raw, function names excluded; CI factor ~1.0)
@@ -92,7 +96,7 @@ The base is tip `f3ed1f32bf0`: Bitget is 1,340,440 in CI, and the allowance is 1
 | `managed-sockets` linked, no use (measured, `ms-bare` vs `ms-feat`) | **+53,253** | about 0 (four adopters already unify the feature) |
 | (1) adoption use: engine paths reached, net of Bitget's supervisor removal (estimate; WOO's whole adoption was +148,677, 77% engine, before fe7's -12.7K outline) | +25K to +50K | +5K to +15K (Bitget `Pending` instantiations) |
 | (2) seam: field, evidence, retire reason, event arm | +1K to +3K | +3K to +8K (every managed family links the arm) |
-| (3) Bitget evidence and counters | +1K to +2K | +1K to +2K |
+| (3) Bitget 40018/40024 evidence (counters deferred) | +1K to +2K | +1K to +2K |
 | **Total, (1) to (3)** | **about +80K to +108K, so about 1,420K to 1,448K** | about +10K to +25K |
 
 **Adoption alone does not fit the 1,409,024 allowance.** Even before slice 3, it is about 11K to 39K over.
