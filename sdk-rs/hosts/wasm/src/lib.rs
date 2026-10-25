@@ -697,6 +697,7 @@ impl WasmEngine {
         let (protocol_now, revision) = self.inner.signing_clock(now);
         let stamp_ms = safe_cex_engine::time::wire_stamp_ms(protocol_now);
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(stamp_ms),
             expiry_ms: None,
         }
@@ -892,7 +893,7 @@ impl WasmEngine {
             let (signer, identities) = safe_cex_venues::local_signer_from_json_for_mode(
                 venue,
                 std::mem::take(&mut *input),
-                safe_cex_venues::signer_setup_public_data_only(&options),
+                &options,
             )
             .map_err(construction_error)?;
             options.signing = Some(identities);

@@ -337,15 +337,24 @@ fn real_cancel_uses_the_out_of_band_remote_ed25519_answer() {
 fn identity_only_local_write_preserves_the_declared_receive_window() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
-    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
-        primary: Some(LocalIdentity {
-            key: Secret::new("provider-only-key".into()),
-            secret: Secret::new(STANDARD.encode([7u8; 32])),
-            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
-            ..Default::default()
-        }),
-        secondary: None,
-    })
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(LocalIdentity {
+                key: Secret::new("provider-only-key".into()),
+                secret: Secret::new(STANDARD.encode([7u8; 32])),
+                secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+        safe_cex_engine::signing::CredentialSetupPolicy {
+            primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+    )
     .unwrap();
     let mut e = identity_only_orders(
         &format!("[{ORDER}]"),

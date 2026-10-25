@@ -3,7 +3,9 @@
 //! by trusted setup as declared base58 and signed only by the provider.
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::book::Book;
-use safe_cex_engine::signing::{CredentialSetupPolicy, Identity, IdentitySetupPolicy, KeyEncoding};
+use safe_cex_engine::signing::{
+    Algorithm, CredentialSetupPolicy, Identity, IdentitySetupPolicy, KeyEncoding,
+};
 use safe_cex_engine::test_support::{prepared_actions, seeded_entropy};
 use safe_cex_engine::{
     Action, Command, Cx, Engine, HttpRequest, Method, Response, SignStep, SocketId, TimerId, Venue,
@@ -38,6 +40,7 @@ fn provider() -> (Arc<LocalSigner>, Identity) {
     let policy = CredentialSetupPolicy {
         primary: Some(IdentitySetupPolicy {
             secret_encoding: Some(KeyEncoding::Base58),
+            signing_algorithm: Some(Algorithm::Ed25519),
             ..Default::default()
         }),
         secondary: None,
