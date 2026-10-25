@@ -533,6 +533,7 @@ impl crate::SignStep for ParkedStep {
     ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
         Ok(crate::signing::SignRequest {
             receipt: crate::signing::SignReceipt {
+                nonce: None,
                 stamp_ms: Some(0.),
                 expiry_ms: None,
             },

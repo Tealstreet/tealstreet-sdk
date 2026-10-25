@@ -14,6 +14,7 @@ impl Prepared {
     fn at(dispatch: &DispatchContext<'_>) -> Result<Self, SignError> {
         let expiry = super::expiry(dispatch.now_ms);
         let receipt = SignReceipt {
+            nonce: None,
             stamp_ms: None,
             expiry_ms: Some(expiry as f64 * 1000.),
         };

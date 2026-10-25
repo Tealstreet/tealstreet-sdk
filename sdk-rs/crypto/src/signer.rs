@@ -1271,6 +1271,7 @@ mod tests {
             assert_eq!(identity.require_stable_id(), Ok("account/opaque-17"));
             let request = SignRequest {
                 receipt: safe_cex_engine::signing::SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(1000.),
                     expiry_ms: Some(2000.),
                 },

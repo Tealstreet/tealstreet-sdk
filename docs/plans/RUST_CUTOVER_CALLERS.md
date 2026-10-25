@@ -8614,3 +8614,56 @@ Caller-visible changes:
   derives from them (`signer_setup_public_data_only`), and so do resolved
   setup facts such as AsterDEX's version. `local_signer_from_json_for`, which
   has no options, refines nothing.
+
+## Dispatch nonce reservation contract
+
+A nonce-bearing managed HTTP recipe reserves at its actual signing prepare,
+from its trusted selected stable subject. This differs from queue-time nonce
+allocation: parked requests do not reserve ahead of requests that prepare first.
+The exact nonce is a canonical decimal u64 receipt field, independent of the
+safe-integer wire timestamp and #2024 StampFloor. Raw clocks above MAX_SAFE
+milliseconds refuse before provider/I/O; missing trusted stable subjects are
+InvalidInput/NotSent, with no secret hash fallback or authentication evidence.
+
+Pure venue admission and every other fallible admission run before the nonce
+mutex is acquired. Under that mutex, the engine checks the floor, commits
+Released and pacing, then advances the process-global floor with max. Observers
+and journal updates follow after the mutex is released. A newer reservation
+alone never supersedes older unreleased work.
+A nonce at or below that floor is discarded before apply or final Claim and
+re-prepared under the same physical identity and immutable deadline. The fixed
+MAX_NONCE_REPREPARES = 8 bounds nonce-only pre-send repairs per physical attempt:
+eight allows bounded local repair without an unbounded provider loop. A ninth
+supersession exhausts the bound as one Internal/NotSent terminal, with nothing
+sent during repair and no physical retry credit or authentication-health effect.
+Clock, route and Bearer repairs do not consume this nonce-only budget. A genuine
+new physical retry/resend starts its own fresh reservation and repair count.
+
+Only explicitly registered NonceUnscheduled venues can queue nonce work; the
+mutable scheduler admission path is exclusive. An unsupported registration,
+wrong selected binding or reused claim refuses before new request/signing IDs.
+A changed or hidden claim at prepare refuses before reservation/provider work. Engine ordering ends at the host handoff, not network arrival.
+A NonceUnscheduled venue refuses every nonempty mutation-barrier declaration
+before origin validation, IDs or credits. Ordinary Plans stay supported; group
+support requires a separate member-order proof and has no individual fallback.
+The existing Kraken secret-digest allocator stays only for its uncut-over native
+consumer, whose stable-namespace continuity and hosted nonce transport need
+separate certification before adoption.
+
+Selected reads carry nonce authority only through `queue_with_nonce`, minted
+from their private retained selection. Ordinary AdmittedRead/ReadLeg queues
+reject a declared nonce claim before request/signing IDs. The nonce queue
+requires the exact authority it just minted; missing, substituted or invalid
+subject claims return the pending wrapper with typed InvalidInput for contextual
+settlement. Nonce-free selected queues and direct managed Slots-claim requests
+keep their existing paths. Each physical retry/queue mints afresh; no reselection
+or reservation occurs while the read snapshot is held.
+
+
+The non-default engine feature `dispatch-nonce` includes reservation, canonical
+wire nonce receipts and the atomic release/repair fence together. Only the Kraken
+crate enables it; Kraken Spot and Futures share that family. Other standalone
+families retain stamp-only signing and reject a present wire nonce or a manually
+supplied nonce receipt. Public Rust opaque types/fields remain nameable, but
+feature-off minting refuses before recipe construction and physical IDs. Native
+host nonce controls require its explicit `dispatch-nonce` forwarding feature.
