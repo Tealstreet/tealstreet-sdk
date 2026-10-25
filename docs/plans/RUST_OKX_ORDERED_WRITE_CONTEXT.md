@@ -2,7 +2,10 @@
 
 ## Status (2026-10-25, claude-4yjlw0 takes over from codex-ih35js)
 
-- **Base and REDs.** The branch is `feat/rust-okx-ordered-write` from landing `b0008964fbb`, with ih35js's plan and originals merged unchanged. On that tip, `request_context_ordered_writes` still runs 13 controls: **two assertion REDs, eleven GREEN, zero ignored**.
+- **Base and REDs.** The branch is `feat/rust-okx-ordered-write` from landing `b0008964fbb`, with ih35js's plan and originals merged unchanged.
+  - The branch has since merged tip `7ada358c446`, which includes S0 (#2103) and #2111. It has no engine edits, so no S0 rewrite applied; only `docs/plans/README.md` conflicted.
+  - On that tip, `request_context_ordered_writes` still runs 13 controls: **two assertion REDs, eleven GREEN, zero ignored**.
+  - The REDs are `write_requires_managed_route_preparation_before_provider_or_release` and `admission_capacity_refusal_precedes_optimistic_store_change`.
 - **Engine prerequisites landed.**
   - The streamed serial Plan landed as #2092 (`ff219538b30`): no step cap, no root clock, incremental full IDs, and `SerialPolicy.refusals_complete`.
   - Condition waits (#2094) also landed, but OKX does not need them: it has no detection or mode wait and no in-job read.
