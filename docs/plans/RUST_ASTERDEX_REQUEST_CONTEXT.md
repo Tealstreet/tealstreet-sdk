@@ -397,3 +397,22 @@ Decisions (overseer, 2026-10-25):
 2. Slice 3 waits for #2093 (`sign.rs`) and merges (never rebases) whichever
    lands first; slices 1 and 2 proceed now. Reviewer:
    claude-m26ps4.
+
+### Slice 2 as built
+
+- FetchAccount and every history command admit the caller's read root
+  (`admit_caller_read_root`) at ingress. Each physical attempt mints a 20 s leg
+  under that root (`http_leg_context`) in the release path, after any clock
+  wait. The leg is retired before the next page or resend.
+- Background signed reads (account snapshots, private brackets) keep one
+  Context, and each resend goes through `http_retry_context(ReadFailure)`.
+- Deviation for review: history validates each page with
+  `validate_read_http_delivery(root, leg)` and completes only through the
+  root. It does not stage rows through `ReadHistoryRows`. Aster's strict
+  refusals (malformed rows, saturation, request budget, unexhausted range) still
+  fail the whole command with no partial result. Skipping `ReadHistoryRows`
+  saves budget; if review requires it, it is added here.
+- Prune: account.rs and history.rs reach zero, and the legacy public branch in
+  request.rs is deleted (17 occurrences). The signed write branch, trading and
+  listenKey remain for slice 3.
+
