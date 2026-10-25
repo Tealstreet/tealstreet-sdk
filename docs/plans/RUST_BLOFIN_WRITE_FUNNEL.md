@@ -53,6 +53,12 @@ Primary})` before validation. A local validation refusal is `fail_preflight`
     `dispatch_signing::Http`.
   - The Verify GET is `SerialCall{Read}` with the Preflight read credential:
     Secondary else Primary, as GET is today. It stays out of the journal.
+    It is never retried: it uses `continue_serial_plan`, never a delayed
+    continuation, so the engine's one read retry under `Next::After` does not
+    apply. This matches native
+    `failed_final_detail_read_is_not_retried_and_never_places`.
+  - Every Mutation `SerialCall` keeps `attempts: 1`. BloFin has no native
+    single resend of a proven refusal.
 - **Native pauses.** The 350 ms (placement and normal or algo cancel) and
   1000 ms (TP/SL cancel) pauses become `continue_serial_plan_after(delay)`
   after the step's DATA. This is the first use after Mutation DATA (Bitget uses
@@ -112,7 +118,9 @@ successful terminal.
   - The D-b RED pins the result. If it fails, a minimal clamp returns rather
     than the field.
 - **D-c, cancel "gone".**
-  - Code 1000 or "does not exist" on a cancel is `Satisfied(Cancel)`.
+  - Code 1000 or "does not exist" on a cancel is `Satisfied(Cancel)`. The
+    CodeTable row needs `only: Some(Cancel)`, since classify rejects a
+    Satisfied row without a matching `only`.
   - Satisfied projects to `WriteResult::Accepted{[]}`, so the engine would
     permit continuing to a dependent replacement. Stopping is therefore a venue
     decision: when a replacement depends on the cancel, the venue stops before
@@ -155,6 +163,10 @@ short]}], PlanPolicy{Mutation, Primary, ..}, [MutationBarrierBound{step: 0}])`,
 
 ## Size gate
 
+The number to watch is the family delta against the BloFin venue budget
+(1,343,488). After S1 the Plan core is shared, so the combined delta should be
+small.
+
 Post-S1, a combined increase over +30K goes to the overseer. W1 links
 `serial-plans`; W2 adds `http-mutation-barriers`, making BloFin the first crate
 with both. Each phase freezes a paired measurement on the actual landing tip
@@ -173,6 +185,12 @@ W1 (each fails on the base):
   with exact native bytes, and the Verify GET is a managed Read;
 - a 350 ms and a 1000 ms pause are `continue_serial_plan_after` continuations
   with no early send;
+- a pause is admitted only after a released Accepted, Rejected or KnownPartial
+  fact. A PartialUnknown batch ends the job rather than waiting out the pause.
+- retirement or a released 503 during a pause sends nothing later, clears the
+  timer, and gives exactly one root terminal;
+- a parked command whose caller wait expires while queued fails once, does not
+  block the FIFO, and `request_preflight_ready` wakes the next command;
 - D-a: a documented row refusal is Rejected, an unlisted code is Unknown, a
   shape mismatch is Unknown, and exact-row versus range precedence holds;
 - D-b: a Verify failure after an Accepted cancel is never NotSent;
@@ -186,7 +204,8 @@ W1 (each fails on the base):
 
 W2:
 
-- either leg's preparation failure gives zero HTTP and NotSent;
+- either leg's preparation failure gives zero HTTP and NotSent, including a
+  refusal on the second leg after the first leg prepared;
 - both succeed and commit;
 - one 503 plus one Accepted gives Unknown with the ID kept and no commit.
 
