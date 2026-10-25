@@ -2,7 +2,7 @@
 //! documented row (the replay tapes' V5 payloads) and every single-field
 //! mutation of it decodes to the same fields, or fails with the same message.
 use super::*;
-use serde_json::Value;
+use serde_json::value::RawValue;
 
 const ORDERS: &str = include_str!("documented-orders.jsonl");
 const POSITIONS: &str = include_str!("documented-positions.jsonl");
@@ -125,24 +125,54 @@ mod derived {
     }
 }
 
-macro_rules! same_fields {
-    ($a:expr, $b:expr, $text:expr; $($field:ident),+ $(,)?) => {
-        {
-            $(assert_eq!($a.$field, $b.$field, "{} on {}", stringify!($field), $text);)+
-        }
-    };
-}
-
 fn order_parity(text: &str) {
     let shipped = serde_json::from_str::<OrderRow>(text);
     let derived = serde_json::from_str::<derived::OrderRow>(text);
     match (shipped, derived) {
-        (Ok(a), Ok(b)) => same_fields!(a, b, text;
-            order_id, order_link_id, symbol, category, price, qty, side, position_idx,
-            order_status, reject_reason, avg_price, leaves_qty, cum_exec_qty, cum_exec_value,
-            time_in_force, order_type, stop_order_type, trigger_price, trigger_direction,
-            take_profit, stop_loss, tp_trigger_by, sl_trigger_by, trigger_by, reduce_only,
-            close_on_trigger, tpsl_mode, create_type, created_time, updated_time),
+        (Ok(a), Ok(b)) => {
+            assert_eq!(a.order_id, b.order_id, "order_id on {text}");
+            assert_eq!(a.order_link_id, b.order_link_id, "order_link_id on {text}");
+            assert_eq!(a.symbol, b.symbol, "symbol on {text}");
+            assert_eq!(a.category, b.category, "category on {text}");
+            assert_eq!(a.price, b.price, "price on {text}");
+            assert_eq!(a.qty, b.qty, "qty on {text}");
+            assert_eq!(a.side, b.side, "side on {text}");
+            assert_eq!(a.position_idx, b.position_idx, "position_idx on {text}");
+            assert_eq!(a.order_status, b.order_status, "order_status on {text}");
+            assert_eq!(a.reject_reason, b.reject_reason, "reject_reason on {text}");
+            assert_eq!(a.avg_price, b.avg_price, "avg_price on {text}");
+            assert_eq!(a.leaves_qty, b.leaves_qty, "leaves_qty on {text}");
+            assert_eq!(a.cum_exec_qty, b.cum_exec_qty, "cum_exec_qty on {text}");
+            assert_eq!(
+                a.cum_exec_value, b.cum_exec_value,
+                "cum_exec_value on {text}"
+            );
+            assert_eq!(a.time_in_force, b.time_in_force, "time_in_force on {text}");
+            assert_eq!(a.order_type, b.order_type, "order_type on {text}");
+            assert_eq!(
+                a.stop_order_type, b.stop_order_type,
+                "stop_order_type on {text}"
+            );
+            assert_eq!(a.trigger_price, b.trigger_price, "trigger_price on {text}");
+            assert_eq!(
+                a.trigger_direction, b.trigger_direction,
+                "trigger_direction on {text}"
+            );
+            assert_eq!(a.take_profit, b.take_profit, "take_profit on {text}");
+            assert_eq!(a.stop_loss, b.stop_loss, "stop_loss on {text}");
+            assert_eq!(a.tp_trigger_by, b.tp_trigger_by, "tp_trigger_by on {text}");
+            assert_eq!(a.sl_trigger_by, b.sl_trigger_by, "sl_trigger_by on {text}");
+            assert_eq!(a.trigger_by, b.trigger_by, "trigger_by on {text}");
+            assert_eq!(a.reduce_only, b.reduce_only, "reduce_only on {text}");
+            assert_eq!(
+                a.close_on_trigger, b.close_on_trigger,
+                "close_on_trigger on {text}"
+            );
+            assert_eq!(a.tpsl_mode, b.tpsl_mode, "tpsl_mode on {text}");
+            assert_eq!(a.create_type, b.create_type, "create_type on {text}");
+            assert_eq!(a.created_time, b.created_time, "created_time on {text}");
+            assert_eq!(a.updated_time, b.updated_time, "updated_time on {text}");
+        }
         (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string(), "error on {text}"),
         (a, b) => panic!(
             "outcome differs on {text}: shipped ok={} derived ok={}",
@@ -164,10 +194,41 @@ fn position_parity(text: &str) {
     let shipped = serde_json::from_str::<PositionRow>(text);
     let derived = serde_json::from_str::<derived::PositionRow>(text);
     match (shipped, derived) {
-        (Ok(a), Ok(b)) => same_fields!(a, b, text;
-            symbol, category, side, size, position_idx, avg_price, mark_price, entry_price,
-            position_value, leverage, unrealised_pnl, cur_realised_pnl, liq_price, position_im,
-            seq, position_status, updated_time, delta, gamma, vega, theta),
+        (Ok(a), Ok(b)) => {
+            assert_eq!(a.symbol, b.symbol, "symbol on {text}");
+            assert_eq!(a.category, b.category, "category on {text}");
+            assert_eq!(a.side, b.side, "side on {text}");
+            assert_eq!(a.size, b.size, "size on {text}");
+            assert_eq!(a.position_idx, b.position_idx, "position_idx on {text}");
+            assert_eq!(a.avg_price, b.avg_price, "avg_price on {text}");
+            assert_eq!(a.mark_price, b.mark_price, "mark_price on {text}");
+            assert_eq!(a.entry_price, b.entry_price, "entry_price on {text}");
+            assert_eq!(
+                a.position_value, b.position_value,
+                "position_value on {text}"
+            );
+            assert_eq!(a.leverage, b.leverage, "leverage on {text}");
+            assert_eq!(
+                a.unrealised_pnl, b.unrealised_pnl,
+                "unrealised_pnl on {text}"
+            );
+            assert_eq!(
+                a.cur_realised_pnl, b.cur_realised_pnl,
+                "cur_realised_pnl on {text}"
+            );
+            assert_eq!(a.liq_price, b.liq_price, "liq_price on {text}");
+            assert_eq!(a.position_im, b.position_im, "position_im on {text}");
+            assert_eq!(a.seq, b.seq, "seq on {text}");
+            assert_eq!(
+                a.position_status, b.position_status,
+                "position_status on {text}"
+            );
+            assert_eq!(a.updated_time, b.updated_time, "updated_time on {text}");
+            assert_eq!(a.delta, b.delta, "delta on {text}");
+            assert_eq!(a.gamma, b.gamma, "gamma on {text}");
+            assert_eq!(a.vega, b.vega, "vega on {text}");
+            assert_eq!(a.theta, b.theta, "theta on {text}");
+        }
         (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string(), "error on {text}"),
         (a, b) => panic!(
             "outcome differs on {text}: shipped ok={} derived ok={}",
@@ -185,45 +246,80 @@ fn position_parity(text: &str) {
     );
 }
 
+/// A row's fields in order, each value as its raw JSON text.
+struct Entries(Vec<(String, Box<RawValue>)>);
+
+impl<'de> Deserialize<'de> for Entries {
+    fn deserialize<D: serde::Deserializer<'de>>(raw: D) -> Result<Self, D::Error> {
+        struct Visit;
+        impl<'de> serde::de::Visitor<'de> for Visit {
+            type Value = Entries;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("an object")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> Result<Entries, M::Error> {
+                let mut entries = Vec::new();
+                while let Some(entry) = map.next_entry::<String, Box<RawValue>>()? {
+                    entries.push(entry);
+                }
+                Ok(Entries(entries))
+            }
+        }
+        raw.deserialize_map(Visit)
+    }
+}
+
+fn object(entries: &[(String, String)]) -> String {
+    let body: Vec<String> = entries
+        .iter()
+        .map(|(key, value)| format!("{}:{value}", serde_json::to_string(key).unwrap()))
+        .collect();
+    format!("{{{}}}", body.join(","))
+}
+
 /// Each documented row, then every single-field mutation of it.
 fn corpus(rows: &str) -> Vec<String> {
+    let replacements = [
+        "null",
+        "7",
+        "-1.5",
+        "true",
+        "false",
+        "\"text\"",
+        "\"1\"",
+        "\"a\\\"b\\u00e9\"",
+        "{}",
+        "[]",
+    ];
     let mut out = Vec::new();
     for row in rows.lines().filter(|line| !line.trim().is_empty()) {
         out.push(row.to_owned());
-        let Value::Object(object) = serde_json::from_str::<Value>(row).unwrap() else {
-            panic!("a documented row is an object");
-        };
-        for key in object.keys() {
-            for replacement in [
-                Value::Null,
-                Value::from(7),
-                Value::from(-1.5),
-                Value::from(true),
-                Value::from(false),
-                Value::from("text"),
-                Value::from("1"),
-                Value::from("a\"b\\u00e9"),
-                serde_json::json!({}),
-                serde_json::json!([]),
-            ] {
-                let mut mutated = object.clone();
-                mutated.insert(key.clone(), replacement);
-                out.push(Value::Object(mutated).to_string());
+        let entries: Vec<(String, String)> = serde_json::from_str::<Entries>(row)
+            .expect("a documented row is an object")
+            .0
+            .into_iter()
+            .map(|(key, value)| (key, value.get().to_owned()))
+            .collect();
+        for (index, (key, _)) in entries.iter().enumerate() {
+            for replacement in replacements {
+                let mut mutated = entries.clone();
+                mutated[index].1 = replacement.to_owned();
+                out.push(object(&mutated));
             }
-            let mut removed = object.clone();
-            removed.remove(key);
-            out.push(Value::Object(removed).to_string());
+            let mut removed = entries.clone();
+            removed.remove(index);
+            out.push(object(&removed));
             // A duplicated key, first and last.
             let quoted = serde_json::to_string(key).unwrap();
             out.push(format!("{{{quoted}:\"dup\",{}", &row[1..]));
             out.push(format!("{},{quoted}:\"dup\"}}", &row[..row.len() - 1]));
         }
-        let mut unknown = object.clone();
-        unknown.insert(
-            "neverDocumented".into(),
-            serde_json::json!({"nested": [1, 2]}),
-        );
-        out.push(Value::Object(unknown).to_string());
+        let mut unknown = entries.clone();
+        unknown.push(("neverDocumented".into(), "{\"nested\":[1,2]}".into()));
+        out.push(object(&unknown));
     }
     for odd in [
         "{}",
