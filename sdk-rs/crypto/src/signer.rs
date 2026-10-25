@@ -1592,7 +1592,7 @@ mod tests {
         let (seed, _, _) = zklink_case();
         let (signer, ids) =
             LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
-        let request = sha512_request(ids.primary.unwrap().signing);
+        let request = sha512_request(ids.primary.unwrap().signing_ref().unwrap().clone());
         assert_eq!(
             crate::hex(&signer.sign_now(&request).unwrap().values[0]),
             "689ec455eb6b1b55d05a2a3662bfe2faabed0c3445180e4efa855216f53f7c5d\
