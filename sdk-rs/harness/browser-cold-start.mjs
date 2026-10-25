@@ -149,6 +149,59 @@ export function debuggingPort(text) {
   return Number(port);
 }
 
+const chromeState = (child, phase) => ({
+  phase, executable: child.spawnfile, pid: child.pid ?? null,
+  exitCode: child.exitCode, signal: child.signalCode,
+});
+
+export async function waitForChrome(child, profile, {
+  now = () => performance.now(), wait = pause,
+  readPort = () => readFileSync(join(profile, 'DevToolsActivePort'), 'utf8'),
+} = {}) {
+  const started = now(), deadline = started + 15_000;
+  let spawned = false, ended, failure, portFile = 'missing';
+  const onSpawn = () => { spawned = true; };
+  const onExit = (code, signal) => { ended = { code, signal }; };
+  const onError = (error) => { failure = error; };
+  child.on('spawn', onSpawn).on('exit', onExit).on('error', onError);
+  const refused = (message, cause) => Object.assign(new Error(message, { cause }), {
+    launch: { ...chromeState(child, spawned ? 'devtools-ready' : 'spawn'),
+      exitCode: ended?.code ?? child.exitCode, signal: ended?.signal ?? child.signalCode,
+      elapsedMs: now() - started, portFile },
+  });
+  const check = () => {
+    if (failure) throw refused(`Chrome spawn failed: ${failure.message}`, failure);
+    if (ended || child.exitCode !== null || child.signalCode !== null)
+      throw refused('Chrome exited before debugging readiness');
+    if (now() >= deadline) throw refused('Chrome debugging port timed out');
+  };
+  try {
+    for (;;) {
+      check();
+      if (spawned) {
+        let text;
+        try { text = readPort(); } catch (error) {
+          if (error.code !== 'ENOENT') throw refused('Cannot read Chrome debugging metadata', error);
+        }
+        if (text !== undefined) {
+          portFile = 'partial';
+          if (text.trim().split('\n').length >= 2) {
+            let port;
+            try { port = debuggingPort(text); }
+            catch (error) { portFile = 'invalid'; throw refused(error.message, error); }
+            portFile = 'ready';
+            check();
+            return port;
+          }
+        }
+      }
+      await wait(Math.min(100, deadline - now()));
+    }
+  } finally {
+    child.off('spawn', onSpawn).off('exit', onExit).off('error', onError);
+  }
+}
+
 export async function stopChrome(child, cdp, signalGroup = process.kill) {
   // Chrome's parent may exit before its renderers/zygotes stop writing. Every
   // launch owns a separate POSIX process group; close gracefully, then reap the
@@ -178,26 +231,19 @@ async function sampleChrome(origin, asset) {
     '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank',
   ], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
-  let failure;
+  let phase = 'spawn';
   let cdp;
   child.stderr.on('data', (data) => { stderr = (stderr + data).slice(-4000); });
-  child.on('error', (error) => { failure = error; });
   try {
-    let port;
-    for (let attempt = 0; attempt < 150; attempt++) {
-      if (failure || child.exitCode !== null) throw failure ?? new Error(`Chrome exited: ${stderr}`);
-      let text;
-      try { text = readFileSync(join(profile, 'DevToolsActivePort'), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-      if (text) { port = debuggingPort(text); break; }
-      await pause(100);
-    }
-    requireValue(port, `Chrome debugging port timed out: ${stderr}`);
+    const port = await waitForChrome(child, profile);
+    phase = 'target';
     const target = await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(origin)}`, { method: 'PUT', signal: AbortSignal.timeout(30_000) });
     requireValue(target.ok, 'Cannot create Chrome target');
     const page = await target.json();
     requireValue(typeof page.webSocketDebuggerUrl === 'string' && page.webSocketDebuggerUrl.startsWith(`ws://127.0.0.1:${port}/`), 'Invalid Chrome target socket');
     cdp = new Cdp(new WebSocket(page.webSocketDebuggerUrl));
     await cdp.send('Page.enable');
+    phase = 'navigation';
     // Ensure same-origin navigation has committed before constructing the worker.
     for (let attempt = 0; attempt < 100; attempt++) {
       const state = await cdp.send('Runtime.evaluate', { expression: 'location.origin', returnByValue: true });
@@ -207,9 +253,14 @@ async function sampleChrome(origin, asset) {
     }
     const version = await cdp.send('Browser.getVersion');
     const chromeLaunchMs = performance.now() - start;
+    phase = 'worker';
     const measurement = await evaluateWorker(cdp, asset.layout, asset.key === 'combined' ? 'bybit' : asset.key);
     return { ...measurement, chromeLaunchMs, browser: version.product, jsVersion: version.jsVersion };
-  } catch (error) { throw new Error(`${asset.key}: ${error.message}\n${stderr}`, { cause: error }); }
+  } catch (error) {
+    throw Object.assign(new Error(`${asset.key}: ${error.message}\n${stderr}`, { cause: error }), {
+      launch: error.launch ?? chromeState(child, phase),
+    });
+  }
   finally {
     await stopChrome(child, cdp);
     rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -235,7 +286,7 @@ export async function measureBrowser({ inputs, out, root = process.cwd(), env = 
       http.requests.length = 0;
       let measured;
       try { measured = await sampleChrome(origin, asset); }
-      catch (error) { report.failedSample = { key: asset.key, sample, requests: [...http.requests] }; throw error; }
+      catch (error) { report.failedSample = { key: asset.key, sample, requests: [...http.requests], launch: error.launch }; throw error; }
       report.samples.push({ key: asset.key, sample, ...measured, wasmRequests: http.requests.filter((r) => r.path.endsWith('.wasm')) });
       save();
       console.log(`${asset.key} sample ${sample + 1}/${SAMPLE_COUNT}: ${measured.moduleReadyMs.toFixed(2)} ms`);
