@@ -288,3 +288,98 @@ owners through Aimux; the earlier messages to the dead IDs did not establish
 delivery. Shared error-classification ownership is now `claude-dazzy3`; this
 checkpoint has no outstanding request to its predecessor. Retry scheduling
 remains with `codex-uufub4`.
+
+## Remaining funnel checkpoint (2026-10-25, claude-19pt8s)
+
+Base `c6a5c4bb0a4`; branch `feat/rust-asterdex-managed-funnel`. Docs only.
+Earlier slices removed 39 of the 71 occurrences (local read admission, local
+trade refusals, the listenKey session write). The unmodified scanner now
+reports **23 fingerprints / 32 occurrences**:
+
+| File | Sites (line at base) | What it is |
+| --- | --- | --- |
+| `request.rs` | 207 `format!` over `request.path`; 210/213 public `request_streamed`/`request`; 256/257 signed `request_streamed`/`request`; 351 `matches!(&request.pending, ..)`; 468 clock `request` | The shared transport: every public read, every signed read and write, and the clock. |
+| `lib.rs` | 811/812 DepthRead `done`/`fail`; 892/893 Klines `done`/`fail`; 1003 DepthRead `fail`; 1013 Klines `fail(.. to_owned())` | Public command terminals. |
+| `account.rs` | 736/737 Info `done`/`fail` | FetchAccount terminal. |
+| `history.rs` | 660-891: 15 `done`/`fail` | Fills, Orders, Income and Trades terminals, including the strict "no partial result" refusals. |
+| `trading.rs` | 473/475 job `fail`/`done`; 489 and 501 `matches!(&request.call, ..)` | Multi-step trade jobs. |
+
+Every site is accounted for; no Aster `sign_http` remains, and the listenKey
+writes already use `session_context` plus `request_signed_managed`.
+
+### Design
+
+Follow the ApeX managed-read unit (#2066) and trade plans (#1891); no new
+engine seam is needed.
+
+- **One per-read custody wrapper** (`read.rs`, as ApeX): `Custody::{Public,
+  Admitted, Leg}` carries the Context with the unsigned request, so a resend
+  rebuilds and re-signs at release. Public reads use `http_context` with
+  credential `None`; signed reads select through `SelectedRead` and release
+  through `request_signed_managed` with the existing `Recipe`.
+- **Background reads** (exchangeInfo, daily, open interest, brackets, account
+  Mode/Balance/Positions/Orders snapshots) use `Scope::Background` and
+  `RetryPolicy::ReadFailure`, and retire through `finish_http_context` before
+  their native callback (`startup.failed`, `seed_daily`, `finish_interest`, the
+  snapshot owners). Native startup and backoff state is unchanged.
+- **Command reads** (DepthRead, Klines, Info, history) admit at command ingress
+  and end only through `done_context`/`fail_context`. History keeps one
+  `ReadRoot` per command with a leg per page, retires each leg before minting the
+  next, and stages rows through `ReadHistoryRows`, keeping the strict
+  no-partial-result refusals and seven-day windows.
+- **Clock.** Each `/time` attempt is its own Background read context; attempts
+  2-3 use `http_context_with_egress(.., Egress::PublicCors)`, replacing
+  `route_request`. The 5 s per-attempt bound becomes the Context deadline.
+- **Clock gating.** `awaiting_clock` keeps holding already-admitted reads and
+  writes; their Context deadline runs from admission, so time spent waiting for
+  the clock counts against it.
+- **Trade jobs become managed Plans** (W). Each `Planned` step is a plan leg
+  (`plan_leg_context_with_intent`); the job ends through
+  `done_plan`/`fail_plan`. `continue_on_error` and `successes` keep their native
+  meaning, and released 408/5xx stays Unknown through the shared classifier.
+  Writes never resend, as today.
+- **Resends.** Network retries and retryable 429/5xx on reads use
+  `AdmittedRead::retry(ReadFailure)` or a fresh leg, and the shared backoff
+  replaces the venue's 1/2/3 s timer (`RequestState.retries` is deleted). V1
+  signature rejection (-1022) keeps exactly one resend; the -1021 timestamp
+  rejection keeps one clock resync then one resend, both through the same
+  Context, never a fresh root.
+- **Lexical sites** at 207, 351, 489 and 501 go away by renaming bindings
+  (`request` to `unsigned`/`leg`), with identical behaviour.
+
+### Caller-visible changes (for CALLERS when each slice lands)
+
+- Signed and public reads gain an admission-to-expiry bound, proposed at 20 s,
+  which also covers the clock wait. Today a read has no venue deadline beyond
+  the host default.
+- Read retry delays follow the shared ReadFailure backoff instead of the fixed
+  1/2/3 s.
+- Typed transport and preparation failures reach command errors instead of
+  being flattened to text.
+
+### Slices (each a separate PR with RED tests first and an exact prune)
+
+1. **Public reads and clock**: `request.rs` 207/210/213/468, `lib.rs` DepthRead
+   and Klines terminals, startup discovery, ticker, OI and brackets. Fixture
+   drivers move to `test_support::prepared_actions`.
+2. **Signed reads**: account Info and snapshots, all history, the signed GET
+   branch of 256/257, and the 351 rename.
+3. **Trade plans**: `trading.rs` jobs, the remaining 256/257 write branch, and
+   the 489/501 renames. This deletes `Pending::Signed`'s legacy terminal path and
+   `RequestState.retries`. Aster reaches zero.
+
+### Budget and risks
+
+The Aster family measures 1,322,746 bytes at base (1,324,108 with #1990)
+against 1,343,488, so about 19.4 K remains after #1990. Each slice measures the
+family and combined wasm on its composed tree, and deleting the venue retry and
+`Pending::Signed` machinery offsets part of the cost. If a slice cannot fit, it
+stops and reports; nothing is trimmed silently.
+
+Open questions for review:
+
+1. Is 20 s the right read bound when it includes up to four 5 s clock
+   attempts? The alternative is to admit the signed release only after the clock
+   settles, with the command root admitted at ingress.
+2. Slice 3 depends on #2093 (dispatch nonce reservation, `sign.rs`); it rebases
+   onto whichever lands first.
