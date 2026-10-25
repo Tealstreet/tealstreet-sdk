@@ -26,6 +26,24 @@ The other 19 previously blocked occurrences retain signed JWT identity/admission
 background aggregate, history/journal and deferred command obligations. No public
 or private HTTP path is migrated in this local-only slice.
 
+### Candle path gates (overseer, 2026-10-25)
+
+The candle read (the `self.request` with `ArrayAt::Field("candles")` in
+`public.rs`) and its three refusals (`timeframe.unsupported("Coinbase")`,
+"Unknown Coinbase market" and "Invalid Coinbase candle range") need both gates
+before any managed conversion. Neither is enough alone:
+
+1. **Catalogue readiness.** A candle command deferred behind the instruments
+   catalogue is dispatched from `public_pending` inside that catalogue's
+   callback. Its custody must come from #1896 Preflight readiness; a fresh
+   `admit_http_command` there is a forged entry.
+2. **Shared engine pacing and ordering.** The candle send shares `rest.rs`'s
+   256-entry FIFO and 334 ms pacing with the unadopted signed requests. A
+   managed candle read needs one engine composition that paces and orders the
+   legacy queue and managed requests together; no venue-local clock or wake.
+
+The core pacing composition (2) is on the engine backlog behind dazzy3's S0-S2.
+
 ## Selected native branches
 
 - lib.rs FetchAccount success/error keeps the exact selected private portfolio

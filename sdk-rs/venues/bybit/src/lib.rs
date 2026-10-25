@@ -8,6 +8,7 @@ mod hyro;
 mod identity;
 mod options;
 mod paths;
+mod policy;
 mod refresh;
 mod sign;
 mod trading;
@@ -656,7 +657,7 @@ impl BybitLinear {
         if self.config_error.is_some() {
             return self.on_public_response(cx, then, Err("Bybit options are invalid"));
         }
-        let Some(policy) = self.read_policy(rest.signed, candles::read_policy().timeout_ms) else {
+        let Some(policy) = self.read_policy(rest.signed, policy::read_policy().timeout_ms) else {
             return self.on_public_response(
                 cx,
                 then,
@@ -696,7 +697,7 @@ impl BybitLinear {
             } else {
                 RetryPolicy::Never
             },
-            ..candles::read_policy()
+            ..policy::read_policy()
         })
     }
 
@@ -2804,7 +2805,7 @@ impl Venue for BybitLinear {
             } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
             safe_cex_engine::VenueAction::FetchBalanceInfo => {
                 // A cached answer still needs this command's own authority.
-                let Ok(context) = cx.admit_http_command(candles::read_policy()) else {
+                let Ok(context) = cx.admit_http_command(policy::read_policy()) else {
                     return;
                 };
                 let info = self.balance_info.clone().unwrap_or_else(|| "null".into());
@@ -2865,7 +2866,7 @@ impl Venue for BybitLinear {
                 } else {
                     safe_cex_engine::request_context::Operation::Mutation
                 };
-                if let Ok(context) = cx.admit_http_command(candles::entry_policy(operation)) {
+                if let Ok(context) = cx.admit_http_command(policy::entry_policy(operation)) {
                     // An account-config precondition, not an unavailable command.
                     let error = safe_cex_engine::VenueError::new("Bybit product is not enabled")
                         .kind(ErrorKind::InvalidInput)
