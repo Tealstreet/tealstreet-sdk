@@ -2,9 +2,10 @@
 mod account;
 mod account_wire;
 mod history;
+mod local_context;
 mod public;
 mod rest;
-mod sign;
+pub mod sign;
 mod trading;
 mod wire;
 
@@ -181,14 +182,13 @@ impl Venue for Coinbase {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if let Command::FetchAccount { command } = command {
-            {
-                let result: Result<String, String> = self.account_identity();
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
-                }
-            };
+        if let Command::FetchAccount { .. } = command {
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                self.account_identity()
+                    .map_err(safe_cex_engine::VenueError::new),
+            );
             return;
         }
         if let Some(Command::Query { command, query }) = self

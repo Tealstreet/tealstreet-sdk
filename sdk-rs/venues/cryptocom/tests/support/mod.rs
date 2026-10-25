@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, PublicFeedPolicy, Response, SocketId};
-use safe_cex_venue_cryptocom::{Cryptocom, Options};
+use safe_cex_venue_cryptocom::Cryptocom;
+pub mod fixture;
+use fixture::Options;
 pub const INSTRUMENTS: &str = r#"{"code":0,"result":{"data":[{"symbol":"BTCUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"BTC","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.001","quote_decimals":1,"quantity_decimals":3,"max_leverage":"50","underlying_symbol":"BTCUSD-INDEX"}]}}"#;
 pub const TICKERS: &str = r#"{"code":0,"result":{"data":[{"i":"BTCUSD-PERP","b":"99","k":"101","a":"100","c":"0.01","v":"1","vv":"100"}]}}"#;
 pub const EMPTY: &str = r#"{"code":0,"result":{"data":[]}}"#;
@@ -31,7 +33,7 @@ impl Harness {
     }
     fn start(options: Options, policy: PublicFeedPolicy, instruments: &str) -> Self {
         let mut h = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options)),
+            engine: fixture::engine(options),
             actions: vec![],
             failures: vec![],
             now: 1_610_000_000_000.0,
@@ -44,7 +46,13 @@ impl Harness {
         h
     }
     pub fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in fixture::actions(&mut self.engine, self.now) {
+            // A host removes cancelled deadlines from its active timer queue.
+            if let Action::ClearTimer { timer } = &action {
+                self.actions.retain(
+                    |a| !matches!(a, Action::SetTimer { timer: pending, .. } if pending == timer),
+                );
+            }
             // Failures as the plain text the host renders.
             let action = match action {
                 Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {

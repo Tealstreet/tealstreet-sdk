@@ -9,6 +9,7 @@ import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from 
 import { DefaultStore } from '../store/store.base';
 import { directTransport } from '../transport/direct';
 import { PositionMode } from '../types';
+import { prepareRecordedHttp } from './support/managedHttp';
 
 const REST = 'https://rpc.txflow-testnet.xyz';
 const PUBLIC_PROXY = 'https://public-cors.invalid';
@@ -18,6 +19,7 @@ const OPTIONS = { key: '', secret: '0x' + 'ab'.repeat(32), applicationId: WALLET
 
 /** Documented native envelopes, also used by harness/private-tape-txflow.mjs. */
 const recordedTxFlowTransport = () => {
+  const startedAt = performance.now();
   const requests: Array<Parameters<Transport['request']>[0]> = [];
   const sockets: Array<{ url: string; channel?: string; sent: unknown[] }> = [];
   const context = {
@@ -75,7 +77,8 @@ const recordedTxFlowTransport = () => {
     activeAssetData: { user: WALLET, coin: '1', leverage: { type: 'cross', mode: 'oneWay', value: 7 } },
   };
   const transport: Transport = {
-    now: () => 1_700_000_000_000,
+    prepareHttp: prepareRecordedHttp,
+    now: () => 1_700_000_000_000 + performance.now() - startedAt,
     connect: (url, { channel, onOpen }) => {
       const socket = { url, channel, sent: [] as unknown[] };
       sockets.push(socket);

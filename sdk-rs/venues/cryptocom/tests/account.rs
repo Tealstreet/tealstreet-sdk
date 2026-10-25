@@ -401,8 +401,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e
-        .drain_actions()
+    let mut pending: Vec<_> = support::fixture::actions(&mut e, due)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -442,10 +442,14 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                     },
                 },
             );
-            pending.extend(e.drain_actions().filter_map(|a| match a {
-                Action::Http(r) => Some(r),
-                _ => None,
-            }));
+            pending.extend(
+                support::fixture::actions(&mut e, due + 1.)
+                    .into_iter()
+                    .filter_map(|a| match a {
+                        Action::Http(r) => Some(r),
+                        _ => None,
+                    }),
+            );
         }
     }
     assert!(pending.is_empty(), "all fixture account reads complete");
@@ -1059,4 +1063,151 @@ fn decoded_position_rearms_skip_memory_before_the_snapshot_finishes() {
         [safe_cex_engine::Level::Warn, safe_cex_engine::Level::Error]
     );
     assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
+}
+
+#[test]
+fn snapshot_token_regular_advanced_join_preserves_absent_rows_after_invalidation() {
+    let mut h = Harness::new();
+    h.reply("get-positions", EMPTY);
+    h.reply("user-balance", BALANCE);
+    h.reply(
+        "private/get-open-orders",
+        &format!(r#"{{"code":0,"result":{{"data":[{ORDER}]}}}}"#),
+    );
+    h.engine.store_mut().invalidate_order_snapshots();
+    h.reply("advanced/get-open-orders", EMPTY);
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.engine.store().loaded().orders);
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+}
+
+#[test]
+fn snapshot_token_accepted_cancel_ack_fences_absent_rows_and_retry_keeps_authority() {
+    for retry in 0..3 {
+        let mut h = Harness::new();
+        h.reply("get-positions", EMPTY);
+        h.reply("user-balance", BALANCE);
+        h.reply(
+            "private/get-open-orders",
+            &format!(r#"{{"code":0,"result":{{"data":[{ORDER}]}}}}"#),
+        );
+        h.event(Event::Command(
+            safe_cex_engine::Command::CancelSymbolOrders {
+                command: 908,
+                symbol: "BTCUSD-PERP".into(),
+            },
+        ));
+        h.reply("cancel-all-orders", r#"{"code":0,"result":{}}"#);
+        if retry == 1 {
+            h.reply(
+                "advanced/get-open-orders",
+                r#"{"code":40101,"message":"retry auth"}"#,
+            );
+        } else if retry == 2 {
+            let failed = h.http("advanced/get-open-orders");
+            h.event(Event::HttpFailed {
+                request: failed.id,
+                error: "transport loss",
+            });
+        }
+        h.reply("advanced/get-open-orders", EMPTY);
+        assert!(h.engine.store().orders().is_empty(), "retry={retry}");
+        assert!(!h.engine.store().loaded().orders);
+    }
+}
+
+#[test]
+fn snapshot_token_capture_and_late_exhaustion_preserve_reconciliation_timer() {
+    for late in [false, true] {
+        let mut h = Harness::new();
+        h.reply("get-positions", EMPTY);
+        if !late {
+            safe_cex_engine::test_support::exhaust_order_snapshots(h.engine.store_mut());
+        }
+        h.reply("user-balance", BALANCE);
+        if late {
+            h.reply(
+                "private/get-open-orders",
+                &format!(r#"{{"code":0,"result":{{"data":[{ORDER}]}}}}"#),
+            );
+            safe_cex_engine::test_support::exhaust_order_snapshots(h.engine.store_mut());
+            h.reply("advanced/get-open-orders", EMPTY);
+        } else {
+            assert!(
+                !h.actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.contains("get-open-orders")))
+            );
+        }
+        assert!(h.engine.store().orders().is_empty());
+        assert!(!h.engine.store().loaded().orders);
+        let timer = h
+            .actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms > h.now => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        h.now = timer.1;
+        h.event(Event::TimerFired { timer: timer.0 });
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.contains("get-positions")))
+        );
+    }
+}
+
+#[test]
+fn snapshot_token_ws_advanced_peer_survives_and_regular_rows_progress() {
+    let mut h = Harness::new();
+    h.reply("get-positions", EMPTY);
+    h.reply("user-balance", BALANCE);
+    let sibling = h.engine.store_mut().begin_orders_snapshot().unwrap();
+    h.reply(
+        "private/get-open-orders",
+        &format!(r#"{{"code":0,"result":{{"data":[{ORDER}]}}}}"#),
+    );
+    let advanced = ORDER
+        .replace("9007199254740993", "8123")
+        .replace("\"LIMIT\"", "\"STOP_LOSS\"")
+        .replace("\"limit_price\":\"90\"", "\"trigger_price\":\"95\"");
+    h.ws("user.advance.order", &advanced);
+    h.reply("advanced/get-open-orders", EMPTY);
+    assert!(h.engine.store().order("8123").is_some());
+    assert!(h.engine.store().order("9007199254740993").is_some());
+    assert!(h.engine.store().orders_snapshot_current(&sibling));
+}
+
+#[test]
+fn snapshot_token_invalid_order_ack_does_not_invalidate_valid_identity_does() {
+    for (body, accepted) in [
+        (r#"{"code":40001,"message":"refused"}"#, false),
+        (r#"{"code":0,"result":{"order_id":"bad"}}"#, false),
+        (r#"{"code":0,"result":{"order_id":123}}"#, true),
+    ] {
+        let mut h = Harness::new();
+        h.load();
+        let token = h.engine.store_mut().begin_orders_snapshot().unwrap();
+        let order = serde_json::from_str(
+            r#"{"symbol":"BTCUSD-PERP","type":"limit","side":"buy","amount":0.0021,"price":90.04}"#,
+        )
+        .unwrap();
+        h.event(Event::Command(safe_cex_engine::Command::PlaceOrders {
+            command: 911,
+            orders: vec![order],
+        }));
+        h.reply("private/create-order", body);
+        assert_eq!(
+            h.engine.store().orders_snapshot_current(&token),
+            !accepted,
+            "{body}"
+        );
+    }
 }

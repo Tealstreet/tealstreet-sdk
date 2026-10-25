@@ -1,5 +1,6 @@
 use safe_cex_engine::{Action, Engine, Event, Method, Notice, Response, SocketId, TimerId};
-use safe_cex_venue_okx::{Okx, Options};
+use safe_cex_venue_okx::{Okx, Options as NativeOptions};
+type Options = FixtureOptions;
 
 // OKX v5 docs: public instruments, tickers and books payload schemas.
 // https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments
@@ -34,6 +35,19 @@ pub fn actions(engine: &mut Engine<Okx>) -> Vec<Action> {
         })
         .collect()
 }
+/// Actions released through the engine's managed-HTTP fixture handshake at
+/// `now`, the time of the event that produced them. Legacy actions pass through.
+pub fn prepared(engine: &mut Engine<Okx>, now: f64) -> Vec<Action> {
+    safe_cex_engine::test_support::prepared_actions(engine, now)
+}
+/// Removes the first HTTP request; managed reads also arm deadline timers.
+pub fn take_http(actions: &mut Vec<Action>) -> Action {
+    let i = actions
+        .iter()
+        .position(|a| matches!(a, Action::Http(_)))
+        .expect("an HTTP request");
+    actions.remove(i)
+}
 pub fn reply(engine: &mut Engine<Okx>, action: &Action, body: &str, now: f64) {
     let Action::Http(r) = action else {
         panic!("expected request")
@@ -54,19 +68,19 @@ pub fn envelope(row: &str) -> String {
     format!(r#"{{"code":"0","msg":"","data":[{row}]}}"#)
 }
 pub fn public(options: Options) -> (Engine<Okx>, SocketId, SocketId) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(options));
+    let mut engine = engine(options);
     engine.start(1_709_209_849_123.0);
-    let request = actions(&mut engine)
+    let request = prepared(&mut engine, 1_709_209_849_123.0)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap();
     reply(&mut engine, &request, &envelope(MARKET), 1.0);
-    let request = actions(&mut engine)
+    let request = prepared(&mut engine, 1.0)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap();
     reply(&mut engine, &request, &envelope(TICKER), 2.0);
-    let sockets: Vec<_> = actions(&mut engine)
+    let sockets: Vec<_> = prepared(&mut engine, 2.0)
         .into_iter()
         .filter_map(|a| {
             if let Action::WsConnect { socket, url, .. } = a {
@@ -99,19 +113,35 @@ pub fn is_get(action: &Action, suffix: &str) -> bool {
 }
 
 pub fn trading_engine() -> Engine<Okx> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
-        key: Some("test-key".into()),
-        secret: Some("test-secret".into()),
-        passphrase: Some("test-passphrase".into()),
-        ..Options::default()
-    }));
+    trading_engine_configure(|_| {})
+}
+
+pub fn trading_engine_configure(configure: impl FnOnce(&mut Engine<Okx>)) -> Engine<Okx> {
+    trading_engine_with(
+        Options {
+            key: Some("test-key".into()),
+            secret: Some("test-secret".into()),
+            passphrase: Some("test-passphrase".into()),
+            ..Options::default()
+        },
+        configure,
+    )
+}
+
+/// A ready private account from explicit credentials, e.g. with read keys.
+pub fn trading_engine_with(
+    options: Options,
+    configure: impl FnOnce(&mut Engine<Okx>),
+) -> Engine<Okx> {
+    let mut e = engine(options);
+    configure(&mut e);
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let mut out = actions(&mut e);
-    let a = out.remove(0);
+    let mut out = prepared(&mut e, 1.0);
+    let a = take_http(&mut out);
     reply(&mut e, &a, &envelope(TICKER), 2.0);
-    out.extend(actions(&mut e));
+    out.extend(prepared(&mut e, 2.0));
     let a = out
         .iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
@@ -122,7 +152,7 @@ pub fn trading_engine() -> Engine<Okx> {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.0,
     );
-    let mut pending: Vec<_> = actions(&mut e)
+    let mut pending: Vec<_> = prepared(&mut e, 3.0)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
@@ -134,10 +164,75 @@ pub fn trading_engine() -> Engine<Okx> {
         };
         reply(&mut e, &a, &body, 4.0);
         pending.extend(
-            actions(&mut e)
+            prepared(&mut e, 4.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
     }
     e
+}
+
+/// Raw test inputs enter the same trusted local-provider setup as the registry.
+#[derive(Clone, Default)]
+pub struct FixtureOptions {
+    pub testnet: bool,
+    pub eea: bool,
+    pub public_data_only: bool,
+    pub key: Option<String>,
+    pub secret: Option<String>,
+    pub passphrase: Option<String>,
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+}
+
+pub fn try_engine(
+    mut options: FixtureOptions,
+) -> Result<Engine<Okx>, safe_cex_engine::signing::SignError> {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::signing::{CredentialSetupPolicy, IdentitySetupPolicy, SetupFieldPolicy};
+    let primary = options.key.as_ref().is_some_and(|s| !s.is_empty())
+        && options.secret.as_ref().is_some_and(|s| !s.is_empty());
+    let setup = LocalSetup {
+        primary: primary.then(|| LocalIdentity {
+            key: Secret::new(options.key.take().unwrap()),
+            secret: Secret::new(options.secret.take().unwrap()),
+            passphrase: options.passphrase.take().map(Secret::new),
+            ..Default::default()
+        }),
+        secondary: options
+            .read_credentials
+            .take()
+            .map(|mut read| LocalIdentity {
+                key: Secret::new(std::mem::take(&mut read.key)),
+                secret: Secret::new(std::mem::take(&mut read.secret)),
+                passphrase: read.passphrase.take().map(Secret::new),
+                ..Default::default()
+            }),
+    };
+    let policy = CredentialSetupPolicy {
+        primary: Some(IdentitySetupPolicy {
+            passphrase: Some(SetupFieldPolicy::RequiredForPrivate),
+            ..Default::default()
+        }),
+        secondary: Some(IdentitySetupPolicy {
+            passphrase: Some(SetupFieldPolicy::RequiredWithPrimaryFallback),
+            ..Default::default()
+        }),
+    };
+    let (provider, identities) =
+        LocalSigner::from_setup_with_policy_and_mode(setup, policy, options.public_data_only)?;
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(NativeOptions {
+        testnet: options.testnet,
+        eea: options.eea,
+        public_data_only: options.public_data_only,
+        credentials: identities.primary,
+        read_credentials: identities.secondary,
+    }));
+    engine
+        .set_signer(Some(std::sync::Arc::new(provider)))
+        .unwrap();
+    Ok(engine)
+}
+
+pub fn engine(options: FixtureOptions) -> Engine<Okx> {
+    try_engine(options).expect("valid fixture provider setup")
 }

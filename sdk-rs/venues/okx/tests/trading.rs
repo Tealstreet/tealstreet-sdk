@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 mod support;
+use crate::support::*;
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{Action, Command, Event, Notice};
-use support::*;
 fn order(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
@@ -15,7 +15,7 @@ fn place(
         5.0,
         Event::Command(Command::PlaceOrders { command: 1, orders }),
     );
-    actions(e)
+    prepared(e, 5.0)
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn caller_id_and_contract_amount_are_sent_verbatim_after_lot_adjustment() {
         &envelope(r#"{"ordId":"1234","sCode":"0","sMsg":""}"#),
         6.0,
     );
-    assert!(actions(&mut e).iter().any(
+    assert!(prepared(&mut e, 6.0).iter().any(
         |a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[\"1234\"]")
     ));
 }
@@ -88,7 +88,7 @@ fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
         &envelope(r#"{"ordId":"1","sCode":"0","sMsg":""}"#),
         6.0,
     );
-    let a = actions(&mut e)
+    let a = prepared(&mut e, 6.0)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap();
@@ -101,7 +101,7 @@ fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
         &envelope(r#"{"algoId":"2","sCode":"0","sMsg":""}"#),
         7.0,
     );
-    let a = actions(&mut e)
+    let a = prepared(&mut e, 7.0)
         .into_iter()
         .find(|a| matches!(a, Action::Http(_)))
         .unwrap();
@@ -112,7 +112,7 @@ fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
         &envelope(r#"{"algoId":"3","sCode":"0","sMsg":""}"#),
         8.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[\"1\",\"2\",\"3\"]")));
+    assert!(prepared(&mut e, 8.0).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[\"1\",\"2\",\"3\"]")));
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn lost_write_response_never_retries() {
             error: "lost response after acceptance",
         },
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 6.0);
     assert!(out.iter().any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get && r.url.contains("orders-pending"))));
     assert!(
         !out.iter()
@@ -206,7 +206,7 @@ fn ack(
         }),
         6.0,
     );
-    actions(e)
+    prepared(e, 6.0)
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn split_brackets_protect_each_accepted_lot_before_another_entry() {
         r#"{"code":"1","msg":"All operations failed","data":[{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
         7.0,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 7.0);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         out.iter()
@@ -344,7 +344,7 @@ fn market_and_terminal_amends_are_rejected_before_writes() {
                 amount: None,
             }),
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 5.0);
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             out.iter()
@@ -374,7 +374,7 @@ fn oco_amend_keeps_sibling_stop_and_amends_only_selected_native_leg() {
             amount: Some(3.145),
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let a = http(&out);
     assert!(matches!(a, Action::Http(r) if r.url.ends_with("/amend-algos")));
     assert!(body(a).contains("\"algoId\":\"91\""));
@@ -406,7 +406,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
         5.0,
         Event::Command(Command::CancelOrders { command: 2, ids }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let mut rows = vec![r#"{"ordId":"1","sCode":"0","sMsg":""}"#; 19];
     rows.push(r#"{"ordId":"2","sCode":"51400","sMsg":"Order does not exist"}"#);
     let mixed = format!(
@@ -414,7 +414,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
         rows.join(",")
     );
     reply(&mut e, http(&out), &mixed, 6.0);
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 6.0);
     assert!(out.iter().any(
         |a| matches!(a, Action::Notice(Notice::CommandError { command:2, message }) if message.contains("51400"))
     ));
@@ -446,7 +446,7 @@ fn replacement_never_runs_after_cancellation_rejection() {
             amount: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     assert!(matches!(http(&out), Action::Http(r) if r.url.ends_with("/cancel-algos")));
     reply(
         &mut e,
@@ -454,7 +454,7 @@ fn replacement_never_runs_after_cancellation_rejection() {
         &envelope(r#"{"algoId":"91","sCode":"51400","sMsg":"Order does not exist"}"#),
         6.0,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 6.0);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         out.iter()
@@ -477,7 +477,7 @@ fn terminal_ws_status_survives_a_late_amend_error() {
             amount: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     e.store_mut().set_order_status("91", OrderStatus::Closed);
     reply(
         &mut e,
@@ -485,7 +485,7 @@ fn terminal_ws_status_survives_a_late_amend_error() {
         &envelope(r#"{"ordId":"91","sCode":"51503","sMsg":"Already filled"}"#),
         6.0,
     );
-    actions(&mut e);
+    prepared(&mut e, 6.0);
     assert_eq!(e.store().order("91").unwrap().status, OrderStatus::Closed);
 }
 
@@ -508,7 +508,7 @@ fn conditional_amend_keeps_limit_execution_price_and_trigger_source() {
             amount: Some(3.145),
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let a = http(&out);
     assert!(matches!(a, Action::Http(r) if r.url.ends_with("/amend-algos")));
     assert!(body(a).contains("\"newTriggerPx\":\"38000\""));
@@ -533,7 +533,7 @@ fn replacement_is_fully_preflighted_before_canceling_protection() {
             amount: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert_eq!(e.store().order("91_sl").unwrap().status, OrderStatus::Open);
 }
@@ -551,7 +551,7 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
             side: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let Action::Http(r) = http(&out) else {
         unreachable!()
     };
@@ -567,7 +567,7 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
             },
         },
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 6.0);
     assert!(
         out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get)),
@@ -648,7 +648,7 @@ fn standalone_protective_limit_amend_preserves_original_by_rejecting_before_canc
                 amount: None,
             }),
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 5.0);
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("execution price"))));
         assert_eq!(e.store().order(id), Some(&original));
@@ -753,7 +753,7 @@ fn lost_cancel_and_amend_responses_keep_pending_state_until_a_fresh_read() {
                 }
             }),
         );
-        let request = actions(&mut e)
+        let request = prepared(&mut e, 5.0)
             .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
@@ -767,7 +767,7 @@ fn lost_cancel_and_amend_responses_keep_pending_state_until_a_fresh_read() {
                 error: "timeout after exchange acceptance",
             },
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 6.0);
         assert_eq!(
             e.store().order("uncertain").unwrap().status,
             if amend {
@@ -805,7 +805,7 @@ fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows(
             format!(r#"{{"ordId":"{id}","sCode":"0"}}"#)
         };
         reply(&mut e, request, &envelope(&ack), 6.0);
-        out = actions(&mut e);
+        out = prepared(&mut e, 6.0);
     }
     assert!(
         e.store().orders().is_empty(),
@@ -818,7 +818,7 @@ fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows(
             symbol: "BTCUSDT".into(),
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 7.0);
     let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
     assert!(
         matches!(request, Action::Http(r) if r.url.ends_with("/cancel-batch-orders") && r.body.as_ref().unwrap().contains("entry"))
@@ -829,7 +829,7 @@ fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows(
         &envelope(r#"{"ordId":"entry","sCode":"0"}"#),
         8.0,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 8.0);
     let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
     assert!(
         matches!(request, Action::Http(r) if r.url.ends_with("/cancel-algos") && r.body.as_ref().unwrap().contains("stop") && r.body.as_ref().unwrap().contains("profit"))
@@ -840,7 +840,7 @@ fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows(
         r#"{"code":"0","data":[{"algoId":"stop","sCode":"0"},{"algoId":"profit","sCode":"0"}]}"#,
         9.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(
+    assert!(prepared(&mut e, 9.0).iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone {
             command: 2,
@@ -867,7 +867,7 @@ fn partial_batch_accepted_order_remains_cancelable_before_the_stream() {
         6.0,
     );
     assert!(
-        actions(&mut e)
+        prepared(&mut e, 6.0)
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
     );
@@ -878,25 +878,25 @@ fn partial_batch_accepted_order_remains_cancelable_before_the_stream() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/cancel-batch-orders") && r.body.as_ref().unwrap().contains("accepted"))));
+    assert!(prepared(&mut e, 7.0).iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/cancel-batch-orders") && r.body.as_ref().unwrap().contains("accepted"))));
 }
 
 fn ready_with_held_reconciliation() -> (
     safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
     Vec<Action>,
 ) {
-    use safe_cex_venue_okx::{Okx, Options};
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    use crate::support::FixtureOptions as Options;
+    let mut e = crate::support::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("pass".into()),
         ..Default::default()
-    }));
+    });
     e.start(0.);
-    let request = http(&actions(&mut e)).clone();
+    let request = http(&prepared(&mut e, 0.)).clone();
     reply(&mut e, &request, &envelope(MARKET), 1.);
     // Private startup begins with the catalogue, alongside the ticker seed.
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 1.);
     let tickers = out
         .iter()
         .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
@@ -912,7 +912,7 @@ fn ready_with_held_reconciliation() -> (
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 3.);
     let private = out
         .iter()
         .find_map(|a| match a {
@@ -932,15 +932,33 @@ fn ready_with_held_reconciliation() -> (
         };
         reply(&mut e, &read, &body, 4.);
         reads.extend(
-            actions(&mut e)
+            prepared(&mut e, 4.)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
     }
     e.handle(5., Event::WsOpened { socket: private });
-    actions(&mut e);
-    ws(&mut e, private, r#"{"event":"login","code":"0","msg":""}"#);
-    let held: Vec<_> = actions(&mut e)
+    prepared(&mut e, 5.);
+    e.handle(
+        5.,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"event":"login","code":"0","msg":""}"#,
+        },
+    );
+    let mut handed_off = prepared(&mut e, 5.);
+    let wakeups: Vec<_> = handed_off
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 5. => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    for timer in wakeups {
+        e.handle(5., Event::TimerFired { timer });
+        handed_off.extend(prepared(&mut e, 5.));
+    }
+    let held: Vec<_> = handed_off
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
@@ -998,7 +1016,7 @@ fn ambiguous_http_and_native_timeouts_preserve_writes_and_force_fresh_reconcilia
                     }
                 }),
             );
-            let write = http(&actions(&mut e)).clone();
+            let write = http(&prepared(&mut e, 5.)).clone();
             let Action::Http(write) = write else {
                 unreachable!()
             };
@@ -1013,7 +1031,7 @@ fn ambiguous_http_and_native_timeouts_preserve_writes_and_force_fresh_reconcilia
                     },
                 },
             );
-            let out = actions(&mut e);
+            let out = prepared(&mut e, 6.);
             let expected = if amend {
                 OrderStatus::Updating
             } else {
@@ -1051,11 +1069,11 @@ fn ambiguous_http_and_native_timeouts_preserve_writes_and_force_fresh_reconcilia
                 expected,
                 "pre-write empty snapshot must not clear pending state"
             );
-            actions(&mut e);
+            prepared(&mut e, 7.);
             while let Some(read) = fresh.pop() {
                 reply(&mut e, &read, &envelope(""), 8.);
                 fresh.extend(
-                    actions(&mut e).into_iter().filter(
+                    prepared(&mut e, 8.).into_iter().filter(
                         |a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")),
                     ),
                 );
@@ -1094,7 +1112,7 @@ fn definite_business_rejection_restores_cancel_or_amend_state() {
                 }
             }),
         );
-        let Action::Http(write) = http(&actions(&mut e)).clone() else {
+        let Action::Http(write) = http(&prepared(&mut e, 5.)).clone() else {
             unreachable!()
         };
         e.handle(
@@ -1108,7 +1126,7 @@ fn definite_business_rejection_restores_cancel_or_amend_state() {
                 },
             },
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 6.);
         assert_eq!(
             e.store().order("rejected").unwrap().status,
             OrderStatus::Open
@@ -1159,7 +1177,7 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
                 },
             }),
         );
-        let actions = actions(&mut e);
+        let actions = prepared(&mut e, 2000.0);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions.iter().any(|a| matches!(
@@ -1195,7 +1213,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
                 side: None,
             }),
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 5.0);
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
         assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 99, error }) if error.legacy_text().contains("leverage limits"))));
     }
@@ -1216,7 +1234,7 @@ fn fetch_leverage_reads_flat_symbol_cross_leverage_into_settings() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let request = out
         .iter()
         .find(|a| {
@@ -1232,7 +1250,7 @@ fn fetch_leverage_reads_flat_symbol_cross_leverage_into_settings() {
         &envelope(r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","posSide":"","lever":"25"}"#),
         6.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result: s }) if s.contains("\"buyLeverage\":25.0") && s.contains("\"sellLeverage\":25.0"))));
+    assert!(prepared(&mut e, 6.0).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result: s }) if s.contains("\"buyLeverage\":25.0") && s.contains("\"sellLeverage\":25.0"))));
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 25.0);
 }
 
@@ -1246,7 +1264,7 @@ fn fetch_leverage_failure_answers_instead_of_hanging() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let request = out.iter().find(|a| is_get(a, "mgnMode=cross")).unwrap();
     reply(
         &mut e,
@@ -1255,7 +1273,7 @@ fn fetch_leverage_failure_answers_instead_of_hanging() {
         6.0,
     );
     assert!(
-        actions(&mut e)
+        prepared(&mut e, 6.0)
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })))
     );
@@ -1267,7 +1285,7 @@ fn fetch_leverage_failure_answers_instead_of_hanging() {
         }),
     );
     assert!(
-        actions(&mut e)
+        prepared(&mut e, 7.0)
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, .. })))
     );
@@ -1278,19 +1296,17 @@ fn ready_engine() -> (
     safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
     Vec<Action>,
 ) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_okx::Okx::new(
-        safe_cex_venue_okx::Options {
-            key: Some("test-key".into()),
-            secret: Some("test-secret".into()),
-            passphrase: Some("test-passphrase".into()),
-            ..Default::default()
-        },
-    ));
+    let mut e = crate::support::engine(crate::support::FixtureOptions {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Default::default()
+    });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     // Private startup begins with the catalogue, alongside the ticker seed.
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 1.0);
     let tickers = out
         .iter()
         .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
@@ -1306,7 +1322,7 @@ fn ready_engine() -> (
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.0,
     );
-    let mut seen = actions(&mut e);
+    let mut seen = prepared(&mut e, 3.0);
     let mut pending: Vec<_> = seen
         .iter()
         .filter(|a| matches!(a, Action::Http(_)))
@@ -1319,7 +1335,7 @@ fn ready_engine() -> (
             envelope("")
         };
         reply(&mut e, &a, &body, 3.0);
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 3.0);
         pending.extend(out.iter().filter(|a| matches!(a, Action::Http(_))).cloned());
         seen.extend(out);
     }
@@ -1342,7 +1358,7 @@ fn tick_until_config(
             .unwrap_or_else(|| panic!("account tick not re-armed at {now}"));
         now += 2_000.0;
         e.handle(now, Event::TimerFired { timer: tick });
-        out = actions(e);
+        out = prepared(e, now);
         if let Some(config) = out.iter().find(|a| is_get(a, "/api/v5/account/config")) {
             assert!(now >= 30_000.0, "polled too early at {now}");
             return (config.clone(), now);
@@ -1364,7 +1380,7 @@ fn account_config_is_reread_and_a_mode_change_in_the_okx_app_is_applied() {
     );
     assert!(e.store().hedged());
     assert!(
-        actions(&mut e)
+        prepared(&mut e, now)
             .iter()
             .any(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
     );
@@ -1382,7 +1398,7 @@ fn config_read_sent_before_our_mode_write_cannot_revert_it() {
             symbol: None,
         }),
     );
-    let write = actions(&mut e)
+    let write = prepared(&mut e, now)
         .into_iter()
         .find(|a| matches!(a, Action::Http(r) if r.url.ends_with("/api/v5/account/set-position-mode")))
         .expect("mode write");
@@ -1416,7 +1432,7 @@ fn unparseable_polled_account_level_keeps_the_known_level() {
         now,
     );
     assert!(
-        !actions(&mut e)
+        !prepared(&mut e, now)
             .iter()
             .any(|a| is_get(a, "/api/v5/account/positions?instType=SWAP")),
         "unchanged mode and unknown level must not reconcile"
@@ -1433,7 +1449,7 @@ fn leverage_read_survives_unrelated_private_pushes() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let request = actions(&mut e)
+    let request = prepared(&mut e, 5.0)
         .into_iter()
         .find(|a| is_get(a, "mgnMode=cross"))
         .unwrap();
@@ -1446,7 +1462,7 @@ fn leverage_read_survives_unrelated_private_pushes() {
             symbol: None,
         }),
     );
-    let write = actions(&mut e)
+    let write = prepared(&mut e, 5.5)
         .into_iter()
         .find(|a| matches!(a, Action::Http(r) if r.url.ends_with("set-position-mode")))
         .unwrap();
@@ -1456,14 +1472,14 @@ fn leverage_read_survives_unrelated_private_pushes() {
         &envelope(r#"{"posMode":"long_short_mode"}"#),
         5.6,
     );
-    actions(&mut e);
+    prepared(&mut e, 5.6);
     reply(
         &mut e,
         &request,
         &envelope(r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","lever":"30"}"#),
         6.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 12, result: s }) if s.contains("30.0"))));
+    assert!(prepared(&mut e, 6.0).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 12, result: s }) if s.contains("30.0"))));
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
 }
 
@@ -1576,7 +1592,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
             },
         );
         // The write's own reconciliation predates its failure; fail it so the retry reads after.
-        let read = actions(&mut e)
+        let read = prepared(&mut e, 6.0)
             .into_iter()
             .find(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))
             .expect("an uncertain placement must reconcile");
@@ -1594,7 +1610,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
                 },
             },
         );
-        let retry = actions(&mut e)
+        let retry = prepared(&mut e, 7.0)
             .into_iter()
             .find_map(|a| match a {
                 Action::SetTimer {
@@ -1605,7 +1621,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
             })
             .expect("retry timer");
         e.handle(5_007.0, Event::TimerFired { timer: retry });
-        let mut reads: Vec<_> = actions(&mut e)
+        let mut reads: Vec<_> = prepared(&mut e, 5_007.0)
             .into_iter()
             .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")))
             .collect();
@@ -1619,7 +1635,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
             };
             reply(&mut e, &read, &body, 5_008.0);
             reads.extend(
-                actions(&mut e)
+                prepared(&mut e, 5_008.0)
                     .into_iter()
                     .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders"))),
             );
@@ -1631,7 +1647,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
                 symbol: "BTCUSDT".into(),
             }),
         );
-        let refused = actions(&mut e).iter().any(|a| {
+        let refused = prepared(&mut e, 5_009.0).iter().any(|a| {
             matches!(
                 a,
                 Action::Notice(Notice::CommandFailed { command: 2, error })
@@ -1659,4 +1675,417 @@ fn conditional_zero_price_executes_at_market_once_triggered() {
         "{}",
         body(request)
     );
+}
+
+/// Every terminal published for `command`: `Ok(result)` or `Err(error)`.
+fn terminals(out: &[Action], command: u32) -> Vec<Result<String, safe_cex_engine::VenueError>> {
+    out.iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandDone { command: c, result }) if *c == command => {
+                Some(Ok(result.clone()))
+            }
+            Action::Notice(Notice::CommandFailed { command: c, error }) if *c == command => {
+                Some(Err(error.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn sends_io(out: &[Action]) -> bool {
+    out.iter()
+        .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+}
+
+fn is_leverage_read(action: &Action) -> bool {
+    is_get(
+        action,
+        "/api/v5/account/leverage-info?instId=BTC-USDT-SWAP&mgnMode=cross",
+    )
+}
+
+fn fetch_leverage(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
+    command: u32,
+    symbol: &str,
+    now: f64,
+) -> Vec<Action> {
+    e.handle(
+        now,
+        Event::Command(Command::FetchLeverage {
+            command,
+            symbol: symbol.into(),
+        }),
+    );
+    prepared(e, now)
+}
+
+/// Fires, in time order, every timer armed by `out` or by the timers it
+/// fires, up to and including `until`; returns all actions they produce.
+fn fire_armed(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
+    out: &[Action],
+    until: f64,
+) -> Vec<Action> {
+    fn track(timers: &mut Vec<(safe_cex_engine::TimerId, f64)>, out: &[Action]) {
+        for action in out {
+            match action {
+                Action::SetTimer { timer, at_ms } => timers.push((*timer, *at_ms)),
+                Action::ClearTimer { timer } => timers.retain(|(t, _)| t != timer),
+                _ => {}
+            }
+        }
+    }
+    let mut timers = Vec::new();
+    track(&mut timers, out);
+    let mut seen = Vec::new();
+    for _ in 0..10_000 {
+        timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let Some(&(timer, at)) = timers.first() else {
+            return seen;
+        };
+        if at > until {
+            return seen;
+        }
+        timers.remove(0);
+        e.handle(at, Event::TimerFired { timer });
+        let out = prepared(e, at);
+        track(&mut timers, &out);
+        seen.extend(out);
+    }
+    panic!("timer chain did not settle by {until}");
+}
+
+#[test]
+fn fetch_leverage_unanswered_read_fails_at_shared_deadline() {
+    let mut e = trading_engine();
+    let before = e.store().setting("BTCUSDT").map(|s| s.leverage);
+    let out = fetch_leverage(&mut e, 7, "BTCUSDT", 5.0);
+    let request = out
+        .iter()
+        .find(|a| is_leverage_read(a))
+        .cloned()
+        .expect("leverage-info read");
+    let mut seen = out.clone();
+    seen.extend(fire_armed(&mut e, &out, 5.0 + 20_000.0));
+    let failed = terminals(&seen, 7);
+    assert_eq!(
+        failed.len(),
+        1,
+        "an unanswered leverage read needs exactly one terminal by the 20 s shared deadline"
+    );
+    let error = failed[0].as_ref().expect_err("deadline is a failure");
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+    reply(
+        &mut e,
+        &request,
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","posSide":"","lever":"25"}"#),
+        20_006.0,
+    );
+    let late = prepared(&mut e, 20_006.0);
+    assert!(terminals(&late, 7).is_empty(), "no second terminal");
+    assert_eq!(
+        e.store().setting("BTCUSDT").map(|s| s.leverage),
+        before,
+        "a late reply cannot publish leverage after the deadline"
+    );
+}
+
+#[test]
+fn leverage_reads_beyond_shared_capacity_are_refused_before_io() {
+    use safe_cex_engine::request_context::Error;
+    let mut e = trading_engine();
+    let mut reads = Vec::new();
+    for command in 1_000..1_256 {
+        let out = fetch_leverage(&mut e, command, "BTCUSDT", 5.0);
+        let read: Vec<_> = out.into_iter().filter(is_leverage_read).collect();
+        assert_eq!(read.len(), 1, "read {command} is admitted and sent");
+        reads.extend(read);
+    }
+    let out = fetch_leverage(&mut e, 1_256, "BTCUSDT", 5.0);
+    assert!(
+        !sends_io(&out),
+        "the read beyond shared capacity must be refused before any HTTP"
+    );
+    let failed = terminals(&out, 1_256);
+    assert_eq!(failed.len(), 1, "one typed capacity failure");
+    let error = failed[0].as_ref().expect_err("capacity is a failure");
+    let expected = Error::Capacity.venue_error();
+    assert_eq!(error.message, expected.message);
+    assert_eq!(error.kind, expected.kind);
+    reply(
+        &mut e,
+        &reads[0],
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","posSide":"","lever":"25"}"#),
+        6.0,
+    );
+    assert_eq!(terminals(&prepared(&mut e, 6.0), 1_000).len(), 1);
+    let out = fetch_leverage(&mut e, 1_257, "BTCUSDT", 7.0);
+    assert_eq!(
+        out.iter().filter(|a| is_leverage_read(a)).count(),
+        1,
+        "an answered read frees capacity for the next"
+    );
+}
+
+#[test]
+fn fetch_leverage_entry_refusals_keep_text_without_http() {
+    let mut e = trading_engine();
+    let out = fetch_leverage(&mut e, 9, "NOPE", 5.0);
+    assert!(!sends_io(&out));
+    let failed = terminals(&out, 9);
+    assert_eq!(failed.len(), 1);
+    assert_eq!(
+        failed[0].as_ref().unwrap_err().message,
+        "unknown market NOPE"
+    );
+
+    let (mut e, _, _) = public(crate::support::FixtureOptions::default());
+    let out = fetch_leverage(&mut e, 10, "BTCUSDT", 5.0);
+    assert!(!sends_io(&out));
+    let failed = terminals(&out, 10);
+    assert_eq!(failed.len(), 1);
+    assert_eq!(
+        failed[0].as_ref().unwrap_err().message,
+        "OKX leverage requires credentials"
+    );
+}
+
+fn header<'a>(action: &'a Action, name: &str) -> Option<&'a str> {
+    let Action::Http(r) = action else {
+        return None;
+    };
+    r.headers
+        .iter()
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| value.as_str())
+}
+
+#[test]
+fn leverage_read_uses_the_read_key_and_writes_keep_the_primary() {
+    let mut e = trading_engine_with(
+        crate::support::FixtureOptions {
+            key: Some("primary-key".into()),
+            secret: Some("primary-secret".into()),
+            passphrase: Some("primary-pass".into()),
+            read_credentials: Some(safe_cex_engine::ReadCredentials {
+                key: "read-key".into(),
+                secret: "read-secret".into(),
+                passphrase: Some("read-pass".into()),
+            }),
+            ..Default::default()
+        },
+        |_| {},
+    );
+    let out = fetch_leverage(&mut e, 7, "BTCUSDT", 5.0);
+    let read = out
+        .iter()
+        .find(|a| is_leverage_read(a))
+        .expect("leverage-info read");
+    assert_eq!(header(read, "OK-ACCESS-KEY"), Some("read-key"));
+    assert_eq!(header(read, "OK-ACCESS-PASSPHRASE"), Some("read-pass"));
+    e.handle(
+        6.0,
+        Event::Command(Command::PlaceOrders {
+            command: 8,
+            orders: vec![order(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000}"#,
+            )],
+        }),
+    );
+    let out = prepared(&mut e, 6.0);
+    let write = out
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post))
+        .expect("placement write");
+    assert_eq!(header(write, "OK-ACCESS-KEY"), Some("primary-key"));
+    assert_eq!(header(write, "OK-ACCESS-PASSPHRASE"), Some("primary-pass"));
+}
+
+/// The catalogue is loaded and the private config read is still unanswered.
+fn unready_engine() -> (safe_cex_engine::Engine<safe_cex_venue_okx::Okx>, Action) {
+    let mut e = crate::support::engine(crate::support::FixtureOptions {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Default::default()
+    });
+    e.start(0.0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
+    reply(&mut e, &a, &envelope(MARKET), 1.0);
+    let mut out = prepared(&mut e, 1.0);
+    let a = take_http(&mut out);
+    reply(&mut e, &a, &envelope(TICKER), 2.0);
+    out.extend(prepared(&mut e, 2.0));
+    let config = out
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    (e, config)
+}
+
+fn finish_startup(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
+    config: &Action,
+    now: f64,
+) {
+    reply(
+        e,
+        config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        now,
+    );
+    let mut pending: Vec<_> = prepared(e, now)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    while let Some(a) = pending.pop() {
+        let body = if matches!(&a, Action::Http(r) if r.url.contains("account-position-risk")) {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else {
+            envelope("")
+        };
+        reply(e, &a, &body, now);
+        pending.extend(
+            prepared(e, now)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+}
+
+const LIMIT: &str = r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000}"#;
+
+/// A same-symbol placement still writes: no residual order lock or pending
+/// placement survives the refusal.
+fn assert_places(e: &mut safe_cex_engine::Engine<safe_cex_venue_okx::Okx>, command: u32, now: f64) {
+    e.handle(
+        now,
+        Event::Command(Command::PlaceOrders {
+            command,
+            orders: vec![order(LIMIT)],
+        }),
+    );
+    let out = prepared(e, now);
+    assert!(
+        out.iter().any(
+            |a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post && r.url.contains("/api/v5/trade/"))
+        ),
+        "placement {command} writes after the refusal"
+    );
+    assert!(terminals(&out, command).is_empty());
+}
+
+fn refused(out: &[Action], command: u32, message: &str, kind: Option<safe_cex_engine::ErrorKind>) {
+    assert!(!sends_io(out), "{message}: refused before any HTTP");
+    let failed = terminals(out, command);
+    assert_eq!(failed.len(), 1, "{message}: exactly one terminal");
+    let error = failed[0].as_ref().expect_err(message);
+    assert_eq!(error.message, message);
+    assert_eq!(error.kind, kind, "{message}");
+    assert_eq!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::NotSent),
+        "{message}"
+    );
+}
+
+#[test]
+fn trade_entry_refusals_keep_text_kind_and_not_sent() {
+    use safe_cex_engine::ErrorKind;
+    // Unsupported: SetMarginType.
+    let mut e = trading_engine();
+    e.handle(
+        5.0,
+        Event::Command(Command::SetMarginType {
+            command: 20,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        }),
+    );
+    let out = prepared(&mut e, 5.0);
+    refused(
+        &out,
+        20,
+        "Only cross mode is supported",
+        Some(ErrorKind::Unsupported),
+    );
+    assert_places(&mut e, 21, 6.0);
+
+    // Invalid input: a same-symbol placement rejected by planning.
+    let mut e = trading_engine();
+    e.handle(
+        5.0,
+        Event::Command(Command::PlaceOrders {
+            command: 22,
+            orders: vec![order(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000,"bybitSlippageToleranceTicks":2}"#,
+            )],
+        }),
+    );
+    let out = prepared(&mut e, 5.0);
+    refused(
+        &out,
+        22,
+        "Bybit execution controls are supported only on Bybit",
+        Some(ErrorKind::InvalidInput),
+    );
+    assert_places(&mut e, 23, 6.0);
+
+    // Not ready: the account config is still unanswered.
+    let (mut e, config) = unready_engine();
+    e.handle(
+        3.0,
+        Event::Command(Command::PlaceOrders {
+            command: 24,
+            orders: vec![order(LIMIT)],
+        }),
+    );
+    let out = prepared(&mut e, 3.0);
+    refused(&out, 24, "OKX account is not ready", None);
+    finish_startup(&mut e, &config, 4.0);
+    assert_places(&mut e, 25, 5.0);
+
+    // Already running: a duplicate active ID never reaches the venue, so it
+    // publishes no venue terminal and no write; the original keeps its lock.
+    let mut e = trading_engine();
+    e.handle(
+        5.0,
+        Event::Command(Command::PlaceOrders {
+            command: 26,
+            orders: vec![order(LIMIT)],
+        }),
+    );
+    let first = prepared(&mut e, 5.0);
+    let write = first
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post))
+        .expect("first placement writes")
+        .clone();
+    for duplicate in [
+        Command::PlaceOrders {
+            command: 26,
+            orders: vec![order(LIMIT)],
+        },
+        Command::SetMarginType {
+            command: 26,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        },
+    ] {
+        e.handle(5.5, Event::Command(duplicate));
+        let out = prepared(&mut e, 5.5);
+        assert!(!sends_io(&out), "duplicate active ID sends nothing");
+        assert!(
+            terminals(&out, 26).is_empty(),
+            "duplicate active ID cannot complete the original"
+        );
+    }
+    reply(
+        &mut e,
+        &write,
+        &envelope(r#"{"ordId":"accepted","clOrdId":"","sCode":"0","sMsg":""}"#),
+        6.0,
+    );
+    assert_eq!(terminals(&prepared(&mut e, 6.0), 26).len(), 1);
 }

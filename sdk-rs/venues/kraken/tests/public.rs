@@ -340,7 +340,7 @@ fn initial_rest_tickers_keep_newer_live_fields_and_omitted_live_peers() {
     engine.start(NOW);
     let metadata = requests(&mut engine).pop().unwrap();
     reply(&mut engine, &metadata, 200, META);
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
     let socket = actions
         .iter()
         .find_map(|action| match action {

@@ -110,6 +110,7 @@ pub enum Request {
     Brackets {
         command: CommandId,
         symbol: String,
+        root: safe_cex_engine::selected_read::ReadRoot,
     },
     Listen {
         generation: u64,
@@ -500,8 +501,7 @@ impl Bitrue {
     pub(crate) fn start_private(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.started
             || self.options.public_data_only
-            || self.options.key.as_ref().is_none_or(String::is_empty)
-            || self.options.secret.as_ref().is_none_or(String::is_empty)
+            || self.options.credentials.is_none()
         {
             return;
         }
@@ -1486,6 +1486,28 @@ impl Bitrue {
                 );
                 return true;
             }
+            use safe_cex_engine::selected_read::{
+                CommandReadError, LocalRefusal, ReadRole, SelectedRead,
+            };
+            let selected = SelectedRead::select(&self.slots(), ReadRole::Read { scope: None });
+            let root = match SelectedRead::command_root(
+                cx,
+                selected,
+                LocalRefusal {
+                    diagnostic: None,
+                    error: VenueError::new("Bitrue private credentials required")
+                        .kind(ErrorKind::InvalidInput),
+                },
+            ) {
+                Ok(root) => root,
+                Err(CommandReadError::Entry(
+                    safe_cex_engine::request_context::CommandEntryError::Revoked,
+                )) => {
+                    let _ = cx.reject_expired_command(Operation::Read);
+                    return true;
+                }
+                Err(_) => return true,
+            };
             let contract = &cx.store.market(&symbol).expect("resolved market").id;
             self.send(
                 cx,
@@ -1499,6 +1521,7 @@ impl Bitrue {
                 Job::Account(Request::Brackets {
                     command: *command,
                     symbol,
+                    root,
                 }),
             );
             return true;
@@ -1701,7 +1724,10 @@ impl Bitrue {
             return;
         }
         match request {
-            Request::Brackets { command, symbol } => {
+            Request::Brackets { root, symbol, .. } => {
+                if cx.validate_read_root_context(root.context()).is_err() {
+                    return;
+                }
                 #[derive(Deserialize)]
                 struct Reply {
                     data: BracketData,
@@ -1751,11 +1777,13 @@ impl Bitrue {
                             market.limits.leverage.max = max;
                         }
                     });
-                    cx.done(command, safe_cex_engine::num::format(max));
+                    let _ = cx.done_context(root.context(), safe_cex_engine::num::format(max));
                 } else {
-                    cx.fail(
-                        command,
-                        "Malformed Bitrue leverage brackets; retaining known limit",
+                    let _ = cx.fail_context(
+                        root.context(),
+                        VenueError::new(
+                            "Malformed Bitrue leverage brackets; retaining known limit",
+                        ),
                     );
                 }
             }
@@ -2058,10 +2086,15 @@ impl Bitrue {
         code: Option<i64>,
     ) {
         match request {
-            Request::Brackets { command, .. } => cx.fail(
-                command,
-                private_diagnostic("Bitrue leverage bracket read failed", code),
-            ),
+            Request::Brackets { root, .. } => {
+                let _ = cx.fail_context(
+                    root.context(),
+                    VenueError::new(private_diagnostic(
+                        "Bitrue leverage bracket read failed",
+                        code,
+                    )),
+                );
+            }
             Request::Listen { generation } if generation == self.account.generation => {
                 self.listen_failed(cx, code, false)
             }

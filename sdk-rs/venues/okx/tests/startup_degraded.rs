@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 mod support;
+use crate::support::FixtureOptions as Options;
 use safe_cex_engine::{Action, Engine, Event, Level, Notice, RequestId, Response};
-use safe_cex_venue_okx::{Okx, Options};
+use safe_cex_venue_okx::Okx;
 
 fn request(out: &[Action], path: &str) -> RequestId {
     out.iter()
@@ -23,7 +24,7 @@ fn reply(e: &mut Engine<Okx>, request: RequestId, now: f64, body: &str) -> Vec<A
             },
         },
     );
-    e.drain_actions().collect()
+    crate::support::prepared(e, now)
 }
 fn events(out: &[Action], code: &str) -> usize {
     out.iter()
@@ -34,16 +35,21 @@ fn events(out: &[Action], code: &str) -> usize {
 #[test]
 fn public_startup_degrades_once_keeps_retrying_and_recovers() {
     for fail_tickers in [false, true] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             public_data_only: true,
             ..Default::default()
-        }));
+        });
         e.start(0.0);
-        let out: Vec<_> = e.drain_actions().collect();
+        let out = crate::support::prepared(&mut e, 0.0);
         let mut pending = request(&out, "public/instruments");
         let mut now = 0.0;
         if fail_tickers {
-            let out = reply(&mut e, pending, now, &support::envelope(support::MARKET));
+            let out = reply(
+                &mut e,
+                pending,
+                now,
+                &crate::support::envelope(crate::support::MARKET),
+            );
             pending = request(&out, "market/tickers");
         }
         for (index, nominal) in [1000., 2000., 4000., 8000., 16000., 30000., 30000., 30000.]
@@ -58,7 +64,7 @@ fn public_startup_degrades_once_keeps_retrying_and_recovers() {
                     error: &cause,
                 },
             );
-            let out: Vec<_> = e.drain_actions().collect();
+            let out = crate::support::prepared(&mut e, now);
             assert_eq!(
                 events(&out, "request.failed"),
                 1,
@@ -108,7 +114,7 @@ fn public_startup_degrades_once_keeps_retrying_and_recovers() {
                 .expect("continuing jittered capped retry");
             now = at;
             e.handle(now, Event::TimerFired { timer });
-            let out: Vec<_> = e.drain_actions().collect();
+            let out = crate::support::prepared(&mut e, now);
             pending = request(
                 &out,
                 if fail_tickers {
@@ -119,16 +125,31 @@ fn public_startup_degrades_once_keeps_retrying_and_recovers() {
             );
         }
         let out = if fail_tickers {
-            reply(&mut e, pending, now, &support::envelope(support::TICKER))
+            reply(
+                &mut e,
+                pending,
+                now,
+                &crate::support::envelope(crate::support::TICKER),
+            )
         } else {
-            let out = reply(&mut e, pending, now, &support::envelope(support::MARKET));
+            let out = reply(
+                &mut e,
+                pending,
+                now,
+                &crate::support::envelope(crate::support::MARKET),
+            );
             assert_eq!(
                 events(&out, "startup.recovered"),
                 0,
                 "tickers still required"
             );
             let pending = request(&out, "market/tickers");
-            reply(&mut e, pending, now, &support::envelope(support::TICKER))
+            reply(
+                &mut e,
+                pending,
+                now,
+                &crate::support::envelope(crate::support::TICKER),
+            )
         };
         assert!(e.store().loaded().markets && e.store().loaded().tickers);
         assert_eq!(events(&out, "startup.recovered"), 1);
@@ -141,14 +162,14 @@ fn public_startup_degrades_once_keeps_retrying_and_recovers() {
 
 #[test]
 fn empty_aggregate_catalogue_keeps_startup_retrying() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }));
+    });
     e.start(0.0);
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = crate::support::prepared(&mut e, 0.0);
     let pending = request(&out, "public/instruments");
-    let out = reply(&mut e, pending, 0.0, &support::envelope(""));
+    let out = reply(&mut e, pending, 0.0, &crate::support::envelope(""));
     assert!(!e.store().loaded().markets);
     assert_eq!(events(&out, "request.failed"), 1);
     let timer = out
@@ -159,20 +180,25 @@ fn empty_aggregate_catalogue_keeps_startup_retrying() {
         })
         .expect("empty catalogue requires retry");
     e.handle(1000.0, Event::TimerFired { timer });
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = crate::support::prepared(&mut e, 1000.0);
     let pending = request(&out, "public/instruments");
-    reply(&mut e, pending, 1000.0, &support::envelope(support::MARKET));
+    reply(
+        &mut e,
+        pending,
+        1000.0,
+        &crate::support::envelope(crate::support::MARKET),
+    );
     assert!(e.store().loaded().markets);
 }
 
 #[test]
 fn venue_rejection_reports_latest_parsed_cause_without_raw_body() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }));
+    });
     e.start(0.0);
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = crate::support::prepared(&mut e, 0.0);
     let mut pending = request(&out, "public/instruments");
     let mut now = 0.0;
     for attempt in 1..=6 {
@@ -209,19 +235,19 @@ fn venue_rejection_reports_latest_parsed_cause_without_raw_body() {
             .expect("retry remains armed");
         now = at;
         e.handle(now, Event::TimerFired { timer });
-        let out: Vec<_> = e.drain_actions().collect();
+        let out = crate::support::prepared(&mut e, now);
         pending = request(&out, "public/instruments");
     }
 }
 
 #[test]
 fn malformed_body_does_not_leak_preview_into_degradation() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }));
+    });
     e.start(0.0);
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = crate::support::prepared(&mut e, 0.0);
     let mut pending = request(&out, "public/instruments");
     let mut now = 0.0;
     for attempt in 1..=6 {
@@ -251,7 +277,7 @@ fn malformed_body_does_not_leak_preview_into_degradation() {
             .expect("retry remains armed");
         now = at;
         e.handle(now, Event::TimerFired { timer });
-        let out: Vec<_> = e.drain_actions().collect();
+        let out = crate::support::prepared(&mut e, now);
         pending = request(&out, "public/instruments");
     }
 }

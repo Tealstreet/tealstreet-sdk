@@ -4,11 +4,17 @@ use safe_cex_engine::Fill;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
+use safe_cex_engine::credential_selection::{
+    CredentialRole, CredentialUnavailable, SlotPolicy, Slots,
+};
 use safe_cex_engine::execution::{
     Arithmetic, CumulativePrice, Cursor, ExecutionRounding, Rejection, Report,
 };
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::selected_read::{
+    AdmittedRead, LocalRefusal, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::startup::rate_limit_pause_ms;
 use serde::Deserialize;
@@ -169,15 +175,16 @@ impl Account {
         }
     }
 }
+/// One command-owned leverage Read under its selected opaque identity.
+pub struct Leverage {
+    read: AdmittedRead,
+    symbol: String,
+    inst_id: String,
+    margin: MarginType,
+    settings_revision: u64,
+    positions_revision: u64,
+}
 pub enum Request {
-    Leverage {
-        command: CommandId,
-        symbol: String,
-        inst_id: String,
-        margin: MarginType,
-        settings_revision: u64,
-        positions_revision: u64,
-    },
     Margin {
         revision: u64,
     },
@@ -229,18 +236,19 @@ impl Blofin {
             Err(error) => cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {id}: {error}; retained proven execution baseline")),
         }
     }
-    pub(crate) fn fetch_leverage(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        symbol: String,
-    ) {
+    pub(crate) fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
         let Some(market) = cx.store.market(&symbol) else {
-            cx.fail(command, format!("Unknown market {symbol}"));
+            let Ok(context) = cx.admit_http_command(Self::read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, format!("Unknown market {symbol}"));
             return;
         };
         let Some(margin) = self.account.margin.filter(|_| self.account.mode_loaded) else {
-            cx.fail(command, "BloFin margin mode is not loaded");
+            let Ok(context) = cx.admit_http_command(Self::read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "BloFin margin mode is not loaded");
             return;
         };
         let inst_id = market.id.clone();
@@ -252,19 +260,197 @@ impl Blofin {
                 "cross"
             }
         );
-        self.private_read(
+        // A configured Secondary serves this GET beside a Primary. The refusal
+        // inspects the same immutable Slots that SelectedRead then selects from,
+        // a deterministic repeat; native refusal text and precedence are unchanged.
+        let identities = &self.options.identities;
+        let slots = Slots::new(
+            identities
+                .primary
+                .clone()
+                .filter(|_| !self.options.public_data_only),
+            identities.secondary.clone(),
+            SlotPolicy {
+                secondary_requires_primary: true,
+            },
+        );
+        let refusal = match slots.select(CredentialRole::Read { scope: None }) {
+            Ok((_, identity)) if identity.passphrase.is_some() => None,
+            Ok(_) => Some("BloFin requires a passphrase"),
+            Err(_) => Some("BloFin requires API credentials"),
+        };
+        let selected = match refusal {
+            Some(_) => Err(CredentialUnavailable::Missing),
+            None => SelectedRead::select(&slots, ReadRole::Read { scope: None }),
+        };
+        let message = refusal.unwrap_or("BloFin requires API credentials");
+        let Ok(read) = SelectedRead::command(
             cx,
-            &path,
-            Request::Leverage {
-                command,
+            selected,
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+            LocalRefusal {
+                diagnostic: Some(message.into()),
+                error: message.into(),
+            },
+        ) else {
+            return;
+        };
+        let testnet = self.options.testnet;
+        let leverage = |read| {
+            Pending::Leverage(Leverage {
+                read,
                 symbol,
                 inst_id,
                 margin,
                 settings_revision: self.account.settings_revision,
                 positions_revision: self.account.positions_revision,
+            })
+        };
+        if let Err((pending, error)) = read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url: format!("{}{path}", self.host()),
+                body: None,
+                stream: None,
             },
-            false,
-        );
+            |identity| {
+                Box::new(crate::dispatch_signing::Http::new(
+                    identity.clone(),
+                    testnet,
+                    Method::Get,
+                    path.clone(),
+                    None,
+                ))
+            },
+            leverage,
+        ) {
+            <Self as Venue>::on_sign_error(self, cx, pending, error.venue_error());
+        }
+    }
+    /// Native terminal text, now bound to the command's own Read context.
+    pub(crate) fn leverage_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        leverage: Leverage,
+        error: VenueError,
+    ) {
+        let context = leverage.read.context();
+        if cx.command_error_context(context, &error.message).is_ok() {
+            let _ = cx.fail_context(context, error);
+        }
+    }
+    pub(crate) fn leverage_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        leverage: Leverage,
+        response: Response<'_>,
+    ) {
+        let context = leverage.read.context();
+        if cx.validate_read_http_delivery(context, context).is_err() {
+            return;
+        }
+        if let Err(e) = check(&response) {
+            if response.body.contains("152401") || response.body.contains("152406") {
+                self.account.auth_failures += 1;
+            }
+            self.leverage_failed(cx, leverage, VenueError::new(e));
+            return;
+        }
+        self.account.auth_failures = 0;
+        let Leverage {
+            read,
+            symbol,
+            inst_id,
+            margin,
+            settings_revision,
+            positions_revision,
+        } = leverage;
+        let result = (|| {
+            let Data { data: rows } =
+                serde_json::from_str::<Data<Vec<LeverageRow<'_>>>>(response.body)
+                    .map_err(|_| "Malformed BloFin leverage response")?;
+            if rows.is_empty() || rows.len() > 2 {
+                return Err("Malformed BloFin leverage rows");
+            }
+            let expected_margin = if margin == MarginType::Isolated {
+                "isolated"
+            } else {
+                "cross"
+            };
+            let mut sides = std::collections::HashSet::new();
+            for row in &rows {
+                if row.inst_id != inst_id
+                    || row.margin_mode != expected_margin
+                    || !matches!(row.position_side.as_ref(), "net" | "long" | "short")
+                    || !row.leverage.0.is_finite()
+                    || row.leverage.0 <= 0.0
+                    || !sides.insert(row.position_side.as_ref())
+                {
+                    return Err("Malformed BloFin leverage row");
+                }
+            }
+            let net = rows.iter().find(|row| row.position_side == "net");
+            if net.is_some() && rows.len() != 1 {
+                return Err("Conflicting BloFin leverage sides");
+            }
+            if settings_revision != self.account.settings_revision
+                || positions_revision != self.account.positions_revision
+            {
+                return Err("BloFin leverage response was superseded");
+            }
+            let buy = rows
+                .iter()
+                .find(|row| row.position_side == "long")
+                .or(net)
+                .unwrap_or(&rows[0]);
+            let sell = rows
+                .iter()
+                .find(|row| row.position_side == "short")
+                .or(net)
+                .unwrap_or(&rows[0]);
+            #[derive(Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct FetchedLeverage {
+                buy_leverage: f64,
+                sell_leverage: f64,
+                margin_type: MarginType,
+                position_mode: PositionMode,
+            }
+            let result = FetchedLeverage {
+                buy_leverage: buy.leverage.0,
+                sell_leverage: sell.leverage.0,
+                margin_type: margin,
+                position_mode: if net.is_some() {
+                    PositionMode::Oneway
+                } else {
+                    PositionMode::Hedged
+                },
+            };
+            let json =
+                serde_json::to_string(&result).map_err(|_| "Invalid BloFin leverage result")?;
+            self.account.settings_revision += 1;
+            self.account.positions_revision += 1;
+            cx.store.update_setting(&symbol, |setting| {
+                setting.leverage = result.buy_leverage;
+                setting.buy_leverage = Some(result.buy_leverage);
+                setting.sell_leverage = Some(result.sell_leverage);
+                setting.margin_type = Some(margin);
+            });
+            Ok(json)
+        })();
+        match result {
+            Ok(data) => {
+                let _ = cx.done_context(read.context(), data);
+            }
+            Err(error) => {
+                let _ = cx.fail_context(read.context(), error);
+            }
+        }
     }
     pub(crate) fn remember_terminal(&mut self, id: &str) {
         self.account.remember_terminal(id);
@@ -1137,92 +1323,6 @@ impl Blofin {
         }
         self.account.auth_failures = 0;
         match request {
-            Request::Leverage {
-                command,
-                symbol,
-                inst_id,
-                margin,
-                settings_revision,
-                positions_revision,
-            } => {
-                let result = (|| {
-                    let Data { data: rows } =
-                        serde_json::from_str::<Data<Vec<LeverageRow<'_>>>>(response.body)
-                            .map_err(|_| "Malformed BloFin leverage response")?;
-                    if rows.is_empty() || rows.len() > 2 {
-                        return Err("Malformed BloFin leverage rows");
-                    }
-                    let expected_margin = if margin == MarginType::Isolated {
-                        "isolated"
-                    } else {
-                        "cross"
-                    };
-                    let mut sides = std::collections::HashSet::new();
-                    for row in &rows {
-                        if row.inst_id != inst_id
-                            || row.margin_mode != expected_margin
-                            || !matches!(row.position_side.as_ref(), "net" | "long" | "short")
-                            || !row.leverage.0.is_finite()
-                            || row.leverage.0 <= 0.0
-                            || !sides.insert(row.position_side.as_ref())
-                        {
-                            return Err("Malformed BloFin leverage row");
-                        }
-                    }
-                    let net = rows.iter().find(|row| row.position_side == "net");
-                    if net.is_some() && rows.len() != 1 {
-                        return Err("Conflicting BloFin leverage sides");
-                    }
-                    if settings_revision != self.account.settings_revision
-                        || positions_revision != self.account.positions_revision
-                    {
-                        return Err("BloFin leverage response was superseded");
-                    }
-                    let buy = rows
-                        .iter()
-                        .find(|row| row.position_side == "long")
-                        .or(net)
-                        .unwrap_or(&rows[0]);
-                    let sell = rows
-                        .iter()
-                        .find(|row| row.position_side == "short")
-                        .or(net)
-                        .unwrap_or(&rows[0]);
-                    #[derive(Serialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct FetchedLeverage {
-                        buy_leverage: f64,
-                        sell_leverage: f64,
-                        margin_type: MarginType,
-                        position_mode: PositionMode,
-                    }
-                    let result = FetchedLeverage {
-                        buy_leverage: buy.leverage.0,
-                        sell_leverage: sell.leverage.0,
-                        margin_type: margin,
-                        position_mode: if net.is_some() {
-                            PositionMode::Oneway
-                        } else {
-                            PositionMode::Hedged
-                        },
-                    };
-                    let json = serde_json::to_string(&result)
-                        .map_err(|_| "Invalid BloFin leverage result")?;
-                    self.account.settings_revision += 1;
-                    self.account.positions_revision += 1;
-                    cx.store.update_setting(&symbol, |setting| {
-                        setting.leverage = result.buy_leverage;
-                        setting.buy_leverage = Some(result.buy_leverage);
-                        setting.sell_leverage = Some(result.sell_leverage);
-                        setting.margin_type = Some(margin);
-                    });
-                    Ok(json)
-                })();
-                match result.map_err(str::to_owned) {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
-                };
-            }
             Request::Margin { revision } => {
                 if let Ok(Data { data: m }) =
                     serde_json::from_str::<Data<ModeRow<'_>>>(response.body)
@@ -1580,11 +1680,6 @@ impl Blofin {
         error: &str,
     ) {
         match request {
-            Request::Leverage { command, .. } => {
-                cx.command_error(command, error);
-                cx.fail(command, error.to_owned());
-                return;
-            }
             Request::Orders { attempt, .. } => {
                 self.account.orders_busy = false;
                 if attempt < 3 && self.account.auth_failures == 0 {

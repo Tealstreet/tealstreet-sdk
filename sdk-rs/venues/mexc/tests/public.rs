@@ -25,7 +25,7 @@ fn buffers_depth_discards_old_versions_and_invalidates_gaps() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let r = requests(&mut e).remove(0);
+    let r = public_requests(&mut e, 150.).remove(0);
     ws(
         &mut e,
         socket,
@@ -69,14 +69,14 @@ fn buffers_depth_discards_old_versions_and_invalidates_gaps() {
         })
         .unwrap();
     e.handle(1000.0, Event::TimerFired { timer });
-    assert_eq!(requests(&mut e).len(), 1);
+    assert_eq!(public_requests(&mut e, 1000.).len(), 1);
 }
 
 #[test]
 fn streamed_200_error_does_not_commit_markets_even_with_an_empty_array() {
     let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options::default()));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = public_requests(&mut e, 0.).remove(0);
     response(
         &mut e,
         &r,
@@ -174,7 +174,7 @@ fn resubscribe_ignores_an_old_subscriptions_inflight_snapshot() {
         })
     };
     e.handle(0.0, subscribe());
-    let old = requests(&mut e).remove(0);
+    let old = public_requests(&mut e, 0.).remove(0);
     e.handle(
         0.0,
         Event::Command(Command::UnsubscribeOrderBook {
@@ -182,7 +182,7 @@ fn resubscribe_ignores_an_old_subscriptions_inflight_snapshot() {
         }),
     );
     e.handle(0.0, subscribe());
-    let new = requests(&mut e).remove(0);
+    let new = public_requests(&mut e, 0.).remove(0);
     response(
         &mut e,
         &old,
@@ -201,7 +201,7 @@ fn resubscribe_ignores_an_old_subscriptions_inflight_snapshot() {
 fn startup_network_failures_retry_reads_without_committing_partial_state() {
     let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options::default()));
     e.start(0.0);
-    let first = requests(&mut e).remove(0);
+    let first = public_requests(&mut e, 0.).remove(0);
     e.handle(
         1.0,
         Event::HttpFailed {
@@ -221,9 +221,9 @@ fn startup_network_failures_retry_reads_without_committing_partial_state() {
         .unwrap();
     assert!(!e.store().loaded().markets);
     e.handle(1001.0, Event::TimerFired { timer });
-    let r = requests(&mut e).remove(0);
+    let r = public_requests(&mut e, 1001.).remove(0);
     response(&mut e, &r, MARKETS);
-    let ticker = requests(&mut e).remove(0);
+    let ticker = public_requests(&mut e, 100.).remove(0);
     e.handle(
         1002.0,
         Event::HttpFailed {
@@ -242,7 +242,7 @@ fn startup_network_failures_retry_reads_without_committing_partial_state() {
         })
         .unwrap();
     e.handle(2002.0, Event::TimerFired { timer });
-    let r = requests(&mut e).remove(0);
+    let r = public_requests(&mut e, 2002.).remove(0);
     response(&mut e, &r, TICKERS);
     assert!(e.store().loaded().tickers);
 }
@@ -311,7 +311,7 @@ fn invalid_rest_depth_never_commits_a_partial_or_empty_anchor() {
                 symbol: "BTCUSDT".into(),
             }),
         );
-        let r = requests(&mut e).remove(0);
+        let r = public_requests(&mut e, 150.).remove(0);
         response(&mut e, &r, body);
         assert!(e.book("BTCUSDT").is_none());
         assert!(
@@ -337,7 +337,7 @@ fn malformed_live_or_buffered_deltas_invalidate_before_advancing_the_anchor() {
                     symbol: "BTCUSDT".into(),
                 }),
             );
-            let r = requests(&mut e).remove(0);
+            let r = public_requests(&mut e, 150.).remove(0);
             let anchor =
                 r#"{"success":true,"code":0,"data":{"version":10,"bids":[[60000,10]],"asks":[]}}"#;
             if !buffered {
@@ -381,7 +381,7 @@ fn all_market_prices_and_selected_ticker_details_survive_reconnect() {
         }),
     );
     e.start(0.0);
-    let request = requests(&mut e).remove(0);
+    let request = public_requests(&mut e, 0.).remove(0);
     let template: serde_json::Value = serde_json::from_str(MARKETS).unwrap();
     let markets: Vec<_> = (0..105)
         .map(|i| {
@@ -396,7 +396,7 @@ fn all_market_prices_and_selected_ticker_details_survive_reconnect() {
         &request,
         &serde_json::json!({"success":true,"code":0,"data":markets}).to_string(),
     );
-    let request = requests(&mut e).remove(0);
+    let request = public_requests(&mut e, 100.).remove(0);
     let template: serde_json::Value = serde_json::from_str(TICKERS).unwrap();
     let tickers: Vec<_> = (0..105)
         .map(|i| {

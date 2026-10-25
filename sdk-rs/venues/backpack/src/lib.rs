@@ -3,7 +3,7 @@ mod account;
 mod depth_query;
 mod history;
 mod identity;
-mod sign;
+pub mod sign;
 mod trading;
 mod wire;
 
@@ -11,10 +11,10 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Precision, Ticker};
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -26,6 +26,9 @@ const PUBLIC_READ_HEADERS: &[(&str, &str)] = &[("X-Broker-Id", "1200")];
 
 #[derive(Default)]
 pub struct Options {
+    pub identity: Option<safe_cex_engine::signing::Identity>,
+    pub read_identity: Option<safe_cex_engine::signing::Identity>,
+    pub read_credentials_status: Option<Result<(), sign::ReadCredentialsError>>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -44,7 +47,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
-    Identity(CommandId),
+    Identity(identity::Request),
     BookQuery {
         context: Context,
     },
@@ -64,11 +67,12 @@ pub enum Pending {
         skipped: Vec<String>,
     },
     Depth {
+        context: Context,
         symbol: String,
         generation: u64,
     },
     Candles {
-        command: CommandId,
+        context: Context,
         rows: Vec<Candle>,
         invalid: bool,
     },
@@ -204,7 +208,7 @@ impl Backpack {
                 },
             ),
         };
-        self.get(cx, path, Default::default(), pending, true);
+        self.get(cx, path, Default::default(), pending);
     }
 
     fn retry_seed(&mut self, cx: &mut Cx<'_, Pending>, kind: SeedRead, error: &str) {
@@ -215,7 +219,13 @@ impl Backpack {
         }
         self.seed.backoff.failed(cx, kind);
     }
-    pub fn new(options: Options) -> Self {
+    pub fn new(mut options: Options) -> Self {
+        if options.read_credentials_status.is_none() {
+            options.read_credentials_status = options
+                .read_credentials
+                .as_ref()
+                .map(|read| sign::validate_read_credentials(read.validate(), &read.secret));
+        }
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
@@ -232,14 +242,7 @@ impl Backpack {
         }
     }
 
-    fn get(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        path: &str,
-        params: sign::Params,
-        pending: Pending,
-        stream: bool,
-    ) {
+    fn get(&self, cx: &mut Cx<'_, Pending>, path: &str, params: sign::Params, pending: Pending) {
         let query = sign::query(&params);
         let url = format!(
             "{REST}{path}{}",
@@ -250,11 +253,7 @@ impl Backpack {
             }
         );
         let headers = vec![("X-Broker-Id", "1200".into())];
-        if stream {
-            cx.request_streamed(Method::Get, url, headers, ArrayAt::Root, pending);
-        } else {
-            cx.request(Method::Get, url, headers, None, pending);
-        }
+        cx.request_streamed(Method::Get, url, headers, ArrayAt::Root, pending);
     }
 
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, topics: Vec<String>, add: bool) {
@@ -344,16 +343,104 @@ impl Backpack {
             _ => vec![],
         };
         state.sync = Sync::Waiting(buffer);
-        self.get(
-            cx,
-            "/api/v1/depth",
-            [("symbol".into(), symbol.into())].into(),
+        let context = match cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(context) => context,
+            Err(reason) => {
+                if reason != safe_cex_engine::request_context::Error::Invalid {
+                    self.recover_book(cx, symbol);
+                }
+                return;
+            }
+        };
+        let params = [("symbol".into(), symbol.into())].into();
+        let url = format!("{REST}/api/v1/depth?{}", sign::query(&params));
+        if let Err((pending, reason)) = cx.request_managed_with_headers(
+            context.clone(),
+            Method::Get,
+            url,
+            PUBLIC_READ_HEADERS,
+            None,
             Pending::Depth {
+                context,
                 symbol: symbol.into(),
                 generation: self.generation,
             },
-            false,
-        );
+        ) {
+            safe_cex_engine::Venue::on_http_preparation_failed(
+                self,
+                cx,
+                pending,
+                reason,
+                reason.read_venue_error(),
+            );
+        }
+    }
+
+    fn apply_depth_seed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: String,
+        generation: u64,
+        response: Response<'_>,
+    ) {
+        let Some(state) = self.books.get_mut(&symbol) else {
+            return;
+        };
+        if state.generation != generation || !matches!(state.sync, Sync::Waiting(_)) {
+            return;
+        }
+        let Ok(depth) = serde_json::from_str::<Depth>(response.body) else {
+            self.recover_book(cx, &symbol);
+            return;
+        };
+        let Sync::Waiting(buffer) = std::mem::replace(
+            &mut state.sync,
+            Sync::Live {
+                last: depth.last_update_id,
+                bridge: true,
+            },
+        ) else {
+            unreachable!()
+        };
+        state.book.load_sorted_owned(BookSide::Bids, depth.bids);
+        state.book.load_sorted_owned(BookSide::Asks, depth.asks);
+        let mut iter = buffer.into_iter();
+        let mut gap = None;
+        while let Some(d) = iter.next() {
+            let valid = match state.sync {
+                Sync::Live { last, bridge } => {
+                    d.last <= last
+                        || last.checked_add(1).is_some_and(|expected| {
+                            d.first <= expected
+                                && (bridge || d.first == expected)
+                                && d.first <= d.last
+                        })
+                }
+                _ => false,
+            };
+            if valid {
+                Self::apply(state, d);
+            } else {
+                gap = Some(std::iter::once(d).chain(iter).collect());
+                break;
+            }
+        }
+        if let Some(buffer) = gap {
+            state.sync = Sync::Waiting(buffer);
+            self.recover_book(cx, &symbol);
+        } else {
+            state.recoveries = 0;
+            cx.book_changed(&symbol);
+        }
     }
 
     fn recover_book(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -547,16 +634,12 @@ impl Venue for Backpack {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read.validate()
-        {
-            cx.notice(safe_cex_engine::Level::Error, code::CONFIG_INVALID, error);
-            return;
-        }
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = sign::Credentials::new(read.key.clone(), &read.secret)
-        {
-            cx.notice(safe_cex_engine::Level::Error, code::CONFIG_INVALID, error);
+        if let Some(Err(error)) = self.options.read_credentials_status {
+            cx.notice(
+                safe_cex_engine::Level::Error,
+                code::CONFIG_INVALID,
+                error.message(),
+            );
             return;
         }
         self.seed_read(cx, SeedRead::Markets);
@@ -640,6 +723,11 @@ impl Venue for Backpack {
         self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Pending::Candles { context, .. } = &*pending
+            && cx.validate_read_http_delivery(context, context).is_err()
+        {
+            return;
+        }
         let result = match pending {
             Pending::Identity(_) => return,
             Pending::History(request) => {
@@ -779,12 +867,43 @@ impl Venue for Backpack {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Depth {
+            context,
+            symbol,
+            generation,
+        } = pending
+        {
+            if cx.validate_background_read_http_delivery(&context).is_err() {
+                let _ = cx.finish_http_context(&context);
+                return;
+            }
+            if !(200..300).contains(&response.status) {
+                self.on_request_failed(
+                    cx,
+                    Pending::Depth {
+                        context,
+                        symbol,
+                        generation,
+                    },
+                    &format!("Backpack HTTP {}: {}", response.status, response.body),
+                );
+                return;
+            }
+            self.apply_depth_seed(cx, symbol, generation, response);
+            let _ = cx.finish_http_context(&context);
+            return;
+        }
+        if let Pending::Candles { context, .. } = &pending
+            && cx.validate_read_http_delivery(context, context).is_err()
+        {
+            return;
+        }
         if let Pending::BookQuery { context } = pending {
             self.book_query_response(cx, &context, response);
             return;
         }
-        if let Pending::Identity(command) = pending {
-            self.identity_response(cx, command, response);
+        if let Pending::Identity(request) = pending {
+            self.identity_response(cx, request, response);
             return;
         }
         if let Pending::History(request) = pending {
@@ -878,7 +997,6 @@ impl Venue for Backpack {
                         rows: vec![],
                         skipped: vec![],
                     },
-                    true,
                 );
                 self.get(
                     cx,
@@ -888,7 +1006,6 @@ impl Venue for Backpack {
                         rows: vec![],
                         skipped: vec![],
                     },
-                    true,
                 );
             }
             Pending::Daily { mut rows, skipped } => {
@@ -932,68 +1049,31 @@ impl Venue for Backpack {
                     self.finish_seed(cx);
                 }
             }
-            Pending::Depth { symbol, generation } => {
-                let Some(state) = self.books.get_mut(&symbol) else {
-                    return;
-                };
-                if state.generation != generation || !matches!(state.sync, Sync::Waiting(_)) {
-                    return;
-                }
-                let Ok(depth) = serde_json::from_str::<Depth>(response.body) else {
-                    self.recover_book(cx, &symbol);
-                    return;
-                };
-                let Sync::Waiting(buffer) = std::mem::replace(
-                    &mut state.sync,
-                    Sync::Live {
-                        last: depth.last_update_id,
-                        bridge: true,
-                    },
-                ) else {
-                    unreachable!()
-                };
-                state.book.load_sorted_owned(BookSide::Bids, depth.bids);
-                state.book.load_sorted_owned(BookSide::Asks, depth.asks);
-                let mut iter = buffer.into_iter();
-                let mut gap = None;
-                while let Some(d) = iter.next() {
-                    let valid = match state.sync {
-                        Sync::Live { last, bridge } => {
-                            d.last <= last
-                                || last.checked_add(1).is_some_and(|expected| {
-                                    d.first <= expected
-                                        && (bridge || d.first == expected)
-                                        && d.first <= d.last
-                                })
-                        }
-                        _ => false,
-                    };
-                    if valid {
-                        Self::apply(state, d);
-                    } else {
-                        gap = Some(std::iter::once(d).chain(iter).collect());
-                        break;
-                    }
-                }
-                if let Some(buffer) = gap {
-                    state.sync = Sync::Waiting(buffer);
-                    self.recover_book(cx, &symbol);
-                } else {
-                    state.recoveries = 0;
-                    cx.book_changed(&symbol);
-                }
-            }
             Pending::Candles {
-                command,
+                context,
                 rows,
                 invalid: false,
-            } => cx.done(command, serde_json::to_string(&rows).unwrap()),
-            Pending::Candles { command, .. } => cx.fail(command, "Backpack invalid candles"),
+            } => {
+                let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
+            }
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, "Backpack invalid candles");
+            }
             _ => cx.notice(
                 safe_cex_engine::Level::Error,
                 code::STREAM_MALFORMED,
                 "Backpack invalid REST list",
             ),
+        }
+    }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Pending::Trade(request) = pending {
+            request.unproven_evidence(response, evidence);
         }
     }
     fn on_http_failed(
@@ -1003,6 +1083,11 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Identity(request) => self.identity_failed(cx, request, error),
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::BookQuery { context } => {
                 // Preserve the public query's existing error presentation from #1680.
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
@@ -1018,15 +1103,56 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Identity(request) => self.identity_failed(cx, request, error),
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::BookQuery { context } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
             pending => self.on_sign_error(cx, pending, error),
         }
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Identity(request) => self.identity_failed(cx, request, error),
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trade_plan_ready(cx, plan);
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.trade_retired(owner);
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Identity(command) = pending {
-            self.identity_failed(cx, command, error);
+        if let Pending::Identity(request) = pending {
+            self.identity_failed(cx, request, safe_cex_engine::VenueError::new(error));
             return;
         }
         match pending {
@@ -1044,15 +1170,23 @@ impl Venue for Backpack {
                 self.trade_failed(cx, request, error)
             }
             Pending::History(request) => self.history_failed(cx, *request, error),
-            Pending::Depth { symbol, generation }
+            Pending::Depth {
+                context,
+                symbol,
+                generation,
+            } => {
+                let _ = cx.finish_http_context(&context);
                 if self
                     .books
                     .get(&symbol)
-                    .is_some_and(|s| s.generation == generation) =>
-            {
-                self.recover_book(cx, &symbol)
+                    .is_some_and(|s| s.generation == generation)
+                {
+                    self.recover_book(cx, &symbol);
+                }
             }
-            Pending::Candles { command, .. } => cx.fail(command, error),
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::Markets { .. } => self.retry_seed(cx, SeedRead::Markets, error),
             Pending::Daily { .. } => self.retry_seed(cx, SeedRead::Daily, error),
             Pending::Marks { .. } => self.retry_seed(cx, SeedRead::Marks, error),
@@ -1155,7 +1289,6 @@ impl Venue for Backpack {
                 }
             }
             Command::FetchCandles {
-                command,
                 symbol,
                 interval,
                 from_ms,
@@ -1163,7 +1296,27 @@ impl Venue for Backpack {
                 ..
             } => {
                 if !supported(interval) {
-                    cx.fail(command, interval.unsupported("Backpack"));
+                    match cx.command_wait() {
+                        Some(CommandWait::Remaining(_)) => {}
+                        Some(CommandWait::Expired) => {
+                            let _ = cx.reject_expired_command(Operation::Read);
+                            return;
+                        }
+                        None => {
+                            let _ = cx.reject_unstamped_command(Operation::Read);
+                            return;
+                        }
+                    }
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) else {
+                        return;
+                    };
+                    let _ = cx.fail_context(&context, interval.unsupported("Backpack"));
                     return;
                 }
                 let mut params: sign::Params = [
@@ -1180,17 +1333,33 @@ impl Venue for Backpack {
                 if let Some(to) = to_ms {
                     params.insert("endTime".into(), format!("{:.0}", (to / 1000.0).floor()));
                 }
-                self.get(
-                    cx,
-                    "/api/v1/klines",
-                    params,
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
+                let url = format!("{REST}/api/v1/klines?{}", sign::query(&params));
+                match cx.request_managed_with_headers(
+                    context.clone(),
+                    Method::Get,
+                    url,
+                    PUBLIC_READ_HEADERS,
+                    None,
                     Pending::Candles {
-                        command,
+                        context,
                         rows: vec![],
                         invalid: false,
                     },
-                    true,
-                );
+                ) {
+                    Ok(request) => cx.stream_response(request, ArrayAt::Root),
+                    Err((pending, reason)) => {
+                        self.on_http_preparation_failed(cx, pending, reason, reason.venue_error())
+                    }
+                }
             }
             Command::FetchOrderBook { symbol, .. } => {
                 let Ok(context) = cx.admit_http_command(Policy {

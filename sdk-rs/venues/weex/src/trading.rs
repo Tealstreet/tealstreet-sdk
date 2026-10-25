@@ -2,12 +2,17 @@
 //! subsequent steps run only after the previous acknowledgement. Writes are
 //! never retried, including when the transport cannot determine their outcome.
 use crate::{Pending, Task, WeexFutures};
+#[path = "trading/context.rs"]
+mod context;
+use context::{Entry, record};
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     MarginType, Order, OrderExtra, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus,
     OrderType, PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::request_context::plan::Slot;
+use safe_cex_engine::request_context::{Context, Plan};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -26,31 +31,19 @@ struct Brackets {
 }
 struct Job {
     steps: VecDeque<Step>,
-    ids: Vec<String>,
-    error: Option<VenueError>,
+    plan: Plan,
+    native_ids: Vec<String>,
     continue_on_error: bool,
     refresh: bool,
     hedged: Option<bool>,
-    /// A step took effect, so a later rejection cannot mean nothing happened.
-    effective: bool,
-}
-impl Job {
-    /// The first failure names the error; any unproven one makes it unknown,
-    /// and a later step that reached the venue means the job was not unsent.
-    fn record(&mut self, error: VenueError) {
-        let outcome = error.outcome;
-        let recorded = self.error.get_or_insert(error);
-        if outcome == Some(Outcome::Unknown) {
-            recorded.outcome = Some(Outcome::Unknown);
-        } else if recorded.outcome == Some(Outcome::NotSent) && outcome != Some(Outcome::NotSent) {
-            recorded.outcome = outcome;
-        }
-    }
 }
 pub(crate) struct Request {
     command: CommandId,
     call: Call,
     revision: u64,
+    plan: Plan,
+    slot: Slot,
+    context: Context,
 }
 struct ReplacementGuard {
     id: String,
@@ -94,6 +87,17 @@ enum Call {
         symbol: String,
         hedged: bool,
     },
+}
+impl Call {
+    fn cancels(&self) -> bool {
+        matches!(self, Self::Cancel { .. })
+    }
+    fn changes_settings(&self) -> bool {
+        matches!(
+            self,
+            Self::Leverage { .. } | Self::Margin { .. } | Self::Mode { .. }
+        )
+    }
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -225,6 +229,19 @@ struct ResultRow {
     error_message: String,
 }
 impl ResultRow {
+    fn aliases_consistent(&self) -> bool {
+        let ids_match = match (&self.order_id, &self.algo_id) {
+            (Some(order), Some(algo)) => order
+                .id()
+                .is_ok_and(|order| algo.id().is_ok_and(|algo| algo == order)),
+            _ => true,
+        };
+        ids_match
+            && match (&self.client_order_id, &self.client_algo_id) {
+                (Some(order), Some(algo)) => order == algo,
+                _ => true,
+            }
+    }
     /// Algo endpoints may answer with `algoId`/`clientAlgoId` instead.
     fn native(&self) -> Option<&Id> {
         self.order_id.as_ref().or(self.algo_id.as_ref())
@@ -357,38 +374,6 @@ fn rounded(value: f64, step: f64) -> Result<f64, String> {
 }
 fn price(value: Option<f64>, step: f64) -> Result<Option<String>, String> {
     value.map(|v| rounded(v, step).map(num::format)).transpose()
-}
-fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: impl Into<VenueError>) {
-    let error = error.into();
-    cx.command_error(command, &error.message);
-    cx.fail(command, error);
-}
-/// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
-pub(crate) fn http_failure(status: u16, body: &str) -> VenueError {
-    #[derive(Deserialize)]
-    struct Envelope {
-        code: Option<Code>,
-        msg: Option<String>,
-    }
-    let message = format!("HTTP {status}: {body}");
-    let mut error = match status {
-        408 | 500.. => unknown(message),
-        401 => VenueError::new(message).kind(ErrorKind::AuthInvalid),
-        403 => VenueError::new(message).kind(ErrorKind::AuthPermission),
-        429 => VenueError::new(message).kind(ErrorKind::RateLimited),
-        _ => VenueError::new(message).kind(ErrorKind::Rejected),
-    };
-    if error.outcome.is_none() {
-        error.outcome = Some(Outcome::Rejected);
-    }
-    if let Ok(envelope) = serde_json::from_str::<Envelope>(body) {
-        error.venue_code = envelope.code.map(|code| match code {
-            Code::Text(text) => text,
-            Code::Number(number) => number.to_string(),
-        });
-        error.venue_message = envelope.msg.filter(|msg| !msg.is_empty());
-    }
-    error
 }
 /// Refused before any request was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
@@ -771,6 +756,19 @@ impl WeexFutures {
         cx: &mut Cx<'_, Pending>,
         command: Command,
     ) -> Option<Command> {
+        match &command {
+            Command::PlaceOrders { command, .. }
+            | Command::CancelOrders { command, .. }
+            | Command::CancelSymbolOrders { command, .. }
+            | Command::AmendOrder { command, .. }
+            | Command::SetLeverage { command, .. }
+            | Command::SetMarginType { command, .. }
+            | Command::SetPositionMode { command, .. } => {
+                let _ = command;
+            }
+            _ => return Some(command),
+        };
+        let entry = Entry::begin(cx, self.credentials.primary.as_ref())?;
         // Serialize settings admission: a later command must be planned from
         // acknowledged settings, never an older in-flight mode/margin cache.
         if let Command::SetLeverage { command: id, .. }
@@ -785,9 +783,8 @@ impl WeexFutures {
                     "WEEX command ID is already in flight",
                 );
             } else {
-                reject(
+                entry.reject(
                     cx,
-                    *id,
                     not_sent(
                         "WEEX account settings update is already in flight; wait for its result",
                     ),
@@ -1104,36 +1101,31 @@ impl WeexFutures {
         let steps = match planned {
             Ok(v) => v,
             Err(error) => {
-                reject(cx, id, not_sent(error).kind(ErrorKind::InvalidInput));
+                entry.reject(cx, not_sent(error).kind(ErrorKind::InvalidInput));
                 return None;
             }
         };
         if !steps.is_empty() && self.credentials.primary.is_none() {
-            reject(
+            entry.reject(
                 cx,
-                id,
                 not_sent("WEEX private credentials required").kind(ErrorKind::AuthInvalid),
             );
             return None;
         }
-        if self.trading.jobs.contains_key(&id) {
-            cx.notice(
-                Level::Error,
-                code::COMMAND_UNSUPPORTED,
-                "WEEX command ID is already in flight",
-            );
+        if steps.is_empty() {
+            entry.empty(cx);
             return None;
         }
+        let plan = entry.admit(cx, steps.len())?;
         self.trading.jobs.insert(
             id,
             Job {
                 steps,
-                ids: Vec::new(),
-                error: None,
+                plan,
+                native_ids: Vec::new(),
                 continue_on_error,
                 refresh,
                 hedged,
-                effective: false,
             },
         );
         self.trade_next(cx, id);
@@ -1144,9 +1136,6 @@ impl WeexFutures {
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
-        if job.error.is_some() && !job.continue_on_error {
-            job.steps.clear();
-        }
         if let Some(step) = job.steps.pop_front() {
             if let Some(guard) = &step.replacement
                 && !cx.store.order(&guard.id).is_some_and(|order| {
@@ -1155,11 +1144,39 @@ impl WeexFutures {
                         && order.filled == guard.filled
                 })
             {
-                job.error=Some("WEEX order changed while canceling; replacement not submitted; reconcile before retrying".into());
+                let _ = cx.fail_plan(&job.plan, "WEEX order changed while canceling; replacement not submitted; reconcile before retrying");
                 self.refresh_account(cx);
-                self.trade_next(cx, command);
                 return;
             }
+            let plan = job.plan.clone();
+            let slot = match cx.plan_slots(&plan).and_then(|slots| {
+                slots
+                    .into_iter()
+                    .next()
+                    .ok_or(safe_cex_engine::request_context::Error::State)
+            }) {
+                Ok(slot) => slot,
+                Err(error) => {
+                    let _ = cx.fail_plan(&plan, error.venue_error());
+                    return;
+                }
+            };
+            let leg = if matches!(&step.call, Call::Place { .. }) {
+                cx.plan_leg_context_with_intent(
+                    &plan,
+                    &slot,
+                    safe_cex_engine::classify::Intent::Place,
+                )
+            } else {
+                cx.plan_leg_context(&plan, &slot)
+            };
+            let context = match leg {
+                Ok(context) => context,
+                Err(error) => {
+                    let _ = cx.fail_plan(&plan, error.venue_error());
+                    return;
+                }
+            };
             if matches!(
                 &step.call,
                 Call::Place { .. } | Call::Cancel { .. } | Call::Amend { .. }
@@ -1167,6 +1184,16 @@ impl WeexFutures {
                 self.account.invalidate_orders();
             } else {
                 self.account.invalidate_settings();
+                let scope = match &step.call {
+                    Call::Leverage { symbol, .. } | Call::Margin { symbol, .. } => {
+                        Some(symbol.as_str())
+                    }
+                    _ => None,
+                };
+                if let Err(error) = cx.store.metadata_write_started(command, scope) {
+                    let _ = cx.fail_plan(&plan, error);
+                    return;
+                }
             }
             match &step.call {
                 Call::Place { orders, .. } => {
@@ -1206,38 +1233,61 @@ impl WeexFutures {
                         .collect(),
                 );
             }
-            self.signed_request(
-                cx,
-                step.method,
-                step.path,
-                &step.query,
-                step.body,
-                Task::Trade(Request {
+            let identity = self
+                .credentials
+                .primary
+                .as_ref()
+                .expect("admitted write credential")
+                .clone();
+            let mut pairs = step
+                .query
+                .split('&')
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>();
+            pairs.sort_unstable_by_key(|p| p.split('=').next().unwrap_or(""));
+            let path_query = if pairs.is_empty() {
+                step.path.to_owned()
+            } else {
+                format!("{}?{}", step.path, pairs.join("&"))
+            };
+            let recipe =
+                crate::dispatch_signing::Http::new(identity, step.method, path_query, step.body);
+            let (url, _, body) = recipe.unsigned();
+            let pending = Pending {
+                task: Task::Trade(Request {
                     command,
                     call: step.call,
                     revision: self.account.order_revision(),
+                    plan,
+                    slot,
+                    context: context.clone(),
                 }),
-                None,
-            );
-        } else {
-            let job = self.trading.jobs.remove(&command).unwrap();
-            if job.refresh {
-                self.refresh_account(cx);
+                invalid: false,
+                skipped: Vec::new(),
+                seed_generation: self.seed_generation,
+            };
+            if let Err((pending, error)) = cx.request_signed_managed(
+                context,
+                step.method,
+                url,
+                body,
+                Box::new(recipe),
+                pending,
+            ) && let Task::Trade(request) = pending.task
+            {
+                self.trade_failed(cx, request, error.venue_error());
             }
-            if let Some(mut error) = job.error {
-                // An earlier accepted step means the command as a whole was neither
-                // rejected nor unsent; a later refusal cannot claim either outcome.
-                if job.effective
-                    && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-                {
-                    error.outcome = None;
-                }
-                reject(cx, command, error);
-            } else {
-                if let Some(hedged) = job.hedged {
-                    cx.store.set_hedged(hedged);
-                }
-                cx.done(command, json(&job.ids));
+        } else {
+            let plan = job.plan.clone();
+            let result = json(&job.native_ids);
+            let refresh = job.refresh;
+            let hedged = job.hedged;
+            if let Some(hedged) = hedged {
+                cx.store.set_hedged(hedged);
+            }
+            let _ = cx.done_plan(&plan, result);
+            if refresh {
+                self.refresh_account(cx);
             }
         }
     }
@@ -1248,18 +1298,30 @@ impl WeexFutures {
         request: Request,
         error: VenueError,
     ) {
+        // Engine failure routing consumes this request's Pending exactly once;
+        // a late failure has no Pending and cannot reach a reused command here.
+        cx.store.metadata_write_finished(request.command);
         rollback(
             cx,
             &request.call,
             request.revision == self.account.order_revision(),
         );
         self.account.invalidate_orders();
-        if let Some(job) = self.trading.jobs.get_mut(&request.command) {
-            job.record(error);
+        if self
+            .trading
+            .jobs
+            .get(&request.command)
+            .is_some_and(|job| job.continue_on_error)
+            && cx
+                .finish_plan_failed_call(&request.plan, &request.slot, &request.context)
+                .is_ok()
+        {
+            self.trade_next(cx, request.command);
+            self.refresh_account(cx);
+            return;
         }
-        // Reconcile ambiguous outcomes through reads; never resend the write.
+        let _ = cx.fail_plan(&request.plan, error);
         self.refresh_account(cx);
-        self.trade_next(cx, request.command);
     }
 
     pub(crate) fn trade_response(
@@ -1268,28 +1330,50 @@ impl WeexFutures {
         request: Request,
         response: Response<'_>,
     ) {
+        if cx
+            .validate_plan_delivery(&request.plan, &request.context)
+            .is_err()
+        {
+            return;
+        }
+        cx.store.metadata_write_finished(request.command);
+        if context::rate_limited(cx, &request.context) {
+            self.paused_until = self
+                .paused_until
+                .max(cx.now + crate::rate::delay(response, cx.now));
+        }
+        let assessment = match record(cx, &request.context, &request.call, response) {
+            Ok(result) => result,
+            Err(error) => {
+                self.trade_failed(cx, request, error.venue_error());
+                return;
+            }
+        };
+        let assessed = assessment.result;
         let owned = request.revision == self.account.order_revision();
         // A fill frame can revoke ownership before the cumulative order frame
         // changes cached quantities. Never replace from that stale amount.
         let replacement_lost = !owned
-            && matches!(&request.call, Call::Cancel { .. })
+            && request.call.cancels()
             && self.trading.jobs.get(&request.command).is_some_and(|job| {
                 job.steps
                     .front()
                     .is_some_and(|step| step.replacement.is_some())
             });
-        let result = self.apply_trade_response(cx, &request.call, response.body, owned);
+        let result = if assessment.publish {
+            self.apply_trade_response(cx, &request.call, response.body, owned)
+        } else {
+            rollback(cx, &request.call, owned);
+            assessed.clone()
+        };
         self.account.invalidate_orders();
         if result.is_err() || replacement_lost {
             self.refresh_account(cx);
         }
-        if matches!(
-            &request.call,
-            Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. }
-        ) {
+        if request.call.changes_settings() {
             self.account.invalidate_settings();
         }
-        if matches!(&request.call, Call::Cancel { .. }) {
+        if request.call.cancels() {
             let terminal: Vec<_> = cx
                 .store
                 .orders()
@@ -1301,19 +1385,35 @@ impl WeexFutures {
                 self.account.terminal(id, cx.now);
             }
         }
-        if let Some(job) = self.trading.jobs.get_mut(&request.command) {
-            if replacement_lost {
-                job.error.get_or_insert_with(||"WEEX order changed while canceling; replacement not submitted; reconcile before retrying".into());
+        if replacement_lost {
+            let _ = cx.fail_plan(&request.plan, "WEEX order changed while canceling; replacement not submitted; reconcile before retrying");
+            return;
+        }
+        let Some(job) = self.trading.jobs.get_mut(&request.command) else {
+            return;
+        };
+        match assessed {
+            Ok(ids) => job.native_ids.extend(ids),
+            Err(error) if !job.continue_on_error => {
+                let _ = cx.fail_plan(&request.plan, error);
+                return;
             }
-            match result {
-                Ok(ids) => {
-                    job.effective = true;
-                    job.ids.extend(ids);
-                }
-                Err(error) => job.record(error),
-            }
+            Err(_) => {}
+        }
+        if let Err(error) = cx.finish_plan_call(&request.plan, &request.slot, &request.context) {
+            let _ = cx.fail_plan(&request.plan, error.venue_error());
+            return;
         }
         self.trade_next(cx, request.command);
+    }
+
+    pub(crate) fn retire_trade(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.trading
+            .jobs
+            .retain(|_, job| !owner.matches_plan(&job.plan));
     }
 
     fn apply_trade_response(
@@ -1496,41 +1596,21 @@ fn apply_place(
     protective: bool,
     body: &str,
 ) -> Result<Vec<String>, VenueError> {
-    let decoded: Rows =
-        serde_json::from_str(body).map_err(|_| unknown("WEEX malformed order response"))?;
-    if batch && !matches!(&decoded, Rows::Many(_)) {
-        return Err(unknown("WEEX batch response must be an array"));
-    }
-    let rows = decoded.into_vec();
-    if rows.len() != orders.len() {
-        return Err(unknown("WEEX order response row count mismatch"));
-    }
-    let mut correlated = HashMap::new();
-    let mut native_ids = HashSet::new();
-    for (i, row) in rows.iter().enumerate() {
-        // A single non-batch write has exactly one possible correlation.
-        let client = match row.client() {
-            Some(client) if !protective => client,
-            _ if protective || !batch => orders[i].client_order_id.as_deref().unwrap(),
-            _ => return Err(unknown("WEEX response missing echoed clientOrderId")),
-        };
-        if !orders
-            .iter()
-            .any(|o| o.client_order_id.as_deref() == Some(client))
-            || correlated.insert(client, row).is_some()
-        {
-            return Err(unknown("WEEX response has unknown/duplicate clientOrderId"));
-        }
-        if row.success {
-            let id = row
-                .native()
-                .ok_or_else(|| unknown("WEEX accepted order missing orderId"))?
-                .id()?;
-            if !native_ids.insert(id) {
-                return Err(unknown("WEEX response duplicated a native orderId"));
-            }
-        }
-    }
+    let rows = place_rows(orders, batch, protective, body)?;
+    let correlated = rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let client = if protective || !batch {
+                row.client()
+                    .filter(|_| !protective)
+                    .unwrap_or_else(|| orders[i].client_order_id.as_deref().unwrap())
+            } else {
+                row.client().unwrap()
+            };
+            (client, row)
+        })
+        .collect::<HashMap<_, _>>();
     let mut ids = Vec::new();
     let mut errors = Vec::new();
     for order in orders {
@@ -1579,26 +1659,7 @@ fn apply_cancel(
     body: &str,
     owned: bool,
 ) -> Result<Vec<String>, VenueError> {
-    let rows = serde_json::from_str::<Rows>(body)
-        .map_err(|_| unknown("WEEX malformed cancellation response"))?
-        .into_vec();
-    let mut seen = HashSet::new();
-    let mut results = Vec::new();
-    for row in rows {
-        let id = row
-            .native()
-            .ok_or_else(|| unknown("WEEX cancellation missing orderId"))?
-            .id()?;
-        if !seen.insert(id.clone()) || (!all && !native.contains(&id)) {
-            return Err(unknown(
-                "WEEX cancellation returned unknown/duplicate orderId",
-            ));
-        }
-        results.push((id, row));
-    }
-    if !all && seen.len() != native.len() {
-        return Err(unknown("WEEX cancellation response row count mismatch"));
-    }
+    let results = cancel_rows(native, all, body)?;
     let mut errors = Vec::new();
     for (id, row) in results {
         if row.success {
@@ -1664,4 +1725,134 @@ fn metadata(body: &str, symbol: Option<&String>) -> Result<(), VenueError> {
     Err(unknown(
         "WEEX settings response has no success acknowledgement",
     ))
+}
+
+fn place_rows(
+    orders: &[Order],
+    batch: bool,
+    protective: bool,
+    body: &str,
+) -> Result<Vec<ResultRow>, VenueError> {
+    let decoded: Rows =
+        serde_json::from_str(body).map_err(|_| unknown("WEEX malformed order response"))?;
+    if batch && !matches!(&decoded, Rows::Many(_)) {
+        return Err(unknown("WEEX batch response must be an array"));
+    }
+    let rows = decoded.into_vec();
+    if rows.len() != orders.len() {
+        return Err(unknown("WEEX order response row count mismatch"));
+    }
+    let mut correlated = HashMap::new();
+    let mut native_ids = HashSet::new();
+    for (i, row) in rows.iter().enumerate() {
+        if context::contradictory(row) {
+            return Err(unknown("WEEX contradictory order acknowledgement"));
+        }
+        // A single non-batch write has exactly one possible correlation.
+        let client = match row.client() {
+            Some(client) if !protective => client,
+            _ if protective || !batch => orders[i].client_order_id.as_deref().unwrap(),
+            _ => return Err(unknown("WEEX response missing echoed clientOrderId")),
+        };
+        if !orders
+            .iter()
+            .any(|o| o.client_order_id.as_deref() == Some(client))
+            || correlated.insert(client, row).is_some()
+        {
+            return Err(unknown("WEEX response has unknown/duplicate clientOrderId"));
+        }
+        if row.success {
+            let id = row
+                .native()
+                .ok_or_else(|| unknown("WEEX accepted order missing orderId"))?
+                .id()?;
+            if !native_ids.insert(id) {
+                return Err(unknown("WEEX response duplicated a native orderId"));
+            }
+        }
+    }
+    Ok(rows)
+}
+
+fn cancel_rows(
+    native: &[String],
+    all: bool,
+    body: &str,
+) -> Result<Vec<(String, ResultRow)>, VenueError> {
+    let rows = serde_json::from_str::<Rows>(body)
+        .map_err(|_| unknown("WEEX malformed cancellation response"))?
+        .into_vec();
+    let mut seen = HashSet::new();
+    let mut results = Vec::new();
+    for row in rows {
+        if context::contradictory(&row) {
+            return Err(unknown("WEEX contradictory cancellation acknowledgement"));
+        }
+        let id = row
+            .native()
+            .ok_or_else(|| unknown("WEEX cancellation missing orderId"))?
+            .id()?;
+        if !seen.insert(id.clone()) || (!all && !native.contains(&id)) {
+            return Err(unknown(
+                "WEEX cancellation returned unknown/duplicate orderId",
+            ));
+        }
+        results.push((id, row));
+    }
+    if !all && seen.len() != native.len() {
+        return Err(unknown("WEEX cancellation response row count mismatch"));
+    }
+    Ok(results)
+}
+
+#[derive(Serialize, Deserialize)]
+enum LateTargets {
+    Cancel(Vec<String>),
+    Place(Vec<String>),
+    Other,
+}
+impl Request {
+    pub(crate) fn unproven_evidence(
+        &self,
+        body: &str,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        context::capture_ids(&self.call, body, evidence);
+    }
+    pub(crate) fn reconciliation(
+        &self,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        let targets = match &self.call {
+            Call::Cancel {
+                native,
+                before,
+                all,
+            } => {
+                let mut ids = if *all {
+                    before
+                        .iter()
+                        .map(|order| order.id.split("__").next().unwrap_or("").to_owned())
+                        .collect::<Vec<_>>()
+                } else {
+                    native.clone()
+                };
+                ids.sort();
+                ids.dedup();
+                LateTargets::Cancel(ids)
+            }
+            Call::Place { orders, .. } => LateTargets::Place(
+                orders
+                    .iter()
+                    .filter_map(|order| order.client_order_id.clone())
+                    .collect(),
+            ),
+            _ => LateTargets::Other,
+        };
+        let data = serde_json::to_string(&targets)
+            .map_err(|_| safe_cex_engine::request_context::Error::Invalid)?;
+        safe_cex_engine::request_context::ReconciliationData::new(data)
+    }
 }

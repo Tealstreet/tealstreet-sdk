@@ -1,4 +1,4 @@
-//! Managed socket boundaries. HTTP dispatch and physical ID allocation are unchanged.
+//! Managed socket boundaries and native work after final subscription handoff.
 use super::*;
 use crate::socket_driver::{ControlWork, Driver, Effect};
 use crate::socket_lifecycle::{
@@ -12,20 +12,44 @@ pub(super) enum InterestUpdate {
     Desired(Vec<Interest>),
     Repair(Vec<String>),
 }
-pub(super) struct Proposal {
+pub(super) struct Proposal<P> {
     id: u64,
     feed: FeedId,
     update: InterestUpdate,
     bytes: usize,
+    continuation: Option<Continuation<P>>,
+}
+
+pub(super) struct Continuation<P> {
+    epoch: Epoch,
+    proposal: u64,
+    required: Vec<Interest>,
+    bytes: usize,
+    revision: u64,
+    timer: Option<TimerId>,
+    armed: bool,
+    armed_at: f64,
+    pending: P,
 }
 
 impl<P> Cx<'_, P> {
     fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut Self) -> R) -> R {
-        let mut driver = std::mem::take(&mut self.io.socket_driver);
+        let mut driver = self.take_socket_driver();
         let result = f(&mut driver, self);
-        self.io.socket_driver = driver;
+        self.restore_socket_driver(driver);
         result
     }
+    // Shared out of line: every driver closure would otherwise inline the
+    // driver's default construction and drop.
+    #[inline(never)]
+    fn take_socket_driver(&mut self) -> Driver {
+        std::mem::take(&mut self.io.socket_driver)
+    }
+    #[inline(never)]
+    fn restore_socket_driver(&mut self, driver: Driver) {
+        self.io.socket_driver = driver;
+    }
+    #[inline(never)]
     pub(super) fn socket_effects(&mut self, effects: Vec<Effect>) {
         if self.io.socket_effects.len().saturating_add(effects.len()) > MAX_EFFECTS {
             self.io.socket_failed = true;
@@ -61,6 +85,38 @@ impl<P> Cx<'_, P> {
         self.io.managed_sockets = true;
         Ok(feed)
     }
+    /// Keep login permission independent of a connect-origin native snapshot bound.
+    pub fn register_socket_feed_with_snapshot(
+        &mut self,
+        policy: FeedPolicy,
+    ) -> Result<FeedId, SocketError> {
+        self.io.assert_actions_safe();
+        self.io.opaque_entry_activity();
+        if self.io.socket_failed {
+            return Err(SocketError::NotPermitted);
+        }
+        let feed = self.io.socket_driver.register_with_snapshot(policy, true)?;
+        self.io.managed_sockets = true;
+        Ok(feed)
+    }
+    /// Complete validated native snapshot proof from this exact text callback only.
+    pub fn complete_socket_snapshot(&mut self) -> Result<(), SocketError> {
+        self.io.assert_actions_safe();
+        self.io.opaque_entry_activity();
+        let (epoch, received_at) = self.io.socket_message.ok_or(SocketError::Stale)?;
+        if self.now != received_at {
+            return Err(SocketError::InvalidTime);
+        }
+        self.io
+            .socket_driver
+            .validate_snapshot_completion(epoch, self.now)?;
+        if !self.io.next_id.available(1) {
+            return Err(SocketError::Capacity);
+        }
+        self.with_socket_driver(|d, cx| d.complete_snapshot(cx, epoch))?;
+        self.io.socket_message = None;
+        Ok(())
+    }
     pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
         self.io.socket_driver.state.epoch(feed)
     }
@@ -95,6 +151,14 @@ impl<P> Cx<'_, P> {
             return Err(SocketError::NotPermitted);
         }
         self.io.socket_driver.preflight_begin(feed, self.now)?;
+        if self
+            .io
+            .socket_driver
+            .snapshot_connect_ids(feed)
+            .is_some_and(|count| !self.io.next_id.available(count))
+        {
+            return Err(SocketError::Capacity);
+        }
         let role = self.io.socket_driver.state.policy(feed)?.role.clone();
         if role == SocketChannel::Public && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return Err(SocketError::NotPermitted);
@@ -131,6 +195,7 @@ impl<P> Cx<'_, P> {
         &mut self,
         feed: FeedId,
         update: InterestUpdate,
+        after: Option<(Vec<Interest>, P)>,
     ) -> Result<u64, SocketError> {
         self.io.opaque_entry_activity();
         if self.io.socket_failed {
@@ -154,10 +219,35 @@ impl<P> Cx<'_, P> {
                     .ok_or(SocketError::Capacity)?,
             ),
         };
+        let required_bytes = after
+            .as_ref()
+            .map(|(required, _)| {
+                required
+                    .iter()
+                    .try_fold(0usize, |bytes, i| {
+                        bytes
+                            .checked_add(i.key.len())?
+                            .checked_add(i.wire_args.len())
+                    })
+                    .ok_or(SocketError::Capacity)
+            })
+            .transpose()?
+            .unwrap_or(0);
+        let epoch = if after.is_some() {
+            Some(self.socket_epoch(feed).ok_or(SocketError::Stale)?)
+        } else {
+            None
+        };
         if count > MAX_INTERESTS
             || bytes > MAX_INTEREST_BYTES / 2
-            || self.io.socket_proposals.len() >= MAX_PROPOSALS
-            || self.io.socket_proposal_bytes.saturating_add(bytes) > MAX_INTEREST_BYTES
+            || self.io.socket_proposals.len() + self.io.socket_continuations.len() >= MAX_PROPOSALS
+            || self
+                .io
+                .socket_proposal_bytes
+                .saturating_add(self.io.socket_continuation_bytes)
+                .saturating_add(bytes)
+                .saturating_add(required_bytes)
+                > MAX_INTEREST_BYTES
         {
             return Err(SocketError::Capacity);
         }
@@ -166,13 +256,31 @@ impl<P> Cx<'_, P> {
             .socket_proposal_next
             .checked_add(1)
             .ok_or(SocketError::Capacity)?;
+        let continuation = if let Some((required, pending)) = after {
+            let timer = TimerId(self.io.reserve_ids(1).ok_or(SocketError::Capacity)?.start);
+            Some(Continuation {
+                epoch: epoch.expect("continuation preflight checked epoch"),
+                proposal: id,
+                required,
+                bytes: required_bytes,
+                revision: 0,
+                timer: Some(timer),
+                armed: false,
+                armed_at: 0.,
+                pending,
+            })
+        } else {
+            None
+        };
         self.io.socket_proposal_next = id;
+        let bytes = bytes + required_bytes;
         self.io.socket_proposal_bytes += bytes;
         self.io.socket_proposals.push_back(Proposal {
             id,
             feed,
             update,
             bytes,
+            continuation,
         });
         Ok(id)
     }
@@ -182,7 +290,41 @@ impl<P> Cx<'_, P> {
         feed: FeedId,
         values: Vec<Interest>,
     ) -> Result<u64, SocketError> {
-        self.propose_interests(feed, InterestUpdate::Desired(values))
+        self.propose_interests(feed, InterestUpdate::Desired(values), None)
+    }
+    /// Admit native work behind final subscription handoff and a subsequent
+    /// engine ingress. Required canonical interests must survive replacement.
+    pub fn set_socket_interests_then(
+        &mut self,
+        feed: FeedId,
+        values: Vec<Interest>,
+        required_keys: &[&str],
+        pending: P,
+    ) -> Result<u64, SocketError> {
+        self.io.opaque_entry_activity();
+        if values.len() > MAX_INTERESTS || required_keys.len() > MAX_INTERESTS {
+            return Err(SocketError::Capacity);
+        }
+        // Inserted one by one: `collect` would add its own sort and bulk build.
+        let mut values_by_key = std::collections::BTreeMap::new();
+        for value in &values {
+            if values_by_key.insert(value.key.as_ref(), value).is_some() {
+                return Err(SocketError::InvalidInterest);
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        let mut required = Vec::with_capacity(required_keys.len());
+        for key in required_keys {
+            if !seen.insert(*key) {
+                return Err(SocketError::InvalidInterest);
+            }
+            required.push((*values_by_key.get(key).ok_or(SocketError::InvalidInterest)?).clone());
+        }
+        self.propose_interests(
+            feed,
+            InterestUpdate::Desired(values),
+            Some((required, pending)),
+        )
     }
     /// Force native unsubscribe/subscribe for unchanged current interests.
     pub fn repair_socket_interests(
@@ -190,7 +332,7 @@ impl<P> Cx<'_, P> {
         feed: FeedId,
         keys: Vec<String>,
     ) -> Result<u64, SocketError> {
-        self.propose_interests(feed, InterestUpdate::Repair(keys))
+        self.propose_interests(feed, InterestUpdate::Repair(keys), None)
     }
     pub(super) fn managed_send_allowed(&self, socket: SocketId) -> bool {
         !self.io.managed_sockets
@@ -208,6 +350,11 @@ impl<V: Venue> Engine<V> {
                 .frames_ready(self.io.dispatch_now, |socket| {
                     self.io.signing.has_socket(socket)
                 })
+            || self
+                .io
+                .socket_continuations
+                .iter()
+                .any(|work| !work.armed && self.continuation_ready(work, self.io.dispatch_now))
             || self.io.socket_after.iter().any(|(epoch, _)| {
                 self.io.socket_driver.one_shot_ready(
                     *epoch,
@@ -234,6 +381,11 @@ impl<V: Venue> Engine<V> {
     fn socket_native(&mut self, now: f64, event: LifecycleEvent) -> Result<(), SocketError> {
         self.assert_live();
         // Lifecycle work is independent of the HTTP codec that queued it.
+        #[cfg(feature = "http-plans")]
+        {
+            self.io.http_history_failure = None;
+        }
+        let message = self.io.socket_message.take();
         let delivery = self.io.http_delivery.take();
         let mut cx = Cx {
             now,
@@ -245,6 +397,7 @@ impl<V: Venue> Engine<V> {
         // callback or hide invalid output behind a socket-retirement filter.
         self.io.assert_actions_safe();
         self.io.http_delivery = delivery;
+        self.io.socket_message = message;
         result
     }
     fn socket_enqueue(&mut self, now: f64, effects: Vec<Effect>) {
@@ -298,6 +451,20 @@ impl<V: Venue> Engine<V> {
         }
         self.process_pending_socket_work(now);
     }
+    /// One shared notice for a refused lifecycle step.
+    #[inline(never)]
+    fn socket_refused(&mut self, now: f64, what: &str, error: SocketError) {
+        Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        }
+        .notice(
+            Level::Error,
+            log_code::SUBSCRIPTION_REJECTED,
+            format!("Managed socket {what} refused: {error:?}"),
+        );
+    }
     #[inline(never)]
     fn process_pending_socket_work(&mut self, now: f64) {
         let mut processed = 0usize;
@@ -331,6 +498,7 @@ impl<V: Venue> Engine<V> {
                     retry,
                 } = effect
                 {
+                    self.cancel_socket_continuations(retirement.epoch);
                     let pending = std::mem::take(&mut self.io.socket_after);
                     for (epoch, text) in pending {
                         if epoch == retirement.epoch {
@@ -360,30 +528,12 @@ impl<V: Venue> Engine<V> {
                         },
                     );
                     if let Err(error) = result {
-                        let mut cx = Cx {
-                            now,
-                            store: &mut self.store,
-                            io: &mut self.io,
-                        };
-                        cx.notice(
-                            Level::Error,
-                            log_code::SUBSCRIPTION_REJECTED,
-                            format!("Managed socket invalidation refused: {error:?}"),
-                        );
+                        self.socket_refused(now, "invalidation", error);
                     }
                     if let Err(error) = self.socket_mutate(now, |d, cx| {
                         d.acknowledge_retirement(cx, retirement, result.is_ok(), retry)
                     }) {
-                        let mut cx = Cx {
-                            now,
-                            store: &mut self.store,
-                            io: &mut self.io,
-                        };
-                        cx.notice(
-                            Level::Error,
-                            log_code::SUBSCRIPTION_REJECTED,
-                            format!("Managed socket retirement refused: {error:?}"),
-                        );
+                        self.socket_refused(now, "retirement", error);
                     }
                     continue;
                 }
@@ -397,6 +547,7 @@ impl<V: Venue> Engine<V> {
                             self.socket_failed_feed(now, epoch.feed(), error);
                             continue;
                         }
+                        self.rebase_socket_continuations(epoch.feed());
                         (LifecycleEvent::Ready { epoch, reopened }, Some(epoch))
                     }
                     Effect::Authenticated { epoch, first } => {
@@ -441,10 +592,18 @@ impl<V: Venue> Engine<V> {
                 continue;
             }
             let event = match self.socket_replace(proposal.feed, proposal.update) {
-                Ok(_) => LifecycleEvent::InterestsCommitted {
-                    feed: proposal.feed,
-                    proposal: proposal.id,
-                },
+                Ok(revision) => {
+                    if let Some(mut work) = proposal.continuation {
+                        work.revision = revision;
+                        self.io.socket_continuation_bytes += work.bytes;
+                        self.io.socket_continuations.push_back(work);
+                    }
+                    self.rebase_socket_continuations(proposal.feed);
+                    LifecycleEvent::InterestsCommitted {
+                        feed: proposal.feed,
+                        proposal: proposal.id,
+                    }
+                }
                 Err(error) => LifecycleEvent::InterestsRefused {
                     feed: proposal.feed,
                     proposal: proposal.id,
@@ -457,16 +616,7 @@ impl<V: Venue> Engine<V> {
         }
     }
     fn socket_failed_feed(&mut self, now: f64, feed: FeedId, error: SocketError) {
-        let mut cx = Cx {
-            now,
-            store: &mut self.store,
-            io: &mut self.io,
-        };
-        cx.notice(
-            Level::Error,
-            log_code::SUBSCRIPTION_REJECTED,
-            format!("Managed socket operation refused: {error:?}"),
-        );
+        self.socket_refused(now, "operation", error);
         let effects = self.socket_mutate(now, |d, cx| d.stop_feed(cx, feed).into_iter().collect());
         self.socket_enqueue(now, effects);
     }
@@ -475,6 +625,9 @@ impl<V: Venue> Engine<V> {
             return false;
         }
         if let Event::TimerFired { timer } = event {
+            if self.handle_socket_continuation(now, *timer) {
+                return true;
+            }
             match self.io.socket_driver.timer_admissible(*timer, now) {
                 None => return false,
                 Some(false) => return true,
@@ -541,7 +694,10 @@ impl<V: Venue> Engine<V> {
                         text,
                     ),
                 };
-                let other = matches!(control, Control::Other);
+                let other = matches!(
+                    control,
+                    Control::Other | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
+                );
                 let ready = self.venue.socket_startup_ready(&self.store);
                 self.assert_live();
                 let work = self.io.socket_driver.observe_control(now, epoch, &control);
@@ -563,7 +719,10 @@ impl<V: Venue> Engine<V> {
                         store: &mut self.store,
                         io: &mut self.io,
                     };
+                    assert!(cx.io.socket_message.is_none());
+                    cx.io.socket_message = Some((epoch, now));
                     Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
+                    cx.io.socket_message = None;
                 }
             }
             Event::WsBinary { data, .. } => {
@@ -684,6 +843,225 @@ impl<V: Venue> Engine<V> {
                 }
             }
         }
+    }
+}
+
+impl<V: Venue> Engine<V> {
+    fn continuation_ready(&self, work: &Continuation<V::Pending>, now: f64) -> bool {
+        #[cfg(feature = "http-plans")]
+        if self.io.http_plan_expiring.is_some() {
+            return false;
+        }
+        !self
+            .io
+            .socket_proposals
+            .iter()
+            .any(|proposal| proposal.feed == work.epoch.feed())
+            && self
+                .io
+                .socket_driver
+                .state
+                .interest_revision(work.epoch, &work.required)
+                == Some(work.revision)
+            && self.io.socket_driver.handoff_ready(
+                work.epoch,
+                now,
+                self.io.signing.has_socket(work.epoch.socket()),
+            )
+    }
+    fn clear_continuation_timer(&mut self, work: &mut Continuation<V::Pending>) {
+        if work.armed {
+            if let Some(timer) = work.timer.take() {
+                self.io.timers.remove(&timer);
+                self.io.actions.push(Action::ClearTimer { timer });
+            }
+            work.armed = false;
+        }
+    }
+    fn discard_socket_continuation(&mut self, mut work: Continuation<V::Pending>) {
+        self.clear_continuation_timer(&mut work);
+        self.io.socket_continuation_bytes -= work.bytes;
+    }
+    fn cancel_socket_continuations(&mut self, epoch: Epoch) {
+        let count = self.io.socket_continuations.len();
+        for _ in 0..count {
+            let work = self
+                .io
+                .socket_continuations
+                .pop_front()
+                .expect("continuation snapshot");
+            if work.epoch == epoch {
+                self.discard_socket_continuation(work);
+            } else {
+                self.io.socket_continuations.push_back(work);
+            }
+        }
+    }
+    fn rebase_socket_continuations(&mut self, feed: FeedId) {
+        let count = self.io.socket_continuations.len();
+        for _ in 0..count {
+            let mut work = self
+                .io
+                .socket_continuations
+                .pop_front()
+                .expect("continuation snapshot");
+            if work.epoch.feed() != feed {
+                self.io.socket_continuations.push_back(work);
+                continue;
+            }
+            let Some(revision) = self
+                .io
+                .socket_driver
+                .state
+                .interest_revision(work.epoch, &work.required)
+            else {
+                self.discard_socket_continuation(work);
+                continue;
+            };
+            if revision != work.revision {
+                self.clear_continuation_timer(&mut work);
+                work.revision = revision;
+            }
+            self.io.socket_continuations.push_back(work);
+        }
+    }
+    pub(super) fn arm_socket_continuations(&mut self, now: f64) {
+        if self.io.socket_continuations.is_empty() || self.io.socket_failed {
+            return;
+        }
+        let count = self.io.socket_continuations.len();
+        for _ in 0..count {
+            let mut work = self
+                .io
+                .socket_continuations
+                .pop_front()
+                .expect("continuation snapshot");
+            if !work.armed && self.continuation_ready(&work, now) {
+                if work.timer.is_none() {
+                    work.timer = self.io.reserve_ids(1).map(|ids| TimerId(ids.start));
+                }
+                let Some(timer) = work.timer else {
+                    let proposal = work.proposal;
+                    self.discard_socket_continuation(work);
+                    let mut cx = Cx {
+                        now,
+                        store: &mut self.store,
+                        io: &mut self.io,
+                    };
+                    cx.notice(
+                        Level::Error,
+                        log_code::SUBSCRIPTION_REJECTED,
+                        format!("Managed socket continuation {proposal} capacity exhausted"),
+                    );
+                    continue;
+                };
+                work.armed = true;
+                work.armed_at = now;
+                self.io.timers.insert(timer, ());
+                self.io.actions.push(Action::SetTimer { timer, at_ms: now });
+            }
+            self.io.socket_continuations.push_back(work);
+        }
+    }
+    fn handle_socket_continuation(&mut self, now: f64, timer: TimerId) -> bool {
+        let Some(index) = self
+            .io
+            .socket_continuations
+            .iter()
+            .position(|work| work.armed && work.timer == Some(timer))
+        else {
+            return false;
+        };
+        if !self.io.timers.contains_key(&timer) {
+            let work = self
+                .io
+                .socket_continuations
+                .remove(index)
+                .expect("located cancelled continuation");
+            self.discard_socket_continuation(work);
+            return true;
+        }
+        #[cfg(feature = "http-plans")]
+        if self.io.http_plan_expiring.is_some() {
+            self.io.timers.remove(&timer);
+            let work = &mut self.io.socket_continuations[index];
+            work.armed = false;
+            work.timer = None;
+            return true;
+        }
+        if now < self.io.socket_continuations[index].armed_at {
+            self.io.actions.push(Action::SetTimer {
+                timer,
+                at_ms: self.io.socket_continuations[index].armed_at,
+            });
+            return true;
+        }
+        self.io.timers.remove(&timer);
+        let mut work = self
+            .io
+            .socket_continuations
+            .remove(index)
+            .expect("located continuation");
+        work.armed = false;
+        work.timer = None;
+        if !self.socket_gate(now, work.epoch.socket(), false) {
+            self.discard_socket_continuation(work);
+            return true;
+        }
+        if !self.continuation_ready(&work, now) {
+            if self
+                .io
+                .socket_driver
+                .state
+                .interest_revision(work.epoch, &work.required)
+                == Some(work.revision)
+            {
+                self.io.socket_continuations.push_back(work);
+            } else {
+                self.discard_socket_continuation(work);
+            }
+            return true;
+        }
+        self.io.socket_continuation_bytes -= work.bytes;
+        self.assert_live();
+        #[cfg(feature = "http-plans")]
+        {
+            self.io.http_history_failure = None;
+        }
+        let message = self.io.socket_message.take();
+        let delivery = self.io.http_delivery.take();
+        let entry = self.io.command_entry.take();
+        #[cfg(feature = "order-locks")]
+        let order = self.io.order_response_token.take();
+        #[cfg(feature = "http-plans")]
+        let plan = self.io.http_plan_ready.take();
+        let result = self.venue.on_socket_interests_released(
+            &mut Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            },
+            work.epoch,
+            work.pending,
+        );
+        self.io.assert_actions_safe();
+        self.io.http_delivery = delivery;
+        self.io.socket_message = message;
+        self.io.command_entry = entry;
+        #[cfg(feature = "order-locks")]
+        {
+            self.io.order_response_token = order;
+        }
+        #[cfg(feature = "http-plans")]
+        {
+            self.io.http_plan_ready = plan;
+        }
+        self.assert_live();
+        if let Err(error) = result {
+            self.socket_failed_feed(now, work.epoch.feed(), error);
+        }
+        self.process_socket_work(now);
+        true
     }
 }
 
@@ -1384,6 +1762,113 @@ mod tests {
         );
         assert_eq!(e.io.socket_driver.state.desired(feed).unwrap().len(), 1);
     }
+    #[test]
+    fn auth_progress_invalid_deadlines_leave_watch_and_auth_bound_unchanged() {
+        for now in [f64::NAN, f64::INFINITY, f64::MAX] {
+            let (mut e, _) = engine();
+            let mut supervisor = crate::socket::Supervisor::new(Config {
+                auth_timeout_ms: Some(15_000.),
+                ..Config::default()
+            });
+            {
+                let mut cx = Cx {
+                    now: 0.,
+                    store: &mut e.store,
+                    io: &mut e.io,
+                };
+                supervisor.connecting(&mut cx);
+                supervisor.opened(&mut cx);
+            }
+            let actions = e.io.actions.len();
+            let timers = e.io.timers.clone();
+            supervisor.authentication_progress(&mut Cx {
+                now,
+                store: &mut e.store,
+                io: &mut e.io,
+            });
+            assert_eq!(e.io.actions.len(), actions);
+            assert_eq!(e.io.timers, timers);
+            assert_eq!(
+                supervisor.expired(15_000.),
+                Some(crate::socket::Timeout::Auth)
+            );
+        }
+    }
+
+    #[test]
+    fn auth_progress_overflow_cannot_replace_the_existing_watch() {
+        let (mut e, _) = engine();
+        let mut supervisor = crate::socket::Supervisor::new(Config {
+            auth_timeout_ms: Some(f64::MAX),
+            ..Config::default()
+        });
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            supervisor.connecting(&mut cx);
+            supervisor.opened(&mut cx);
+        }
+        let actions = e.io.actions.len();
+        let timers = e.io.timers.clone();
+        supervisor.authentication_progress(&mut Cx {
+            now: f64::MAX / 2.,
+            store: &mut e.store,
+            io: &mut e.io,
+        });
+        assert_eq!(e.io.actions.len(), actions);
+        assert_eq!(e.io.timers, timers);
+        assert_eq!(
+            supervisor.expired(60_000.),
+            Some(crate::socket::Timeout::Idle)
+        );
+    }
+
+    #[test]
+    fn auth_progress_timer_exhaustion_is_fatal_before_replacing_the_old_bound() {
+        let (mut e, _) = engine();
+        let mut supervisor = crate::socket::Supervisor::new(Config {
+            auth_timeout_ms: Some(15_000.),
+            ..Config::default()
+        });
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            supervisor.connecting(&mut cx);
+            supervisor.opened(&mut cx);
+        }
+        let actions = e.io.actions.len();
+        let timers = e.io.timers.clone();
+        e.io.next_id =
+            crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID + 1);
+        let trapped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            supervisor.authentication_progress(&mut Cx {
+                now: 14_000.,
+                store: &mut e.store,
+                io: &mut e.io,
+            });
+        }));
+        assert!(trapped.is_err());
+        assert!(e.failed());
+        assert_eq!(e.io.actions.len(), actions);
+        assert_eq!(e.io.timers, timers);
+        assert_eq!(
+            supervisor.expired(15_000.),
+            Some(crate::socket::Timeout::Auth)
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                e.drain_actions().for_each(drop);
+            }))
+            .is_err()
+        );
+    }
+
     struct Step;
     impl crate::SignStep for Step {
         fn prepare(
@@ -1553,4 +2038,100 @@ mod tests {
         assert_eq!(sent, vec!["native-follow-up"]);
         assert!(!e.has_actions());
     }
+    #[test]
+    fn snapshot_connect_preflights_exact_owned_resource_count() {
+        for (timeout, ceiling, admitted) in
+            [(20_000., 2, true), (1_000., 2, false), (1_000., 3, true)]
+        {
+            let mut store = Store::default();
+            let mut io = Io::<()> {
+                next_id: crate::resource_ids::ResourceIds::with_ceiling(ceiling),
+                ..Default::default()
+            };
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let mut declared = policy();
+            declared.auth = AuthMode::Required;
+            declared.supervision.auth_timeout_ms = Some(timeout);
+            let feed = cx.register_socket_feed_with_snapshot(declared).unwrap();
+            let result = cx.connect_socket(feed, "wss://snapshot.test");
+            if admitted {
+                assert!(result.is_ok());
+                assert!(!cx.io.next_id.available(1));
+                assert!(cx.socket_epoch(feed).is_some());
+            } else {
+                assert_eq!(result, Err(SocketError::Capacity));
+                assert!(cx.io.actions.is_empty());
+                assert!(cx.io.next_id.available(ceiling));
+                assert!(cx.socket_epoch(feed).is_none());
+            }
+        }
+    }
+    #[test]
+    fn snapshot_invalid_policy_does_not_register_a_feed() {
+        let mut store = Store::default();
+        let mut io = Io::<()>::default();
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(
+            cx.register_socket_feed_with_snapshot(policy()),
+            Err(SocketError::InvalidPolicy)
+        );
+        assert!(cx.io.actions.is_empty());
+        assert_eq!(cx.register_socket_feed(policy()).unwrap().index(), 0);
+    }
+    #[test]
+    fn snapshot_completion_capacity_preserves_proof_and_duplicate_is_inert() {
+        for ceiling in [3, 4] {
+            let mut store = Store::default();
+            let mut io = Io::<()> {
+                next_id: crate::resource_ids::ResourceIds::with_ceiling(ceiling),
+                ..Default::default()
+            };
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let mut declared = policy();
+            declared.auth = AuthMode::Required;
+            declared.supervision.auth_timeout_ms = Some(20_000.);
+            let feed = cx.register_socket_feed_with_snapshot(declared).unwrap();
+            let epoch = cx.connect_socket(feed, "wss://snapshot.test").unwrap();
+            cx.with_socket_driver(|d, cx| d.ingress(cx, epoch.socket(), Ingress::Open));
+            cx.with_socket_driver(|d, cx| {
+                d.control(
+                    cx,
+                    epoch,
+                    crate::socket_lifecycle::Control::Auth(
+                        crate::socket_lifecycle::AuthEvidence::Accepted,
+                    ),
+                    false,
+                )
+            });
+            cx.io.socket_message = Some((epoch, 0.));
+            if ceiling == 3 {
+                let actions = cx.io.actions.len();
+                assert_eq!(cx.complete_socket_snapshot(), Err(SocketError::Capacity));
+                assert_eq!(cx.io.actions.len(), actions);
+                assert_eq!(cx.io.socket_message, Some((epoch, 0.)));
+                cx.io.next_id = crate::resource_ids::ResourceIds::starting_at(4);
+            }
+            assert_eq!(cx.complete_socket_snapshot(), Ok(()));
+            cx.io.socket_message = Some((epoch, 0.));
+            let actions = cx.io.actions.len();
+            assert_eq!(cx.complete_socket_snapshot(), Err(SocketError::Stale));
+            assert_eq!(cx.io.actions.len(), actions);
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "socket_handoff_tests.rs"]
+mod handoff_tests;
