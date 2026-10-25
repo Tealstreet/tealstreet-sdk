@@ -92,3 +92,28 @@ combined bundle.
 - CPU re-certification on the PR. The Plan paths run per command, off the
   replay and decode hot path.
 - Plan review, then source review, by claude-fe7lgm.
+
+## S1 design note (after S0)
+
+A transitive scan of the 269 `Cx<P>`/`Io<P>` methods (a method is P-dependent
+if it names a P field or type, or calls a P-dependent method) found 172 that
+are P-free already. Of the 97 that depend on P, 63 do so only through one
+leaf, `Io::discard_managed`. It removes a managed call's core state and drops
+its `PendingHttp<P>`, and 10 of its 12 callers ignore the returned pending.
+Those 63 include `finish_sealed_command`, `fail_owned_admission`,
+`prepare_plan_terminal`, `admit_plan_owned` and `with_recorded_owned_failure`.
+
+So S1 starts by moving the pending map out of the generic shell:
+
+- `IoCore` holds the pending map behind a small object-safe trait, with
+  `discard(id) -> bool` and `as_any_mut()`. `discard` drops the entry
+  synchronously, so no pending outlives its call.
+- Generic code that needs the typed `PendingHttp<P>` (issue, delivery, and the
+  two callers that hand the pending back) downcasts once at that boundary.
+- `discard_managed` then splits into a non-generic core (core state plus the
+  erased drop) and a generic `take` used only where the pending is returned.
+
+With that leaf erased, the P-free set grows to about 235 of 269 methods. They
+move to a non-generic `CoreCx<'a> { now, store, io: &mut IoCore }` with
+`#[inline]` `Cx<P>` forwarders. The remaining generic code is the issue path,
+the venue-callback boundaries and the socket proposal and continuation queues.
