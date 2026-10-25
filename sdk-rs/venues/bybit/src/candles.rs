@@ -1,5 +1,6 @@
 //! Public klines on the engine's managed Read authority: one command Context
 //! with a native 20 s window, streamed `result.list`, typed terminals.
+use crate::policy::read_policy;
 use crate::sign::{self, Query};
 use crate::trading::codes::BYBIT;
 use crate::wire::{KlineRow, Status, float};
@@ -7,7 +8,7 @@ use crate::{BybitLinear, Category, MARKETS_PATH, Pending, Rest, Then, interval_c
 use safe_cex_engine::classify::{self, Native, NativeCode, Released};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval};
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::Context;
 
 use safe_cex_engine::{Cx, ErrorKind, Method, Outcome, Response, VenueError};
 
@@ -15,23 +16,6 @@ use safe_cex_engine::{Cx, ErrorKind, Method, Outcome, Response, VenueError};
 pub struct Read {
     context: Context,
     candles: Vec<Candle>,
-}
-
-/// A public read answered once, inside its native window.
-pub(crate) fn read_policy() -> Policy {
-    entry_policy(Operation::Read)
-}
-
-/// Command authority for an answer or refusal with no I/O. A write command's
-/// refusal keeps its NotSent outcome even when admission itself is refused.
-pub(crate) fn entry_policy(operation: Operation) -> Policy {
-    Policy {
-        operation,
-        credential: None,
-        timeout_ms: 20_000,
-        pacing: None,
-        retry: RetryPolicy::Never,
-    }
 }
 
 fn refused(message: impl Into<String>) -> VenueError {

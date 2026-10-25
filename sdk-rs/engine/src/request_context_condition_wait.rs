@@ -23,7 +23,11 @@ impl<P> Cx<'_, P> {
         if bound_ms == Some(0) {
             return Err(Error::Invalid);
         }
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         let serial = body.serial.as_ref().ok_or(Error::Invalid)?;
         if serial.condition.is_some() {
             return Err(Error::State);
@@ -32,6 +36,7 @@ impl<P> Cx<'_, P> {
         let deadline = bound_ms.map_or(ROOT, |ms| self.now + f64::from(ms));
         let serial = self
             .io
+            .core
             .request_contexts
             .plan_body_mut(plan)?
             .serial
@@ -54,7 +59,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         let now = self.now;
-        let body = self.io.request_contexts.plan_body_mut(&wait.plan)?;
+        let body = self.io.core.request_contexts.plan_body_mut(&wait.plan)?;
         let serial = body.serial.as_mut().ok_or(Error::Revoked)?;
         if serial.condition.map(|(own, _)| own) != Some(wait.wait) {
             return Err(Error::Revoked);
@@ -74,7 +79,7 @@ impl<V: Venue> Engine<V> {
     /// failure custody, or the engine seals it once with its projection.
     #[inline(never)]
     pub(in crate::engine) fn expire_plan_condition(&mut self, now: f64, plan: &Plan) {
-        let Ok(body) = self.io.request_contexts.plan_body_mut(plan) else {
+        let Ok(body) = self.io.core.request_contexts.plan_body_mut(plan) else {
             return;
         };
         let Some(serial) = body.serial.as_mut() else {
@@ -96,6 +101,7 @@ impl<V: Venue> Engine<V> {
         );
         if self
             .io
+            .core
             .request_contexts
             .plan_body(plan)
             .is_ok_and(|body| body.entries[0].parked)

@@ -151,6 +151,9 @@ pub struct RoutingPlan {
     pub socket_channels: Vec<SocketChannelRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub public_ws_routes: Vec<PublicWsRoute>,
+    /// Private sockets whose native URL has its own route (Bitget UTA).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub private_ws_routes: Vec<PublicWsRoute>,
 }
 
 pub(crate) struct RoutingState {
@@ -173,6 +176,8 @@ pub(crate) struct SelectedSocket {
     pub headers: Vec<(String, String)>,
     pub key: String,
     pub relay: Option<String>,
+    /// A `reject_route` connect with no route left: report, never dial.
+    pub exhausted: bool,
 }
 
 impl RoutingState {
@@ -322,11 +327,17 @@ impl RoutingState {
                 .iter()
                 .find(|rule| original.contains(&rule.contains))
                 .map_or(&self.plan.ws.public, |rule| &rule.route),
-            SocketChannel::Private => &self.plan.ws.private,
+            SocketChannel::Private => self
+                .plan
+                .private_ws_routes
+                .iter()
+                .find(|rule| original.contains(&rule.contains))
+                .map_or(&self.plan.ws.private, |rule| &rule.route),
             SocketChannel::Business => &self.plan.ws.business,
         };
         let feed = context.as_ref().map_or("", |context| context.feed.as_str());
         let recover = context.as_ref().is_some_and(|context| context.recover);
+        let reject = context.as_ref().is_some_and(|context| context.reject_route);
         let key = format!(
             "{channel:?}:{feed}:{}",
             original.split('?').next().unwrap_or(original)
@@ -337,6 +348,8 @@ impl RoutingState {
                 headers,
                 key: format!("direct:{key}"),
                 relay: None,
+                // A direct-only route has no other egress to try.
+                exhausted: reject,
             };
         }
         let mut sockets = self.sockets.lock().unwrap();
@@ -347,7 +360,8 @@ impl RoutingState {
                 ignored_messages: route.ignored_messages.clone(),
                 ..SocketAttempts::default()
             });
-        if attempts.connected {
+        // A refusal is a reply, never silence.
+        if attempts.connected && !reject {
             attempts.silent = if attempts.message {
                 0
             } else {
@@ -364,7 +378,20 @@ impl RoutingState {
                 .flatten()
                 .filter(|url| !url.is_empty()),
         );
-        if recover && fallback.is_some() {
+        if reject {
+            // Advance exactly one route; `recover` does not also jump to the last.
+            if attempts.candidate + 1 >= candidates.len() {
+                return SelectedSocket {
+                    url: original.into(),
+                    headers,
+                    key,
+                    relay: None,
+                    exhausted: true,
+                };
+            }
+            attempts.candidate += 1;
+            attempts.silent = 0;
+        } else if recover && fallback.is_some() {
             attempts.candidate = candidates.len() - 1;
             attempts.silent = 0;
         } else if attempts.silent >= 2 && attempts.candidate + 1 < candidates.len() {
@@ -400,6 +427,7 @@ impl RoutingState {
             headers,
             key,
             relay,
+            exhausted: false,
         }
     }
 
@@ -1409,6 +1437,7 @@ mod tests {
                             .map(|context| safe_cex_engine::SocketContext {
                                 feed: context.feed.into(),
                                 recover: context.recover,
+                                reject_route: false,
                             }),
                     );
                     assert_eq!(
@@ -1470,5 +1499,99 @@ mod tests {
             "Engine HTTP header alias conflicts with an existing header"
         );
         assert!(!error.contains("Bearer"));
+    }
+
+    fn private_route() -> WsRoute {
+        WsRoute {
+            host: Some("wss://proxy.invalid/bitget/v2/private".into()),
+            relay: Some("wss://relay.invalid/ws?ts-relay=bitget".into()),
+            fallback: Some("wss://ws.bitget.com/v2/ws/private".into()),
+            ..WsRoute::default()
+        }
+    }
+
+    fn connect(state: &RoutingState, url: &str, recover: bool, reject: bool) -> SelectedSocket {
+        state.socket(
+            url,
+            vec![],
+            Some(safe_cex_engine::SocketChannel::Private),
+            Some(safe_cex_engine::SocketContext {
+                feed: "private".into(),
+                recover,
+                reject_route: reject,
+            }),
+        )
+    }
+
+    #[test]
+    fn reject_route_walks_each_route_once_then_exhausts_without_dialling() {
+        let state = state(RoutingPlan {
+            ws: WsRoutes {
+                private: private_route(),
+                ..WsRoutes::default()
+            },
+            ..RoutingPlan::default()
+        });
+        let url = "wss://ws.bitget.com/v2/ws/private";
+        let first = connect(&state, url, false, false);
+        assert_eq!(first.url, "wss://proxy.invalid/bitget/v2/private");
+        let relay = connect(&state, url, false, true);
+        assert!(!relay.exhausted);
+        assert!(relay.url.starts_with("wss://relay.invalid/ws"));
+        let fallback = connect(&state, url, false, true);
+        assert_eq!(fallback.url, "wss://ws.bitget.com/v2/ws/private");
+        let exhausted = connect(&state, url, false, true);
+        assert!(exhausted.exhausted, "no route left: report, never dial");
+        // The connect after exhaustion carries no reject and stays on the last route.
+        let after = connect(&state, url, false, false);
+        assert!(!after.exhausted);
+        assert_eq!(after.url, "wss://ws.bitget.com/v2/ws/private");
+    }
+
+    #[test]
+    fn reject_route_with_recover_advances_one_route_not_to_the_last() {
+        let state = state(RoutingPlan {
+            ws: WsRoutes {
+                private: private_route(),
+                ..WsRoutes::default()
+            },
+            ..RoutingPlan::default()
+        });
+        let url = "wss://ws.bitget.com/v2/ws/private";
+        connect(&state, url, false, false);
+        let next = connect(&state, url, true, true);
+        assert!(
+            next.url.starts_with("wss://relay.invalid/ws"),
+            "one route forward, not recover's jump to the fallback: {}",
+            next.url
+        );
+    }
+
+    #[test]
+    fn a_private_url_scoped_route_replaces_the_channel_route_and_a_direct_url_exhausts() {
+        let state = state(RoutingPlan {
+            ws: WsRoutes {
+                private: WsRoute {
+                    direct_urls: vec!["wss://ws.bitget.com/v3/ws/private".into()],
+                    ..private_route()
+                },
+                ..WsRoutes::default()
+            },
+            private_ws_routes: vec![PublicWsRoute {
+                contains: "/v2/ws/private".into(),
+                route: WsRoute {
+                    host: Some("wss://proxy.invalid/bitget/v2-scoped".into()),
+                    ..WsRoute::default()
+                },
+            }],
+            ..RoutingPlan::default()
+        });
+        let scoped = connect(&state, "wss://ws.bitget.com/v2/ws/private", false, false);
+        assert_eq!(scoped.url, "wss://proxy.invalid/bitget/v2-scoped");
+        let direct = connect(&state, "wss://ws.bitget.com/v3/ws/private", false, true);
+        assert!(
+            direct.exhausted,
+            "a direct-only route has no egress to switch to"
+        );
     }
 }

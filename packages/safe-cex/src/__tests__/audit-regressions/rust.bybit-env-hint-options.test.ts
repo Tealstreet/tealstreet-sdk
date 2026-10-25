@@ -24,7 +24,7 @@ it.each([undefined, 'BRA_BTL'] as const)('forwards Bybit site %s to native auth-
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noop,
     wsMessage: noop,
-    wsClose: noop,
+    wsClose: noop, wsRouteExhausted: noop,
     httpStart: noop,
     httpChunk: noop,
     httpEnd: noop,

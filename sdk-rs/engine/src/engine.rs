@@ -16,6 +16,8 @@ use std::collections::HashMap;
 /// Bounds on a host-scaled poll cadence, beyond a venue's own native cadence.
 pub const POLL_POLICY_FLOOR_MS: f64 = 1_000.0;
 pub const POLL_POLICY_CAP_MS: f64 = 120_000.0;
+/// Close code the default `on_route_exhausted` reports: abnormal closure, no peer frame.
+pub const ROUTE_EXHAUSTED_CLOSE: u16 = 1006;
 
 /// Bound a configured absolute cadence; positive infinity explicitly pauses polling.
 pub fn bounded_tick_interval(interval_ms: f64) -> f64 {
@@ -388,6 +390,10 @@ pub enum SocketChannel {
 pub struct SocketContext {
     pub feed: String,
     pub recover: bool,
+    /// The venue refused the last route's egress: advance exactly one route
+    /// candidate for this connect, or report `WsRouteExhausted` without dialling.
+    #[serde(rename = "rejectRoute", skip_serializing_if = "std::ops::Not::not")]
+    pub reject_route: bool,
 }
 
 /// Everything a host needs to open one socket; `Cx::connect` takes it or a bare URL.
@@ -419,7 +425,16 @@ impl SocketSpec {
         self.context = Some(SocketContext {
             feed: feed.into(),
             recover,
+            reject_route: false,
         });
+        self
+    }
+
+    /// Ask the host to leave the current route; needs a `feed` context.
+    pub fn reject_route(mut self) -> Self {
+        if let Some(context) = self.context.as_mut() {
+            context.reject_route = true;
+        }
         self
     }
 
@@ -792,6 +807,11 @@ pub enum Event<'a> {
         socket: SocketId,
         code: u16,
     },
+    /// Host-only: a `reject_route` connect had no route left, so nothing was
+    /// dialled. It is that socket's only terminal; no open or close follows.
+    WsRouteExhausted {
+        socket: SocketId,
+    },
     /// A complete response.
     HttpResponse {
         request: RequestId,
@@ -1074,7 +1094,8 @@ mod resource_identity_regressions {
         let retired = engine.venue.socket.unwrap();
         engine.drain_actions().for_each(drop);
         // Simulate the long-lived allocation count without a load test.
-        engine.io.next_id = crate::resource_ids::ResourceIds::starting_at(u64::from(u32::MAX - 3));
+        engine.io.core.next_id =
+            crate::resource_ids::ResourceIds::starting_at(u64::from(u32::MAX - 3));
         let mut cx = Cx {
             now: 1.,
             store: &mut engine.store,
@@ -1111,11 +1132,11 @@ mod resource_identity_regressions {
             exhaust: true,
             ..Probe::default()
         });
-        engine.io.next_id = crate::resource_ids::ResourceIds::with_ceiling(1);
+        engine.io.core.next_id = crate::resource_ids::ResourceIds::with_ceiling(1);
         assert!(catch_unwind(AssertUnwindSafe(|| engine.start(0.))).is_err());
         assert!(engine.failed());
         assert!(
-            !engine.io.actions.is_empty(),
+            !engine.io.core.actions.is_empty(),
             "callback queued an action before exhaustion"
         );
         assert!(
@@ -1193,7 +1214,7 @@ mod resource_identity_regressions {
         use std::panic::{AssertUnwindSafe, catch_unwind};
         let mut engine = crate::test_support::seeded_engine(Probe::default());
         // A valid first packet must not escape before the unsafe later action.
-        engine.io.actions.push(Action::Http(HttpRequest {
+        engine.io.core.actions.push(Action::Http(HttpRequest {
             id: RequestId(4),
             method: Method::Get,
             route: None,
@@ -1203,7 +1224,7 @@ mod resource_identity_regressions {
             signer_headers: vec![],
             body: None,
         }));
-        engine.io.actions.push(unsafe_action);
+        engine.io.core.actions.push(unsafe_action);
         let mut exposed = 0;
         assert!(
             catch_unwind(AssertUnwindSafe(|| {
@@ -1263,7 +1284,7 @@ mod resource_identity_regressions {
         engine.start(0.);
         // A failure callback may queue one valid final request, then catch an
         // exhausted timer allocation itself instead of propagating the panic.
-        engine.io.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
+        engine.io.core.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
         let mut exposed = 0;
         assert!(
             catch_unwind(AssertUnwindSafe(|| {
@@ -1507,7 +1528,9 @@ where
     }
 }
 
-struct Io<P> {
+/// Every Io field that does not name the venue's pending type, so engine
+/// code that only touches these can be shared across venues.
+struct IoCore {
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
     #[cfg(feature = "http-plans")]
@@ -1572,9 +1595,7 @@ struct Io<P> {
     read_root_sweep_capacity: Option<usize>,
     public_feed_policy: PublicFeedPolicy,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
-    pending: crate::IdMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
-    session_waits: request_context_registry::session::Waits<P>,
     /// Attempts a Session resume selected with no delivery in this event: the
     /// resume is their issue custody until the outer Plan flush. Reserved at
     /// park, so a resume never allocates.
@@ -1589,6 +1610,7 @@ struct Io<P> {
     host_algorithms: Option<Vec<crate::signing::Algorithm>>,
     dispatch_now: f64,
     signing_admission: Vec<(Action, crate::signing::SignError)>,
+    signing_latch: SigningLatch,
     streams: crate::IdMap<RequestId, (ArrayAt, ItemCheck)>,
     incoming: crate::IdMap<RequestId, Incoming>,
     timers: crate::IdMap<TimerId, ()>,
@@ -1619,20 +1641,28 @@ struct Io<P> {
     #[cfg(feature = "managed-sockets")]
     socket_effects: std::collections::VecDeque<crate::socket_driver::Effect>,
     #[cfg(feature = "managed-sockets")]
-    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal<P>>,
-    #[cfg(feature = "managed-sockets")]
     socket_proposal_bytes: usize,
     #[cfg(feature = "managed-sockets")]
     socket_proposal_next: u64,
     #[cfg(feature = "managed-sockets")]
     socket_after: std::collections::VecDeque<(crate::socket_lifecycle::Epoch, String)>,
     #[cfg(feature = "managed-sockets")]
-    socket_continuations: std::collections::VecDeque<managed_sockets::Continuation<P>>,
-    #[cfg(feature = "managed-sockets")]
     socket_continuation_bytes: usize,
 }
 
-impl<P> Default for Io<P> {
+struct Io<P> {
+    core: IoCore,
+    pending: crate::IdMap<RequestId, PendingHttp<P>>,
+    session_waits: request_context_registry::session::Waits<P>,
+    #[cfg(feature = "managed-sockets")]
+    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal<P>>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuations: std::collections::VecDeque<managed_sockets::Continuation<P>>,
+}
+
+impl Default for IoCore {
+    // One caller per venue engine: inline it, so a family pays no extra call or copy.
+    #[inline]
     fn default() -> Self {
         Self {
             request_contexts: Default::default(),
@@ -1684,9 +1714,7 @@ impl<P> Default for Io<P> {
             read_root_sweep_capacity: None,
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
-            pending: Default::default(),
             signatures: Vec::new(),
-            session_waits: Default::default(),
             #[cfg(feature = "http-plans")]
             session_resumed: Vec::new(),
             signing: Default::default(),
@@ -1696,6 +1724,7 @@ impl<P> Default for Io<P> {
             host_algorithms: None,
             dispatch_now: 0.,
             signing_admission: Vec::new(),
+            signing_latch: SigningLatch::default(),
             streams: Default::default(),
             incoming: Default::default(),
             timers: Default::default(),
@@ -1723,17 +1752,27 @@ impl<P> Default for Io<P> {
             #[cfg(feature = "managed-sockets")]
             socket_effects: Default::default(),
             #[cfg(feature = "managed-sockets")]
-            socket_proposals: Default::default(),
-            #[cfg(feature = "managed-sockets")]
             socket_proposal_bytes: 0,
             #[cfg(feature = "managed-sockets")]
             socket_proposal_next: 0,
             #[cfg(feature = "managed-sockets")]
             socket_after: Default::default(),
             #[cfg(feature = "managed-sockets")]
-            socket_continuations: Default::default(),
-            #[cfg(feature = "managed-sockets")]
             socket_continuation_bytes: 0,
+        }
+    }
+}
+
+impl<P> Default for Io<P> {
+    fn default() -> Self {
+        Self {
+            core: IoCore::default(),
+            pending: Default::default(),
+            session_waits: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_proposals: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuations: Default::default(),
         }
     }
 }
@@ -1761,22 +1800,23 @@ impl<P> Io<P> {
         const RECONCILE_QUEUE: usize = 64;
         // A seal at a non-finite clock is due at the next drain.
         let at = if at.is_finite() { at } else { 0. };
-        if self.reconcile_due.len() < RECONCILE_QUEUE {
-            self.reconcile_due.push((symbols, at));
+        if self.core.reconcile_due.len() < RECONCILE_QUEUE {
+            self.core.reconcile_due.push((symbols, at));
             return;
         }
         let latest = self
+            .core
             .reconcile_due
             .iter()
             .map(|(_, at)| *at)
             .fold(at, f64::max);
-        self.reconcile_due = vec![(None, latest)];
+        self.core.reconcile_due = vec![(None, latest)];
     }
 
     fn managed_socket_active(&self) -> bool {
         #[cfg(feature = "managed-sockets")]
         {
-            self.managed_sockets
+            self.core.managed_sockets
         }
         #[cfg(not(feature = "managed-sockets"))]
         {
@@ -1784,53 +1824,59 @@ impl<P> Io<P> {
         }
     }
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
-        let index = self.signatures.iter().position(|(id, _)| *id == request)?;
-        Some(self.signatures.swap_remove(index).1)
+        let index = self
+            .core
+            .signatures
+            .iter()
+            .position(|(id, _)| *id == request)?;
+        Some(self.core.signatures.swap_remove(index).1)
     }
     fn next(&mut self) -> u64 {
-        next_engine_id(&mut self.next_id)
+        next_engine_id(&mut self.core.next_id)
     }
 
     fn reserve_ids(&mut self, count: u64) -> Option<std::ops::Range<u64>> {
-        self.next_id.reserve(count)
+        self.core.next_id.reserve(count)
     }
 
     fn assert_action_safe(&mut self, action: &Action) {
         assert!(
-            !self.next_id.failed() && !self.signing.failed(),
+            !self.core.next_id.failed() && !self.core.signing.failed(),
             "engine resource identities exhausted"
         );
         if !crate::resource_ids::action_ids_safe(action) {
-            self.next_id.invalidate();
+            self.core.next_id.invalidate();
         }
     }
 
     fn assert_actions_safe(&mut self) {
         assert!(
-            !self.next_id.failed() && !self.signing.failed(),
+            !self.core.next_id.failed() && !self.core.signing.failed(),
             "engine resource identities exhausted"
         );
         if self
+            .core
             .actions
             .iter()
             .any(|a| !crate::resource_ids::action_ids_safe(a))
             || self
+                .core
                 .signing_admission
                 .iter()
                 .any(|(a, _)| !crate::resource_ids::action_ids_safe(a))
         {
-            self.next_id.invalidate();
+            self.core.next_id.invalidate();
         }
     }
 
     /// Splits the poll registry from the timer state it writes to.
     fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
         (
-            &mut self.polls,
+            &mut self.core.polls,
             TimerSink {
-                next_id: &mut self.next_id,
-                timers: &mut self.timers,
-                actions: &mut self.actions,
+                next_id: &mut self.core.next_id,
+                timers: &mut self.core.timers,
+                actions: &mut self.core.actions,
             },
         )
     }
@@ -1851,8 +1897,8 @@ impl<P> Cx<'_, P> {
     ) -> Result<(), crate::signing::SignError> {
         use crate::signing::{Capability, KeyUse, SignError};
         let identity = match slot {
-            CredentialSlot::Primary => self.io.identities.primary.as_ref(),
-            CredentialSlot::Secondary => self.io.identities.secondary.as_ref(),
+            CredentialSlot::Primary => self.io.core.identities.primary.as_ref(),
+            CredentialSlot::Secondary => self.io.core.identities.secondary.as_ref(),
         }
         .ok_or(SignError::InvalidRequest)?;
         // Resolve every ref first, so a malformed command is InvalidRequest
@@ -1866,7 +1912,7 @@ impl<P> Cx<'_, P> {
             .collect::<Option<Vec<_>>>()
             .ok_or(SignError::InvalidRequest)?;
         for (need, key) in needs.iter().zip(keys) {
-            let capability = match (&self.io.signer, &self.io.host_algorithms) {
+            let capability = match (&self.io.core.signer, &self.io.core.host_algorithms) {
                 (Some(signer), _) => signer.can_sign(key, need.algorithm),
                 (None, Some(declared)) if declared.contains(&need.algorithm) => {
                     Capability::Supported
@@ -1885,7 +1931,7 @@ impl<P> Cx<'_, P> {
     /// Calibrated venue UTC for outbound timestamps, absolute expiry and
     /// time-based nonces. Timers, deadlines and emitted data retain `self.now`.
     pub fn protocol_now(&self) -> f64 {
-        self.io.protocol_clock.at(self.now)
+        self.io.core.protocol_clock.at(self.now)
     }
 
     /// Integer calibrated Unix milliseconds for outbound protocol fields.
@@ -1897,22 +1943,30 @@ impl<P> Cx<'_, P> {
     /// Feed a server-time observation captured at this callback's raw host time.
     /// Replaces the per-engine correction; invalid observations preserve it.
     pub fn observe_protocol_time(&mut self, server_ms: f64) -> bool {
-        self.io.protocol_clock.observe(self.now, server_ms)
+        self.io.core.protocol_clock.observe(self.now, server_ms)
     }
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
-        self.io.public_feed_policy
+        self.io.core.public_feed_policy
     }
 
     pub fn private_feed_policy(&self) -> crate::signing_policy::PrivateFeedPolicy {
-        self.io.private_feed_policy
+        self.io.core.private_feed_policy
+    }
+
+    /// `SocketId(0)` stands for a connect the engine suppressed.
+    fn inert_socket(&self, socket: SocketId) -> bool {
+        socket.0 == 0
+            && (self.io.core.public_feed_policy != PublicFeedPolicy::Direct
+                || self.io.core.signing_latch.roles != 0)
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
         let spec = spec.into();
         if self.io.managed_socket_active()
             || spec.channel == Some(SocketChannel::Public)
-                && self.io.public_feed_policy != PublicFeedPolicy::Direct
+                && self.io.core.public_feed_policy != PublicFeedPolicy::Direct
+            || self.io.core.signing_latch.blocks(spec.channel.as_ref())
         {
             return SocketId(0);
         }
@@ -1930,10 +1984,11 @@ impl<P> Cx<'_, P> {
         } = spec;
         if let Some(channel) = &channel {
             self.io
+                .core
                 .sockets
-                .connected(socket, channel, &mut self.io.health);
+                .connected(socket, channel, &mut self.io.core.health);
         }
-        self.io.actions.push(Action::WsConnect {
+        self.io.core.actions.push(Action::WsConnect {
             binary,
             socket,
             url,
@@ -1960,13 +2015,14 @@ impl<P> Cx<'_, P> {
     fn sign_socket_upgrade(&mut self, socket: SocketId, step: Box<dyn crate::SignStep>) {
         let index = self
             .io
+            .core
             .actions
             .iter()
             .position(
                 |action| matches!(action, Action::WsConnect { socket: id, .. } if *id == socket),
             )
             .expect("connect queued its upgrade");
-        let outbound = self.io.actions.remove(index);
+        let outbound = self.io.core.actions.remove(index);
         self.stage_signed(index, outbound, step);
     }
 
@@ -1974,7 +2030,7 @@ impl<P> Cx<'_, P> {
         if !self.managed_send_allowed(socket) {
             return;
         }
-        if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
+        if self.inert_socket(socket) {
             return;
         }
         self.io.opaque_entry_activity();
@@ -1982,14 +2038,15 @@ impl<P> Cx<'_, P> {
             socket,
             text: text.into(),
         };
-        if self.io.signing.has_socket(socket) {
-            if self.io.signing.hold(action.clone()).is_err() {
+        if self.io.core.signing.has_socket(socket) {
+            if self.io.core.signing.hold(action.clone()).is_err() {
                 self.io
+                    .core
                     .signing_admission
                     .push((action, crate::signing::SignError::Unavailable));
             }
         } else {
-            self.io.actions.push(action);
+            self.io.core.actions.push(action);
         }
     }
 
@@ -1997,7 +2054,7 @@ impl<P> Cx<'_, P> {
         #[cfg(feature = "managed-sockets")]
         if self.io.managed_socket_active() {
             self.io.opaque_entry_activity();
-            if let Some(epoch) = self.io.socket_driver.state.socket_epoch(socket) {
+            if let Some(epoch) = self.io.core.socket_driver.state.socket_epoch(socket) {
                 self.retire_socket(epoch.feed(), crate::socket_lifecycle::RetireReason::Stopped);
             }
             return;
@@ -2009,21 +2066,21 @@ impl<P> Cx<'_, P> {
     /// use this after revoking the epoch, before native invalidation; public
     /// close can then enter retirement without recursively invoking itself.
     fn close_socket_transport(&mut self, socket: SocketId) {
-        if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
+        if self.inert_socket(socket) {
             return;
         }
         self.io.opaque_entry_activity();
-        for timer in self.io.signing.close_socket(socket) {
+        for timer in self.io.core.signing.close_socket(socket) {
             if timer.0 != 0 {
-                self.io.actions.push(Action::ClearTimer { timer });
+                self.io.core.actions.push(Action::ClearTimer { timer });
             }
         }
         // The host drops engine-initiated closes without reporting them back.
         // They are deliberate, so they never make the next connect a reconnect.
-        if self.io.sockets.closed(socket, false) {
-            self.io.health.count(log_code::WS_CLOSED);
+        if self.io.core.sockets.closed(socket, false) {
+            self.io.core.health.count(log_code::WS_CLOSED);
         }
-        self.io.actions.push(Action::WsClose { socket });
+        self.io.core.actions.push(Action::WsClose { socket });
     }
 
     /// Issue a request; `pending` comes back with its response.
@@ -2039,11 +2096,12 @@ impl<P> Cx<'_, P> {
         #[cfg(feature = "order-locks")]
         {
             if method != Method::Get {
-                self.io.order_locks.note_write();
+                self.io.core.order_locks.note_write();
             }
             self.io
+                .core
                 .order_read_tokens
-                .insert(id, self.io.order_locks.token());
+                .insert(id, self.io.core.order_locks.token());
         }
         self.io.pending.insert(
             id,
@@ -2052,7 +2110,7 @@ impl<P> Cx<'_, P> {
                 auth: None,
             },
         );
-        self.io.actions.push(Action::Http(HttpRequest {
+        self.io.core.actions.push(Action::Http(HttpRequest {
             id,
             method,
             route: None,
@@ -2087,19 +2145,20 @@ impl<P> Cx<'_, P> {
         self.io.opaque_entry_activity();
         let Some(index) = self
             .io
+            .core
             .actions
             .iter()
             .position(|a| matches!(a, Action::Http(r) if r.id == id))
         else {
             return Ok(());
         };
-        let Action::Http(http) = self.io.actions.remove(index) else {
+        let Action::Http(http) = self.io.core.actions.remove(index) else {
             unreachable!()
         };
-        if self.io.signatures.len() >= 256 {
+        if self.io.core.signatures.len() >= 256 {
             #[cfg(feature = "order-locks")]
-            self.io.order_read_tokens.remove(&id);
-            self.io.streams.remove(&id);
+            self.io.core.order_read_tokens.remove(&id);
+            self.io.core.streams.remove(&id);
             return Err(self
                 .io
                 .pending
@@ -2108,7 +2167,7 @@ impl<P> Cx<'_, P> {
                 .value);
         }
         let timeout_ms = http.timeout_ms.unwrap_or(20_000).max(1);
-        self.io.signatures.push((
+        self.io.core.signatures.push((
             id,
             PendingSignature {
                 http,
@@ -2116,7 +2175,7 @@ impl<P> Cx<'_, P> {
                 deadline: self.now + f64::from(timeout_ms),
             },
         ));
-        self.io.actions.insert(
+        self.io.core.actions.insert(
             index,
             Action::SignPayload {
                 request: id,
@@ -2145,13 +2204,14 @@ impl<P> Cx<'_, P> {
     pub fn sign_http(&mut self, request: RequestId, step: Box<dyn crate::SignStep>) {
         let Some(index) = self
             .io
+            .core
             .actions
             .iter()
             .position(|a| matches!(a, Action::Http(http) if http.id == request))
         else {
             return;
         };
-        let outbound = self.io.actions.remove(index);
+        let outbound = self.io.core.actions.remove(index);
         self.stage_signed(index, outbound, step);
     }
 
@@ -2160,40 +2220,44 @@ impl<P> Cx<'_, P> {
         if !self.managed_send_allowed(socket) {
             return;
         }
-        let index = self.io.actions.len();
+        let index = self.io.core.actions.len();
         self.stage_signed(index, Action::WsSend { socket, text }, step);
     }
 
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
         self.io.opaque_entry_activity();
         self.io.assert_action_safe(&outbound);
-        let attempt = self.io.signing.next_id();
+        let attempt = self.io.core.signing.next_id();
         // Exhaustion is handled through the same asynchronous failure event.
-        let timer = if self.io.signer.as_ref().is_some_and(|s| s.immediate()) {
+        let timer = if self.io.core.signer.as_ref().is_some_and(|s| s.immediate()) {
             TimerId(0)
         } else {
             TimerId(self.io.next())
         };
         let staged = self
             .io
+            .core
             .signing
             .stage(attempt, outbound.clone(), step, timer, self.now);
-        let error = staged.as_ref().err();
-        if error.is_some() {
+        if let Err(error) = staged {
             // Retain the continuation even when admission fails, so the engine
-            // reports a typed pre-dispatch failure instead of silently dropping it.
-            self.io
-                .signing_admission
-                .push((outbound, crate::signing::SignError::Unavailable));
+            // reports a typed pre-dispatch failure instead of silently dropping
+            // it. Only a latched missing key keeps its own kind.
+            let error = if error == crate::signing::SignError::MissingKey {
+                error
+            } else {
+                crate::signing::SignError::Unavailable
+            };
+            self.io.core.signing_admission.push((outbound, error));
             return;
         }
         if timer.0 != 0 {
-            self.io.actions.push(Action::SetTimer {
+            self.io.core.actions.push(Action::SetTimer {
                 timer,
                 at_ms: staged.expect("checked admission"),
             });
         }
-        self.io.actions.insert(
+        self.io.core.actions.insert(
             index,
             Action::Sign {
                 attempt,
@@ -2218,32 +2282,36 @@ impl<P> Cx<'_, P> {
         pending: P,
     ) -> RequestId {
         let id = self.request(method, url, headers, body, pending);
-        self.io.streams.insert(id, (at, ItemCheck::Splitter));
+        self.io.core.streams.insert(id, (at, ItemCheck::Splitter));
         id
     }
 
     /// Stream the response of an already-issued request, including signed POST reads.
     pub fn stream_response(&mut self, request: RequestId, at: ArrayAt) {
-        self.io.streams.insert(request, (at, ItemCheck::Splitter));
+        self.io
+            .core
+            .streams
+            .insert(request, (at, ItemCheck::Splitter));
     }
 
     /// Skip the splitter's per-element syntax pass for a streamed request
     /// whose venue deserializes every element with serde_json and fails the
     /// request on any error.
     pub fn venue_parses_items(&mut self, request: RequestId) {
-        if let Some((_, check)) = self.io.streams.get_mut(&request) {
+        if let Some((_, check)) = self.io.core.streams.get_mut(&request) {
             *check = ItemCheck::Venue;
         }
     }
 
     /// Set host policy on an outbound action before the host drains it.
     pub fn route_request(&mut self, id: RequestId, route: RequestRoute) {
-        if let Some(request) = self.io.signing.request_mut(id) {
+        if let Some(request) = self.io.core.signing.request_mut(id) {
             request.route = Some(route);
             return;
         }
         if let Some(request) = self
             .io
+            .core
             .actions
             .iter_mut()
             .rev()
@@ -2258,17 +2326,19 @@ impl<P> Cx<'_, P> {
 
     /// Bound the whole host operation, including route setup and response body.
     pub fn request_timeout(&mut self, id: RequestId, timeout_ms: u32) {
-        if let Some((timer, at_ms)) = self.io.signing.timeout_request(id, timeout_ms) {
+        if let Some((timer, at_ms)) = self.io.core.signing.timeout_request(id, timeout_ms) {
             if timer.0 != 0 {
                 self.io
+                    .core
                     .actions
                     .retain(|a| !matches!(a,Action::SetTimer {timer:old,..} if *old==timer));
-                self.io.actions.push(Action::SetTimer { timer, at_ms });
+                self.io.core.actions.push(Action::SetTimer { timer, at_ms });
             }
             return;
         }
         if let Some(request) = self
             .io
+            .core
             .actions
             .iter_mut()
             .rev()
@@ -2283,6 +2353,7 @@ impl<P> Cx<'_, P> {
 
     pub fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
         self.io
+            .core
             .entropy
             .as_ref()
             .ok_or("Engine entropy providers are required")?
@@ -2290,6 +2361,7 @@ impl<P> Cx<'_, P> {
     }
     pub fn fill_signing_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
         self.io
+            .core
             .entropy
             .as_ref()
             .ok_or("Engine entropy providers are required")?
@@ -2312,8 +2384,8 @@ impl<P> Cx<'_, P> {
 
     pub fn set_timer(&mut self, delay_ms: f64) -> TimerId {
         let timer = TimerId(self.io.next());
-        self.io.timers.insert(timer, ());
-        self.io.actions.push(Action::SetTimer {
+        self.io.core.timers.insert(timer, ());
+        self.io.core.actions.push(Action::SetTimer {
             timer,
             at_ms: self.now + delay_ms,
         });
@@ -2329,7 +2401,7 @@ impl<P> Cx<'_, P> {
     /// The interval a registered poll is armed with under the current host
     /// policy (bounded, and infinite while paused).
     pub fn poll_interval(&self, timer: TimerId) -> Option<f64> {
-        self.io.polls.current_interval(timer)
+        self.io.core.polls.current_interval(timer)
     }
 
     /// Configuration changes rearm from change-time, honoring both the recurring
@@ -2354,22 +2426,25 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn book_changed(&mut self, symbol: &str) {
-        let active = self.io.changed_books_active;
-        if !self.io.changed_books[..active].iter().any(|s| s == symbol) {
-            if let Some(slot) = self.io.changed_books.get_mut(active) {
+        let active = self.io.core.changed_books_active;
+        if !self.io.core.changed_books[..active]
+            .iter()
+            .any(|s| s == symbol)
+        {
+            if let Some(slot) = self.io.core.changed_books.get_mut(active) {
                 slot.clear();
                 slot.push_str(symbol);
             } else {
-                self.io.changed_books.push(symbol.to_owned());
+                self.io.core.changed_books.push(symbol.to_owned());
             }
-            self.io.changed_books_active += 1;
+            self.io.core.changed_books_active += 1;
         }
     }
 
     /// Whether an event at `level` reaches the host; check before formatting
     /// an expensive Debug message.
     pub fn logs(&self, level: Level) -> bool {
-        level >= self.io.min_level
+        level >= self.io.core.min_level
     }
 
     /// [`Cx::event`] without fields.
@@ -2389,12 +2464,12 @@ impl<P> Cx<'_, P> {
             .map(|c| if c.is_ascii_digit() { '#' } else { c })
             .collect();
         let now = self.now;
-        let level = match self.io.retried_failures.get(site) {
+        let level = match self.io.core.retried_failures.get(site) {
             Some((at, last)) if *last == shape && now - at < RETRIED_FAILURE_ERROR_EVERY_MS => {
                 Level::Warn
             }
             _ => {
-                self.io.retried_failures.insert(site, (now, shape));
+                self.io.core.retried_failures.insert(site, (now, shape));
                 Level::Error
             }
         };
@@ -2415,9 +2490,9 @@ impl<P> Cx<'_, P> {
         }
         let io = &mut *self.io;
         push_event(
-            &mut io.actions,
-            &mut io.health,
-            io.min_level,
+            &mut io.core.actions,
+            &mut io.core.health,
+            io.core.min_level,
             LogEvent {
                 level,
                 code,
@@ -2429,7 +2504,10 @@ impl<P> Cx<'_, P> {
 
     pub fn deactivate(&mut self) {
         count_auth_failure(self.io, None);
-        self.io.actions.push(Action::Notice(Notice::Deactivate));
+        self.io
+            .core
+            .actions
+            .push(Action::Notice(Notice::Deactivate));
     }
 
     /// Legacy numeric finalization. Managed commands use `done_context`.
@@ -2440,6 +2518,7 @@ impl<P> Cx<'_, P> {
     pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
         if !receipts.is_empty() {
             self.io
+                .core
                 .actions
                 .push(Action::Notice(Notice::CommandProgress {
                     command,
@@ -2454,6 +2533,7 @@ impl<P> Cx<'_, P> {
             self.notice(Level::Error, log_code::COMMAND_FAILED, message);
         } else {
             self.io
+                .core
                 .actions
                 .push(Action::Notice(Notice::CommandError { command, message }));
         }
@@ -2463,6 +2543,7 @@ impl<P> Cx<'_, P> {
         let error = error.into();
         count_auth_failure(self.io, Some(&error));
         self.io
+            .core
             .actions
             .push(Action::Notice(Notice::StartupFailed { error }));
     }
@@ -2491,7 +2572,7 @@ impl<P> Cx<'_, P> {
         observer: bool,
     ) -> Result<(), crate::request_context::Error> {
         #[cfg(feature = "http-plans")]
-        if self.io.http_preflight_ready.as_ref().is_some_and(|ready| {
+        if self.io.core.http_preflight_ready.as_ref().is_some_and(|ready| {
             !matches!(ready.owner(), crate::request_context::Owner::Command { id, .. } if id == command)
         }) {
             return Err(crate::request_context::Error::Revoked);
@@ -2506,10 +2587,11 @@ impl<P> Cx<'_, P> {
         let delivery = if observer {
             None
         } else {
-            completion_delivery(&self.io.http_delivery)
+            completion_delivery(&self.io.core.http_delivery)
         };
         let seal = self
             .io
+            .core
             .request_contexts
             .seal_as(command, delivery, authority, error, observer);
         self.finish_sealed_command(command, success, seal)
@@ -2544,11 +2626,11 @@ impl<P> Cx<'_, P> {
             }
         };
         // A credential-free route's auth-kind refusal is no credential evidence.
-        let credential_evidence = self.io.request_contexts.owner_credentialed(command);
+        let credential_evidence = self.io.core.request_contexts.owner_credentialed(command);
         self.io.finish_command_wait(command);
         self.io.retire_http_command(command);
-        if !self.io.request_contexts.finish(command) {
-            self.io.http_owner_poison = true;
+        if !self.io.core.request_contexts.finish(command) {
+            self.io.core.http_owner_poison = true;
             panic!("HTTP owner retirement bookkeeping failed");
         }
         self.io.untrack_read_root(command);
@@ -2562,11 +2644,11 @@ impl<P> Cx<'_, P> {
                     .err()
                     .is_none_or(|error| error.outcome != Some(crate::Outcome::Unknown))
             {
-                self.io.order_locks.managed_resolved(command);
+                self.io.core.order_locks.managed_resolved(command);
             }
-            let scope = self.io.order_locks.reconcile_scope(command);
-            let absent = self.io.order_locks.absent_pending(command);
-            let marked = self.io.order_locks.finish(command, result.is_err());
+            let scope = self.io.core.order_locks.reconcile_scope(command);
+            let absent = self.io.core.order_locks.absent_pending(command);
+            let marked = self.io.core.order_locks.finish(command, result.is_err());
             let unknown = result
                 .as_ref()
                 .err()
@@ -2591,7 +2673,7 @@ impl<P> Cx<'_, P> {
                 let delay = delay.clamp(0., crate::startup::MAX_RATE_LIMIT_PAUSE_MS);
                 self.io.queue_reconcile(scope, self.now + delay);
             }
-            self.io.active_commands.remove(&command);
+            self.io.core.active_commands.remove(&command);
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = write_sealed;
@@ -2605,14 +2687,14 @@ impl<P> Cx<'_, P> {
             }
         };
         self.io.entry_completed(command);
-        self.io.actions.push(Action::Notice(notice));
+        self.io.core.actions.push(Action::Notice(notice));
         Ok(())
     }
 
     /// Every placement in this response is proven accepted or explicitly rejected.
     pub fn placement_resolved(&mut self, command: CommandId) {
         #[cfg(feature = "order-locks")]
-        self.io.order_locks.resolved(command);
+        self.io.core.order_locks.resolved(command);
         #[cfg(not(feature = "order-locks"))]
         let _ = command;
     }
@@ -2621,8 +2703,8 @@ impl<P> Cx<'_, P> {
     /// A read started before an uncertain placement cannot clear its fence.
     pub fn orders_reconciled(&mut self, symbol: Option<&str>) {
         #[cfg(feature = "order-locks")]
-        if let Some(token) = self.io.order_response_token {
-            self.io.order_locks.reconciled(symbol, token);
+        if let Some(token) = self.io.core.order_response_token {
+            self.io.core.order_locks.reconciled(symbol, token);
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = symbol;
@@ -2633,18 +2715,23 @@ impl<P> Cx<'_, P> {
     pub fn candle(&mut self, symbol: &str, interval: Interval, candle: Candle) {
         let same = self
             .io
+            .core
             .candles
             .iter_mut()
             .find(|(s, i, c)| s == symbol && *i == interval && c.timestamp == candle.timestamp);
         match same {
             Some(queued) => queued.2 = candle,
-            None => self.io.candles.push((symbol.to_owned(), interval, candle)),
+            None => self
+                .io
+                .core
+                .candles
+                .push((symbol.to_owned(), interval, candle)),
         }
     }
 
     /// Queue an execution for the next frame.
     pub fn fill(&mut self, fill: Fill) {
-        self.io.fills.push((fill, None));
+        self.io.core.fills.push((fill, None));
     }
 
     /// Preserve optional per-execution financials without inventing values for
@@ -2654,7 +2741,7 @@ impl<P> Cx<'_, P> {
         financials.fee = financials.fee.filter(|v| v.is_finite());
         let financials =
             (financials.realized_pnl.is_some() || financials.fee.is_some()).then_some(financials);
-        self.io.fills.push((fill, financials));
+        self.io.core.fills.push((fill, financials));
     }
 }
 
@@ -3001,6 +3088,11 @@ pub trait Venue {
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, text: &str);
     fn on_close(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, code: u16);
+    /// Opts in to `on_route_exhausted`; every other venue sees today's close.
+    const ROUTE_EXHAUSTION: bool = false;
+    /// Every route was refused, so the host dialled nothing. Called only when
+    /// `ROUTE_EXHAUSTION` is set.
+    fn on_route_exhausted(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId) {}
     fn on_response(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -3093,7 +3185,7 @@ const STARTUP_REPEAT_MS: f64 = 300_000.0;
 
 fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
     let loaded = cx.store.loaded();
-    let tickers = cx.io.public_feed_policy != PublicFeedPolicy::Disabled;
+    let tickers = cx.io.core.public_feed_policy != PublicFeedPolicy::Disabled;
     let missing: Vec<&str> = [
         ("markets", loaded.markets, true),
         ("tickers", loaded.tickers, tickers),
@@ -3175,8 +3267,11 @@ impl<V: Venue> Engine<V> {
             venue,
             store,
             io: Io {
-                entropy: Some(entropy),
-                http_pacing,
+                core: IoCore {
+                    entropy: Some(entropy),
+                    http_pacing,
+                    ..IoCore::default()
+                },
                 ..Io::default()
             },
             started: false,
@@ -3209,11 +3304,11 @@ impl<V: Venue> Engine<V> {
             return Err(VenueError::new("Signer must be configured before startup")
                 .kind(ErrorKind::InvalidInput));
         }
-        self.io.signer = signer;
+        self.io.core.signer = signer;
         Ok(())
     }
     pub fn signer(&self) -> Option<crate::signing::Provider> {
-        self.io.signer.clone()
+        self.io.core.signer.clone()
     }
 
     /// Trusted construction registers the same refs the venue holds, so
@@ -3228,11 +3323,11 @@ impl<V: Venue> Engine<V> {
                     .kind(ErrorKind::InvalidInput),
             );
         }
-        self.io.identities = identities;
+        self.io.core.identities = identities;
         Ok(())
     }
     pub fn identities(&self) -> &crate::signing::Identities {
-        &self.io.identities
+        &self.io.core.identities
     }
 
     /// A host signer fulfilling Action::Sign declares what it can sign; undeclared is unknown.
@@ -3244,7 +3339,7 @@ impl<V: Venue> Engine<V> {
             return Err(VenueError::new("Signer must be configured before startup")
                 .kind(ErrorKind::InvalidInput));
         }
-        self.io.host_algorithms = algorithms;
+        self.io.core.host_algorithms = algorithms;
         Ok(())
     }
 
@@ -3259,7 +3354,7 @@ impl<V: Venue> Engine<V> {
                     .kind(ErrorKind::InvalidInput),
             );
         }
-        self.io.private_feed_policy = policy;
+        self.io.core.private_feed_policy = policy;
         Ok(())
     }
 
@@ -3267,8 +3362,8 @@ impl<V: Venue> Engine<V> {
     /// without starting the venue or changing its raw scheduling clock.
     pub fn signing_clock(&self, host_now: f64) -> (f64, u64) {
         (
-            self.io.protocol_clock.at(host_now),
-            self.io.protocol_clock.revision(),
+            self.io.core.protocol_clock.at(host_now),
+            self.io.core.protocol_clock.revision(),
         )
     }
 
@@ -3279,6 +3374,7 @@ impl<V: Venue> Engine<V> {
                 .kind(ErrorKind::InvalidInput));
         }
         self.io
+            .core
             .entropy
             .as_mut()
             .expect("validated construction")
@@ -3294,6 +3390,7 @@ impl<V: Venue> Engine<V> {
             );
         }
         self.io
+            .core
             .entropy
             .as_mut()
             .expect("validated construction")
@@ -3306,7 +3403,7 @@ impl<V: Venue> Engine<V> {
         if self.started {
             return Err("public feed policy must be configured before startup");
         }
-        self.io.public_feed_policy = policy;
+        self.io.core.public_feed_policy = policy;
         Ok(())
     }
 
@@ -3317,7 +3414,7 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
-        self.io.public_feed_policy
+        self.io.core.public_feed_policy
     }
 
     /// Apply an explicitly shared public feed without admitting any account fields.
@@ -3425,19 +3522,19 @@ impl<V: Venue> Engine<V> {
 
     /// Events below `level` are dropped before they are built; defaults to Info.
     pub fn set_log_level(&mut self, level: Level) {
-        self.io.min_level = level;
+        self.io.core.min_level = level;
     }
 
     pub fn health(&self) -> &Health {
-        &self.io.health
+        &self.io.core.health
     }
 
     /// Native hosts surface a rejected trusted-provider update as an ordinary notice.
     pub fn report_public_feed_error(&mut self, error: &str) {
         push_event(
-            &mut self.io.actions,
-            &mut self.io.health,
-            self.io.min_level,
+            &mut self.io.core.actions,
+            &mut self.io.core.health,
+            self.io.core.min_level,
             LogEvent {
                 level: Level::Error,
                 code: log_code::PUBLIC_FEED_REJECTED,
@@ -3520,7 +3617,7 @@ impl<V: Venue> Engine<V> {
 
     pub fn start(&mut self, now: f64) {
         self.assert_live();
-        self.io.dispatch_now = now;
+        self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         if std::mem::replace(&mut self.started, true) {
             return;
@@ -3553,7 +3650,7 @@ impl<V: Venue> Engine<V> {
             self.io.receive_command_wait(id, deadline, now);
         }
         self.handle_received(now, event);
-        self.io.command_waits.end_receipt();
+        self.io.core.command_waits.end_receipt();
     }
 
     /// Dispatch one host command with the caller's own wait. A non-finite
@@ -3577,13 +3674,13 @@ impl<V: Venue> Engine<V> {
             self.io.receive_command_wait(id, Some(deadline), now);
         }
         self.handle_received(now, Event::Command(command));
-        self.io.command_waits.end_receipt();
+        self.io.core.command_waits.end_receipt();
         Ok(())
     }
 
     fn handle_received(&mut self, now: f64, event: Event<'_>) {
         self.assert_live();
-        self.io.dispatch_now = now;
+        self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         if let Event::TimerFired { timer } = &event
             && self.io.read_root_timer(*timer, now)
@@ -3591,7 +3688,7 @@ impl<V: Venue> Engine<V> {
             return;
         }
         self.process_socket_work(now);
-        self.io.http_responses.prune(now);
+        self.io.core.http_responses.prune(now);
         // Expired observers detach before any delivery can project to them.
         self.sweep_executions(now);
         if self.expire_plan_timer(now, &event) {
@@ -3609,10 +3706,11 @@ impl<V: Venue> Engine<V> {
         if let Event::TimerFired { timer } = &event
             && self
                 .io
+                .core
                 .execution_timer
                 .is_some_and(|(own, _)| own == *timer)
         {
-            self.io.execution_timer = None;
+            self.io.core.execution_timer = None;
             self.sweep_executions(now);
             self.flush_preflight_readiness(now);
             return;
@@ -3636,7 +3734,7 @@ impl<V: Venue> Engine<V> {
             _ => None,
         };
         if let Event::Signed { attempt, result } = event {
-            if !self.io.signing.is_managed(attempt) || self.signing_pending(attempt) {
+            if !self.io.core.signing.is_managed(attempt) || self.signing_pending(attempt) {
                 self.sign_completed(now, attempt, result);
             }
             if self.venue.cancel_needs_stored_order() {
@@ -3648,7 +3746,7 @@ impl<V: Venue> Engine<V> {
             return;
         }
         if let Event::TimerFired { timer } = &event
-            && let Some((_, pending)) = self.io.signing.expire(*timer)
+            && let Some((_, pending)) = self.io.core.signing.expire(*timer)
         {
             self.sign_failed(now, pending.outbound, crate::signing::SignError::TimedOut);
             if self.venue.cancel_needs_stored_order() {
@@ -3707,32 +3805,34 @@ impl<V: Venue> Engine<V> {
         // Bookkeeping reads this event's outcomes here rather than in `Cx`, so
         // venues that do not opt in compile none of it.
         let io = &mut self.io;
-        io.placement_acks.observe(&io.actions, &io.fills, now);
-        let released = self.io.placement_acks.release(&self.store, now);
+        io.core
+            .placement_acks
+            .observe(&io.core.actions, &io.core.fills, now);
+        let released = self.io.core.placement_acks.release(&self.store, now);
         if !released.is_empty() {
             // A nested release (order-lock `ready` re-entering `handle`) keeps the flag.
             let was_releasing = std::mem::replace(&mut self.releasing, true);
             for (_, receipt) in &released {
-                self.io.command_waits.batch(*receipt);
+                self.io.core.command_waits.batch(*receipt);
             }
             for (command, receipt) in released {
                 let carried = command.completion_id().map(|id| (id, receipt));
-                let outer = self.io.command_waits.carry(carried);
+                let outer = self.io.core.command_waits.carry(carried);
                 self.handle_event(now, Event::Command(command));
-                self.io.command_waits.carry(outer);
+                self.io.core.command_waits.carry(outer);
             }
             self.releasing = was_releasing;
         }
-        let next = self.io.placement_acks.next_deadline(&self.store, now);
+        let next = self.io.core.placement_acks.next_deadline(&self.store, now);
         if self.ack_timer.map(|(_, at)| at) == next {
             return;
         }
         if let Some((timer, _)) = self.ack_timer.take() {
-            self.io.actions.push(Action::ClearTimer { timer });
+            self.io.core.actions.push(Action::ClearTimer { timer });
         }
         if let Some(at_ms) = next {
             let timer = TimerId(self.io.next());
-            self.io.actions.push(Action::SetTimer { timer, at_ms });
+            self.io.core.actions.push(Action::SetTimer { timer, at_ms });
             self.ack_timer = Some((timer, at_ms));
         }
     }
@@ -3761,7 +3861,7 @@ impl<V: Venue> Engine<V> {
     ) {
         #[cfg(feature = "http-plans")]
         {
-            self.io.http_history_failure = None;
+            self.io.core.http_history_failure = None;
         }
         let request = match &event {
             Event::HttpResponse { request, .. }
@@ -3772,46 +3872,46 @@ impl<V: Venue> Engine<V> {
             _ => None,
         };
         let delivery = request
-            .and_then(|request| self.io.managed_http.get(&request))
+            .and_then(|request| self.io.core.managed_http.get(&request))
             .map(|managed| managed.delivery());
         if let Event::HttpFailed { error, .. } = &event
             && let Some(delivery) = delivery.as_ref()
             && delivery.context.operation() == crate::request_context::Operation::Mutation
         {
-            let _ = self.io.request_contexts.result(
+            let _ = self.io.core.request_contexts.result(
                 delivery,
                 crate::request_context::WriteResult::Failed(
-                    VenueError::new(*error).kind(self.io.http_failure_kind),
+                    VenueError::new(*error).kind(self.io.core.http_failure_kind),
                 ),
             );
         }
         if let Some(delivery) = delivery.as_ref() {
-            self.io.request_contexts.enter_delivery(delivery);
+            self.io.core.request_contexts.enter_delivery(delivery);
         }
-        let previous = std::mem::replace(&mut self.io.http_delivery, delivery.clone());
+        let previous = std::mem::replace(&mut self.io.core.http_delivery, delivery.clone());
         #[cfg(feature = "managed-sockets")]
-        let socket_message = self.io.socket_message.take();
+        let socket_message = self.io.core.socket_message.take();
         self.handle_event_scoped(now, event, physical_timeout);
         #[cfg(feature = "http-plans")]
         {
-            self.io.http_history_failure = None;
+            self.io.core.http_history_failure = None;
         }
-        self.io.http_delivery = previous;
+        self.io.core.http_delivery = previous;
         #[cfg(feature = "managed-sockets")]
         {
-            self.io.socket_message = socket_message;
+            self.io.core.socket_message = socket_message;
         }
         if let Some(delivery) = delivery.as_ref() {
-            self.io.request_contexts.exit_delivery(delivery);
+            self.io.core.request_contexts.exit_delivery(delivery);
         }
         self.flush_http_plans(now);
     }
 
     fn duplicate_command(&mut self) {
         push_event(
-            &mut self.io.actions,
-            &mut self.io.health,
-            self.io.min_level,
+            &mut self.io.core.actions,
+            &mut self.io.core.health,
+            self.io.core.min_level,
             LogEvent {
                 level: Level::Error,
                 code: log_code::COMMAND_DUPLICATE,
@@ -3826,14 +3926,14 @@ impl<V: Venue> Engine<V> {
         // Sibling legs originate under Cx authority, not a repeated wire command.
         if let Event::Command(command) = &event
             && let Some(id) = command.completion_id()
-            && self.io.request_contexts.command_live(id, now)
+            && self.io.core.request_contexts.command_live(id, now)
         {
             self.duplicate_command();
             return;
         }
         if self.venue.cancel_needs_stored_order() && !self.releasing {
             if let Event::Command(Command::PlaceOrders { command, .. }) = &event {
-                self.io.placement_acks.placing(*command);
+                self.io.core.placement_acks.placing(*command);
             } else if matches!(
                 &event,
                 Event::Command(Command::CancelOrders { .. } | Command::AmendOrder { .. })
@@ -3842,9 +3942,10 @@ impl<V: Venue> Engine<V> {
                 let Event::Command(command) = event else {
                     unreachable!()
                 };
-                let receipt = self.io.command_waits.receipt_of(&command);
+                let receipt = self.io.core.command_waits.receipt_of(&command);
                 match self
                     .io
+                    .core
                     .placement_acks
                     .hold(&self.store, command, receipt, now)
                 {
@@ -3858,7 +3959,8 @@ impl<V: Venue> Engine<V> {
         }
         if self.public_feed_policy() != PublicFeedPolicy::Direct
             && matches!(&event, Event::WsOpened { socket } | Event::WsBinary { socket, .. }
-            | Event::WsMessage { socket, .. } | Event::WsClosed { socket, .. } if socket.0 == 0)
+            | Event::WsMessage { socket, .. } | Event::WsClosed { socket, .. }
+            | Event::WsRouteExhausted { socket } if socket.0 == 0)
         {
             return;
         }
@@ -3866,7 +3968,7 @@ impl<V: Venue> Engine<V> {
         if self.venue.guard_order_mutations()
             && let Event::Command(command) = &event
             && let Some(id) = command.completion_id()
-            && !self.io.active_commands.insert(id)
+            && !self.io.core.active_commands.insert(id)
         {
             self.duplicate_command();
             return;
@@ -3944,29 +4046,46 @@ impl<V: Venue> Engine<V> {
                 polls.set_policy(now, scale, ceiling_ms, &mut sink);
             }
             Event::WsOpened { socket } => {
-                cx.io.health.ws_opened = cx.io.health.ws_opened.saturating_add(1);
+                cx.io.core.health.ws_opened = cx.io.core.health.ws_opened.saturating_add(1);
                 self.venue.on_open(&mut cx, socket)
             }
             Event::WsBinary { socket, data } => {
-                cx.io.sockets.received(socket, now, &mut cx.io.health);
+                cx.io
+                    .core
+                    .sockets
+                    .received(socket, now, &mut cx.io.core.health);
                 self.venue.on_binary(&mut cx, socket, data)
             }
             Event::WsMessage { socket, text } => {
-                cx.io.sockets.received(socket, now, &mut cx.io.health);
+                cx.io
+                    .core
+                    .sockets
+                    .received(socket, now, &mut cx.io.core.health);
                 #[cfg(feature = "managed-sockets")]
                 Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
                 #[cfg(not(feature = "managed-sockets"))]
                 self.venue.on_message(&mut cx, socket, text);
             }
-            Event::WsClosed { socket, code } => {
-                for timer in cx.io.signing.close_socket(socket) {
+            // One terminal body for both: exhaustion is a close unless the venue opts in.
+            Event::WsClosed { socket, .. } | Event::WsRouteExhausted { socket } => {
+                let (code, exhausted) = match event {
+                    Event::WsClosed { code, .. } => (code, false),
+                    _ => (ROUTE_EXHAUSTED_CLOSE, true),
+                };
+                for timer in cx.io.core.signing.close_socket(socket) {
                     if timer.0 != 0 {
-                        cx.io.actions.push(Action::ClearTimer { timer });
+                        cx.io.core.actions.push(Action::ClearTimer { timer });
                     }
                 }
-                cx.io.sockets.closed(socket, true);
-                cx.io.health.count(log_code::WS_CLOSED);
-                self.venue.on_close(&mut cx, socket, code)
+                cx.io.core.sockets.closed(socket, true);
+                if !exhausted {
+                    cx.io.core.health.count(log_code::WS_CLOSED);
+                }
+                if exhausted && V::ROUTE_EXHAUSTION {
+                    self.venue.on_route_exhausted(&mut cx, socket)
+                } else {
+                    self.venue.on_close(&mut cx, socket, code)
+                }
             }
             Event::HttpResponse { request, response } => {
                 self.http_start(now, request, response.status, response.headers);
@@ -3998,12 +4117,12 @@ impl<V: Venue> Engine<V> {
                     Ok(()) => {
                         signing.http.timeout_ms =
                             Some((signing.deadline - now).ceil().max(1.) as u32);
-                        cx.io.actions.push(Action::Http(signing.http));
+                        cx.io.core.actions.push(Action::Http(signing.http));
                     }
                     Err(error) => {
                         #[cfg(feature = "order-locks")]
-                        cx.io.order_read_tokens.remove(&request);
-                        cx.io.streams.remove(&request);
+                        cx.io.core.order_read_tokens.remove(&request);
+                        cx.io.core.streams.remove(&request);
                         if let Some(pending) = cx.io.pending.remove(&request) {
                             self.venue.on_sign_failed(&mut cx, pending.value, error);
                         }
@@ -4013,8 +4132,8 @@ impl<V: Venue> Engine<V> {
             Event::PayloadSignFailed { request, error } => {
                 if cx.io.take_signature(request).is_some() {
                     #[cfg(feature = "order-locks")]
-                    cx.io.order_read_tokens.remove(&request);
-                    cx.io.streams.remove(&request);
+                    cx.io.core.order_read_tokens.remove(&request);
+                    cx.io.core.streams.remove(&request);
                     if let Some(pending) = cx.io.pending.remove(&request) {
                         self.venue.on_sign_failed(&mut cx, pending.value, error);
                     }
@@ -4022,20 +4141,20 @@ impl<V: Venue> Engine<V> {
             }
             Event::HttpFailed { request, error } => {
                 #[cfg(feature = "order-locks")]
-                cx.io.order_read_tokens.remove(&request);
+                cx.io.core.order_read_tokens.remove(&request);
                 cx.io.take_signature(request);
-                if let Some(pending) = cx.io.signing.remove_request(request)
+                if let Some(pending) = cx.io.core.signing.remove_request(request)
                     && pending.timer.0 != 0
                 {
-                    cx.io.actions.push(Action::ClearTimer {
+                    cx.io.core.actions.push(Action::ClearTimer {
                         timer: pending.timer,
                     });
                 }
-                cx.io.streams.remove(&request);
-                cx.io.incoming.remove(&request);
+                cx.io.core.streams.remove(&request);
+                cx.io.core.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
-                    cx.io.health.count(log_code::HTTP_FAILED);
-                    let kind = cx.io.http_failure_kind;
+                    cx.io.core.health.count(log_code::HTTP_FAILED);
+                    let kind = cx.io.core.http_failure_kind;
                     let make_failure = || VenueError::new(error).kind(kind);
                     #[cfg(feature = "http-plans")]
                     {
@@ -4058,16 +4177,17 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Event::TimerFired { timer } => {
-                if cx.io.timers.remove(&timer).is_some() {
-                    let logical = cx.io.polls.fired(timer).unwrap_or(timer);
+                if cx.io.core.timers.remove(&timer).is_some() {
+                    let logical = cx.io.core.polls.fired(timer).unwrap_or(timer);
                     self.venue.on_timer(&mut cx, logical);
                 }
             }
             Event::Command(Command::Venue { command, action }) => {
                 cx.io.begin_command_entry(Some(command));
-                cx.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
+                cx.io.core.request_contexts.dispatch =
+                    Some((command, crate::classify::Intent::Place));
                 self.venue.on_venue_action(&mut cx, command, action);
-                cx.io.request_contexts.dispatch = None;
+                cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
             Event::Command(Command::FetchAccount { command })
@@ -4095,7 +4215,7 @@ impl<V: Venue> Engine<V> {
                         | Command::CancelSymbolOrders { command, .. } => Some(*command),
                         _ => None,
                     };
-                    if id.is_some_and(|id| cx.io.order_locks.contains(id)) {
+                    if id.is_some_and(|id| cx.io.core.order_locks.contains(id)) {
                         cx.notice(
                             Level::Error,
                             log_code::COMMAND_DUPLICATE,
@@ -4105,14 +4225,15 @@ impl<V: Venue> Engine<V> {
                     }
                     if cx
                         .io
+                        .core
                         .order_locks
-                        .defer(&command, cx.io.command_waits.receipt_of(&command))
+                        .defer(&command, cx.io.core.command_waits.receipt_of(&command))
                     {
                         return;
                     }
                     if (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements())
-                        && let Err(refusal) = cx.io.order_locks.acquire(
+                        && let Err(refusal) = cx.io.core.order_locks.acquire(
                             &command,
                             cx.store,
                             self.venue.fence_uncertain_cancel_all(),
@@ -4126,7 +4247,7 @@ impl<V: Venue> Engine<V> {
                             }
                             (_, Command::CancelSymbolOrders { symbol, .. })
                                 if self.venue.fence_uncertain_cancel_all()
-                                    && cx.io.order_locks.uncertain(symbol) =>
+                                    && cx.io.core.order_locks.uncertain(symbol) =>
                             {
                                 "Placement outcome is uncertain; reconcile before cancel-all".into()
                             }
@@ -4160,11 +4281,11 @@ impl<V: Venue> Engine<V> {
                 cx.io.begin_command_entry(command.completion_id());
                 // The classifier takes intent from the command, never the venue
                 // (an amend's cancel leg is still an amend).
-                cx.io.request_contexts.dispatch = command
+                cx.io.core.request_contexts.dispatch = command
                     .completion_id()
                     .map(|id| (id, command.write_intent()));
                 self.venue.on_command(&mut cx, command);
-                cx.io.request_contexts.dispatch = None;
+                cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
         }
@@ -4174,23 +4295,23 @@ impl<V: Venue> Engine<V> {
     fn begin_event_scope(&mut self) {
         #[cfg(feature = "order-locks")]
         {
-            self.io.order_response_token = None;
+            self.io.core.order_response_token = None;
         }
-        self.io.auth_failure_counted = false;
+        self.io.core.auth_failure_counted = false;
     }
 
     fn count_http_status(&mut self, status: u16) {
         if status == 429 {
-            self.io.health.count(log_code::RATE_LIMITED);
+            self.io.core.health.count(log_code::RATE_LIMITED);
         } else if status >= 500 {
-            self.io.health.count(log_code::HTTP_FAILED);
+            self.io.core.health.count(log_code::HTTP_FAILED);
         }
     }
 
     fn finish_event_scope(&mut self, now: f64) {
         #[cfg(feature = "http-plans")]
-        self.io.request_contexts.end_preflight_admission();
-        self.io.request_contexts.end_plan_admission();
+        self.io.core.request_contexts.end_preflight_admission();
+        self.io.core.request_contexts.end_plan_admission();
         self.flush_bearer_fences(now);
         self.flush_http_owner_retirements();
         self.finish_deferred_commands(now);
@@ -4208,22 +4329,22 @@ impl<V: Venue> Engine<V> {
         // attempt authority to an unrelated internal finalization.
         #[cfg(feature = "http-plans")]
         {
-            self.io.http_history_failure = None;
+            self.io.core.http_history_failure = None;
         }
-        let delivery = self.io.http_delivery.take();
-        let entry = self.io.command_entry.take();
+        let delivery = self.io.core.http_delivery.take();
+        let entry = self.io.core.command_entry.take();
         #[cfg(feature = "order-locks")]
-        let order_response = self.io.order_response_token.take();
+        let order_response = self.io.core.order_response_token.take();
         #[cfg(feature = "order-locks")]
-        let ready = self.io.order_locks.ready();
+        let ready = self.io.core.order_locks.ready();
         #[cfg(feature = "order-locks")]
         for (.., receipt) in &ready {
-            self.io.command_waits.batch(*receipt);
+            self.io.core.command_waits.batch(*receipt);
         }
         #[cfg(feature = "order-locks")]
         for (command, failed, receipt) in ready {
             let carried = command.completion_id().map(|id| (id, receipt));
-            let outer = self.io.command_waits.carry(carried);
+            let outer = self.io.core.command_waits.carry(carried);
             if failed && self.venue.fence_uncertain_cancel_all() {
                 let Command::CancelSymbolOrders { command, .. } = command else {
                     unreachable!()
@@ -4239,19 +4360,19 @@ impl<V: Venue> Engine<V> {
                 );
             } else {
                 if let Some(id) = command.completion_id() {
-                    self.io.active_commands.remove(&id);
+                    self.io.core.active_commands.remove(&id);
                 }
                 // Not a new receipt: it keeps the receipt it was deferred with.
                 self.handle_received(now, Event::Command(command));
             }
-            self.io.command_waits.carry(outer);
+            self.io.core.command_waits.carry(outer);
         }
         self.process_socket_work(now);
-        self.io.http_delivery = delivery;
-        self.io.command_entry = entry;
+        self.io.core.http_delivery = delivery;
+        self.io.core.command_entry = entry;
         #[cfg(feature = "order-locks")]
         {
-            self.io.order_response_token = order_response;
+            self.io.core.order_response_token = order_response;
         }
         #[cfg(feature = "order-locks")]
         self.reconcile_uncertain(now);
@@ -4267,11 +4388,11 @@ impl<V: Venue> Engine<V> {
     fn reconcile_uncertain(&mut self, now: f64) {
         // Never inside a command entry; the hook runs with no HTTP delivery
         // or order-read authority of its own.
-        if self.io.command_entry.is_some() {
+        if self.io.core.command_entry.is_some() {
             return;
         }
         let (mut any, mut all, mut symbols) = (false, false, Vec::<String>::new());
-        self.io.reconcile_due.retain_mut(|(scope, at)| {
+        self.io.core.reconcile_due.retain_mut(|(scope, at)| {
             if *at > now && now.is_finite() {
                 return true;
             }
@@ -4291,10 +4412,10 @@ impl<V: Venue> Engine<V> {
         if any {
             #[cfg(feature = "http-plans")]
             {
-                self.io.http_history_failure = None;
+                self.io.core.http_history_failure = None;
             }
-            let delivery = self.io.http_delivery.take();
-            let token = self.io.order_response_token.take();
+            let delivery = self.io.core.http_delivery.take();
+            let token = self.io.core.order_response_token.take();
             let mut cx = Cx {
                 now,
                 store: &mut self.store,
@@ -4302,11 +4423,12 @@ impl<V: Venue> Engine<V> {
             };
             self.venue
                 .reconcile_uncertain(&mut cx, (!all).then_some(symbols.as_slice()));
-            self.io.http_delivery = delivery;
-            self.io.order_response_token = token;
+            self.io.core.http_delivery = delivery;
+            self.io.core.order_response_token = token;
         }
         let next = self
             .io
+            .core
             .reconcile_due
             .iter()
             .map(|(_, at)| *at)
@@ -4315,11 +4437,11 @@ impl<V: Venue> Engine<V> {
             return;
         }
         if let Some((timer, _)) = self.reconcile_timer.take() {
-            self.io.actions.push(Action::ClearTimer { timer });
+            self.io.core.actions.push(Action::ClearTimer { timer });
         }
         if let Some(at_ms) = next {
             let timer = TimerId(self.io.next());
-            self.io.actions.push(Action::SetTimer { timer, at_ms });
+            self.io.core.actions.push(Action::SetTimer { timer, at_ms });
             self.reconcile_timer = Some((timer, at_ms));
         }
     }
@@ -4328,11 +4450,11 @@ impl<V: Venue> Engine<V> {
         if !self.io.pending.contains_key(&request) {
             return;
         }
-        let stream = self.io.streams.remove(&request);
+        let stream = self.io.core.streams.remove(&request);
         let splitter = stream
             .filter(|_| (200..300).contains(&status))
             .map(|(at, check)| ArraySplitter::with_item_check(at, check));
-        self.io.incoming.insert(
+        self.io.core.incoming.insert(
             request,
             Incoming {
                 status,
@@ -4345,7 +4467,7 @@ impl<V: Venue> Engine<V> {
 
     fn http_chunk(&mut self, now: f64, request: RequestId, data: &[u8]) {
         let managed = self.io.managed_preparation(request);
-        let Some(incoming) = self.io.incoming.get_mut(&request) else {
+        let Some(incoming) = self.io.core.incoming.get_mut(&request) else {
             return;
         };
         let Some(splitter) = incoming.splitter.as_mut() else {
@@ -4370,7 +4492,7 @@ impl<V: Venue> Engine<V> {
         });
         if managed.is_none_or(|token| self.io.managed_response_live(request, token, now)) {
             self.io.pending.insert(request, pending);
-            if let Some(incoming) = self.io.incoming.get_mut(&request) {
+            if let Some(incoming) = self.io.core.incoming.get_mut(&request) {
                 incoming.splitter = Some(splitter);
             }
         }
@@ -4379,10 +4501,10 @@ impl<V: Venue> Engine<V> {
     fn http_end(&mut self, now: f64, request: RequestId) {
         #[cfg(feature = "order-locks")]
         {
-            self.io.order_response_token = self.io.order_read_tokens.remove(&request);
+            self.io.core.order_response_token = self.io.core.order_read_tokens.remove(&request);
         }
         let (Some(incoming), Some(pending)) = (
-            self.io.incoming.remove(&request),
+            self.io.core.incoming.remove(&request),
             self.io.pending.remove(&request),
         ) else {
             return;
@@ -4412,7 +4534,7 @@ impl<V: Venue> Engine<V> {
                         false,
                         now,
                         cx.store,
-                        &mut cx.io.actions,
+                        &mut cx.io.core.actions,
                     );
                     cx.with_owned_read_failure(
                         || {
@@ -4463,7 +4585,7 @@ impl<V: Venue> Engine<V> {
                 true,
                 now,
                 cx.store,
-                &mut cx.io.actions,
+                &mut cx.io.core.actions,
             );
             self.venue.on_response(&mut cx, pending.value, response);
             return;
@@ -4482,11 +4604,11 @@ impl<V: Venue> Engine<V> {
                     true,
                     now,
                     cx.store,
-                    &mut cx.io.actions,
+                    &mut cx.io.core.actions,
                 );
                 // Session writes skip the journaled collector, so expose the
                 // reply metadata the write classifier reads during this callback.
-                let session_write = cx.io.http_delivery.as_ref().is_some_and(|delivery| {
+                let session_write = cx.io.core.http_delivery.as_ref().is_some_and(|delivery| {
                     delivery.context.operation() == crate::request_context::Operation::Mutation
                         && matches!(
                             delivery.context.owner(),
@@ -4494,11 +4616,12 @@ impl<V: Venue> Engine<V> {
                         )
                 });
                 if session_write {
-                    cx.io.http_write_reply = Some((response.status, response.headers.to_owned()));
+                    cx.io.core.http_write_reply =
+                        Some((response.status, response.headers.to_owned()));
                 }
                 self.venue.on_response(&mut cx, pending.value, response);
                 if session_write {
-                    cx.io.http_write_reply = None;
+                    cx.io.core.http_write_reply = None;
                 }
             }
             Err(_) => {
@@ -4507,6 +4630,29 @@ impl<V: Venue> Engine<V> {
                     self.venue.on_http_failed(cx, pending.value, make_failure());
                 });
             }
+        }
+    }
+
+    /// The local signer's missing key on primary material latches signing
+    /// (`SigningLatch`). An asynchronous result fails only its own request:
+    /// no host reports `MissingKey`, and none may stop the account if one did.
+    fn provider_refused(
+        &mut self,
+        work: &crate::signing::SignRequest,
+        result: &Result<crate::signing::SignResult, crate::signing::SignError>,
+    ) {
+        if let Err(crate::signing::SignError::MissingKey) = result {
+            let startup = self.startup_watch_at.is_some();
+            let io = &mut self.io;
+            let primary = io.core.identities.primary_owns(work);
+            SigningLatch::missing_key(
+                &mut io.core.signing,
+                primary,
+                startup,
+                &mut io.core.actions,
+                &mut io.core.health,
+                io.core.min_level,
+            );
         }
     }
 
@@ -4519,14 +4665,30 @@ impl<V: Venue> Engine<V> {
         match outbound {
             Action::Http(http) => {
                 #[cfg(feature = "order-locks")]
-                cx.io.order_read_tokens.remove(&http.id);
-                cx.io.streams.remove(&http.id);
+                cx.io.core.order_read_tokens.remove(&http.id);
+                cx.io.core.streams.remove(&http.id);
                 if let Some(pending) = cx.io.pending.remove(&http.id) {
                     self.venue
                         .on_sign_error(&mut cx, pending.value, error.venue_error());
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
+                let io = &mut *cx.io;
+                // Records the role; managed feeds also stop on it.
+                #[cfg_attr(not(feature = "managed-sockets"), allow(unused_variables))]
+                let refused =
+                    io.core
+                        .signing_latch
+                        .socket_failed(&io.core.signing, &io.core.sockets, socket);
+                #[cfg(feature = "managed-sockets")]
+                if refused
+                    && cx.io.managed_socket_active()
+                    && let Some(epoch) = cx.io.core.socket_driver.state.socket_epoch(socket)
+                {
+                    cx.stop_socket_feed(epoch.feed());
+                    self.flush_http_owner_retirements();
+                    return;
+                }
                 if cx.io.managed_socket_active() {
                     cx.close(socket);
                 } else {
@@ -4547,16 +4709,17 @@ impl<V: Venue> Engine<V> {
     ) {
         use crate::signing_dispatch::Completion;
         #[cfg(feature = "managed-sockets")]
-        if let Some((socket, connect)) = self.io.signing.outbound_socket(attempt)
+        if let Some((socket, connect)) = self.io.core.signing.outbound_socket(attempt)
             && !self.socket_gate(now, socket, connect)
         {
             return;
         }
-        let Some(completion) =
-            self.io
-                .signing
-                .finish(attempt, now, self.io.protocol_clock.revision(), result)
-        else {
+        let Some(completion) = self.io.core.signing.finish(
+            attempt,
+            now,
+            self.io.core.protocol_clock.revision(),
+            result,
+        ) else {
             return;
         };
         if match &completion {
@@ -4570,27 +4733,27 @@ impl<V: Venue> Engine<V> {
         match completion {
             Completion::Ready(pending, outbound) => {
                 if pending.timer.0 != 0 {
-                    self.io.actions.push(Action::ClearTimer {
+                    self.io.core.actions.push(Action::ClearTimer {
                         timer: pending.timer,
                     });
                 }
-                self.io.signing.ready(attempt, pending);
-                self.io.actions.push(Action::SignedOutbound {
+                self.io.core.signing.ready(attempt, pending);
+                self.io.core.actions.push(Action::SignedOutbound {
                     attempt,
                     outbound: Box::new(outbound),
                 });
             }
             Completion::Stale(mut pending) => {
                 if pending.timer.0 != 0 {
-                    self.io.actions.push(Action::ClearTimer {
+                    self.io.core.actions.push(Action::ClearTimer {
                         timer: pending.timer,
                     });
                     pending.timer = TimerId(0);
                 }
                 // New identity invalidates every late completion from the old attempt.
-                let next = self.io.signing.next_id();
-                self.io.signing.retry(next, pending);
-                self.io.actions.push(Action::Sign {
+                let next = self.io.core.signing.next_id();
+                self.io.core.signing.retry(next, pending);
+                self.io.core.actions.push(Action::Sign {
                     attempt: next,
                     work: crate::signing::SignRequest {
                         receipt: Default::default(),
@@ -4602,7 +4765,7 @@ impl<V: Venue> Engine<V> {
             }
             Completion::Failed(pending, error) => {
                 if pending.timer.0 != 0 {
-                    self.io.actions.push(Action::ClearTimer {
+                    self.io.core.actions.push(Action::ClearTimer {
                         timer: pending.timer,
                     });
                 }
@@ -4617,17 +4780,17 @@ impl<V: Venue> Engine<V> {
     /// Hosts check this before starting any delayed primitive operation.
     /// A fatal allocator failure permanently retires this engine.
     pub fn failed(&self) -> bool {
-        self.io.http_owner_poison
+        self.io.core.http_owner_poison
             || self.plan_callback_failed()
-            || self.io.command_entry.is_some()
-            || self.io.next_id.failed()
-            || self.io.signing.failed()
+            || self.io.core.command_entry.is_some()
+            || self.io.core.next_id.failed()
+            || self.io.core.signing.failed()
     }
 
     fn plan_callback_failed(&self) -> bool {
         #[cfg(feature = "http-plans")]
         {
-            self.io.http_plan_poison
+            self.io.core.http_plan_poison
         }
         #[cfg(not(feature = "http-plans"))]
         {
@@ -4654,14 +4817,14 @@ impl<V: Venue> Engine<V> {
 
     fn assert_retirement_safe(&self) {
         assert!(
-            !self.io.http_owner_poison && !self.plan_callback_failed(),
+            !self.io.core.http_owner_poison && !self.plan_callback_failed(),
             "engine HTTP owner callback or cleanup failed"
         );
     }
 
     fn assert_command_entry_safe(&self) {
         assert!(
-            self.io.command_entry.is_none(),
+            self.io.core.command_entry.is_none(),
             "engine command callback did not return"
         );
     }
@@ -4676,7 +4839,7 @@ impl<V: Venue> Engine<V> {
     #[cfg(all(feature = "test-support", feature = "http-plans"))]
     #[doc(hidden)]
     pub fn plan_scan_visits(&self) -> usize {
-        self.io.request_contexts.plan_scan_visits()
+        self.io.core.request_contexts.plan_scan_visits()
     }
 
     /// A Plan-ready callback, the Plan timer, delivery exit and
@@ -4684,7 +4847,7 @@ impl<V: Venue> Engine<V> {
     /// at this tail, not left queued for a later event.
     #[cfg(feature = "http-plans")]
     fn flush_http_plans(&mut self, now: f64) {
-        if self.io.request_contexts.has_plans() {
+        if self.io.core.request_contexts.has_plans() {
             self.flush_live_http_plans(now);
         }
         // Bearer fences first, then parked Slots (which drain fences per pass).
@@ -4694,24 +4857,24 @@ impl<V: Venue> Engine<V> {
         self.flush_plan_session_waits(now);
         // A no-delivery resume's custody ends with its event; every outer
         // path ends here, after any callback in this flush could resume.
-        self.io.session_resumed.clear();
+        self.io.core.session_resumed.clear();
     }
 
     #[inline(never)]
     #[cfg(feature = "http-plans")]
     fn flush_live_http_plans(&mut self, now: f64) {
-        self.io.request_contexts.end_plan_admission();
+        self.io.core.request_contexts.end_plan_admission();
         if !now.is_finite()
-            || self.io.http_delivery.is_some()
-            || self.io.http_plan_ready.is_some()
-            || self.io.http_plan_expiring.is_some()
-            || self.io.http_preflight_ready.is_some()
-            || !self.io.request_contexts.plan_scope_clear()
+            || self.io.core.http_delivery.is_some()
+            || self.io.core.http_plan_ready.is_some()
+            || self.io.core.http_plan_expiring.is_some()
+            || self.io.core.http_preflight_ready.is_some()
+            || !self.io.core.request_contexts.plan_scope_clear()
         {
             return;
         }
         let mut advanced = false;
-        while let Some(plan) = self.io.request_contexts.next_plan_ready(now) {
+        while let Some(plan) = self.io.core.request_contexts.next_plan_ready(now) {
             advanced = true;
             if now >= plan.deadline() {
                 self.expire_plan_calls(now, &plan);
@@ -4726,11 +4889,11 @@ impl<V: Venue> Engine<V> {
                 )
                 .expect("current expired plan");
             } else {
-                self.io.http_plan_ready = Some(plan.clone());
-                self.io.http_plan_poison = true;
+                self.io.core.http_plan_ready = Some(plan.clone());
+                self.io.core.http_plan_poison = true;
                 #[cfg(feature = "order-locks")]
-                let order_response = self.io.order_response_token.take();
-                self.io.http_history_failure = None;
+                let order_response = self.io.core.order_response_token.take();
+                self.io.core.http_history_failure = None;
                 self.venue.on_http_plan_ready(
                     &mut Cx {
                         now,
@@ -4741,10 +4904,10 @@ impl<V: Venue> Engine<V> {
                 );
                 #[cfg(feature = "order-locks")]
                 {
-                    self.io.order_response_token = order_response;
+                    self.io.core.order_response_token = order_response;
                 }
-                self.io.http_plan_ready = None;
-                self.io.http_plan_poison = false;
+                self.io.core.http_plan_ready = None;
+                self.io.core.http_plan_poison = false;
                 self.assert_live();
                 request_context_registry::ContextRegistry::rearm_live_plan(&mut self.io, &plan);
             }
@@ -4763,7 +4926,7 @@ impl<V: Venue> Engine<V> {
         let Event::TimerFired { timer } = event else {
             return false;
         };
-        let Some(plan) = self.io.request_contexts.plan_for_timer(*timer) else {
+        let Some(plan) = self.io.core.request_contexts.plan_for_timer(*timer) else {
             #[cfg(feature = "condition-waits")]
             return self.expire_preflight_condition(now, *timer);
             #[cfg(not(feature = "condition-waits"))]
@@ -4778,9 +4941,9 @@ impl<V: Venue> Engine<V> {
 
     #[cfg(feature = "http-plans")]
     fn flush_http_owner_retirements(&mut self) {
-        self.io.request_contexts.end_plan_admission();
+        self.io.core.request_contexts.end_plan_admission();
         self.assert_live();
-        if self.io.request_contexts.has_retirements() {
+        if self.io.core.request_contexts.has_retirements() {
             self.flush_pending_http_owner_retirements();
         }
     }
@@ -4788,37 +4951,37 @@ impl<V: Venue> Engine<V> {
     #[inline(never)]
     #[cfg(feature = "http-plans")]
     fn flush_pending_http_owner_retirements(&mut self) {
-        while let Some(token) = self.io.request_contexts.next_retirement() {
+        while let Some(token) = self.io.core.request_contexts.next_retirement() {
             self.assert_live();
-            if !self.io.request_contexts.retirement_current(&token) {
-                self.io.http_owner_poison = true;
+            if !self.io.core.request_contexts.retirement_current(&token) {
+                self.io.core.http_owner_poison = true;
                 panic!("invalid HTTP owner retirement token");
             }
             // A caught hook panic permanently fences the engine. No unwind
             // reset guard or fabricated allocator failure is used.
-            self.io.http_owner_poison = true;
+            self.io.core.http_owner_poison = true;
             let wake = self.venue.on_http_owner_retired_preflight(&token);
             assert!(
-                self.io.request_contexts.complete_retirement(&token),
+                self.io.core.request_contexts.complete_retirement(&token),
                 "HTTP owner retirement changed during cleanup"
             );
             if let Some(wake) = wake {
-                let _ = self.io.request_contexts.queue_preflight_ready(&wake);
+                let _ = self.io.core.request_contexts.queue_preflight_ready(&wake);
             }
-            self.io.http_owner_poison = false;
+            self.io.core.http_owner_poison = false;
             self.assert_live();
         }
     }
 
     pub fn signing_pending(&self, attempt: RequestId) -> bool {
-        !self.failed() && self.io.signing.signature_pending(attempt)
+        !self.failed() && self.io.core.signing.signature_pending(attempt)
     }
 
     pub fn prepare_dispatch(&mut self, now: f64) {
         self.assert_live();
         self.expire_read_roots(now);
         self.flush_http_owner_retirements();
-        self.io.dispatch_now = now;
+        self.io.core.dispatch_now = now;
         self.flush_http_plans(now);
         self.flush_preflight_readiness(now);
     }
@@ -4832,7 +4995,7 @@ impl<V: Venue> Engine<V> {
     ) {
         self.assert_live();
         self.flush_http_owner_retirements();
-        for action in self.io.actions.split_off(emitted).into_iter().rev() {
+        for action in self.io.core.actions.split_off(emitted).into_iter().rev() {
             queued.push_front(action);
         }
     }
@@ -4840,9 +5003,9 @@ impl<V: Venue> Engine<V> {
     #[inline(always)]
     fn dispatch_actions(&mut self, now: f64) {
         self.assert_live();
-        if self.io.actions.is_empty()
-            && self.io.signing_admission.is_empty()
-            && self.io.signing.is_empty()
+        if self.io.core.actions.is_empty()
+            && self.io.core.signing_admission.is_empty()
+            && self.io.core.signing.is_empty()
         {
             return;
         }
@@ -4852,21 +5015,22 @@ impl<V: Venue> Engine<V> {
     #[inline(never)]
     fn dispatch_queued_actions(&mut self, now: f64) {
         use crate::signing_dispatch::Completion;
-        for (outbound, error) in std::mem::take(&mut self.io.signing_admission) {
+        for (outbound, error) in std::mem::take(&mut self.io.core.signing_admission) {
             self.sign_failed(now, outbound, error);
             self.assert_live();
         }
         #[cfg(feature = "session-bearer")]
         let mut queued = Wiping(std::collections::VecDeque::from(std::mem::take(
-            &mut *self.io.actions,
+            &mut *self.io.core.actions,
         )));
         #[cfg(not(feature = "session-bearer"))]
-        let mut queued = std::collections::VecDeque::from(std::mem::take(&mut self.io.actions));
+        let mut queued =
+            std::collections::VecDeque::from(std::mem::take(&mut self.io.core.actions));
         loop {
             self.assert_live();
             while let Some(action) = queued.pop_front() {
                 self.io.assert_action_safe(&action);
-                let emitted = self.io.actions.len();
+                let emitted = self.io.core.actions.len();
                 #[cfg(not(feature = "managed-sockets"))]
                 let live = true;
                 #[cfg(feature = "managed-sockets")]
@@ -4875,7 +5039,7 @@ impl<V: Venue> Engine<V> {
                 } else {
                     match &action {
                         Action::Sign { attempt, .. } => {
-                            self.io.signing.outbound_socket(*attempt).is_none_or(
+                            self.io.core.signing.outbound_socket(*attempt).is_none_or(
                                 |(socket, connect)| self.socket_gate(now, socket, connect),
                             )
                         }
@@ -4891,17 +5055,17 @@ impl<V: Venue> Engine<V> {
                 }
                 match action {
                     Action::SignedOutbound { attempt, outbound } => {
-                        match self.io.signing.release(
+                        match self.io.core.signing.release(
                             attempt,
                             *outbound,
                             now,
-                            self.io.protocol_clock.revision(),
+                            self.io.core.protocol_clock.revision(),
                         ) {
                             Some(Completion::Ready(mut pending, mut outbound)) => {
                                 let time = crate::request_context::ReleaseTime {
                                     raw_ms: now,
-                                    protocol_ms: self.io.protocol_clock.at(now),
-                                    revision: self.io.protocol_clock.revision(),
+                                    protocol_ms: self.io.core.protocol_clock.at(now),
+                                    revision: self.io.core.protocol_clock.revision(),
                                 };
                                 let release =
                                     match crate::SigningRelease::new(pending.receipt, time) {
@@ -4909,13 +5073,13 @@ impl<V: Venue> Engine<V> {
                                         Err(crate::request_context::Error::Stale) => {
                                             crate::signing_dispatch::wipe(&mut outbound);
                                             pending.timer = TimerId(0);
-                                            let next = self.io.signing.next_id();
-                                            self.io.signing.retry(next, pending);
+                                            let next = self.io.core.signing.next_id();
+                                            self.io.core.signing.retry(next, pending);
                                             continue;
                                         }
                                         Err(_) => {
                                             crate::signing_dispatch::wipe(&mut outbound);
-                                            let emitted = self.io.actions.len();
+                                            let emitted = self.io.core.actions.len();
                                             self.sign_failed(
                                                 now,
                                                 pending.outbound,
@@ -4949,15 +5113,15 @@ impl<V: Venue> Engine<V> {
                                     }
                                     _ => {}
                                 }
-                                self.io.actions.push(outbound);
+                                self.io.core.actions.push(outbound);
                             }
                             Some(Completion::Stale(mut pending)) => {
                                 pending.timer = TimerId(0);
-                                let next = self.io.signing.next_id();
-                                self.io.signing.retry(next, pending);
+                                let next = self.io.core.signing.next_id();
+                                self.io.core.signing.retry(next, pending);
                             }
                             Some(Completion::Failed(pending, error)) => {
-                                let emitted = self.io.actions.len();
+                                let emitted = self.io.core.actions.len();
                                 self.sign_failed(now, pending.outbound, error);
                                 self.queue_dispatch_callback_actions(&mut queued, emitted);
                             }
@@ -4970,43 +5134,63 @@ impl<V: Venue> Engine<V> {
                         timeout_ms,
                     } => {
                         if !work.operations.is_empty() {
-                            self.io.actions.push(Action::Sign {
+                            self.io.core.actions.push(Action::Sign {
                                 attempt,
                                 work,
                                 timeout_ms,
                             });
                             continue;
                         }
-                        if !self.io.signing.can_prepare(attempt) {
+                        if !self.io.core.signing.can_prepare(attempt) {
                             continue;
                         }
-                        let work = match self.io.signing.prepare(
+                        let work = match self.io.core.signing.prepare(
                             attempt,
                             now,
                             &crate::DispatchContext::new(
-                                self.io.protocol_clock.at(now),
-                                self.io.entropy.as_ref(),
+                                self.io.core.protocol_clock.at(now),
+                                self.io.core.entropy.as_ref(),
                             ),
-                            self.io.protocol_clock.revision(),
+                            self.io.core.protocol_clock.revision(),
+                            &self.io.core.identities,
                         ) {
                             Ok(work) => work,
                             Err(error) => {
-                                let emitted = self.io.actions.len();
+                                let emitted = self.io.core.actions.len();
+                                if let Some(primary) =
+                                    self.io.core.signing.take_credential_refusal()
+                                {
+                                    let startup = self.startup_watch_at.is_some();
+                                    let io = &mut self.io;
+                                    SigningLatch::missing_key(
+                                        &mut io.core.signing,
+                                        primary,
+                                        startup,
+                                        &mut io.core.actions,
+                                        &mut io.core.health,
+                                        io.core.min_level,
+                                    );
+                                }
                                 self.sign_completed(now, attempt, Err(error));
                                 self.queue_dispatch_callback_actions(&mut queued, emitted);
                                 continue;
                             }
                         };
-                        if let Some(result) =
-                            self.io.signer.as_ref().and_then(|s| s.sign_ready(&work))
+                        if let Some(result) = self
+                            .io
+                            .core
+                            .signer
+                            .as_ref()
+                            .and_then(|s| s.sign_ready(&work))
                         {
-                            let emitted = self.io.actions.len();
+                            let emitted = self.io.core.actions.len();
+                            self.provider_refused(&work, &result);
                             self.sign_completed(now, attempt, result);
                             // Inline local completion retains original mixed action order.
                             self.queue_dispatch_callback_actions(&mut queued, emitted);
                         } else {
-                            if self.io.signer.as_ref().is_some_and(|s| s.immediate()) {
-                                let emitted = self.io.actions.len();
+                            if self.io.core.signer.as_ref().is_some_and(|s| s.immediate()) {
+                                let emitted = self.io.core.actions.len();
                                 self.sign_completed(
                                     now,
                                     attempt,
@@ -5015,31 +5199,36 @@ impl<V: Venue> Engine<V> {
                                 self.queue_dispatch_callback_actions(&mut queued, emitted);
                                 continue;
                             }
-                            if !self.io.signing.is_managed(attempt)
-                                && self.io.signing.timer(attempt).is_some_and(|t| t.0 == 0)
+                            if !self.io.core.signing.is_managed(attempt)
+                                && self
+                                    .io
+                                    .core
+                                    .signing
+                                    .timer(attempt)
+                                    .is_some_and(|t| t.0 == 0)
                             {
                                 let timer = TimerId(self.io.next());
-                                if let Some(at_ms) = self.io.signing.arm(attempt, timer) {
-                                    self.io.actions.push(Action::SetTimer { timer, at_ms });
+                                if let Some(at_ms) = self.io.core.signing.arm(attempt, timer) {
+                                    self.io.core.actions.push(Action::SetTimer { timer, at_ms });
                                 }
                             }
-                            let timeout_ms = self.io.signing.timeout_ms(attempt, now);
-                            self.io.actions.push(Action::Sign {
+                            let timeout_ms = self.io.core.signing.timeout_ms(attempt, now);
+                            self.io.core.actions.push(Action::Sign {
                                 attempt,
                                 work,
                                 timeout_ms,
                             });
                         }
                     }
-                    action => self.io.actions.push(action),
+                    action => self.io.core.actions.push(action),
                 }
             }
             self.assert_live();
-            if let Some(action) = self.io.signing.take_plain() {
+            if let Some(action) = self.io.core.signing.take_plain() {
                 queued.push_back(action);
                 continue;
             }
-            if let Some(attempt) = self.io.signing.next_work() {
+            if let Some(attempt) = self.io.core.signing.next_work() {
                 queued.push_back(Action::Sign {
                     attempt,
                     work: crate::signing::SignRequest {
@@ -5066,29 +5255,29 @@ impl<V: Venue> Engine<V> {
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
         self.assert_live();
         // No clock here: the last observed engine time, never a wall clock.
-        self.expire_read_roots(self.io.dispatch_now);
-        self.flush_http_plans(self.io.dispatch_now);
+        self.expire_read_roots(self.io.core.dispatch_now);
+        self.flush_http_plans(self.io.core.dispatch_now);
         self.flush_http_owner_retirements();
         self.io.assert_actions_safe();
-        self.process_socket_work(self.io.dispatch_now);
+        self.process_socket_work(self.io.core.dispatch_now);
         self.io.assert_actions_safe();
-        self.dispatch_actions(self.io.dispatch_now);
-        self.process_socket_work(self.io.dispatch_now);
+        self.dispatch_actions(self.io.core.dispatch_now);
+        self.process_socket_work(self.io.core.dispatch_now);
         #[cfg(feature = "managed-sockets")]
         if self.io.managed_socket_active() {
-            self.fence_socket_actions(self.io.dispatch_now);
-            self.dispatch_actions(self.io.dispatch_now);
-            self.drain_socket_frames(self.io.dispatch_now);
-            self.process_socket_work(self.io.dispatch_now);
-            self.dispatch_actions(self.io.dispatch_now);
-            self.fence_socket_actions(self.io.dispatch_now);
+            self.fence_socket_actions(self.io.core.dispatch_now);
+            self.dispatch_actions(self.io.core.dispatch_now);
+            self.drain_socket_frames(self.io.core.dispatch_now);
+            self.process_socket_work(self.io.core.dispatch_now);
+            self.dispatch_actions(self.io.core.dispatch_now);
+            self.fence_socket_actions(self.io.core.dispatch_now);
         }
-        self.flush_preflight_readiness(self.io.dispatch_now);
+        self.flush_preflight_readiness(self.io.core.dispatch_now);
         if self.store.take_rejected_empty_catalogue() {
             push_event(
-                &mut self.io.actions,
-                &mut self.io.health,
-                self.io.min_level,
+                &mut self.io.core.actions,
+                &mut self.io.core.health,
+                self.io.core.min_level,
                 LogEvent {
                     level: Level::Warn,
                     code: log_code::SNAPSHOT_DISCARDED,
@@ -5102,17 +5291,17 @@ impl<V: Venue> Engine<V> {
         self.io.assert_actions_safe();
         #[cfg(feature = "managed-sockets")]
         if !self.io.socket_continuations.is_empty() {
-            self.arm_socket_continuations(self.io.dispatch_now);
+            self.arm_socket_continuations(self.io.core.dispatch_now);
             self.io.assert_actions_safe();
         }
-        self.io.actions.drain(..)
+        self.io.core.actions.drain(..)
     }
 
     pub fn has_actions(&self) -> bool {
-        !self.io.actions.is_empty()
-            || !self.io.signing_admission.is_empty()
+        !self.io.core.actions.is_empty()
+            || !self.io.core.signing_admission.is_empty()
             || self.has_socket_work()
-            || self.io.signing.next_work().is_some()
+            || self.io.core.signing.next_work().is_some()
             || self.store.rejected_empty_catalogue()
     }
 
@@ -5135,7 +5324,7 @@ impl<V: Venue> Engine<V> {
     pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
         self.expire_read_roots(now);
-        let buffer = std::mem::take(&mut self.io.snapshot);
+        let buffer = std::mem::take(&mut self.io.core.snapshot);
         let mut w = FrameWriter::new(buffer, now);
         let everything = self.store.everything();
         self.store.write(&everything, &mut w);
@@ -5150,8 +5339,8 @@ impl<V: Venue> Engine<V> {
                 }
             }
         }
-        self.io.snapshot = w.finish();
-        &self.io.snapshot
+        self.io.core.snapshot = w.finish();
+        &self.io.core.snapshot
     }
 
     /// Full private sections and any unflushed market catalog, without consuming
@@ -5159,14 +5348,14 @@ impl<V: Venue> Engine<V> {
     pub fn account_snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
         self.expire_read_roots(now);
-        let buffer = std::mem::take(&mut self.io.snapshot);
+        let buffer = std::mem::take(&mut self.io.core.snapshot);
         let mut writer = FrameWriter::new(buffer, now);
         self.store
             .write(&self.store.account_snapshot(), &mut writer);
         writer.begin(section::ACCOUNT_READ);
         writer.end();
-        self.io.snapshot = writer.finish();
-        &self.io.snapshot
+        self.io.core.snapshot = writer.finish();
+        &self.io.core.snapshot
     }
 
     /// Write everything that changed since the previous call as one flush
@@ -5190,7 +5379,7 @@ impl<V: Venue> Engine<V> {
     fn write_frame(&mut self, now: f64, store: bool) -> Option<&[u8]> {
         // A fill must not reach a consumer before its order: a book-cadence
         // flush carrying fills writes the store sections with them.
-        let store = store || !self.io.fills.is_empty();
+        let store = store || !self.io.core.fills.is_empty();
         if !store && self.store.markets_pending() {
             return None;
         }
@@ -5203,7 +5392,7 @@ impl<V: Venue> Engine<V> {
                     ));
             if self.book_deltas {
                 self.book_baselines.retain(|symbol, _| {
-                    (if self.io.public_feed_policy == PublicFeedPolicy::Shared {
+                    (if self.io.core.public_feed_policy == PublicFeedPolicy::Shared {
                         self.shared_books.contains_key(symbol)
                     } else {
                         self.venue.book(symbol).is_some()
@@ -5237,20 +5426,20 @@ impl<V: Venue> Engine<V> {
             // A market-only flush must not publish row indexes ahead of MARKETS.
             !self.book_deltas || store || markets_match
         };
-        let buffer = std::mem::take(&mut self.io.frame);
+        let buffer = std::mem::take(&mut self.io.core.frame);
         let mut w = FrameWriter::new(buffer, now);
         let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
         }
-        let books = self.io.changed_books[..self.io.changed_books_active].iter();
+        let books = self.io.core.changed_books[..self.io.core.changed_books_active].iter();
         #[cfg(feature = "book-deltas")]
         let books = books.filter(|_| write_books);
         for symbol in books {
             let Some(market) = self.store.market_index(symbol) else {
                 continue;
             };
-            if let Some(book) = if self.io.public_feed_policy == PublicFeedPolicy::Shared {
+            if let Some(book) = if self.io.core.public_feed_policy == PublicFeedPolicy::Shared {
                 self.shared_books.get(symbol)
             } else {
                 self.venue.book(symbol)
@@ -5297,6 +5486,7 @@ impl<V: Venue> Engine<V> {
         }
         let candles: Vec<_> = self
             .io
+            .core
             .candles
             .iter()
             .filter_map(|(symbol, interval, candle)| {
@@ -5304,7 +5494,7 @@ impl<V: Venue> Engine<V> {
             })
             .collect();
         w.candles(&candles);
-        let mut fills = std::mem::take(&mut self.io.fills);
+        let mut fills = std::mem::take(&mut self.io.core.fills);
         if !fills.is_empty() {
             w.begin_revision(section::FILLS, 2);
             w.u32(fills.len() as u32);
@@ -5343,21 +5533,21 @@ impl<V: Venue> Engine<V> {
         let frame = w.finish();
         #[cfg(feature = "book-deltas")]
         if write_books {
-            self.io.changed_books_active = 0;
+            self.io.core.changed_books_active = 0;
         }
         #[cfg(not(feature = "book-deltas"))]
         {
-            self.io.changed_books_active = 0;
+            self.io.core.changed_books_active = 0;
         }
         if let Some(pending) = pending {
             self.store.recycle_pending(pending);
         }
         fills.clear();
-        self.io.fills = fills;
+        self.io.core.fills = fills;
         drop(candles);
-        self.io.candles.clear();
-        self.io.frame = frame;
-        (!empty).then_some(self.io.frame.as_slice())
+        self.io.core.candles.clear();
+        self.io.core.frame = frame;
+        (!empty).then_some(self.io.core.frame.as_slice())
     }
 }
 
@@ -5422,6 +5612,75 @@ fn apply_signature(
 /// app's 120 s auth-badge expiry, so a key that stays rejected keeps its badge.
 pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
 
+/// The latch notice, `SignError::MissingKey`'s text after a fixed prefix.
+const MISSING_KEY_NOTICE: &str =
+    "Signing cannot succeed with the installed credentials: Signing key is not installed";
+
+/// Credential-level signing refusal. Non-generic, so the combined build holds
+/// one copy rather than one per venue engine.
+#[derive(Default)]
+struct SigningLatch {
+    /// Socket roles whose signing was refused; they are never reconnected.
+    roles: u8,
+}
+
+impl SigningLatch {
+    #[inline(never)]
+    fn blocks(&self, channel: Option<&SocketChannel>) -> bool {
+        channel.is_some_and(|channel| self.roles & (1 << SocketRoles::role(channel)) != 0)
+    }
+
+    /// Whether signing is latched; if so, the failed socket's role is too.
+    #[inline(never)]
+    fn socket_failed(
+        &mut self,
+        signing: &crate::signing_dispatch::Dispatch,
+        sockets: &SocketRoles,
+        socket: SocketId,
+    ) -> bool {
+        if !signing.refused() {
+            return false;
+        }
+        if let Some(role) = sockets.role_of(socket) {
+            self.roles |= 1 << role;
+        }
+        true
+    }
+
+    /// A key missing from primary material can never sign: fail once,
+    /// visibly, and during startup fail `start` (`Identities::primary_owns`).
+    #[inline(never)]
+    fn missing_key(
+        signing: &mut crate::signing_dispatch::Dispatch,
+        primary: bool,
+        startup: bool,
+        actions: &mut Vec<Action>,
+        health: &mut Health,
+        min_level: Level,
+    ) {
+        if !primary || !signing.refuse() {
+            return;
+        }
+        let error = crate::signing::SignError::MissingKey;
+        push_event(
+            actions,
+            health,
+            min_level,
+            LogEvent {
+                level: Level::Error,
+                code: log_code::CONFIG_INVALID,
+                message: MISSING_KEY_NOTICE.into(),
+                fields: Vec::new(),
+            },
+        );
+        if startup {
+            actions.push(Action::Notice(Notice::StartupFailed {
+                error: error.venue_error(),
+            }));
+        }
+    }
+}
+
 /// Live sockets that declared a role, for reconnect and private-traffic counts.
 #[derive(Default)]
 struct SocketRoles {
@@ -5439,6 +5698,12 @@ impl SocketRoles {
             SocketChannel::Private => 1,
             SocketChannel::Business => 2,
         }
+    }
+
+    fn role_of(&self, socket: SocketId) -> Option<u8> {
+        self.live
+            .iter()
+            .find_map(|(id, role)| (*id == socket).then_some(*role))
     }
 
     fn connected(&mut self, socket: SocketId, channel: &SocketChannel, health: &mut Health) {
@@ -5484,9 +5749,9 @@ fn count_auth_failure<P>(io: &mut Io<P>, error: Option<&VenueError>) {
             Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
         )
     });
-    if auth && !io.auth_failure_counted {
-        io.auth_failure_counted = true;
-        io.health.count(log_code::AUTH_REJECTED);
+    if auth && !io.core.auth_failure_counted {
+        io.core.auth_failure_counted = true;
+        io.core.health.count(log_code::AUTH_REJECTED);
     }
 }
 
@@ -5869,7 +6134,7 @@ mod streaming_tests {
             }),
         );
         assert_eq!(engine.venue.commands.len(), 2);
-        engine.io.order_locks.finish(1, false);
+        engine.io.core.order_locks.finish(1, false);
         engine.handle(
             0.,
             Event::Command(Command::CancelOrders {
@@ -6018,8 +6283,8 @@ mod streaming_tests {
     fn failed_sent_place_blocks_queued_and_later_cancel_all_until_fresh_reconciliation() {
         let mut engine = frame_engine();
         engine.handle(0., Event::Command(held_place(1, "A")));
-        engine.io.order_locks.note_write();
-        let stale_read = engine.io.order_locks.token();
+        engine.io.core.order_locks.note_write();
+        let stale_read = engine.io.core.order_locks.token();
         engine.handle(
             0.,
             Event::Command(Command::CancelSymbolOrders {
@@ -6028,7 +6293,7 @@ mod streaming_tests {
             }),
         );
         // A snapshot while the write is still in flight cannot prove absence.
-        engine.io.order_locks.reconciled(Some("A"), stale_read);
+        engine.io.core.order_locks.reconciled(Some("A"), stale_read);
         complete_held(&mut engine, 1, true);
         engine.handle(
             0.,
@@ -6048,18 +6313,20 @@ mod streaming_tests {
         }
         engine
             .io
+            .core
             .order_locks
-            .reconciled(Some("B"), engine.io.order_locks.token());
-        assert!(engine.io.order_locks.uncertain("A"));
-        engine.io.order_locks.reconciled(Some("A"), stale_read);
+            .reconciled(Some("B"), engine.io.core.order_locks.token());
+        assert!(engine.io.core.order_locks.uncertain("A"));
+        engine.io.core.order_locks.reconciled(Some("A"), stale_read);
         assert!(
-            engine.io.order_locks.uncertain("A"),
+            engine.io.core.order_locks.uncertain("A"),
             "pre-write snapshot cannot clear uncertainty"
         );
         engine
             .io
+            .core
             .order_locks
-            .reconciled(Some("A"), engine.io.order_locks.token());
+            .reconciled(Some("A"), engine.io.core.order_locks.token());
         engine.handle(
             0.,
             Event::Command(Command::CancelSymbolOrders {
@@ -6071,7 +6338,7 @@ mod streaming_tests {
         // A preflight failure without a dispatched write does not poison its market.
         engine.handle(0., Event::Command(held_place(5, "B")));
         complete_held(&mut engine, 5, true);
-        assert!(!engine.io.order_locks.uncertain("B"));
+        assert!(!engine.io.core.order_locks.uncertain("B"));
     }
 
     #[cfg(feature = "order-locks")]
@@ -6080,7 +6347,7 @@ mod streaming_tests {
         let mut engine = frame_engine();
         engine.venue.fence_uncertain = false;
         engine.handle(0., Event::Command(held_place(1, "A")));
-        engine.io.order_locks.note_write();
+        engine.io.core.order_locks.note_write();
         engine.handle(
             0.,
             Event::Command(Command::CancelSymbolOrders {
@@ -6094,7 +6361,7 @@ mod streaming_tests {
             "cancel-all still waits for the placement"
         );
         complete_held(&mut engine, 1, true);
-        assert!(engine.io.order_locks.uncertain("A"));
+        assert!(engine.io.core.order_locks.uncertain("A"));
         assert_eq!(
             engine.venue.commands.len(),
             2,
@@ -6122,22 +6389,22 @@ mod streaming_tests {
     fn complete_known_partial_outcome_does_not_poison_or_clear_older_uncertainty() {
         let mut engine = frame_engine();
         engine.handle(0., Event::Command(held_place(1, "A")));
-        engine.io.order_locks.note_write();
+        engine.io.core.order_locks.note_write();
         complete_held(&mut engine, 1, true);
-        assert!(engine.io.order_locks.uncertain("A"));
+        assert!(engine.io.core.order_locks.uncertain("A"));
         for (command, symbol) in [(2, "A"), (3, "B")] {
             engine.handle(0., Event::Command(held_place(command, symbol)));
-            engine.io.order_locks.note_write();
+            engine.io.core.order_locks.note_write();
             // Every batch row has either an exact native identity or a definite rejection.
-            engine.io.order_locks.resolved(command);
+            engine.io.core.order_locks.resolved(command);
             complete_held(&mut engine, command, true);
         }
         assert!(
-            engine.io.order_locks.uncertain("A"),
+            engine.io.core.order_locks.uncertain("A"),
             "known later error cannot clear earlier ambiguous placement"
         );
         assert!(
-            !engine.io.order_locks.uncertain("B"),
+            !engine.io.core.order_locks.uncertain("B"),
             "definite rejection or complete partial ACK is safe"
         );
         engine.handle(
@@ -6192,7 +6459,7 @@ mod streaming_tests {
             );
         };
         respond(&mut engine, stale);
-        assert!(engine.io.order_locks.uncertain("A"));
+        assert!(engine.io.core.order_locks.uncertain("A"));
         engine.handle(
             0.,
             Event::Command(Command::CancelSymbolOrders {
@@ -6204,7 +6471,7 @@ mod streaming_tests {
         message(&mut engine, "read-orders:A");
         let fresh = request(&mut engine);
         respond(&mut engine, fresh);
-        assert!(!engine.io.order_locks.uncertain("A"));
+        assert!(!engine.io.core.order_locks.uncertain("A"));
         engine.handle(
             0.,
             Event::Command(Command::CancelSymbolOrders {
@@ -6649,7 +6916,7 @@ mod streaming_tests {
                 text: "A",
             },
         );
-        engine.io.candles.push((
+        engine.io.core.candles.push((
             "A".into(),
             Interval::M1,
             Candle {
@@ -6662,10 +6929,10 @@ mod streaming_tests {
             },
         ));
         assert!(engine.take_market_frame(1.).is_none());
-        assert_eq!(engine.io.changed_books_active, 1);
-        assert_eq!(engine.io.candles.len(), 1);
+        assert_eq!(engine.io.core.changed_books_active, 1);
+        assert_eq!(engine.io.core.candles.len(), 1);
         // A pending fill would promote the flush to a full frame (MARKETS first).
-        engine.io.fills.push((
+        engine.io.core.fills.push((
             Fill {
                 id: None,
                 order_id: "filled-order".into(),
@@ -6712,9 +6979,9 @@ mod streaming_tests {
         let end = u32::from_le_bytes(strings[at + 4..at + 8].try_into().unwrap()) as usize;
         let data = 4 + (count + 1) * 4;
         assert_eq!(&strings[data + start..data + end], b"ORPHAN");
-        assert!(engine.io.fills.is_empty());
-        assert!(engine.io.candles.is_empty());
-        assert_eq!(engine.io.changed_books_active, 0);
+        assert!(engine.io.core.fills.is_empty());
+        assert!(engine.io.core.candles.is_empty());
+        assert_eq!(engine.io.core.changed_books_active, 0);
         assert!(engine.take_market_frame(3.).is_none());
     }
 
@@ -7293,7 +7560,10 @@ mod request_route_tests {
     fn route_hints_mark_only_the_requested_outbound_action() {
         let mut store = Store::default();
         let mut io = Io::<()> {
-            entropy: Some(crate::test_support::seeded_entropy(17)),
+            core: IoCore {
+                entropy: Some(crate::test_support::seeded_entropy(17)),
+                ..IoCore::default()
+            },
             ..Io::default()
         };
         let mut cx = Cx {
@@ -7328,6 +7598,7 @@ mod request_route_tests {
         cx.request_timeout(cors, 0);
         cx.route_request(RequestId(999), RequestRoute::Direct);
         let requests = io
+            .core
             .actions
             .iter()
             .filter_map(|a| {
@@ -7392,11 +7663,12 @@ mod signing_tests {
         }
         assert_eq!(io.pending.len(), 256);
         #[cfg(feature = "order-locks")]
-        assert_eq!(io.order_read_tokens.len(), 256);
-        assert_eq!(io.signatures.len(), 256);
-        assert_eq!(io.actions.len(), 256);
+        assert_eq!(io.core.order_read_tokens.len(), 256);
+        assert_eq!(io.core.signatures.len(), 256);
+        assert_eq!(io.core.actions.len(), 256);
         assert!(
-            io.actions
+            io.core
+                .actions
                 .iter()
                 .all(|a| matches!(a, Action::SignPayload { .. }))
         );
@@ -7419,7 +7691,8 @@ mod signing_tests {
         fn on_message(&mut self, _cx: &mut Cx<'_, u32>, _socket: SocketId, _text: &str) {}
         fn on_close(&mut self, _cx: &mut Cx<'_, u32>, _socket: SocketId, _code: u16) {}
         fn on_response(&mut self, cx: &mut Cx<'_, u32>, pending: u32, _response: Response<'_>) {
-            self.responses.push((pending, cx.io.order_response_token));
+            self.responses
+                .push((pending, cx.io.core.order_response_token));
         }
         fn on_sign_failed(&mut self, _cx: &mut Cx<'_, u32>, pending: u32, error: &str) {
             self.signing_failures.push((pending, error.to_owned()));
@@ -7453,7 +7726,7 @@ mod signing_tests {
         );
         cx.request_timeout(request, 1_000);
         assert_eq!(cx.sign_request(request, payload(), target), Ok(()));
-        assert_eq!(engine.io.order_read_tokens.get(&request), Some(&0));
+        assert_eq!(engine.io.core.order_read_tokens.get(&request), Some(&0));
         let actions: Vec<_> = engine.drain_actions().collect();
         assert!(
             matches!(actions.as_slice(), [Action::SignPayload { request: id, timeout_ms: 1_000, .. }] if *id == request)
@@ -7495,10 +7768,10 @@ mod signing_tests {
                     },
                 );
             }
-            assert!(engine.io.order_read_tokens.is_empty(), "{failure}");
+            assert!(engine.io.core.order_read_tokens.is_empty(), "{failure}");
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.streams.is_empty());
-            assert!(engine.io.signatures.is_empty());
+            assert!(engine.io.core.streams.is_empty());
+            assert!(engine.io.core.signatures.is_empty());
             assert_eq!(engine.venue.signing_failures.len(), 1);
             assert_eq!(engine.venue.signing_failures[0].0, 42);
             assert!(engine.venue.transport_failures.is_empty());
@@ -7540,7 +7813,7 @@ mod signing_tests {
                 amount: None,
             }),
         );
-        assert!(engine.io.order_locks.contains(1));
+        assert!(engine.io.core.order_locks.contains(1));
         engine.handle(
             1.,
             Event::Command(Command::AmendOrderWithSymbol {
@@ -7551,8 +7824,8 @@ mod signing_tests {
                 amount: None,
             }),
         );
-        assert!(engine.io.active_commands.contains(&1));
-        assert!(engine.io.order_locks.contains(1));
+        assert!(engine.io.core.active_commands.contains(&1));
+        assert!(engine.io.core.order_locks.contains(1));
         let actions: Vec<_> = engine.drain_actions().collect();
         assert!(matches!(
             actions.as_slice(),
@@ -7576,8 +7849,8 @@ mod signing_tests {
                 ..
             }))]
         ));
-        assert!(engine.io.active_commands.contains(&1));
-        assert!(engine.io.order_locks.contains(1));
+        assert!(engine.io.core.active_commands.contains(&1));
+        assert!(engine.io.core.order_locks.contains(1));
         engine.handle(
             2.,
             Event::Command(Command::CancelOrders {
@@ -7590,7 +7863,7 @@ mod signing_tests {
                 .drain_actions()
                 .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, .. })))
         );
-        assert!(engine.io.order_locks.contains(1));
+        assert!(engine.io.core.order_locks.contains(1));
         engine.handle(
             3.,
             Event::Command(Command::AmendOrderWithSymbol {
@@ -7601,8 +7874,8 @@ mod signing_tests {
                 amount: None,
             }),
         );
-        assert!(!engine.io.active_commands.contains(&3));
-        assert!(engine.io.order_locks.contains(1));
+        assert!(!engine.io.core.active_commands.contains(&3));
+        assert!(engine.io.core.order_locks.contains(1));
     }
 
     #[cfg(feature = "order-locks")]
@@ -7623,7 +7896,7 @@ mod signing_tests {
             matches!(actions.as_slice(), [Action::Http(http)] if http.id == request
             && http.headers == [("SIGNATURE", "opaque".into())] && http.timeout_ms == Some(900))
         );
-        assert!(engine.io.signatures.is_empty());
+        assert!(engine.io.core.signatures.is_empty());
         // A duplicate signer outcome cannot consume the live HTTP request's provenance.
         engine.handle(
             101.,
@@ -7632,7 +7905,7 @@ mod signing_tests {
                 error: "late duplicate signer failure",
             },
         );
-        assert_eq!(engine.io.order_read_tokens.get(&request), Some(&0));
+        assert_eq!(engine.io.core.order_read_tokens.get(&request), Some(&0));
         engine.handle(
             200.,
             Event::HttpStart {
@@ -7648,10 +7921,10 @@ mod signing_tests {
                 data: b"[]",
             },
         );
-        assert_eq!(engine.io.order_read_tokens.get(&request), Some(&0));
+        assert_eq!(engine.io.core.order_read_tokens.get(&request), Some(&0));
         assert!(engine.venue.responses.is_empty());
         engine.handle(202., Event::HttpEnd { request });
-        assert!(engine.io.order_read_tokens.is_empty());
+        assert!(engine.io.core.order_read_tokens.is_empty());
         assert!(engine.io.pending.is_empty());
         assert_eq!(engine.venue.responses, [(42, Some(0))]);
         assert!(engine.venue.signing_failures.is_empty());
@@ -7733,7 +8006,10 @@ mod jitter_tests {
 
     fn draws(clocks: &[f64], delay: f64) -> Vec<f64> {
         let mut io = Io::<()> {
-            entropy: Some(crate::test_support::seeded_entropy(17)),
+            core: IoCore {
+                entropy: Some(crate::test_support::seeded_entropy(17)),
+                ..IoCore::default()
+            },
             ..Io::default()
         };
         let mut store = Store::default();
@@ -7766,13 +8042,16 @@ mod jitter_tests {
     #[test]
     fn failed_entropy_uses_the_nominal_delay() {
         let mut io = Io::<()> {
-            entropy: Some(crate::entropy::Entropy::new(
-                Box::new(|bytes| {
-                    bytes.fill(99);
-                    Err("unavailable".into())
-                }),
-                Box::new(|_| panic!("jitter must not consume signing entropy")),
-            )),
+            core: IoCore {
+                entropy: Some(crate::entropy::Entropy::new(
+                    Box::new(|bytes| {
+                        bytes.fill(99);
+                        Err("unavailable".into())
+                    }),
+                    Box::new(|_| panic!("jitter must not consume signing entropy")),
+                )),
+                ..IoCore::default()
+            },
             ..Io::default()
         };
         let mut store = Store::default();
@@ -7789,7 +8068,10 @@ mod jitter_tests {
         let draws = draws(&[0.0; 4], f64::INFINITY);
         assert!(draws.iter().all(|d| *d == f64::INFINITY));
         let mut io = Io::<()> {
-            entropy: Some(crate::test_support::seeded_entropy(17)),
+            core: IoCore {
+                entropy: Some(crate::test_support::seeded_entropy(17)),
+                ..IoCore::default()
+            },
             ..Io::default()
         };
         let mut store = Store::default();
@@ -7826,7 +8108,10 @@ mod startup_tests {
     #[test]
     fn discovery_retry_jitters_but_never_undercuts_a_rate_limit_minimum() {
         let mut io = Io::<()> {
-            entropy: Some(crate::test_support::seeded_entropy(17)),
+            core: IoCore {
+                entropy: Some(crate::test_support::seeded_entropy(17)),
+                ..IoCore::default()
+            },
             ..Io::default()
         };
         let mut store = Store::default();
@@ -7844,6 +8129,7 @@ mod startup_tests {
         retry.failed_after(&mut cx, "limited", 1_000.0);
         let delays: Vec<_> = cx
             .io
+            .core
             .actions
             .drain(..)
             .filter_map(|a| match a {
@@ -7863,7 +8149,10 @@ mod startup_tests {
     fn discovery_retry_waits_out_a_rate_limit_window() {
         use crate::startup::rate_limit_pause_ms;
         let mut io = Io::<()> {
-            entropy: Some(crate::test_support::seeded_entropy(17)),
+            core: IoCore {
+                entropy: Some(crate::test_support::seeded_entropy(17)),
+                ..IoCore::default()
+            },
             ..Io::default()
         };
         let mut store = Store::default();
@@ -7877,6 +8166,7 @@ mod startup_tests {
         retry.failed_after(&mut cx, "tickers", 10.0);
         let delays: Vec<_> = cx
             .io
+            .core
             .actions
             .drain(..)
             .filter_map(|a| match a {
@@ -7888,7 +8178,7 @@ mod startup_tests {
         assert_eq!(delays, [120_000.0, 120_000.0]);
         // A later, shorter ban neither shortens the window nor reschedules reads already due.
         retry.failed_after(&mut cx, "premium", 90_000.0);
-        let actions = std::mem::take(&mut cx.io.actions);
+        let actions = std::mem::take(&mut cx.io.core.actions);
         assert!(
             !actions
                 .iter()
@@ -7904,7 +8194,7 @@ mod startup_tests {
         assert_eq!(delays, [120_000.0]);
         // A longer ban still pushes back every waiting read.
         retry.failed_after(&mut cx, "funding", 150_000.0);
-        let actions = std::mem::take(&mut cx.io.actions);
+        let actions = std::mem::take(&mut cx.io.core.actions);
         let delays: Vec<_> = actions
             .iter()
             .filter_map(|a| match a {
@@ -7936,7 +8226,10 @@ mod startup_tests {
     #[test]
     fn discovery_backoff_caps_deduplicates_and_resets_independent_reads() {
         let mut io = Io::<()> {
-            entropy: Some(crate::test_support::seeded_entropy(17)),
+            core: IoCore {
+                entropy: Some(crate::test_support::seeded_entropy(17)),
+                ..IoCore::default()
+            },
             ..Io::default()
         };
         let mut store = Store::default();
@@ -7951,6 +8244,7 @@ mod startup_tests {
             retry.failed(&mut cx, "markets");
             let timers: Vec<_> = cx
                 .io
+                .core
                 .actions
                 .drain(..)
                 .filter_map(|a| match a {
@@ -7968,6 +8262,7 @@ mod startup_tests {
         retry.failed(&mut cx, "markets");
         let timers: Vec<_> = cx
             .io
+            .core
             .actions
             .drain(..)
             .filter_map(|a| match a {
@@ -7983,6 +8278,7 @@ mod startup_tests {
         assert_eq!(retry.on_timer(timers[0].0), None);
         assert!(
             cx.io
+                .core
                 .actions
                 .iter()
                 .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == timers[0].0))
@@ -8027,7 +8323,10 @@ mod public_retry_tests {
     #[test]
     fn public_retry_deduplicates_ban_extensions_recovers_and_keeps_repairs_running() {
         let mut io = Io::<()> {
-            entropy: Some(crate::test_support::seeded_entropy(17)),
+            core: IoCore {
+                entropy: Some(crate::test_support::seeded_entropy(17)),
+                ..IoCore::default()
+            },
             ..Io::default()
         };
         let mut store = Store::default();
@@ -8040,7 +8339,7 @@ mod public_retry_tests {
         let mut waiting = None;
         for attempt in 1..=6 {
             retry.failed_after(&mut cx, DiscoveryRead::Markets, 0.0, cause());
-            let out = std::mem::take(&mut cx.io.actions);
+            let out = std::mem::take(&mut cx.io.core.actions);
             assert_eq!(count(&out, log_code::REQUEST_FAILED), 1);
             assert_eq!(
                 count(&out, log_code::STARTUP_DEGRADED),
@@ -8049,7 +8348,7 @@ mod public_retry_tests {
             let (old, old_at) = last_timer(&out);
             // Extending an armed timer must not spend another attempt or re-report.
             retry.failed_after(&mut cx, DiscoveryRead::Markets, 120_000.0, cause());
-            let out = std::mem::take(&mut cx.io.actions);
+            let out = std::mem::take(&mut cx.io.core.actions);
             assert_eq!(count(&out, log_code::REQUEST_FAILED), 0);
             assert_eq!(count(&out, log_code::STARTUP_DEGRADED), 0);
             assert!(
@@ -8069,20 +8368,20 @@ mod public_retry_tests {
         cx.store
             .set_markets(vec![super::streaming_tests::market("BTC")]);
         retry.ready(&mut cx);
-        assert_eq!(count(&cx.io.actions, log_code::STARTUP_RECOVERED), 0);
+        assert_eq!(count(&cx.io.core.actions, log_code::STARTUP_RECOVERED), 0);
         cx.store.set_tickers(Vec::new());
         retry.ready(&mut cx);
         retry.ready(&mut cx);
-        assert_eq!(count(&cx.io.actions, log_code::STARTUP_RECOVERED), 1);
+        assert_eq!(count(&cx.io.core.actions, log_code::STARTUP_RECOVERED), 1);
         // Becoming ready must not retire an incomplete catalogue's repair timer.
         assert_eq!(
             retry.on_timer(waiting.unwrap()),
             Some(DiscoveryRead::Markets)
         );
-        cx.io.actions.clear();
+        cx.io.core.actions.clear();
         for _ in 0..8 {
             retry.failed_after(&mut cx, DiscoveryRead::Markets, 0.0, cause());
-            let out = std::mem::take(&mut cx.io.actions);
+            let out = std::mem::take(&mut cx.io.core.actions);
             assert_eq!(count(&out, log_code::STARTUP_DEGRADED), 0);
             assert_eq!(count(&out, log_code::REQUEST_FAILED), 1);
             let (timer, at) = last_timer(&out);
@@ -8094,7 +8393,10 @@ mod public_retry_tests {
     #[test]
     fn public_retry_counts_reads_independently_and_reports_only_one_outage() {
         let mut io = Io::<()> {
-            entropy: Some(crate::test_support::seeded_entropy(17)),
+            core: IoCore {
+                entropy: Some(crate::test_support::seeded_entropy(17)),
+                ..IoCore::default()
+            },
             ..Io::default()
         };
         let mut store = Store::default();
@@ -8108,7 +8410,7 @@ mod public_retry_tests {
             for read in [DiscoveryRead::Markets, DiscoveryRead::Tickers] {
                 let error = public_response_error(429, Some("busy"), Some("maintenance"));
                 retry.failed_after(&mut cx, read, 10_000.0, error);
-                let out = std::mem::take(&mut cx.io.actions);
+                let out = std::mem::take(&mut cx.io.core.actions);
                 assert_eq!(
                     count(&out, log_code::STARTUP_DEGRADED),
                     usize::from(attempt == 6 && read == DiscoveryRead::Markets)
@@ -8140,7 +8442,7 @@ mod public_retry_tests {
             }
         }
         retry.succeeded(&mut cx, DiscoveryRead::Markets);
-        assert_eq!(count(&cx.io.actions, log_code::STARTUP_RECOVERED), 0);
+        assert_eq!(count(&cx.io.core.actions, log_code::STARTUP_RECOVERED), 0);
     }
 
     #[test]

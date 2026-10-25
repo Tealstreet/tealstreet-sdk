@@ -638,119 +638,352 @@ pub struct TopicFrame<T> {
     pub data: Vec<T>,
 }
 
+/// How one row field decodes, exactly as its former `#[serde(...)]` attribute.
+#[derive(Clone, Copy)]
+enum Kind {
+    /// Required borrowed text.
+    Text,
+    /// Borrowed text, empty when absent.
+    TextOr,
+    /// Optional text: absent or `null` is none.
+    Opt,
+    /// `integer`: a number or numeric text, absent is none.
+    Int,
+    /// `flag`: a bool, text or number, absent is false.
+    Flag,
+}
+
+/// One shared decoder for every row shape, in place of one serde derive per
+/// struct: a field table drives a single map (and positional) visitor.
+mod rows {
+    use super::{BorrowedStr, Kind, Opt, Str, flag, integer};
+    use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
+    use std::fmt;
+
+    pub(super) enum Slot<'a> {
+        Absent,
+        Text(Str<'a>),
+        Opt(Opt<'a>),
+        Int(Option<i64>),
+        Flag(bool),
+    }
+
+    struct Value(Kind);
+
+    impl<'de> DeserializeSeed<'de> for Value {
+        type Value = Slot<'de>;
+        fn deserialize<D: de::Deserializer<'de>>(self, value: D) -> Result<Slot<'de>, D::Error> {
+            Ok(match self.0 {
+                Kind::Text | Kind::TextOr => {
+                    Slot::Text(<BorrowedStr as de::Deserialize>::deserialize(value)?.0)
+                }
+                Kind::Opt => Slot::Opt(<Option<Str> as de::Deserialize>::deserialize(value)?),
+                Kind::Int => Slot::Int(integer(value)?),
+                Kind::Flag => Slot::Flag(flag(value)?),
+            })
+        }
+    }
+
+    /// A key's field index; an unknown key is `None` and its value is skipped.
+    struct Key(&'static [(&'static str, Kind)]);
+
+    impl<'de> DeserializeSeed<'de> for Key {
+        type Value = Option<usize>;
+        fn deserialize<D: de::Deserializer<'de>>(self, key: D) -> Result<Option<usize>, D::Error> {
+            key.deserialize_identifier(self)
+        }
+    }
+
+    impl<'de> Visitor<'de> for Key {
+        type Value = Option<usize>;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("field identifier")
+        }
+        fn visit_str<E: de::Error>(self, key: &str) -> Result<Option<usize>, E> {
+            Ok(self.0.iter().position(|(name, _)| *name == key))
+        }
+        fn visit_u64<E: de::Error>(self, index: u64) -> Result<Option<usize>, E> {
+            Ok(usize::try_from(index)
+                .ok()
+                .filter(|index| *index < self.0.len()))
+        }
+        fn visit_bytes<E: de::Error>(self, key: &[u8]) -> Result<Option<usize>, E> {
+            Ok(self.0.iter().position(|(name, _)| name.as_bytes() == key))
+        }
+    }
+
+    struct Row {
+        name: &'static str,
+        fields: &'static [(&'static str, Kind)],
+    }
+
+    struct Elements(&'static str, usize);
+
+    impl de::Expected for Elements {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "struct {} with {} elements", self.0, self.1)
+        }
+    }
+
+    impl<'de> Visitor<'de> for Row {
+        type Value = Vec<Slot<'de>>;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "struct {}", self.name)
+        }
+        fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+            let mut slots: Vec<Slot<'de>> = self.fields.iter().map(|_| Slot::Absent).collect();
+            while let Some(index) = map.next_key_seed(Key(self.fields))? {
+                let Some(index) = index else {
+                    map.next_value::<IgnoredAny>()?;
+                    continue;
+                };
+                let (name, kind) = self.fields[index];
+                if !matches!(slots[index], Slot::Absent) {
+                    return Err(de::Error::duplicate_field(name));
+                }
+                slots[index] = map.next_value_seed(Value(kind))?;
+            }
+            for (slot, (name, kind)) in slots.iter().zip(self.fields) {
+                if matches!((slot, kind), (Slot::Absent, Kind::Text)) {
+                    return Err(de::Error::missing_field(name));
+                }
+            }
+            Ok(slots)
+        }
+        fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
+            let mut slots = Vec::with_capacity(self.fields.len());
+            for (index, (_, kind)) in self.fields.iter().enumerate() {
+                match seq.next_element_seed(Value(*kind))? {
+                    Some(slot) => slots.push(slot),
+                    None if matches!(kind, Kind::Text) => {
+                        return Err(de::Error::invalid_length(
+                            index,
+                            &Elements(self.name, self.fields.len()),
+                        ));
+                    }
+                    None => slots.push(Slot::Absent),
+                }
+            }
+            Ok(slots)
+        }
+    }
+
+    pub(super) fn read<'de, D: de::Deserializer<'de>>(
+        deserializer: D,
+        name: &'static str,
+        fields: &'static [(&'static str, Kind)],
+    ) -> Result<Vec<Slot<'de>>, D::Error> {
+        // `deserialize_struct`, as derive calls it, accepts both object and array forms;
+        // serde_json does not consult the field-name list.
+        deserializer.deserialize_struct(name, &[], Row { name, fields })
+    }
+
+    pub(super) fn take_text<'a>(slot: Option<Slot<'a>>) -> Str<'a> {
+        match slot {
+            Some(Slot::Text(text)) => text,
+            _ => Str::default(),
+        }
+    }
+    pub(super) fn take_opt<'a>(slot: Option<Slot<'a>>) -> Opt<'a> {
+        match slot {
+            Some(Slot::Opt(text)) => text,
+            _ => None,
+        }
+    }
+    pub(super) fn take_int(slot: Option<Slot<'_>>) -> Option<i64> {
+        match slot {
+            Some(Slot::Int(value)) => value,
+            _ => None,
+        }
+    }
+    pub(super) fn take_flag(slot: Option<Slot<'_>>) -> bool {
+        matches!(slot, Some(Slot::Flag(true)))
+    }
+}
+
 /// An order as `/v5/order/realtime`, `/v5/order/history` and the `order`
-/// topic report it.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// topic report it. Decoded by `rows`, field for field as serde's derive did.
 pub struct OrderRow<'a> {
-    #[serde(borrow)]
     pub order_id: Str<'a>,
-    #[serde(borrow, default)]
     pub order_link_id: Opt<'a>,
-    #[serde(borrow)]
     pub symbol: Str<'a>,
-    #[serde(borrow, default)]
     pub category: Opt<'a>,
-    #[serde(borrow, default)]
     pub price: Opt<'a>,
-    #[serde(borrow, default)]
     pub qty: Opt<'a>,
-    #[serde(borrow, default)]
     pub side: Opt<'a>,
-    #[serde(default, deserialize_with = "integer")]
     pub position_idx: Option<i64>,
-    #[serde(borrow, default)]
     pub order_status: Str<'a>,
-    #[serde(borrow, default)]
     pub reject_reason: Opt<'a>,
-    #[serde(borrow, default)]
     pub avg_price: Opt<'a>,
-    #[serde(borrow, default)]
     pub leaves_qty: Opt<'a>,
-    #[serde(borrow, default)]
     pub cum_exec_qty: Opt<'a>,
-    #[serde(borrow, default)]
     pub cum_exec_value: Opt<'a>,
-    #[serde(borrow, default)]
     pub time_in_force: Opt<'a>,
-    #[serde(borrow, default)]
     pub order_type: Opt<'a>,
-    #[serde(borrow, default)]
     pub stop_order_type: Opt<'a>,
-    #[serde(borrow, default)]
     pub trigger_price: Opt<'a>,
-    #[serde(default, deserialize_with = "integer")]
     pub trigger_direction: Option<i64>,
-    #[serde(borrow, default)]
     pub take_profit: Opt<'a>,
-    #[serde(borrow, default)]
     pub stop_loss: Opt<'a>,
-    #[serde(borrow, default)]
     pub tp_trigger_by: Opt<'a>,
-    #[serde(borrow, default)]
     pub sl_trigger_by: Opt<'a>,
-    #[serde(borrow, default)]
     pub trigger_by: Opt<'a>,
-    #[serde(default, deserialize_with = "flag")]
     pub reduce_only: bool,
-    #[serde(default, deserialize_with = "flag")]
     pub close_on_trigger: bool,
-    #[serde(borrow, default)]
     pub tpsl_mode: Opt<'a>,
-    #[serde(borrow, default)]
     pub create_type: Opt<'a>,
-    #[serde(borrow, default)]
     pub created_time: Opt<'a>,
-    #[serde(borrow, default)]
     pub updated_time: Opt<'a>,
 }
 
+const ORDER_ROW_FIELDS: &[(&str, Kind)] = &[
+    ("orderId", Kind::Text),
+    ("orderLinkId", Kind::Opt),
+    ("symbol", Kind::Text),
+    ("category", Kind::Opt),
+    ("price", Kind::Opt),
+    ("qty", Kind::Opt),
+    ("side", Kind::Opt),
+    ("positionIdx", Kind::Int),
+    ("orderStatus", Kind::TextOr),
+    ("rejectReason", Kind::Opt),
+    ("avgPrice", Kind::Opt),
+    ("leavesQty", Kind::Opt),
+    ("cumExecQty", Kind::Opt),
+    ("cumExecValue", Kind::Opt),
+    ("timeInForce", Kind::Opt),
+    ("orderType", Kind::Opt),
+    ("stopOrderType", Kind::Opt),
+    ("triggerPrice", Kind::Opt),
+    ("triggerDirection", Kind::Int),
+    ("takeProfit", Kind::Opt),
+    ("stopLoss", Kind::Opt),
+    ("tpTriggerBy", Kind::Opt),
+    ("slTriggerBy", Kind::Opt),
+    ("triggerBy", Kind::Opt),
+    ("reduceOnly", Kind::Flag),
+    ("closeOnTrigger", Kind::Flag),
+    ("tpslMode", Kind::Opt),
+    ("createType", Kind::Opt),
+    ("createdTime", Kind::Opt),
+    ("updatedTime", Kind::Opt),
+];
+
+impl<'de: 'a, 'a> Deserialize<'de> for OrderRow<'a> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut slots = rows::read(deserializer, "OrderRow", ORDER_ROW_FIELDS)?.into_iter();
+        Ok(Self {
+            order_id: rows::take_text(slots.next()),
+            order_link_id: rows::take_opt(slots.next()),
+            symbol: rows::take_text(slots.next()),
+            category: rows::take_opt(slots.next()),
+            price: rows::take_opt(slots.next()),
+            qty: rows::take_opt(slots.next()),
+            side: rows::take_opt(slots.next()),
+            position_idx: rows::take_int(slots.next()),
+            order_status: rows::take_text(slots.next()),
+            reject_reason: rows::take_opt(slots.next()),
+            avg_price: rows::take_opt(slots.next()),
+            leaves_qty: rows::take_opt(slots.next()),
+            cum_exec_qty: rows::take_opt(slots.next()),
+            cum_exec_value: rows::take_opt(slots.next()),
+            time_in_force: rows::take_opt(slots.next()),
+            order_type: rows::take_opt(slots.next()),
+            stop_order_type: rows::take_opt(slots.next()),
+            trigger_price: rows::take_opt(slots.next()),
+            trigger_direction: rows::take_int(slots.next()),
+            take_profit: rows::take_opt(slots.next()),
+            stop_loss: rows::take_opt(slots.next()),
+            tp_trigger_by: rows::take_opt(slots.next()),
+            sl_trigger_by: rows::take_opt(slots.next()),
+            trigger_by: rows::take_opt(slots.next()),
+            reduce_only: rows::take_flag(slots.next()),
+            close_on_trigger: rows::take_flag(slots.next()),
+            tpsl_mode: rows::take_opt(slots.next()),
+            create_type: rows::take_opt(slots.next()),
+            created_time: rows::take_opt(slots.next()),
+            updated_time: rows::take_opt(slots.next()),
+        })
+    }
+}
+
 /// A position as `/v5/position/list` and the `position` topic report it.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// Decoded by `rows`, field for field as serde's derive did.
 pub struct PositionRow<'a> {
-    #[serde(borrow)]
     pub symbol: Str<'a>,
-    #[serde(borrow, default)]
     pub category: Opt<'a>,
-    #[serde(borrow, default)]
     pub side: Opt<'a>,
-    #[serde(borrow, default)]
     pub size: Opt<'a>,
-    #[serde(default, deserialize_with = "integer")]
     pub position_idx: Option<i64>,
-    #[serde(borrow, default)]
     pub avg_price: Opt<'a>,
-    #[serde(borrow, default)]
     pub mark_price: Opt<'a>,
-    #[serde(borrow, default)]
     pub entry_price: Opt<'a>,
-    #[serde(borrow, default)]
     pub position_value: Opt<'a>,
-    #[serde(borrow, default)]
     pub leverage: Opt<'a>,
-    #[serde(borrow, default)]
     pub unrealised_pnl: Opt<'a>,
-    #[serde(borrow, default)]
     pub cur_realised_pnl: Opt<'a>,
-    #[serde(borrow, default)]
     pub liq_price: Opt<'a>,
-    #[serde(rename = "positionIM", borrow, default)]
     pub position_im: Opt<'a>,
-    #[serde(default, deserialize_with = "integer")]
     pub seq: Option<i64>,
-    #[serde(borrow, default)]
     pub position_status: Opt<'a>,
-    #[serde(borrow, default)]
     pub updated_time: Opt<'a>,
-    #[serde(borrow, default)]
     pub delta: Opt<'a>,
-    #[serde(borrow, default)]
     pub gamma: Opt<'a>,
-    #[serde(borrow, default)]
     pub vega: Opt<'a>,
-    #[serde(borrow, default)]
     pub theta: Opt<'a>,
+}
+
+const POSITION_ROW_FIELDS: &[(&str, Kind)] = &[
+    ("symbol", Kind::Text),
+    ("category", Kind::Opt),
+    ("side", Kind::Opt),
+    ("size", Kind::Opt),
+    ("positionIdx", Kind::Int),
+    ("avgPrice", Kind::Opt),
+    ("markPrice", Kind::Opt),
+    ("entryPrice", Kind::Opt),
+    ("positionValue", Kind::Opt),
+    ("leverage", Kind::Opt),
+    ("unrealisedPnl", Kind::Opt),
+    ("curRealisedPnl", Kind::Opt),
+    ("liqPrice", Kind::Opt),
+    ("positionIM", Kind::Opt),
+    ("seq", Kind::Int),
+    ("positionStatus", Kind::Opt),
+    ("updatedTime", Kind::Opt),
+    ("delta", Kind::Opt),
+    ("gamma", Kind::Opt),
+    ("vega", Kind::Opt),
+    ("theta", Kind::Opt),
+];
+
+impl<'de: 'a, 'a> Deserialize<'de> for PositionRow<'a> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut slots = rows::read(deserializer, "PositionRow", POSITION_ROW_FIELDS)?.into_iter();
+        Ok(Self {
+            symbol: rows::take_text(slots.next()),
+            category: rows::take_opt(slots.next()),
+            side: rows::take_opt(slots.next()),
+            size: rows::take_opt(slots.next()),
+            position_idx: rows::take_int(slots.next()),
+            avg_price: rows::take_opt(slots.next()),
+            mark_price: rows::take_opt(slots.next()),
+            entry_price: rows::take_opt(slots.next()),
+            position_value: rows::take_opt(slots.next()),
+            leverage: rows::take_opt(slots.next()),
+            unrealised_pnl: rows::take_opt(slots.next()),
+            cur_realised_pnl: rows::take_opt(slots.next()),
+            liq_price: rows::take_opt(slots.next()),
+            position_im: rows::take_opt(slots.next()),
+            seq: rows::take_int(slots.next()),
+            position_status: rows::take_opt(slots.next()),
+            updated_time: rows::take_opt(slots.next()),
+            delta: rows::take_opt(slots.next()),
+            gamma: rows::take_opt(slots.next()),
+            vega: rows::take_opt(slots.next()),
+            theta: rows::take_opt(slots.next()),
+        })
+    }
 }
 
 /// One execution, from the `execution` topic or `/v5/execution/list`.
@@ -934,6 +1167,10 @@ pub fn topic(text: &str) -> Option<&str> {
     let end = text[start..].find('"')? + start;
     Some(&text[start..end])
 }
+
+#[cfg(test)]
+#[path = "wire_rows/parity_tests.rs"]
+mod row_parity_tests;
 
 #[cfg(test)]
 mod tests {
