@@ -364,9 +364,9 @@ pass (`CARGO_BUILD_JOBS=4`).
   - Type erasure saves about 0-2K per family; it pays off in the combined bundle once a second family adopts.
   - About 2-8K of Bitget's engine share is recoverable without a redesign.
 
-## Sam's ruling and the composed size (2026-10-25)
+## Allowance ruling and the composed size (2026-10-25)
 
-Sam ruled out keeping Bitget trading on TS. Slice 3 lands on Rust with the Bitget allowance raised to the measured size plus a small margin, and it can only go down. codex-ih35js is working separately on shrinking the engine feature-link baseline, so the allowance can come back down.
+Sam's directive is that there is no TS fallback for now. Under it, the overseer ruled (2026-10-25) that slice 3 lands on Rust with the Bitget allowance raised to the measured size plus a small margin. Sam set the directive, not this number. The allowance is shrink-only, and codex-ih35js's engine cuts are meant to bring it back down.
 
 - **Allowance.** `WASM_VENUE_OVERRIDES` for `bitget` and `bitgetusdc` goes from 1,409,024 (venue + 64 KiB) to **1,474,560 (venue + 128 KiB)**. That leaves 2,533 bytes of margin over the composed number. The change is in `sdk-rs/harness/wasm-budget.mjs`, with its test.
 - **Recompose.** Commit `546f585f187` is composed on tip `76f1f7fc842`, using dazzy3's S0 recipe:
