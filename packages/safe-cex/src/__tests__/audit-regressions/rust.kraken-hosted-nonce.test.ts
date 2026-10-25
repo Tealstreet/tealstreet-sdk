@@ -116,7 +116,7 @@ it('keeps the existing HmacSha256 hosted Bybit route working as a control', asyn
     config: { method: 'GET', baseURL: 'https://api.bybit.com', url: '/v5/account/wallet-balance', params: { accountType: 'UNIFIED' } },
   });
   expect(output.error).toBeUndefined();
-  const payload = `${stamp}${key}5000accountType=UNIFIED`;
+  const payload = `${stamp}${key}20000accountType=UNIFIED`;
   expect(output.config?.headers['X-BAPI-SIGN']).toBe(createHmac('sha256', 'control-secret').update(payload).digest('hex'));
   expect(hostedSigning).toHaveBeenCalledWith({ kind: 'http', payload, stampMs: stamp, revision: '7' });
 });
