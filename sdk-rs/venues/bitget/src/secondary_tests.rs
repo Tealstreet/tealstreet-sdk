@@ -47,7 +47,7 @@ pub(crate) fn headers(
                 cx,
                 self.method,
                 &self.path,
-                Payload::Body(None),
+                ArrayAt::Envelope(&[&["data"]]),
                 true,
                 pending,
             );
