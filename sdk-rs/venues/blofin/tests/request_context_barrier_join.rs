@@ -136,9 +136,9 @@ fn count(h: &Harness, path: &str) -> usize {
     h.pending.iter().filter(|r| r.url.contains(path)).count()
 }
 
-/// A flat account switched to isolated margin and hedge mode, whose signing
-/// entropy follows `draws` (UNLIMITED until armed).
-fn hedged(draws: Arc<AtomicUsize>) -> Harness {
+/// A flat cross/net account whose signing entropy follows `draws`
+/// (UNLIMITED until armed).
+fn flat(draws: Arc<AtomicUsize>) -> Harness {
     let fill: safe_cex_engine::entropy::Fill = Box::new(move |bytes| {
         let left = draws.load(Ordering::SeqCst);
         if left == 0 {
@@ -164,6 +164,12 @@ fn hedged(draws: Arc<AtomicUsize>) -> Harness {
     ] {
         h.reply(path, r#"{"code":"0","data":[]}"#);
     }
+    h
+}
+
+/// `flat`, switched to isolated margin and hedge mode.
+fn hedged(draws: Arc<AtomicUsize>) -> Harness {
+    let mut h = flat(draws);
     event(
         &mut h,
         Event::Command(Command::SetMarginType {
@@ -251,16 +257,40 @@ fn both_accepted_commit_once() {
     assert_eq!(leverage(&h), 30.0);
 }
 
-#[test]
-fn one_503_beside_one_accepted_is_unknown_without_commit() {
+/// dazzy3 P1: a released 5xx seals the Plan; the other leg's answer, in
+/// either order, adds no second terminal and no commit.
+fn one_503_and_one_accepted(first_503: bool) {
     let mut h = hedged(Arc::new(AtomicUsize::new(UNLIMITED)));
     set_leverage(&mut h);
     let (long, short) = legs(&h);
     let (long, short) = (long.expect("long"), short.expect("short"));
-    answer(&mut h, &long, 503, "Service Unavailable");
-    answer(&mut h, &short, 200, OK);
+    let positions = count(&h, "account/positions");
+    if first_503 {
+        answer(&mut h, &long, 503, "Service Unavailable");
+        // The unproven seal is the terminal; the sibling has not answered.
+        assert_eq!(terminals(&h, 7).len(), 1, "terminal at the 503");
+        answer(&mut h, &short, 200, OK);
+    } else {
+        answer(&mut h, &short, 200, OK);
+        answer(&mut h, &long, 503, "Service Unavailable");
+    }
     assert_eq!(failure(&h, 7).outcome, Some(Outcome::Unknown));
     assert_ne!(leverage(&h), 30.0);
+    assert_eq!(
+        count(&h, "account/positions"),
+        positions + 1,
+        "native join refresh"
+    );
+}
+
+#[test]
+fn a_503_then_a_late_accepted_is_one_unknown_without_commit() {
+    one_503_and_one_accepted(true);
+}
+
+#[test]
+fn an_accepted_then_a_503_is_one_unknown_without_commit() {
+    one_503_and_one_accepted(false);
 }
 
 #[test]
@@ -291,4 +321,175 @@ fn both_refused_is_rejected() {
     answer(&mut h, &short, 200, REFUSED);
     assert_eq!(failure(&h, 7).outcome, Some(Outcome::Rejected));
     assert_ne!(leverage(&h), 30.0);
+}
+
+#[test]
+fn a_join_queued_behind_a_placement_admits_both_legs_at_its_wake() {
+    let mut h = hedged(Arc::new(AtomicUsize::new(UNLIMITED)));
+    let orders = serde_json::from_value(serde_json::json!([
+        {"symbol": "BTCUSDT", "type": "limit", "side": "buy", "amount": 1, "price": 60000}
+    ]))
+    .unwrap();
+    event(
+        &mut h,
+        Event::Command(Command::PlaceOrders { command: 6, orders }),
+    );
+    set_leverage(&mut h);
+    assert_eq!(count(&h, "set-leverage"), 0, "parked behind the placement");
+    reply(
+        &mut h,
+        "batch-orders",
+        r#"{"code":"0","data":[{"orderId":"1","code":"0","msg":"success"}]}"#,
+    );
+    let (long, short) = legs(&h);
+    assert!(long.is_some() && short.is_some(), "{:?}", h.pending);
+}
+
+const REFUSED_SHORT: &str = r#"{"code":"110019","msg":"Margin mode cannot be adjusted"}"#;
+
+fn refusal_beside_accepted(short_first: bool) {
+    let mut h = hedged(Arc::new(AtomicUsize::new(UNLIMITED)));
+    set_leverage(&mut h);
+    let (long, short) = legs(&h);
+    let (long, short) = (long.expect("long"), short.expect("short"));
+    if short_first {
+        answer(&mut h, &short, 200, REFUSED);
+        answer(&mut h, &long, 200, OK);
+    } else {
+        answer(&mut h, &long, 200, OK);
+        answer(&mut h, &short, 200, REFUSED);
+    }
+    let error = failure(&h, 7);
+    assert_eq!(error.outcome, None, "the journal's projection");
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
+    assert!(
+        error.message.contains("Leverage cannot be adjusted"),
+        "{}",
+        error.message
+    );
+    assert_ne!(leverage(&h), 30.0);
+}
+
+#[test]
+fn a_short_refusal_before_long_accepted_reports_the_refusal() {
+    refusal_beside_accepted(true);
+}
+
+#[test]
+fn a_short_refusal_after_long_accepted_reports_the_refusal() {
+    refusal_beside_accepted(false);
+}
+
+#[test]
+fn both_refused_reports_the_last_refusal_as_native_does() {
+    for long_first in [true, false] {
+        let mut h = hedged(Arc::new(AtomicUsize::new(UNLIMITED)));
+        set_leverage(&mut h);
+        let (long, short) = legs(&h);
+        let (long, short) = (long.expect("long"), short.expect("short"));
+        let (first, second, last) = if long_first {
+            (
+                (&long, REFUSED),
+                (&short, REFUSED_SHORT),
+                "Margin mode cannot be adjusted",
+            )
+        } else {
+            (
+                (&short, REFUSED_SHORT),
+                (&long, REFUSED),
+                "Leverage cannot be adjusted",
+            )
+        };
+        answer(&mut h, first.0, 200, first.1);
+        answer(&mut h, second.0, 200, second.1);
+        let error = failure(&h, 7);
+        assert_eq!(error.outcome, Some(Outcome::Rejected));
+        assert!(
+            error.message.contains(last),
+            "{long_first}: {}",
+            error.message
+        );
+    }
+}
+
+#[test]
+fn a_short_transport_loss_after_long_accepted_is_settled_unknown() {
+    let mut h = hedged(Arc::new(AtomicUsize::new(UNLIMITED)));
+    set_leverage(&mut h);
+    let (long, short) = legs(&h);
+    let (long, short) = (long.expect("long"), short.expect("short"));
+    let positions = count(&h, "account/positions");
+    answer(&mut h, &long, 200, OK);
+    event(
+        &mut h,
+        Event::HttpFailed {
+            request: short.id,
+            error: "connection reset",
+        },
+    );
+    assert_eq!(failure(&h, 7).outcome, Some(Outcome::Unknown));
+    assert_ne!(leverage(&h), 30.0);
+    assert_eq!(
+        count(&h, "account/positions"),
+        positions + 1,
+        "native join refresh"
+    );
+}
+
+#[test]
+fn unanswered_legs_end_at_the_call_bound_with_one_timeout() {
+    let mut h = hedged(Arc::new(AtomicUsize::new(UNLIMITED)));
+    set_leverage(&mut h);
+    assert!(matches!(legs(&h), (Some(_), Some(_))));
+    let deadline = h.now + 20_000.0;
+    let timers: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms <= deadline && *timer != h.tick => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .collect();
+    for (timer, at) in timers {
+        h.now = h.now.max(at);
+        event(&mut h, Event::TimerFired { timer });
+    }
+    let error = failure(&h, 7);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+    assert_ne!(leverage(&h), 30.0);
+}
+
+#[test]
+fn a_leverage_that_becomes_hedged_while_queued_takes_the_barrier() {
+    let mut h = flat(Arc::new(AtomicUsize::new(UNLIMITED)));
+    for command in [
+        Command::SetMarginType {
+            command: 5,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        },
+        Command::SetPositionMode {
+            command: 6,
+            hedged: true,
+            symbol: None,
+        },
+    ] {
+        event(&mut h, Event::Command(command));
+    }
+    // Planned at entry this is one net leg; at its wake it is the hedged join.
+    set_leverage(&mut h);
+    reply(
+        &mut h,
+        "set-margin-mode",
+        r#"{"code":"0","data":{"marginMode":"isolated"}}"#,
+    );
+    reply(
+        &mut h,
+        "set-position-mode",
+        r#"{"code":"0","data":{"positionMode":"long_short_mode"}}"#,
+    );
+    let (long, short) = legs(&h);
+    assert!(long.is_some() && short.is_some(), "{:?}", h.pending);
 }

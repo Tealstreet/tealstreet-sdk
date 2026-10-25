@@ -200,6 +200,39 @@ after_refusal: []}`.
   Accepted projects to outcome None, as native's `succeeded` edit did.
 - **Retirement.** Unchanged from W1: the engine-sealed join moves to
   `retired`, restores, reconciles and refreshes the account.
+- **Join versus seal (dazzy3 P1, fe7lgm P1, 4yjlw0 2).** A released 408 or 5xx
+  is an engine unproven seal. It emits the root terminal at once (Unknown,
+  with prior facts kept) and retires the sibling, so the venue learns of it
+  through retirement, not through a second answer. The join never waits for
+  the other leg after a seal, and that leg's later answer is ignored.
+  - Accepted first, then the 503: Unknown, long's fact kept, no commit.
+  - The 503 first: Unknown at the 503, before the sibling answers. That
+    earlier terminal is a caller-visible timing difference from native's
+    join, which waited for both answers. The late Accepted adds no commit and
+    no second terminal.
+  - In both orders the account refresh comes through the W1 retirement path.
+- **Which error is reported (fe7lgm P3, 4yjlw0 1).** Native's `finish_join`
+  overwrites `joined.error` on each failing leg, so it reports the LAST failing
+  leg's text, kept Unknown if any leg was unproven. W2 keeps that rule (the
+  last failing fact by arrival). The outcome and kind are the journal's
+  projection, never the venue's.
+- **Outcome of one refusal plus one Accepted (fe7lgm P2).** This must be the
+  journal's projection through `fail_plan`. The engine's `failure_projection`
+  gives None when a leg was released, none is uncertain and not all were
+  rejected. The RED confirms the observed value at source time; if it isn't
+  None, it goes back to fe7lgm rather than shaping the venue error.
+- **Commit gate (4yjlw0 3).** Commit only after `done_plan` returns Ok. An
+  expired call at join time gives one Timeout terminal and no commit.
+- **Settled includes failures (4yjlw0 5).** A leg whose released call fails by
+  transport or deadline (`on_http_failed`, `finish_plan_failed_call`) counts as
+  settled, so the join never waits on it.
+- **Synchronous queue refusal (dazzy3 P2).** If `request_signed_managed`
+  refuses short after long was queued, the venue ends the Plan once
+  (`fail_plan`). Long's preparation is cancelled with zero HTTP, and the
+  outcome is NotSent.
+- **Wake custody (dazzy3 P3).** A join queued behind another job admits from
+  `on_http_preflight_ready`: `admit_plan_with_barriers` and both
+  `plan_leg_context` calls run in that ready custody, exactly as from entry.
 - **Feature closure.** BloFin's venue crate links `http-mutation-barriers`, and
   the BloFin WASM and native features forward the host barrier support
   (`hosts/wasm`'s `blofin` feature and the native host's barrier feature). The
@@ -279,6 +312,30 @@ W2 (each fails on W1's serial interim):
 - one documented refusal plus one Accepted gives outcome None, no commit and the
   account refresh;
 - both refused gives Rejected;
+- 503 ordering: a 503 first and then a late Accepted, and an Accepted first
+  and then a 503, each give exactly one Unknown terminal, no commit, and the
+  account refresh. In the 503-first order the terminal exists before the
+  sibling answers;
+- reported error: a short refusal before long's Accepted, and after it, gives
+  outcome None and the refusal's text and kind. Both refused, in both orders,
+  reports the last refusal's text;
+- a short transport loss after long's Accepted gives Unknown, no commit, and the
+  refresh (a failure counts as settled);
+- both legs released and neither answering until the call bound gives one
+  Timeout terminal and no commit;
+- pre-barrier (4yjlw0 4, with a parked provider for short's signature): the root
+  deadline passing gives zero HTTP and one Timeout/NotSent terminal with no
+  refresh, and owner retirement gives zero HTTP and one terminal. The
+  parked-provider rig lands with the source;
+- wake re-plan flip (4yjlw0 6): a SetLeverage queued while net or cross that is
+  hedged and isolated at its wake takes the barrier Plan, with both legs in
+  flight;
+- dazzy3 P2: a synchronous queue refusal of short after long was queued gives
+  zero HTTP, one NotSent terminal and long's preparation cancelled. The
+  fixture lever is chosen at source time; if none can reach it, this becomes
+  a reviewed source pin;
+- dazzy3 P3: a join queued behind a placement admits both legs from its ready
+  wake, with both in flight before either answers;
 - a host without group support binds nothing and sends nothing (the
   isolated native proof, both host modes).
 - W1's serial-interim tests (`the_hedged_join_sends_short_only_after_long_is_accepted`,
@@ -287,7 +344,9 @@ W2 (each fails on W1's serial interim):
   is the documented interim ending, not a weakened assertion.
 
 W2 size: BloFin is the first shipping adopter of `http-mutation-barriers`, so
-the family and combined deltas are measured on the composed tip. Bybit's
+the family and combined deltas are measured on the composed tip. The feature
+reaches the combined bundle only through feature unification, so standalone
+Bybit and Bitget are measured too and must be unchanged (dazzy3 P4). Bybit's
 diagnostic barrier-on build was about +20K, and the post-S1 +30K combined bar
 still applies.
 
