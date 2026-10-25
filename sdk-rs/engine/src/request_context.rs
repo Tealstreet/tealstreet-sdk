@@ -1216,6 +1216,14 @@ pub struct ResendGrant {
     pub(crate) attempt: RequestId,
 }
 
+/// Evidence for the current serial call's one Session-authentication resend.
+#[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+#[derive(Debug)]
+pub enum SessionResend {
+    Write(ResendGrant),
+    Read,
+}
+
 /// Native codecs supply definitive facts. HTTP status and exception text are
 /// deliberately absent from this contract.
 #[derive(Clone, Debug, PartialEq)]

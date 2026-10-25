@@ -1551,6 +1551,8 @@ struct IoCore {
     http_write_reply: Option<(u16, String)>,
     #[cfg(feature = "repair-mutations")]
     repairs: repair_core::Repairs,
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    http_status_exempt: Option<RequestId>,
     // Reconcile reads the engine owes the venue, one per uncertain seal: the
     // symbols (`None` = all) and the earliest time to ask.
     #[cfg(feature = "order-locks")]
@@ -1687,6 +1689,8 @@ impl Default for IoCore {
             http_write_reply: None,
             #[cfg(feature = "repair-mutations")]
             repairs: Default::default(),
+            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            http_status_exempt: None,
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
             command_entry: None,
@@ -2994,6 +2998,12 @@ impl<V: Venue> Clone for HttpRelease<V> {
 
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
+    /// A fully parsed native refusal may exempt this delivery from unproven
+    /// HTTP status handling. The default keeps the strict shared policy.
+    fn status_exempt_refusal(&self, _pending: &Self::Pending, _response: Response<'_>) -> bool {
+        false
+    }
+
     /// Read-only native evidence from an unproven managed mutation envelope.
     /// Exact SDK identity namespaces must be validated by the native codec.
     fn unproven_http_evidence(
