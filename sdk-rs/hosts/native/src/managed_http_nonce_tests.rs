@@ -71,6 +71,7 @@ impl Venue for NonceVenue {
                 .unwrap();
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/nonce".into(),
                 None,

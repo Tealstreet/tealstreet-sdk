@@ -192,6 +192,7 @@ impl<const SUPPORTED: bool, const CAPABILITY: u8> Venue for NonceProbe<SUPPORTED
             };
             if let Err((_, error)) = cx.request_signed_managed(
                 context,
+                None,
                 Method::Post,
                 format!("https://nonce.test/{owner}"),
                 None,
@@ -253,6 +254,7 @@ impl<const SUPPORTED: bool, const CAPABILITY: u8> Venue for NonceProbe<SUPPORTED
         self.trace.lock().unwrap().command_root = Some(root.clone());
         cx.request_signed_managed(
             root,
+            None,
             Method::Post,
             "https://nonce.test/0".into(),
             None,
