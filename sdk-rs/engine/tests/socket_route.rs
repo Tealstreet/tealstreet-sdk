@@ -57,12 +57,14 @@ struct Default_ {
 impl Venue for Default_ {
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
-        self.socket = Some(cx.connect(
-            SocketSpec::new("wss://feed.test/private")
-                .channel(SocketChannel::Private)
-                .feed("private", false)
-                .reject_route(),
-        ));
+        self.socket = Some(
+            cx.connect(
+                SocketSpec::new("wss://feed.test/private")
+                    .channel(SocketChannel::Private)
+                    .feed("private", false)
+                    .reject_route(),
+            ),
+        );
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
@@ -97,7 +99,10 @@ fn contexts<V: Venue>(engine: &mut Engine<V>) -> Vec<String> {
 fn reject_route_is_on_the_wire_only_when_set() {
     let mut plain = support::seeded_engine(Feed::default());
     plain.start(1.);
-    assert_eq!(contexts(&mut plain), [r#"{"feed":"private","recover":true}"#]);
+    assert_eq!(
+        contexts(&mut plain),
+        [r#"{"feed":"private","recover":true}"#]
+    );
     let mut rejecting = support::seeded_engine(Feed {
         reject: true,
         ..Feed::default()
@@ -121,7 +126,10 @@ fn route_exhaustion_reaches_an_opted_in_venue_once_and_is_not_a_close() {
     let socket = engine.venue().socket.unwrap();
     engine.handle(2., Event::WsRouteExhausted { socket });
     assert_eq!(engine.venue().exhausted, [socket]);
-    assert!(engine.venue().closes.is_empty(), "exhaustion is not a close");
+    assert!(
+        engine.venue().closes.is_empty(),
+        "exhaustion is not a close"
+    );
 }
 
 #[test]
