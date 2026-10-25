@@ -2272,3 +2272,15 @@ fn a_latch_never_refuses_an_unsigned_frame_held_behind_a_login() {
         "the held frame does not tear the socket down"
     );
 }
+
+/// The latch notice is the text the engine formatted before it became static.
+#[test]
+fn the_missing_key_notice_is_the_formatted_text() {
+    assert_eq!(
+        MISSING_KEY_NOTICE,
+        format!(
+            "Signing cannot succeed with the installed credentials: {}",
+            SignError::MissingKey
+        )
+    );
+}

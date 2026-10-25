@@ -5486,6 +5486,10 @@ fn apply_signature(
 /// app's 120 s auth-badge expiry, so a key that stays rejected keeps its badge.
 pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
 
+/// The latch notice, `SignError::MissingKey`'s text after a fixed prefix.
+const MISSING_KEY_NOTICE: &str =
+    "Signing cannot succeed with the installed credentials: Signing key is not installed";
+
 /// Credential-level signing refusal. Non-generic, so the combined build holds
 /// one copy rather than one per venue engine.
 #[derive(Default)]
@@ -5539,7 +5543,7 @@ impl SigningLatch {
             LogEvent {
                 level: Level::Error,
                 code: log_code::CONFIG_INVALID,
-                message: format!("Signing cannot succeed with the installed credentials: {error}"),
+                message: MISSING_KEY_NOTICE.into(),
                 fields: Vec::new(),
             },
         );
