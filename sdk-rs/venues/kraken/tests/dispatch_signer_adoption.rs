@@ -719,3 +719,140 @@ fn new_contract_closed_spot_socket_retires_token_callback_authority() {
         "a retired token Session must fence delivery before the venue callback"
     );
 }
+
+fn private_boundary<V: Venue>(engine: &mut Engine<V>) -> Vec<(HttpRequest, bool)> {
+    use safe_cex_engine::request_context::HttpAction;
+    let mut observed = vec![];
+    for _ in 0..16 {
+        engine.prepare_dispatch(NOW);
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        if actions.is_empty() {
+            return observed;
+        }
+        for action in actions {
+            let request = match action {
+                Action::Http(request) => {
+                    if is_private_http(&request) {
+                        observed.push((request, false));
+                        continue;
+                    }
+                    request
+                }
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare { request, .. } => {
+                        assert!(is_private_http(&request), "unexpected public preparation");
+                        observed.push((request, true));
+                        continue;
+                    }
+                    HttpAction::Bind { .. } | HttpAction::BindGroup { .. } => {
+                        panic!("a held preparation cannot bind without a host response")
+                    }
+                    HttpAction::Cancel { .. } => continue,
+                },
+                Action::WsConnect {
+                    socket,
+                    channel: Some(SocketChannel::Private),
+                    ..
+                } => {
+                    engine.handle(NOW, Event::WsOpened { socket });
+                    continue;
+                }
+                _ => continue,
+            };
+            let body = if request.url.ends_with("AssetPairs") {
+                spot_support::META
+            } else if request.url.ends_with("Ticker") {
+                spot_support::TICKERS
+            } else if request.url.ends_with("/instruments") {
+                support::META
+            } else if request.url.ends_with("/tickers") {
+                support::TICKERS
+            } else {
+                panic!("unexpected public bootstrap request");
+            };
+            engine.handle(
+                NOW,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+    }
+    panic!("private preparation fixture did not settle");
+}
+fn is_private_http(request: &HttpRequest) -> bool {
+    request.url.contains("/0/private/")
+        || request.url.contains("/accounts")
+        || request.url.contains("/openorders")
+        || request.url.contains("/openpositions")
+        || request.url.contains("/leveragepreferences")
+}
+#[test]
+fn futures_ordinary_private_send_waits_for_host_preparation() {
+    let opts = options(true);
+    let (provider, identities) = provider(&opts, Some("ordinary-preparation-subject"), false);
+    let mut engine = engine(Kraken::new(opts), &provider, identities);
+    let boundary = private_boundary(&mut engine);
+    let accounts = boundary
+        .iter()
+        .filter(|(request, _)| request.url.ends_with("/accounts"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        accounts.len(),
+        1,
+        "native account bootstrap must be reached"
+    );
+    assert!(
+        accounts[0].1,
+        "ordinary private HTTP escaped before Prepare/Bind/Claim"
+    );
+}
+#[test]
+fn futures_streamed_private_send_waits_for_host_preparation() {
+    let opts = options(true);
+    let (provider, identities) = provider(&opts, Some("streamed-preparation-subject"), false);
+    let mut engine = engine(Kraken::new(opts), &provider, identities);
+    let boundary = private_boundary(&mut engine);
+    for endpoint in ["/openorders", "/openpositions", "/leveragepreferences"] {
+        let requests = boundary
+            .iter()
+            .filter(|(request, _)| request.url.ends_with(endpoint))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests.len(),
+            1,
+            "native streamed account bootstrap must be reached"
+        );
+        assert!(
+            requests[0].1,
+            "streamed private HTTP escaped before Prepare/Bind/Claim"
+        );
+    }
+}
+#[test]
+fn spot_private_post_waits_for_host_preparation() {
+    let opts = options(true);
+    let (provider, identities) = provider(&opts, Some("spot-preparation-subject"), false);
+    let mut engine = engine(KrakenSpot::new(opts), &provider, identities);
+    let boundary = private_boundary(&mut engine);
+    for endpoint in ["Balance", "OpenOrders", "GetWebSocketsToken"] {
+        let requests = boundary
+            .iter()
+            .filter(|(request, _)| request.url.ends_with(endpoint))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests.len(),
+            1,
+            "native Spot private bootstrap must be reached"
+        );
+        assert!(
+            requests[0].1,
+            "Spot private POST escaped before Prepare/Bind/Claim"
+        );
+    }
+}
