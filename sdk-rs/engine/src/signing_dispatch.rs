@@ -157,8 +157,6 @@ pub(crate) struct Pending {
     pub(crate) nonce: Option<NonceReservation>,
     #[cfg(feature = "dispatch-nonce")]
     pub(crate) nonce_repairs: u8,
-    /// Whether the prepared request names primary material (`primary_owns`).
-    primary: bool,
 }
 impl Pending {
     #[cfg(all(test, feature = "dispatch-nonce"))]
@@ -229,10 +227,6 @@ impl Dispatch {
     }
     pub fn take_credential_refusal(&mut self) -> Option<bool> {
         self.credential_refused.take()
-    }
-    /// Whether the attempt's prepared request names primary material.
-    pub fn prepared_primary(&self, id: RequestId) -> bool {
-        self.pending.get(&id).is_some_and(|p| p.primary)
     }
     pub fn next_id(&mut self) -> RequestId {
         RequestId(self.next.next_or_fatal())
@@ -355,7 +349,7 @@ impl Dispatch {
     pub fn hold(&mut self, outbound: Action) -> Result<(), SignError> {
         let id = self.next_id();
         // A held frame is unsigned, so a signing latch never refuses it.
-        self.admit(id, outbound, Box::new(Plain), TimerId(0), 0.)?;
+        self.admit(id, outbound, Box::new(Plain), TimerId(0), 0., false)?;
         if let Some(p) = self.pending.get_mut(&id) {
             p.deadline = f64::MAX;
             p.plain = true;
@@ -370,6 +364,7 @@ impl Dispatch {
         pending.timer = timer;
         Some(pending.deadline)
     }
+    #[inline]
     pub fn stage(
         &mut self,
         id: RequestId,
@@ -378,11 +373,9 @@ impl Dispatch {
         timer: TimerId,
         now: f64,
     ) -> Result<f64, SignError> {
-        if self.refused {
-            return Err(SignError::MissingKey);
-        }
-        self.admit(id, outbound, step, timer, now)
+        self.admit(id, outbound, step, timer, now, true)
     }
+    /// One staging body; only a signed action is refused once latched.
     fn admit(
         &mut self,
         id: RequestId,
@@ -390,7 +383,11 @@ impl Dispatch {
         step: Box<dyn SignStep>,
         timer: TimerId,
         now: f64,
+        signed: bool,
     ) -> Result<f64, SignError> {
+        if signed && self.refused {
+            return Err(SignError::MissingKey);
+        }
         if self.pending.len() + self.outbound.len() >= 256 || !now.is_finite() {
             return Err(SignError::Unavailable);
         }
@@ -440,7 +437,6 @@ impl Dispatch {
                 nonce: None,
                 #[cfg(feature = "dispatch-nonce")]
                 nonce_repairs: 0,
-                primary: true,
             },
         );
         Ok(deadline)
@@ -660,7 +656,6 @@ impl Dispatch {
             self.credential_refused = Some(identities.primary_owns(&work));
             return Err(SignError::MissingKey);
         }
-        p.primary = identities.primary_owns(&work);
         // Refuse a non-progressing recipe before an immediate provider can enter
         // an endless stale/reprepare loop at one unchanged dispatch clock.
         if work

@@ -273,7 +273,7 @@ impl Identities {
             || self
                 .primary
                 .as_ref()
-                .is_some_and(|primary| work.key_refs().any(|key| primary.owns(key)))
+                .is_some_and(|primary| work.any_key_ref(&|key| primary.owns(key)))
     }
 }
 
@@ -501,11 +501,13 @@ impl SignRequest {
     /// Refs come only from an identity, so an invalid one means the installed
     /// credentials lack that material: no retry of this request can sign.
     pub fn has_invalid_key_ref(&self) -> bool {
-        self.key_refs().any(|key| !valid_key_ref(key))
+        self.any_key_ref(&|key| !valid_key_ref(key))
     }
-    /// Every ref the operations name, including interpolated credentials.
-    pub fn key_refs(&self) -> impl Iterator<Item = &KeyRef> {
-        self.operations.iter().flat_map(|op| {
+    /// Whether any ref the operations name, including interpolated
+    /// credentials, passes `test`. A plain loop over `dyn`, so every caller
+    /// shares one body.
+    pub fn any_key_ref(&self, test: &dyn Fn(&KeyRef) -> bool) -> bool {
+        for op in &self.operations {
             let (key, payload) = match op {
                 Operation::Present { key }
                 | Operation::PublicAddress { key }
@@ -513,12 +515,18 @@ impl SignRequest {
                 Operation::Sign { key, payload, .. } => (Some(key), &payload[..]),
                 Operation::Sha256 { payload } => (None, &payload[..]),
             };
-            key.into_iter()
-                .chain(payload.iter().filter_map(|part| match part {
-                    PayloadPart::Credential { key } => Some(key),
-                    _ => None,
-                }))
-        })
+            if key.is_some_and(test) {
+                return true;
+            }
+            for part in payload {
+                if let PayloadPart::Credential { key } = part
+                    && test(key)
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
     /// Shared structural bounds also apply to injected providers. Expanded secret
     /// input bounds are enforced privately by the provider before allocation.
