@@ -2,7 +2,13 @@
 
 Plan only, 2026-10-25, claude-4yjlw0. This supersedes #1890 (`RUST_BITGET_UTA_ROUTING.md`, which predates managed sockets).
 Branch `feat/rust-bitget-managed-socket-routing` from landing `f3ed1f32bf0`.
-Reviewer for the shared socket API: claude-dazzy3. No source until claude-ddi2il rules.
+Reviewer for the shared socket API: claude-dazzy3.
+
+## Overseer rulings (2026-10-25, pending dazzy3's plan review)
+
+1. **The legacy-path seam goes first.** The `reject_route` / `WsRouteExhausted` seam on Bitget's legacy socket path, with the 40018/40024 evidence, may go to source after dazzy3 CLEARs this plan. It is measured against the 1,409,024 allowance.
+2. **Managed adoption is deferred.** Bitget's managed-socket adoption, item (1), is a separate budget question for Sam after slice 3's ruling. It gets no source until then and is not folded into the slice 3 ask.
+3. **Exhaustion matches TS.** Route exhaustion stops reconnecting, with one visible notice and no silent retry loop, consistent with #2109's terminal shape. A test pins zero reconnects after exhaustion.
 
 ## Gap (unchanged on the tip)
 
@@ -59,8 +65,7 @@ Reviewer for the shared socket API: claude-dazzy3. No source until claude-ddi2il
 ### (3) Bitget 40018/40024 evidence
 
 - **Pre-login refusal.** A 40018 (IP-bound key) or 40024 (restricted location) refusal before login maps to `RouteRefused`. It logs TS's "trying the next route" warning and reports no error.
-- **Exhaustion.** On `RouteExhausted`, report the native egress refusal once per streak as an `AUTH_REJECTED` notice, never a startup failure or deactivation. Then keep retrying the last route under backoff, so a later whitelist fix recovers. A successful login ends the streak.
-  - Open point for review: TS stops reconnecting after exhaustion, while the earlier Rust plan kept retrying. Ruling needed; I propose matching TS.
+- **Exhaustion (ruling 3, matches TS).** On route exhaustion, report the native egress refusal once as an `AUTH_REJECTED` notice, never a startup failure or deactivation, and stop reconnecting the private socket. There is no silent retry loop; a test pins zero reconnects after exhaustion. Recovery is a new start, as in TS.
 - **TS counters.** Carried over as data: `MAX_UNAUTHENTICATED_TUNNEL_CLOSES = 2` and `MAX_FAILED_TUNNEL_CONNECTS = 6`. Each sends `reject_route` once its threshold is met.
 - **REST is unchanged.** REST 40018 keeps `AuthPermission`.
 
@@ -78,7 +83,7 @@ The base is tip `f3ed1f32bf0`: Bitget is 1,340,440 in CI, and the allowance is 1
 
 **Adoption alone does not fit the 1,409,024 allowance.** Even before slice 3, it is about 11K to 39K over.
 
-### Alternative: the seam on the legacy socket path (no managed adoption)
+### The first source item (ruling 1): the seam on the legacy socket path, without managed adoption
 
 `SocketContext` already reaches the hosts from Bitget's legacy `cx.connect` (`lib.rs:313-356`). The same `reject_route` flag, the host-only `WsRouteExhausted` event and a default-close `Venue::on_route_exhausted` can therefore work without the managed lifecycle.
 
@@ -96,13 +101,11 @@ Both items compete for the same 68,584 bytes of room:
 | Both | about 1,550K to 1,575K | |
 | Legacy-path seam alone | about 1,346K | fits |
 
-Proposed order, pending Sam's budget ruling:
+Ruled order:
 
-1. **Slice 3 first.** It is written and ruled, and it closes the trading write funnel.
-2. **The legacy-path route seam next**, if parity is wanted before a socket budget exists. It is the only item that fits today.
-3. **Managed adoption last.** It needs its own budget decision and fe7lgm or dazzy3 socket-path trims.
-
-If Sam funds the socket budget first, the order flips to (1)(2)(3) here, and slice 3 waits.
+1. **The legacy-path route seam**, with the 40018/40024 evidence. It goes to source after dazzy3's CLEAR. It fits today and is measured against 1,409,024.
+2. **Slice 3**, held for Sam's budget ruling.
+3. **Managed adoption.** It is a separate later Sam budget question and gets no source until then.
 
 ## Callers
 
