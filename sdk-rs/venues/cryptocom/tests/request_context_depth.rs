@@ -1,4 +1,5 @@
 //! Standalone public depth reads use the same prepared release as hosted reads.
+mod support;
 use safe_cex_engine::request_context::{
     Claim, Error, HttpAction, Preparation, Prepared, RoutingIntent,
 };
@@ -6,13 +7,14 @@ use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Notice, Outcome, Response, TimerId,
     VenueError,
 };
-use safe_cex_venue_cryptocom::{Cryptocom, Options};
+use safe_cex_venue_cryptocom::Cryptocom;
+use support::fixture::Options;
 
 const BOOK: &str =
     r#"{"code":0,"result":{"data":[{"bids":[["001.20","2.5"]],"asks":[["2.00","3"]]}]}}"#;
 
 fn engine() -> Engine<Cryptocom> {
-    safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options::default()))
+    support::fixture::engine(Options::default())
 }
 
 fn command(e: &mut Engine<Cryptocom>, now: f64, owner: u32) {

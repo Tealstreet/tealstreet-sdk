@@ -1,12 +1,13 @@
 //! Declared mutation terminals and shared synchronous seal preparation.
 use super::*;
 use crate::request_context::PreparedWriteSeal;
-use crate::request_context::plan::MutationTerminalBound;
+use crate::request_context::plan::{MutationBarrierBound, MutationTerminalBound};
 
 pub(super) struct AdmissionDeclaration<'s, 'd, 't> {
     pub steps: &'s [StepBound<'d>],
     pub policy: PlanPolicy,
     pub terminals: &'t [MutationTerminalBound],
+    pub barriers: &'t [MutationBarrierBound],
 }
 
 pub(super) struct PreparedPlanSeal {
@@ -73,6 +74,7 @@ impl<P> Cx<'_, P> {
                 steps,
                 policy,
                 terminals,
+                barriers: &[],
             },
         )
     }

@@ -10,7 +10,6 @@ use crate::request_context::{
 use crate::request_context::{
     HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
 };
-use std::collections::HashMap;
 #[cfg(feature = "http-plans")]
 use std::collections::VecDeque;
 
@@ -166,10 +165,15 @@ mod owned_call;
 mod preflight;
 #[cfg(feature = "http-plans")]
 pub(super) use owned_call::Admission as OwnedAdmission;
+#[cfg(feature = "http-plans")]
+pub(super) use owned_call::ReleasedReadFailure;
 
 #[cfg(feature = "http-plans")]
 #[path = "request_context_planned.rs"]
 mod planned;
+#[cfg(feature = "http-plans")]
+#[cfg(feature = "http-mutation-barriers")]
+pub(in crate::engine) use planned::MutationGroupKey;
 
 #[cfg(not(feature = "http-plans"))]
 #[path = "request_context_without_plans.rs"]
@@ -199,8 +203,8 @@ pub(super) enum Seal {
 #[derive(Default)]
 pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
-    contexts: HashMap<u64, Context>,
-    commands: HashMap<CommandId, CommandOwner>,
+    contexts: crate::IdMap<u64, Context>,
+    commands: std::collections::HashMap<CommandId, CommandOwner>,
     sessions: session::Sessions,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
@@ -224,13 +228,59 @@ pub(super) struct ContextRegistry {
     /// Plan-backed executions' physical owners, keyed by execution identity.
     /// They hold the Plan, its slots and journal; no command observes them.
     #[cfg(feature = "http-plans")]
-    physical: HashMap<u64, CommandOwner>,
+    physical: PhysicalOwners,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
     /// Order-read epoch at each live owner's first released Read: one logical
     /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
     #[cfg(feature = "order-locks")]
     read_marks: Vec<(Owner, u64)>,
+}
+
+/// Plan-backed executions' physical owners. Few live at once, so a vector
+/// keeps the map shape without another hash table instantiation.
+#[cfg(feature = "http-plans")]
+#[derive(Default)]
+struct PhysicalOwners(Vec<(u64, CommandOwner)>);
+
+#[cfg(feature = "http-plans")]
+impl PhysicalOwners {
+    fn get(&self, identity: &u64) -> Option<&CommandOwner> {
+        self.0
+            .iter()
+            .find(|(held, _)| held == identity)
+            .map(|(_, owner)| owner)
+    }
+    fn get_mut(&mut self, identity: &u64) -> Option<&mut CommandOwner> {
+        self.0
+            .iter_mut()
+            .find(|(held, _)| held == identity)
+            .map(|(_, owner)| owner)
+    }
+    fn contains_key(&self, identity: &u64) -> bool {
+        self.0.iter().any(|(held, _)| held == identity)
+    }
+    /// Identities are engine-issued and unique, so this never replaces.
+    fn insert(&mut self, identity: u64, owner: CommandOwner) {
+        debug_assert!(!self.contains_key(&identity));
+        self.0.push((identity, owner));
+    }
+    fn remove(&mut self, identity: &u64) -> Option<CommandOwner> {
+        let index = self.0.iter().position(|(held, _)| held == identity)?;
+        Some(self.0.swap_remove(index).1)
+    }
+    fn try_reserve(&mut self, additional: usize) -> Result<(), std::collections::TryReserveError> {
+        self.0.try_reserve(additional)
+    }
+    fn values(&self) -> impl Iterator<Item = &CommandOwner> {
+        self.0.iter().map(|(_, owner)| owner)
+    }
+    fn iter(&self) -> impl Iterator<Item = (&u64, &CommandOwner)> {
+        self.0.iter().map(|(identity, owner)| (identity, owner))
+    }
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl ContextRegistry {
@@ -1521,23 +1571,15 @@ impl<P> Cx<'_, P> {
 
     /// A new physical leg under the same logical authority. Preserve its exact
     /// raw deadline; integer timeout recomputation cannot round the bound up.
+    /// Session legs use `session_leg_context`, so families without Sessions
+    /// never link Session issuance.
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
         self.io.request_contexts.validate_legacy(parent)?;
         self.io.request_contexts.validate_send(parent, self.now)?;
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
-            Owner::Session { generation } => {
-                self.session_scope()?;
-                let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-                return self.io.request_contexts.issue_session(
-                    identity,
-                    generation,
-                    policy,
-                    self.now,
-                    Some(parent),
-                );
-            }
+            Owner::Session { .. } => return Err(Error::Invalid),
             Owner::Execution { .. } => Scope::Execution,
         };
         self.make_http_context(scope, policy, Some(parent), None)

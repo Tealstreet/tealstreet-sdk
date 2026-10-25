@@ -5,8 +5,10 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub(crate) struct OrderLocks {
     active: Vec<(CommandId, Scope)>,
-    /// Deferred commands: failed flag and the caller-wait receipt each carries.
-    waiting: Vec<(Command, bool, Option<u64>)>,
+    /// Deferred cancel-all commands (ID and symbol): failed flag and the
+    /// caller-wait receipt each carries. Only the fields are kept, so no
+    /// whole Command is cloned.
+    waiting: Vec<(CommandId, String, bool, Option<u64>)>,
     uncertain: HashMap<String, u64>,
     epoch: u64,
 }
@@ -38,10 +40,23 @@ fn native(id: &str) -> &str {
     .unwrap_or(id)
 }
 
+/// Concurrent order-command scopes; a scope conflict is reported first.
+pub(crate) const ACTIVE_SCOPES: usize = 64;
+/// An order command refused only by `ACTIVE_SCOPES`; nothing was sent.
+pub(crate) const CAPACITY_REACHED: &str =
+    "Order command capacity reached: 64 order commands are in flight; retry after one finishes";
+
+/// Why entry refused an order command's scope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    Conflict(CommandId),
+    Capacity(CommandId),
+}
+
 impl OrderLocks {
     pub fn contains(&self, command: CommandId) -> bool {
         self.active.iter().any(|(id, _)| *id == command)
-            || self.waiting.iter().any(|(c, ..)| matches!(c, Command::CancelSymbolOrders { command: id, .. } if *id == command))
+            || self.waiting.iter().any(|(id, ..)| *id == command)
     }
 
     pub fn acquire(
@@ -49,7 +64,7 @@ impl OrderLocks {
         command: &Command,
         store: &Store,
         fence_uncertain: bool,
-    ) -> Result<(), CommandId> {
+    ) -> Result<(), Refusal> {
         let mut scope = Scope {
             ids: Vec::new(),
             symbols: Vec::new(),
@@ -128,7 +143,6 @@ impl OrderLocks {
                 .all_symbol
                 .as_deref()
                 .is_some_and(|symbol| self.uncertain(symbol))
-            || self.active.len() >= 64
             || self.active.iter().any(|(_, held)| {
                 scope.ids.iter().any(|id| held.ids.contains(id))
                     || scope
@@ -141,14 +155,17 @@ impl OrderLocks {
                         .is_some_and(|s| overlaps_symbol(s, &scope))
             })
         {
-            return Err(command);
+            return Err(Refusal::Conflict(command));
+        }
+        if self.active.len() >= ACTIVE_SCOPES {
+            return Err(Refusal::Capacity(command));
         }
         self.active.push((command, scope));
         Ok(())
     }
 
     pub fn defer(&mut self, command: &Command, receipt: Option<u64>) -> bool {
-        if let Command::CancelSymbolOrders { symbol, .. } = command
+        if let Command::CancelSymbolOrders { command, symbol } = command
             && self.active.iter().any(|(_, held)| {
                 held.placing && (symbol.is_empty() || held.symbols.contains(symbol))
             })
@@ -156,7 +173,8 @@ impl OrderLocks {
             if self.waiting.len() >= 64 {
                 return false;
             }
-            self.waiting.push((command.clone(), false, receipt));
+            self.waiting
+                .push((*command, symbol.clone(), false, receipt));
             return true;
         }
         false
@@ -168,28 +186,25 @@ impl OrderLocks {
     }
 
     pub fn ready(&mut self) -> Vec<(Command, bool, Option<u64>)> {
-        let mut ready = Vec::new();
-        let uncertain = &self.uncertain;
-        self.waiting.retain(|(command, failed, receipt)| {
-            let Command::CancelSymbolOrders { symbol, .. } = command else {
-                return false;
-            };
-            let blocked = self.active.iter().any(|(_, held)| {
-                held.placing && (symbol.is_empty() || held.symbols.contains(symbol))
-            });
-            if !blocked {
-                ready.push((
-                    command.clone(),
-                    *failed
-                        || uncertain.contains_key("")
-                        || uncertain.contains_key(symbol)
-                        || symbol.is_empty() && !uncertain.is_empty(),
-                    *receipt,
-                ));
-            }
-            blocked
-        });
-        ready
+        let (active, uncertain) = (&self.active, &self.uncertain);
+        self.waiting
+            .extract_if(.., |(_, symbol, ..)| {
+                !active.iter().any(|(_, held)| {
+                    held.placing && (symbol.is_empty() || held.symbols.contains(symbol))
+                })
+            })
+            .map(|(command, symbol, failed, receipt)| {
+                let failed = failed
+                    || uncertain.contains_key("")
+                    || uncertain.contains_key(&symbol)
+                    || symbol.is_empty() && !uncertain.is_empty();
+                (
+                    Command::CancelSymbolOrders { command, symbol },
+                    failed,
+                    receipt,
+                )
+            })
+            .collect()
     }
 
     /// Returns the symbols this finish newly marks uncertain (an empty symbol
@@ -215,10 +230,8 @@ impl OrderLocks {
                 self.uncertain.insert(String::new(), self.epoch);
                 marked.push(String::new());
             }
-            for (waiting, failed, _) in &mut self.waiting {
-                if matches!(waiting, Command::CancelSymbolOrders { symbol, .. }
-                    if symbol.is_empty() || scope.symbols.contains(symbol))
-                {
+            for (_, symbol, failed, _) in &mut self.waiting {
+                if symbol.is_empty() || scope.symbols.contains(symbol) {
                     *failed = true;
                 }
             }

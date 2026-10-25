@@ -157,18 +157,63 @@ export async function currentPhysical(context, name) {
   return { run, job: selected[0] };
 }
 
+const PRODUCER_STEP_REFRESH_LIMIT = 20;
+const PRODUCER_STEP_REFRESH_MS = 30_000;
+const producerIdentity = job => Object.fromEntries(['id', 'run_id', 'run_attempt', 'runner_id',
+  'name', 'head_sha', 'head_branch', 'status', 'conclusion', 'started_at'].map(key => [key, job[key]]));
+const workflowIdentity = run => Object.fromEntries(['id', 'run_number', 'run_attempt', 'workflow_id',
+  'path', 'head_sha', 'head_branch', 'event'].map(key => [key, run[key]]));
+
+async function terminalProducer(context, jobName, stepName) {
+  let inventory = await evidenceInventory(context), originalJob, originalRun;
+  for (;;) {
+    const { run, jobs } = inventory, selected = jobs.filter(job => job.name === jobName);
+    insist(run.id === context.runId && run.run_attempt === 1 && selected.length === 1,
+      'missing unique artifact physical producer in original workflow attempt1');
+    const job = selected[0];
+    insist(Number.isSafeInteger(job.id) && job.id > 0 && Number.isSafeInteger(job.runner_id) && job.runner_id > 0 &&
+      job.run_id === run.id && job.run_attempt === 1 && job.head_sha === run.head_sha && job.head_branch === run.head_branch &&
+      job.status === 'completed' && job.conclusion === 'success', 'measurement not successful original physical attempt1');
+    const identity = producerIdentity(job), workflow = workflowIdentity(run);
+    originalJob ??= identity; originalRun ??= workflow;
+    insist(same(identity, originalJob) && same(workflow, originalRun), 'producer physical identity changed during step metadata refresh');
+    insist(Array.isArray(job.steps) && job.steps.every(step => step && typeof step.name === 'string'),
+      'missing producer step inventory');
+    const empty = job.steps.length === 0;
+    const upload = job.steps.filter(step => step.name === stepName);
+    insist(empty || upload.length === 1, `missing unique successful step ${stepName}`);
+    if (!empty && upload[0].status === 'completed' && upload[0].conclusion != null)
+      insist(upload[0].conclusion === 'success', `missing unique successful step ${stepName}`);
+    const pending = job.steps.filter(step => step.status !== 'completed' || step.conclusion == null);
+    if (!empty && !pending.length) {
+      const bound = context.bindings?.find(binding => binding.job.id === job.id);
+      insist(!bound || same(bound.job, job), 'physical producer changed after artifact binding');
+      return { run, job };
+    }
+    context.producerStepRefreshes ??= 0;
+    insist(context.producerStepRefreshes < PRODUCER_STEP_REFRESH_LIMIT,
+      `${empty ? 'empty inventory' : 'producer steps not terminal'} after ${PRODUCER_STEP_REFRESH_LIMIT} refreshes: ` +
+      `run ${run.id}, job ${job.id} ${job.name}; ` +
+      (empty ? 'empty step inventory' : pending.map(step => `${step.name} [${step.status}/${step.conclusion}]`).join(', ')));
+    context.producerStepRefreshes++;
+    await new Promise(resolve => setTimeout(resolve, PRODUCER_STEP_REFRESH_MS));
+    inventory = await evidenceInventory(context, true);
+  }
+}
+
 export async function authenticatedBundle(context, runId, name, jobName, stepName, expectedCheckoutSha, metadataOnly = false) {
   context.bundles ??= new Map();
   const key = JSON.stringify([runId, name, jobName, stepName, expectedCheckoutSha, metadataOnly]);
   if (context.bundles.has(key)) return context.bundles.get(key);
-  const bundle = await artifact(context, runId, name, metadataOnly), { run, jobs: allJobs } = await evidenceInventory(context);
-  const jobs = allJobs.filter(job => job.name === jobName);
-  insist(jobs.length === 1, 'missing unique artifact physical producer');
-  const logBytes = await context.reader.getLog(jobs[0].id);
+  const bundle = await artifact(context, runId, name, metadataOnly);
+  const { run, job } = await terminalProducer(context, jobName, stepName);
+  const currentArtifacts = (await evidenceInventory(context)).artifacts.filter(meta => meta.name === name);
+  insist(currentArtifacts.length === 1 && same(currentArtifacts[0], bundle.meta), 'artifact identity changed during step metadata refresh');
+  const logBytes = await context.reader.getLog(job.id);
   const receipt = (metadataOnly ? authenticateArtifactMetadata : authenticateArtifactExecution)({ artifact: bundle.meta, artifactBytes: bundle.bytes,
-    run, job: jobs[0], logBytes, stepName, jobName, expectedCheckoutSha });
-  context.bindings?.push({ artifact: bundle.meta, job: jobs[0] });
-  const result = { ...bundle, receipt, job: jobs[0], logBytes };
+    run, job, logBytes, stepName, jobName, expectedCheckoutSha });
+  context.bindings?.push({ artifact: bundle.meta, job });
+  const result = { ...bundle, receipt, job, logBytes };
   context.bundles.set(key, result);
   return result;
 }

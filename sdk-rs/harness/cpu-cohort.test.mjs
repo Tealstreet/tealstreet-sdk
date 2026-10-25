@@ -97,18 +97,18 @@ test('strict JSON retains duplicate/prototype/nonfinite/trailing/invalid UTF8 de
 
 test('complete pagination refuses gaps, duplicate IDs, status errors and untrusted redirects', async () => {
   for (const data of [{ total_count: 2, jobs: [{ id: 1 }] }, { total_count: 2, jobs: [{ id: 1 }, { id: 1 }] }]) {
-    const reader = createGithubReader({ repository: 'org/repo', fetch: async () => jsonResponse(data) });
+    const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async () => jsonResponse(data) });
     await assert.rejects(reader.listJobs(1));
   }
-  const badStatus = createGithubReader({ repository: 'org/repo', fetch: async () => new Response('missing', { status: 404 }) });
+  const badStatus = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async () => new Response('missing', { status: 404 }) });
   await assert.rejects(badStatus.getRun(1));
-  const redirect = createGithubReader({ repository: 'org/repo', token: 'secret', fetch: async () => new Response(null, { status: 302, headers: { location: 'https://evil.example/bytes' } }) });
+  const redirect = createGithubReader({ sleep: async () => {}, repository: 'org/repo', token: 'secret', fetch: async () => new Response(null, { status: 302, headers: { location: 'https://evil.example/bytes' } }) });
   await assert.rejects(redirect.getLog(1), /untrusted/);
 });
 
 test('all-attempt pagination follows every page without latest-only selection', async () => {
   const calls = [], jobs = Array.from({ length: 101 }, (_, index) => ({ id: index + 1 }));
-  const reader = createGithubReader({ repository: 'org/repo', fetch: async url => {
+  const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async url => {
     calls.push(url); const page = Number(new URL(url).searchParams.get('page'));
     return jsonResponse({ total_count: 101, jobs: page === 1 ? jobs.slice(0, 100) : jobs.slice(100) });
   } });
@@ -118,7 +118,7 @@ test('all-attempt pagination follows every page without latest-only selection', 
 
 test('artifact CDN receives no token; immutable original bytes retained', async () => {
   const calls = [], raw = Buffer.from('\ufefforiginal log\r\n');
-  const reader = createGithubReader({ repository: 'org/repo', token: 'secret', fetch: async (url, options) => { calls.push({ url, options }); return calls.length === 1 ? new Response(null, { status: 302, headers: { location: 'https://fixture.blob.core.windows.net/log' } }) : new Response(raw); } });
+  const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', token: 'secret', fetch: async (url, options) => { calls.push({ url, options }); return calls.length === 1 ? new Response(null, { status: 302, headers: { location: 'https://fixture.blob.core.windows.net/log' } }) : new Response(raw); } });
   assert.deepEqual(await reader.getLog(10), raw);
   assert.equal(calls[1].options.headers, undefined); assert.equal(calls[1].options.redirect, 'error');
   assert.deepEqual(reader.snapshots().logs[0].raw, raw);
@@ -129,7 +129,7 @@ const socketClosure = () => new TypeError('fetch failed', { cause: { code: 'UND_
 test('immutable binary read recovers one socket closure and caches only complete bytes', async () => {
   for (const failBody of [false, true]) {
     const calls = [], raw = Buffer.from('original immutable evidence');
-    const reader = createGithubReader({ repository: 'org/repo', fetch: async (url, options) => {
+    const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async (url, options) => {
       calls.push({ url, options });
       if (calls.length === 1) {
         if (!failBody) throw socketClosure();
@@ -146,38 +146,38 @@ test('immutable binary read recovers one socket closure and caches only complete
   }
 });
 
-test('immutable binary closure retry fails closed on exhaustion and never retries HTTP refusal', async () => {
+test('transport retry fails closed after three attempts and never retries HTTP4xx', async () => {
   let calls = 0;
-  const permanent = createGithubReader({ repository: 'org/repo', fetch: async () => { calls++; throw socketClosure(); } });
+  const permanent = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async () => { calls++; throw socketClosure(); } });
   await assert.rejects(permanent.getArtifactBytes(700), /fetch failed/);
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   assert.equal(permanent.snapshots().responses.length, 0);
-  for (const status of [403, 404, 429, 503]) {
+  for (const status of [403, 404, 429]) {
     calls = 0;
-    const refused = createGithubReader({ repository: 'org/repo', fetch: async () => { calls++; return new Response('refused', { status }); } });
+    const refused = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async () => { calls++; return new Response('refused', { status }); } });
     await assert.rejects(refused.getArtifactBytes(700), error => error.message === `CPU cohort: GitHub evidence unavailable (${status})`);
     assert.equal(calls, 1);
   }
 });
 
-test('metadata and active-job log socket failures are never retried', async () => {
+test('metadata and active-job log transport failures share the fixed three-attempt cap', async () => {
   const calls = [];
-  const reader = createGithubReader({ repository: 'org/repo', fetch: async url => {
+  const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async url => {
     calls.push(url);
     if (url.endsWith('actions/jobs/5')) return jsonResponse({ id: 5, status: 'in_progress', conclusion: null });
     throw socketClosure();
   } });
   await assert.rejects(reader.getRun(1000), /fetch failed/);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 3);
   await reader.getJob(5);
   await assert.rejects(reader.getLog(5), /fetch failed/);
-  assert.equal(calls.filter(url => url.endsWith('actions/jobs/5/logs')).length, 1);
+  assert.equal(calls.filter(url => url.endsWith('actions/jobs/5/logs')).length, 3);
 });
 
-test('only a completed physical log may recover one socket closure', async () => {
+test('completed physical logs recover transport failures and cache exact bytes', async () => {
   let logCalls = 0;
   const raw = Buffer.from('original completed physical log');
-  const reader = createGithubReader({ repository: 'org/repo', fetch: async url => {
+  const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async url => {
     if (url.endsWith('actions/jobs/5')) return jsonResponse({ id: 5, status: 'completed', conclusion: 'success', completed_at: at(29) });
     logCalls++;
     if (logCalls === 1) throw socketClosure();
@@ -189,7 +189,7 @@ test('only a completed physical log may recover one socket closure', async () =>
   assert.equal(logCalls, 2);
   for (const failure of [new TypeError('different failure', { cause: { code: 'OTHER' } }), new Error('different failure', { cause: { code: 'UND_ERR_SOCKET' } })]) {
     let calls = 0;
-    const otherError = createGithubReader({ repository: 'org/repo', fetch: async () => { calls++; throw failure; } });
+    const otherError = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async () => { calls++; throw failure; } });
     await assert.rejects(otherError.getArtifactBytes(700), /different failure/);
     assert.equal(calls, 1);
   }
@@ -197,7 +197,7 @@ test('only a completed physical log may recover one socket closure', async () =>
 
 test('immutable CDN recovery repeats the same authority and never forwards its credential', async () => {
   const calls = [], raw = Buffer.from('original ZIP');
-  const reader = createGithubReader({ repository: 'org/repo', token: 'fixture-token', fetch: async (url, options) => {
+  const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', token: 'fixture-token', fetch: async (url, options) => {
     calls.push({ url, options });
     if (url.startsWith('https://api.github.com/')) return new Response(null, { status: 302, headers: { location: 'https://fixture.blob.core.windows.net/archive' } });
     if (calls.length === 2) throw socketClosure();
@@ -274,7 +274,7 @@ test('physical markers remain standalone after child diagnostics without a newli
 });
 
 test('reader caches only immutable Git/ZIP/completed log bytes; mutable authority endpoints refresh', async () => {
-  const value = fixture(), api = apiFixture(value), reader = createGithubReader({ repository: 'org/repo', fetch: api.fetch }), source = value.claims[0].observations[0];
+  const value = fixture(), api = apiFixture(value), reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: api.fetch }), source = value.claims[0].observations[0];
   for (let index = 0; index < 2; index++) {
     await reader.getRun(value.current.id); await reader.listJobs(value.current.id); await reader.getArtifact(value.claims[0].artifact.id);
     await reader.getCommit(source.checkout.sha); await reader.getTree(source.tree.sha); await reader.getBlob(source.policyBlob.sha);
@@ -310,7 +310,7 @@ test('metadata, logs and ordinary archives retain the original 512 MiB bound', (
 
 test('immutable artifact recovers one empty HTTP 200 without caching the empty bytes', async () => {
   const calls = [], raw = Buffer.from('complete original archive');
-  const reader = createGithubReader({ repository: 'org/repo', fetch: async (url, options) => {
+  const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async (url, options) => {
     calls.push({ url, options }); return new Response(calls.length === 1 ? null : raw);
   } });
   assert.deepEqual(await reader.getArtifactBytes(700), raw);
@@ -320,23 +320,23 @@ test('immutable artifact recovers one empty HTTP 200 without caching the empty b
   assert.deepEqual(reader.snapshots().responses[0].raw, raw);
 });
 
-test('empty and socket failures share exactly two artifact retrieval attempts', async () => {
+test('one empty-artifact recovery and transport errors share the three-attempt cap', async () => {
   for (const failures of [['empty', 'empty'], ['empty', 'socket'], ['socket', 'empty']]) {
     let calls = 0;
-    const reader = createGithubReader({ repository: 'org/repo', fetch: async () => {
+    const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async () => {
       const failure = failures[calls++];
       if (failure === 'socket') throw socketClosure();
       return new Response(null);
     } });
     await assert.rejects(reader.getArtifactBytes(700));
-    assert.equal(calls, 2, failures.join(' then '));
+    assert.equal(calls, failures[0] === 'empty' && failures[1] === 'socket' ? 3 : 2, failures.join(' then '));
     assert.equal(reader.snapshots().responses.length, 0);
   }
 });
 
 test('empty metadata and completed physical logs are never retried', async () => {
   let metadataCalls = 0, logCalls = 0;
-  const reader = createGithubReader({ repository: 'org/repo', fetch: async url => {
+  const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async url => {
     if (url.endsWith('actions/jobs/5')) return jsonResponse({ id: 5, status: 'completed', conclusion: 'success', completed_at: at(29) });
     if (url.endsWith('/logs')) logCalls++; else metadataCalls++;
     return new Response(null);
@@ -348,7 +348,7 @@ test('empty metadata and completed physical logs are never retried', async () =>
 
 test('empty CDN artifact retry rechecks the original authority and strips its token', async () => {
   const calls = [], raw = Buffer.from('complete original ZIP');
-  const reader = createGithubReader({ repository: 'org/repo', token: 'fixture-token', fetch: async (url, options) => {
+  const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', token: 'fixture-token', fetch: async (url, options) => {
     calls.push({ url, options });
     if (url.startsWith('https://api.github.com/')) return new Response(null, { status: 302, headers: { location: 'https://fixture.blob.core.windows.net/archive' } });
     return new Response(calls.length === 2 ? null : raw);
@@ -363,7 +363,7 @@ test('empty CDN artifact retry rechecks the original authority and strips its to
 
 test('artifact callers cannot request metadata or arbitrary response kinds', async () => {
   let calls = 0;
-  const reader = createGithubReader({ repository: 'org/repo', fetch: async () => { calls++; return new Response('archive'); } });
+  const reader = createGithubReader({ sleep: async () => {}, repository: 'org/repo', fetch: async () => { calls++; return new Response('archive'); } });
   for (const kind of ['metadata', 'log', 'unbounded', 4 * 1024 ** 3])
     await assert.rejects(async () => reader.getArtifactBytes(700, kind), /invalid artifact response kind/);
   assert.equal(calls, 0);

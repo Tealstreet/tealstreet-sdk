@@ -9,7 +9,8 @@ use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, OffsetStep, OffsetWalk, Stall};
-use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Query, Response, VenueError};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::{CommandId, CommandWait, Cx, ErrorKind, Method, Query, Response, VenueError};
 use serde::Serialize;
 
 /// Requests per read before paging that still reports more is incomplete.
@@ -138,6 +139,30 @@ fn stalled_page(_: Stall) -> String {
     "Backpack history is incomplete: paging made no progress".into()
 }
 impl Backpack {
+    fn reject_history_query(cx: &mut Cx<'_, Pending>, message: &str) {
+        match cx.command_wait() {
+            Some(CommandWait::Remaining(_)) => {}
+            Some(CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+            None => {
+                let _ = cx.reject_unstamped_command(Operation::Read);
+                return;
+            }
+        }
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        let _ = cx.fail_context(&context, message);
+    }
+
     pub(crate) fn history_command(
         &self,
         cx: &mut Cx<'_, Pending>,
@@ -146,7 +171,7 @@ impl Backpack {
     ) {
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(command, "Backpack client-order-ID lookup is unsupported");
+                Self::reject_history_query(cx, "Backpack client-order-ID lookup is unsupported");
                 return;
             }
             Query::Fills {
@@ -186,8 +211,8 @@ impl Backpack {
                 if kind.as_ref().is_some_and(|k| {
                     !matches!(k.to_ascii_uppercase().as_str(), "FUNDING_FEE" | "FUNDING")
                 }) {
-                    cx.fail(
-                        command,
+                    Self::reject_history_query(
+                        cx,
                         "Backpack income query supports funding payments only",
                     );
                     return;
@@ -216,14 +241,14 @@ impl Backpack {
             .any(|t| !t.is_finite() || t < 0.0)
             || from.zip(to).is_some_and(|(a, b)| a > b)
         {
-            cx.fail(command, "Backpack invalid history time range");
+            Self::reject_history_query(cx, "Backpack invalid history time range");
             return;
         }
         if symbol
             .as_ref()
             .is_some_and(|s| cx.store.market(s).is_none())
         {
-            cx.fail(command, "Backpack history market not found");
+            Self::reject_history_query(cx, "Backpack history market not found");
             return;
         }
         let limit = limit.clamp(1, 1000) as usize;
@@ -283,7 +308,7 @@ impl Backpack {
             Kind::Trades => "/api/v1/trades",
         };
         if request.kind == Kind::Trades {
-            self.get(cx, path, params, Pending::History(Box::new(request)), true);
+            self.get(cx, path, params, Pending::History(Box::new(request)));
         } else {
             params.insert("sortDirection".into(), "Desc".into());
             if request.walk.offset() > 0 {
