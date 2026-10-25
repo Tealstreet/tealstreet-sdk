@@ -137,6 +137,8 @@ const ZERO: &str = r#"{"s":"SOL_USDC_PERP","b":"0","q":"0","n":"0","P":"0","f":"
 #[test]
 fn side_flip_zero_and_old_event_cannot_resurrect_a_closed_position() {
     let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    seed_requests(&mut e, 1000.0);
     ws(&mut e, socket, "account.positionUpdate", LONG);
     ws(&mut e, socket, "account.positionUpdate", SHORT);
     assert_eq!(e.store().positions().len(), 1);
@@ -180,6 +182,8 @@ fn late_and_failed_snapshots_preserve_stream_state() {
 #[test]
 fn duplicate_execution_emits_one_fill_and_never_regresses_order_state() {
     let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    seed_requests(&mut e, 1000.0);
     let fill = r#"{"e":"orderFill","i":"123","c":42,"E":3000000,"X":"Filled","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"5","l":"5","L":"139.5","t":999,"f":"GTC"}"#;
     e.take_frame(1000.0);
     ws(&mut e, socket, "account.orderUpdate", fill);
@@ -206,6 +210,8 @@ fn duplicate_execution_emits_one_fill_and_never_regresses_order_state() {
 #[test]
 fn documented_trigger_quantity_is_y_and_trigger_failure_is_terminal() {
     let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    seed_requests(&mut e, 1000.0);
     ws(
         &mut e,
         socket,
@@ -219,6 +225,8 @@ fn documented_trigger_quantity_is_y_and_trigger_failure_is_terminal() {
 #[test]
 fn entry_price_uses_b_uppercase_from_the_documented_position_event() {
     let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    seed_requests(&mut e, 1000.0);
     ws(
         &mut e,
         socket,
@@ -821,14 +829,65 @@ fn trigger_order_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
     );
 }
 
+fn reopen_account(e: &mut Driver, socket: &mut SocketId, now: &mut f64) {
+    e.handle(
+        *now,
+        Event::WsClosed {
+            socket: *socket,
+            code: 1006,
+        },
+    );
+    let (timer, at) = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .expect("actual private reconnect timer");
+    *now = at;
+    e.handle(*now, Event::TimerFired { timer });
+    *socket = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(socket),
+            _ => None,
+        })
+        .expect("actual replacement private socket");
+    e.handle(*now, Event::WsOpened { socket: *socket });
+}
+
+fn reply_at(e: &mut Driver, now: f64, request: &safe_cex_engine::HttpRequest, body: &str) {
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: request.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
+
 /// Answers one position and order re-read and returns its logs.
-fn reread(e: &mut Driver, socket: SocketId, positions: &str, orders: &str) -> Vec<String> {
-    e.handle(1000.0, Event::WsOpened { socket });
-    for r in seed_requests(e, 1000.0) {
+fn reread(
+    e: &mut Driver,
+    socket: &mut SocketId,
+    now: &mut f64,
+    positions: &str,
+    orders: &str,
+) -> Vec<String> {
+    reopen_account(e, socket, now);
+    for r in seed_requests(e, *now) {
         if r.url.ends_with("/position") {
-            reply(e, &r, 200, positions);
+            reply_at(e, *now, &r, positions);
         } else if r.url.ends_with("/orders") {
-            reply(e, &r, 200, orders);
+            reply_at(e, *now, &r, orders);
         }
     }
     e.drain_actions()
@@ -851,11 +910,12 @@ fn one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit() {
     let positions =
         |sol: &str, btc: &str| format!("[{},{btc}]", row(POSITIONS).replace("\"5\"", sol));
     let orders = |price: &str, btc: &str| format!("[{},{btc}]", ORDER.replace("\"140\"", price));
-    let (mut e, socket, _, _) = ready_catalogue(
+    let (mut e, mut socket, _, _) = ready_catalogue(
         MARKETS,
         &positions("\"5\"", &btc_position),
         &orders("\"140\"", &btc_order),
     );
+    let mut now = 1000.0;
     let stored_position = e.store().position("BTC_USDC_PERP-long").unwrap().clone();
     let stored_order = e.store().order("456").unwrap().clone();
     e.drain_actions().for_each(drop);
@@ -865,7 +925,8 @@ fn one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit() {
     for round in 0..2 {
         let logs = reread(
             &mut e,
-            socket,
+            &mut socket,
+            &mut now,
             &positions("\"7\"", &bad_position),
             &orders("\"141\"", &bad_order),
         );
@@ -891,7 +952,13 @@ fn one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit() {
     }
 
     let sol_only = POSITIONS.replace("\"5\"", "\"7\"");
-    reread(&mut e, socket, &sol_only, &format!("[{ORDER}]"));
+    reread(
+        &mut e,
+        &mut socket,
+        &mut now,
+        &sol_only,
+        &format!("[{ORDER}]"),
+    );
     let store = e.store();
     assert_eq!(store.positions().len(), 1);
     assert!(store.position("BTC_USDC_PERP-long").is_none());
@@ -1023,7 +1090,9 @@ fn unproven_missing_quantities_keep_prior_orders_and_never_start_repair() {
 #[test]
 fn unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without_repair() {
     let peer = ORDER.replace("\"id\":\"123\"", "\"id\":\"456\"");
-    let (mut e, socket, _, _) = ready_catalogue(MARKETS, POSITIONS, &format!("[{ORDER},{peer}]"));
+    let (mut e, mut socket, _, _) =
+        ready_catalogue(MARKETS, POSITIONS, &format!("[{ORDER},{peer}]"));
+    let mut now = 1000.0;
     let retained = e.store().order("123").unwrap().clone();
     e.drain_actions().for_each(drop);
     let mut bad: serde_json::Value = serde_json::from_str(ORDER).unwrap();
@@ -1032,12 +1101,12 @@ fn unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without
     bad["triggerQuantity"] = "0".into();
     for (round, price) in ["141", "142"].into_iter().enumerate() {
         let good = peer.replace("\"price\":\"140\"", &format!("\"price\":\"{price}\""));
-        e.handle(1000.0, Event::WsOpened { socket });
-        for request in seed_requests(&mut e, 1000.0) {
+        reopen_account(&mut e, &mut socket, &mut now);
+        for request in seed_requests(&mut e, now) {
             if request.url.ends_with("/position") {
-                reply(&mut e, &request, 200, POSITIONS);
+                reply_at(&mut e, now, &request, POSITIONS);
             } else if request.url.ends_with("/orders") {
-                reply(&mut e, &request, 200, &format!("[{bad},{good}]"));
+                reply_at(&mut e, now, &request, &format!("[{bad},{good}]"));
             }
         }
         let actions = e.drain_actions().collect::<Vec<_>>();
@@ -1059,7 +1128,7 @@ fn unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without
         );
         assert!(!actions.iter().any(|action|matches!(action,Action::Http(request) if request.method!=safe_cex_engine::Method::Get)));
     }
-    reread(&mut e, socket, POSITIONS, "[]");
+    reread(&mut e, &mut socket, &mut now, POSITIONS, "[]");
     assert!(e.store().orders().is_empty());
 }
 
@@ -1229,6 +1298,8 @@ fn snapshot_explicit_store_invalidation_discards_native_rows_and_repairs() {
 #[test]
 fn snapshot_exhaustion_keeps_writes_and_recurring_account_continuation() {
     let (mut e, socket, _, timers) = ready_catalogue(MARKETS, POSITIONS, &format!("[{ORDER}]"));
+    e.handle(1000.0, Event::WsOpened { socket });
+    seed_requests(&mut e, 1000.0);
     let (mut timer, mut at) = timers
         .into_iter()
         .find(|(_, at)| jittered(*at - 1000.0, POLL_MS))

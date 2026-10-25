@@ -232,6 +232,34 @@ impl Venue for Audit {
         self.state.cleanup.set(Some((timer, cx.now + 60_000.)));
         self.native.start(cx);
     }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.native.on_socket_event(cx, event)
+    }
+    fn on_socket_interests_released(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        epoch: safe_cex_engine::socket_lifecycle::Epoch,
+        pending: Self::Pending,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.native.on_socket_interests_released(cx, epoch, pending)
+    }
+    fn encode_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        items: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.native
+            .encode_socket_interests(store, feed, subscribe, items, emit)
+    }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         self.native.on_open(cx, socket)
     }
@@ -746,6 +774,44 @@ fn complete_startup() -> (Driver, SocketId, (TimerId, f64), Rc<State>) {
     }
     unreachable!()
 }
+fn open_for_overlap(e: &mut Driver, socket: SocketId) {
+    e.handle(START, Event::WsOpened { socket });
+    for packet in drain(e) {
+        let route = if packet.request.url.ends_with(Route::Orders.path()) {
+            Route::Orders
+        } else if packet.request.url.ends_with(Route::Positions.path()) {
+            Route::Positions
+        } else {
+            Route::Balance
+        };
+        complete(e, &packet, START, route);
+        e.drain_actions().for_each(drop);
+    }
+}
+fn reopen_for_overlap(e: &mut Driver, socket: SocketId, now: f64) -> (SocketId, f64) {
+    e.handle(now, Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .expect("actual private reconnect timer");
+    e.handle(at, Event::TimerFired { timer });
+    let socket = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(socket),
+            _ => None,
+        })
+        .expect("actual replacement private socket");
+    e.handle(at, Event::WsOpened { socket });
+    (socket, at)
+}
 fn poll_to(e: &mut Driver, tick: (TimerId, f64), route: Route) -> Packet {
     e.handle(tick.1, Event::TimerFired { timer: tick.0 });
     let mut p = take(&mut drain(e), Route::Info);
@@ -775,19 +841,20 @@ fn fill(e: &mut Driver, socket: SocketId, now: f64, id: u32) -> Vec<Packet> {
 #[test]
 fn native_live_stale_positions_keep_next_without_publication() {
     let (mut e, socket, tick, _) = complete_startup();
+    open_for_overlap(&mut e, socket);
     let p = poll_to(&mut e, tick, Route::Positions);
-    e.handle(tick.1 + 1., Event::WsOpened { socket });
+    let (_, observation) = reopen_for_overlap(&mut e, socket, tick.1 + 1.);
     let newer = drain(&mut e);
     assert!(
         newer
             .iter()
             .any(|p| p.request.url.ends_with(Route::Positions.path()))
     );
-    release(&mut e, &p, tick.1 + 2.);
+    release(&mut e, &p, observation + 1.);
     respond(
         &mut e,
         &p,
-        tick.1 + 2.,
+        observation + 1.,
         200,
         &POSITIONS.replace("\"netQuantity\":\"5\"", "\"netQuantity\":\"9\""),
     );
@@ -845,13 +912,15 @@ fn native_rejected_order_token_keeps_finish_and_suppresses_repairs() {
 }
 fn balance_overlap() -> (Driver, Packet, Rc<State>, f64) {
     let (mut e, socket, tick, state) = complete_startup();
+    open_for_overlap(&mut e, socket);
     let p = poll_to(&mut e, tick, Route::Balance);
-    e.handle(tick.1 + 1., Event::WsOpened { socket });
+    let (socket, observation) = reopen_for_overlap(&mut e, socket, tick.1 + 1.);
+    let origin = observation - 1.;
     let mut work = drain(&mut e);
-    work.extend(fill(&mut e, socket, tick.1 + 1000., 1));
-    work.extend(fill(&mut e, socket, tick.1 + 2000., 2));
+    work.extend(fill(&mut e, socket, origin + 1000., 1));
+    work.extend(fill(&mut e, socket, origin + 2000., 2));
     let mut balances = vec![];
-    let now = tick.1 + 2001.;
+    let now = origin + 2001.;
     for packet in work {
         if packet.request.url.ends_with(Route::Balance.path()) {
             balances.push(packet);
@@ -1102,13 +1171,15 @@ fn orders_selected_provider_material_original() {
 #[test]
 fn native_balance_older_than_committed_never_wins_after_two_more_discards() {
     let (mut e, socket, tick, _) = complete_startup();
+    open_for_overlap(&mut e, socket);
     let old = poll_to(&mut e, tick, Route::Balance);
-    e.handle(tick.1 + 1., Event::WsOpened { socket });
+    let (socket, observation) = reopen_for_overlap(&mut e, socket, tick.1 + 1.);
+    let origin = observation - 1.;
     let mut work = drain(&mut e);
-    work.extend(fill(&mut e, socket, tick.1 + 1000., 1));
-    work.extend(fill(&mut e, socket, tick.1 + 2000., 2));
+    work.extend(fill(&mut e, socket, origin + 1000., 1));
+    work.extend(fill(&mut e, socket, origin + 2000., 2));
     let mut balances = Vec::new();
-    let now = tick.1 + 2001.;
+    let now = origin + 2001.;
     for packet in work {
         if packet.request.url.ends_with(Route::Balance.path()) {
             balances.push(packet);
@@ -1128,35 +1199,35 @@ fn native_balance_older_than_committed_never_wins_after_two_more_discards() {
         assert_eq!(e.store().balance().total, 1005.);
         assert!(drain(&mut e).is_empty());
     }
-    let mut third = fill(&mut e, socket, tick.1 + 3000., 3);
+    let mut third = fill(&mut e, socket, origin + 3000., 3);
     let third_balance = take(&mut third, Route::Balance);
     let newer = balances.pop().unwrap();
-    release(&mut e, &newer, tick.1 + 3001.);
+    release(&mut e, &newer, origin + 3001.);
     respond(
         &mut e,
         &newer,
-        tick.1 + 3001.,
+        origin + 3001.,
         200,
         &BALANCE.replace("1005", "2005"),
     );
     assert_eq!(e.store().balance().total, 2005.);
     let corrective = take(&mut drain(&mut e), Route::Balance);
-    let fourth = fill(&mut e, socket, tick.1 + 4000., 4);
+    let fourth = fill(&mut e, socket, origin + 4000., 4);
     assert!(
         fourth
             .iter()
             .any(|p| p.request.url.ends_with(Route::Balance.path()))
     );
     for p in [corrective, third_balance] {
-        complete(&mut e, &p, tick.1 + 4001., Route::Balance);
+        complete(&mut e, &p, origin + 4001., Route::Balance);
         assert_eq!(e.store().balance().total, 2005.);
         assert!(drain(&mut e).is_empty());
     }
-    release(&mut e, &old, tick.1 + 4002.);
+    release(&mut e, &old, origin + 4002.);
     respond(
         &mut e,
         &old,
-        tick.1 + 4002.,
+        origin + 4002.,
         200,
         &BALANCE.replace("1005", "9999"),
     );
