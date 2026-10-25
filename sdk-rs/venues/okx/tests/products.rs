@@ -1455,6 +1455,59 @@ mod product_semantics {
     }
 
     #[test]
+    fn eea_composite_failed_later_page_stays_a_strict_failure() {
+        let (mut e, _) = startup(true, true);
+        e.handle(
+            4.0,
+            Event::Command(Command::Query {
+                command: 1,
+                query: Query::OrderHistory {
+                    symbol: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+            }),
+        );
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
+        let rows = (0..100)
+            .map(|index| format!(r#"{{"instId":"BTC-USD-SWAP","ordId":"{}","side":"buy","ordType":"limit","state":"filled","px":"50000","sz":"1","accFillSz":"1","cTime":"1700000000000"}}"#, 1000 - index))
+            .collect::<Vec<_>>()
+            .join(",");
+        reply(&mut e, &request, &envelope(&rows), 5.0);
+        let timer = prepared(&mut e, 5.0)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, .. } => Some(timer),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(105.0, Event::TimerFired { timer });
+        let request = prepared(&mut e, 105.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
+        reply(
+            &mut e,
+            &request,
+            r#"{"code":"51000","msg":"bad request","data":[]}"#,
+            106.0,
+        );
+        let out = prepared(&mut e, 106.0);
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+        );
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+        );
+    }
+
+    #[test]
     fn eea_composite_history_stall_is_an_explicit_incomplete_failure() {
         let (mut e, _) = startup(true, true);
         e.handle(
