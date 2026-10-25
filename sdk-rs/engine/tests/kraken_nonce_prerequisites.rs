@@ -290,6 +290,7 @@ mod serial {
         }
     }
     struct SerialProbe {
+        identity: Identity,
         plan: Option<Plan>,
         slot: Option<Slot>,
         context: Option<Context>,
@@ -310,9 +311,10 @@ mod serial {
                 cx.plan_protection_cancel_leg_context(plan, slot)
             }
             .unwrap();
-            let (_, _, claim) = Slots::new(Some(identity()), None, SlotPolicy::default())
-                .select_with_nonce(CredentialRole::Mutation, &KRAKEN)
-                .unwrap();
+            let (_, _, claim) =
+                Slots::new(Some(self.identity.clone()), None, SlotPolicy::default())
+                    .select_with_nonce(CredentialRole::Mutation, &KRAKEN)
+                    .unwrap();
             cx.request_signed_managed(
                 context.clone(),
                 None,
@@ -365,7 +367,7 @@ mod serial {
             self.timer = Some(cx.set_timer(1.));
         }
         fn on_command(&mut self, cx: &mut Cx<'_, Context>, _: Command) {
-            let slots = Slots::new(Some(identity()), None, SlotPolicy::default());
+            let slots = Slots::new(Some(self.identity.clone()), None, SlotPolicy::default());
             let (selection, identity, _) = slots
                 .select_with_nonce(CredentialRole::Mutation, &KRAKEN)
                 .unwrap();
@@ -477,8 +479,11 @@ mod serial {
             Box::new(std::iter::empty())
         }
     }
-    fn engine() -> Engine<SerialProbe> {
+    fn engine(scenario: &str) -> Engine<SerialProbe> {
+        let mut installed = identity();
+        installed.stable_id = Some(format!("kraken-prerequisite/{scenario}"));
         let mut e = safe_cex_engine::test_support::seeded_engine(SerialProbe {
+            identity: installed.clone(),
             plan: None,
             slot: None,
             context: None,
@@ -490,7 +495,7 @@ mod serial {
             responses: 0,
         });
         e.set_identities(Identities {
-            primary: Some(identity()),
+            primary: Some(installed),
             secondary: None,
         })
         .unwrap();
@@ -610,7 +615,7 @@ mod serial {
     }
     #[test]
     fn replacement_requires_its_cancel_data_and_a_recorded_native_fact() {
-        let mut e = engine();
+        let mut e = engine("serial-custody");
         let actions = e.drain_actions().collect::<Vec<_>>();
         let cancel = preparation(&actions);
         assert_eq!(e.venue().custody, vec![Err(Error::Revoked)]);
@@ -635,7 +640,7 @@ mod serial {
     }
     #[test]
     fn replacement_reserves_only_after_cancel_data_and_uses_a_higher_nonce() {
-        let mut e = engine();
+        let mut e = engine("serial-nonce-order");
         let cancel = preparation(&e.drain_actions().collect::<Vec<_>>());
         let (cancel_nonce, _) = release(&mut e, cancel, 1_003.);
         no_egress(&e.drain_actions().collect::<Vec<_>>());
@@ -651,7 +656,7 @@ mod serial {
             ("rejected", Outcome::Rejected),
             ("unknown", Outcome::Unknown),
         ] {
-            let mut e = engine();
+            let mut e = engine(body);
             let cancel = preparation(&e.drain_actions().collect::<Vec<_>>());
             release(&mut e, cancel, 1_003.);
             e.drain_actions().for_each(drop);
@@ -664,7 +669,7 @@ mod serial {
     }
     #[test]
     fn released_cancel_transport_failure_is_unknown_and_never_resends() {
-        let mut e = engine();
+        let mut e = engine("serial-transport-failure");
         let cancel = preparation(&e.drain_actions().collect::<Vec<_>>());
         release(&mut e, cancel, 1_003.);
         e.drain_actions().for_each(drop);
@@ -689,7 +694,7 @@ mod serial {
     fn execution_or_changed_provenance_during_cancel_preserves_accepted_cancel_and_suppresses_place()
      {
         for field in ["filled", "price", "amount", "kind", "trigger", "closed"] {
-            let mut e = engine();
+            let mut e = engine(field);
             let cancel = preparation(&e.drain_actions().collect::<Vec<_>>());
             release(&mut e, cancel, 1_003.);
             e.drain_actions().for_each(drop);

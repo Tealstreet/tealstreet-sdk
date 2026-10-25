@@ -56,6 +56,33 @@ an existing higher target merge both maxima atomically; reverse release cannot
 move the floor down; UINT64_MAX stays exhausted; unrelated subjects are unchanged;
 failed takeover changes no maxima; no new dispatch reservation before takeover.
 
+### Concrete host coverage gap before the takeover source cut
+
+At incoming 8fcedfbbdfc, Kraken Signer::new retains only the decoded secret and
+digest. Signer::nonce calls crypto::nonce::kraken, which reaches the exported
+engine reserve_kraken_legacy returning a bare u64. None retains an issuer or
+physical-work lease. All three boundaries must participate in tracking; a new
+tracked entry cannot silently certify callers of the old bare entry.
+
+The native Transport::request returns unit. Its NetworkTransport implementation
+spawns preparation and drops the handle returned by bound.dispatch, so the host
+currently has no joined retirement receipt for that legacy request. In the JS
+host, dispose aborts controllers then clears requests; it does not wait for every
+transport promise to settle. Neither operation proves a generation drained.
+Custom transports and old hosts without the tracking contract remain unsupported
+for takeover, while their existing unfenced legacy requests continue unchanged.
+
+The next shared source review must bind issuer registration and every reservation
+to a host generation, with an exact request-to-lease handoff through preparation,
+signing and transport retirement. Lost or merely dropped leases must keep the
+fence closed. Old raw entry use without that handoff marks the generation
+untracked; it never mints drain evidence. Host completion proves resource drain
+only, retaining uncertain venue outcomes. Only a complete reviewed generation
+can produce the opaque fenced/drained capability consumed by the atomic import;
+the import reads both maxima from the same locked store, never caller numbers.
+This audit is not implementation or host-drain proof. Do not expose a takeover
+switch until the native and WASM host adapters satisfy these conditions.
+
 ## B. Approved owner/window and terminal policy
 
 Native Futures sends have timeout_ms=None; Spot explicitly sets 20,000ms per
