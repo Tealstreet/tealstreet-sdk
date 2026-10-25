@@ -891,7 +891,13 @@ impl<P> Cx<'_, P> {
         plan: &Plan,
         slot: &Slot,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, Some(crate::classify::Intent::Cancel), true, false)
+        self.make_plan_leg_context(
+            plan,
+            slot,
+            Some(crate::classify::Intent::Cancel),
+            true,
+            false,
+        )
     }
 
     /// Handoff, initial or ready custody over this Plan's next issue.
