@@ -100,3 +100,21 @@ Cut 1 landed as `35ae6c6b254`. This independent cut now plain-merges that
 actual landing, retaining its schedule change and the incoming README rows.
 Only the report iterator production delta and its unchanged control remain
 own SDK changes; no independent savings are summed into a combined claim.
+
+## Paired actual cut-1 landing verification
+
+Baseline actual landing `35ae6c6b254` versus source `b989e762178`, with
+Rust 1.99.0, Binaryen 132 and identical profiles/jobs=4:
+
+| Family | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| Bitget | 1,473,607 | 1,473,439 | -168 |
+| Bybit | 1,397,892 | 1,397,796 | -96 |
+
+Web and Node agree. Raw deltas are -581 and -112 bytes respectively.
+Fresh composed report controls pass seven serial and six declared cases;
+strict all-target Clippy passes both configurations, formatting passes, and
+full bans/ratchets pass on the source head. Both completed size targets and
+the review target were removed; artifacts, tables and logs remain outside Git.
+This follow-up freezes documentation only; the two own SDK blobs remain exact
+to green `231cd805454`, with no manual non-documentation merge hunk.
