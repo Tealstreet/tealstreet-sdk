@@ -343,14 +343,14 @@ fn ticker_indexes_follow_reordered_market_and_ticker_seeds_and_last_duplicates()
         },
     )));
     engine.start(1_000_000.0);
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_000_000.0);
     reply(
         &mut engine,
         actions,
         "/contracts",
         &serde_json::json!({"code":"00000","data":[btc,eth]}).to_string(),
     );
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_000_000.0);
     let socket = actions
         .iter()
         .find_map(|a| match a {
@@ -364,7 +364,7 @@ fn ticker_indexes_follow_reordered_market_and_ticker_seeds_and_last_duplicates()
         "/tickers",
         r#"{"code":"00000","data":[{"symbol":"ETHUSDT","lastPr":"200"},{"symbol":"BTCUSDT","lastPr":"100"},{"symbol":"BTCUSDT","lastPr":"110"}]}"#,
     );
-    engine.drain_actions();
+    let _ = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_000_000.0);
     message(
         &mut engine,
         socket,
@@ -386,14 +386,14 @@ fn ticker_indexes_follow_reordered_market_and_ticker_seeds_and_last_duplicates()
             symbol: "reload".into(),
         }),
     );
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_000_000.0);
     reply(
         &mut engine,
         actions,
         "/contracts",
         &serde_json::json!({"code":"00000","data":[eth,btc]}).to_string(),
     );
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_000_000.0);
     let socket = actions
         .iter()
         .find_map(|a| match a {
@@ -415,7 +415,7 @@ fn ticker_indexes_follow_reordered_market_and_ticker_seeds_and_last_duplicates()
         "/tickers",
         r#"{"code":"00000","data":[{"symbol":"BTCUSDT","lastPr":"300"}]}"#,
     );
-    engine.drain_actions();
+    let _ = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_000_000.0);
     assert_eq!(
         engine.store().ticker("BTCUSDT").unwrap().last,
         112.0,

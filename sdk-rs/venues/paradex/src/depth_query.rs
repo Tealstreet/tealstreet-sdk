@@ -99,6 +99,7 @@ impl Paradex {
         if cx
             .request_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 format!(
                     "{}/orderbook/{}?depth={}",

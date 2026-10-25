@@ -63,6 +63,9 @@ pub(crate) const BYBIT: CodeTable = CodeTable {
             Verdict::Satisfied(SatisfiedIntent::Setting),
             Intent::Setting,
         ),
+        // Duplicate orderLinkId on create: the order may already exist (R2).
+        only(Key::Int(10014), Verdict::Unknown(None), Intent::Place),
+        only(Key::Int(110072), Verdict::Unknown(None), Intent::Place),
         // "Order does not exist" (derivatives, spot): the order is not open.
         // Not a Cancelled transition; the engine fences it for reconciliation.
         only(
