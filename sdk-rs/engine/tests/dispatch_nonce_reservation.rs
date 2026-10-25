@@ -37,6 +37,10 @@ struct Trace {
     stamp_floor: Option<safe_cex_engine::StampFloor>,
     releases: Vec<safe_cex_engine::SigningRelease>,
     command_root: Option<safe_cex_engine::request_context::Context>,
+    #[cfg(feature = "session-bearer")]
+    bearer_revision: Option<u64>,
+    #[cfg(feature = "session-bearer")]
+    bearer_session: Option<safe_cex_engine::request_context::Session>,
 }
 struct Recipe {
     owner: u8,
@@ -154,7 +158,40 @@ impl<const SUPPORTED: bool, const CAPABILITY: u8> Venue for NonceProbe<SUPPORTED
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         self.pacing.as_slice()
     }
+    #[cfg(feature = "session-bearer")]
+    fn session_bearer(&self, _: u64) -> safe_cex_engine::request_context::SessionBearer {
+        use safe_cex_engine::request_context::{SecretHeaderValue, SessionBearer, SessionHeaders};
+        match self.trace.lock().unwrap().bearer_revision {
+            Some(revision) => SessionBearer::Ready {
+                headers: SessionHeaders::authorization(
+                    SecretHeaderValue::new(format!("Bearer revision-{revision}")).unwrap(),
+                ),
+                revision,
+            },
+            None => SessionBearer::NotReady,
+        }
+    }
+    #[cfg(feature = "session-bearer")]
+    fn session_bearer_revision(&self, _: u64) -> Option<u64> {
+        self.trace.lock().unwrap().bearer_revision
+    }
     fn start(&mut self, cx: &mut Cx<'_, u8>) {
+        #[cfg(feature = "session-bearer")]
+        let bearer = if self.trace.lock().unwrap().bearer_revision.is_some() {
+            let session = cx
+                .open_session(safe_cex_engine::request_context::SessionPolicy {
+                    credential: None,
+                    repeat_safe: true,
+                    private_egress: None,
+                })
+                .unwrap();
+            self.trace.lock().unwrap().bearer_session = Some(session.clone());
+            Some(session)
+        } else {
+            None
+        };
+        #[cfg(not(feature = "session-bearer"))]
+        let bearer = None;
         for owner in 0..self.count {
             let slots = Slots::new(
                 Some(Identity {
@@ -192,7 +229,7 @@ impl<const SUPPORTED: bool, const CAPABILITY: u8> Venue for NonceProbe<SUPPORTED
             };
             if let Err((_, error)) = cx.request_signed_managed(
                 context,
-                None,
+                bearer.as_ref(),
                 Method::Post,
                 format!("https://nonce.test/{owner}"),
                 None,
@@ -1149,4 +1186,47 @@ fn a_changed_nonce_selector_refuses_before_release_without_advancing_the_floor()
         earlier_packet.nonce()
     );
     NONCE_SELECTOR.store(true, Ordering::SeqCst);
+}
+
+#[cfg(feature = "session-bearer")]
+#[test]
+fn bearer_revision_fence_precedes_nonce_floor_and_preserves_nonce_repair_credits() {
+    let mut engine = unstarted_fixture::<0>("nonce-bearer/revision-floor", 2, None);
+    engine.venue().trace.lock().unwrap().bearer_revision = Some(1);
+    engine.start(START);
+    let mut routes = drain(&mut engine).routes;
+    routes.sort_by_key(|route| route.owner);
+    let a = ready(&mut engine, &routes[0], 1_001.);
+    let a = bind(&mut engine, a, 1_002.);
+    let b = ready(&mut engine, &routes[1], 1_003.);
+    let b = bind(&mut engine, b, 1_004.);
+    assert!(b.nonce() > a.nonce());
+    assert_eq!(send(&mut engine, &b, 1_005.), b.nonce());
+    let mut stale = a;
+    for revision in 2..=10 {
+        let now = 1_006. + (revision - 2) as f64 * 3.;
+        engine.venue().trace.lock().unwrap().bearer_revision = Some(revision);
+        assert_eq!(engine.claim_http(now, stale.permit), Err(Error::Stale));
+        assert_eq!(engine.venue().trace.lock().unwrap().releases.len(), 1);
+        let mut batch = drain(&mut engine);
+        assert!(batch.work.is_empty() && batch.bound.is_empty() && batch.failed.is_empty());
+        assert_eq!(batch.routes.len(), 1);
+        let route = batch.routes.remove(0);
+        assert_eq!(route.token.attempt(), stale.permit.attempt());
+        let work = ready(&mut engine, &route, now + 1.);
+        stale = bind(&mut engine, work, now + 2.);
+        assert!(stale.nonce() > b.nonce());
+        assert!(
+            stale
+                .request
+                .headers
+                .iter()
+                .any(|(name, value)| *name == "Authorization"
+                    && value == &format!("Bearer revision-{revision}"))
+        );
+    }
+    let repaired_nonce = send(&mut engine, &stale, 1_033.);
+    assert!(repaired_nonce > b.nonce());
+    assert_eq!(engine.venue().trace.lock().unwrap().releases.len(), 2);
+    assert!(engine.venue().errors.is_empty());
 }

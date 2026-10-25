@@ -26,13 +26,13 @@ def modes():
         # metadata-freshness OFF control: standalone Bitget with test support.
         ('order-locks', 'polling-control', 'test-support'): ['metadata freshness OFF control'],
         # dispatch-nonce OFF control keeps ordinary Plan/read signing enabled.
+        # Seeded serial-plans OFF control: never add serial-plans here. Once a family
+        # adopts, workspace tests unify it on, so this row alone proves the off build.
         ('http-plans', 'order-locks', 'test-support'): ['dispatch nonce OFF control', 'serial plans OFF control'],
     }
     grouped[('metadata-freshness', 'test-support')] = ['metadata-only CI control']
     grouped[('http-plans', 'metadata-freshness', 'order-locks', 'test-support')] = [
         'metadata Plan CI control']
-    # Seeded serial-plans OFF control: never add serial-plans here. Once a family
-    # adopts, workspace tests unify it on, so this row alone proves the off build.
     # No family enables serial Plans before adoption; keep them compiled and tested.
     grouped[('http-plans', 'order-locks', 'serial-plans', 'test-support')] = ['serial Plan control']
     # Condition waits imply serial-plans; no family enables them before adoption.
