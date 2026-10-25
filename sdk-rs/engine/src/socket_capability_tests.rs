@@ -22,8 +22,9 @@ type Full = Handoff<true>;
 type Narrow = Handoff<false>;
 impl<const HANDOFF: bool> Venue for Handoff<HANDOFF> {
     type Pending = Counted;
-    const SOCKET_CAPABILITIES: crate::socket_lifecycle::SocketCapabilities =
-        crate::socket_lifecycle::SocketCapabilities { handoff: HANDOFF };
+    fn socket_capabilities() -> crate::socket_lifecycle::SocketCapabilities {
+        crate::socket_lifecycle::SocketCapabilities { handoff: HANDOFF }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Counted>) {
         let feed = cx
             .register_socket_feed(FeedPolicy {
@@ -202,11 +203,11 @@ fn construction_installs_the_declared_capabilities() {
     assert!(!started::<false>().io.core.socket_capabilities.handoff);
     assert_eq!(
         started::<true>().io.core.socket_capabilities,
-        <Full as Venue>::SOCKET_CAPABILITIES
+        <Full as Venue>::socket_capabilities()
     );
     assert_eq!(
         started::<false>().io.core.socket_capabilities,
-        <Narrow as Venue>::SOCKET_CAPABILITIES
+        <Narrow as Venue>::socket_capabilities()
     );
 }
 

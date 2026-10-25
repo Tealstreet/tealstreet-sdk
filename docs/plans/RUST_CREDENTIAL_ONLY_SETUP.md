@@ -1,10 +1,14 @@
 # Credential-only trusted setup
 
-Status: PLAN, revision 3, CLEAR (kuhwxi, at `8d5914ee117`). It folds in kuhwxi's reviews (B1-B5, M1-M2, then R1,
-X1, X2), fe7lgm's review (points 1-5) and ddi2il's ruling on G1 and G3. No source before CLEAR.
+Status: PLAN, revision 4. Phase 2 (D1 + D2, D4 `MissingKey`) landed as #2132 (`a2c914e2b24`).
+Revision 4 records zs5e83's G2-G6 answers (GRVT recipe plan `4e6c4f4f3bd`,
+`deaa151acb1`) and replaces the open G3 and G6 with D3's typed login intent and
+D6's per-operation Optional absence. ddi2il disposed revision 4 APPROVED on
+this design, effective at kuhwxi's CLEAR; any later design change goes back to
+ddi2il. Revision 3 was CLEAR (kuhwxi, at `8d5914ee117`).
 Owner: shared credential core (m26ps4). First consumer: GRVT, whose recipe is
 zs5e83's (plan `c13acb15e56` on `feat/rust-grvt-write-funnel-plan`). This plan
-does not edit that recipe; G2, G4, G5 and G6 stay open for zs5e83.
+does not edit that recipe; G2, G4 and G5 are recorded as GRVT constraints.
 
 ## Problem
 
@@ -166,9 +170,25 @@ construction, and Required is unchanged.**
 - **Existing families** ignore `SetupFacts`. Native per-family builders that
   read `options.key` (`registry/src/lib.rs`, `asterdex_setup.rs`) keep their
   presence gates; only the `Secret` wrapping changes.
-- **G3** (Empty-key login selection) may revise D3. Under the B3 model, Empty
-  gives `{credential: "", signing: ...}`, which is invalid for both
-  validators. It gates phase 3.
+- **Typed login intent (G3, decided).** A named shared seam turns trusted
+  `SetupFacts` into a non-secret `PrimaryLogin`, never an `Identity` or
+  `KeyRef`:
+  - `Absent` gives no login intent; the venue keeps `config.invalid` and
+    sends no login.
+  - `Empty` gives `PrimaryLogin::Empty`. `Slots::new(Some(PrimaryLogin::Empty),
+    None, SlotPolicy::default()).select(SessionAuth)` gives the Primary
+    selection and its `session_egress`, as native selects over `Some("")`
+    today. The venue renders its known `api_key ""` login with Policy
+    credential `None`, a real keyless Session with Primary `private_egress`,
+    and the existing managed unsigned login: no `Present`, no provider batch,
+    no empty-ref validation exception.
+  - `Blank` and `Nonblank` give `PrimaryLogin::Installed`: the installed
+    credential-only primary, whose login `Present`s the actual credential
+    bytes, never trimmed.
+  - `SetupFacts::primary_login(&self) -> Option<PrimaryLogin>` is the only
+    constructor. It is trusted setup output, never parsed from caller JSON.
+  - D3 never makes a credential-absent `Identity` valid and never fabricates
+    a provider ref.
 
 **D4: signing is checked per operation, not per selection, on every path
 (B4).**
@@ -182,8 +202,9 @@ construction, and Required is unchanged.**
   (#2109) on every path, beside a secondary too (C4l): one `config.invalid`
   notice, `StartupFailed` during startup, a socket role that never
   reconnects, and every later signed staging refused, including steps that
-  only present the key without a signature. For an Optional family that
-  scope is open (G6).
+  only present the key without a signature. That latch is for Required
+  families and for refs setup declared installed; an Optional family's
+  intentional absence is D6.
 - Capability admission (`Cx::can_sign`) refuses an absent signing ref as
   `MissingKey`; a missing extra ref stays `InvalidRequest` in any need order.
   An admission refusal does not latch; the venue returns it.
@@ -191,6 +212,53 @@ construction, and Required is unchanged.**
   they stay available.
 - A family wanting earlier typed admission, before queue effects, does it in
   its own command admission (GRVT: G2).
+
+**D6 (G6, decided): intentional absence in an Optional family refuses only
+the signed operation.**
+- **Disposition (ddi2il):** a deliberately absent signing ref in an Optional
+  family refuses that operation with a typed reason, `NotSent`, and no
+  account latch. Unsigned operations (key-only `Present` login and refresh,
+  session-authenticated unsigned work, second-slot reads) and startup stay
+  available. Required families keep #2109's `MissingKey` latch unchanged.
+- **Shape:** `apply_to_identities`, on the Optional branch that accepts a
+  credential-only primary, records the intentional absence on the `Identity`
+  as a private flag. It has `serde(skip)`, so injected JSON can never set it
+  (C8 still refuses injected slots without `signing`). `signing_ref()` then
+  returns a new `SignError::SigningNotConfigured`, with venue error
+  `InvalidInput` / `NotSent` and its own static message. Every other absence
+  stays `MissingKey`.
+- **Where the flag comes from (kuhwxi carry A, ddi2il ruling option 2):**
+  the flag is never transported, and `serde(skip)` drops it on any hop.
+  Because C8 refuses injected identities without `signing` for every family,
+  a credential-only identity reaches an engine only through trusted local
+  setup in the engine-owning realm. The flag is derived there, by
+  `apply_to_identities` from the family's trusted `IdentitySetupPolicy`. It
+  is set only on an installed primary whose `signing` is `None`, and never
+  from anything in a payload. Phase 3 adds no external acceptance surface.
+  Accepting an Optional credential-only identity across a serialized hop,
+  and its round-trip RED, belongs to the hosted/injected GRVT step, and only
+  if that step proves it needs one (zs5e83's G5: the intended path is the
+  in-realm hosted `LocalSetup`).
+- **Injection (carry B):** JSON carrying the flag's field name cannot set
+  it. `Identity` ignores it, and a pin fixes that behaviour so a later serde
+  change can't open it.
+- **Equality (carry C):** the flag takes part in `Identity`'s `PartialEq`, so
+  a flagged and an unflagged identity never compare equal (`primary_owns`,
+  `matches_identity`); a pin fixes this.
+- **Dispatch:** `SigningNotConfigured` is a per-request preparation failure.
+  It never sets `credential_refused`, never latches and never emits
+  `config.invalid` or `StartupFailed`. `Cx::can_sign` returns the same typed
+  error at admission.
+- **Not allowed:** suppressing every `MissingKey` because the policy is
+  Optional, mapping it to a generic error, or a venue exception. A real
+  provider `MissingKey` for a ref that setup installed still latches per
+  #2119 (inline `sign_ready`), Optional or not.
+- **Serial Plans (fe7lgm via zs5e83):** the operation refuses typed
+  `NotSent`; a serial command's terminal follows its Plan journal, prior
+  effects included, with no whole-command `NotSent` overclaim.
+- **Sockets:** a failed signed socket step still stops that operation and
+  does not reconnect in a loop. An Optional family's own login is unsigned
+  (D3), so the latch-free refusal never touches it.
 
 **D5: one evaluator per path, with a parity matrix.**
 - Local WASM and native setup both compute `KeyPresence` in Rust, from the key
@@ -216,6 +284,12 @@ Shared-core REDs. Each fails on `ad0b74afdf8` for the stated reason.
 | C7 | A Required family's key-only setup gives today's pinned terminal, with no venue code change. Only an Optional fixture family receives a slot that `validate_credential()` accepts at construction | no policy |
 | C8 | Remote, delegated and hosted identities without `signing`, or with `null`, are refused for every family at the options parse with today's terminal | after D1 they would parse as `None` |
 | C9 | `SetupFacts` `Debug` and serde output contain only the variant name | no type |
+| C10 | Login intent: `primary_login()` maps Absent to `None`, Empty to `PrimaryLogin::Empty` and Blank/Nonblank to `Installed`. `Slots<PrimaryLogin>` over Empty selects Primary for SessionAuth with `session_egress`. Pins: Empty with and without the scalar and with secondary metadata, exact login body and headers, Prepare Primary and the final Bind/Claim. Absent keeps `config.invalid` with no login | no seam |
+| C11 | Optional absence: a test that deliberately bypasses G2 reaches absent-ref preparation and fails `SigningNotConfigured` (`InvalidInput` / `NotSent`). There is no `config.invalid`, `StartupFailed` or latch; a real login `Present` plus unsigned cancel and leverage still succeed afterwards, including during startup | today it latches through `MissingKey` (C4s/C4l path) |
+| C11p | Serial Plan: an unsigned call settles, then the absent-ref placement fails in preparation. The operation and command terminals are pinned, there is no account latch, and later unsigned work succeeds | same |
+| C11i | Optional family with an installed ref: a provider `MissingKey` on inline `sign_ready` still latches (#2119), and C4s/C4l stay unchanged for Required families | control: green before and after |
+| C11r | Serialization boundary (carry A, option 2): (a) a serialized Optional credential-only identity is still refused at the options parse (C8, every family); (b) trusted local setup derives the flag only for an installed primary with `signing` `None` under Optional policy, giving `SigningNotConfigured`; the same setup under Required gives `MissingKey`; a serialized copy never carries the flag back | no flag or derivation |
+| C11j | Injection and equality (carries B, C): JSON naming the flag's field leaves it unset (pinned as ignored), and a flagged identity is not equal to an otherwise identical unflagged one | no flag |
 
 Behaviour-neutral controls, green before and after:
 
@@ -259,9 +333,11 @@ terminal.
 2. D1 + D2, with D4's `MissingKey` refusal: the private `Option` cutover,
    the signing policy, the external boundary and the bans rule. C1, C4-C8
    (with C4l) and K1-K6 go GREEN.
-3. D3 + D5: the `Option<Secret>` key, `KeyPresence` and `SetupFacts`. C2, C3
-   and C9 go GREEN. **This phase does not start until G3 and G6 are answered** with
-   zs5e83. If the answer reopens D3, D3 is revised first.
+3. D3 + D5 + D6: the `Option<Secret>` key, `KeyPresence`, `SetupFacts`, the
+   typed `PrimaryLogin` seam and the Optional `SigningNotConfigured` refusal.
+   C2, C3, C9, C10 and C11 (with C11p and C11i) go GREEN. Originals start
+   after kuhwxi CLEARs revision 4. Gates add Bybit and Bitget sizes on the
+   composed tree.
 4. Docs: a `RUST_CUTOVER_CALLERS.md` row saying external providers may omit
    `signing` only for Optional families, and the `RUST_SIGNER.md` identity
    contract.
@@ -275,30 +351,26 @@ Every phase's gates:
 Each phase also needs an independent review that answers: "Is this a
 per-venue fix of a cross-cutting concern?"
 
-## Open questions for GRVT (zs5e83, when the recipe resumes)
+## GRVT answers (zs5e83) and recorded constraints
 
-- **G2: placement admission.** Refuse placement typed in GRVT's command
-  admission, using `signing_ref()` and the declared Secp256k1Digest
-  capability, before queue effects. kuhwxi's view: the D4 `NotSent` floor is
-  safe, but GRVT should refuse earlier. Whether admission alone keeps work
-  from the latch is part of G6.
-- **G3: Empty login (gates phase 3).** Under `KeyPresence::Empty` the slot is
-  `{credential: "", signing: None}`, and it fails both validators. Which
-  Selection and `session_egress` does the `api_key ""` login use? One option
-  is a primary-slot Selection built from the Empty fact with no material. That
-  is a further shared-core change and may revise D3.
-- **G4: Blank keys.** A whitespace-only key installs a credential ref
-  (`trim_credential=false`) and logs in with those exact bytes; identity
-  eligibility reads Blank. Confirm the native diagnostic and I/O precedence.
-- **G5: legacy callbacks.** Do any GRVT remote, payload or delegated shapes
-  need credential-only support? D2 refuses them by default.
-- **G6: latch scope for an Optional family (gates phase 3 and GRVT
-  adoption).** Today one signed attempt on a credential-only primary latches
-  all later signed staging (D4), including key-only presentation and session
-  steps, second-slot reads and startup. For an Optional family an absent key
-  is a valid state, which contradicts the per-operation check D4 is named
-  for. Options:
-  admission refuses first so nothing reaches the latch (G2); the latch skips
-  `signing_ref()` absence for an Optional primary; or the latch narrows to
-  work that carries a signing operation. No decision yet; settled with
-  zs5e83 and kuhwxi when the GRVT recipe resumes.
+G3 and G6 are decided above (D3, D6).
+
+- **G2 (GRVT owns):** placement and replacement check the selected signing
+  ref and the declared Secp256k1Digest capability in command or Preflight
+  admission, before the queue, builder work, provisional Store effects or any
+  cancel preceding a replacement. There is no blanket Mutation gate: key-only
+  CancelOrders, CancelSymbolOrders and SetLeverage stay unsigned and
+  available. A typed unreleased failure belongs to that owner; record any
+  changed pre-queue failure order. Preparation still rechecks (D6); admission
+  is not a substitute.
+- **G4:** native `private_start` returns first for `public_data_only`. Login
+  respects login_pending, authentication_failed and login_retry before the
+  key check. `None` gives `config.invalid` with no login; `Some("")` and
+  whitespace serialize exactly and log in on Primary, never trimmed.
+  `identity.rs` refuses public-only, `None`, empty and trim-blank before the
+  request. Classification uses `str::trim` before policy (NEL versus BOM).
+  Scalar presence never manufactures credential eligibility.
+- **G5:** no GRVT legacy remoteSigner, payloadSigner or delegated callback
+  needs credential-only support; those boundaries stay (D2 refuses them). The
+  hosted `LocalSetup` with an API key and no scalar is the intended
+  credential-only path; caller-supplied external `Identities` JSON is not.
