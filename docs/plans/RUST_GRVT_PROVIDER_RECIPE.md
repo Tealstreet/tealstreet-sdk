@@ -393,8 +393,8 @@ before GRVT source, and he accepted them as plan fit, not source clearance.
   reviewed signature criterion, not a key-only callback bypass.
 - **G6, Optional-family latch:** an intentionally absent Optional signing ref
   is a per-operation limitation, not an account-wide missing credential.
-  m26ps4 will propose an operation-scoped distinction: that owner gets the
-  typed unreleased failure without poisoning later login Present/refresh,
+  The overseer approved the operation-scoped distinction: that owner gets
+  a typed NotSent refusal without poisoning later login Present/refresh,
   unsigned Session work, secondary operations or startup. Admission normally
   refuses placement earlier, but a late absence must also be safe. Required
   families and an actual MissingKey for a ref declared installed keep #2109's
@@ -406,8 +406,9 @@ G6 controls deliberately reach absent-ref prepare past G2, then prove real
 login Present and unsigned cancel/leverage still succeed, with no account
 latch/StartupFailed caused by intentional Optional absence. Keep Required-
 family and declared-installed-ref missing-key latch controls as positives.
-m26ps4 owns revision 4 of RUST_CREDENTIAL_ONLY_SETUP.md after phase-2/D1 lands;
-kuhwxi reviews source and ddi2il disposes of G6 before GRVT adoption. G2-G6
-answers do not bypass those shared gates. Any generic engine PR measures
-Bybit and Bitget on its composed tree. No build, source authorization or push
+m26ps4 records the approved G6 disposition in revision 4 of
+RUST_CREDENTIAL_ONLY_SETUP.md after phase-2/D1 lands; kuhwxi reviews its source.
+The behavior ruling is closed, while shared plan/source and consumer controls
+still gate GRVT adoption. G2-G6 answers do not bypass those gates. Any generic
+engine PR measures Bybit and Bitget on its composed tree. No build, source authorization or push
 is inferred from resuming this plan.

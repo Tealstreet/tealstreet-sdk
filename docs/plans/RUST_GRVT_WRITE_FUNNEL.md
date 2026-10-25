@@ -391,3 +391,8 @@ resend/status exemption and credential-only setup remain adoption gates.
 RUST_GRVT_PROVIDER_RECIPE.md records G2-G6 consumer answers accepted by m26ps4
 as plan fit: he owns the Empty login-intent seam and the proposed Optional
 per-operation absence/latch distinction. No source clearance is inferred.
+
+The overseer has approved G6: intentional Optional signing absence refuses
+only the signed operation, typed NotSent, with no account latch; unsigned
+operations remain usable. Required-family MissingKey latching remains #2109.
+m26ps4 records the shared revision and kuhwxi reviews its source before adoption.
