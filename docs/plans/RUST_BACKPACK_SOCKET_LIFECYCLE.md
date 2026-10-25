@@ -1,7 +1,8 @@
 # Backpack public and private socket lifecycle
 
 Status: plan/originals and bounded runtime SOURCE/API CLEAR; applied for scoped
-qualification. Further fixture review, paired sizes and frozen CI remain gates.
+qualification complete, including paired sizes. Frozen-head CI and auditor GO
+remain gates.
 Original baseline is actual landing tip34999f973f9ac9581cd4342d5cf23e4fa06c0142,
 which includes account-read #2139 at3f2c90991c26cbf639a5001095bea962c9e1e295.
 Owner codex-mxb4mq; native/API reviewer codex-hcmq3f. Runtime, Cargo features, inventories and CI remain unchanged at the original
@@ -325,3 +326,36 @@ reconciliation_created_at_cannot_invalidate_pending_cancel_acknowledgements
 replaces duplicate Opened2100 with an actual Close/retry-at/new socket/Open and
 prepared read at that observation time. ORDER.createdAt1000, last_update1000,
 all financial assertions and the original cancellation request/ACK are unchanged.
+
+## Committed source and first-source paired measurements
+
+Source commit c47a5f83e7d, composed by plain merge at4df579711ee on actual
+0a8c9625c497. hcm committed source/native/API/fixture/map carry is CLEAR.
+All18 own paths and5980 incoming-unowned paths were independently verified;
+only CALLERS resolved manually as entire incoming plus exact own suffix once.
+Both socket count1 sites and the Backpack socket-family row are removed; all
+foreign inventory entries/order and request/signing/credential maps stay exact.
+All534 incoming assertions and original19 entire prefix remain intact.
+
+On that actual composition:377 native PASS,0FAIL,1pre-existing ignored across
+27targets; strict all-target Backpack Clippy, selected-file formatting and full
+bans/ratchets PASS. The cleared forwarding formatter also inserts an optional
+FnMut trailing comma; it is behavior-neutral, not literally token-identical.
+
+Four sequential fresh-target builds used Rust1.99.0, wasm-bindgen0.2.129,
+wasm-opt132, CARGO_BUILD_JOBS=4, BINARYEN_CORES=4 and
+SAFE_CEX_WASM_OPT=required. Commands were the unchanged harness/build.sh
+(combined) and harness/build.sh --venue backpack. Each tree's target was deleted
+immediately after its measurement; sources/logs/artifacts remain outside Git.
+Web and Node each produced the same bytes and SHA256 for each row.
+
+| Bundle | Bare0a8c bytes | Composed4df bytes | Delta | Budget | Composed headroom |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Backpack | 1,092,442 | 1,159,729 | +67,287 | 1,343,488 | 183,759 |
+| Combined | 14,034,260 | 14,053,513 | +19,253 | 14,155,776 | 102,263 |
+
+Receipt: /tmp/codex-backpack-socket-measurement.json, with exact command/env,
+source/tree pins, tool versions, web/Node artifact SHA256s and cleanup proof.
+Native/strict/bans receipt: /tmp/codex-backpack-socket-composed-qualification.json.
+No generic engine source is changed, so this slice requires Backpack/combined,
+not additional Bybit/Bitget measurements. Frozen-head CI and auditor GO remain.

@@ -452,4 +452,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Serial single-call schedule construction | Local cut; paired measurements and exact-patch review pending | Before changing serial topology construction or declared-admission error precedence. | [RUST_SERIAL_SINGLE_CALL_SCHEDULE.md](RUST_SERIAL_SINGLE_CALL_SCHEDULE.md) |
 
 | Journal report iterator simplification | [RUST_JOURNAL_REPORT_ITERATORS.md](RUST_JOURNAL_REPORT_ITERATORS.md) | codex-ih35js | Local measured cut after Bitget slice 3; exact review required. |
-| Backpack public and private socket lifecycle | Plan/API CLEAR; originals under review | Before adopting Backpack feed epochs/interests, native private auth lifecycle, or enabling managed-sockets. | [RUST_BACKPACK_SOCKET_LIFECYCLE.md](RUST_BACKPACK_SOCKET_LIFECYCLE.md) |
+| Backpack public and private socket lifecycle | Source/API/native CLEAR; local gates and paired sizes green; CI pending | Before adopting Backpack feed epochs/interests, native private auth lifecycle, or enabling managed-sockets. | [RUST_BACKPACK_SOCKET_LIFECYCLE.md](RUST_BACKPACK_SOCKET_LIFECYCLE.md) |
