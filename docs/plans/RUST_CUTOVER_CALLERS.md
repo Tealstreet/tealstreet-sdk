@@ -8580,3 +8580,29 @@ cannot schedule recovery or issue another observation. Native rows, partial
 catalogue repair, live ticker overlay, private-startup eligibility and retry
 jitter/counters stay unchanged. Account, trading, signing and socket production
 remain outside this adoption. Only the shared public-seed raw HTTP site is pruned.
+
+## AsterDEX managed public reads and clock
+
+AsterDEX's public reads and its `/time` clock now go through engine read
+Contexts ([RUST_ASTERDEX_REQUEST_CONTEXT.md](RUST_ASTERDEX_REQUEST_CONTEXT.md),
+remaining-funnel slice 1). This covers FetchOrderBook, FetchCandles, startup
+exchangeInfo, the 24 h ticker seed, open interest and the keyless leverage
+brackets. Keyless public trades and every signed request keep their native path
+until their own slices.
+
+- **Read bound.** Each public read has a 20 s bound, retries included. Before,
+  it had none beyond the host default. An unanswered read now fails as a typed
+  `timeout`, and the open-interest and ticker refreshes resume after their
+  native delay instead of stalling.
+- **Retries.** Transport loss and retryable 429/5xx still retry up to three
+  times after 1, 2 and 3 s, now with engine permission under the original
+  bound. Startup discovery still never transport-retries. A resend due after the
+  bound fails as a timeout.
+- **Typed errors.** FetchOrderBook and FetchCandles failures keep the engine's
+  error kind (`network`, `timeout`, `internal`) instead of plain text. Native
+  messages for negative envelopes, malformed rows and HTTP status are unchanged.
+- **Clock.** Each of the four `/time` attempts is its own 5 s Background read.
+  Attempts 1-2 go direct and 3-4 through the public CORS egress, as before.
+  A full or refused context counts as a failed attempt.
+- **Completion.** FetchOrderBook and FetchCandles complete once, through their
+  command Context. A late or duplicate response completes nothing.

@@ -6,13 +6,30 @@ use safe_cex_engine::Level;
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
-use safe_cex_engine::{Cx, Method, RequestRoute, Response, TimerId, Venue};
+use safe_cex_engine::request_context::{
+    Context, Egress, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
+};
+use safe_cex_engine::{Cx, ErrorKind, Method, Response, TimerId, Venue, VenueError};
 use serde::Deserialize;
 
 use crate::sign::{Query, Recipe, Version};
 use crate::{AsterDex, Pending, reset_pending};
 
 const CLOCK_INTERVAL_MS: f64 = 300_000.0;
+/// One `/time` attempt's own bound, as the host timeout it replaces.
+const CLOCK_TIMEOUT_MS: u32 = 5_000;
+const READ_TIMEOUT_MS: u32 = 20_000;
+
+/// Unsigned public reads: the engine owns the bound and retry eligibility.
+pub(crate) fn public_read_policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: READ_TIMEOUT_MS,
+        pacing: None,
+        retry: RetryPolicy::ReadFailure,
+    }
+}
 
 #[derive(Default)]
 pub struct RequestState {
@@ -37,12 +54,15 @@ pub struct SignedRequest {
     public: bool,
     role: CredentialRole,
     /// Engine authority of a dispatched listenKey session write.
-    context: Option<safe_cex_engine::request_context::Context>,
+    context: Option<Context>,
+    /// Engine custody of a managed public read: the command's own Context, or
+    /// a Background one retired before its native callback.
+    read: Option<Context>,
 }
 
-#[derive(Clone, Copy)]
 pub struct ClockRequest {
     attempt: u8,
+    context: Context,
 }
 
 #[derive(Deserialize)]
@@ -96,6 +116,32 @@ impl SignedRequest {
         reset_pending(&mut self.pending);
     }
 
+    /// Startup discovery: never transport-retried, refused on a negative code.
+    fn discovery(&self) -> bool {
+        self.public
+            && matches!(
+                self.pending,
+                Pending::ExchangeInfo { .. } | Pending::Daily { .. }
+            )
+    }
+
+    fn command_read(&self) -> bool {
+        matches!(
+            self.pending,
+            Pending::DepthRead { .. } | Pending::Klines { .. }
+        )
+    }
+
+    /// Retire a Background read before its native callback; a command read
+    /// settles through its own terminal.
+    fn settle(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(context) = self.read.take()
+            && !self.command_read()
+        {
+            let _ = cx.finish_http_context(&context);
+        }
+    }
+
     fn retryable_status(&self, status: u16) -> bool {
         matches!(status, 503 | 504)
             || (matches!(self.method, Method::Get | Method::Put | Method::Delete)
@@ -147,6 +193,21 @@ impl AsterDex {
         pending: Pending,
         stream: Option<ArrayAt>,
     ) {
+        // History reads keep the native public path until their own slice.
+        let read = match &pending {
+            Pending::DepthRead { context } | Pending::Klines { context, .. } => {
+                Some(Ok(context.clone()))
+            }
+            Pending::History(_) => None,
+            _ => Some(cx.http_context(Scope::Background, public_read_policy())),
+        };
+        let read = match read.transpose() {
+            Ok(read) => read,
+            Err(error) => {
+                self.on_read_failed(cx, pending, error.read_venue_error());
+                return;
+            }
+        };
         let request = Box::new(SignedRequest {
             method: Method::Get,
             path: path.into(),
@@ -160,6 +221,7 @@ impl AsterDex {
             public: true,
             role: CredentialRole::Read { scope: None },
             context: None,
+            read,
         });
         self.dispatch_signed(cx, request);
     }
@@ -188,6 +250,7 @@ impl AsterDex {
             public: false,
             role,
             context: None,
+            read: None,
         });
         let stale = self
             .requests
@@ -203,6 +266,25 @@ impl AsterDex {
     }
 
     fn dispatch_signed(&mut self, cx: &mut Cx<'_, Pending>, request: Box<SignedRequest>) -> bool {
+        if let Some(read) = request.read.clone() {
+            let path = &request.path;
+            let url = format!("{}{path}", self.urls.rest);
+            let stream = request.stream;
+            match cx.request_managed(read, None, Method::Get, url, None, Pending::Signed(request)) {
+                Ok(id) => {
+                    if let Some(at) = stream {
+                        cx.stream_response(id, at);
+                    }
+                }
+                Err((Pending::Signed(mut unsent), error)) => {
+                    unsent.settle(cx);
+                    let error = error.read_venue_error();
+                    self.on_read_failed(cx, unsent.pending, error);
+                }
+                Err(_) => unreachable!("a refused read returns its own continuation"),
+            }
+            return true;
+        }
         if request.public {
             let url = format!("{}{}", self.urls.rest, request.path);
             match request.stream {
@@ -346,11 +428,19 @@ impl AsterDex {
             // Repeat-safe: an unproven write does not block the next operation.
             let _ = cx.finish_http_context(&context);
         }
-        let discovery = request.public
-            && matches!(
-                &request.pending,
-                Pending::ExchangeInfo { .. } | Pending::Daily { .. }
-            );
+        if let (Some(read), Ok(_)) = (&request.read, &response) {
+            let delivered = if request.command_read() {
+                cx.validate_read_http_delivery(read, read)
+            } else {
+                cx.validate_background_read_http_delivery(read)
+            };
+            if let Err(error) = delivered {
+                request.settle(cx);
+                self.on_read_failed(cx, request.pending, error.read_venue_error());
+                return;
+            }
+        }
+        let discovery = request.discovery();
         if let Ok(response) = response {
             let error = serde_json::from_str::<ErrorBody>(response.body).ok();
             let code = error
@@ -385,6 +475,7 @@ impl AsterDex {
             if discovery
                 && (!(200..300).contains(&response.status) || code.is_some_and(|value| value < 0.0))
             {
+                request.settle(cx);
                 self.on_request_failed(
                     cx,
                     request.pending,
@@ -396,10 +487,11 @@ impl AsterDex {
                 && request.is_read()
                 && request.network_retries < 3
             {
-                self.schedule_retry(cx, request);
+                self.retry_read(cx, request);
                 return;
             }
             if request.public && code.is_some_and(|code| code < 0.0) {
+                request.settle(cx);
                 self.on_request_failed(
                     cx,
                     request.pending,
@@ -407,15 +499,57 @@ impl AsterDex {
                 );
                 return;
             }
+            request.settle(cx);
             self.on_response(cx, request.pending, response);
         } else {
             let error = response.unwrap_err();
             if !discovery && request.is_read() && request.network_retries < 3 {
-                self.schedule_retry(cx, request);
+                self.retry_read(cx, request);
             } else {
+                request.settle(cx);
                 self.on_request_failed(cx, request.pending, error);
             }
         }
+    }
+
+    /// A typed transport, deadline or decode failure. Only a network loss is
+    /// retried for a managed read; the rest keep their kind to the terminal.
+    pub(crate) fn on_signed_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Box<SignedRequest>,
+        error: VenueError,
+    ) {
+        if request.read.is_none() {
+            self.on_signed_response(cx, request, Err(&error.message));
+            return;
+        }
+        if error.kind == Some(ErrorKind::Network)
+            && !request.discovery()
+            && request.network_retries < 3
+        {
+            self.retry_read(cx, request);
+            return;
+        }
+        request.settle(cx);
+        self.on_read_failed(cx, request.pending, error);
+    }
+
+    /// The engine grants a managed read's resend under its original bound; the
+    /// native 1/2/3 s delay stays.
+    fn retry_read(&mut self, cx: &mut Cx<'_, Pending>, mut request: Box<SignedRequest>) {
+        if let Some(read) = request.read.take() {
+            match cx.http_retry_context(&read, RetryEvidence::ReadFailure) {
+                Ok(read) => request.read = Some(read),
+                Err(error) => {
+                    request.read = Some(read);
+                    request.settle(cx);
+                    self.on_read_failed(cx, request.pending, error.read_venue_error());
+                    return;
+                }
+            }
+        }
+        self.schedule_retry(cx, request);
     }
 
     pub(crate) fn on_signed_stream_error(
@@ -431,6 +565,8 @@ impl AsterDex {
         if business_error || !(200..300).contains(&response.status) {
             self.on_signed_response(cx, request, Ok(response));
         } else if request.public {
+            let mut request = request;
+            request.settle(cx);
             self.on_stream_error(cx, request.pending, response);
         } else {
             self.on_request_failed(cx, request.pending, "missing expected Aster response list");
@@ -452,11 +588,13 @@ impl AsterDex {
         if let Some(timer) = self.requests.clock_timer.take() {
             cx.clear_timer(timer);
         }
-        self.issue_clock(cx, ClockRequest { attempt: 0 });
+        self.issue_clock(cx, 0);
     }
 
-    fn issue_clock(&self, cx: &mut Cx<'_, Pending>, request: ClockRequest) {
-        let version = if request.attempt % 2 == 1 {
+    /// Each attempt is its own Background read with its own bound; the last
+    /// two leave through the host's public CORS egress.
+    fn issue_clock(&mut self, cx: &mut Cx<'_, Pending>, attempt: u8) {
+        let version = if attempt % 2 == 1 {
             match self.version {
                 Version::V1 => Version::V3,
                 Version::V3 => Version::V1,
@@ -464,23 +602,32 @@ impl AsterDex {
         } else {
             self.version
         };
-        let attempt = request.attempt;
-        let id = cx.request(
-            Method::Get,
-            format!("{}{}/time", self.urls.rest, version.prefix()),
-            Vec::new(),
-            None,
-            Pending::Clock(request),
-        );
-        cx.route_request(
-            id,
-            if attempt < 2 {
-                RequestRoute::Direct
-            } else {
-                RequestRoute::PublicCors
-            },
-        );
-        cx.request_timeout(id, 5_000);
+        let policy = Policy {
+            timeout_ms: CLOCK_TIMEOUT_MS,
+            retry: RetryPolicy::Never,
+            ..public_read_policy()
+        };
+        let egress = if attempt < 2 {
+            Egress::Direct
+        } else {
+            Egress::PublicCors
+        };
+        let Ok(context) = cx.http_context_with_egress(Scope::Background, policy, egress) else {
+            self.clock_settled(cx, attempt, None);
+            return;
+        };
+        let url = format!("{}{}/time", self.urls.rest, version.prefix());
+        let pending = Pending::Clock(ClockRequest {
+            attempt,
+            context: context.clone(),
+        });
+        if cx
+            .request_managed(context.clone(), None, Method::Get, url, None, pending)
+            .is_err()
+        {
+            let _ = cx.finish_http_context(&context);
+            self.clock_settled(cx, attempt, None);
+        }
     }
 
     pub(crate) fn on_clock_response(
@@ -489,22 +636,26 @@ impl AsterDex {
         request: ClockRequest,
         response: Result<Response<'_>, &str>,
     ) {
+        let delivered = cx
+            .validate_background_read_http_delivery(&request.context)
+            .is_ok();
+        let _ = cx.finish_http_context(&request.context);
         let time = response
             .ok()
+            .filter(|_| delivered)
             .filter(|r| (200..300).contains(&r.status))
             .and_then(|r| serde_json::from_str::<ServerTime>(r.body).ok())
             .and_then(|r| r.server_time.value())
             .filter(|time| *time > 0.0)
             .filter(|time| cx.observe_protocol_time(*time));
+        self.clock_settled(cx, request.attempt, time);
+    }
+
+    fn clock_settled(&mut self, cx: &mut Cx<'_, Pending>, attempt: u8, time: Option<f64>) {
         if time.is_some() {
             self.requests.last_sync_success = Some(cx.now);
-        } else if request.attempt < 3 {
-            self.issue_clock(
-                cx,
-                ClockRequest {
-                    attempt: request.attempt + 1,
-                },
-            );
+        } else if attempt < 3 {
+            self.issue_clock(cx, attempt + 1);
             return;
         } else {
             cx.notice(
@@ -516,8 +667,8 @@ impl AsterDex {
         self.requests.clock_running = false;
         self.requests.clock_timer = Some(cx.set_timer(CLOCK_INTERVAL_MS));
         let queued = std::mem::take(&mut self.requests.awaiting_clock);
-        for request in queued {
-            self.dispatch_signed(cx, request);
+        for unsent in queued {
+            self.dispatch_signed(cx, unsent);
         }
         if self.requests.startup_pending {
             self.requests.startup_pending = false;
@@ -554,7 +705,9 @@ mod tests {
     use super::*;
     use crate::fixture::Options;
     use safe_cex_engine::book::Book;
-    use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, SocketId};
+    use safe_cex_engine::{
+        Action, Command, Engine, Event, HttpRequest, Notice, RequestRoute, SocketId,
+    };
 
     fn role(method: Method) -> CredentialRole {
         match method {
@@ -579,18 +732,6 @@ mod tests {
         type Pending = Pending;
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
             self.inner.requests.last_sync_success = Some(cx.now);
-            self.inner.signed(
-                cx,
-                role(self.method),
-                self.method,
-                "/fapi/v1/probe",
-                Query::new().str("symbol", "BTCUSDT"),
-                Pending::Klines {
-                    command: 7,
-                    rows: Vec::new(),
-                    invalid: None,
-                },
-            );
         }
         fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
         fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
@@ -640,9 +781,13 @@ mod tests {
         fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
             self.inner.on_request_timer(cx, timer);
         }
+        // The carrier's terminal needs a genuine command Context.
         fn on_command(&mut self, cx: &mut Cx<'_, Pending>, _: Command) {
+            let Ok(context) = cx.admit_http_command(public_read_policy()) else {
+                return;
+            };
             let pending = Pending::Klines {
-                command: 7,
+                context,
                 rows: Vec::new(),
                 invalid: None,
             };
@@ -655,7 +800,7 @@ mod tests {
                     role(self.method),
                     self.method,
                     "/fapi/v1/probe",
-                    Query::new(),
+                    Query::new().str("symbol", "BTCUSDT"),
                     pending,
                 );
             }
@@ -699,8 +844,22 @@ mod tests {
                 done: Vec::new(),
             };
             h.engine.start(h.now);
-            h.collect();
+            h.command();
             h
+        }
+        fn command(&mut self) {
+            self.engine.handle(
+                self.now,
+                Event::Command(Command::FetchCandles {
+                    command: 7,
+                    symbol: "BTCUSDT".into(),
+                    interval: safe_cex_engine::model::Interval::M1,
+                    limit: None,
+                    from_ms: None,
+                    to_ms: None,
+                }),
+            );
+            self.collect();
         }
         fn collect(&mut self) {
             for action in
@@ -711,6 +870,7 @@ mod tests {
                     Action::SetTimer { timer, at_ms } => {
                         self.timers.push((timer, at_ms - self.now))
                     }
+                    Action::ClearTimer { timer } => self.timers.retain(|(id, _)| *id != timer),
                     Action::Notice(Notice::CommandDone { result, .. }) => {
                         self.done.push(Ok(result))
                     }
@@ -880,11 +1040,10 @@ mod tests {
             public: false,
             role: CredentialRole::Mutation,
             context: None,
+            read: None,
         };
-        let klines = || Pending::Klines {
-            command: 7,
-            rows: Vec::new(),
-            invalid: None,
+        let klines = || Pending::MarketBrackets {
+            rows: HashMap::new(),
         };
         let create = Pending::Account(Request::ListenKey { epoch: 0 });
         let keepalive = Pending::Account(Request::Keepalive { epoch: 0 });
@@ -1088,7 +1247,9 @@ mod tests {
             h
         }
         fn collect(&mut self) {
-            for action in self.engine.drain_actions() {
+            for action in
+                safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now)
+            {
                 match action {
                     Action::Http(request) => self.requests.push(request),
                     Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
@@ -1136,7 +1297,8 @@ mod tests {
         let mut h = PublicHarness::new();
         let request = h.take("/exchangeInfo");
         assert!(request.headers.is_empty());
-        assert_eq!(request.timeout_ms, None);
+        // The managed read's own bound.
+        assert_eq!(request.timeout_ms, Some(READ_TIMEOUT_MS));
         h.event(Event::HttpStart {
             request: request.id,
             status: 200,

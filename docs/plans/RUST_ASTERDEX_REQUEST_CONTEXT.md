@@ -347,9 +347,11 @@ engine seam is needed.
   timestamp and signature and frozen economic fields. -1021/-1022 are
   venue-definitive pre-execution rejections, never Unknown. RED tests pin
   both for POST, PUT and DELETE.
-- **Resends.** Network retries and retryable 429/5xx on reads use
-  `AdmittedRead::retry(ReadFailure)` or a fresh leg, and the shared backoff
-  replaces the venue's 1/2/3 s timer (`RequestState.retries` is deleted). V1
+- **Resends.** Network retries and retryable 429/5xx on reads take engine
+  permission (`http_retry_context`, `AdmittedRead::retry(ReadFailure)` or a
+  fresh leg) under the original bound. The engine has no shared read backoff,
+  so the native 1/2/3 s delay timer stays; a resend due after the bound fails
+  as a typed timeout. V1
   signature rejection (-1022) keeps exactly one resend; the -1021 timestamp
   rejection keeps one clock resync then one resend, both through the same
   Context, never a fresh root.
@@ -361,8 +363,8 @@ engine seam is needed.
 - Signed and public reads gain an admission-to-expiry bound (20 s, as ApeX),
   starting after any clock wait. Today a read has no venue deadline beyond the
   host default.
-- Read retry delays follow the shared ReadFailure backoff instead of the fixed
-  1/2/3 s.
+- A read retry still waits 1/2/3 s, but the whole read, retries included, is
+  capped by its bound.
 - Typed transport and preparation failures reach command errors instead of
   being flattened to text.
 
@@ -374,8 +376,8 @@ engine seam is needed.
 2. **Signed reads**: account Info and snapshots, all history, the signed GET
    branch of 256/257, and the 351 rename.
 3. **Trade plans**: `trading.rs` jobs, the remaining 256/257 write branch, and
-   the 489/501 renames. This deletes `Pending::Signed`'s legacy terminal path and
-   `RequestState.retries`. Aster reaches zero.
+   the 489/501 renames. This deletes `Pending::Signed`'s legacy terminal path.
+   Aster reaches zero.
 
 ### Budget and risks
 
