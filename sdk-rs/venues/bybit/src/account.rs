@@ -210,6 +210,9 @@ pub struct AccountState {
     /// A Hyro reconciliation read failed in transport or at the venue, not on content.
     hyro_transient: bool,
     hyro_transient_streak: u8,
+    /// This snapshot had a read refused locally (engine admission or queue);
+    /// it never reached Hyro, so it is no evidence against the session.
+    hyro_local_refusal: bool,
     /// Bumped to orphan an in-flight wallet read without ending the session.
     wallet_epoch: u32,
     /// Per-coin holdings; `None` until a wallet read or push is accepted.
@@ -1162,11 +1165,12 @@ impl BybitLinear {
     /// A periodic read that failed in transport keeps the healthy stream and the
     /// last good state; the next tick retries. Bad content still reconnects.
     fn hyro_read_failed(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
-        if std::mem::take(&mut self.account.hyro_transient)
-            && self.account.ready
-            && self.account.hyro_transient_streak < 3
-        {
-            self.account.hyro_transient_streak += 1;
+        let transient = std::mem::take(&mut self.account.hyro_transient);
+        let local = self.account.hyro_local_refusal;
+        if self.account.ready && (local || (transient && self.account.hyro_transient_streak < 3)) {
+            if !local {
+                self.account.hyro_transient_streak += 1;
+            }
             cx.notice(
                 Level::Warn,
                 code::REQUEST_FAILED,
@@ -1183,6 +1187,13 @@ impl BybitLinear {
             return;
         }
         self.fail_hyro(cx, message);
+    }
+
+    /// A read the engine refused before any I/O (admission or queue).
+    pub(crate) fn note_local_read_refusal(&mut self) {
+        if self.variant.is_hyro() {
+            self.account.hyro_local_refusal = true;
+        }
     }
 
     fn fail_hyro(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
@@ -1232,7 +1243,21 @@ impl BybitLinear {
         }
     }
 
+    /// Reconcile an uncertain Hyro write with a fresh atomic snapshot; reads
+    /// already out predate the write, so they are abandoned, not joined.
+    pub(crate) fn reconcile_hyro_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Before the subscribe ack, its own snapshot follows and reconciles.
+        if !self.account.authed || self.account.handshake.is_some() {
+            return;
+        }
+        self.drop_account_reads(cx);
+        self.account.wallet_in_flight = false;
+        self.account.wallet_epoch = self.account.wallet_epoch.wrapping_add(1);
+        self.start_hyro_snapshot(cx);
+    }
+
     fn start_hyro_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.hyro_local_refusal = false;
         self.account.snapshot = Some(HyroSnapshot {
             revision: self.account.revision,
             orders: None,
@@ -1344,6 +1369,8 @@ impl BybitLinear {
         self.commit_balance(cx);
         self.account.orders_snapshot_version += 1;
         self.account.ready = true;
+        // A complete committed snapshot is the fresh order read for the fence.
+        cx.orders_reconciled(None);
     }
 
     fn settle_coins(&self) -> &'static [&'static str] {
@@ -1480,7 +1507,10 @@ impl BybitLinear {
             .and_then(|(root, policy)| cx.http_leg_context(&root, policy).ok());
         match leg {
             Some(leg) => self.queue_read(cx, leg, rest, then),
-            None => self.on_public_response(cx, then, Err("Bybit account read was not admitted")),
+            None => {
+                self.note_local_read_refusal();
+                self.on_public_response(cx, then, Err("Bybit account read was not admitted"));
+            }
         }
     }
 
@@ -1637,7 +1667,7 @@ impl BybitLinear {
             .str("orderId", &id)
             .num("limit", 100.0)
             .opt_str("cursor", cursor.as_deref());
-        self.send(
+        self.send_read(
             cx,
             Rest::get("/v5/execution/list", query).signed(),
             Then::Account(Request::FillRepair {
