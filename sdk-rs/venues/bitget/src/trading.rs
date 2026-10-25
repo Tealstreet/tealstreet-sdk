@@ -542,6 +542,7 @@ impl BitgetFutures {
     }
 
     /// The native job order, without I/O except the borrowed position read.
+    #[inline(never)]
     fn next_step(&mut self, cx: &mut Cx<'_, Pending>, job: &mut Job) -> Step {
         if !self.account.detected && !(job.planned && job.calls.is_empty()) {
             return Step::Wait(Condition::Detection);
@@ -627,6 +628,7 @@ impl BitgetFutures {
     }
 
     /// Advances the active job from `at`: admit, continue, park, or settle.
+    #[inline(never)]
     fn drive(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job, at: At<'_>) {
         let current = match &at {
             At::Data(slot, context) => Some((*slot, *context)),
@@ -712,6 +714,7 @@ impl BitgetFutures {
     }
 
     /// Queues one Plan call, applying native optimistic status after admission.
+    #[inline(never)]
     fn issue(&mut self, cx: &mut Cx<'_, Pending>, job: Job, slot: Slot, outgoing: Outgoing) {
         let Outgoing {
             call,
@@ -747,6 +750,7 @@ impl BitgetFutures {
         self.send_call(cx, job, request);
     }
 
+    #[inline(never)]
     fn send_call(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job, request: Request) {
         job.live = (!request.call.read()).then(|| request.call.clone());
         if let Effect::Cancel { orders, .. } = &request.call.effect {
@@ -783,6 +787,7 @@ impl BitgetFutures {
 
     /// Fails the job under its owner; after a write took effect it is never
     /// Rejected or NotSent. Then wakes the next queued command.
+    #[inline(never)]
     fn end(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -809,6 +814,7 @@ impl BitgetFutures {
         self.next_job(cx);
     }
 
+    #[inline(never)]
     fn finish(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -837,6 +843,7 @@ impl BitgetFutures {
     }
 
     /// The active job ended: wake the oldest queued Preflight (FIFO).
+    #[inline(never)]
     fn next_job(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(queued) = self.trading.queue.front() {
             let _ = cx.request_preflight_ready(&queued.preflight);
@@ -2079,6 +2086,7 @@ impl BitgetFutures {
     /// The native answer of a call that will not be resent: record its write
     /// fact once, then fall back, roll back, fail, or continue as native.
     #[allow(clippy::too_many_arguments)]
+    #[inline(never)]
     fn call_settled(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -2436,6 +2444,7 @@ impl BitgetFutures {
     }
 
     /// Records a write's journal fact exactly once; reads keep none.
+    #[inline(never)]
     fn record_once(
         &self,
         cx: &mut Cx<'_, Pending>,
@@ -2490,6 +2499,7 @@ impl BitgetFutures {
     }
 
     /// The 40085 promotion's own write fact: true when it proves a refusal.
+    #[inline(never)]
     fn record(&self, cx: &mut Cx<'_, Pending>, request: &Request, response: &Response<'_>) -> bool {
         let reply = serde_json::from_str::<Reply>(response.body).ok();
         let native = native_code(reply.as_ref(), response.status);
@@ -2700,6 +2710,7 @@ impl BitgetFutures {
 
     /// A call that failed before or after release. A released read may retry
     /// natively (250·n ms, three times) on the Plan's own timer.
+    #[inline(never)]
     pub(crate) fn trade_call_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -2766,6 +2777,7 @@ impl BitgetFutures {
         }
     }
 
+    #[inline(never)]
     fn retry_read(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job, request: Request) {
         let plan = job.plan.clone().expect("live Plan");
         let delay = 250 * (u32::from(request.read_retries) + 1);
@@ -2793,6 +2805,7 @@ impl BitgetFutures {
     }
 
     /// Issues a read retry on the slot the Plan's timer handed back.
+    #[inline(never)]
     fn reissue(&mut self, cx: &mut Cx<'_, Pending>, job: Job, slot: Slot, retry: Request) {
         let plan = job.plan.clone().expect("live Plan");
         match cx.plan_leg_context(&plan, &slot) {

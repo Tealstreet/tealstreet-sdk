@@ -400,12 +400,15 @@ fn a_mixed_batch_keeps_accepted_ids_and_fails() {
         "accepted IDs survive the failure: {}",
         error.message
     );
-    // Only the failureList row is refused: the accepted order took effect.
+    // Batch level: an accepted order took effect, so no batch outcome.
     assert_eq!(error.outcome, None);
-    assert_eq!(
-        error.partial.as_ref().map(|p| p.order_ids.clone()),
-        Some(vec!["a".to_owned()])
-    );
+    // Per row: row 0 accepted with its ID, row 1 (failureList) refused.
+    let partial = error.partial.as_ref().expect("per-row result");
+    assert_eq!(partial.order_ids, vec!["a".to_owned()]);
+    assert_eq!(partial.total, Some(2));
+    assert_eq!(partial.failed_index, Some(1));
+    assert_eq!(error.kind, Some(ErrorKind::Rejected));
+    assert!(error.message.contains("balance"), "{}", error.message);
 }
 
 #[test]
