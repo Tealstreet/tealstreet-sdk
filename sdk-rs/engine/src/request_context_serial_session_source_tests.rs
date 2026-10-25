@@ -184,4 +184,43 @@ mod source_controls {
         assert_ne!(e.venue.context.as_ref().unwrap().leg(), old.leg());
         assert_ne!(prep(&actions).attempt().request, first.attempt().request);
     }
+    #[test]
+    fn unbound_read_two_is_admissible_but_cannot_select_auth_attempt_two() {
+        let mut e = crate::test_support::seeded_engine(Probe {
+            read: true,
+            unbound: true,
+            attempts: 2,
+            exempt: true,
+            ..Default::default()
+        });
+        e.start(0.);
+        e.handle_command(
+            0.,
+            Command::PlaceOrders {
+                command: 7,
+                orders: vec![
+                    serde_json::from_str(
+                        r#"{"symbol":"BTCUSD","type":"limit","side":"buy","amount":1,"price":1}"#,
+                    )
+                    .unwrap(),
+                ],
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(e.venue.admitted, Some(Ok(())));
+        let first = prep(&drain(&mut e));
+        let packet = release(&mut e, first, 0.);
+        assert!(
+            !packet
+                .headers
+                .iter()
+                .any(|(name, _)| *name == "Authorization")
+        );
+        reply(&mut e, first, 1., 200, r#"{"code":1000}"#);
+        let actions = drain(&mut e);
+        assert_eq!(e.venue.selected, vec![Err(Error::Invalid)]);
+        assert!(e.venue.unchanged[0]);
+        no_http(&actions);
+    }
 }

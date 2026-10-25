@@ -46,6 +46,7 @@ mod serial_session {
     #[derive(Default)]
     struct Probe {
         read: bool,
+        unbound: bool,
         attempts: u8,
         exempt: bool,
         immediate: bool,
@@ -87,10 +88,15 @@ mod serial_session {
         fn issue(&mut self, cx: &mut Cx<'_, Context>, context: Context) {
             self.context = Some(context.clone());
             let body = Some(BODY.into());
+            let session = if self.unbound {
+                None
+            } else {
+                self.session.as_ref()
+            };
             let result = if context.credential().is_some() {
                 cx.request_signed_managed(
                     context.clone(),
-                    self.session.as_ref(),
+                    session,
                     Method::Post,
                     "https://venue.test/order".into(),
                     body,
@@ -100,7 +106,7 @@ mod serial_session {
             } else {
                 cx.request_managed(
                     context.clone(),
-                    self.session.as_ref(),
+                    session,
                     Method::Post,
                     "https://venue.test/read".into(),
                     body,

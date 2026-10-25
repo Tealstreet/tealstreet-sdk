@@ -348,3 +348,11 @@ Add one explicit combined mode (condition-waits, mutation barriers, order locks,
 serial-plans, session-bearer and test support) while preserving every existing
 mode and family closure. Metadata-only before/after comparison confirms exactly
 one new mode and no closure change. Runtime and WASM build inputs are unchanged.
+
+
+Source review: claude-fe7lgm CLEAR at e96870dfbb7 on the actual #2142
+composition. Precision: Read2 admission is a declaration enabled by the build,
+not proof of a request's Session binding. An unbound Read2 may be admitted, but
+serial_plan_session_resend refuses Invalid without a managed bearer; the extra
+source control pins that refusal without spending. No synthetic Session is
+created by admission and no generic Read retry reaches attempt 2.
