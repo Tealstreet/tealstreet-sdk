@@ -17,7 +17,7 @@ Base: `feat/rust-rewrite` `49a5b54f362`. Area plan: [RUST_BITRUE_REQUEST_CONTEXT
 | signing | `lib.rs` | 1 | The secondary-identity validation message; stays (user-visible text) |
 | credential | `lib.rs` | 4 | Funnel-side credential selection |
 
-Targets: request 18 → 0. Signing 12 → 3 (dispatch 2, lib 1). Credential lib.rs drops to whatever the managed selection leaves, measured at source.
+Targets: request 18 → 0. Signing 12 → 3 (dispatch 2, lib 1). B1 measured signing at 6: `secondary_tests.rs` keeps 3 sites because it drives the crate-private legacy `send()`. B2 must reach 3 by rewriting that test over managed selection, not by moving it (fe7lgm). Credential lib.rs drops to whatever the managed selection leaves, measured at source.
 
 The matches are not ten dispatchers (area plan). They leave with the pending representation they read: `sign::Request` stops being a field named `request` and the `matches!` bodies bind the step or call instead. Their assertions are kept.
 
@@ -54,6 +54,11 @@ Splitting keeps each size and review scoped: B1 links nothing new; B2 links `ser
   - Each joined command keeps its own entry Read Context in `leverage_queries`. It completes `done_context` from the published Store state, or `fail_context` if that read fails or is refused.
   - An expired owner refuses only itself; each owner carries its own deadline and generation, by the retention the WS FIFO reads use (#1830).
 - **Delivery.** Each response validates its exact Context before Store effects (`validate_http_context` / read-root delivery, as Brackets does today).
+- **Native fact: keys sign the catalog even in public-data-only mode.** With a primary key configured, Markets is Primary-signed whether or not private data is enabled (fe7lgm, kept native).
+- **B1 interim: the census tail runs one tick later** (fe7lgm, accepted; deleted by B2/D4).
+  - While a protective census is pending, the census still completes a legacy trading command, and the engine refuses any completion inside another root's delivery. So the order read's census result and its `order_finished` tail run from a zero-delay timer, in native order.
+  - The timer serves only the census generation it was armed for, skips a command already sealed, and never fires twice.
+  - A control pins it: nothing completes in the delivery, exactly once on the next tick, and no extra open-order GET.
 
 ## B2: trading writes
 

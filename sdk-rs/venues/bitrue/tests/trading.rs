@@ -734,6 +734,53 @@ fn conditional_census_accepts_rewritten_zero_and_missing_client_ids_without_trus
         assert_eq!(body(&cancel)["conditionOrder"], true);
     }
 }
+/// B1 interim (fe7lgm): a census delivery completes nothing inside itself; its
+/// result lands exactly once on the next tick, with native's GET count.
+#[test]
+fn a_census_completes_its_placement_once_on_the_tick_after_its_delivery() {
+    let (mut h, _) = protective_ack();
+    let census = post_write_census(&mut h);
+    let gets = |h: &Harness| {
+        h.requests
+            .iter()
+            .filter(|r| r.method == Method::Get && r.url.contains("/fapi/v2/openOrders"))
+            .count()
+    };
+    let before = gets(&h);
+    let armed = h.timers.len();
+    let now = h.now;
+    h.e.handle(
+        now,
+        Event::HttpResponse {
+            request: census.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":"0","data":[]}"#,
+            },
+        },
+    );
+    h.collect_once();
+    assert_eq!(h.result(), None, "nothing completes inside the delivery");
+    let ticks: Vec<_> = h.timers[armed..]
+        .iter()
+        .filter(|(_, at)| *at <= now)
+        .copied()
+        .collect();
+    assert_eq!(ticks.len(), 1, "one deferred census tick");
+    h.timers.retain(|tick| *tick != ticks[0]);
+    h.handle(now, Event::TimerFired { timer: ticks[0].0 });
+    h.collect();
+    assert_eq!(h.result(), Some("[]"));
+    let done = h
+        .notices
+        .iter()
+        .filter(|n| matches!(n, Notice::CommandDone { command: 7, .. }))
+        .count();
+    assert_eq!(done, 1, "exactly once");
+    h.collect();
+    assert_eq!(gets(&h), before, "no extra open-order read");
+}
 #[test]
 fn complete_post_write_empty_census_proves_no_open_protection_and_releases_cancel_all() {
     let (mut h, _) = protective_ack();
