@@ -13,6 +13,12 @@ pub(in super::super) struct State {
     /// The next read waits on a login Session: nothing may issue, complete or
     /// re-park it until that Session's drain or ended disposition.
     pub(super) session_parked: bool,
+    /// Parked by `park_preflight_for`: failable from any callback while it
+    /// holds nothing; `condition` is its engine bound's timer.
+    #[cfg(feature = "condition-waits")]
+    pub(super) condition_park: bool,
+    #[cfg(feature = "condition-waits")]
+    pub(super) condition: Option<crate::TimerId>,
 }
 
 impl State {
@@ -24,6 +30,10 @@ impl State {
             handoff: None,
             activation: super::ready::Activation::Initial,
             session_parked: false,
+            #[cfg(feature = "condition-waits")]
+            condition_park: false,
+            #[cfg(feature = "condition-waits")]
+            condition: None,
         }
     }
 

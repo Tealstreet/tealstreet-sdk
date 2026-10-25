@@ -220,6 +220,9 @@ pub(super) struct ContextRegistry {
     preflight_ready: VecDeque<Preflight>,
     #[cfg(feature = "http-plans")]
     preflight_initial: Vec<Preflight>,
+    /// Engine-bounded Preflight condition waits, by timer.
+    #[cfg(feature = "condition-waits")]
+    condition_preflights: Vec<(crate::TimerId, Preflight)>,
     /// Scoped delivery loans outlive temporary marker removal and even owner
     /// cleanup. Readiness may run only after the true outermost scope exits.
     #[cfg(feature = "http-plans")]
