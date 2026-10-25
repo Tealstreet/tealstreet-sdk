@@ -2393,53 +2393,8 @@ impl BitgetFutures {
                 }
                 job.ids.push(next);
             }
-            Effect::Leverage {
-                symbol,
-                leverage,
-                side,
-            } => {
-                let (leverage, side) = (*leverage, *side);
-                self.account.config_at = Some(cx.now);
-                cx.store.update_setting(symbol, |s| match side {
-                    Some(PositionSide::Long) => {
-                        s.leverage = leverage;
-                        s.buy_leverage = Some(leverage);
-                    }
-                    Some(PositionSide::Short) => s.sell_leverage = Some(leverage),
-                    None => {
-                        s.leverage = leverage;
-                        s.buy_leverage = Some(leverage);
-                        s.sell_leverage = Some(leverage);
-                    }
-                });
-                cx.store.update_positions(|p| {
-                    if &p.symbol == symbol && side.is_none_or(|side| p.side == side) {
-                        p.leverage = leverage;
-                    }
-                });
-            }
-            Effect::Margin { symbol, margin } => {
-                let margin = *margin;
-                self.account.config_at = Some(cx.now);
-                cx.store
-                    .update_setting(symbol, |s| s.margin_type = Some(margin));
-                cx.store.update_positions(|p| {
-                    if &p.symbol == symbol {
-                        p.margin_type = Some(margin);
-                    }
-                });
-            }
-            Effect::Mode(hedged) => {
-                let hedged = *hedged;
-                self.account.config_at = Some(cx.now);
-                cx.store.set_hedged(hedged);
-                cx.store.update_positions(|p| {
-                    p.position_mode = Some(if hedged {
-                        PositionMode::Hedged
-                    } else {
-                        PositionMode::Oneway
-                    })
-                });
+            effect @ (Effect::Leverage { .. } | Effect::Margin { .. } | Effect::Mode(_)) => {
+                self.apply_setting(cx, effect)
             }
             _ => {}
         }
@@ -2664,6 +2619,51 @@ impl BitgetFutures {
                 }
             }
         }
+    }
+
+    /// A confirmed setting write, through one Store closure per table.
+    fn apply_setting(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
+        self.account.config_at = Some(cx.now);
+        match effect {
+            Effect::Mode(hedged) => cx.store.set_hedged(*hedged),
+            Effect::Leverage { symbol, .. } | Effect::Margin { symbol, .. } => {
+                cx.store.update_setting(symbol, |s| match effect {
+                    Effect::Leverage { leverage, side, .. } => {
+                        let leverage = *leverage;
+                        if *side != Some(PositionSide::Short) {
+                            s.leverage = leverage;
+                            s.buy_leverage = Some(leverage);
+                        }
+                        if *side != Some(PositionSide::Long) {
+                            s.sell_leverage = Some(leverage);
+                        }
+                    }
+                    Effect::Margin { margin, .. } => s.margin_type = Some(*margin),
+                    _ => {}
+                })
+            }
+            _ => {}
+        }
+        cx.store.update_positions(|p| match effect {
+            Effect::Leverage {
+                symbol,
+                leverage,
+                side,
+            } if &p.symbol == symbol && side.is_none_or(|side| p.side == side) => {
+                p.leverage = *leverage
+            }
+            Effect::Margin { symbol, margin } if &p.symbol == symbol => {
+                p.margin_type = Some(*margin)
+            }
+            Effect::Mode(hedged) => {
+                p.position_mode = Some(if *hedged {
+                    PositionMode::Hedged
+                } else {
+                    PositionMode::Oneway
+                })
+            }
+            _ => {}
+        });
     }
 
     fn apply_symbol_config(&self, cx: &mut Cx<'_, Pending>, symbol: &str, row: &SymbolConfig) {
