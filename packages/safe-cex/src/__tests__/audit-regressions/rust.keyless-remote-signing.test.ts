@@ -30,7 +30,7 @@ const hosted = (extra: Partial<ExchangeOptions> = {}): ExchangeOptions => ({
   ...extra,
 });
 
-// Lighter runs read-only without a secret; Paradex and Polymarket sign with `key`.
+// These names select Rust; hosted wallet material is refused at construction.
 const engineSigned = new Set<ExchangeName>(['lighter', 'lighter-robinhood', 'paradex', 'polymarket']);
 
 describe('keyless remote-signed accounts never start on an engine that cannot sign', () => {
@@ -46,10 +46,12 @@ describe('keyless remote-signed accounts never start on an engine that cannot si
     expect(runsOnRustEngine('hyperliquid', { engine: 'rust', secret: '' })).toBe(true);
     // The wallet-key exemption is AsterDEX's own field, not a pass for other venues.
     expect(runsOnRustEngine('blofin', hosted({ auth: { privateKey: '0xabc' } }))).toBe(false);
-    // Hosted Paradex sends its signing key in `key` with both addresses, as exchange-server does.
+    // Hosted Paradex no longer admits the legacy local-key path; Rust selection never falls back.
     const paradex = hosted({ key: '0x' + '1'.repeat(64), paradexAddress: '0xabc', subkeyAddress: '0xdef' });
     expect(runsOnRustEngine('paradex', paradex)).toBe(true);
-    expect(new RustEngineExchange('paradex', paradex, new DefaultStore()).isPublicDataOnly).toBe(false);
+    expect(() => new RustEngineExchange('paradex', paradex, new DefaultStore())).toThrowError(
+      expect.objectContaining({ kind: 'invalidInput', outcome: 'notSent' }),
+    );
     // Spot or not, a hosted Hyperliquid account signs through the browser on TS.
     expect(runsOnRustEngine('hyperliquid', hosted({ enableSpotMarkets: true }))).toBe(false);
   });

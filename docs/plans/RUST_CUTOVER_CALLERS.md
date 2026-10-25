@@ -8590,7 +8590,9 @@ WASM loading or I/O. Paradex key is public only under the configured payloadSign
 contract; addresses remain public. Polymarket key, L2 apiSecret/apiPassphrase and
 both families' secret/passphrase/starkPrivateKey must be absent or empty. No callback or
 engine fallback is introduced; local mode is unchanged. This supersedes the
-Paradex wrapper fixture that allowed remote HTTP plus local JWT signing.
+Paradex wrapper fixture that allowed remote HTTP plus local JWT signing and the
+keyless routing fixture that constructed a hosted local-key Paradex account.
+Rust selection remains unchanged; the constructor refuses rather than falling back.
 The shared constructor applies declarative construction-rules rows, with no
 venue-name branch. See RUST_SIGNER_REMOTE_WIRE_AND_IMPORT.md for the owner ruling
 and original REDs.
