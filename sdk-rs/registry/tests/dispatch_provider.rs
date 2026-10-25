@@ -28,7 +28,10 @@ fn assert_owned_identity(
 ) {
     assert_eq!(identity.validate(), Ok(()));
     assert_eq!(identity.credential.0, format!("{slot}.credential"));
-    assert_eq!(identity.signing.0, format!("{slot}.signing"));
+    assert_eq!(
+        identity.signing_ref().unwrap().clone().0,
+        format!("{slot}.signing")
+    );
     assert_eq!(
         identity.passphrase.as_ref().unwrap().0,
         format!("{slot}.passphrase")
@@ -54,7 +57,7 @@ fn assert_owned_identity(
             },
             Operation::Sign {
                 algorithm: Algorithm::HmacSha256,
-                key: identity.signing.clone(),
+                key: identity.signing_ref().unwrap().clone(),
                 payload: vec![
                     PayloadPart::Bytes {
                         bytes: b"fixture:".to_vec(),
@@ -559,20 +562,17 @@ fn required_family_policy_applies_to_raw_json_and_opaque_setup_without_material_
             b" primary-pass "
         );
         let mut opaque = Identities {
-            primary: Some(Identity {
-                credential: KeyRef("primary.credential".into()),
-                signing: KeyRef("primary.signing".into()),
-                passphrase: Some(KeyRef("primary.passphrase".into())),
-                stable_id: None,
-                extra: Default::default(),
-            }),
-            secondary: Some(Identity {
-                credential: KeyRef("secondary.credential".into()),
-                signing: KeyRef("secondary.signing".into()),
-                passphrase: None,
-                stable_id: None,
-                extra: Default::default(),
-            }),
+            primary: Some(
+                Identity::new(
+                    KeyRef("primary.credential".into()),
+                    Some(KeyRef("primary.signing".into())),
+                )
+                .with_passphrase(Some(KeyRef("primary.passphrase".into()))),
+            ),
+            secondary: Some(Identity::new(
+                KeyRef("secondary.credential".into()),
+                Some(KeyRef("secondary.signing".into())),
+            )),
         };
         policy.apply_to_identities(&mut opaque, false).unwrap();
         assert_eq!(
@@ -684,7 +684,7 @@ fn passphrase_only_primary_survives_raw_setup_as_alias_and_defaults_remain_optio
         assert!(raw.passphrase.is_none());
         let primary = ids.primary.as_ref().unwrap();
         let secondary = ids.secondary.as_ref().unwrap();
-        assert!(primary.credential.0.is_empty() && primary.signing.0.is_empty());
+        assert!(primary.credential.0.is_empty() && primary.signing_opt().is_none());
         assert_eq!(secondary.passphrase, primary.passphrase);
         assert_eq!(
             presented_passphrase(&provider, secondary),

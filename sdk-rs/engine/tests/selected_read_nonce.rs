@@ -18,13 +18,11 @@ use safe_cex_engine::{
 };
 use std::sync::{Arc, Mutex};
 fn identity(name: &str, subject: Option<&str>) -> Identity {
-    Identity {
-        credential: KeyRef(format!("credential/{name}")),
-        signing: KeyRef(format!("signing/{name}")),
-        passphrase: None,
-        stable_id: subject.map(Into::into),
-        extra: Default::default(),
-    }
+    Identity::new(
+        KeyRef(format!("credential/{name}")),
+        Some(KeyRef(format!("signing/{name}"))),
+    )
+    .with_stable_id(subject.map(Into::into))
 }
 struct Recipe {
     claim: Option<NonceClaim>,

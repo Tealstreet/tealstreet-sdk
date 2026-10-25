@@ -137,29 +137,26 @@ impl DecodedIdentity {
         KeyRef(format!("{slot}.extra.{}", name.name()))
     }
     fn references(&self, slot: &str) -> Identity {
-        Identity {
-            credential: KeyRef(if self.key.is_empty() {
+        let mut identity = Identity::new(
+            KeyRef(if self.key.is_empty() {
                 String::new()
             } else {
                 format!("{slot}.credential")
             }),
-            signing: KeyRef(if self.secret.is_empty() {
-                String::new()
-            } else {
-                format!("{slot}.signing")
-            }),
-            passphrase: self
-                .passphrase
-                .as_ref()
-                .map(|_| KeyRef(format!("{slot}.passphrase"))),
-            stable_id: self.stable_id.clone(),
-            extra: self
-                .extra
-                .iter()
-                .filter(|(_, bytes)| !bytes.is_empty())
-                .map(|(name, _)| (*name, Self::extra_ref(slot, *name)))
-                .collect(),
-        }
+            (!self.secret.is_empty()).then(|| KeyRef(format!("{slot}.signing"))),
+        );
+        identity.passphrase = self
+            .passphrase
+            .as_ref()
+            .map(|_| KeyRef(format!("{slot}.passphrase")));
+        identity.stable_id = self.stable_id.clone();
+        identity.extra = self
+            .extra
+            .iter()
+            .filter(|(_, bytes)| !bytes.is_empty())
+            .map(|(name, _)| (*name, Self::extra_ref(slot, *name)))
+            .collect();
+        identity
     }
     fn install(self, signer: &mut LocalSigner, slot: &str) {
         if !self.key.is_empty() {
@@ -309,10 +306,14 @@ impl LocalSigner {
             else {
                 return Err(SignError::InvalidRequest);
             };
-            if primary.signing.0.is_empty() {
+            let Some(signing) = primary
+                .signing_opt()
+                .filter(|key| !key.0.is_empty())
+                .cloned()
+            else {
                 return Err(SignError::InvalidRequest);
-            }
-            secondary.signing = primary.signing.clone();
+            };
+            secondary.set_signing_ref(Some(signing));
         }
         // The same policy validates bytes and opaque refs. Empty decoded material
         // is represented only in temporary validation metadata as an invalid ref.
@@ -352,17 +353,21 @@ impl LocalSigner {
             (identities.secondary.as_ref(), policy.secondary),
         ] {
             if let (Some(identity), Some(algorithm)) = (identity, declared(rule))
-                && !identity.signing.0.is_empty()
+                && let Some(signing) = identity.signing_opt().filter(|key| !key.0.is_empty())
             {
-                signer
-                    .algorithms
-                    .insert(identity.signing.clone(), algorithm);
+                signer.algorithms.insert(signing.clone(), algorithm);
             }
         }
         // After declarations, so the shared binding keeps the slots' algorithm.
-        if alias && let Some(primary) = identities.primary.as_ref() {
-            let declared = signer.algorithms.get(&primary.signing).copied();
-            signer.shared.insert(primary.signing.clone(), declared);
+        if alias
+            && let Some(signing) = identities
+                .primary
+                .as_ref()
+                .and_then(|primary| primary.signing_opt())
+                .filter(|key| !key.0.is_empty())
+        {
+            let declared = signer.algorithms.get(signing).copied();
+            signer.shared.insert(signing.clone(), declared);
         }
         Ok((signer, identities))
     }
@@ -758,11 +763,11 @@ mod tests {
                         key: identity.credential.clone(),
                     },
                     Operation::Present {
-                        key: identity.passphrase.unwrap(),
+                        key: identity.passphrase.clone().unwrap(),
                     },
                     Operation::Sign {
                         algorithm: Algorithm::HmacSha256,
-                        key: identity.signing,
+                        key: identity.signing_ref().unwrap().clone(),
                         payload: vec![
                             PayloadPart::Bytes {
                                 bytes: b"fixture:".to_vec(),
@@ -909,7 +914,7 @@ mod tests {
             LocalSigner::from_json_with_policy(setup, required_passphrase_policy()).unwrap();
         let primary = ids.primary.unwrap();
         let secondary = ids.secondary.unwrap();
-        assert!(primary.credential.0.is_empty() && primary.signing.0.is_empty());
+        assert!(primary.credential.0.is_empty() && primary.signing_opt().is_none());
         assert_eq!(secondary.stable_id.as_deref(), Some("account/read"));
         assert_eq!(secondary.passphrase, primary.passphrase);
         assert!(
@@ -960,7 +965,7 @@ mod tests {
             serde_json::json!({"primary":{"key":"lighter-api-key","secret":format!("0x{key}"),"secretEncoding":"hex"}}),
         )
         .unwrap();
-        let signing = ids.primary.unwrap().signing;
+        let signing = ids.primary.unwrap().signing_ref().unwrap().clone();
         let sign = |entropy: [u8; 32], input: &[u8]| {
             let mut payload = entropy.to_vec();
             payload.extend_from_slice(input);
@@ -1018,7 +1023,7 @@ mod tests {
             serde_json::json!({"primary":{"key":"k","secret":hex,"secretEncoding":"hex"}}),
         )
         .unwrap();
-        (signer, ids.primary.unwrap().signing)
+        (signer, ids.primary.unwrap().signing_ref().unwrap().clone())
     }
 
     /// R1: payloads without full entropy, or without whole input words, are refused.
@@ -1165,17 +1170,23 @@ mod tests {
         )
         .unwrap();
         let (primary, secondary) = (ids.primary.unwrap(), ids.secondary.unwrap());
-        assert_eq!(secondary.signing, primary.signing);
+        assert_eq!(
+            secondary.signing_ref().unwrap().clone(),
+            primary.signing_ref().unwrap().clone()
+        );
         assert_eq!(secondary.credential, KeyRef("secondary.credential".into()));
         assert!(
             !signer
                 .keys
                 .contains_key(&KeyRef("secondary.signing".into()))
         );
-        assert_eq!(signer.key(&secondary.signing).unwrap(), [1, 2]);
+        assert_eq!(
+            signer.key(secondary.signing_ref().unwrap()).unwrap(),
+            [1, 2]
+        );
         // One copy, one revocation point for both slots.
-        signer.remove(&secondary.signing);
-        assert!(signer.key(&primary.signing).is_err());
+        signer.remove(secondary.signing_ref().unwrap());
+        assert!(signer.key(primary.signing_ref().unwrap()).is_err());
         for (secondary, policy) in [
             // A declared encoding mismatch is refused, not reinterpreted.
             (
@@ -1278,11 +1289,11 @@ mod tests {
                 context: Default::default(),
                 operations: vec![
                     Operation::Present {
-                        key: identity.passphrase.unwrap(),
+                        key: identity.passphrase.clone().unwrap(),
                     },
                     Operation::Sign {
                         algorithm: Algorithm::HmacSha256,
-                        key: identity.signing,
+                        key: identity.signing_ref().unwrap().clone(),
                         payload: vec![PayloadPart::Bytes {
                             bytes: vector["payload"].as_str().unwrap().as_bytes().to_vec(),
                         }],
@@ -1586,7 +1597,9 @@ mod tests {
             .1
             .primary
             .unwrap()
-            .signing
+            .signing_ref()
+            .unwrap()
+            .clone()
     }
     fn zklink_request(key: KeyRef, payload: Vec<u8>) -> SignRequest {
         SignRequest {
@@ -1612,7 +1625,7 @@ mod tests {
             context: Default::default(),
             operations: vec![Operation::Sign {
                 algorithm: Algorithm::HmacSha256,
-                key: primary.signing.clone(),
+                key: primary.signing_ref().unwrap().clone(),
                 payload: vec![PayloadPart::Bytes {
                     bytes: b"1700000000000GET/api/v3/account".to_vec(),
                 }],
@@ -1622,7 +1635,10 @@ mod tests {
             crate::hex(&signer.sign_now(&request).unwrap().values[0]),
             "754e7df89fca47eee8f6c2458bb820526604226248620adb40045b6b003d6ad0"
         );
-        assert_eq!(signer.key(&primary.signing).unwrap(), b"YXBleC1zZWNyZXQ=");
+        assert_eq!(
+            signer.key(primary.signing_ref().unwrap()).unwrap(),
+            b"YXBleC1zZWNyZXQ="
+        );
     }
 
     fn sha512_request(key: KeyRef) -> SignRequest {
@@ -1646,7 +1662,7 @@ mod tests {
         let (seed, _, _) = zklink_case();
         let (signer, ids) =
             LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
-        let request = sha512_request(ids.primary.unwrap().signing);
+        let request = sha512_request(ids.primary.unwrap().signing_ref().unwrap().clone());
         assert_eq!(
             crate::hex(&signer.sign_now(&request).unwrap().values[0]),
             "689ec455eb6b1b55d05a2a3662bfe2faabed0c3445180e4efa855216f53f7c5d\
@@ -1660,7 +1676,7 @@ mod tests {
         let (seed, _, _) = zklink_case();
         let (signer, ids) =
             LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
-        let request = sha512_request(ids.primary.unwrap().signing);
+        let request = sha512_request(ids.primary.unwrap().signing_ref().unwrap().clone());
         assert_eq!(signer.sign_now(&request), Err(SignError::Unsupported));
     }
 
@@ -1799,13 +1815,17 @@ mod tests {
         };
         for (key, algorithm, expected) in [
             (
-                &primary.signing,
+                primary.signing_ref().unwrap(),
                 Algorithm::HmacSha256,
                 Capability::Supported,
             ),
-            (&primary.signing, Algorithm::HmacSha512, sha512),
             (
-                &primary.signing,
+                primary.signing_ref().unwrap(),
+                Algorithm::HmacSha512,
+                sha512,
+            ),
+            (
+                primary.signing_ref().unwrap(),
                 Algorithm::Sha256SecretSuffix,
                 Capability::Supported,
             ),
@@ -1813,12 +1833,12 @@ mod tests {
             // Role binding: neither ref crosses into the other's algorithm.
             (&seed_ref, Algorithm::HmacSha256, Capability::Unsupported),
             (
-                &primary.signing,
+                primary.signing_ref().unwrap(),
                 Algorithm::ZkLinkContract,
                 Capability::Unsupported,
             ),
             (
-                &primary.signing,
+                primary.signing_ref().unwrap(),
                 Algorithm::Ed25519,
                 Capability::Unsupported,
             ),
@@ -1847,7 +1867,10 @@ mod tests {
             serde_json::json!({"primary": {"key": "account", "secret": secret}}),
         )
         .unwrap();
-        (signer, identities.primary.unwrap().signing)
+        (
+            signer,
+            identities.primary.unwrap().signing_ref().unwrap().clone(),
+        )
     }
     /// Arbitrary in-range scalar for refusal paths; never a vector or real key.
     const SCALAR: &str = "1111111111111111111111111111111111111111111111111111111111111111";
@@ -1882,14 +1905,17 @@ mod tests {
             alias,
         )
         .unwrap();
-        assert_eq!(ids.secondary.unwrap().signing, ids.primary.unwrap().signing);
+        assert_eq!(
+            ids.secondary.unwrap().signing_ref().unwrap().clone(),
+            ids.primary.unwrap().signing_ref().unwrap().clone()
+        );
         // Undeclared material answers nothing, whatever its shape.
         let (undeclared, ids) = try_public_setup(
             serde_json::json!({"primary": {"secretEncoding": "hex"}}),
             setup,
         )
         .unwrap();
-        let key = ids.primary.unwrap().signing;
+        let key = ids.primary.unwrap().signing_ref().unwrap().clone();
         let request = public_request(serde_json::json!([{"kind": "publicAddress", "key": key}]));
         assert_eq!(
             undeclared.sign_now(&request),
@@ -2245,7 +2271,7 @@ mod tests {
         let (signer, ids) =
             LocalSigner::from_json_with_policy(wallet_only.to_string(), policy()).unwrap();
         let ids = ids.primary.unwrap();
-        assert!(ids.credential.0.is_empty() && ids.signing.0.is_empty());
+        assert!(ids.credential.0.is_empty() && ids.signing_opt().is_none());
         let role = ids.extra[&ExtraKey::L1Wallet].clone();
         let request = public_request(serde_json::json!([{"kind": "publicAddress", "key": role}]));
         assert_eq!(signer.sign_now(&request).unwrap().values[0].len(), 20);
@@ -2309,7 +2335,7 @@ mod tests {
                 .to_string(),
         )
         .unwrap();
-        (signer, ids.primary.unwrap().signing)
+        (signer, ids.primary.unwrap().signing_ref().unwrap().clone())
     }
     // One test per algorithm, so every variant runs. The declaration check
     // precedes the arm, so these refuse the same way in every build.
@@ -2440,8 +2466,8 @@ mod tests {
             }),
         )
         .unwrap();
-        let shared = ids.secondary.unwrap().signing;
-        assert_eq!(shared, ids.primary.unwrap().signing);
+        let shared = ids.secondary.unwrap().signing_ref().unwrap().clone();
+        assert_eq!(&shared, ids.primary.unwrap().signing_ref().unwrap());
         assert_eq!(
             aliased.insert_declared(shared.clone(), vec![0x33; 32], Algorithm::Ed25519),
             Err(SignError::InvalidRequest)

@@ -24,13 +24,12 @@ use std::sync::{Arc, Mutex};
 const NOW: f64 = 1_000.25;
 const HEADERS: &[(&str, &str)] = &[("X-Demo", "1"), ("Content-Type", "application/json")];
 fn identity(slot: &str) -> Identity {
-    Identity {
-        credential: KeyRef(format!("ref:{slot}:credential")),
-        signing: KeyRef(format!("ref:{slot}:signing")),
-        passphrase: Some(KeyRef(format!("ref:{slot}:passphrase"))),
-        stable_id: Some("account".into()),
-        extra: Default::default(),
-    }
+    Identity::new(
+        KeyRef(format!("ref:{slot}:credential")),
+        Some(KeyRef(format!("ref:{slot}:signing"))),
+    )
+    .with_passphrase(Some(KeyRef(format!("ref:{slot}:passphrase"))))
+    .with_stable_id(Some("account".into()))
 }
 struct Recipe {
     identity: Identity,
@@ -50,7 +49,8 @@ impl SignStep for Recipe {
         cx: &DispatchContext<'_>,
     ) -> Result<SignRequest, SignError> {
         Ok(hmac_sha256_work(
-            &self.identity,
+            &self.identity.credential,
+            self.identity.signing_ref()?,
             Vec::new(),
             Default::default(),
             SignReceipt {
