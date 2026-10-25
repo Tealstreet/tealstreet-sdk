@@ -111,6 +111,16 @@ sign-res.d = {
   review this additional bound before source. It does not alter legacy v1.
   Correlation/subject ids are bounded to 256 UTF-8 bytes, accountName to its
   existing 4096-byte cap; no unbounded reply, descriptor or pending-task map.
+- A peer refuses duplicate (id, attemptId, receipt) while pending and retains a
+  replay tombstone until the original deadline, refusing rather than re-signing.
+  Changing id does not permit reuse of the same signing-task/receipt authority.
+  Bind the cached decision to the account and descriptor; a changed descriptor
+  under that authority refuses too. This grants no peer nonce reservation or
+  counter. Real repair has a fresh task and receipt, as specified above.
+  Bound concurrent work and replay state per authenticated account, with a
+  sanitized full-map refusal before callback; pin the existing limit or a
+  separately reviewed numeric limit before source, without cross-account
+  starvation or eviction that permits a replay before its deadline.
 - Callback headers cannot replace authentication. First Kraken/Stark descriptors
   need no callback header authority; existing HmacSha256 presentation policies
   remain unchanged. Error text never includes preimages, refs, keys or results.
@@ -171,6 +181,22 @@ Allow only the native private consumer methods/paths from
 RUST_KRAKEN_PRIVATE_DISPATCH_ADOPTION.md. Futures Read GETs outside /api/history/
 may use Secondary; PrimaryRead History and all writes remain Primary. Spot
 uses Primary only. Peer method/path/role mismatches refuse before signing.
+The closed HTTP allowlist is exactly this current native set, with wire path
+spelling preserved and no prefix/wildcard grant:
+
+| Family | Method | Exact native wire paths |
+| --- | --- | --- |
+| Futures | GET | /derivatives/api/v3/accounts; /derivatives/api/v3/openorders; /derivatives/api/v3/openpositions; /derivatives/api/v3/leveragepreferences; /derivatives/api/v3/fills; /api/history/v3/account-log; /api/history/v3/orders |
+| Futures | POST | /derivatives/api/v3/sendorder; /derivatives/api/v3/cancelorder; /derivatives/api/v3/batchorder; /derivatives/api/v3/editorder |
+| Futures | PUT | /derivatives/api/v3/leveragepreferences |
+| Spot | POST | /0/private/Balance; /0/private/OpenOrders; /0/private/GetWebSocketsToken; /0/private/AddOrder; /0/private/AmendOrder; /0/private/CancelOrder |
+
+Every other method/path refuses before callback. In particular no Spot Withdraw,
+WithdrawCancel or WalletTransfer, nor any Futures transfer/withdrawal endpoint,
+is authorized. No /secondary-test fixture path is a production grant. The
+secretless origin cannot verify a peer MAC; this closed peer check must prevent
+an origin from obtaining signatures for arbitrary Kraken account operations.
+
 Reject noncanonical/signed/exponent/leading-zero/over-u64 nonce, JSON number,
 duplicate nonce field, or descriptor/header/form/receipt disagreement. The
 original dispatcher receipt is the sole nonce authority. The peer never reserves,
@@ -222,14 +248,17 @@ Preserve that 300s relationship; it does not extend the <=5s signing window.
 Order timestamps are native milliseconds and remain frozen across any separately
 authorized same-command re-sign. No new automatic resend. Expired command or
 signed validity refuses; reconstruction applies only to future commands. Before
-source, security must approve this proposed peer policy: auth expiration must
-equal timestamp + 300 seconds exactly; auth timestamp seconds must be within
-[peer_now - 30s, peer_now + 30s]. Order signature timestamp milliseconds uses
-the same 30-second skew bound. These checks use the peer's own clock and never
-widen the <=5s execution bound (minimum of the original deadline and capture
-cap). Preserve native units and exact 300s validity; malformed or out-of-skew
-fields refuse before signing. These numbers are proposed security pins, not
-source authorization.
+security approved these peer time-policy pins: read peer wall time at the
+signing moment and check the original effective deadline first; equality or
+later refuses. Auth expiration must equal timestamp + 300 seconds exactly;
+auth timestamp seconds must be within [peer_now - 30s, peer_now + 30s] inclusive.
+Order signature timestamp milliseconds must be within peer_now +/-30,000ms
+inclusive. These checks never widen or re-derive the <=5s execution bound
+(minimum of the original deadline and capture cap). Out-of-skew or malformed
+fields refuse NotSent before signing. Effective signed-auth validity can reach
+about 330s from peer time; this is accepted and must not be silently shortened
+by changing native expiration. Security approval of these numbers is plan-only,
+not source authorization.
 
 JWT uses the landed Session-bearer revision fence: /auth is Session login;
 refresh moves the Bearer revision, session_ready follows refresh, NotReady parks
@@ -276,12 +305,17 @@ Originals precede source and retain existing hosted HmacSha256 wire controls:
    bare digest under an allowed tag and added arbitrary graph/KeyRef all refuse.
    The 1 MiB op-wire originals exercise pre-parse receive refusal and
    post-encode send refusal, including UTF-8 byte length rather than JS length.
+   Every excluded Kraken withdrawal/transfer/wallet path under an otherwise
+   valid descriptor refuses before callback, alongside exact allowlist positives.
 2. Complete receipt presence/equality, exact nonce/descriptor/header/form,
    malformed u64 and 32/64-byte graph/result controls; literal vectors plus
    independent Node/Python HMAC and independent Stark verification.
 3. Original/fractional/equality deadline, future deadline, clock-revision change,
    held callback, cancellation, duplicate/late result and dispose release once;
    no late signature can cause HTTP, Store effects, Session ready or retransmit.
+   Repeating a pending or completed request before its original deadline, with
+   the same ids or a fresh correlation id over the same task/receipt, invokes no
+   second callback. Pin per-account full-map refusal and account isolation.
 4. Actual EngineHost + actual family WASM + actual canonical builder + real peer:
    genuine Kraken reservations 2^53+1/+3; MAX codec/work/MAC ONLY. Reverse Claims,
    exact Cancel/new preparation/same Attempt/higher nonce/new MAC, zero peer
