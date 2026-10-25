@@ -1,9 +1,10 @@
 # GRVT EIP712 provider recipe and installed construction
 
 Owner: codex-zs5e83. Reviewers: codex-9czdjh (native recipe and construction)
-and claude-fe7lgm (serial call and auth-resend interplay). PLAN ONLY, following
-the overseer's assignment after #2086. No builds, new tests, runtime, constructor,
-manifest, feature, host or credential-selection edits at this checkpoint.
+and claude-fe7lgm (serial call and auth-resend interplay). The original plan-only
+checkpoint follows the overseer's assignment after #2086. The local recipe
+checkpoint below follows the later explicit source assignment; installed
+construction and native command cutover remain held at G3/G6.
 
 This is the recipe/construction prerequisite of RUST_GRVT_WRITE_FUNNEL.md,
 whose original-control pin bf61d06542a remains unchanged. Native observations
@@ -454,3 +455,77 @@ dispatch CI or push a partially integrated implementation. Generic engine
 changes require Bybit and Bitget measurements on the composed landing tree;
 each scratch measurement/review build removes its own target directory after
 preserving logs and size tables. No build or measurement ran in this audit.
+
+
+## Local recipe checkpoint above #2146
+
+The overseer authorized local source above the frozen #2146 composition, with
+no push until #2146 lands and no implementation of m26ps4's G3/G6 seams.
+The branch contains the actual CreateOrder and Login SignStep implementations.
+CreateOrder requests PublicAddress and Secp256k1Digest over one signing ref,
+verifies both against the trusted expected account, and builds the native body
+only after receipt, low-s signature and recovered-signer validation. FrozenOrder
+holds the canonical digest and all once-materialized fields; prepare performs
+fresh provider work without renewing nonce, expiry or client identity. Login
+uses only Present for an installed credential and emits the native login wire.
+Neither recipe holds the API key or scalar outside the outbound presentation.
+
+The native placement wire types are shared by the recipe and existing caller;
+removing the added visibility and Clone/Debug derives reconstructs the original
+type block exactly. Native eager signing, login, queue, entry and constructor
+selection are not switched. Options still belongs to that unconverted native
+path; neither new recipe reads it or falls back to it. No inventory entry is
+pruned. The only Cargo change enables the existing local-provider secp256k1 arm
+for dev-dependencies so the isolated recipe controls use the real LocalSigner.
+Production feature adoption, engine, host and registry remain unchanged.
+
+The new engine-driven recipe controls live in tests/support/provider_recipes.rs,
+following the repository's test-only module layout. Fixture keys and oracle
+signing stay outside production source; the signing inventory is unchanged.
+They cover exact local wire on both domains,
+ordinary Stale with immutable bytes, asynchronous external signatures that vary
+only r/s/v, wrong signer/digest/high-s/receipt/header rejection, Present-only login
+wire, and expiry without provider work. These controls use real admitted owners,
+Prepare, Bind, Claim and asynchronous Signed delivery. Login's installed-credential
+probe selects SessionAuth and uses a real Session context. It is not proof of the
+Empty-intent constructor, Optional absence, native queue or serial resend adoption.
+Their execution receipt is recorded after the scoped run, rather than inferred
+from the pre-existing funnel originals.
+
+G3/G6 remain the stopping boundary: no fake Identity, empty signing-ref sentinel,
+caller-supplied setup facts, Empty Present operation, account-latch override or
+native fallback. Actual constructor cutover needs #2149's shared source and its
+consumer controls. Later adoption must explicitly enable the reviewed features,
+run the GRVT size/budget gate, retain bf61 originals, and obtain source reviews.
+
+
+Local verification: 13 library tests (the six new recipe controls plus seven
+existing library controls), 42 unchanged trading controls and one security
+control pass: 56 total, none ignored. After the test-only module moved into
+support, all six recipe controls and strict GRVT lib/tests clippy passed again.
+Formatting and diff checks pass. The source gate retains the old bf61 target
+byte-for-byte; its intentional custody REDs are not run or called green here.
+The isolated LocalSigner arm initially refused Unsupported until the explicit
+dev-only secp256k1 opt-in; the positive tests expose that condition. The async
+driver then uses actual Signed ingress with a retained prepared route instead
+of the immediate-only fixture. Neither change replaces provider work or Claim.
+The initial signing-ratchet failure identified test fixture secret setup in
+src; moving that unit module into tests/support follows the existing test-only
+layout, with no inventory addition or checker change.
+
+
+Full bans on this frozen local parent fail only the foreign stale OKX request
+keys in lib.rs/trading.rs and credential-selection lib.rs against the advancing
+origin/feat/rust-rewrite. The current request scan matches its checked-in
+inventory; no GRVT site or map is added or pruned. Signing, socket and checker
+unit controls pass. This is a recorded full-gate failure, not a complete bans
+PASS or permission to change foreign maps. Recompose and rerun on the adoption
+tip after the engine freeze and shared seams are resolved.
+
+The overseer reports #2132 landed at a2c914e2b24466725c546c87cdfb157797fbec0e;
+that object is verified locally. It introduces explicit optional signing refs,
+so the eventual composition must use the landed required-signing accessor for
+CreateOrder rather than the pre-D1 field shape compiled at this frozen parent.
+G3/G6 in #2149 is still the next shared gate. No newer engine input is silently
+merged into the published #2146 A3d30/B7aa diagnostic pair, and no compatibility
+shim or optional-signing emulation is added to this recipe checkpoint.
