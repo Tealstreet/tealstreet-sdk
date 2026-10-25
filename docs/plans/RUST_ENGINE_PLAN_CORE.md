@@ -54,7 +54,8 @@ generic only because their methods hang off `Cx<'_, P>`. Those files are
   - Every core access names `io.core.field` explicitly; there is no `Deref`,
     since one split about 90 borrows that touch a P field and a core field
     together. A script makes the rewrite, so a later recompose re-runs it.
-  - No behaviour change; the size change is about 0.
+  - No behaviour change. Measured on ba6fb191239 (shipped wasm): families
+    -188 to +144 B, combined -9,814 B.
 - **S1, CoreCx.**
   - A non-generic `CoreCx<'a> { now, store, io: &mut IoCore }` carries the
     P-free Plan, Preflight, entry and execution bodies, and `Cx<P>` keeps
