@@ -1,6 +1,8 @@
-//! V5 API-key identity reads reuse the native read signer and signature resend.
+//! V5 API-key identity: a signed command Read on the engine's managed
+//! authority, with the read key when configured.
 use crate::{BybitLinear, Pending, Rest, Then, sign::Query};
-use safe_cex_engine::{CommandId, Cx, Response};
+use safe_cex_engine::request_context::Context;
+use safe_cex_engine::{Cx, ErrorKind, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -70,53 +72,76 @@ fn parse(response: Response<'_>) -> Result<Identity, String> {
         affiliate_id: data.inviter_id.filter(Id::truthy).and_then(Id::value),
     })
 }
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
+fn finish(cx: &mut Cx<'_, Pending>, context: &Context, result: Result<Identity, String>) {
     let result = result
         .and_then(|identity| serde_json::to_string(&identity).map_err(|error| error.to_string()));
     match result {
-        Ok(data) => cx.done(command, data),
-        Err(error) => {
-            cx.command_error(command, &error);
-            cx.fail(command, error);
+        Ok(data) => {
+            let _ = cx.done_context(context, data);
         }
+        Err(error) => fail(cx, context, VenueError::new(error)),
     }
 }
+
+/// Every failure is reported to its command before the typed terminal.
+fn fail(cx: &mut Cx<'_, Pending>, context: &Context, error: VenueError) {
+    // Only a live owner gets the diagnostic, so it never outlives its terminal.
+    if cx
+        .command_error_context(context, error.message.clone())
+        .is_ok()
+    {
+        let _ = cx.fail_context(context, error);
+    }
+}
+
+fn refuse(cx: &mut Cx<'_, Pending>, context: &Context, message: String, kind: ErrorKind) {
+    fail(
+        cx,
+        context,
+        VenueError::new(message)
+            .kind(kind)
+            .outcome(Outcome::NotSent),
+    );
+}
+
 impl BybitLinear {
-    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        if let Some(error) = &self.config_error {
-            finish(cx, command, Err(error.clone()));
+    pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>) {
+        let policy = self
+            .read_policy(true, crate::candles::read_policy().timeout_ms)
+            .unwrap_or_else(crate::candles::read_policy);
+        // The engine owns an initial admission refusal.
+        let Ok(context) = cx.admit_http_command(policy) else {
             return;
+        };
+        if let Some(error) = self.config_error.clone() {
+            return refuse(cx, &context, error, ErrorKind::InvalidInput);
         }
         if let Some(read) = &self.read_credentials
             && let Err(error) = read.validate()
         {
-            finish(cx, command, Err(error.into()));
-            return;
+            return refuse(cx, &context, error.into(), ErrorKind::InvalidInput);
         }
         if self
             .credentials
             .as_ref()
             .is_none_or(|c| c.validate().is_err())
         {
-            finish(
-                cx,
-                command,
-                Err("Bybit account identity requires credentials".into()),
-            );
-            return;
+            let message = "Bybit account identity requires credentials".to_owned();
+            return refuse(cx, &context, message, ErrorKind::AuthInvalid);
         }
-        self.send(
-            cx,
-            Rest::get("/v5/user/query-api", Query::new()).signed(),
-            Then::Identity(command),
-        );
+        let rest = Rest::get("/v5/user/query-api", Query::new()).signed();
+        self.queue_read(cx, context.clone(), rest, Then::Identity(context));
     }
+
     pub(crate) fn identity_response(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        response: Result<Response<'_>, &str>,
+        context: Context,
+        response: Result<Response<'_>, VenueError>,
     ) {
-        finish(cx, command, response.map_err(str::to_owned).and_then(parse));
+        match response {
+            Ok(response) => finish(cx, &context, parse(response)),
+            Err(error) => fail(cx, &context, error),
+        }
     }
 }

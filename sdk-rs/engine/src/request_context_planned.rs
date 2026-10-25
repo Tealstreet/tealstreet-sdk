@@ -887,7 +887,7 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
     ) -> Result<Context, Error> {
-        let leg = self.make_plan_leg_context(plan, slot, intent, true)?;
+        let leg = self.make_plan_leg_context(plan, slot, intent, false, true)?;
         self.note_session_resume(plan, &leg);
         Ok(leg)
     }
@@ -915,7 +915,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, None, false)
+        self.make_plan_leg_context(plan, slot, None, false, false)
     }
 
     /// Narrow a write leg using the common engine intent rules before its first
@@ -926,7 +926,24 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: crate::classify::Intent,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, Some(intent), false)
+        self.make_plan_leg_context(plan, slot, Some(intent), false, false)
+    }
+
+    /// The Plan form of `http_write_protection_cancel_leg`: an amend's cancel
+    /// leg of a position-bound cancel-then-recreate, declared before the leg's
+    /// journal registration. Never declare it for any other replacement.
+    pub fn plan_protection_cancel_leg_context(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+    ) -> Result<Context, Error> {
+        self.make_plan_leg_context(
+            plan,
+            slot,
+            Some(crate::classify::Intent::Cancel),
+            true,
+            false,
+        )
     }
 
     /// Handoff, initial or ready custody over this Plan's next issue.
@@ -955,6 +972,7 @@ impl<P> Cx<'_, P> {
         plan: &Plan,
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
+        protection_cancel: bool,
         resumed: bool,
     ) -> Result<Context, Error> {
         let body = self.io.request_contexts.validate_plan(plan, self.now)?;
@@ -1021,7 +1039,9 @@ impl<P> Cx<'_, P> {
             .owner_entry_mut(plan.owner())
             .unwrap();
         let narrowed = match intent {
-            Some(intent) if owner.prepare_leg_intent(&context, intent, false)? => Some(intent),
+            Some(intent) if owner.prepare_leg_intent(&context, intent, protection_cancel)? => {
+                Some(intent)
+            }
             _ => None,
         };
         // Journal enrollment precedes headers, recipe preparation and all queue
