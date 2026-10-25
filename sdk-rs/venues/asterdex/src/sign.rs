@@ -418,7 +418,7 @@ impl SignStep for Recipe {
                 },
                 Operation::Sign {
                     algorithm,
-                    key: self.identity.signing.clone(),
+                    key: self.identity.signing_ref()?.clone(),
                     payload: vec![PayloadPart::Bytes { bytes: message }],
                 },
             ],

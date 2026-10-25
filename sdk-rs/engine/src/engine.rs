@@ -2042,16 +2042,20 @@ impl<P> Cx<'_, P> {
             CredentialSlot::Secondary => self.io.core.identities.secondary.as_ref(),
         }
         .ok_or(SignError::InvalidRequest)?;
-        // Resolve every ref first, so a malformed command is InvalidRequest
-        // regardless of the order of its needs.
+        // A malformed command is InvalidRequest before an absent signing ref is
+        // MissingKey, regardless of the order of its needs.
+        if needs.iter().any(
+            |need| matches!(need.key, KeyUse::Extra(extra) if !identity.extra.contains_key(&extra)),
+        ) {
+            return Err(SignError::InvalidRequest);
+        }
         let keys = needs
             .iter()
             .map(|need| match need.key {
-                KeyUse::Signing => Some(&identity.signing),
-                KeyUse::Extra(extra) => identity.extra.get(&extra),
+                KeyUse::Signing => identity.signing_ref(),
+                KeyUse::Extra(extra) => Ok(&identity.extra[&extra]),
             })
-            .collect::<Option<Vec<_>>>()
-            .ok_or(SignError::InvalidRequest)?;
+            .collect::<Result<Vec<_>, _>>()?;
         for (need, key) in needs.iter().zip(keys) {
             let capability = match (&self.io.core.signer, &self.io.core.host_algorithms) {
                 (Some(signer), _) => signer.can_sign(key, need.algorithm),
