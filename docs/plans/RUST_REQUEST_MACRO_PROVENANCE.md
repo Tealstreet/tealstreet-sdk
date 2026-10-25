@@ -38,26 +38,47 @@ uses. No endpoint, venue, hash or variable-name allowlist.
 A macro can lose ONLY its extra conservative fingerprint when all of these
 conditions are proved:
 
-1. It is the ordinary matches! or format! shape, not an unknown macro, alias,
-   imported replacement or locally shadowed macro definition. Ambiguous names
-   retain the old conservative result. The exact treatment of glob imports is
-   a source-review pin: no hidden macro/Cx authority may be inferred from them.
-2. Every METHODS-spelled token causing the old false positive is a plain data
-   reference to an already typed non-Cx parameter, with ordinary field access
-   as in the13 working WEEX cases. A member/path/method reference, direct or
-   indirect call, raw identifier sender, alias or unresolved binding is not
-   eligible. Local let/for/match/closure shadowing must not borrow the outer
-   parameter's proof; ambiguous cases stay conservative.
-3. The macro passes or captures no resolved Cx/unknown closure binding. Its
-   source contains no counted legacy call, nested unknown macro, callable
-   selector or other unresolved capability transfer. Do not clear the enclosing
-   function's existing taint or use the data proof for another expression.
+1. Only bare matches! and format! are eligible. Qualified names, aliases,
+   visible imports naming either macro, local or ancestor macro definitions,
+   macro_use/export and unresolved macro identity stay conservative. Spelling
+   alone does not prove a standard macro. No other nested macro is eligible.
+2. Every METHODS-spelled token must be an enclosing fn parameter with an explicit
+   concrete non-Cx type, not generic/impl/dyn/inferred or a closure parameter.
+   Its expression is only IDENT followed by .field segments, with no call,
+   index, turbofish or parenthesized receiver. ANY rebinding anywhere in that
+   function (let/for/match/if-let/while-let/closure parameter) refuses the proof;
+   no flow analysis or borrowing an outer parameter proof across ambiguity.
+3. For format!, arguments after the literal contain only these references,
+   literals and the tokens . , &; no parentheses or calls. For matches!, the
+   scrutinee obeys rule2, and parentheses are allowed only in the pattern after
+   the first top-level comma. No resolved Cx or unknown capability is passed.
+4. Any actual counted direct/raw/generic/UFCS/indirect call retains its wrapper
+   fingerprint, even beside a pure sibling. This never clears fn taint or raw
+   call rows. Unknown forms retain the old accounting.
 
-The implementation may refuse additional uncertain shapes instead of growing
-Rust name or type inference. It must accept all13 exact WEEX cases for a stated
-structural reason. The reviewers must settle the concrete shadow/import
-predicate before source application. This plan does not authorize broad removal
-of arbitrary METHODS tokens from unknown macros.
+### Closed single-hop private-import proof
+
+A visible glob normally refuses precision. The sole exception is a top-level,
+flat, single-segment `use crate::<ident>::*;` in the consumer. Resolve it via
+actual tracked plain `mod <ident>;` declarations to exactly one source file,
+without path/conditional/ambiguous declarations. Record the consumer/target
+module paths, declaration and target blob. Grouped, external, self/super,
+nested or otherwise unresolved consumer globs remain conservative.
+
+The target has no macro definition (macro_rules or decl_macro), macro_use/export,
+extern crate, include/item-generating source, nested module or re-export of ANY
+visibility. A use item is private ONLY when it has no visibility modifier:
+pub, pub(crate), pub(super), pub(self) and pub(in ...) all refuse the proof.
+Private target imports, including private globs, are permitted and are not
+traversed as exports. The consumer must be a sibling or unrelated module in the
+plain mod graph, NEVER the target or its descendant: descendants can see private
+imports. Ancestor macro definitions/imports/macro_use still require independent
+resolution, and unknown cases keep old counts. No venue/hash allowlist.
+
+This is the co-signed hcm/8x supplement, supported by the pinned Rust1.99 private
+import failure and public-glob working probe. It permits originals and an exact
+unapplied source preview; source and every removed-row proof still require both
+reviewers before application.
 
 ## Originals and hostile controls
 
@@ -76,6 +97,10 @@ body/assertion and both production/test inventory partitions. No Cargo build.
   macro, a Cx named request, inferred closure request, shadowed data binding,
   and moved/borrowed Cx arguments retain their conservative inventory or typed
   refusal. Real macro-generated sender and include! still fail closed.
+- Flat local-glob private imports versus pub/pub(crate)/pub(self)/pub(in ...)
+  re-exports, exported macro, macro_rules/decl_macro, macro_use, path or conditional
+  declarations, missing/ambiguous targets, nested modules, grouped/external/super
+  globs and descendant consumers. Record actual declarations and target blobs.
 - Working controls for literal method-like text, ordinary typed data references,
   resolved Cx members and non-Cx fields; both default source-local index and
   workspace escape index. Existing taint, ownership and baseline tests pass.
@@ -113,6 +138,6 @@ qualification; never master, rebase or force-push. Exact-tree GO precedes landin
 
 All Rust, Cargo.lock, profiles, hosts and build/workflow inputs remain unchanged.
 No shipping WASM size delta is claimed or inferred from Python test results;
-this checker-only slice proposes no release build. Any additional measurement
-requirement is for the auditor to disposition, with exact unchanged runtime
-input proof, rather than relabelling earlier #2165 measurements.
+8x explicitly ruled no size measurement necessary for this Python-only change
+with runtime/build inputs unchanged. State that scope in the PR; do not relabel
+earlier #2165 measurements.
