@@ -284,3 +284,45 @@ fn position_modes_need_object_rows_with_integer_indexes() {
         assert!(position_mode(result, "BTCUSDT").is_err(), "{body}");
     }
 }
+
+/// Decoder parity pins: what the serde-derived codec guaranteed implicitly.
+#[test]
+fn field_decoding_keeps_its_strictness() {
+    // A duplicated known field is malformed; unknown fields are ignored.
+    assert_eq!(
+        answer(r#"{"retCode":0,"retCode":1}"#).err(),
+        Some(Malformed)
+    );
+    assert!(answer(r#"{"retCode":0,"extra":[1,{"x":null}]}"#).is_ok());
+    // A text field that is not a string (or null) is malformed; null is absent.
+    assert_eq!(answer(r#"{"retCode":5,"retMsg":7}"#).err(), Some(Malformed));
+    assert_eq!(
+        refused(r#"{"retCode":5,"retMsg":null}"#),
+        Some((5, String::new()))
+    );
+    let raw = |body: &'static str| Some(serde_json::from_str::<&RawValue>(body).unwrap());
+    assert_eq!(created(raw(r#"{"orderId":7}"#), None), Err(Malformed));
+    assert_eq!(created(raw(r#"{"orderId":null}"#), None), Err(Malformed));
+    assert_eq!(
+        created(raw(r#"{"orderId":"a","orderId":"b"}"#), None),
+        Err(Malformed)
+    );
+    assert_eq!(
+        created(raw(r#"{"orderId":"ab"}"#), None),
+        Ok("ab".to_owned())
+    );
+    // Position rows need a string symbol and an exact integer index.
+    let mode = |body: &'static str| position_mode(raw(body), "BTCUSDT");
+    assert!(mode(r#"{"list":[{"symbol":"BTCUSDT","positionIdx":1.0}]}"#).is_err());
+    assert!(mode(r#"{"list":[{"symbol":"BTCUSDT","positionIdx":"1"}]}"#).is_err());
+    assert!(mode(r#"{"list":[{"symbol":7,"positionIdx":1}]}"#).is_err());
+    assert_eq!(
+        mode(r#"{"list":[{"symbol":"BTCUSDT","positionIdx":2}]}"#),
+        Ok(true)
+    );
+    // A margin reason with a non-string code is malformed.
+    assert_eq!(
+        margin_applied(raw(r#"{"reasons":[{"reasonCode":1}]}"#)),
+        Err(Malformed)
+    );
+}

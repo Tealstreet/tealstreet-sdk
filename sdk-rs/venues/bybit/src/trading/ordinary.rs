@@ -1,7 +1,8 @@
 //! Ordinary (Linear, Inverse, Spot and Demo) trading on the engine's Preflight
 //! and Plan core. Each command owns one genuine preflight: optional signed mode
 //! reads, then one admitted native plan whose write facts the engine journal
-//! seals. Hyro and option placements stay on the legacy job pipeline (D5).
+//! seals. Options run here too; a Hyro placement founds or joins one planned
+//! execution of its retained intent (`placements`).
 use super::acknowledgement::{self as ack, Answer, Row};
 use super::codes::BYBIT;
 use super::{
@@ -20,10 +21,10 @@ use safe_cex_engine::request_context::{
     Policy, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData, ResendGrant,
     RetryEvidence, RetryPolicy, WriteResult,
 };
-use safe_cex_engine::{
-    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, Store, VenueError,
-};
+use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use std::collections::VecDeque;
+
+mod placements;
 
 /// Every native call (and its one fresh-signature resend) has a 20 s window.
 const CALL_TIMEOUT_MS: u32 = 20_000;
@@ -42,6 +43,17 @@ pub(crate) struct Ordinary {
     write_credential: Option<Credential>,
     command: Command,
     stage: Stage,
+    hyro: Option<HyroCall>,
+}
+
+/// A Hyro placement call on its retained intent.
+struct HyroCall {
+    key: String,
+    /// Lots this call's own reads proved absent on both axes.
+    proven: Vec<bool>,
+    execution: Option<safe_cex_engine::engine::ExecutionHandle>,
+    /// Every observer root of the execution: the founder's, then joiners'.
+    observers: Vec<Context>,
 }
 
 enum Stage {
@@ -52,6 +64,13 @@ enum Stage {
         context: Context,
     },
     Plan(Box<Run>),
+    /// A Hyro link-filtered read before admission.
+    HyroRead {
+        lot: usize,
+        history: bool,
+        context: Context,
+        boundary: (u32, u32),
+    },
 }
 
 struct Run {
@@ -67,6 +86,8 @@ struct Run {
 struct Leg {
     planned: Planned,
     intent: LegIntent,
+    /// The Hyro intent lot this leg sends.
+    lot: Option<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -114,6 +135,10 @@ fn call_bound<'a>(after_refusal: &'a [StepBound<'a>]) -> CallBound<'a> {
     }
 }
 
+pub(crate) const HYRO_RECONNECTING: &str =
+    "HyroTrader account is reconnecting; wait for private state reconciliation";
+const HYRO_RECOVERING: &str = "HyroTrader private state is recovering";
+
 /// Bybit names its own clock in a recv-window refusal; it corrects ours.
 pub(crate) fn server_time(message: &str) -> Option<f64> {
     message
@@ -143,55 +168,23 @@ fn fields(body: &str) -> Fields {
 }
 
 impl BybitLinear {
-    /// Hyro and every option-symbol command stay on the legacy job pipeline
-    /// (D5, removed before the master merge).
-    pub(crate) fn ordinary_command(&self, store: &Store, command: &Command) -> bool {
-        let option = |symbol: &str| self.category_for(symbol) == Category::Option;
-        let order_option = |id: &String| store.order(id).is_some_and(|order| option(&order.symbol));
-        let touches_options = match command {
-            Command::PlaceOrders { orders, .. } => orders.iter().any(|o| option(&o.symbol)),
-            Command::AmendOrder { id, .. } => order_option(id),
-            Command::CancelOrders { ids, .. } => ids.iter().any(order_option),
-            Command::CancelSymbolOrders { symbol, .. }
-            | Command::SetLeverage { symbol, .. }
-            | Command::SetMarginType { symbol, .. } => option(symbol),
-            _ => false,
-        };
-        !self.variant.is_hyro()
-            && trade_command_id(command).is_some()
+    pub(crate) fn ordinary_command(&self, command: &Command) -> bool {
+        trade_command_id(command).is_some()
             && !matches!(command, Command::CancelOrdersWithSymbols { .. })
-            && !touches_options
     }
 
     /// The genuine command entry: one preflight before any check or read.
     pub(crate) fn start_ordinary(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if self.variant.is_hyro() && matches!(command, Command::PlaceOrders { .. }) {
+            self.start_hyro(cx, command);
+            return;
+        }
         let Some(id) = trade_command_id(&command) else {
             return;
         };
-        let write_credential = self.credentials.as_ref().map(|identity| Credential {
-            slot: CredentialSlot::Primary,
-            reference: identity.credential.clone(),
-        });
-        let read_credential = self
-            .read_credentials
-            .as_ref()
-            .map(|identity| Credential {
-                slot: CredentialSlot::Secondary,
-                reference: identity.credential.clone(),
-            })
-            .or_else(|| write_credential.clone())
-            .filter(|_| write_credential.is_some());
-        let purpose = if write_credential.is_some() {
-            PreflightPurpose::WriteAfterReads
-        } else {
-            PreflightPurpose::ReadOnly
-        };
+        let (policy, read_credential, write_credential) = self.ordinary_preflight();
         // A refused issuance already sealed the command.
-        let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
-            purpose,
-            read_credential: read_credential.clone(),
-            write_credential: write_credential.clone(),
-        }) else {
+        let Ok(preflight) = cx.begin_preflight(policy) else {
             return;
         };
         match self.ordinary_gate(cx, &command) {
@@ -213,15 +206,44 @@ impl BybitLinear {
                 write_credential,
                 command,
                 stage: Stage::Idle,
+                hyro: None,
             },
         );
         self.resume_ordinary(cx, id);
     }
 
+    pub(crate) fn ordinary_preflight(
+        &self,
+    ) -> (PreflightPolicy, Option<Credential>, Option<Credential>) {
+        let credential = |key| {
+            self.select_key(key)
+                .map(|(selection, identity)| selection.credential(identity.credential.clone()))
+        };
+        let write_credential = credential(crate::KeyUse::Write);
+        let read_credential = credential(crate::KeyUse::AccountRead);
+        let purpose = if write_credential.is_some() {
+            PreflightPurpose::WriteAfterReads
+        } else {
+            PreflightPurpose::ReadOnly
+        };
+        let policy = PreflightPolicy {
+            purpose,
+            read_credential: read_credential.clone(),
+            write_credential: write_credential.clone(),
+        };
+        (policy, read_credential, write_credential)
+    }
+
     /// Native validation before any read or write, in the legacy order.
+    // A product the account has not enabled is its configuration (as for reads).
     fn ordinary_gate(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> Option<Gate> {
         if let Some(error) = self.config_error.clone() {
             return Some(Gate::Fail(not_sent(error)));
+        }
+        // A Hyro placement checks this before its first write instead: a retry
+        // that only returns already-recovered identities sends nothing.
+        if !self.private_ready() && !matches!(command, Command::PlaceOrders { .. }) {
+            return Some(Gate::Fail(not_sent(HYRO_RECONNECTING)));
         }
         let symbol = match command {
             Command::CancelSymbolOrders { symbol, .. }
@@ -233,17 +255,23 @@ impl BybitLinear {
         if let Some(symbol) = symbol
             && !self.category_enabled(self.category_for(&symbol))
         {
-            return Some(Gate::Fail(not_sent("Bybit product is not enabled")));
+            return Some(Gate::Fail(disabled_product()));
         }
         if let Command::PlaceOrders { orders, .. } = command {
             for order in orders {
                 if !self.category_enabled(self.category_for(&order.symbol)) {
-                    return Some(Gate::Fail(not_sent("Bybit product is not enabled")));
+                    return Some(Gate::Fail(disabled_product()));
                 }
-                if order.implied_volatility.is_some() {
+                let option = self.category_for(&order.symbol) == Category::Option;
+                if !option && order.implied_volatility.is_some() {
                     return Some(Gate::Fail(not_sent(
                         "impliedVolatility is supported only on Bybit options",
                     )));
+                }
+                // The whole batch validates before any read: an invalid option
+                // must not cost a mode read for its linear neighbours.
+                if option && let Err(error) = self.format_option(cx, order) {
+                    return Some(Gate::Fail(not_sent(error)));
                 }
             }
             // An unpriced protective order must never become a market order.
@@ -273,7 +301,8 @@ impl BybitLinear {
 
     /// A settle-coin snapshot omits flat symbols; their mode is read first.
     fn unresolved_mode(&self, cx: &Cx<'_, Pending>, command: &Command) -> Option<String> {
-        if self.variant.is_spot() {
+        // Spot has no position mode; Hyro is one-way by venue contract.
+        if self.variant.is_spot() || self.variant.is_hyro() {
             return None;
         }
         match command {
@@ -378,7 +407,11 @@ impl BybitLinear {
                 Call::CancelPartialStop { .. } => LegIntent::ProtectionCancel,
                 _ => LegIntent::Command,
             };
-            legs.push_back(Leg { planned, intent });
+            legs.push_back(Leg {
+                planned,
+                intent,
+                lot: None,
+            });
         }
         let fallbacks: Vec<Vec<CallBound<'_>>> = legs
             .iter()
@@ -455,12 +488,7 @@ impl BybitLinear {
         path: &'static str,
         payload: String,
     ) -> bool {
-        let identity = if method == Method::Get {
-            self.read_credentials.as_ref().or(self.credentials.as_ref())
-        } else {
-            self.credentials.as_ref()
-        };
-        let Some(identity) = identity else {
+        let Some(identity) = self.signing_identity(method) else {
             return false;
         };
         let mut url = format!("{}{}", self.paths.rest, path);
@@ -474,7 +502,6 @@ impl BybitLinear {
         let pending = Pending {
             category: self.category,
             rest: Rest {
-                method,
                 path,
                 payload,
                 stream: false,
@@ -487,18 +514,18 @@ impl BybitLinear {
             }),
             read: None,
         };
-        cx.request_signed_managed(context, method, url, body, Box::new(step), pending)
+        cx.request_signed_managed(context, None, method, url, body, Box::new(step), pending)
             .is_ok()
     }
 
     /// Issue the next eligible slot, or seal a structurally complete plan.
     fn continue_ordinary(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId, mut entry: Ordinary) {
         let Stage::Plan(run) = &mut entry.stage else {
-            self.trading.ordinary.insert(id, entry);
+            self.park(id, entry);
             return;
         };
         if run.active.is_some() {
-            self.trading.ordinary.insert(id, entry);
+            self.park(id, entry);
             return;
         }
         let slots = match cx.plan_slots(&run.plan) {
@@ -515,20 +542,37 @@ impl BybitLinear {
         };
         if slots.is_empty() {
             if run.queue.is_empty() {
-                let sealed = match run.error.take() {
-                    Some(error) => cx.fail_plan(&run.plan, error),
-                    None => cx.done_plan(
-                        &run.plan,
-                        serde_json::to_string(&run.ids).unwrap_or_default(),
-                    ),
+                // A Hyro result names every lot of the intent, earlier calls' included.
+                let ids = match &entry.hyro {
+                    Some(call) => self
+                        .trading
+                        .hyro
+                        .intents
+                        .get(&call.key)
+                        .map_or_else(|| "[]".into(), |intent| intent.ids()),
+                    None => serde_json::to_string(&run.ids).unwrap_or_default(),
                 };
-                if sealed.is_err() {
-                    let _ = cx.fail_plan(&run.plan, internal("Bybit trading plan was incomplete"));
+                let sealed = match run.error.take() {
+                    Some(error) => cx.fail_plan(&run.plan, error).map(|()| false),
+                    None => cx.done_plan(&run.plan, ids.clone()).map(|()| true),
+                };
+                match sealed {
+                    Ok(true) => {
+                        if let Some(call) = &entry.hyro {
+                            self.settle_hyro(&call.key, Some(ids));
+                            self.wake_hyro_waiters(cx);
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(_) => {
+                        let _ =
+                            cx.fail_plan(&run.plan, internal("Bybit trading plan was incomplete"));
+                    }
                 }
                 return;
             }
             // A paced step: `on_http_plan_ready` resumes it.
-            self.trading.ordinary.insert(id, entry);
+            self.park(id, entry);
             return;
         }
         let (Ok([slot]), Some(leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front()) else {
@@ -549,6 +593,12 @@ impl BybitLinear {
             );
             return;
         };
+        // A later Hyro leg waits for reconciled private state (legacy text).
+        if !self.private_ready() {
+            let _ = cx.fail_plan(&run.plan, not_sent(HYRO_RECOVERING));
+            return;
+        }
+        self.note_hyro_write();
         self.route_body(&leg.planned.body);
         let local = self.local_order_lifecycle().then(|| LocalWrite {
             path: leg.planned.path,
@@ -557,19 +607,31 @@ impl BybitLinear {
             socket: self.private.socket,
             snapshot: self.account.orders_snapshot_version,
         });
-        cx.command_progress(id, leg.planned.receipts.clone());
-        let (path, body) = (leg.planned.path, leg.planned.body.clone());
+        match (&entry.hyro, leg.lot) {
+            (Some(call), Some(lot)) => self.hyro_leg_sent(cx, id, call, lot, &leg.planned.receipts),
+            _ => cx.command_progress(id, leg.planned.receipts.clone()),
+        }
+        let (path, body, lot) = (leg.planned.path, leg.planned.body.clone(), leg.lot);
         let plan = run.plan.clone();
+        let key = entry.hyro.as_ref().map(|call| call.key.clone());
         run.active = Some(Active {
             slot,
             context: context.clone(),
             leg,
             local,
         });
-        self.trading.ordinary.insert(id, entry);
+        self.park(id, entry);
         if !self.send_ordinary(cx, id, context, Method::Post, path, body) {
             // A typed pre-send refusal seals the plan in the engine; never hang.
-            self.trading.ordinary.remove(&id);
+            match &key {
+                Some(key) => {
+                    self.take_hyro_live(key);
+                    self.hyro_leg_unsent(key, lot);
+                }
+                None => {
+                    self.trading.ordinary.remove(&id);
+                }
+            }
             let _ = cx.fail_plan(&plan, internal("Bybit trading request was refused"));
         }
     }
@@ -605,14 +667,25 @@ impl BybitLinear {
             && let Some(entry) = self.trading.ordinary.remove(&id)
         {
             self.continue_ordinary(cx, id, entry);
+            return;
+        }
+        if let Some((key, id, entry)) = self.take_hyro_plan(plan) {
+            self.continue_ordinary(cx, id, entry);
+            self.after_hyro(cx, &key, id);
         }
     }
 
     /// Cleanup only: the engine sealed and retired this generation.
     pub(crate) fn on_ordinary_retired(&mut self, owner: &HttpOwnerRetirement) {
-        self.trading
-            .ordinary
-            .retain(|_, entry| !owner.matches_preflight(&entry.preflight));
+        let mut settled = Vec::new();
+        self.trading.ordinary.retain(|id, entry| {
+            let retired = owner.matches_preflight(&entry.preflight);
+            if let (true, Some(call)) = (retired, &entry.hyro) {
+                settled.push((call.key.clone(), *id));
+            }
+            !retired
+        });
+        self.retire_hyro(owner, settled);
     }
 
     pub(crate) fn ordinary_reconciliation(
@@ -622,8 +695,12 @@ impl BybitLinear {
         if !matches!(pending.then, Then::Ordinary(_)) {
             return Err(ContextError::Invalid);
         }
-        // Unknown effects reconcile through ordinary fenced order reads.
-        ReconciliationData::new(String::new())
+        // A Hyro create keeps its link so a late ACK can be correlated;
+        // other unknown effects reconcile through fenced order reads.
+        let link = (self.variant.is_hyro() && pending.rest.path == "/v5/order/create")
+            .then(|| fields(&pending.rest.payload).order_link_id)
+            .flatten();
+        ReconciliationData::new(link.unwrap_or_default())
     }
 
     pub(crate) fn on_ordinary_response(
@@ -632,12 +709,16 @@ impl BybitLinear {
         request: Request,
         response: Response<'_>,
     ) {
-        let Some(mut entry) = self.trading.ordinary.remove(&request.command) else {
+        let Some(mut entry) = self.take_ordinary(&request) else {
             return;
         };
+        let hyro = entry.hyro.as_ref().map(|call| call.key.clone());
         match &mut entry.stage {
             Stage::Mode { context, .. } if *context == request.context => {
                 self.on_mode_response(cx, request.command, entry, &response)
+            }
+            Stage::HyroRead { context, .. } if *context == request.context => {
+                self.on_hyro_read(cx, request.command, entry, &response)
             }
             Stage::Plan(run)
                 if run
@@ -647,10 +728,30 @@ impl BybitLinear {
             {
                 self.on_leg_response(cx, request.command, entry, &response)
             }
-            _ => {
-                self.trading.ordinary.insert(request.command, entry);
-            }
+            _ => self.park(request.command, entry),
         }
+        if let Some(key) = hyro {
+            self.after_hyro(cx, &key, request.command);
+        }
+    }
+
+    /// The entry a continuation belongs to: a command's, or a Hyro execution's.
+    fn take_ordinary(&mut self, request: &Request) -> Option<Ordinary> {
+        let owner = request.context.owner();
+        if let safe_cex_engine::request_context::Owner::Execution { .. } = owner {
+            return self.take_hyro_owner(owner);
+        }
+        self.trading.ordinary.remove(&request.command)
+    }
+
+    /// Keep an entry until its next callback; a Hyro plan parks on its intent.
+    fn park(&mut self, id: CommandId, entry: Ordinary) {
+        if let (Some(call), Stage::Plan(_)) = (&entry.hyro, &entry.stage) {
+            let key = call.key.clone();
+            self.park_hyro(&key, entry);
+            return;
+        }
+        self.trading.ordinary.insert(id, entry);
     }
 
     fn on_mode_response(
@@ -774,10 +875,13 @@ impl BybitLinear {
             .is_err()
         {
             run.active = Some(active);
-            self.trading.ordinary.insert(id, entry);
+            self.park(id, entry);
             return;
         }
         let decision = self.leg_decision(cx, id, &active, response);
+        if let (Some(call), Some(lot)) = (&entry.hyro, active.leg.lot) {
+            self.hyro_leg_decided(&call.key, lot, &decision);
+        }
         let Stage::Plan(run) = &mut entry.stage else {
             return;
         };
@@ -794,7 +898,10 @@ impl BybitLinear {
                 }
             }
             Decision::Failed(error) => {
-                cx.command_error(id, error.message.clone());
+                // An execution's journal reports each failure to every observer.
+                if entry.hyro.is_none() {
+                    cx.command_error(id, error.message.clone());
+                }
                 if !run.continue_on_error {
                     let _ = cx.fail_plan(&plan, error);
                     return;
@@ -834,7 +941,7 @@ impl BybitLinear {
                     return;
                 };
                 run.active = Some(active);
-                self.trading.ordinary.insert(id, entry);
+                self.park(id, entry);
                 return;
             }
             Decision::Replace(fallback) => {
@@ -855,6 +962,7 @@ impl BybitLinear {
                             call: Call::PlaceOne,
                         },
                         intent: LegIntent::Command,
+                        lot: None,
                     });
                 }
             }
@@ -875,11 +983,17 @@ impl BybitLinear {
         request: Request,
         error: VenueError,
     ) {
-        let Some(mut entry) = self.trading.ordinary.remove(&request.command) else {
+        let Some(mut entry) = self.take_ordinary(&request) else {
             return;
         };
+        if let Some(call) = &entry.hyro {
+            let key = call.key.clone();
+            self.on_hyro_leg_failed(cx, &request, entry, error);
+            self.after_hyro(cx, &key, request.command);
+            return;
+        }
         let Stage::Plan(run) = &mut entry.stage else {
-            self.trading.ordinary.insert(request.command, entry);
+            self.park(request.command, entry);
             return;
         };
         let matches = run
@@ -887,7 +1001,7 @@ impl BybitLinear {
             .as_ref()
             .is_some_and(|active| active.context == request.context);
         if !matches || !run.continue_on_error {
-            self.trading.ordinary.insert(request.command, entry);
+            self.park(request.command, entry);
             return;
         }
         let active = run.active.take().expect("matched active leg");
@@ -896,7 +1010,7 @@ impl BybitLinear {
             .is_err()
         {
             run.active = Some(active);
-            self.trading.ordinary.insert(request.command, entry);
+            self.park(request.command, entry);
             return;
         }
         cx.command_error(request.command, error.message.clone());
@@ -1044,15 +1158,17 @@ impl BybitLinear {
         if weaken {
             return Decision::Failed(error);
         }
+        // Bybit's clock corrects ours for the next attempt, even when this
+        // write gets no resend (an execution-owned Hyro create).
+        if let (Verdict::RefusedResend(_), Some(server)) = (verdict, server) {
+            cx.observe_protocol_time(server);
+        }
         match (verdict, &planned.call) {
             (Verdict::Satisfied(_), call) => {
                 self.satisfied_effects(cx, call);
                 Decision::Next(Vec::new())
             }
             (Verdict::RefusedResend(_), _) if grant.is_some() => {
-                if let Some(server) = server {
-                    cx.observe_protocol_time(server);
-                }
                 Decision::Resend(grant.expect("checked above"))
             }
             (Verdict::Refused(_), Call::PlaceBatch { fallback })
@@ -1430,19 +1546,19 @@ impl BybitLinear {
                 self.apply_position_mode(cx, *hedged);
                 Decision::Next(Vec::new())
             }
-            Call::Hyro(_) | Call::ResolveMode { .. } => Self::unproven(
-                cx,
-                context,
-                "Bybit ordinary plan carried a legacy call",
-                &[],
-            ),
         }
     }
 
     /// Reconcile unknown or absent-order writes with one fresh order read per
     /// product; an in-flight read predates the write, so it is not joined.
     pub(crate) fn reconcile_ordinary(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.variant.is_hyro() || self.credentials.is_none() {
+        if self.credentials.is_none() {
+            return;
+        }
+        if self.variant.is_hyro() {
+            // The lost creates' link reads go first; the snapshot follows.
+            self.reconcile_hyro_links(cx);
+            self.reconcile_hyro_snapshot(cx);
             return;
         }
         let selected = self.category;
@@ -1459,4 +1575,8 @@ fn context_command(context: &Context) -> CommandId {
         safe_cex_engine::request_context::Owner::Command { id, .. } => id,
         _ => 0,
     }
+}
+
+fn disabled_product() -> VenueError {
+    not_sent("Bybit product is not enabled").kind(ErrorKind::InvalidInput)
 }

@@ -237,6 +237,7 @@ impl BitgetFutures {
         };
         match cx.request_signed_managed(
             context,
+            None,
             Method::Get,
             format!("{}{path}", paths::REST),
             None,

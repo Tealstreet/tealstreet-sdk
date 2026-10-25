@@ -381,6 +381,7 @@ impl Account {
         };
         if let Err((pending, error)) = cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             format!("{}/system/config", self.rest()),
             None,

@@ -654,6 +654,7 @@ impl Cryptocom {
         );
         if let Err((Pending::Trade(request), error)) = cx.request_signed_managed(
             request.context().clone(),
+            None,
             safe_cex_engine::Method::Post,
             url,
             None,

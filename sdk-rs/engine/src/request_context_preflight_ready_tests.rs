@@ -268,6 +268,7 @@ impl Venue for ScopeProbe {
                     let other = cx.plan_leg_context(&plan, &slot).unwrap();
                     cx.request_managed(
                         other.clone(),
+                        None,
                         Method::Get,
                         "https://read.test/other".into(),
                         None,
@@ -283,6 +284,7 @@ impl Venue for ScopeProbe {
         self.leg = Some(leg.clone());
         cx.request_managed(
             leg.clone(),
+            None,
             Method::Get,
             "https://read.test/current".into(),
             None,
@@ -367,6 +369,7 @@ impl Venue for ScopeProbe {
             assert_eq!(
                 cx.request_managed(
                     leg.clone(),
+                    None,
                     Method::Get,
                     "https://read.test/borrowed".into(),
                     None,
