@@ -459,7 +459,10 @@ mod serial {
             }
         }
         fn on_request_failed(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: &str) {
-            self.fail(cx, &context);
+            let plan = self.plan.as_ref().unwrap();
+            cx.finish_plan_failed_call(plan, self.slot.as_ref().unwrap(), &context)
+                .unwrap();
+            cx.fail_plan(plan, "cancel transport failed").unwrap();
         }
         fn on_timer(&mut self, cx: &mut Cx<'_, Context>, _: TimerId) {
             self.probe(cx, &self.context.clone().unwrap());
@@ -611,18 +614,24 @@ mod serial {
         let actions = e.drain_actions().collect::<Vec<_>>();
         let cancel = preparation(&actions);
         assert_eq!(e.venue().custody, vec![Err(Error::Revoked)]);
-        let timer = e.venue().timer.unwrap();
-        e.handle(1_002., Event::TimerFired { timer });
-        assert_eq!(e.venue().custody, vec![Err(Error::Revoked); 2]);
-        no_egress(&e.drain_actions().collect::<Vec<_>>());
         let (_, request) = release(&mut e, cancel, 1_003.);
         assert!(request.url.ends_with("/cancel"));
+        no_egress(&e.drain_actions().collect::<Vec<_>>());
+        let timer = e.venue().timer.unwrap();
+        e.handle(1_004., Event::TimerFired { timer });
+        assert_eq!(e.venue().custody, vec![Err(Error::Revoked); 2]);
         no_egress(&e.drain_actions().collect::<Vec<_>>());
         let actions = reply(&mut e, cancel, "accepted");
         preparation(&actions);
         assert_eq!(e.venue().custody.last(), Some(&Err(Error::State)));
         assert_eq!(e.venue().facts, 1);
         assert!(e.venue().placed);
+        no_egress(&reply(&mut e, cancel, "accepted"));
+        assert_eq!(
+            e.venue().responses,
+            1,
+            "a retired cancel reply cannot admit another replacement"
+        );
     }
     #[test]
     fn replacement_reserves_only_after_cancel_data_and_uses_a_higher_nonce() {
@@ -652,6 +661,29 @@ mod serial {
             assert!(!e.venue().placed);
             assert_eq!(e.venue().facts, 1);
         }
+    }
+    #[test]
+    fn released_cancel_transport_failure_is_unknown_and_never_resends() {
+        let mut e = engine();
+        let cancel = preparation(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, cancel, 1_003.);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            1_004.,
+            Event::HttpFailed {
+                request: cancel.attempt().request,
+                error: "lost ACK",
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        no_egress(&actions);
+        assert_eq!(failed(&actions).outcome, Some(Outcome::Unknown));
+        assert!(!e.venue().placed);
+        assert_eq!(
+            e.venue().facts,
+            0,
+            "transport failure cannot invent a native answer"
+        );
     }
     #[test]
     fn execution_or_changed_provenance_during_cancel_preserves_accepted_cancel_and_suppresses_place()
