@@ -1,12 +1,11 @@
-//! Single-owner command reads under engine-issued Read authority. Route,
-//! release, deadline and outcome policy stay with the shared lifecycle.
-use crate::dispatch_signing::Http;
+//! Single-owner command reads under engine-issued Read authority. Key choice,
+//! route, release, deadline and outcome policy stay with SelectedRead.
+use crate::dispatch_signing::{Http, url};
 use crate::{Pending, Task};
-use safe_cex_engine::request_context::{
-    Context, Credential, Operation, Policy, RetryPolicy, Scope,
-};
-use safe_cex_engine::signing::Identity;
-use safe_cex_engine::{CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, VenueError};
+use safe_cex_engine::credential_selection::CredentialUnavailable;
+use safe_cex_engine::request_context::{Context, Operation, RetryPolicy};
+use safe_cex_engine::selected_read::{LocalRefusal, ReadPolicy, ReadRequest, SelectedRead};
+use safe_cex_engine::{CommandWait, Cx, ErrorKind, Method, Outcome, VenueError};
 
 fn refused() -> VenueError {
     VenueError::new("WEEX managed read lifecycle is unavailable")
@@ -14,55 +13,63 @@ fn refused() -> VenueError {
         .outcome(Outcome::NotSent)
 }
 
-/// Issue one signed GET whose task owns `context` until it completes. Native
-/// WEEX reads never re-sign, so the read keeps its single physical attempt.
-/// Without engine authority nothing is issued and the caller fails the command.
+/// Admit one signed GET from the genuine command entry. Its task retains the
+/// context through completion; admission owns its refusal terminal.
 pub(crate) fn read(
     cx: &mut Cx<'_, Pending>,
-    (identity, slot): (&Identity, CredentialSlot),
-    command: CommandId,
+    selected: Result<SelectedRead, CredentialUnavailable>,
     path_query: String,
     seed_generation: u32,
     task: impl FnOnce(Context) -> Task,
-) -> Result<(), VenueError> {
-    let method = Method::Get;
-    let Ok(context) = cx.http_context(
-        Scope::Command(command),
-        Policy {
-            operation: Operation::Read,
-            credential: Some(Credential {
-                slot,
-                reference: identity.credential.clone(),
-            }),
-            timeout_ms: 20_000,
-            pacing: None,
-            retry: RetryPolicy::Never,
+) {
+    match cx.command_wait() {
+        Some(CommandWait::Remaining(_)) => {}
+        Some(CommandWait::Expired) => {
+            let _ = cx.reject_expired_command(Operation::Read);
+            return;
+        }
+        None => {
+            let _ = cx.reject_unstamped_command(Operation::Read);
+            return;
+        }
+    }
+    let policy = ReadPolicy {
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    };
+    let Ok(read) = SelectedRead::command(
+        cx,
+        selected,
+        policy,
+        LocalRefusal {
+            diagnostic: None,
+            error: refused(),
         },
     ) else {
-        return Err(refused());
+        return;
     };
-    let recipe = Http::new(identity.clone(), method, path_query, None);
-    let (url, _, body) = recipe.unsigned();
-    let pending = Pending {
-        task: task(context.clone()),
-        invalid: false,
-        skipped: Vec::new(),
-        seed_generation,
+    let context = read.context().clone();
+    let request = ReadRequest {
+        method: Method::Get,
+        url: url(&path_query),
+        body: None,
+        stream: None,
     };
-    if cx
-        .request_signed_managed(
-            context.clone(),
-            method,
-            url,
-            body,
-            Box::new(recipe),
-            pending,
-        )
-        .is_err()
-    {
+    let queued = read.queue(
+        cx,
+        request,
+        |identity| Box::new(Http::new(identity.clone(), Method::Get, path_query, None)),
+        |read| Pending {
+            task: task(read.context().clone()),
+            invalid: false,
+            skipped: Vec::new(),
+            seed_generation,
+        },
+    );
+    if queued.is_err() {
         reject(cx, &context, refused());
     }
-    Ok(())
 }
 
 pub(crate) fn complete(cx: &mut Cx<'_, Pending>, context: &Context, data: String) {

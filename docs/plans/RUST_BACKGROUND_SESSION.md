@@ -197,6 +197,237 @@ owns *when* to acquire and retire, and the import primitive owns
   and #1842. The retire-all-on-dispose and `drop_imported` calls are owned
   here.
 
+### AsterDEX listenKey (stacked on #1832 and #1893 `981f8d7156c`)
+
+claude-m26ps4 pinned #1893 for this stack and owns its signer and dispatch.
+This PR changes only the listen-key region.
+
+**Original REDs** (`asterdex/tests/listen_key_session.rs`; both fail on the
+legacy source):
+- The create carries the engine-owned 20 s raw bound.
+- A hung keepalive (PUT) is retried at its bound when the host reports
+  nothing. Every due timer fires in real order and pings are answered, so no
+  watchdog closes the stream first.
+
+**Shape.**
+- **Dispatch.** `dispatch_signed` sends listen-key work as a session Mutation
+  through `request_signed_managed`. It uses the same `SessionAuth` selection
+  and dispatch-time `sign::Recipe`, plus the selection's credential.
+- **Session.** Each create (POST) retires the old session and opens a new
+  repeat-safe generation; keepalives reuse the live one.
+  - Repeat-safe on the cited fact above: Aster returns the active key on
+    create and extends it on keepalive.
+  - `close_private` retires the session, so a stale create or keepalive
+    answer never reaches the account reducers.
+  - **Stale epochs are never sent.** A parked create or keepalive retry from
+    a closed stream's `key_epoch` is dropped at dispatch. The reducer would
+    ignore its answer, and sending it would rotate the session of the
+    reconnect's current create (review of #1916).
+- **Retries.** The existing V1 signature resend, timestamp resync and
+  network/status retries (1/2/3 s) each become a new session operation.
+  - `is_read`'s `/listenKey` path test is replaced by an explicit rule:
+    listen-key session writes. The path alone grants nothing.
+- **Facts.** A 2xx answer without a negative code records `Accepted`. Any
+  other outcome is left unproven, which is harmless for a repeat-safe session.
+
+**Inventory.** No call site is removed: the shared `dispatch_signed` sender
+stays. The rewritten read-policy unit test drops three `assert!(request(…))`
+fingerprints that the checker counted inside `request.rs`'s test module.
+Aster `request.rs` goes **32→29** against #1893.
+
+**Original REDs, continued.**
+`a_closed_streams_create_retry_cannot_rotate_the_current_session` reproduces
+the review scenario: a create retry is parked across the 10 s connect watchdog
+and fires after the reconnect's create. The retry must not be sent, and the
+current create must open the stream. Without the epoch guard it fails.
+
+**Fixture.** `late_listen_key_response_after_connect_deadline_*` picked "the
+last timer" as the connect watchdog. It now takes the earliest timer the
+reconnect armed (the watchdog precedes the create's 20 s bound); its
+assertions are unchanged. On #1893's source only the three REDs fail.
+
+**Follow-up (claude-m26ps4).** The open/retire, context, rollback and fact
+glue now repeats in Binance #1851 and AsterDEX #1916. Lift it into one engine
+listen-key helper before a third adopter.
+
+### Unsigned private egress (owner assignment, 2026-10-23)
+
+**Problem.** A Context's routing intent comes only from its credential:
+keyless means `RoutingIntent::Public`, which the SDK may send via the
+public/CORS route. Three flows are unsigned yet must use the account's private
+egress:
+- GRVT `/auth/api_key/login` carries the API key in its body.
+- BreakoutProp `/login` carries the account login fields in its body, and
+  later requests carry the DXtrade session token in a header.
+- KuCoin keyless `bullet-public` must keep forced Primary egress.
+
+Moving any of them onto managed HTTP today would route them Public. RED
+(`a_keyless_login_carrying_credentials_in_its_body_must_not_route_public`):
+a keyless session login is prepared with `Public`.
+
+**API (agreed with claude-m26ps4; ruled by claude-ddi2il; codex-uufub4
+reviews the rule).** The seam reuses #1833's issuance-time egress
+(`Context.egress`, `ContextRegistry::issue_with_egress`). Legs, replacements
+and retries inherit it. There is no second Context field.
+- **`Egress::Session(SessionEgress)`** is an unsigned request carrying a
+  session's login or token on the primary private egress.
+  - `SessionEgress {generation}` is opaque: the session core alone mints it.
+    `http_context_with_egress` refuses it, so a venue cannot forge one.
+  - It is Primary only. #1833 restricts unsigned secondary-proxy routing, so
+    a keyless request never takes the read key's egress.
+  - Allowed for Read and Mutation, only with no credential: no `KeyRef`, no
+    signer, and the signer-iff-credential rule is untouched.
+    Primary/PublicCors/Direct stay unsigned-Read-only.
+  - `routing_intent()` is Primary, and `route()` is `None`.
+  - It is routing only. It never grants write, signing or session authority:
+    a Background mutation is still refused.
+- **Session side:**
+  - `SessionPolicy.private_egress: Option<PrivateEgress>`. The grant is
+    opaque: only `Selection::session_egress()` creates it, and only for a
+    primary `SessionAuth` selection. Only a keyless session may declare it.
+  - `session_context` stamps the egress on every session context and leg.
+  - `session_scoped_context(&session, scope, policy)` lets command or
+    background work that carries the session token ride the same egress,
+    under its own owner.
+- **Retirement fence.** `validate_send` refuses a context whose session
+  generation is retired. It guards issuance (legs, replacements, retries,
+  resends) and every physical send step: queue, prepare, sign completion,
+  claim and re-preparation. A fenced send fails typed (NotSent).
+  - Plain `validate` keeps delivery, streaming and write facts for an attempt
+    sent earlier. A sent write's outcome is never lost, and a stream already
+    sent keeps delivering.
+- **Regressions** (`session_context_tests.rs`):
+  - The original RED now passes.
+  - Negative controls:
+    - forged egress, a foreign session or engine context, and a session
+      leg or child crossing into another session's egress
+    - a stale generation: issuance, leg, queue, prepared send, bound claim
+      and retry
+    - Background mutation, signed work, and a signed session declaring egress
+    - non-`SessionAuth` selections, which grant nothing
+  - Riding the egress exempts no write. A command write keeps its journal and
+    write revision. A session write keeps the one-unresolved-write gate.
+  - After retirement, the public `http_write_fact` path still records a
+    command write sent earlier.
+  - Keyless sessions without declared egress still route Public.
+- **Not included:** no inference from method, URL or body, and no fallback
+  to Public when the private route is unavailable (preparation fails typed).
+- **Session callbacks settle waiters.** A session delivery is no command's
+  completion authority, so its callbacks settle like a delivery-less (socket
+  or timer) callback. They do not bind waiters to the session.
+  - They may complete commands through a live Context the venue holds, or
+    legacy commands numerically (the GRVT login fails its `account.waiting`
+    reads).
+  - Unchanged: issuer, generation and journal checks still apply, managed
+    writes are never sealed numerically, and a session Context is never
+    command authority.
+  - Background and execution deliveries keep the exact-owner check.
+  - Before this, numeric and Context completion were refused inside any
+    managed delivery. A failed managed login left its waiters hanging until
+    their own deadlines.
+  - RED/regression: `a_session_callback_settles_the_commands_waiting_on_it`.
+
+**Adoptions (stacked):** GRVT login (codex-zs5e83) and BreakoutProp login
+(codex-hcmq3f) as session Mutations behind the #1842 gate. Then KuCoin
+`bullet-public` as a session Read (codex-9czdjh, after its header use).
+
+### GRVT API-key login (stacked on #1897; cleared by codex-zs5e83)
+
+**Scope.** Only the login moves (`grvt/src/account.rs` `login`, AUTH row of
+[RUST_GRVT_REQUEST_CONTEXT.md](RUST_GRVT_REQUEST_CONTEXT.md)). Exact inventory
+prune: GRVT **56→55**, `account.rs` **12→11** (`3bb318de…`).
+
+**Original REDs** (`grvt/tests/login_session.rs`, both fail on the legacy
+source):
+- The login is prepared as managed session work on the primary private
+  egress. That means intent `Primary`, no explicit route and a 20 s bound,
+  with exact URL, body and the three static headers.
+- A hung login is reissued at its engine bound when the host reports
+  nothing. Every due timer fires in real order.
+  - The same test also proves a late success to the abandoned login installs
+    nothing, while the current login opens the account.
+
+**Shape.**
+- **Session.** One keyless session owns API-key logins:
+  - `private_egress` comes from a `Slots` `SessionAuth` selection over the
+    configured key.
+  - Each login is its own session Mutation with `RetryPolicy::Never` and the
+    20 s host default the unmanaged login relied on.
+  - It is sent through `request_managed_with_headers`; the API key stays in
+    the body.
+- **Repeat-safety decision: not repeat-safe**, per the contract above (GRVT
+  and BreakoutProp relogin retire and open a new generation).
+  - **Evidence.** No GRVT documentation says whether a second API-key login
+    leaves an earlier cookie valid. Repeat-safety would need that cited venue
+    fact, so the session takes the conservative contract.
+  - **Cost.** None to the caller. The legacy path already sent each reissue
+    as a fresh request after a failure, so the budget and timing are the
+    same; only the fence is new.
+  - **Rule.** Any login that does not succeed (transport failure, expiry,
+    unproven 2xx, refusal or failed preparation) retires the session. The
+    reissue opens a new generation, so the engine drops the abandoned login's
+    late answer.
+  - Retry count and presentation are unchanged.
+- **Outcomes.**
+  - Success with both session headers records `Accepted`, then finishes. The
+    existing `account_response` and `account_failed` presentation is
+    unchanged.
+  - Transport failure or expiry retires the session and reissues, up to the
+    legacy budget of five, then `account_login_unavailable`. The existing
+    network-retry fixtures pin this.
+  - `fail_authentication` retires the session.
+- **Waiting reads.** They stay in the venue's `account.waiting`. The #1842
+  gate needs managed owners, and those reads are still legacy. A failed login
+  settles them from its session callback (the #1897 completion fix).
+- **Not included.** Cookie-bearing reads and writes stay legacy for now. They
+  adopt `session_scoped_context` in their own slices.
+
+**Fixtures.** Action drains in
+`tests/{account,history,identity,products,markets_refresh,trading}.rs` switch
+to `test_support::prepared_actions` at each event's time, with no assertion
+changed. They also pass on the legacy source, where only the two REDs fail.
+
+### BreakoutProp password login (stacked on #1897 and #1885 `6ead08efef0`)
+
+**Scope: transport only (owner and overseer ruling, 2026-10-23).** The DXtrade
+`/login` moves onto the session core. The existing password body rides the
+approved private session egress, with no new holder, no logging and no echo.
+- **Still OPEN:** provider send-time presentation (claude-19pt8s) and remote
+  readiness. Both are required before any signer-migrated claim; see CALLERS.
+- **Inventory: no prune.** Login shares the generic `drive` sender
+  (`34b6cbe6…`, the DISPATCH row), which stays for every other operation.
+
+**Original REDs:**
+- #1885's `p0_write_login_{401,403}_*` controls, un-ignored with their
+  assertions unchanged. A waiter keeps `AuthInvalid`/`AuthPermission`,
+  `AUTH_REJECTED` is logged, the venue deactivates, and nothing leaks.
+- New `tests/login_session.rs`: the login is prepared with intent `Primary`,
+  no route, the configured `timeout_ms`, and exact URL, body and header.
+
+All three fail on the legacy source.
+
+**Shape.**
+- **Session.** One keyless session with private egress (a `SessionAuth`
+  selection) owns logins.
+  - Each login is a session Mutation with `RetryPolicy::Never`, dispatched
+    from `drive`, so venue pacing (rolling 5/1000 ms) and queue order are
+    unchanged.
+  - **Not repeat-safe**, per the contract above. Any login that does not
+    succeed (transport failure, expiry, non-2xx, a 2xx whose token is
+    unusable, or refusal) retires the session. Only an accepted token records
+    `Accepted`. A reissue (the existing 1/2/3 s network retries) opens a new
+    generation, so the engine drops late answers to an abandoned login.
+- **Typed failure.** A login 401/403 is `http_failure(status)`. Queued waiters,
+  including candle commands, get NotSent errors carrying
+  `AuthInvalid`/`AuthPermission`. Every other login or discover failure
+  leaves waiters untyped as before (pinned by
+  `only_a_credential_refusal_types_the_waiters_it_never_sent`).
+- **Not included.** Discover and token-bearing reads and writes stay on the
+  generic sender. They adopt `session_scoped_context` with their slices.
+
+**Fixtures.** `tests/support.rs` drains through
+`test_support::prepared_actions`, with no assertion changed.
+
 ### Cadence and socket linkage (Phase C, after #1771 merges)
 
 The keepalive interval, failure backoff and expiry-driven recreation are
@@ -238,6 +469,55 @@ Contract:
 - A GRVT trade re-sent after relogin is a new physical attempt under its
   command journal, never a session replay.
 - AsterDEX `awaiting_clock` stays with the clock lane.
+
+API (A2), revised after an independent audit:
+- `Cx::session_wait(&Session, owner: &Context, pending: P) -> Result<(), (P, Error)>`
+  parks a continuation behind a live session.
+  - **Owner:** must be live. It cannot be a Session owner, because a
+    Login→Discover sequence waiting on its own session would deadlock; that
+    two-stage flow is plain venue sequencing.
+  - **Mutation owners:** refused (`State`) while their latest attempt was
+    released without a definitive fact. A 401 must be recorded as a definitive
+    refusal before a relogin re-send.
+  - **Keys and bounds:** waiters are keyed by owner leg, and a second wait is
+    `Duplicate`. The registry's 256 live contexts bound them. A refusal
+    returns the continuation.
+  - **Timer:** one engine timer at the owner's existing raw deadline (already
+    parent-capped, never extended). It queues no HTTP.
+- `Cx` cannot call venue hooks, so draining returns the waiters to the caller
+  in FIFO order. A wait made during handling parks for the next drain:
+  - `#[must_use] session_ready(&Session) -> Vec<Waiter<P>>`, where
+    `Waiter::{Ready(Context, P), Failed(Context, P, VenueError)}`. A live owner
+    is `Ready`, and the venue then issues the owner's own request. An expired
+    or revoked owner is `Failed` with Timeout or Revoked and outcome NotSent.
+    It is never dropped, because pending values carry venue in-flight
+    bookkeeping.
+  - `#[must_use] session_failed(&Session, VenueError)` and `retire_session`
+    return every waiter as `(Context, P, VenueError)` with NotSent.
+- **Outcome:** the forced NotSent is only the waiter's own pre-send fact.
+  Command seals still recompute the outcome from the journal.
+- **Expiry hook:** expiry is the only engine-initiated callback, through
+  `Venue::on_session_wait_expired(cx, P, VenueError)`. By default it delegates
+  to `on_http_preparation_failed(.., Error::TimedOut, ..)` with outcome NotSent
+  and kind Timeout, so there are no fail-closed panics.
+- **Placement:**
+  - The `Io` field `session_waits` sits after `pending`/`signatures`, clear of
+    #1816's `http_failure_kind` insert.
+  - The timer lookup goes in `expire_http_timer`'s not-found branch in
+    `http_lifecycle.rs`, so `Engine::handle` is untouched (#1771's insert
+    window).
+  - The hook goes right after `on_http_preparation_failed`.
+  - This departs from Phase A's "no new `Io` field / no `engine.rs`" only
+    because pending values are generic over `P`.
+- **Not waiters:**
+  - WS auth sends (Paradex `send_auth`, GRVT private/proxy auth) are venue
+    continuations after `session_ready`.
+  - The Paradex sign queue becomes `request_signed_managed`.
+  - BreakoutProp issues `request_managed` as soon as each owner drains, with
+    its 5/s limit moved into engine `http_pacing`. Re-queuing contexts in a
+    venue rate queue would leave them without a timer.
+  - GRVT's early return in `login()` during `login_retry`, which is #1821's
+    hang, is covered by the per-waiter deadline.
 
 ## Phases
 
@@ -316,6 +596,75 @@ Contract:
     - **Not yet:** no venue adopts sessions at this checkpoint.
 - **A2. Session prerequisite gate** (above), engine-only, before the Paradex/
   GRVT/BreakoutProp adoptions.
+  - **Checkpoint:**
+    - **Code:** `Cx::session_wait`, `session_ready -> Vec<Waiter<P>>` and
+      `session_failed`; `retire_session` now returns its waiters; plus the
+      `Venue::on_session_wait_expired` hook and the waiter timer in the
+      `expire_http_timer` not-found branch.
+    - **Tests:** 29 session tests in all.
+    - **Fault controls:** seven compiled faults fail exact tests (no resend
+      gate, dropping revoked owners, no timer clear, early expiry, self-wait,
+      no command hold, no retry-policy check).
+    - **Gates:** engine 653 tests with order locks and 634 without, Binance
+      293, strict Clippy both ways, fmt, bans.
+    - **Review:** the independent review found that a parked command could
+      lose completion authority once pruned past its deadline. Waiters now
+      hold the command owner until it finishes. It also found the resend
+      check was looser than `retry`; it now shares `retry`'s journal
+      admission and requires the context's refusal policy.
+  - **BingX checkpoint** (stacked on #1832 and landing; claude-4yjlw0
+    confirmed no overlap with #1884):
+    - **Code:** listenKey POST create and PUT keepalive run as repeat-safe
+      session Mutations through a thin `managed::session_write` over the
+      existing managed `queue()`. BingX listen keys expire 60 minutes after
+      their last keepalive, so an extra create or keepalive is harmless. The
+      writes are created with `resent: true`, because a listen key presents
+      only the API key and legacy never resent it on a signature refusal.
+    - **Session lifecycle:** each create and every `invalidate_private` retire
+      the previous session. Native `epoch`/`key_in_flight` recovery stays as
+      it was.
+    - **Ratchet:** `bingx/src/account.rs` goes 17 → 15 (its two listen-key
+      callers).
+    - **Not removed yet:** `Self::request` stays on landing because
+      `fetch_metadata` still uses it; whichever of this and #1884 lands second
+      deletes it. The `lib.rs` STAGING_BOOTSTRAPS `sign_http` allowance stays
+      until codex-cxxyqr's history Completion bridge removes the history
+      callers.
+    - **Declared caller change:** an explicit 20 s raw bound. It matters for
+      keepalive: a hung create is already dropped by the native 10 s connect
+      watchdog, but a hung keepalive runs with no watchdog and previously
+      relied on the host default. It now fails at 20 s and the native 30 s
+      `RETRY_MS` PUT follows.
+      `a_hung_listen_key_keepalive_fails_at_its_bound_and_retries` fires
+      timers in real order and fails on the legacy code. Request bytes are
+      unchanged: same method, URL, `?listenKey=` query, the per-method
+      unsigned headers plus `X-BX-APIKEY`, and no signature.
+  - **MEXC:** no session HTTP consumer. Rust MEXC authenticates its private
+    socket with a signed WS `login` (confirmed by codex-ih35js), which is
+    #1771/signer work.
+  - **Binance checkpoint** (owner ruling (a): stacked on #1817's reviewed
+    head, listen-key region only; regions confirmed with claude-m26ps4):
+    - **Code:** create and keepalive go through `venues/binance/src/session.rs`
+      as session Mutations. One `SessionAuth` selection is made per request,
+      and its `selection.credential` goes into the Policy (no `route_request`).
+      Livenet uses the key-only recipe; testnet uses the signed recipe, selected
+      inside the adapter.
+    - **Session lifecycle:** each create retires the previous session, so a
+      stale create or keepalive outcome cannot reach the account reducers. The
+      session is repeat-safe: Binance returns the active key and keepalive
+      extends it.
+    - **Native policy kept:** the backoff, the 30 min keepalive and the
+      reconnect behaviour are unchanged.
+    - **Ratchet:** `binance/src/account.rs` goes from 1 legacy site to 0; no
+      other map changes.
+    - **Declared caller change:** listenKey requests now carry an explicit
+      20 s raw bound. Legacy sent `timeout_ms: None`, which fell back to the
+      host default. A hung create now fails at 20 s and backs off, where an
+      unbounded host could hang forever. That regression fails on the legacy
+      code.
+    - **Tests adapted:** two waits answer the reconnect listenKey like their
+      account siblings. The slow-POST test uses 15 s, which is still above the
+      10 s connect timeout it checks.
 - **C. Cadence/feed linkage** as above, after #1771.
 - **D. Hand-off.** The API and adoption notes go to codex-9czdjh, codex-zs5e83,
   codex-ih35js and codex-hcmq3f. BingX adoption and deletion of the #1779

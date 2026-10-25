@@ -1,9 +1,11 @@
+mod support;
 use safe_cex_engine::model::{MarginType, OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::wire::{section, sections};
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketChannel, SocketId,
 };
-use safe_cex_venue_bitrue::{Bitrue, Options};
+use safe_cex_venue_bitrue::Bitrue;
+use support::Options;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 2_000.0;
 
@@ -24,11 +26,11 @@ impl Harness {
         Self::with_market(MARKET)
     }
     fn with_market(market: &str) -> Self {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
+        let mut e = support::engine(Options {
             key: Some("key".into()),
             secret: Some("secret".into()),
             ..Options::default()
-        }));
+        });
         e.start(0.0);
         let mut h = Self {
             e,
@@ -64,7 +66,8 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for a in self.e.drain_actions() {
+        for a in safe_cex_engine::test_support::prepared_actions(&mut self.e, self.now).into_iter()
+        {
             if let Action::Http(r) = a {
                 self.pending.push(r)
             } else {

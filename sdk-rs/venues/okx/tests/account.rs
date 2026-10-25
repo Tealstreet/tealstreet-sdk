@@ -1,28 +1,29 @@
 #![allow(dead_code)]
 mod support;
+use crate::support::FixtureOptions as Options;
+use crate::support::*;
 use safe_cex_engine::{Action, Engine, Event, Level, Notice};
-use safe_cex_venue_okx::{Okx, Options};
-use support::*;
+use safe_cex_venue_okx::Okx;
 
 const POSITION: &str = r#"{"instId":"BTC-USDT-SWAP","pos":"5","posSide":"net","avgPx":"39000","lever":"10","upl":"50","liqPx":"30000","mgnMode":"cross","imr":"200","mmr":"20"}"#;
 const ORDER: &str = r#"{"instId":"BTC-USDT-SWAP","ordId":"123","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"1","px":"38000","lever":"10","reduceOnly":"false","clOrdId":"caller123"}"#;
 
 #[test]
 fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
         ..Default::default()
-    }));
+    });
     e.start(0.);
-    let market = actions(&mut e).remove(0);
+    let market = take_http(&mut prepared(&mut e, 0.));
     reply(&mut e, &market, &envelope(MARKET), 1.);
     // Account config is requested alongside the ticker seed once markets load.
-    let mut initial = actions(&mut e);
-    let ticker = initial.remove(0);
+    let mut initial = prepared(&mut e, 1.);
+    let ticker = take_http(&mut initial);
     reply(&mut e, &ticker, &envelope(TICKER), 2.);
-    initial.extend(actions(&mut e));
+    initial.extend(prepared(&mut e, 2.));
     let config = initial
         .into_iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
@@ -33,7 +34,7 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.,
     );
-    let pending = actions(&mut e);
+    let pending = prepared(&mut e, 3.);
     let timer = pending
         .iter()
         .find_map(|a| match a {
@@ -41,11 +42,11 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
             _ => None,
         })
         .unwrap();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let expected = e.store().balance().clone();
     for scale in [f64::INFINITY, 15., 0.25] {
         e.handle(100., Event::PollScaleChanged { scale });
-        assert!(actions(&mut e).is_empty());
+        assert!(prepared(&mut e, 100.).is_empty());
     }
     e.handle(
         100.,
@@ -56,7 +57,7 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
     e.store_mut().set_balance(Default::default());
     e.handle(2003., Event::TimerFired { timer });
     assert_eq!(e.store().balance(), &expected);
-    let after = actions(&mut e);
+    let after = prepared(&mut e, 2003.);
     assert!(!after.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         after
@@ -77,14 +78,14 @@ fn startup() -> (
         passphrase: Some("test-passphrase".into()),
         ..Options::default()
     };
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(opts));
+    let mut e = crate::support::engine(opts);
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let mut initial = actions(&mut e);
-    let a = initial.remove(0);
+    let mut initial = prepared(&mut e, 1.0);
+    let a = take_http(&mut initial);
     reply(&mut e, &a, &envelope(TICKER), 2.0);
-    initial.extend(actions(&mut e));
+    initial.extend(prepared(&mut e, 2.0));
     let business = initial
         .iter()
         .find_map(|a| match a {
@@ -102,7 +103,7 @@ fn startup() -> (
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.0,
     );
-    let pending = actions(&mut e);
+    let pending = prepared(&mut e, 3.0);
     let private = pending
         .iter()
         .find_map(|a| match a {
@@ -112,7 +113,7 @@ fn startup() -> (
         .unwrap();
     for socket in [private, business] {
         e.handle(4.0, Event::WsOpened { socket });
-        let sent = actions(&mut e);
+        let sent = prepared(&mut e, 4.0);
         assert!(sent.iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text.contains("\"op\":\"login\"") && text.contains("test-passphrase"))));
         ws(&mut e, socket, r#"{"event":"login","code":"0","msg":""}"#);
         let subscriptions = handoff_actions(&mut e, 4.);
@@ -130,7 +131,7 @@ fn startup() -> (
 }
 
 fn handoff_actions(engine: &mut Engine<Okx>, now: f64) -> Vec<Action> {
-    let mut output = actions(engine);
+    let mut output = prepared(engine, now);
     let wakeups: Vec<_> = output
         .iter()
         .filter_map(|action| match action {
@@ -140,12 +141,12 @@ fn handoff_actions(engine: &mut Engine<Okx>, now: f64) -> Vec<Action> {
         .collect();
     for timer in wakeups {
         engine.handle(now, Event::TimerFired { timer });
-        output.extend(actions(engine));
+        output.extend(prepared(engine, now));
     }
     output
 }
 
-fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str) {
+fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str, at: f64) {
     while let Some(a) = requests.pop() {
         let Action::Http(r) = &a else {
             continue;
@@ -159,9 +160,9 @@ fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str) {
         } else {
             envelope("")
         };
-        reply(e, &a, &body, 5.0);
+        reply(e, &a, &body, at);
         requests.extend(
-            actions(e)
+            prepared(e, at)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -171,7 +172,7 @@ fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str) {
 #[test]
 fn authenticates_two_sockets_and_maps_contract_units_and_balance() {
     let (mut e, _, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     assert!(
         e.store().loaded().balance && e.store().loaded().positions && e.store().loaded().orders
     );
@@ -201,7 +202,7 @@ fn terminal_push_wins_over_delayed_snapshot_and_fills_dedupe() {
     let frame = format!(r#"{{"arg":{{"channel":"orders"}},"data":[{filled}]}}"#);
     ws(&mut e, private, &frame);
     ws(&mut e, private, &frame);
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     assert_eq!(e.store().orders().len(), 1);
     assert_eq!(
         e.store().orders()[0].status,
@@ -236,7 +237,7 @@ fn position_tombstone_and_new_equity_win_over_inflight_rest() {
         private,
         r#"{"arg":{"channel":"account"},"data":[{"totalEq":"6000"}]}"#,
     );
-    complete(&mut e, pending, "");
+    complete(&mut e, pending, "", 5.0);
     assert!(e.store().positions().is_empty());
     assert_eq!(e.store().balance().total, 6000.0);
 }
@@ -262,7 +263,7 @@ fn failed_account_snapshot_preserves_existing_state() {
 #[test]
 fn stale_live_push_cannot_reopen_terminal_order() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let canceled = ORDER.replace("\"live\"", "\"canceled\"");
     ws(
         &mut e,
@@ -283,7 +284,7 @@ fn stale_live_push_cannot_reopen_terminal_order() {
 #[test]
 fn empty_and_unknown_position_pushes_preserve_balance() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, "");
+    complete(&mut e, pending, "", 5.0);
     let before = e.store().balance().clone();
     ws(
         &mut e,
@@ -307,7 +308,7 @@ fn rejected_login_closes_and_reconnects() {
         private,
         r#"{"event":"login","code":"60009","msg":"Login failed"}"#,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 4.0);
     assert!(
         out.iter()
             .any(|a| matches!(a, Action::WsClose { socket } if *socket == private))
@@ -324,7 +325,7 @@ fn rejected_login_closes_and_reconnects() {
         .unwrap();
     e.handle(20_000.0, Event::TimerFired { timer });
     assert!(
-        actions(&mut e)
+        prepared(&mut e, 20_000.0)
             .iter()
             .any(|a| matches!(a, Action::WsConnect { url, .. } if url.ends_with("/private")))
     );
@@ -352,7 +353,7 @@ fn malformed_known_position_row_without_a_stored_copy_commits_flat() {
     }
     assert!(e.store().loaded().positions && e.store().loaded().balance);
     assert!(e.store().positions().is_empty());
-    let errors: Vec<_> = actions(&mut e)
+    let errors: Vec<_> = prepared(&mut e, 5.0)
         .into_iter()
         .filter_map(|a| match a {
             Action::Notice(Notice::Event(event)) if event.level == Level::Error => {
@@ -382,7 +383,7 @@ fn resweep(
             code: 1006,
         },
     );
-    let out = actions(e);
+    let out = prepared(e, now);
     let (timer, at) = out
         .iter()
         .find_map(|a| match a {
@@ -395,7 +396,7 @@ fn resweep(
         })
         .expect("private reconnect backoff");
     e.handle(at, Event::TimerFired { timer });
-    let private = actions(e)
+    let private = prepared(e, at)
         .into_iter()
         .find_map(|a| match a {
             Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(socket),
@@ -403,7 +404,7 @@ fn resweep(
         })
         .expect("replacement private epoch");
     e.handle(at, Event::WsOpened { socket: private });
-    actions(e);
+    prepared(e, at);
     e.handle(
         at,
         Event::WsMessage {
@@ -428,7 +429,7 @@ fn resweep(
         };
         reply(e, &a, &body, at + 1.0);
         requests.extend(
-            actions(e)
+            prepared(e, at + 1.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -439,7 +440,7 @@ fn resweep(
 #[test]
 fn bad_position_row_keeps_its_stored_copy_while_the_balance_commits() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let bad = POSITION.replace("\"pos\":\"5\"", "\"pos\":\"bad\"");
     resweep(
         &mut e,
@@ -461,7 +462,7 @@ fn bad_balance_currency_row_keeps_its_equity_while_positions_commit() {
         r#"{"balData":[{"ccy":"","eq":"6000"}]}"#,
     ] {
         let (mut e, private, _, pending) = startup();
-        complete(&mut e, pending, ORDER);
+        complete(&mut e, pending, ORDER, 5.0);
         let grown = POSITION.replace("\"pos\":\"5\"", "\"pos\":\"6\"");
         resweep(&mut e, private, risk, &grown, ORDER, 10.0);
         assert_eq!(e.store().positions()[0].contracts, 0.06, "{risk}");
@@ -480,7 +481,7 @@ fn bad_order_row_keeps_its_stored_copy_and_new_orders_commit() {
         r#"{"ordId":123}"#.to_string(),
     ] {
         let (mut e, private, _, pending) = startup();
-        complete(&mut e, pending, ORDER);
+        complete(&mut e, pending, ORDER, 5.0);
         let balance = r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#;
         resweep(
             &mut e,
@@ -507,9 +508,10 @@ fn complete_fresh(e: &mut Engine<Okx>, mut requests: Vec<Action>, position: &str
         } else {
             envelope("")
         };
-        reply(e, &a, &body, 30_000.0);
+        // Inside the shared 20 s read deadline of a page issued after reconnect.
+        reply(e, &a, &body, 10_000.0);
         requests.extend(
-            actions(e)
+            prepared(e, 10_000.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -526,7 +528,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
             code: 1006,
         },
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 100.0);
     let timer = out
         .iter()
         .find_map(|a| match a {
@@ -535,7 +537,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
         })
         .unwrap();
     e.handle(2_000.0, Event::TimerFired { timer });
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 2_000.0);
     let socket = out
         .iter()
         .find_map(|a| match a {
@@ -544,7 +546,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
         })
         .unwrap();
     e.handle(2_001.0, Event::WsOpened { socket });
-    actions(&mut e);
+    prepared(&mut e, 2_001.0);
     e.handle(
         2_002.,
         Event::WsMessage {
@@ -562,7 +564,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
     assert!(e.store().orders().is_empty() && e.store().positions().is_empty());
     assert_eq!(e.store().balance().total, 6000.0);
     // The old page must not restart paging or replace the post-reconnect view.
-    complete(&mut e, stale, ORDER);
+    complete(&mut e, stale, ORDER, 10_001.0);
     assert!(e.store().orders().is_empty() && e.store().positions().is_empty());
     assert_eq!(e.store().balance().total, 6000.0);
 }
@@ -571,11 +573,11 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
 fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
     use safe_cex_engine::Command;
     let (mut e, private, _, initial) = startup();
-    complete(&mut e, initial, ORDER);
+    complete(&mut e, initial, ORDER, 5.0);
     // The SDK completes startup before commands; repeat authentication starts
     // another read sweep whose replies race the acknowledged settings write.
     ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
-    let stale = actions(&mut e)
+    let stale = prepared(&mut e, 4.0)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
@@ -588,7 +590,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
             side: None,
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 5.0);
     let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
     reply(
         &mut e,
@@ -596,7 +598,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
         &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"20","mgnMode":"cross"}"#),
         6.0,
     );
-    let fresh: Vec<_> = actions(&mut e)
+    let fresh: Vec<_> = prepared(&mut e, 6.0)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
@@ -607,7 +609,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("orders")))
     );
     // Retired position reads cannot overwrite the acknowledged leverage.
-    complete(&mut e, stale, ORDER);
+    complete(&mut e, stale, ORDER, 7.0);
     assert_eq!(e.store().orders().len(), 1);
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
     complete_fresh(
@@ -636,7 +638,7 @@ fn fill_count(frame: &[u8]) -> u32 {
 #[test]
 fn distinct_earlier_fill_survives_terminal_order_guard_and_deduplicates() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let filled = ORDER.replace("\"live\"", "\"filled\"").replace(
         "\"accFillSz\":\"1\"",
         "\"accFillSz\":\"4\",\"fillSz\":\"2\",\"fillPx\":\"38000\",\"tradeId\":\"last\"",
@@ -662,7 +664,7 @@ fn distinct_earlier_fill_survives_terminal_order_guard_and_deduplicates() {
 #[test]
 fn invalid_execution_does_not_emit_or_consume_the_execution_identity() {
     let (mut e, private, _, pending) = startup();
-    complete(&mut e, pending, ORDER);
+    complete(&mut e, pending, ORDER, 5.0);
     let valid = ORDER.replace("\"live\"", "\"filled\"").replace(
         "\"accFillSz\":\"1\"",
         "\"accFillSz\":\"4\",\"fillSz\":\"3\",\"fillPx\":\"38000\",\"tradeId\":\"987\"",
@@ -691,7 +693,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
         envelope(r#"{"balData":[]},{"balData":[]}"#),
     ] {
         let (mut e, _, _, pending) = startup();
-        complete(&mut e, pending, ORDER);
+        complete(&mut e, pending, ORDER, 5.0);
         let balance = e.store().balance().clone();
         let positions = e.store().positions().to_vec();
         e.handle(
@@ -703,7 +705,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
                 side: None,
             }),
         );
-        let request = actions(&mut e)
+        let request = prepared(&mut e, 6.0)
             .into_iter()
             .find(|a| matches!(a, Action::Http(_)))
             .unwrap();
@@ -713,7 +715,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
             &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"12","mgnMode":"cross"}"#),
             7.0,
         );
-        let requests = actions(&mut e);
+        let requests = prepared(&mut e, 7.0);
         for a in requests
             .iter()
             .filter(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
@@ -772,7 +774,7 @@ fn filtered_market_rows_are_skipped_and_the_rest_of_the_snapshot_commits() {
                     envelope("")
                 };
                 reply(&mut e, &action, &body, 5.0);
-                pending.extend(actions(&mut e));
+                pending.extend(prepared(&mut e, 5.0));
             }
             Action::Notice(safe_cex_engine::Notice::Event(event)) => {
                 logs.push(event.message.clone())
@@ -797,7 +799,7 @@ fn filtered_market_rows_are_skipped_and_the_rest_of_the_snapshot_commits() {
 #[test]
 fn partially_effective_algo_remains_visible_and_accepts_later_live_updates() {
     let (mut e, _, business, pending) = startup();
-    complete(&mut e, pending, "");
+    complete(&mut e, pending, "", 5.0);
     let algo = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo123","ordType":"conditional","state":"partially_effective","side":"sell","sz":"4","accFillSz":"0","slTriggerPx":"36000","slOrdPx":"-1","tpTriggerPx":"42000","tpOrdPx":"-1","reduceOnly":"true"}"#;
     ws(
         &mut e,
@@ -829,17 +831,17 @@ fn undecodable_instrument_row_still_reports_its_exposure() {
 }
 
 fn reports_exposure_on_malformed_instrument(bad: &str) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
         ..Options::default()
-    }));
+    });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(&format!("{MARKET},{bad}")), 1.0);
     // Private startup begins once markets load, alongside the ticker read.
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 1.0);
     let tickers = out
         .iter()
         .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
@@ -856,7 +858,7 @@ fn reports_exposure_on_malformed_instrument(bad: &str) {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.0,
     );
-    let joined = actions(&mut e);
+    let joined = prepared(&mut e, 3.0);
     let positions = joined
         .iter()
         .find(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
@@ -874,7 +876,7 @@ fn reports_exposure_on_malformed_instrument(bad: &str) {
         )),
         4.0,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 4.0);
     assert!(out.iter().any(|a| matches!(
         a,
         Action::Notice(safe_cex_engine::Notice::Event(event))
@@ -898,17 +900,17 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
         .replace("BTC-USDT-SWAP", "ETH-USDT-SWAP")
         .replace("\"BTC\"", "\"ETH\"");
     let bad = eth.replace("\"lotSz\":\"0.01\"", "\"lotSz\":\"0\"");
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
         ..Options::default()
-    }));
+    });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(&format!("{MARKET},{bad}")), 1.0);
     assert!(e.store().loaded().markets);
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 1.0);
     assert_eq!(
         out.iter()
             .filter(|a| is_get(a, "/api/v5/account/config"))
@@ -917,7 +919,7 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
     );
     let retry = retry_timer(&out, 1.0, 1_000.0).expect("partial catalogue schedules a re-read");
     e.handle(1001.0, Event::TimerFired { timer: retry });
-    let reread = actions(&mut e)
+    let reread = prepared(&mut e, 1001.0)
         .into_iter()
         .find(|a| is_get(a, "/api/v5/public/instruments?instType=SWAP"))
         .unwrap();
@@ -928,7 +930,7 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
         1002.0,
     );
     assert!(e.store().market("ETHUSDT").is_some());
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 1002.0);
     assert!(!out.iter().any(|a| is_get(a, "/api/v5/account/config")));
     // The complete re-read clears the retry instead of scheduling another.
     assert!(retry_timer(&out, 1002.0, 2_000.0).is_none());
@@ -947,7 +949,7 @@ fn rejected_currency_row_holds_the_usd_balance_instead_of_double_counting() {
         };
         reply(&mut e, &a, &body, 5.0);
         pending.extend(
-            actions(&mut e)
+            prepared(&mut e, 5.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );
@@ -994,21 +996,21 @@ fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
         r#"{"instId":"ETH-USDT-SWAP","ordId":"9","sz":4}"#,
         r#"{"instId":"ETH-USDT-SWAP","ordId":9,"state":null}"#,
     ] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             key: Some("test-key".into()),
             secret: Some("test-secret".into()),
             passphrase: Some("test-passphrase".into()),
             ..Options::default()
-        }));
+        });
         e.start(0.0);
-        let a = actions(&mut e).remove(0);
+        let a = take_http(&mut prepared(&mut e, 0.0));
         reply(
             &mut e,
             &a,
             &envelope(&format!("{MARKET},{bad_market}")),
             1.0,
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 1.0);
         let tickers = out
             .iter()
             .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
@@ -1024,7 +1026,7 @@ fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
             &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
             3.0,
         );
-        let mut pending = actions(&mut e);
+        let mut pending = prepared(&mut e, 3.0);
         let mut logs = vec![];
         while let Some(a) = pending.pop() {
             match &a {
@@ -1037,7 +1039,7 @@ fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
                         envelope("")
                     };
                     reply(&mut e, &a, &body, 4.0);
-                    pending.extend(actions(&mut e));
+                    pending.extend(prepared(&mut e, 4.0));
                 }
                 Action::Notice(Notice::Event(event)) => logs.push(event.message.clone()),
                 _ => {}
@@ -1060,6 +1062,7 @@ fn undecodable_out_of_scope_order_row_fails_the_order_read() {
         &mut e,
         pending,
         r#"{"instId":"BTC-USDT-SWAP","instType":"FUTURES","ordId":"9","sz":4}"#,
+        5.0,
     );
     assert!(e.store().loaded().positions);
     assert!(!e.store().loaded().orders);
@@ -1088,6 +1091,7 @@ fn market_maker_and_liquidity_program_orders_keep_their_ord_id() {
             &mut e,
             pending,
             &ORDER.replace(r#""ordType":"limit""#, &format!(r#""ordType":"{kind}""#)),
+            5.0,
         );
         let o = &e.store().orders()[0];
         assert_eq!(o.id, "123", "{kind}");

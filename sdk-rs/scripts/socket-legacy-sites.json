@@ -96,10 +96,6 @@
     "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2,
     "cdbc56e33db26826a6081ba21a8e2bde0358586fa3f14bce7fae483b071e8b6c": 1
   },
-  "venues/hyperliquid/src/lib.rs": {
-    "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2,
-    "fd78adb5b21889b836207c7d212d4694d9e34d6bfeb0e5f19023c0f2abffd7c3": 1
-  },
   "venues/kraken/src/account.rs": {
     "297733c7eb42dfbca2cbf5172bc2d8d63e74f1cff9c223adc1a9bff1c7b526ed": 1
   },
@@ -149,12 +145,6 @@
   "venues/paradex/src/public.rs": {
     "f6f8d25a5c60b29e224eefe904a8f74baeadf4fc57b9921da2dcae54cb152dac": 1
   },
-  "venues/phemex/src/account.rs": {
-    "c42cbb663aa3220ad6b6ccb5c064414482645c5a658b8ed112350d89b70625ff": 1
-  },
-  "venues/phemex/src/lib.rs": {
-    "bfc950bbe21c9d625ea9774177bfa8606bb559d376d71b7ad05a25603c20683a": 1
-  },
   "venues/polymarket/src/account.rs": {
     "fa5d212e681c96ea593cc1d269023ae773a6ae98e350a9c791a8c518bfb8682c": 2
   },
@@ -162,12 +152,6 @@
     "22407a560a9b6955a6a74cff78bb148f107e9289c1550c83d749b48facdc8d3a": 2,
     "52155f5c065b519e8cceea36d068f2dc7c8729ffffb71ba4136c739dfd420344": 1,
     "e3f45941f6f918ffd8e24c8d3b84b5a4864310f29dcd5e237385c1366f68a826": 1
-  },
-  "venues/txflow/src/lib.rs": {
-    "1dd17767b986aa9f889bb7662deb16e7d6ab86e99a57a3a1f4a731c478f4cc25": 1,
-    "68a3f6f47923eae17af0f8556064bc4caf1fdb6e6a0d2aaf20a07a9c349203c2": 1,
-    "8295b5ad0547ce471b41da25af645715f4cb998ae64d34053dd10eb0b27405b8": 1,
-    "d7f62ba4022a0480394d8d646a0502bf832e0c71ee7a1131c509d0fa1034a12e": 1
   },
   "venues/weex/src/account.rs": {
     "f9aa006cf88eec01bc93cf70d941c3b65c5fb1ed55dedd3cc56e871f8c516fde": 1

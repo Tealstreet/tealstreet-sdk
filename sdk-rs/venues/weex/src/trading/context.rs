@@ -132,6 +132,7 @@ impl Entry {
             owner,
             &steps,
             PlanPolicy {
+                independent_calls: false,
                 operation: Operation::Mutation,
                 credential: Some(credential.clone()),
                 pacing: None,

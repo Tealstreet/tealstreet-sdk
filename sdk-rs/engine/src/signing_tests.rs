@@ -1897,3 +1897,126 @@ fn admission_is_evidence_only_release_still_validates_and_earlier_effects_stand(
     assert_eq!(released, [cancel]);
     assert_eq!(engine.venue.failed, 1);
 }
+
+#[test]
+fn public_operations_validate_refs_algorithms_and_exact_result_widths() {
+    let key = || KeyRef("primary.signing".into());
+    let request = |operations| SignRequest {
+        receipt: Default::default(),
+        operations,
+        context: Default::default(),
+    };
+    let public = request(vec![
+        Operation::PublicAddress { key: key() },
+        Operation::PublicKey {
+            algorithm: Algorithm::Ed25519,
+            key: key(),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::StarkDigest,
+            key: key(),
+        },
+    ]);
+    assert_eq!(public.validate(), Ok(()));
+    let answer = |widths: [usize; 3]| {
+        SignResult::new(
+            widths.map(|width| vec![1; width]).to_vec(),
+            Default::default(),
+        )
+    };
+    assert_eq!(public.validate_result(&answer([20, 32, 32])), Ok(()));
+    for widths in [[32, 32, 32], [20, 33, 32], [20, 32, 31]] {
+        assert_eq!(
+            public.validate_result(&answer(widths)),
+            Err(SignError::InvalidResult)
+        );
+    }
+    for operation in [
+        Operation::PublicAddress {
+            key: KeyRef(String::new()),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::Ed25519,
+            key: KeyRef(String::new()),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::Es256,
+            key: key(),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::Secp256k1Digest,
+            key: key(),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::HmacSha256,
+            key: key(),
+        },
+    ] {
+        assert_eq!(
+            request(vec![operation]).validate(),
+            Err(SignError::InvalidRequest)
+        );
+    }
+}
+
+#[test]
+fn l1_wallet_role_is_primary_only_for_injected_refs_and_policies() {
+    use crate::signing::{
+        CredentialSetupPolicy, ExtraFieldPolicy, ExtraKey, ExtraKeyPolicy, Identities, Identity,
+        IdentitySetupPolicy,
+    };
+    let wallet = Some(IdentitySetupPolicy {
+        extra: Some(ExtraKeyPolicy {
+            key: ExtraKey::L1Wallet,
+            field: ExtraFieldPolicy::RequiredForPrivate,
+            encoding: None,
+        }),
+        ..Default::default()
+    });
+    let identity = |extra: bool| Identity {
+        credential: KeyRef("credential".into()),
+        signing: KeyRef("signing".into()),
+        passphrase: None,
+        stable_id: None,
+        extra: extra
+            .then(|| (ExtraKey::L1Wallet, KeyRef("wallet".into())))
+            .into_iter()
+            .collect(),
+    };
+    // The role's one algorithm is the L1 digest signature.
+    assert_eq!(ExtraKey::L1Wallet.algorithm(), Algorithm::Secp256k1Digest);
+    assert_eq!(ExtraKey::ZklinkSeed.algorithm(), Algorithm::ZkLinkContract);
+    let primary = CredentialSetupPolicy {
+        primary: wallet,
+        secondary: None,
+    };
+    let mut ok = Identities {
+        primary: Some(identity(true)),
+        secondary: None,
+    };
+    assert_eq!(primary.apply_to_identities(&mut ok, false), Ok(()));
+    // A secondary declaration is invalid policy, even with no secondary identity.
+    let secondary = CredentialSetupPolicy {
+        primary: None,
+        secondary: wallet,
+    };
+    for secondary_identity in [None, Some(identity(true))] {
+        let mut ids = Identities {
+            primary: Some(identity(false)),
+            secondary: secondary_identity,
+        };
+        assert_eq!(
+            secondary.apply_to_identities(&mut ids, false),
+            Err(SignError::InvalidRequest)
+        );
+    }
+    // An injected secondary wallet ref without any declaration is refused too.
+    let mut injected = Identities {
+        primary: Some(identity(true)),
+        secondary: Some(identity(true)),
+    };
+    assert_eq!(
+        primary.apply_to_identities(&mut injected, false),
+        Err(SignError::InvalidRequest)
+    );
+}

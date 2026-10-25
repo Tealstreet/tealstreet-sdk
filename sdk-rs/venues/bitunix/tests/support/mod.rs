@@ -52,7 +52,7 @@ pub fn startup_with_engine(mut e: TestEngine) -> (TestEngine, SocketId) {
     let mut private = None;
     let mut repairs = Vec::new();
     loop {
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
         if actions.is_empty() {
             if let Some((timer, at)) = repairs.pop() {
                 now = at;

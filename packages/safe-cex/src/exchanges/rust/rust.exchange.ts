@@ -84,7 +84,7 @@ import type { BaseWebSocket } from '../base.ws';
 import { deriveBridgeConstruction, derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupMapping, deriveSignerSetupPolicy } from './construction';
 import { RustSocketHandle } from './rustSockets';
 import { type AsterDEXPublicSetup, mapAsterDEXSignerSetup } from './asterdexSignerSetup';
-import { LocalSignerSetup, withoutSigningCredentials } from './localSignerSetup';
+import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
 import { DelegatedSignerSetup, selectDelegatedSigningMode, withoutDelegatedSigning } from './delegatedSignerSetup';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
@@ -634,7 +634,9 @@ export class RustEngineExchange extends BaseExchange {
     const signerSetup = bridgeConstruction.dispatchSigning && !setupError
       ? delegated ? new DelegatedSignerSetup(exchangeName, options)
         : aster ? new LocalSignerSetup(aster.setupOptions, deriveSignerSetupPolicy(exchangeName), aster.secondarySigningFromPrimary)
-          : new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName))
+          : deriveSignerSetupMapping(exchangeName) === 'apexomni'
+            ? new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName), false, options.omniKeySeed || undefined)
+            : new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName))
       : undefined;
     const signingMode=signerSetup ? derivePublicMode(exchangeName,options,undefined,signerSetup.credentialPresence) : undefined;
     if (signingMode && !signingMode.publicDataOnly && delegatedMode === 'payload'
@@ -895,7 +897,13 @@ export class RustEngineExchange extends BaseExchange {
         key,
         secret,
         passphrase,
-        ...(this.options.secondary_key
+        // A ValidateOnly family receives only the result, never the read key.
+        ...(this.bridgeConstruction.readCredentials === 'validateOnly'
+          ? (() => {
+              const valid = readCredentialsValidity(this.options);
+              return valid === undefined ? {} : { readCredentialsValid: valid };
+            })()
+          : this.options.secondary_key
           ? { readCredentials: {
               key: this.options.secondary_key,
               secret: this.options.secondary_secret,

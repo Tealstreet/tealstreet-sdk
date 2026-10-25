@@ -71,6 +71,7 @@ pub struct Account {
     pub started: bool,
     mode: Mode,
     mode_resolved: bool,
+    pub(crate) mode_refresh_due: bool,
     mode_timer: Option<TimerId>,
     role_timer: Option<TimerId>,
     sync_timer: Option<TimerId>,
@@ -274,6 +275,53 @@ impl Hyperliquid {
                 return;
             }
             let read = self.account.reads.pop_front().unwrap();
+            let read = match read {
+                QueuedRead {
+                    body,
+                    request: ReadContinuation::History(mut history),
+                    streamed,
+                    weight,
+                } => {
+                    let leg = match cx.http_leg_context(
+                        history.root(),
+                        safe_cex_engine::request_context::Policy {
+                            operation: safe_cex_engine::request_context::Operation::Read,
+                            credential: None,
+                            timeout_ms: 20_000,
+                            pacing: None,
+                            retry: safe_cex_engine::request_context::RetryPolicy::Never,
+                        },
+                    ) {
+                        Ok(leg) => leg,
+                        Err(error) => {
+                            self.reject_history(cx, *history, error.read_venue_error());
+                            continue;
+                        }
+                    };
+                    history.leg = Some(leg.clone());
+                    match cx.request_managed_with_headers(
+                        leg,
+                        Method::Post,
+                        format!("{}/info", self.rest()),
+                        &[("Content-Type", "application/json")],
+                        Some(body),
+                        Pending::History(history),
+                    ) {
+                        Ok(id) => {
+                            self.account.read_weight += weight;
+                            if streamed {
+                                cx.stream_response(id, ArrayAt::Root);
+                            }
+                        }
+                        Err((Pending::History(history), error)) => {
+                            self.reject_history(cx, *history, error.read_venue_error())
+                        }
+                        Err(_) => unreachable!("history submission returns its own pending"),
+                    }
+                    continue;
+                }
+                read => read,
+            };
             self.account.read_weight += read.weight;
             if read.streamed {
                 self.info(cx, read.body, ArrayAt::Root, read.request.pending());
@@ -287,6 +335,15 @@ impl Hyperliquid {
                 );
             }
         }
+    }
+    pub(crate) fn discard_history_owner(&mut self, owner: safe_cex_engine::request_context::Owner) {
+        self.account.reads.retain(|read| match read {
+            QueuedRead {
+                request: ReadContinuation::History(history),
+                ..
+            } => history.root().owner() != owner,
+            _ => true,
+        });
     }
     /// TS synthesises no position (and so no leverage row) for a merged spot pair.
     pub(crate) fn has_setting(&self, m: &Market) -> bool {
@@ -565,16 +622,30 @@ impl Hyperliquid {
         if let Some(t) = self.account.mode_timer.take() {
             cx.clear_timer(t);
         }
-        self.private_subscribe(cx);
-        self.refresh_spot_holdings(cx);
-        self.live_balance(cx);
+        self.account.mode_refresh_due = true;
+        self.schedule_socket_refresh(cx, true);
     }
-    pub(crate) fn private_subscribe(&self, cx: &mut Cx<'_, Pending>) {
-        if self.options.public_data_only || !self.account.mode_resolved || !self.connection.open {
+    pub(crate) fn finish_mode_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.mode_refresh_due {
             return;
         }
-        let (Some(user), Some(socket)) = (self.user(), self.connection.socket) else {
+        self.refresh_spot_holdings(cx);
+        if self.tracks_spot_holdings() && !self.account.spot_inflight {
             return;
+        }
+        self.live_balance(cx);
+        self.account.mode_refresh_due = false;
+    }
+    pub(crate) fn private_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+    ) -> Vec<safe_cex_engine::socket_lifecycle::Interest> {
+        let mut interests = Vec::new();
+        if self.options.public_data_only || !self.account.mode_resolved {
+            return interests;
+        }
+        let Some(user) = self.user() else {
+            return interests;
         };
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -593,10 +664,9 @@ impl Hyperliquid {
             method: &'static str,
             subscription: Sub<'a>,
         }
-        let markets = cx.store.markets().to_vec();
-        let send = |cx: &mut Cx<'_, Pending>, kind, dex, coin, portfolio| {
-            cx.send(
-                socket,
+        let markets = store.markets();
+        let mut send = |kind, dex, coin, portfolio| {
+            interests.push(safe_cex_engine::socket_lifecycle::Interest::from_wire_args(
                 serde_json::to_string(&Send {
                     method: "subscribe",
                     subscription: Sub {
@@ -608,7 +678,7 @@ impl Hyperliquid {
                     },
                 })
                 .unwrap(),
-            )
+            ));
         };
         if self.spot {
             for kind in [
@@ -617,9 +687,9 @@ impl Hyperliquid {
                 "userFills",
                 "userNonFundingLedgerUpdates",
             ] {
-                send(cx, kind, None, None, None);
+                send(kind, None, None, None);
             }
-            return;
+            return interests;
         }
         for kind in [
             "notification",
@@ -630,11 +700,10 @@ impl Hyperliquid {
             "userNonFundingLedgerUpdates",
             "clearinghouseState",
         ] {
-            send(cx, kind, None, None, None);
+            send(kind, None, None, None);
         }
         if self.tracks_spot_holdings() {
             send(
-                cx,
                 "spotState",
                 None,
                 None,
@@ -648,14 +717,15 @@ impl Hyperliquid {
                 "orderUpdates",
                 "userEvents",
             ] {
-                send(cx, kind, Some(dex), None, None);
+                send(kind, Some(dex), None, None);
             }
         }
-        for m in &markets {
+        for m in markets {
             if !m.id.contains(':') && m.is_spot != Some(true) {
-                send(cx, "activeAssetData", None, Some(&m.id), None);
+                send("activeAssetData", None, Some(&m.id), None);
             }
         }
+        interests
     }
     pub(crate) fn account_response(
         &mut self,
