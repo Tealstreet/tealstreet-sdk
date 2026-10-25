@@ -45,6 +45,7 @@ impl BybitLinear {
             self.join_hyro(cx, id, key);
             return;
         }
+        self.wake_hyro_waiters(cx);
         let (policy, read_credential, write_credential) = self.ordinary_preflight();
         let Ok(preflight) = cx.begin_preflight(policy) else {
             return;
@@ -59,7 +60,7 @@ impl BybitLinear {
         if let Some(intent) = self.trading.hyro.intents.get(&key)
             && matches!(intent.phase, Phase::Reading(_))
         {
-            let _ = cx.fail_preflight(&preflight, not_sent(BEING_RECONCILED));
+            self.wait_for_hyro_founder(cx, id, &key, preflight);
             return;
         }
         if !self.trading.hyro.intents.contains_key(&key) {
@@ -77,6 +78,7 @@ impl BybitLinear {
                     digest,
                     lots,
                     phase: Phase::Idle,
+                    founding: 0,
                 },
             );
         }
@@ -86,6 +88,11 @@ impl BybitLinear {
             .intents
             .get_mut(&key)
             .expect("inserted above");
+        // An earlier call's lot may be live or may have reached the venue: no
+        // seal of this one, a remint refusal included, is Rejected or NotSent.
+        if intent.placed() {
+            let _ = cx.inherit_preflight_uncertainty(&preflight);
+        }
         if let Err(message) = intent
             .lots
             .iter_mut()
@@ -94,16 +101,12 @@ impl BybitLinear {
             let _ = cx.fail_preflight(&preflight, not_sent(message));
             return;
         }
-        // An earlier call may have reached the venue: no seal of this one is NotSent.
-        if intent.maybe_sent() {
-            let _ = cx.inherit_preflight_uncertainty(&preflight);
-        }
         let receipts = intent.receipts();
         if !receipts.is_empty() {
             cx.command_progress(id, receipts);
         }
-        intent.phase = Phase::Reading(id);
         let proven = vec![false; intent.lots.len()];
+        self.found_hyro(&key, id);
         self.trading.ordinary.insert(
             id,
             Ordinary {
@@ -121,7 +124,7 @@ impl BybitLinear {
             },
         );
         self.resume_hyro(cx, id);
-        self.after_hyro(&key, id);
+        self.after_hyro(cx, &key, id);
     }
 
     /// An identical caller observes the running execution; nothing is sent for it.
@@ -189,7 +192,7 @@ impl BybitLinear {
             return true;
         }
         intent.phase = Phase::Idle;
-        self.settle_hyro(key, false);
+        self.settle_hyro(key, None);
         false
     }
 
@@ -269,8 +272,8 @@ impl BybitLinear {
         }
         if legs.is_empty() {
             let ids = intent_ids(self, &key);
-            if cx.done_empty_plan(&entry.preflight, ids).is_ok() {
-                self.settle_hyro(&key, true);
+            if cx.done_empty_plan(&entry.preflight, ids.clone()).is_ok() {
+                self.settle_hyro(&key, Some(ids));
             }
             return;
         }
@@ -627,8 +630,14 @@ impl BybitLinear {
         let _ = cx.fail_plan(&plan, error);
     }
 
-    /// After a Hyro callback: an entry neither parked nor reading has sealed.
-    pub(super) fn after_hyro(&mut self, key: &str, founder: CommandId) {
+    /// After a Hyro callback: an entry neither parked nor reading has sealed;
+    /// any founding that sealed wakes its waiters.
+    pub(super) fn after_hyro(&mut self, cx: &mut Cx<'_, Pending>, key: &str, founder: CommandId) {
+        self.settle_sealed_hyro(key, founder);
+        self.wake_hyro_waiters(cx);
+    }
+
+    fn settle_sealed_hyro(&mut self, key: &str, founder: CommandId) {
         let reading = self.trading.ordinary.contains_key(&founder);
         let Some(intent) = self.trading.hyro.intents.get_mut(key) else {
             return;
@@ -639,7 +648,7 @@ impl BybitLinear {
             _ => {}
         }
         intent.phase = Phase::Idle;
-        self.settle_hyro(key, false);
+        self.settle_hyro(key, None);
     }
 
     pub(super) fn take_hyro_owner(&mut self, owner: Owner) -> Option<Ordinary> {
@@ -711,8 +720,9 @@ impl BybitLinear {
             }
         }
         for key in settled {
-            self.settle_hyro(&key, false);
+            self.settle_hyro(&key, None);
         }
+        self.retire_hyro_waiters(owner);
     }
 }
 
