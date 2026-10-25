@@ -10,8 +10,9 @@ fn public_catalogue_preserves_factory_broker_attribution_without_credentials() {
         },
     ));
     engine.start(0.0);
-    let requests: Vec<_> = engine
-        .drain_actions()
+    // Discovery is managed; the fixture driver completes its preparation.
+    let requests: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,

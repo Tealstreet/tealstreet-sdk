@@ -23,18 +23,23 @@ fn seeded(options: Options) -> TestEngine {
 }
 fn ask(engine: &mut TestEngine) -> Vec<Action> {
     engine.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    engine.drain_actions().collect()
+    // Identity is a managed read: the fixture driver prepares and signs it.
+    safe_cex_engine::test_support::prepared_actions(engine, NOW)
 }
 fn identity_request(engine: &mut TestEngine) -> HttpRequest {
-    let actions = ask(engine);
+    let mut requests: Vec<_> = ask(engine)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
     assert_eq!(
-        actions.len(),
+        requests.len(),
         1,
         "one rare read, no reconciliation/startup work"
     );
-    let Action::Http(request) = actions.into_iter().next().unwrap() else {
-        panic!("expected identity request")
-    };
+    let request = requests.remove(0);
     assert_eq!(request.method, Method::Get);
     assert_eq!(request.body, None);
     assert_eq!(request.route, None, "ordinary selected-read egress");
@@ -106,7 +111,7 @@ fn respond(engine: &mut TestEngine, request: &HttpRequest, status: u16, body: &s
             },
         },
     );
-    engine.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(engine, NOW)
 }
 fn options(read: bool, variant: Variant) -> Options {
     Options {
@@ -263,7 +268,7 @@ fn malformed_missing_or_failed_identity_finishes_once_without_state_changes() {
                     error: "connection lost",
                 },
             );
-            engine.drain_actions().collect()
+            safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
         } else {
             respond(&mut engine, &request, 503, "unavailable")
         };
