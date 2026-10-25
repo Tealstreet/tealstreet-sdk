@@ -1503,7 +1503,7 @@ impl BybitLinear {
                 .and_then(|join| join.root.clone()),
         };
         let leg = root
-            .zip(self.read_policy(true, crate::candles::read_policy().timeout_ms))
+            .zip(self.read_policy(true, crate::policy::read_policy().timeout_ms))
             .and_then(|(root, policy)| cx.http_leg_context(&root, policy).ok());
         match leg {
             Some(leg) => self.queue_read(cx, leg, rest, then),
