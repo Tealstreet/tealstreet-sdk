@@ -1168,6 +1168,7 @@ async fn feed_connection(
         feed.map(|feed| safe_cex_engine::SocketContext {
             feed: feed.into(),
             recover,
+            reject_route: false,
         }),
         send,
     );

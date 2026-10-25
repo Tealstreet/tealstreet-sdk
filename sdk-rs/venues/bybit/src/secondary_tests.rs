@@ -250,3 +250,45 @@ fn every_signed_call_site_pins_its_key_use() {
         assert_eq!(plan_write, writes, "{case:?}");
     }
 }
+
+/// dazzy3 on #1971: a signed read that cannot be admitted (no key, or a
+/// configuration error) fails into its caller's failure path, so the caller's
+/// in-flight flag clears, instead of returning silently with it still set.
+fn read_without_admission(options: Options) -> bool {
+    let cleared = std::rc::Rc::new(std::cell::Cell::new(false));
+    let seen = cleared.clone();
+    let probe = ProbeVenue::new(BybitLinear::new(options), move |venue, cx| {
+        venue.startup.tickers_in_flight = true;
+        let rest = Rest {
+            path: "/signed-without-admission",
+            payload: String::new(),
+            stream: false,
+            signed: true,
+            resent: false,
+        };
+        venue.send_read(cx, rest, Then::Tickers(vec![]));
+        seen.set(!venue.startup.tickers_in_flight);
+    });
+    let mut engine = safe_cex_engine::test_support::seeded_engine(probe);
+    engine.start(1700000000000.0);
+    assert!(
+        !engine.drain_actions().any(|a| matches!(a, Action::Http(_))),
+        "nothing is sent"
+    );
+    cleared.get()
+}
+
+#[test]
+fn a_signed_read_without_a_key_fails_into_its_caller() {
+    assert!(read_without_admission(Options::default()));
+}
+
+#[test]
+fn a_read_under_a_configuration_error_fails_into_its_caller() {
+    // HyroTrader without its endpoints is a configuration error.
+    let (mut options, _) = setup();
+    options.variant = Variant::Hyrotrader;
+    options.endpoints = None;
+    assert!(BybitLinear::new(options.clone()).config_error.is_some());
+    assert!(read_without_admission(options));
+}

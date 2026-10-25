@@ -122,7 +122,7 @@ impl<P> Cx<'_, P> {
             .validate_housekeeping(call.admission.attempt.request)?;
         // No journal or structural mutation before all fallible projection and
         // report storage preparation succeeds. No callback may intervene.
-        let prepared = self.prepare_plan_terminal(plan, None, Some(&result))?;
+        let prepared = self.prepare_plan_terminal(plan, None, None, Some(&result))?;
         self.finish_plan_call(plan, slot, context)
             .expect("validated conditional DATA settlement");
         self.commit_plan_terminal(plan, Some(result), prepared)
