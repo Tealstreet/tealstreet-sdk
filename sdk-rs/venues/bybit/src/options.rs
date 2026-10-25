@@ -276,6 +276,7 @@ impl BybitLinear {
         };
         match cx.request_managed_with_headers(
             context.clone(),
+            None,
             Method::Get,
             url,
             &[("X-Referer", sign::BROKER_ID)],
@@ -318,12 +319,9 @@ impl BybitLinear {
 
     /// The GET credential: the read key when configured, else the primary.
     /// Like trading, Greeks need the account's primary key at all.
-    fn greeks_credentials(&self) -> Option<(CredentialSlot, sign::Credentials)> {
-        match (&self.read_credentials, &self.credentials) {
-            (_, None) => None,
-            (Some(read), Some(_)) => Some((CredentialSlot::Secondary, read.clone())),
-            (None, Some(primary)) => Some((CredentialSlot::Primary, primary.clone())),
-        }
+    pub(crate) fn greeks_credentials(&self) -> Option<(CredentialSlot, sign::Credentials)> {
+        self.select_key(crate::KeyUse::AccountRead)
+            .map(|(selection, identity)| (selection.slot(), identity.clone()))
     }
 
     pub(crate) fn fetch_account_greeks(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -387,6 +385,7 @@ impl BybitLinear {
         };
         match cx.request_signed_managed(
             context.clone(),
+            None,
             Method::Get,
             url,
             None,

@@ -383,6 +383,7 @@ fn send(cx: &mut Cx<'_, Pending>, credentials: &Credentials, leg: Leg) {
     let context = leg.context.clone();
     if let Err((pending, _)) = cx.request_signed_managed(
         context,
+        None,
         Method::Get,
         url,
         body,

@@ -126,7 +126,9 @@ fn work(actions: Vec<Action>) -> (RequestId, SignRequest) {
     one
 }
 fn command(engine: &mut Engine<BybitLinear>, now: f64, command: Command) -> Vec<Action> {
-    engine.handle(now, Event::Command(command));
+    engine
+        .handle_command(now, command, None)
+        .expect("valid caller receipt");
     managed(engine, now)
 }
 /// Prepare one managed request whose signing the provider parks; the
@@ -338,26 +340,31 @@ fn provider_refusal_invalid_presentation_and_timeout_are_owned_not_sent_reads() 
             } else {
                 Command::FetchAccount { command: 42 }
             };
-            let mut actions = if mode == 1 && !query {
-                // Identity is managed: its parked signing stays with the provider.
-                engine.handle(1000., Event::Command(cmd));
+            let mut actions = if mode == 1 {
+                // Identity and history are managed: parked signing stays with the provider.
+                engine
+                    .handle_command(1000., cmd, None)
+                    .expect("valid caller receipt");
                 prepare_parked(&mut engine, 1000.)
             } else {
                 command(&mut engine, 1000., cmd)
             };
             if mode == 1 {
-                let timer = actions
+                // Fire every timer due by then: the read's 20 s window, not a
+                // caller root's later deadline.
+                let due: Vec<_> = actions
                     .iter()
-                    .find_map(|a| {
-                        if let Action::SetTimer { timer, .. } = a {
-                            Some(*timer)
-                        } else {
-                            None
-                        }
+                    .filter_map(|a| match a {
+                        Action::SetTimer { timer, at_ms } if *at_ms <= 21_001. => Some(*timer),
+                        _ => None,
                     })
-                    .unwrap();
-                engine.handle(21_001., Event::TimerFired { timer });
-                actions = engine.drain_actions().collect();
+                    .collect();
+                assert!(!due.is_empty(), "a bounded read window");
+                actions.clear();
+                for timer in due {
+                    engine.handle(21_001., Event::TimerFired { timer });
+                    actions.extend(engine.drain_actions());
+                }
             }
             let error = failed(&actions, 42);
             assert_eq!(error.outcome, Some(Outcome::NotSent));

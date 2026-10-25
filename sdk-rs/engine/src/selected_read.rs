@@ -334,6 +334,7 @@ fn queue_read<P>(
 ) -> Result<RequestId, (P, Error)> {
     let id = cx.request_signed_managed(
         context,
+        None,
         request.method,
         request.url,
         request.body,

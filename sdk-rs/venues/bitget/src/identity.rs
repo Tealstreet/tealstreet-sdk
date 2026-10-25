@@ -124,6 +124,7 @@ impl BitgetFutures {
         let recipe = sign::Http::new(identity, PATH.into());
         if let Err((pending, reason)) = cx.request_signed_managed(
             root.clone(),
+            None,
             Method::Get,
             format!("{}{PATH}", paths::REST),
             None,

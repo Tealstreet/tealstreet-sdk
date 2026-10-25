@@ -190,6 +190,7 @@ impl BitunixFutures {
         };
         match cx.request_managed_with_headers(
             context,
+            None,
             Method::Get,
             format!("{REST}{path}"),
             self.public_headers(),
@@ -1123,7 +1124,7 @@ impl Venue for BitunixFutures {
                 } else {
                     String::new()
                 };
-                if let Err((pending, error)) = cx.request_managed_with_headers(context.clone(), Method::Get,
+                if let Err((pending, error)) = cx.request_managed_with_headers(context.clone(), None, Method::Get,
                     format!("{REST}{KLINE}?symbol={symbol}&interval={}&startTime={start}&endTime={end}{limit_query}", interval.as_str()),
                     self.public_headers(), None, Pending::Candles { context }) {
                     self.on_http_failed(cx, pending, error.venue_error());

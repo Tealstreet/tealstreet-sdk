@@ -134,6 +134,7 @@ impl NativeFifo {
         let context = cx.plan_leg_context(&plan, &slot).unwrap();
         cx.request_signed_managed(
             context.clone(),
+            None,
             Method::Post,
             format!("https://venue.test/cancel/{id}"),
             None,
@@ -251,6 +252,7 @@ impl Venue for NativeFifo {
             self.foreign_submission = Some(
                 cx.request_managed(
                     context.clone(),
+                    None,
                     Method::Get,
                     "https://venue.test/foreign".into(),
                     None,
@@ -288,6 +290,7 @@ impl Venue for NativeFifo {
                 if matches!(self.behavior, ReadyBehavior::ReadThenPlan) {
                     cx.request_managed(
                         context.clone(),
+                        None,
                         Method::Get,
                         "https://venue.test/prerequisite".into(),
                         None,

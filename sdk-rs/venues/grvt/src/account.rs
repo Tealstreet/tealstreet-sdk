@@ -876,6 +876,7 @@ impl Grvt {
             Ok(context) => cx
                 .request_managed_with_headers(
                     context.clone(),
+                    None,
                     safe_cex_engine::Method::Post,
                     format!("{}{AUTH}", self.edge()),
                     HEADERS,

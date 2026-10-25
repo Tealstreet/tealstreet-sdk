@@ -2700,9 +2700,10 @@ fn owned_history_first_page_failure_is_typed_and_never_empty_success() {
                 error.kind.is_some(),
                 "typed: kind {kind}, failure {failure}"
             );
-            // venue_error's numeric fallback is an HTTP status, not a native
-            // envelope code. This adapter adds no fabricated venueCode.
-            assert_eq!(error.venue_code, None, "kind {kind}, failure {failure}");
+            // A native envelope refusal keeps its retCode; venue_error's numeric
+            // fallback is an HTTP status, and no venueCode is fabricated from it.
+            let native = (failure == 0).then(|| "10001".to_owned());
+            assert_eq!(error.venue_code, native, "kind {kind}, failure {failure}");
             if failure == 2 {
                 assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
             }

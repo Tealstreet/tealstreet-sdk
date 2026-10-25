@@ -222,6 +222,7 @@ impl BybitLinear {
         };
         match cx.request_managed_with_headers(
             leg,
+            None,
             Method::Get,
             url,
             &[("X-Referer", sign::BROKER_ID)],

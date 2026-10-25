@@ -160,6 +160,7 @@ impl MexcFutures {
         );
         if let Err((pending, reason)) = cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             format!("{}{path}", crate::REST),
             None,
