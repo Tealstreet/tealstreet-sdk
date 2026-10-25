@@ -166,3 +166,49 @@ Native Phemex working references include failed_late_cancel_is_reported_as_an_er
 4. Venue source adoption, exact map pruning, provider/native source reviews, scoped tests, paired family+combined sizes, frozen push/one qualifying run, READY and exact-tree GO remain separate. Other Backpack/Phemex slices may proceed independently.
 
 No current runtime, test execution, API availability, production readiness or automatic mutation authority is claimed by this plan.
+
+## Originals (claude-fe7lgm, reviewer codex-ih35js)
+
+Engine feature `repair-mutations = ["order-locks"]`; only the adopting Phemex
+and Backpack families will enable it, so other families stay byte-identical.
+The API lives in `engine/src/repair.rs`, and the controls in
+`engine/src/repair_tests.rs` drive real command admission, real Background
+Read delivery and the real Prepare/Bind/Claim path.
+
+Two engine facts settle plan items:
+
+- Identities and the signer are frozen once the engine starts (`set_identities`
+  and `set_signer` refuse after `started`, and no event installs, replaces or
+  clears credentials). E1's credential-install generation is therefore
+  structural within one engine instance and needs no counter. The proof at mint
+  is `owns(read KeyRef)` plus the installed primary. A GREEN control pins the
+  precondition.
+- There is no engine teardown path. Entitlements and roots retire through the
+  subject and root lifecycle only.
+
+API (inert at this checkpoint; each call refuses with `Invalid`):
+
+| Call | Custody |
+| --- | --- |
+| `mint_command_repair(primary, subjects)` | `entry_bound` for the current entry; refused before any ID allocation otherwise |
+| `mint_snapshot_repair(read, primary, subject, symbol)` | exact live Background DATA delivery, owned Read key, published Store order with that symbol, no live entitlement for it |
+| `admit_repair_cancel(members)` | at most 10 compatible subjects, possibly from several command-origin entitlements; atomic spend |
+| `admit_repair_replace(entitlement, subject, binding)` | the cancel leg of one snapshot subject |
+| `repair_successor(root)` | once, after an engine-recorded accepted cancel |
+| `retire_repair_subject(entitlement, key, Retire)` | unspent subjects only; idempotent |
+| `Venue::on_repair_notice` | once per ended root and per refused snapshot mint, outside any command entry |
+
+Every repair leg signs with the recorded primary under
+Policy{Mutation, 20_000 ms, Never}. Each `Warn` reads "Automatic repair
+authority unavailable: <reason>", with "capacity exhausted" for capacity.
+
+Original execution on tip `d3b392b0b14` with `--features repair-mutations`:
+25 new controls, 24 assertion REDs and 1 GREEN (frozen identities). The
+other 937 engine controls pass. No fixture panic or missing method counts as
+a RED. Setup assertions (a successful mint) gate the later suffixes; those
+suffixes are not execution evidence until source exists.
+
+Deferred to source review, where the inert stubs cannot express them: wrong
+issuer or foreign handles, saturated-credit and retire-before-successor
+accounting, mint after a serial Plan admission (the Phemex nonempty path),
+the per-subject partial-ack facts, and host (JS/capsule) parity.

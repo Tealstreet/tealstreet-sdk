@@ -2967,6 +2967,16 @@ pub trait Venue {
     ) {
     }
 
+    /// A repair root ended or a snapshot mint was refused. Runs outside any
+    /// command entry, like `reconcile_uncertain`; it grants no new authority.
+    #[cfg(feature = "repair-mutations")]
+    fn on_repair_notice(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _notice: crate::repair::RepairNotice<'_>,
+    ) {
+    }
+
     /// A Plan Slot parked on a Session ended unissued because the Session was
     /// retired or failed. This runs in that Plan's ready custody: re-park the Slot
     /// on another live Session, or fail the Plan. Nothing was sent for it.
