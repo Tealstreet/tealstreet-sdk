@@ -59,8 +59,7 @@ pub(super) fn terminal_ordinals(
 }
 
 impl<P> Cx<'_, P> {
-    /// Admit immutable optional mutation terminals in the same complete native
-    /// Plan transaction. No declaration may be changed after admission.
+    #[inline]
     pub fn admit_plan_with_terminals(
         &mut self,
         preflight: &Preflight,
@@ -68,15 +67,8 @@ impl<P> Cx<'_, P> {
         policy: PlanPolicy,
         terminals: &[MutationTerminalBound],
     ) -> Result<Plan, Error> {
-        self.admit_declared_plan(
-            preflight,
-            AdmissionDeclaration {
-                steps,
-                policy,
-                terminals,
-                barriers: &[],
-            },
-        )
+        self.core()
+            .admit_plan_with_terminals(preflight, steps, policy, terminals)
     }
 
     /// Complete at a declared native terminal from exact current DATA. Retire
@@ -126,5 +118,27 @@ impl<P> Cx<'_, P> {
         self.finish_plan_call(plan, slot, context)
             .expect("validated conditional DATA settlement");
         self.commit_plan_terminal(plan, Some(result), prepared)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    /// Admit immutable optional mutation terminals in the same complete native
+    /// Plan transaction. No declaration may be changed after admission.
+    pub fn admit_plan_with_terminals(
+        &mut self,
+        preflight: &Preflight,
+        steps: &[StepBound<'_>],
+        policy: PlanPolicy,
+        terminals: &[MutationTerminalBound],
+    ) -> Result<Plan, Error> {
+        self.admit_declared_plan(
+            preflight,
+            AdmissionDeclaration {
+                steps,
+                policy,
+                terminals,
+                barriers: &[],
+            },
+        )
     }
 }

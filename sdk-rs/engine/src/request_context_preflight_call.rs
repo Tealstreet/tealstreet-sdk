@@ -305,6 +305,8 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     pub(in super::super::super) fn preflight_plan_origin(
         &self,
         handle: &Preflight,
@@ -521,6 +523,127 @@ impl<P> Cx<'_, P> {
             }
             self.fail_preflight(&handle, error)
                 .expect("exact failed read custody");
+        }
+    }
+
+    /// Check exact response authority before native/cache publication. A live
+    /// response still requires native decoding and snapshot freshness checks.
+    pub fn validate_preflight_delivery(
+        &self,
+        handle: &Preflight,
+        context: &Context,
+    ) -> Result<(), Error> {
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let call = self.io.core.request_contexts.read_call(handle, context)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: false }) {
+            return Err(Error::Revoked);
+        }
+        if self.now >= call.admission.deadline {
+            return Err(Error::TimedOut);
+        }
+        let managed = self
+            .io
+            .core
+            .managed_http
+            .get(&delivery.attempt.request)
+            .ok_or(Error::Revoked)?;
+        if !managed.released_delivery(delivery) {
+            return Err(Error::Revoked);
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub fn finish_preflight_call(
+        &mut self,
+        handle: &Preflight,
+        context: &Context,
+    ) -> Result<(), Error> {
+        self.core().finish_preflight_call(handle, context)
+    }
+
+    #[inline]
+    pub fn preflight_retry_context(
+        &mut self,
+        handle: &Preflight,
+        context: &Context,
+        evidence: RetryEvidence,
+    ) -> Result<Context, Error> {
+        self.core()
+            .preflight_retry_context(handle, context, evidence)
+    }
+
+    #[inline]
+    pub fn preflight_read_context(
+        &mut self,
+        handle: &Preflight,
+        policy: Policy,
+        terms: CallTerms,
+    ) -> Result<Context, Error> {
+        self.core().preflight_read_context(handle, policy, terms)
+    }
+
+    /// The declared read's own terms, checked before any custody is spent.
+    pub(super) fn validate_preflight_read(
+        &self,
+        handle: &Preflight,
+        policy: &Policy,
+        terms: CallTerms,
+        parked: bool,
+    ) -> Result<(), Error> {
+        let state = self.io.core.request_contexts.preflight_state(handle)?;
+        if policy.operation != Operation::Read
+            || policy.credential != state.policy.read_credential
+            || terms.wait_ms != 0
+            || terms.timeout_ms != policy.timeout_ms
+            || (terms.attempts > 1 && policy.retry == RetryPolicy::Never)
+        {
+            return Err(Error::Invalid);
+        }
+        let window = terms.window(self.now, state.read_bound(parked))?;
+        Context::new(
+            handle.owner(),
+            1,
+            Operation::Read,
+            policy.credential.clone(),
+            self.now,
+            window.deadline(),
+            policy.pacing,
+        )?
+        .with_retry(policy.retry)?;
+        Ok(())
+    }
+
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    pub(super) fn issue_preflight_read(
+        &mut self,
+        handle: &Preflight,
+        policy: Policy,
+        terms: CallTerms,
+        parked: bool,
+    ) -> Result<Context, Error> {
+        self.core()
+            .issue_preflight_read(handle, policy, terms, parked)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    pub(in super::super::super) fn preflight_plan_origin(
+        &self,
+        handle: &Preflight,
+    ) -> Result<(PreflightPolicy, Option<Context>), Error> {
+        self.validate_preflight_activation(handle)?;
+        let state = self.io.core.request_contexts.preflight_state(handle)?;
+        if let Some(call) = state.call.first() {
+            self.validate_preflight_delivery(handle, &call.context)?;
+            Ok((state.policy.clone(), Some(call.context.clone())))
+        } else if state.admits_handoff(self.io.core.http_delivery.as_ref()) {
+            Ok((state.policy.clone(), None))
+        } else {
+            Err(Error::Revoked)
         }
     }
 

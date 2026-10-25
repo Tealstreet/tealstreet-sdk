@@ -1875,7 +1875,7 @@ fn session_egress_never_crosses_sessions_or_engines() {
         .egress(generation(&second));
     assert!(other.is_some() && other != scoped.egress());
     assert_eq!(
-        with(&mut engine, 1., |cx| cx.make_http_context(
+        with(&mut engine, 1., |cx| cx.core().make_http_context(
             Scope::Command(7),
             policy(Operation::Read),
             Some(&scoped),

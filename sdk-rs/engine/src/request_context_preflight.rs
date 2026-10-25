@@ -234,6 +234,36 @@ impl<P> Cx<'_, P> {
         })
     }
 
+    #[inline]
+    pub(in crate::engine) fn issue_preflight(
+        &mut self,
+        command: CommandId,
+        policy: PreflightPolicy,
+    ) -> Result<Preflight, Error> {
+        self.core().issue_preflight(command, policy)
+    }
+
+    #[inline]
+    pub fn done_preflight(&mut self, preflight: &Preflight, result: String) -> Result<(), Error> {
+        self.core().done_preflight(preflight, result)
+    }
+
+    #[inline]
+    pub fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
+        self.core().inherit_preflight_uncertainty(preflight)
+    }
+
+    #[inline]
+    pub fn fail_preflight(
+        &mut self,
+        preflight: &Preflight,
+        error: impl Into<VenueError>,
+    ) -> Result<(), Error> {
+        self.core().fail_preflight(preflight, error)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     // Private issuer shared with pure engine state fixtures. Public initial
     // admission always obtains command/generation custody from the callback.
     pub(in crate::engine) fn issue_preflight(

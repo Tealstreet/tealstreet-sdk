@@ -189,6 +189,69 @@ impl<P> Io<P> {
         Ok((receipt, deadline))
     }
 
+    #[inline]
+    pub(super) fn begin_command_entry(&mut self, command: Option<CommandId>) {
+        self.core_io().begin_command_entry(command)
+    }
+
+    #[inline]
+    pub(super) fn receive_command_wait(
+        &mut self,
+        command: CommandId,
+        deadline: Option<f64>,
+        now: f64,
+    ) {
+        self.core_io().receive_command_wait(command, deadline, now)
+    }
+    #[inline]
+    pub(super) fn end_command_entry(&mut self) {
+        self.core_io().end_command_entry()
+    }
+    #[inline]
+    pub(super) fn opaque_entry_activity(&mut self) {
+        self.core_io().opaque_entry_activity()
+    }
+    /// Read-only: this exact command's genuine callback holds its issued root.
+    // Only some feature combinations call this.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    pub(super) fn entry_bound(&self, command: CommandId) -> bool {
+        self.core
+            .command_entry
+            .as_ref()
+            .is_some_and(|entry| entry.command == command && entry.state == State::Bound)
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
+    pub(super) fn fresh_command_entry(&self) -> bool {
+        self.core.command_entry.as_ref().is_some_and(|entry| {
+            entry.state == State::Fresh
+                && entry.resources == self.core.next_id
+                && self.core.http_delivery.is_none()
+        })
+    }
+
+    pub(super) fn command_receipt(&self) -> Result<(u64, f64), crate::request_context::Error> {
+        use crate::request_context::Error;
+        let entry = self.core.command_entry.as_ref().ok_or(Error::Revoked)?;
+        if self.core.http_delivery.is_some()
+            || !matches!(entry.state, State::Fresh | State::Bound | State::Legacy)
+        {
+            return Err(Error::Revoked);
+        }
+        let (receipt, deadline) = self.core.command_waits.stamp(entry.command).ok_or({
+            if self.core.command_waits.receipts == u64::MAX {
+                Error::Capacity
+            } else {
+                Error::Revoked
+            }
+        })?;
+        if entry.receipt != Some(receipt) {
+            return Err(Error::Revoked);
+        }
+        Ok((receipt, deadline))
+    }
+
     pub(super) fn begin_command_entry(&mut self, command: Option<CommandId>) {
         assert!(
             self.core.command_entry.is_none(),
@@ -250,9 +313,11 @@ impl<P> Io<P> {
         }
         self.core.command_waits.receive(command, deadline);
     }
+
     pub(super) fn end_command_entry(&mut self) {
         self.core.command_entry = None;
     }
+
     /// Existing resources are not a second ID allocator. Changing their state,
     /// or staging an outbound operation without a new ID, burns fresh custody.
     pub(super) fn opaque_entry_activity(&mut self) {
@@ -262,17 +327,20 @@ impl<P> Io<P> {
             entry.state = State::Legacy;
         }
     }
+
     pub(super) fn numeric_entry_completion_allowed(&self, command: CommandId) -> bool {
         self.core.command_entry.as_ref().is_none_or(|entry| {
             entry.command != command || matches!(entry.state, State::Fresh | State::Legacy)
         })
     }
+
     pub(super) fn entry_context_allowed(&self, scope: Scope) -> bool {
         self.core.command_entry.as_ref().is_none_or(|entry| {
             scope != Scope::Command(entry.command)
                 || !matches!(entry.state, State::Rejected | State::Spent)
         })
     }
+
     /// Read-only: this exact command's genuine callback holds its issued root.
     pub(super) fn entry_bound(&self, command: CommandId) -> bool {
         self.core
@@ -280,6 +348,7 @@ impl<P> Io<P> {
             .as_ref()
             .is_some_and(|entry| entry.command == command && entry.state == State::Bound)
     }
+
     pub(super) fn entry_completed(&mut self, command: CommandId) {
         if let Some(entry) = &mut self.core.command_entry
             && entry.command == command
@@ -290,6 +359,86 @@ impl<P> Io<P> {
 }
 
 impl<P> Cx<'_, P> {
+    #[inline]
+    pub(super) fn refuse_before_entry(&mut self, command: CommandId, error: impl Into<VenueError>) {
+        self.core().refuse_before_entry(command, error)
+    }
+
+    /// The caller's remaining wait, only inside this command's genuine entry
+    /// callback (before or after admission, never once rejected or spent)
+    /// and only for its own receipt. `None` in every borrowed callback.
+    pub fn command_wait(&self) -> Option<CommandWait> {
+        let (_, deadline) = self.io.command_receipt().ok()?;
+        if !self.now.is_finite() {
+            return None;
+        }
+        let left = (deadline - self.now).floor();
+        Some(if left >= 1.0 {
+            CommandWait::Remaining(left.min(f64::from(u32::MAX)) as u32)
+        } else {
+            CommandWait::Expired
+        })
+    }
+
+    #[inline]
+    pub fn reject_expired_command(
+        &mut self,
+        operation: Operation,
+    ) -> Result<(), CommandEntryError> {
+        self.core().reject_expired_command(operation)
+    }
+
+    /// Admit the first HTTP Context of this genuine engine command callback.
+    /// Rejected already emitted one failure; do not finalize it a second time.
+    /// This is initial admission only, never authority for siblings or retries.
+    pub fn admit_http_command(&mut self, policy: Policy) -> Result<Context, CommandEntryError> {
+        self.with_command_entry(policy.operation, |cx, command| {
+            let context = cx.http_context(Scope::Command(command), policy)?;
+            cx.io.core.request_contexts.retain_command_entry(&context);
+            Ok(context)
+        })
+    }
+
+    /// One initial command transaction shared by Context and opaque Preflight
+    /// issuers. Only this callback loan can reject an unissued command. The
+    /// generic shell only calls `issue`; both halves are shared, non-generic code.
+    pub(in crate::engine) fn with_command_entry<T>(
+        &mut self,
+        operation: Operation,
+        issue: impl FnOnce(&mut Self, CommandId) -> Result<T, crate::request_context::Error>,
+    ) -> Result<T, CommandEntryError> {
+        let command = self.begin_command_transaction()?;
+        issue(self, command)
+            .map_err(|reason| self.reject_command_transaction(command, operation, reason))
+    }
+
+    #[inline]
+    pub(in crate::engine) fn reject_command_entry(
+        &mut self,
+        operation: Operation,
+        reason: crate::request_context::Error,
+    ) -> CommandEntryError {
+        self.core().reject_command_entry(operation, reason)
+    }
+
+    #[inline]
+    fn begin_command_transaction(&mut self) -> Result<CommandId, CommandEntryError> {
+        self.core().begin_command_transaction()
+    }
+
+    #[inline]
+    fn reject_command_transaction(
+        &mut self,
+        command: CommandId,
+        operation: Operation,
+        reason: crate::request_context::Error,
+    ) -> CommandEntryError {
+        self.core()
+            .reject_command_transaction(command, operation, reason)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     /// An engine refusal before the venue's entry ends under this receipt's
     /// own entry, so a duplicate id never clears the live command's wait.
     pub(super) fn refuse_before_entry(&mut self, command: CommandId, error: impl Into<VenueError>) {
@@ -330,30 +479,6 @@ impl<P> Cx<'_, P> {
             CommandEntryError::Rejected(_) => Ok(()),
             error => Err(error),
         }
-    }
-
-    /// Admit the first HTTP Context of this genuine engine command callback.
-    /// Rejected already emitted one failure; do not finalize it a second time.
-    /// This is initial admission only, never authority for siblings or retries.
-    pub fn admit_http_command(&mut self, policy: Policy) -> Result<Context, CommandEntryError> {
-        self.with_command_entry(policy.operation, |cx, command| {
-            let context = cx.http_context(Scope::Command(command), policy)?;
-            cx.io.core.request_contexts.retain_command_entry(&context);
-            Ok(context)
-        })
-    }
-
-    /// One initial command transaction shared by Context and opaque Preflight
-    /// issuers. Only this callback loan can reject an unissued command. The
-    /// generic shell only calls `issue`; both halves are shared, non-generic code.
-    pub(in crate::engine) fn with_command_entry<T>(
-        &mut self,
-        operation: Operation,
-        issue: impl FnOnce(&mut Self, CommandId) -> Result<T, crate::request_context::Error>,
-    ) -> Result<T, CommandEntryError> {
-        let command = self.begin_command_transaction()?;
-        issue(self, command)
-            .map_err(|reason| self.reject_command_transaction(command, operation, reason))
     }
 
     /// Reject this genuine command entry without issuing anything.

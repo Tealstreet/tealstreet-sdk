@@ -1498,136 +1498,43 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
-    /// Atomically replace a definitively refused physical write with bounded
-    /// engine-issued child legs. This queues no HTTP and extends no deadline.
+    #[inline]
     pub fn http_replacement_contexts(
         &mut self,
         parent: &Context,
         policies: &[Policy],
     ) -> Result<Vec<Context>, Error> {
-        self.io.core.request_contexts.validate_legacy(parent)?;
-        if policies.is_empty() {
-            return Err(Error::Invalid);
-        }
-        if policies.len() > CAPACITY {
-            return Err(Error::Capacity);
-        }
-        let delivery = self
-            .io
-            .core
-            .http_delivery
-            .as_ref()
-            .ok_or(Error::State)?
-            .clone();
-        // Reserve the complete child range before registry/journal mutation.
-        // Failed admission may leave monotonic gaps, never reused identities.
-        let first = self
-            .io
-            .reserve_ids(policies.len() as u64)
-            .ok_or(Error::Capacity)?
-            .start;
-        self.io
-            .core
-            .request_contexts
-            .replace(parent, &delivery, first, policies, self.now)
+        self.core().http_replacement_contexts(parent, policies)
     }
 
-    /// Abort an unreleased replacement child during its exact superseded
-    /// parent's callback. Normal old-parent completion stays revoked. This is
-    /// failure-only and grants no result, send, retry or success authority.
+    #[inline]
     pub fn fail_replacement_context(
         &mut self,
         root: &Context,
         child: &Context,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
-        let Owner::Command { id, .. } = root.owner() else {
-            return Err(Error::Invalid);
-        };
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
-        let seal = self.io.core.request_contexts.seal_replacement_failure(
-            root,
-            child,
-            delivery,
-            self.now,
-            error.into(),
-        )?;
-        self.finish_sealed_command(id, None, seal)
+        self.core().fail_replacement_context(root, child, error)
     }
 
-    /// Capture the logical raw deadline and engine-owned owner/leg generation.
-    /// This neither queues HTTP nor reserves admission, a transport or pacing.
+    #[inline]
     pub fn http_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
-        self.make_http_context(scope, policy, None, None)
+        self.core().http_context(scope, policy)
     }
 
-    /// As `http_context`, with egress declared at issuance. Only unsigned
-    /// reads declare egress; a credentialed context may only confirm Primary.
+    #[inline]
     pub fn http_context_with_egress(
         &mut self,
         scope: Scope,
         policy: Policy,
         egress: Egress,
     ) -> Result<Context, Error> {
-        // Session egress is minted only from a live session.
-        if matches!(egress, Egress::Session(_)) {
-            return Err(Error::Invalid);
-        }
-        self.make_http_context(scope, policy, None, Some(egress))
+        self.core().http_context_with_egress(scope, policy, egress)
     }
 
-    /// A new physical leg under the same logical authority. Preserve its exact
-    /// raw deadline; integer timeout recomputation cannot round the bound up.
-    /// Session legs use `session_leg_context`, so families without Sessions
-    /// never link Session issuance.
+    #[inline]
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
-        self.io.core.request_contexts.validate_legacy(parent)?;
-        self.io
-            .core
-            .request_contexts
-            .validate_send(parent, self.now)?;
-        let scope = match parent.owner() {
-            Owner::Command { id, .. } => Scope::Command(id),
-            Owner::Background { .. } => Scope::Background,
-            Owner::Session { .. } => return Err(Error::Invalid),
-            Owner::Execution { .. } => Scope::Execution,
-        };
-        self.make_http_context(scope, policy, Some(parent), None)
-    }
-
-    fn make_http_context(
-        &mut self,
-        scope: Scope,
-        policy: Policy,
-        parent: Option<&Context>,
-        egress: Option<Egress>,
-    ) -> Result<Context, Error> {
-        #[cfg(feature = "http-plans")]
-        if self.io.core.http_preflight_ready.is_some() {
-            return Err(Error::Revoked);
-        }
-        if !self.io.entry_context_allowed(scope) {
-            return Err(Error::Revoked);
-        }
-        // A tracked caller-wait root stays plain Read: refused before any spend.
-        if policy.operation == Operation::Mutation
-            && matches!(scope, Scope::Command(id) if self.io.core.request_contexts.tracked(id))
-        {
-            return Err(Error::Invalid);
-        }
-        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        let context = self
-            .io
-            .core
-            .request_contexts
-            .issue_with_egress(identity, scope, policy, self.now, parent, egress)?;
-        #[cfg(feature = "order-locks")]
-        if context.operation() == Operation::Mutation
-            && let Owner::Command { id, .. } = context.owner()
-        {
-            self.io.core.order_locks.manage(id);
-        }
-        Ok(context)
+        self.core().http_leg_context(parent, policy)
     }
 
     /// Validate context provenance and retry policy without extending its bound.
@@ -1812,59 +1719,33 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    #[inline]
     pub fn fail_context(
         &mut self,
         context: &Context,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
-        let Owner::Command { id, .. } = context.owner() else {
-            return Err(Error::Invalid);
-        };
-        self.finish_command(id, Err(error.into()), Some(context))
+        self.core().fail_context(context, error)
     }
 
-    /// A physical timer carries its original attempt token. A logical Context
-    /// alone cannot distinguish an old physical timeout from its newer retry.
+    #[inline]
     pub fn fail_http_attempt(
         &mut self,
         context: &Context,
         attempt: Attempt,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
-        let delivery = self
-            .io
-            .core
-            .managed_http
-            .get(&attempt.request)
-            .ok_or(Error::Revoked)?
-            .delivery();
-        if delivery.attempt != attempt
-            || delivery.context != *context
-            || !context.issued_by(&self.io.core.request_contexts.issuer)
-        {
-            return Err(Error::Revoked);
-        }
-        let previous = self.io.core.http_delivery.replace(delivery);
-        let result = self.fail_context(context, error);
-        self.io.core.http_delivery = previous;
-        result
+        self.core().fail_http_attempt(context, attempt, error)
     }
 
-    /// Record only native codec facts for the exact currently delivered attempt.
-    /// Transport and signing failures are recorded by the engine, never inferred
-    /// from venue exception text or a caller-provided numeric request id.
     #[cfg(test)]
+    #[inline]
     pub(crate) fn http_write_result(
         &mut self,
         context: &Context,
         result: WriteResult,
     ) -> Result<(), Error> {
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
-        if delivery.context != *context || !context.issued_by(&self.io.core.request_contexts.issuer)
-        {
-            return Err(Error::Revoked);
-        }
-        self.io.core.request_contexts.result(delivery, result)
+        self.core().http_write_result(context, result)
     }
 
     /// Retain bounded native diagnostics/IDs when a delivered write ACK cannot
@@ -1941,6 +1822,400 @@ impl<P> Cx<'_, P> {
             .and_then(|owner| owner.writes.as_ref())
             .ok_or(Error::State)?;
         Ok((writes, delivery.attempt.request))
+    }
+
+    #[cfg(test)]
+    #[inline]
+    pub(crate) fn http_write_result_with_reports(
+        &mut self,
+        context: &Context,
+        result: WriteResult,
+        reports: RejectionReports,
+    ) -> Result<(), Error> {
+        self.core()
+            .http_write_result_with_reports(context, result, reports)
+    }
+
+    /// Classify the delivered write reply. The engine supplies the status,
+    /// headers and the command's intent; the codec supplies native evidence.
+    pub fn classify_write(
+        &self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        native: Option<&crate::classify::Native<'_>>,
+        message: impl Into<String>,
+    ) -> Result<crate::classify::Fact, Error> {
+        let (status, headers) = self.io.core.http_write_reply.as_ref().ok_or(Error::State)?;
+        let response = crate::Response {
+            status: *status,
+            headers,
+            body: "",
+        };
+        let delivery = self.current_write_delivery(context)?;
+        Ok(crate::classify::fact(
+            table,
+            self.write_intent(context)?,
+            crate::classify::Released::Response(&response),
+            native,
+            message,
+        )
+        .for_attempt(delivery.attempt.request))
+    }
+
+    #[inline]
+    pub fn http_write_fact(
+        &mut self,
+        context: &Context,
+        fact: crate::classify::WriteFact,
+        reports: Option<RejectionReports>,
+    ) -> Result<Option<ResendGrant>, Error> {
+        self.core().http_write_fact(context, fact, reports)
+    }
+
+    #[inline]
+    pub fn http_write_failure(
+        &mut self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        native: Option<&crate::classify::Native<'_>>,
+        message: impl Into<String>,
+        reports: Option<RejectionReports>,
+    ) -> Result<(crate::classify::Verdict, Option<ResendGrant>), Error> {
+        self.core()
+            .http_write_failure(context, table, native, message, reports)
+    }
+
+    #[inline]
+    pub fn http_write_unproven(
+        &mut self,
+        context: &Context,
+        message: impl Into<String>,
+    ) -> Result<(), Error> {
+        self.core().http_write_unproven(context, message)
+    }
+
+    #[inline]
+    pub fn http_write_batch(
+        &mut self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        expected: usize,
+        items: &[crate::classify::BatchItem<'_>],
+        message: impl Into<String>,
+        reports: Option<RejectionReports>,
+    ) -> Result<WriteResult, Error> {
+        self.core()
+            .http_write_batch(context, table, expected, items, message, reports)
+    }
+
+    /// The intent the engine recorded for this leg's logical command.
+    /// Background (session) writes classify as placements; a command owner
+    /// created outside dispatch has no trusted intent.
+    fn write_intent(&self, context: &Context) -> Result<crate::classify::Intent, Error> {
+        // Session writes (listen keys, logins) change account state, not orders.
+        if matches!(context.owner(), Owner::Session { .. }) {
+            return Ok(crate::classify::Intent::Setting);
+        }
+        if !matches!(context.owner(), Owner::Command { .. })
+            && !self
+                .io
+                .core
+                .request_contexts
+                .physical_owner(context.owner())
+        {
+            return Ok(crate::classify::Intent::Place);
+        }
+        let owner = self
+            .io
+            .core
+            .request_contexts
+            .owner_entry(context.owner())
+            .ok_or(Error::Revoked)?;
+        let leg = owner
+            .leg_intents
+            .iter()
+            .find(|(leg, _)| *leg == context.leg())
+            .map(|(_, intent)| *intent);
+        leg.or(owner.intent).ok_or(Error::State)
+    }
+
+    /// Narrow one leg's intent, before its first attempt, where the command
+    /// implies it: an amend's replacement is a Place and its attached TP/SL
+    /// update a Setting; a placement may first cancel conflicting orders or set
+    /// a protection setting. An amend's own cancel leg never becomes a Cancel
+    /// here (see `http_write_protection_cancel_leg`). The command's own intent is
+    /// a no-op.
+    pub fn http_write_leg_intent(
+        &mut self,
+        context: &Context,
+        intent: crate::classify::Intent,
+    ) -> Result<(), Error> {
+        self.narrow_leg(context, intent, false)
+    }
+
+    /// The one declared exception for an amend's cancel leg: the old order of a
+    /// cancel-then-recreate whose replacement is position-bound protection
+    /// (reduce-only / close-on-trigger), so an absent old order is safe to
+    /// replace. Never declare it for any other replacement.
+    pub fn http_write_protection_cancel_leg(&mut self, context: &Context) -> Result<(), Error> {
+        self.narrow_leg(context, crate::classify::Intent::Cancel, true)
+    }
+
+    fn narrow_leg(
+        &mut self,
+        context: &Context,
+        intent: crate::classify::Intent,
+        protection_cancel: bool,
+    ) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(context.owner())?;
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let Owner::Command { id, generation } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        let owner = self
+            .io
+            .core
+            .request_contexts
+            .commands
+            .get_mut(&id)
+            .filter(|owner| owner.generation == generation)
+            .ok_or(Error::Revoked)?;
+        if owner.prepare_leg_intent(context, intent, protection_cancel)? {
+            owner.leg_intents.push((context.leg(), intent));
+        }
+        Ok(())
+    }
+
+    /// A resend of a write refused with a `RefusedResend` verdict. The journal
+    /// still refuses a second resend of the same logical leg.
+    pub fn http_resend_context(
+        &self,
+        context: &Context,
+        grant: ResendGrant,
+    ) -> Result<Context, Error> {
+        self.io
+            .core
+            .request_contexts
+            .validate_send(context, self.now)?;
+        if self.io.core.request_contexts.latest_write(context)? != Some(grant.attempt) {
+            return Err(Error::Revoked);
+        }
+        context.retry(RetryEvidence::DefinitiveRefusal, self.now)
+    }
+
+    fn current_write_delivery(&self, context: &Context) -> Result<Delivery, Error> {
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context || !context.issued_by(&self.io.core.request_contexts.issuer)
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(delivery.clone())
+    }
+
+    /// Retire a fully completed logical read/page join or write leg. Do not call
+    /// for each physical page: all remaining attempts must retain their owner.
+    /// Command generation stays live until done/fail or its final bound expires.
+    /// Expired current handles may retire; this grants no send/retry permission.
+    pub fn finish_http_context(&mut self, context: &Context) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(context.owner())?;
+        self.io.core.request_contexts.validate_legacy(context)?;
+        self.io.core.request_contexts.validate_handle(context)?;
+        self.io.retire_http_leg(context);
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
+        Ok(())
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    /// Atomically replace a definitively refused physical write with bounded
+    /// engine-issued child legs. This queues no HTTP and extends no deadline.
+    pub fn http_replacement_contexts(
+        &mut self,
+        parent: &Context,
+        policies: &[Policy],
+    ) -> Result<Vec<Context>, Error> {
+        self.io.core.request_contexts.validate_legacy(parent)?;
+        if policies.is_empty() {
+            return Err(Error::Invalid);
+        }
+        if policies.len() > CAPACITY {
+            return Err(Error::Capacity);
+        }
+        let delivery = self
+            .io
+            .core
+            .http_delivery
+            .as_ref()
+            .ok_or(Error::State)?
+            .clone();
+        // Reserve the complete child range before registry/journal mutation.
+        // Failed admission may leave monotonic gaps, never reused identities.
+        let first = self
+            .io
+            .reserve_ids(policies.len() as u64)
+            .ok_or(Error::Capacity)?
+            .start;
+        self.io
+            .core
+            .request_contexts
+            .replace(parent, &delivery, first, policies, self.now)
+    }
+
+    /// Abort an unreleased replacement child during its exact superseded
+    /// parent's callback. Normal old-parent completion stays revoked. This is
+    /// failure-only and grants no result, send, retry or success authority.
+    pub fn fail_replacement_context(
+        &mut self,
+        root: &Context,
+        child: &Context,
+        error: impl Into<VenueError>,
+    ) -> Result<(), Error> {
+        let Owner::Command { id, .. } = root.owner() else {
+            return Err(Error::Invalid);
+        };
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
+        let seal = self.io.core.request_contexts.seal_replacement_failure(
+            root,
+            child,
+            delivery,
+            self.now,
+            error.into(),
+        )?;
+        self.finish_sealed_command(id, None, seal)
+    }
+
+    /// Capture the logical raw deadline and engine-owned owner/leg generation.
+    /// This neither queues HTTP nor reserves admission, a transport or pacing.
+    pub fn http_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
+        self.make_http_context(scope, policy, None, None)
+    }
+
+    /// As `http_context`, with egress declared at issuance. Only unsigned
+    /// reads declare egress; a credentialed context may only confirm Primary.
+    pub fn http_context_with_egress(
+        &mut self,
+        scope: Scope,
+        policy: Policy,
+        egress: Egress,
+    ) -> Result<Context, Error> {
+        // Session egress is minted only from a live session.
+        if matches!(egress, Egress::Session(_)) {
+            return Err(Error::Invalid);
+        }
+        self.make_http_context(scope, policy, None, Some(egress))
+    }
+
+    /// A new physical leg under the same logical authority. Preserve its exact
+    /// raw deadline; integer timeout recomputation cannot round the bound up.
+    /// Session legs use `session_leg_context`, so families without Sessions
+    /// never link Session issuance.
+    pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
+        self.io.core.request_contexts.validate_legacy(parent)?;
+        self.io
+            .core
+            .request_contexts
+            .validate_send(parent, self.now)?;
+        let scope = match parent.owner() {
+            Owner::Command { id, .. } => Scope::Command(id),
+            Owner::Background { .. } => Scope::Background,
+            Owner::Session { .. } => return Err(Error::Invalid),
+            Owner::Execution { .. } => Scope::Execution,
+        };
+        self.make_http_context(scope, policy, Some(parent), None)
+    }
+
+    fn make_http_context(
+        &mut self,
+        scope: Scope,
+        policy: Policy,
+        parent: Option<&Context>,
+        egress: Option<Egress>,
+    ) -> Result<Context, Error> {
+        #[cfg(feature = "http-plans")]
+        if self.io.core.http_preflight_ready.is_some() {
+            return Err(Error::Revoked);
+        }
+        if !self.io.entry_context_allowed(scope) {
+            return Err(Error::Revoked);
+        }
+        // A tracked caller-wait root stays plain Read: refused before any spend.
+        if policy.operation == Operation::Mutation
+            && matches!(scope, Scope::Command(id) if self.io.core.request_contexts.tracked(id))
+        {
+            return Err(Error::Invalid);
+        }
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        let context = self
+            .io
+            .core
+            .request_contexts
+            .issue_with_egress(identity, scope, policy, self.now, parent, egress)?;
+        #[cfg(feature = "order-locks")]
+        if context.operation() == Operation::Mutation
+            && let Owner::Command { id, .. } = context.owner()
+        {
+            self.io.core.order_locks.manage(id);
+        }
+        Ok(context)
+    }
+
+    pub fn fail_context(
+        &mut self,
+        context: &Context,
+        error: impl Into<VenueError>,
+    ) -> Result<(), Error> {
+        let Owner::Command { id, .. } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.finish_command(id, Err(error.into()), Some(context))
+    }
+
+    /// A physical timer carries its original attempt token. A logical Context
+    /// alone cannot distinguish an old physical timeout from its newer retry.
+    pub fn fail_http_attempt(
+        &mut self,
+        context: &Context,
+        attempt: Attempt,
+        error: impl Into<VenueError>,
+    ) -> Result<(), Error> {
+        let delivery = self
+            .io
+            .core
+            .managed_http
+            .get(&attempt.request)
+            .ok_or(Error::Revoked)?
+            .delivery();
+        if delivery.attempt != attempt
+            || delivery.context != *context
+            || !context.issued_by(&self.io.core.request_contexts.issuer)
+        {
+            return Err(Error::Revoked);
+        }
+        let previous = self.io.core.http_delivery.replace(delivery);
+        let result = self.fail_context(context, error);
+        self.io.core.http_delivery = previous;
+        result
+    }
+
+    /// Record only native codec facts for the exact currently delivered attempt.
+    /// Transport and signing failures are recorded by the engine, never inferred
+    /// from venue exception text or a caller-provided numeric request id.
+    #[cfg(test)]
+    pub(crate) fn http_write_result(
+        &mut self,
+        context: &Context,
+        result: WriteResult,
+    ) -> Result<(), Error> {
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context || !context.issued_by(&self.io.core.request_contexts.issuer)
+        {
+            return Err(Error::Revoked);
+        }
+        self.io.core.request_contexts.result(delivery, result)
     }
 
     /// Native reports are published centrally with the terminal logical legs.
@@ -2159,55 +2434,10 @@ impl<P> Cx<'_, P> {
         leg.or(owner.intent).ok_or(Error::State)
     }
 
-    /// Narrow one leg's intent, before its first attempt, where the command
-    /// implies it: an amend's replacement is a Place and its attached TP/SL
-    /// update a Setting; a placement may first cancel conflicting orders or set
-    /// a protection setting. An amend's own cancel leg never becomes a Cancel
-    /// here (see `http_write_protection_cancel_leg`). The command's own intent is
-    /// a no-op.
-    pub fn http_write_leg_intent(
-        &mut self,
-        context: &Context,
-        intent: crate::classify::Intent,
-    ) -> Result<(), Error> {
-        self.narrow_leg(context, intent, false)
-    }
-
-    /// The one declared exception for an amend's cancel leg: the old order of a
-    /// cancel-then-recreate whose replacement is position-bound protection
-    /// (reduce-only / close-on-trigger), so an absent old order is safe to
-    /// replace. Never declare it for any other replacement.
-    pub fn http_write_protection_cancel_leg(&mut self, context: &Context) -> Result<(), Error> {
-        self.narrow_leg(context, crate::classify::Intent::Cancel, true)
-    }
-
-    fn narrow_leg(
-        &mut self,
-        context: &Context,
-        intent: crate::classify::Intent,
-        protection_cancel: bool,
-    ) -> Result<(), Error> {
-        self.validate_preflight_ready_owner(context.owner())?;
-        self.io.core.request_contexts.validate(context, self.now)?;
-        let Owner::Command { id, generation } = context.owner() else {
-            return Err(Error::Invalid);
-        };
-        let owner = self
-            .io
-            .core
-            .request_contexts
-            .commands
-            .get_mut(&id)
-            .filter(|owner| owner.generation == generation)
-            .ok_or(Error::Revoked)?;
-        if owner.prepare_leg_intent(context, intent, protection_cancel)? {
-            owner.leg_intents.push((context.leg(), intent));
-        }
-        Ok(())
-    }
-
     /// A resend of a write refused with a `RefusedResend` verdict. The journal
     /// still refuses a second resend of the same logical leg.
+    // Only some feature combinations call this.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
     pub fn http_resend_context(
         &self,
         context: &Context,
@@ -2246,23 +2476,6 @@ impl<P> Cx<'_, P> {
                 .result_with_reports(delivery, result, reports),
             None => self.io.core.request_contexts.result(delivery, result),
         }
-    }
-
-    /// Retire a fully completed logical read/page join or write leg. Do not call
-    /// for each physical page: all remaining attempts must retain their owner.
-    /// Command generation stays live until done/fail or its final bound expires.
-    /// Expired current handles may retire; this grants no send/retry permission.
-    pub fn finish_http_context(&mut self, context: &Context) -> Result<(), Error> {
-        self.validate_preflight_ready_owner(context.owner())?;
-        self.io.core.request_contexts.validate_legacy(context)?;
-        self.io.core.request_contexts.validate_handle(context)?;
-        self.io.retire_http_leg(context);
-        self.io
-            .core
-            .request_contexts
-            .contexts
-            .remove(&context.leg());
-        Ok(())
     }
 }
 

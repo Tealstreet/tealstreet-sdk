@@ -17,6 +17,13 @@ impl ExecutionHandle {
 }
 
 impl<P> Io<P> {
+    #[inline]
+    pub(super) fn rearm_execution_timer(&mut self) {
+        self.core_io().rearm_execution_timer()
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
     pub(super) fn rearm_execution_timer(&mut self) {
         // Called on every HTTP completion; skip the scan when no group exists.
         let next = if self.core.request_contexts.has_executions() {
@@ -39,6 +46,166 @@ impl<P> Io<P> {
 }
 
 impl<P> Cx<'_, P> {
+    #[inline]
+    pub fn begin_execution(
+        &mut self,
+        founder: &Context,
+        policy: Policy,
+        window: Window,
+        key: &str,
+    ) -> Result<ExecutionHandle, Error> {
+        self.core().begin_execution(founder, policy, window, key)
+    }
+
+    #[inline]
+    pub fn begin_background_execution(
+        &mut self,
+        background: &Context,
+        policy: Policy,
+        window: Window,
+    ) -> Result<ExecutionHandle, Error> {
+        self.core()
+            .begin_background_execution(background, policy, window)
+    }
+
+    #[inline]
+    pub fn begin_successor_execution(
+        &mut self,
+        previous: &ExecutionHandle,
+        background: &Context,
+        policy: Policy,
+    ) -> Result<ExecutionHandle, Error> {
+        self.core()
+            .begin_successor_execution(previous, background, policy)
+    }
+
+    #[inline]
+    pub fn join_execution(
+        &mut self,
+        execution: &ExecutionHandle,
+        root: &Context,
+        key: &str,
+    ) -> Result<Joined, Error> {
+        self.core().join_execution(execution, root, key)
+    }
+
+    /// Retire only this observer; siblings and shared physical work continue.
+    pub fn detach_execution_observer(
+        &mut self,
+        root: &Context,
+        error: impl Into<VenueError>,
+    ) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(root.owner())?;
+        let sealed = self
+            .io
+            .core
+            .request_contexts
+            .detach_observer(root, error.into())?;
+        self.finish_sealed(vec![sealed]);
+        Ok(())
+    }
+
+    /// Seal every live observer once with its projected result, in the exact
+    /// delivery callback of one of this execution's legs.
+    pub fn complete_execution(
+        &mut self,
+        execution: &ExecutionHandle,
+        project: impl FnMut(&str) -> Result<String, VenueError>,
+    ) -> Result<(), Error> {
+        if self
+            .io
+            .core
+            .http_delivery
+            .as_ref()
+            .is_none_or(|delivery| delivery.context.owner() != execution.0.owner())
+        {
+            return Err(Error::Revoked);
+        }
+        // Owners already past their deadline time out before any projection.
+        self.sweep_executions();
+        let sealed = self
+            .io
+            .core
+            .request_contexts
+            .seal_execution(&execution.0, project)?;
+        self.finish_sealed(sealed);
+        Ok(())
+    }
+
+    #[inline]
+    pub fn execution_progress(
+        &mut self,
+        execution: &ExecutionHandle,
+        receipts: Vec<OrderIdentityReceipt>,
+    ) -> Result<(), Error> {
+        self.core().execution_progress(execution, receipts)
+    }
+
+    /// Seal every live observer with one error, outside any delivery or in
+    /// one of this execution's own deliveries.
+    pub fn abort_execution(
+        &mut self,
+        execution: &ExecutionHandle,
+        error: impl Into<VenueError>,
+    ) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(execution.0.owner())?;
+        if self
+            .io
+            .core
+            .request_contexts
+            .planned_execution_root(&execution.0)
+        {
+            return Err(Error::Invalid);
+        }
+        if self
+            .io
+            .core
+            .http_delivery
+            .as_ref()
+            .is_some_and(|delivery| delivery.context.owner() != execution.0.owner())
+        {
+            return Err(Error::Revoked);
+        }
+        self.sweep_executions();
+        let error = error.into();
+        let sealed = self
+            .io
+            .core
+            .request_contexts
+            .seal_execution(&execution.0, |_| Err(error.clone()))?;
+        self.finish_sealed(sealed);
+        Ok(())
+    }
+
+    /// Publication gate for this exact execution leg, before any codec,
+    /// native-cache or Store change. Grants no send or completion rights.
+    pub fn validate_execution_read_delivery(
+        &self,
+        execution: &ExecutionHandle,
+        leg: &Context,
+    ) -> Result<(), Error> {
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        if delivery.context != *leg
+            || leg.owner() != execution.0.owner()
+            || !matches!(leg.owner(), Owner::Execution { .. })
+        {
+            return Err(Error::Revoked);
+        }
+        self.io.core.request_contexts.validate(leg, self.now)
+    }
+
+    #[inline]
+    fn finish_sealed(&mut self, sealed: Vec<Sealed>) {
+        self.core().finish_sealed(sealed)
+    }
+
+    #[inline]
+    pub(super) fn sweep_executions(&mut self) {
+        self.core().sweep_executions()
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     /// Begin a read execution founded by this command's genuine entry root.
     /// The execution bound is capped by the founder and never raised later.
     pub fn begin_execution(
@@ -144,49 +311,6 @@ impl<P> Cx<'_, P> {
         Ok(joined)
     }
 
-    /// Retire only this observer; siblings and shared physical work continue.
-    pub fn detach_execution_observer(
-        &mut self,
-        root: &Context,
-        error: impl Into<VenueError>,
-    ) -> Result<(), Error> {
-        self.validate_preflight_ready_owner(root.owner())?;
-        let sealed = self
-            .io
-            .core
-            .request_contexts
-            .detach_observer(root, error.into())?;
-        self.finish_sealed(vec![sealed]);
-        Ok(())
-    }
-
-    /// Seal every live observer once with its projected result, in the exact
-    /// delivery callback of one of this execution's legs.
-    pub fn complete_execution(
-        &mut self,
-        execution: &ExecutionHandle,
-        project: impl FnMut(&str) -> Result<String, VenueError>,
-    ) -> Result<(), Error> {
-        if self
-            .io
-            .core
-            .http_delivery
-            .as_ref()
-            .is_none_or(|delivery| delivery.context.owner() != execution.0.owner())
-        {
-            return Err(Error::Revoked);
-        }
-        // Owners already past their deadline time out before any projection.
-        self.sweep_executions();
-        let sealed = self
-            .io
-            .core
-            .request_contexts
-            .seal_execution(&execution.0, project)?;
-        self.finish_sealed(sealed);
-        Ok(())
-    }
-
     /// Publish order identities to every live observer, in the exact delivery
     /// callback of one of this execution's legs; late joiners replay them.
     pub fn execution_progress(
@@ -214,59 +338,6 @@ impl<P> Cx<'_, P> {
             self.command_progress(command, receipts);
         }
         Ok(())
-    }
-
-    /// Seal every live observer with one error, outside any delivery or in
-    /// one of this execution's own deliveries.
-    pub fn abort_execution(
-        &mut self,
-        execution: &ExecutionHandle,
-        error: impl Into<VenueError>,
-    ) -> Result<(), Error> {
-        self.validate_preflight_ready_owner(execution.0.owner())?;
-        if self
-            .io
-            .core
-            .request_contexts
-            .planned_execution_root(&execution.0)
-        {
-            return Err(Error::Invalid);
-        }
-        if self
-            .io
-            .core
-            .http_delivery
-            .as_ref()
-            .is_some_and(|delivery| delivery.context.owner() != execution.0.owner())
-        {
-            return Err(Error::Revoked);
-        }
-        self.sweep_executions();
-        let error = error.into();
-        let sealed = self
-            .io
-            .core
-            .request_contexts
-            .seal_execution(&execution.0, |_| Err(error.clone()))?;
-        self.finish_sealed(sealed);
-        Ok(())
-    }
-
-    /// Publication gate for this exact execution leg, before any codec,
-    /// native-cache or Store change. Grants no send or completion rights.
-    pub fn validate_execution_read_delivery(
-        &self,
-        execution: &ExecutionHandle,
-        leg: &Context,
-    ) -> Result<(), Error> {
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
-        if delivery.context != *leg
-            || leg.owner() != execution.0.owner()
-            || !matches!(leg.owner(), Owner::Execution { .. })
-        {
-            return Err(Error::Revoked);
-        }
-        self.io.core.request_contexts.validate(leg, self.now)
     }
 
     /// Begin/join run only in the observer command's own genuine callback,
@@ -314,6 +385,53 @@ impl<P> Cx<'_, P> {
 
 #[cfg(feature = "http-plans")]
 impl<P> Cx<'_, P> {
+    #[inline]
+    pub fn begin_planned_execution(
+        &mut self,
+        preflight: &crate::request_context::Preflight,
+        steps: &[crate::request_context::plan::StepBound<'_>],
+        policy: crate::request_context::PlanPolicy,
+        window: Window,
+        key: &str,
+    ) -> Result<(crate::request_context::Plan, ExecutionHandle, Context), Error> {
+        self.core()
+            .begin_planned_execution(preflight, steps, policy, window, key)
+    }
+
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    pub(super) fn finish_physical_plan(&mut self, owner: Owner, retired: Vec<RequestId>) {
+        self.core().finish_physical_plan(owner, retired)
+    }
+
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    pub(super) fn seal_planned_execution(
+        &mut self,
+        plan: &crate::request_context::Plan,
+        fanout: Vec<(Result<String, VenueError>, Vec<String>)>,
+        sealed: Vec<Sealed>,
+    ) {
+        self.core().seal_planned_execution(plan, fanout, sealed)
+    }
+
+    /// Fail every physical Plan left with no observer, outside any delivery:
+    /// its unsent work was already revoked and nothing may be published.
+    pub(super) fn fail_orphaned_plans(&mut self) {
+        if !self.io.core.request_contexts.has_planned_executions() {
+            return;
+        }
+        while let Some(plan) = self.io.core.request_contexts.orphaned_plan() {
+            let failed = self.fail_plan(&plan, VenueError::new("No execution observer remains"));
+            assert!(failed.is_ok(), "orphaned Plan seal {failed:?}");
+        }
+    }
+}
+
+#[cfg(feature = "http-plans")]
+impl crate::engine::CoreCx<'_> {
     /// Admit the founder's retained Preflight as a Plan owned by a new
     /// execution, in one transaction. The founder becomes that execution's
     /// first observer; the returned root is its own (detach/completion only,
@@ -390,17 +508,5 @@ impl<P> Cx<'_, P> {
             }
         }
         self.finish_sealed(sealed);
-    }
-
-    /// Fail every physical Plan left with no observer, outside any delivery:
-    /// its unsent work was already revoked and nothing may be published.
-    pub(super) fn fail_orphaned_plans(&mut self) {
-        if !self.io.core.request_contexts.has_planned_executions() {
-            return;
-        }
-        while let Some(plan) = self.io.core.request_contexts.orphaned_plan() {
-            let failed = self.fail_plan(&plan, VenueError::new("No execution observer remains"));
-            assert!(failed.is_ok(), "orphaned Plan seal {failed:?}");
-        }
     }
 }

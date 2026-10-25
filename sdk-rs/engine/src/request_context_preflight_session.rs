@@ -168,6 +168,39 @@ impl<P> Cx<'_, P> {
         Ok((cap, Some(timer)))
     }
 
+    #[inline]
+    pub(in crate::engine) fn resume_preflight_read(
+        &mut self,
+        handle: &Preflight,
+        policy: Policy,
+        terms: CallTerms,
+    ) -> Result<Context, Error> {
+        self.core().resume_preflight_read(handle, policy, terms)
+    }
+
+    #[inline]
+    pub(in crate::engine) fn resume_preflight_retry(
+        &mut self,
+        handle: &Preflight,
+        context: &Context,
+    ) -> Result<Context, Error> {
+        self.core().resume_preflight_retry(handle, context)
+    }
+
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    fn resumed_preflight(&mut self, handle: &Preflight) {
+        self.core().resumed_preflight(handle)
+    }
+
+    #[inline]
+    pub(in crate::engine) fn expire_parked_preflight(&mut self, handle: &Preflight) {
+        self.core().expire_parked_preflight(handle)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     /// Issue a parked read at its Session's resume, under the drain's delivery.
     pub(in crate::engine) fn resume_preflight_read(
         &mut self,

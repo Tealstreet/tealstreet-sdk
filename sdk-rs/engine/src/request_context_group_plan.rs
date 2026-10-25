@@ -51,6 +51,20 @@ pub(super) fn normalize(
 }
 
 impl<P> Cx<'_, P> {
+    #[inline]
+    pub fn admit_plan_with_barriers(
+        &mut self,
+        preflight: &Preflight,
+        steps: &[StepBound<'_>],
+        policy: PlanPolicy,
+        barriers: &[MutationBarrierBound],
+    ) -> Result<Plan, Error> {
+        self.core()
+            .admit_plan_with_barriers(preflight, steps, policy, barriers)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     /// Barrier declarations are immutable and share the canonical transaction.
     pub fn admit_plan_with_barriers(
         &mut self,

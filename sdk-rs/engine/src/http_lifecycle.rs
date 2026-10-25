@@ -385,6 +385,61 @@ impl<P> Io<P> {
         })
     }
 
+    #[inline]
+    pub(super) fn retire_http_leg(&mut self, context: &Context) {
+        self.core_io().retire_http_leg(context)
+    }
+
+    pub(super) fn managed_preparation(&self, request: RequestId) -> Option<Preparation> {
+        Some(
+            self.core
+                .managed_http
+                .get(&request)?
+                .lifecycle
+                .preparation(),
+        )
+    }
+
+    #[cfg(feature = "http-plans")]
+    #[inline]
+    pub(super) fn prepare_owner_retirement(
+        &mut self,
+        owner: Owner,
+        notices: usize,
+    ) -> Result<Vec<RequestId>, crate::request_context::Error> {
+        self.core_io().prepare_owner_retirement(owner, notices)
+    }
+
+    #[cfg(feature = "http-plans")]
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    pub(super) fn retire_physical_owner(&mut self, owner: Owner, requests: Vec<RequestId>) {
+        self.core_io().retire_physical_owner(owner, requests)
+    }
+
+    #[inline]
+    pub(super) fn retire_http_owner(&mut self, owner: Owner) {
+        self.core_io().retire_http_owner(owner)
+    }
+
+    pub(super) fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
+        self.discard_managed_with_cancel(request, None)
+    }
+
+    fn discard_managed_with_cancel(
+        &mut self,
+        request: RequestId,
+        cancel: Option<Action>,
+    ) -> Option<PendingHttp<P>> {
+        if !self.core_io().discard_managed_state(request, cancel) {
+            return None;
+        }
+        self.pending.remove(&request)
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
     pub(super) fn retire_http_leg(&mut self, context: &Context) {
         let requests = self
             .core
@@ -399,16 +454,6 @@ impl<P> Io<P> {
         for request in requests {
             self.discard_managed(request);
         }
-    }
-
-    pub(super) fn managed_preparation(&self, request: RequestId) -> Option<Preparation> {
-        Some(
-            self.core
-                .managed_http
-                .get(&request)?
-                .lifecycle
-                .preparation(),
-        )
     }
 
     pub(super) fn retire_http_command(&mut self, command: CommandId) {
@@ -545,30 +590,6 @@ impl<P> Io<P> {
         }));
         Some(managed)
     }
-
-    pub(super) fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
-        self.discard_managed_with_cancel(request, None)
-    }
-
-    fn discard_managed_with_cancel(
-        &mut self,
-        request: RequestId,
-        cancel: Option<Action>,
-    ) -> Option<PendingHttp<P>> {
-        let managed = self.take_managed_with_cancel(request, cancel)?;
-        if managed.lifecycle.context().operation() == Operation::Mutation
-            && managed.lifecycle.release().is_some()
-        {
-            self.core.http_responses.retire(request);
-        } else {
-            self.core.http_responses.remove(request);
-        }
-        self.core.streams.remove(&request);
-        self.core.incoming.remove(&request);
-        #[cfg(feature = "order-locks")]
-        self.core.order_read_tokens.remove(&request);
-        self.pending.remove(&request)
-    }
 }
 
 #[cfg(not(feature = "http-mutation-barriers"))]
@@ -582,6 +603,38 @@ impl<V: Venue> Engine<V> {
         _: crate::request_context::GroupPermit,
     ) -> Result<crate::request_context::GroupClaim, Error> {
         Err(Error::Invalid)
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
+    pub(super) fn discard_managed(&mut self, request: RequestId) -> bool {
+        self.discard_managed_with_cancel(request, None)
+    }
+
+    fn discard_managed_with_cancel(&mut self, request: RequestId, cancel: Option<Action>) -> bool {
+        if !self.discard_managed_state(request, cancel) {
+            return false;
+        }
+        self.pending.discard(request)
+    }
+
+    /// Everything a discard removes except the pending itself.
+    fn discard_managed_state(&mut self, request: RequestId, cancel: Option<Action>) -> bool {
+        let Some(managed) = self.take_managed_with_cancel(request, cancel) else {
+            return false;
+        };
+        if managed.lifecycle.context().operation() == Operation::Mutation
+            && managed.lifecycle.release().is_some()
+        {
+            self.core.http_responses.retire(request);
+        } else {
+            self.core.http_responses.remove(request);
+        }
+        self.core.streams.remove(&request);
+        self.core.incoming.remove(&request);
+        #[cfg(feature = "order-locks")]
+        self.core.order_read_tokens.remove(&request);
+        true
     }
 }
 
@@ -1533,6 +1586,26 @@ pub(in crate::engine) struct PreparedReadCleanup {
 
 #[cfg(feature = "http-plans")]
 impl<P> Io<P> {
+    #[inline]
+    pub(super) fn prepare_read_history_cleanup(
+        &mut self,
+        owner: Owner,
+        leg: Option<u64>,
+        notices: usize,
+    ) -> Result<Vec<PreparedReadCleanup>, Error> {
+        self.core_io()
+            .prepare_read_history_cleanup(owner, leg, notices)
+    }
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    pub(super) fn commit_read_history_cleanup(&mut self, cleanup: Vec<PreparedReadCleanup>) {
+        self.core_io().commit_read_history_cleanup(cleanup)
+    }
+}
+
+#[cfg(feature = "http-plans")]
+impl crate::engine::CoreIo<'_> {
     pub(super) fn prepare_read_history_cleanup(
         &mut self,
         owner: Owner,
@@ -1578,6 +1651,7 @@ impl<P> Io<P> {
         }
         Ok(cleanup)
     }
+
     pub(super) fn commit_read_history_cleanup(&mut self, cleanup: Vec<PreparedReadCleanup>) {
         for item in cleanup {
             assert!(

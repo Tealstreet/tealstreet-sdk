@@ -19,6 +19,13 @@ impl<V: Venue> Drop for SweepScope<'_, V> {
 }
 
 impl<P> Io<P> {
+    #[inline]
+    pub(super) fn read_root_timer(&mut self, timer: TimerId, now: f64) -> bool {
+        self.core_io().read_root_timer(timer, now)
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
     /// Every terminal of a tracked owner leaves the index and clears its own
     /// timer; nothing here needs a fresh identity.
     pub(super) fn untrack_read_root(&mut self, command: CommandId) {
@@ -204,6 +211,27 @@ impl<P> Cx<'_, P> {
         })
     }
 
+    #[inline]
+    fn root_admission_checks(
+        &mut self,
+        command: CommandId,
+        credential: Option<&Credential>,
+        pacing: Option<Pacing>,
+    ) -> Result<(), Error> {
+        self.core()
+            .root_admission_checks(command, credential, pacing)
+    }
+
+    #[inline]
+    pub fn reject_unstamped_command(
+        &mut self,
+        operation: Operation,
+    ) -> Result<(), CommandEntryError> {
+        self.core().reject_unstamped_command(operation)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     /// Effect-free checks and fallible reservations before any identity spend.
     fn root_admission_checks(
         &mut self,

@@ -324,6 +324,76 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    #[inline]
+    pub fn admit_plan(
+        &mut self,
+        preflight: &Preflight,
+        steps: &[StepBound<'_>],
+        policy: PlanPolicy,
+    ) -> Result<Plan, Error> {
+        self.core().admit_plan(preflight, steps, policy)
+    }
+
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    fn admit_declared_plan(
+        &mut self,
+        preflight: &Preflight,
+        declaration: AdmissionDeclaration<'_, '_, '_>,
+    ) -> Result<Plan, Error> {
+        self.core().admit_declared_plan(preflight, declaration)
+    }
+
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    pub(in super::super) fn admit_physical_plan(
+        &mut self,
+        preflight: &Preflight,
+        steps: &[StepBound<'_>],
+        policy: PlanPolicy,
+    ) -> Result<(Plan, Option<(u64, Context)>), Error> {
+        self.core().admit_physical_plan(preflight, steps, policy)
+    }
+
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    fn admit_plan_owned(
+        &mut self,
+        preflight: &Preflight,
+        declaration: AdmissionDeclaration<'_, '_, '_>,
+        physical: bool,
+    ) -> Result<(Plan, Option<(u64, Context)>), Error> {
+        self.core()
+            .admit_plan_owned(preflight, declaration, physical)
+    }
+
+    /// Structural availability only; issuing a slot requires its exact Plan,
+    /// original eligibility and one-use reserved physical admission.
+    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        let mut slots = Vec::new();
+        slots
+            .try_reserve_exact(body.entries.len())
+            .map_err(|_| Error::Capacity)?;
+        for slot in body.schedule.available() {
+            let index = body.schedule.ordinal(&slot)?;
+            let entry = &body.entries[index];
+            if !entry.parked && entry.eligible_at.is_some_and(|at| at <= self.now) {
+                slots.push(slot);
+            }
+        }
+        Ok(slots)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     /// Admit only the final native plan. Mode/precondition reads retain their
     /// original generation and do not consume this checked whole-plan deadline.
     pub fn admit_plan(
@@ -655,6 +725,8 @@ impl<P> Cx<'_, P> {
 
     /// Structural availability only; issuing a slot requires its exact Plan,
     /// original eligibility and one-use reserved physical admission.
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
         let body = self
             .io
@@ -828,49 +900,14 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
-    /// Select a parked retry's next attempt at its Session's resume, under the
-    /// drain's delivery, inside the existing budget and declared window.
+    #[inline]
     pub(in crate::engine) fn resume_plan_retry(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
     ) -> Result<Context, Error> {
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .validate_plan(plan, self.now)?;
-        self.io.core.request_contexts.validate(context, self.now)?;
-        let index = body.schedule.ordinal(slot)?;
-        let entry = &body.entries[index];
-        let call = entry
-            .call
-            .as_ref()
-            .filter(|call| call.context == *context && matches!(call.stage, Stage::Parked))
-            .ok_or(Error::Revoked)?;
-        if !entry.parked {
-            return Err(Error::Revoked);
-        }
-        if call.selected >= call.terms.attempts {
-            return Err(Error::RetryForbidden);
-        }
-        call.window.physical_deadline(self.now)?;
-        let predecessor = self.io.core.http_delivery.clone();
-        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
-        body.schedule
-            .retry(slot)
-            .expect("remaining declared credit");
-        let entry = &mut body.entries[index];
-        entry.parked = false;
-        entry
-            .call
-            .as_mut()
-            .expect("validated call")
-            .select(self.now, predecessor)
-            .expect("validated retry");
-        self.note_session_resume(plan, context);
-        Ok(context.clone())
+        self.core().resume_plan_retry(plan, slot, context)
     }
 
     /// Issue a parked Slot's leg at its Session's resume, under the drain's
@@ -886,27 +923,9 @@ impl<P> Cx<'_, P> {
         Ok(leg)
     }
 
-    /// A resume drained with no delivery is the resumed attempt's custody for
-    /// the rest of this event only.
+    #[inline]
     fn note_session_resume(&mut self, plan: &Plan, leg: &Context) {
-        if self.io.core.http_delivery.is_some() {
-            return;
-        }
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .plan_body(plan)
-            .expect("resumed Plan");
-        let request = body
-            .entries
-            .iter()
-            .find_map(|entry| entry.call.as_ref().filter(|call| call.context == *leg))
-            .expect("resumed call")
-            .admission
-            .attempt
-            .request;
-        self.io.core.session_resumed.push(request);
+        self.core().note_session_resume(plan, leg)
     }
 
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
@@ -1129,61 +1148,29 @@ impl<P> Cx<'_, P> {
         Ok(plan.clone())
     }
 
-    /// Settle a call after validating DATA and recording write facts. Structural
-    /// progress grants no effect or successful command outcome by itself.
+    #[inline]
     pub fn finish_plan_call(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
     ) -> Result<(), Error> {
-        self.io.core.request_contexts.validate_unbound_plan(plan)?;
-        self.finish_plan_call_inner(plan, slot, context)
+        self.core().finish_plan_call(plan, slot, context)
     }
 
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     fn finish_plan_call_inner(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
     ) -> Result<(), Error> {
-        self.validate_plan_delivery(plan, context)?;
-        let body = self.io.core.request_contexts.plan_body(plan)?;
-        let index = body.schedule.ordinal(slot)?;
-        let call = body.entries[index]
-            .call
-            .as_ref()
-            .filter(|call| call.context == *context)
-            .ok_or(Error::Revoked)?;
-        if context.operation() == Operation::Mutation {
-            self.io
-                .core
-                .request_contexts
-                .owner_entry(plan.owner())
-                .unwrap()
-                .writes
-                .as_ref()
-                .ok_or(Error::State)?
-                .validate_housekeeping(call.admission.attempt.request)?;
-        }
-        self.io.retire_http_leg(context);
-        self.io
-            .core
-            .request_contexts
-            .contexts
-            .remove(&context.leg());
-        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
-        body.schedule.settle(slot)?;
-        body.entries[index].call = None;
-        body.entries[index].credit = Credit::Released;
-        body.handoff = self.io.core.http_delivery.clone();
-        body.refresh_availability(self.now);
-        self.rearm_plan(plan);
-        Ok(())
+        self.core().finish_plan_call_inner(plan, slot, context)
     }
 
-    /// Select a declared Read retry without extending its owner or root. A
-    /// write refusal must use the opaque classified resend-grant operation.
+    #[inline]
     pub fn plan_retry_context(
         &mut self,
         plan: &Plan,
@@ -1191,15 +1178,11 @@ impl<P> Cx<'_, P> {
         context: &Context,
         evidence: RetryEvidence,
     ) -> Result<Context, Error> {
-        if evidence == RetryEvidence::DefinitiveRefusal {
-            return Err(Error::RetryForbidden);
-        }
-        context.retry(evidence, self.now)?;
-        self.select_plan_retry(plan, slot, context)
+        self.core()
+            .plan_retry_context(plan, slot, context, evidence)
     }
 
-    /// Consume the existing classifier's exact-attempt write grant within the
-    /// declared call window. The journal alone owns one-resend consumption.
+    #[inline]
     pub fn plan_resend_context(
         &mut self,
         plan: &Plan,
@@ -1207,62 +1190,19 @@ impl<P> Cx<'_, P> {
         context: &Context,
         grant: ResendGrant,
     ) -> Result<Context, Error> {
-        self.http_resend_context(context, grant)?;
-        self.select_plan_retry(plan, slot, context)
+        self.core().plan_resend_context(plan, slot, context, grant)
     }
 
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     fn select_plan_retry(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
     ) -> Result<Context, Error> {
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .validate_plan(plan, self.now)?;
-        self.io.core.request_contexts.validate(context, self.now)?;
-        let index = body.schedule.ordinal(slot)?;
-        let call = body.entries[index]
-            .call
-            .as_ref()
-            .filter(|call| call.context == *context)
-            .ok_or(Error::Revoked)?;
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
-        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { .. }) {
-            return Err(Error::Revoked);
-        }
-        if call.selected >= call.terms.attempts {
-            return Err(Error::RetryForbidden);
-        }
-        call.window.physical_deadline(self.now)?;
-        let next = RequestId(call.ids.start);
-        let previous = delivery.attempt.request;
-        let predecessor = delivery.clone();
-        if context.operation() == Operation::Mutation {
-            self.io
-                .core
-                .request_contexts
-                .owner_entry_mut(plan.owner())
-                .unwrap()
-                .writes
-                .as_mut()
-                .ok_or(Error::State)?
-                .retry(previous, next)?;
-        }
-        self.io.retire_http_leg(context);
-        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
-        body.schedule
-            .retry(slot)
-            .expect("remaining declared credit");
-        body.entries[index]
-            .call
-            .as_mut()
-            .unwrap()
-            .select(self.now, Some(predecessor))
-            .expect("validated retry");
-        Ok(context.clone())
+        self.core().select_plan_retry(plan, slot, context)
     }
 
     /// Only a structurally complete plan may request success. Journal facts
@@ -1429,6 +1369,261 @@ impl<P> Cx<'_, P> {
         Ok(prepared)
     }
 
+    #[inline]
+    fn commit_plan_terminal(
+        &mut self,
+        plan: &Plan,
+        result: Option<String>,
+        prepared: conditional::PreparedPlanSeal,
+    ) -> Result<(), Error> {
+        self.core().commit_plan_terminal(plan, result, prepared)
+    }
+
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    fn rearm_plan(&mut self, plan: &Plan) {
+        self.core().rearm_plan(plan)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    /// Select a parked retry's next attempt at its Session's resume, under the
+    /// drain's delivery, inside the existing budget and declared window.
+    pub(in crate::engine) fn resume_plan_retry(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<Context, Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let index = body.schedule.ordinal(slot)?;
+        let entry = &body.entries[index];
+        let call = entry
+            .call
+            .as_ref()
+            .filter(|call| call.context == *context && matches!(call.stage, Stage::Parked))
+            .ok_or(Error::Revoked)?;
+        if !entry.parked {
+            return Err(Error::Revoked);
+        }
+        if call.selected >= call.terms.attempts {
+            return Err(Error::RetryForbidden);
+        }
+        call.window.physical_deadline(self.now)?;
+        let predecessor = self.io.core.http_delivery.clone();
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
+        body.schedule
+            .retry(slot)
+            .expect("remaining declared credit");
+        let entry = &mut body.entries[index];
+        entry.parked = false;
+        entry
+            .call
+            .as_mut()
+            .expect("validated call")
+            .select(self.now, predecessor)
+            .expect("validated retry");
+        self.note_session_resume(plan, context);
+        Ok(context.clone())
+    }
+
+    /// A resume drained with no delivery is the resumed attempt's custody for
+    /// the rest of this event only.
+    fn note_session_resume(&mut self, plan: &Plan, leg: &Context) {
+        if self.io.core.http_delivery.is_some() {
+            return;
+        }
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .plan_body(plan)
+            .expect("resumed Plan");
+        let request = body
+            .entries
+            .iter()
+            .find_map(|entry| entry.call.as_ref().filter(|call| call.context == *leg))
+            .expect("resumed call")
+            .admission
+            .attempt
+            .request;
+        self.io.core.session_resumed.push(request);
+    }
+
+    /// Exact released DATA authority before any native or Store mutation.
+    pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let call = body
+            .entries
+            .iter()
+            .find_map(|entry| entry.call.as_ref().filter(|call| call.context == *context))
+            .ok_or(Error::Revoked)?;
+        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: false }) {
+            return Err(Error::Revoked);
+        }
+        if self.now >= call.admission.deadline {
+            return Err(Error::TimedOut);
+        }
+        if !self
+            .io
+            .core
+            .managed_http
+            .get(&delivery.attempt.request)
+            .is_some_and(|managed| managed.released_delivery(delivery))
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(())
+    }
+
+    /// Settle a call after validating DATA and recording write facts. Structural
+    /// progress grants no effect or successful command outcome by itself.
+    pub fn finish_plan_call(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<(), Error> {
+        self.io.core.request_contexts.validate_unbound_plan(plan)?;
+        self.finish_plan_call_inner(plan, slot, context)
+    }
+
+    fn finish_plan_call_inner(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<(), Error> {
+        self.validate_plan_delivery(plan, context)?;
+        let body = self.io.core.request_contexts.plan_body(plan)?;
+        let index = body.schedule.ordinal(slot)?;
+        let call = body.entries[index]
+            .call
+            .as_ref()
+            .filter(|call| call.context == *context)
+            .ok_or(Error::Revoked)?;
+        if context.operation() == Operation::Mutation {
+            self.io
+                .core
+                .request_contexts
+                .owner_entry(plan.owner())
+                .unwrap()
+                .writes
+                .as_ref()
+                .ok_or(Error::State)?
+                .validate_housekeeping(call.admission.attempt.request)?;
+        }
+        self.io.retire_http_leg(context);
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
+        body.schedule.settle(slot)?;
+        body.entries[index].call = None;
+        body.entries[index].credit = Credit::Released;
+        body.handoff = self.io.core.http_delivery.clone();
+        body.refresh_availability(self.now);
+        self.rearm_plan(plan);
+        Ok(())
+    }
+
+    /// Select a declared Read retry without extending its owner or root. A
+    /// write refusal must use the opaque classified resend-grant operation.
+    pub fn plan_retry_context(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        evidence: RetryEvidence,
+    ) -> Result<Context, Error> {
+        if evidence == RetryEvidence::DefinitiveRefusal {
+            return Err(Error::RetryForbidden);
+        }
+        context.retry(evidence, self.now)?;
+        self.select_plan_retry(plan, slot, context)
+    }
+
+    /// Consume the existing classifier's exact-attempt write grant within the
+    /// declared call window. The journal alone owns one-resend consumption.
+    pub fn plan_resend_context(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        grant: ResendGrant,
+    ) -> Result<Context, Error> {
+        self.http_resend_context(context, grant)?;
+        self.select_plan_retry(plan, slot, context)
+    }
+
+    fn select_plan_retry(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<Context, Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let index = body.schedule.ordinal(slot)?;
+        let call = body.entries[index]
+            .call
+            .as_ref()
+            .filter(|call| call.context == *context)
+            .ok_or(Error::Revoked)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { .. }) {
+            return Err(Error::Revoked);
+        }
+        if call.selected >= call.terms.attempts {
+            return Err(Error::RetryForbidden);
+        }
+        call.window.physical_deadline(self.now)?;
+        let next = RequestId(call.ids.start);
+        let previous = delivery.attempt.request;
+        let predecessor = delivery.clone();
+        if context.operation() == Operation::Mutation {
+            self.io
+                .core
+                .request_contexts
+                .owner_entry_mut(plan.owner())
+                .unwrap()
+                .writes
+                .as_mut()
+                .ok_or(Error::State)?
+                .retry(previous, next)?;
+        }
+        self.io.retire_http_leg(context);
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
+        body.schedule
+            .retry(slot)
+            .expect("remaining declared credit");
+        body.entries[index]
+            .call
+            .as_mut()
+            .unwrap()
+            .select(self.now, Some(predecessor))
+            .expect("validated retry");
+        Ok(context.clone())
+    }
+
     // One Cx-level terminal funnel, including conditional completion. Shared
     // execution observer projection hooks attach here, never re-run a journal.
     fn commit_plan_terminal(
@@ -1560,6 +1755,18 @@ impl<P> Cx<'_, P> {
 }
 
 impl<P> Cx<'_, P> {
+    #[inline]
+    pub fn finish_plan_failed_call(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<(), Error> {
+        self.core().finish_plan_failed_call(plan, slot, context)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     /// Retire one failed physical call while continuing independently declared
     /// work. This cannot publish effects, erase evidence or authorize a retry.
     pub fn finish_plan_failed_call(
@@ -1746,6 +1953,23 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    #[inline]
+    pub fn replace_plan_call(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<(), Error> {
+        self.core().replace_plan_call(plan, slot, context)
+    }
+
+    #[inline]
+    pub fn done_empty_plan(&mut self, preflight: &Preflight, result: String) -> Result<(), Error> {
+        self.core().done_empty_plan(preflight, result)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     /// Select a predeclared replacement sequence only after the existing journal
     /// proves an effects-free refusal. All descendants were reserved on admission.
     pub fn replace_plan_call(

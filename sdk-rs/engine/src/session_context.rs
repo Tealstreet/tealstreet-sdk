@@ -454,82 +454,33 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
-    /// Issue a session owner. It reserves no HTTP, timer or socket and has no
-    /// deadline; each operation captures its own bound in `session_context`.
+    #[inline]
     pub fn open_session(&mut self, policy: SessionPolicy) -> Result<Session, Error> {
-        self.session_scope()?;
-        let generation = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        self.io
-            .core
-            .request_contexts
-            .sessions
-            .open(generation, policy)?;
-        Ok(Session::new(
-            &self.io.core.request_contexts.issuer,
-            generation,
-        ))
+        self.core().open_session(policy)
     }
 
-    /// A logical session operation with its own original raw bound. Mutations
-    /// on a session that is not repeat-safe wait for every earlier write to be
-    /// proven; an unresolved write blocks them until the session is retired.
-    /// Record a write's codec fact before `finish_http_context`: finishing
-    /// first discards the attempt, and its outcome stays unknown.
+    #[inline]
     pub fn session_context(&mut self, session: &Session, policy: Policy) -> Result<Context, Error> {
-        self.session_scope()?;
-        let generation = self.io.core.request_contexts.validate_session(session)?;
-        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        self.io
-            .core
-            .request_contexts
-            .issue_session(identity, generation, policy, self.now, None)
+        self.core().session_context(session, policy)
     }
 
-    /// A new physical leg of a session operation, keeping its exact raw bound.
-    /// A Read leg can never become a Mutation; any other owner is refused.
+    #[inline]
     pub fn session_leg_context(
         &mut self,
         parent: &Context,
         policy: Policy,
     ) -> Result<Context, Error> {
-        self.io.core.request_contexts.validate_legacy(parent)?;
-        self.io
-            .core
-            .request_contexts
-            .validate_send(parent, self.now)?;
-        let Owner::Session { generation } = parent.owner() else {
-            return Err(Error::Invalid);
-        };
-        self.session_scope()?;
-        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        self.io.core.request_contexts.issue_session(
-            identity,
-            generation,
-            policy,
-            self.now,
-            Some(parent),
-        )
+        self.core().session_leg_context(parent, policy)
     }
 
-    /// Work owned by a command or the background that carries this session's
-    /// login or token: it rides the session's private egress, and retirement
-    /// fences its sends. Routing only: the scope still decides write authority.
+    #[inline]
     pub fn session_scoped_context(
         &mut self,
         session: &Session,
         scope: Scope,
         policy: Policy,
     ) -> Result<Context, Error> {
-        self.session_scope()?;
-        let generation = self.io.core.request_contexts.validate_session(session)?;
-        let egress = self
-            .io
-            .core
-            .request_contexts
-            .sessions
-            .egress(generation)
-            .ok_or(Error::Invalid)?;
-        self.make_http_context(scope, policy, None, Some(egress))
+        self.core().session_scoped_context(session, scope, policy)
     }
 
     /// Discard the session's work and revoke it, with no venue callback in
@@ -769,6 +720,97 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .validate_session(session)
             .is_ok()
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    /// Session lifetimes belong to session, socket and timer callbacks. A
+    /// retained Preflight's or a Plan's readiness scope may not mint, retire
+    /// or drain them.
+    pub(super) fn session_scope(&self) -> Result<(), Error> {
+        #[cfg(feature = "http-plans")]
+        if self.io.core.http_preflight_ready.is_some() || self.io.core.http_plan_ready.is_some() {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
+    /// Issue a session owner. It reserves no HTTP, timer or socket and has no
+    /// deadline; each operation captures its own bound in `session_context`.
+    pub fn open_session(&mut self, policy: SessionPolicy) -> Result<Session, Error> {
+        self.session_scope()?;
+        let generation = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        self.io
+            .core
+            .request_contexts
+            .sessions
+            .open(generation, policy)?;
+        Ok(Session::new(
+            &self.io.core.request_contexts.issuer,
+            generation,
+        ))
+    }
+
+    /// A logical session operation with its own original raw bound. Mutations
+    /// on a session that is not repeat-safe wait for every earlier write to be
+    /// proven; an unresolved write blocks them until the session is retired.
+    /// Record a write's codec fact before `finish_http_context`: finishing
+    /// first discards the attempt, and its outcome stays unknown.
+    pub fn session_context(&mut self, session: &Session, policy: Policy) -> Result<Context, Error> {
+        self.session_scope()?;
+        let generation = self.io.core.request_contexts.validate_session(session)?;
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        self.io
+            .core
+            .request_contexts
+            .issue_session(identity, generation, policy, self.now, None)
+    }
+
+    /// A new physical leg of a session operation, keeping its exact raw bound.
+    /// A Read leg can never become a Mutation; any other owner is refused.
+    pub fn session_leg_context(
+        &mut self,
+        parent: &Context,
+        policy: Policy,
+    ) -> Result<Context, Error> {
+        self.io.core.request_contexts.validate_legacy(parent)?;
+        self.io
+            .core
+            .request_contexts
+            .validate_send(parent, self.now)?;
+        let Owner::Session { generation } = parent.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.session_scope()?;
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        self.io.core.request_contexts.issue_session(
+            identity,
+            generation,
+            policy,
+            self.now,
+            Some(parent),
+        )
+    }
+
+    /// Work owned by a command or the background that carries this session's
+    /// login or token: it rides the session's private egress, and retirement
+    /// fences its sends. Routing only: the scope still decides write authority.
+    pub fn session_scoped_context(
+        &mut self,
+        session: &Session,
+        scope: Scope,
+        policy: Policy,
+    ) -> Result<Context, Error> {
+        self.session_scope()?;
+        let generation = self.io.core.request_contexts.validate_session(session)?;
+        let egress = self
+            .io
+            .core
+            .request_contexts
+            .sessions
+            .egress(generation)
+            .ok_or(Error::Invalid)?;
+        self.make_http_context(scope, policy, None, Some(egress))
     }
 }
 

@@ -1666,6 +1666,55 @@ impl Default for IoCore {
     }
 }
 
+/// Drops a managed call's pending without naming the venue's type. The drop
+/// happens synchronously, at the same point the typed removal did.
+trait PendingDiscard {
+    fn discard(&mut self, request: RequestId) -> bool;
+}
+
+impl<P> PendingDiscard for crate::IdMap<RequestId, PendingHttp<P>> {
+    fn discard(&mut self, request: RequestId) -> bool {
+        self.remove(&request).is_some()
+    }
+}
+
+/// The venue-independent view of `Io<P>`. Engine code that needs only this is
+/// compiled once, instead of once per venue.
+struct CoreIo<'a> {
+    core: &'a mut IoCore,
+    pending: &'a mut dyn PendingDiscard,
+}
+
+/// The venue-independent view of `Cx<P>`; see `CoreIo`.
+struct CoreCx<'a> {
+    now: f64,
+    #[cfg(feature = "metadata-freshness")]
+    store: &'a mut Store,
+    io: CoreIo<'a>,
+}
+
+impl<P> Io<P> {
+    #[inline]
+    fn core_io(&mut self) -> CoreIo<'_> {
+        CoreIo {
+            core: &mut self.core,
+            pending: &mut self.pending,
+        }
+    }
+}
+
+impl<P> Cx<'_, P> {
+    #[inline]
+    fn core(&mut self) -> CoreCx<'_> {
+        CoreCx {
+            now: self.now,
+            #[cfg(feature = "metadata-freshness")]
+            store: &mut *self.store,
+            io: self.io.core_io(),
+        }
+    }
+}
+
 impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
@@ -1695,6 +1744,62 @@ fn completion_delivery(
 }
 
 impl<P> Io<P> {
+    #[cfg(feature = "order-locks")]
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "order-locks", allow(dead_code))]
+    fn queue_reconcile(&mut self, symbols: Option<Vec<String>>, at: f64) {
+        self.core_io().queue_reconcile(symbols, at)
+    }
+
+    fn managed_socket_active(&self) -> bool {
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.core.managed_sockets
+        }
+        #[cfg(not(feature = "managed-sockets"))]
+        {
+            false
+        }
+    }
+    #[inline]
+    fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
+        self.core_io().take_signature(request)
+    }
+    #[inline]
+    fn next(&mut self) -> u64 {
+        self.core_io().next()
+    }
+
+    #[inline]
+    fn reserve_ids(&mut self, count: u64) -> Option<std::ops::Range<u64>> {
+        self.core_io().reserve_ids(count)
+    }
+
+    #[inline]
+    fn assert_action_safe(&mut self, action: &Action) {
+        self.core_io().assert_action_safe(action)
+    }
+
+    #[inline]
+    fn assert_actions_safe(&mut self) {
+        self.core_io().assert_actions_safe()
+    }
+
+    /// Splits the poll registry from the timer state it writes to.
+    fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
+        (
+            &mut self.core.polls,
+            TimerSink {
+                next_id: &mut self.core.next_id,
+                timers: &mut self.core.timers,
+                actions: &mut self.core.actions,
+            },
+        )
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
     /// Bounded: past the cap, coalesce into one full read that waits for the
     /// latest merged deadline, so no rate or credential wait is cut short.
     #[cfg(feature = "order-locks")]
@@ -1726,6 +1831,7 @@ impl<P> Io<P> {
             false
         }
     }
+
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
         let index = self
             .core
@@ -1734,6 +1840,7 @@ impl<P> Io<P> {
             .position(|(id, _)| *id == request)?;
         Some(self.core.signatures.swap_remove(index).1)
     }
+
     fn next(&mut self) -> u64 {
         next_engine_id(&mut self.core.next_id)
     }
@@ -1770,18 +1877,6 @@ impl<P> Io<P> {
         {
             self.core.next_id.invalidate();
         }
-    }
-
-    /// Splits the poll registry from the timer state it writes to.
-    fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
-        (
-            &mut self.core.polls,
-            TimerSink {
-                next_id: &mut self.core.next_id,
-                timers: &mut self.core.timers,
-                actions: &mut self.core.actions,
-            },
-        )
     }
 }
 
@@ -1843,10 +1938,9 @@ impl<P> Cx<'_, P> {
         crate::time::wire_stamp_ms(self.protocol_now())
     }
 
-    /// Feed a server-time observation captured at this callback's raw host time.
-    /// Replaces the per-engine correction; invalid observations preserve it.
+    #[inline]
     pub fn observe_protocol_time(&mut self, server_ms: f64) -> bool {
-        self.io.core.protocol_clock.observe(self.now, server_ms)
+        self.core().observe_protocol_time(server_ms)
     }
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
@@ -1857,68 +1951,30 @@ impl<P> Cx<'_, P> {
         self.io.core.private_feed_policy
     }
 
+    #[inline]
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
-        let spec = spec.into();
-        if self.io.managed_socket_active()
-            || spec.channel == Some(SocketChannel::Public)
-                && self.io.core.public_feed_policy != PublicFeedPolicy::Direct
-        {
-            return SocketId(0);
-        }
-        let socket = SocketId(self.io.next());
-        self.queue_socket_transport(socket, spec);
-        socket
+        self.core().connect(spec)
     }
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(not(feature = "managed-sockets"), allow(dead_code))]
     fn queue_socket_transport(&mut self, socket: SocketId, spec: SocketSpec) {
-        let SocketSpec {
-            url,
-            channel,
-            context,
-            headers,
-            binary,
-        } = spec;
-        if let Some(channel) = &channel {
-            self.io
-                .core
-                .sockets
-                .connected(socket, channel, &mut self.io.core.health);
-        }
-        self.io.core.actions.push(Action::WsConnect {
-            binary,
-            socket,
-            url,
-            headers,
-            channel,
-            context,
-        });
+        self.core().queue_socket_transport(socket, spec)
     }
 
-    /// Create an unsigned upgrade and stage it through the shared signing queue.
-    /// Public-role suppression and socket metadata are identical to `connect`.
+    #[inline]
     pub fn connect_signed(
         &mut self,
         spec: impl Into<SocketSpec>,
         step: Box<dyn crate::SignStep>,
     ) -> SocketId {
-        let socket = self.connect(spec);
-        if socket.0 == 0 {
-            return socket;
-        }
-        self.sign_socket_upgrade(socket, step);
-        socket
+        self.core().connect_signed(spec, step)
     }
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(not(feature = "managed-sockets"), allow(dead_code))]
     fn sign_socket_upgrade(&mut self, socket: SocketId, step: Box<dyn crate::SignStep>) {
-        let index = self
-            .io
-            .core
-            .actions
-            .iter()
-            .position(
-                |action| matches!(action, Action::WsConnect { socket: id, .. } if *id == socket),
-            )
-            .expect("connect queued its upgrade");
-        let outbound = self.io.core.actions.remove(index);
-        self.stage_signed(index, outbound, step);
+        self.core().sign_socket_upgrade(socket, step)
     }
 
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
@@ -1957,25 +2013,9 @@ impl<P> Cx<'_, P> {
         self.close_socket_transport(socket);
     }
 
-    /// Physical close and signing cancellation only. Managed lifecycle effects
-    /// use this after revoking the epoch, before native invalidation; public
-    /// close can then enter retirement without recursively invoking itself.
+    #[inline]
     fn close_socket_transport(&mut self, socket: SocketId) {
-        if socket.0 == 0 && self.io.core.public_feed_policy != PublicFeedPolicy::Direct {
-            return;
-        }
-        self.io.opaque_entry_activity();
-        for timer in self.io.core.signing.close_socket(socket) {
-            if timer.0 != 0 {
-                self.io.core.actions.push(Action::ClearTimer { timer });
-            }
-        }
-        // The host drops engine-initiated closes without reporting them back.
-        // They are deliberate, so they never make the next connect a reconnect.
-        if self.io.core.sockets.closed(socket, false) {
-            self.io.core.health.count(log_code::WS_CLOSED);
-        }
-        self.io.core.actions.push(Action::WsClose { socket });
+        self.core().close_socket_transport(socket)
     }
 
     /// Issue a request; `pending` comes back with its response.
@@ -2095,6 +2135,322 @@ impl<P> Cx<'_, P> {
         self.request_streamed_body(method, url, headers, None, at, pending)
     }
 
+    #[inline]
+    pub fn sign_http(&mut self, request: RequestId, step: Box<dyn crate::SignStep>) {
+        self.core().sign_http(request, step)
+    }
+
+    /// WS authentication uses the same deadline/freshness/generation service.
+    pub fn send_signed(&mut self, socket: SocketId, text: String, step: Box<dyn crate::SignStep>) {
+        if !self.managed_send_allowed(socket) {
+            return;
+        }
+        let index = self.io.core.actions.len();
+        self.stage_signed(index, Action::WsSend { socket, text }, step);
+    }
+
+    #[inline]
+    fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
+        self.core().stage_signed(index, outbound, step)
+    }
+
+    /// Stream a POSTed read while retaining its typed request body.
+    pub fn request_streamed_body(
+        &mut self,
+        method: Method,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        body: Option<String>,
+        at: ArrayAt,
+        pending: P,
+    ) -> RequestId {
+        let id = self.request(method, url, headers, body, pending);
+        self.io.core.streams.insert(id, (at, ItemCheck::Splitter));
+        id
+    }
+
+    #[inline]
+    pub fn stream_response(&mut self, request: RequestId, at: ArrayAt) {
+        self.core().stream_response(request, at)
+    }
+
+    #[inline]
+    pub fn venue_parses_items(&mut self, request: RequestId) {
+        self.core().venue_parses_items(request)
+    }
+
+    #[inline]
+    pub fn route_request(&mut self, id: RequestId, route: RequestRoute) {
+        self.core().route_request(id, route)
+    }
+
+    #[inline]
+    pub fn request_timeout(&mut self, id: RequestId, timeout_ms: u32) {
+        self.core().request_timeout(id, timeout_ms)
+    }
+
+    pub fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
+        self.io
+            .core
+            .entropy
+            .as_ref()
+            .ok_or("Engine entropy providers are required")?
+            .identity(bytes)
+    }
+    pub fn fill_signing_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
+        self.io
+            .core
+            .entropy
+            .as_ref()
+            .ok_or("Engine entropy providers are required")?
+            .signing(bytes)
+    }
+
+    #[inline]
+    pub fn jittered(&mut self, delay_ms: f64) -> f64 {
+        self.core().jittered(delay_ms)
+    }
+
+    #[inline]
+    pub fn set_timer(&mut self, delay_ms: f64) -> TimerId {
+        self.core().set_timer(delay_ms)
+    }
+
+    /// Register one periodic-poll wakeup. The configured positive interval
+    /// replaces this fallback cadence; Infinity pauses without losing it.
+    /// Rearm from the venue callback or read completion for the next cycle.
+    pub fn set_poll_timer(&mut self, default_interval_ms: f64) -> TimerId {
+        self.set_poll_timer_with_bounds(default_interval_ms, PollTimerBounds::default())
+    }
+    /// The interval a registered poll is armed with under the current host
+    /// policy (bounded, and infinite while paused).
+    pub fn poll_interval(&self, timer: TimerId) -> Option<f64> {
+        self.io.core.polls.current_interval(timer)
+    }
+
+    /// Configuration changes rearm from change-time, honoring both the recurring
+    /// minimum and the unchanged absolute deadline. Backoff should therefore be
+    /// an absolute `not_before_ms`, not the fallback cadence. Invalid bounds or
+    /// nonfinite due times stay parked rather than reaching a host timer.
+    pub fn set_poll_timer_with_bounds(
+        &mut self,
+        default_interval_ms: f64,
+        bounds: PollTimerBounds,
+    ) -> TimerId {
+        let now = self.now;
+        let (polls, mut sink) = self.io.polls();
+        polls.register(now, default_interval_ms, bounds, &mut sink)
+    }
+
+    pub fn clear_timer(&mut self, timer: TimerId) {
+        let (polls, mut sink) = self.io.polls();
+        if !polls.clear(timer, &mut sink) {
+            sink.clear(timer);
+        }
+    }
+
+    #[inline]
+    pub fn book_changed(&mut self, symbol: &str) {
+        self.core().book_changed(symbol)
+    }
+
+    /// Whether an event at `level` reaches the host; check before formatting
+    /// an expensive Debug message.
+    pub fn logs(&self, level: Level) -> bool {
+        level >= self.io.core.min_level
+    }
+
+    #[inline]
+    pub fn notice(&mut self, level: Level, code: &'static str, message: impl Into<String>) {
+        self.core().notice(level, code, message)
+    }
+
+    #[inline]
+    pub fn retried_failure(&mut self, site: &'static str, message: impl Into<String>) {
+        self.core().retried_failure(site, message)
+    }
+
+    #[inline]
+    pub fn event(
+        &mut self,
+        level: Level,
+        code: &'static str,
+        message: impl Into<String>,
+        fields: Vec<(&'static str, Value)>,
+    ) {
+        self.core().event(level, code, message, fields)
+    }
+
+    #[inline]
+    pub fn deactivate(&mut self) {
+        self.core().deactivate()
+    }
+
+    #[inline]
+    pub fn done(&mut self, command: CommandId, result: String) {
+        self.core().done(command, result)
+    }
+
+    #[inline]
+    pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
+        self.core().command_progress(command, receipts)
+    }
+
+    #[inline]
+    pub fn command_error(&mut self, command: CommandId, message: impl Into<String>) {
+        self.core().command_error(command, message)
+    }
+
+    #[inline]
+    pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
+        self.core().startup_failed(error)
+    }
+
+    #[inline]
+    pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
+        self.core().fail(command, error)
+    }
+
+    #[inline]
+    fn finish_command(
+        &mut self,
+        command: CommandId,
+        result: Result<String, VenueError>,
+        authority: Option<&crate::request_context::Context>,
+    ) -> Result<(), crate::request_context::Error> {
+        self.core().finish_command(command, result, authority)
+    }
+
+    #[inline]
+    fn finish_sealed_command(
+        &mut self,
+        command: CommandId,
+        success: Option<String>,
+        seal: request_context_registry::Seal,
+    ) -> Result<(), crate::request_context::Error> {
+        self.core().finish_sealed_command(command, success, seal)
+    }
+
+    #[inline]
+    pub fn placement_resolved(&mut self, command: CommandId) {
+        self.core().placement_resolved(command)
+    }
+
+    #[inline]
+    pub fn orders_reconciled(&mut self, symbol: Option<&str>) {
+        self.core().orders_reconciled(symbol)
+    }
+
+    #[inline]
+    pub fn candle(&mut self, symbol: &str, interval: Interval, candle: Candle) {
+        self.core().candle(symbol, interval, candle)
+    }
+
+    #[inline]
+    pub fn fill(&mut self, fill: Fill) {
+        self.core().fill(fill)
+    }
+
+    #[inline]
+    pub fn fill_with_financials(&mut self, fill: Fill, financials: FillFinancials) {
+        self.core().fill_with_financials(fill, financials)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    /// Feed a server-time observation captured at this callback's raw host time.
+    /// Replaces the per-engine correction; invalid observations preserve it.
+    pub fn observe_protocol_time(&mut self, server_ms: f64) -> bool {
+        self.io.core.protocol_clock.observe(self.now, server_ms)
+    }
+
+    pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
+        let spec = spec.into();
+        if self.io.managed_socket_active()
+            || spec.channel == Some(SocketChannel::Public)
+                && self.io.core.public_feed_policy != PublicFeedPolicy::Direct
+        {
+            return SocketId(0);
+        }
+        let socket = SocketId(self.io.next());
+        self.queue_socket_transport(socket, spec);
+        socket
+    }
+
+    fn queue_socket_transport(&mut self, socket: SocketId, spec: SocketSpec) {
+        let SocketSpec {
+            url,
+            channel,
+            context,
+            headers,
+            binary,
+        } = spec;
+        if let Some(channel) = &channel {
+            self.io
+                .core
+                .sockets
+                .connected(socket, channel, &mut self.io.core.health);
+        }
+        self.io.core.actions.push(Action::WsConnect {
+            binary,
+            socket,
+            url,
+            headers,
+            channel,
+            context,
+        });
+    }
+
+    /// Create an unsigned upgrade and stage it through the shared signing queue.
+    /// Public-role suppression and socket metadata are identical to `connect`.
+    pub fn connect_signed(
+        &mut self,
+        spec: impl Into<SocketSpec>,
+        step: Box<dyn crate::SignStep>,
+    ) -> SocketId {
+        let socket = self.connect(spec);
+        if socket.0 == 0 {
+            return socket;
+        }
+        self.sign_socket_upgrade(socket, step);
+        socket
+    }
+
+    fn sign_socket_upgrade(&mut self, socket: SocketId, step: Box<dyn crate::SignStep>) {
+        let index = self
+            .io
+            .core
+            .actions
+            .iter()
+            .position(
+                |action| matches!(action, Action::WsConnect { socket: id, .. } if *id == socket),
+            )
+            .expect("connect queued its upgrade");
+        let outbound = self.io.core.actions.remove(index);
+        self.stage_signed(index, outbound, step);
+    }
+
+    /// Physical close and signing cancellation only. Managed lifecycle effects
+    /// use this after revoking the epoch, before native invalidation; public
+    /// close can then enter retirement without recursively invoking itself.
+    fn close_socket_transport(&mut self, socket: SocketId) {
+        if socket.0 == 0 && self.io.core.public_feed_policy != PublicFeedPolicy::Direct {
+            return;
+        }
+        self.io.opaque_entry_activity();
+        for timer in self.io.core.signing.close_socket(socket) {
+            if timer.0 != 0 {
+                self.io.core.actions.push(Action::ClearTimer { timer });
+            }
+        }
+        // The host drops engine-initiated closes without reporting them back.
+        // They are deliberate, so they never make the next connect a reconnect.
+        if self.io.core.sockets.closed(socket, false) {
+            self.io.core.health.count(log_code::WS_CLOSED);
+        }
+        self.io.core.actions.push(Action::WsClose { socket });
+    }
+
     /// Attach a venue's unsigned HTTP recipe. Preparation happens at dispatch.
     pub fn sign_http(&mut self, request: RequestId, step: Box<dyn crate::SignStep>) {
         let Some(index) = self
@@ -2108,15 +2464,6 @@ impl<P> Cx<'_, P> {
         };
         let outbound = self.io.core.actions.remove(index);
         self.stage_signed(index, outbound, step);
-    }
-
-    /// WS authentication uses the same deadline/freshness/generation service.
-    pub fn send_signed(&mut self, socket: SocketId, text: String, step: Box<dyn crate::SignStep>) {
-        if !self.managed_send_allowed(socket) {
-            return;
-        }
-        let index = self.io.core.actions.len();
-        self.stage_signed(index, Action::WsSend { socket, text }, step);
     }
 
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
@@ -2162,21 +2509,6 @@ impl<P> Cx<'_, P> {
                 timeout_ms: 0,
             },
         );
-    }
-
-    /// Stream a POSTed read while retaining its typed request body.
-    pub fn request_streamed_body(
-        &mut self,
-        method: Method,
-        url: String,
-        headers: Vec<(&'static str, String)>,
-        body: Option<String>,
-        at: ArrayAt,
-        pending: P,
-    ) -> RequestId {
-        let id = self.request(method, url, headers, body, pending);
-        self.io.core.streams.insert(id, (at, ItemCheck::Splitter));
-        id
     }
 
     /// Stream the response of an already-issued request, including signed POST reads.
@@ -2252,14 +2584,6 @@ impl<P> Cx<'_, P> {
             .ok_or("Engine entropy providers are required")?
             .identity(bytes)
     }
-    pub fn fill_signing_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
-        self.io
-            .core
-            .entropy
-            .as_ref()
-            .ok_or("Engine entropy providers are required")?
-            .signing(bytes)
-    }
 
     /// Spreads a failed-request retry delay into `[0.75, 1.0] * delay_ms` so
     /// clients do not retry in lockstep. Apply rate-limit minimums afterwards.
@@ -2285,39 +2609,6 @@ impl<P> Cx<'_, P> {
         timer
     }
 
-    /// Register one periodic-poll wakeup. The configured positive interval
-    /// replaces this fallback cadence; Infinity pauses without losing it.
-    /// Rearm from the venue callback or read completion for the next cycle.
-    pub fn set_poll_timer(&mut self, default_interval_ms: f64) -> TimerId {
-        self.set_poll_timer_with_bounds(default_interval_ms, PollTimerBounds::default())
-    }
-    /// The interval a registered poll is armed with under the current host
-    /// policy (bounded, and infinite while paused).
-    pub fn poll_interval(&self, timer: TimerId) -> Option<f64> {
-        self.io.core.polls.current_interval(timer)
-    }
-
-    /// Configuration changes rearm from change-time, honoring both the recurring
-    /// minimum and the unchanged absolute deadline. Backoff should therefore be
-    /// an absolute `not_before_ms`, not the fallback cadence. Invalid bounds or
-    /// nonfinite due times stay parked rather than reaching a host timer.
-    pub fn set_poll_timer_with_bounds(
-        &mut self,
-        default_interval_ms: f64,
-        bounds: PollTimerBounds,
-    ) -> TimerId {
-        let now = self.now;
-        let (polls, mut sink) = self.io.polls();
-        polls.register(now, default_interval_ms, bounds, &mut sink)
-    }
-
-    pub fn clear_timer(&mut self, timer: TimerId) {
-        let (polls, mut sink) = self.io.polls();
-        if !polls.clear(timer, &mut sink) {
-            sink.clear(timer);
-        }
-    }
-
     pub fn book_changed(&mut self, symbol: &str) {
         let active = self.io.core.changed_books_active;
         if !self.io.core.changed_books[..active]
@@ -2332,12 +2623,6 @@ impl<P> Cx<'_, P> {
             }
             self.io.core.changed_books_active += 1;
         }
-    }
-
-    /// Whether an event at `level` reaches the host; check before formatting
-    /// an expensive Debug message.
-    pub fn logs(&self, level: Level) -> bool {
-        level >= self.io.core.min_level
     }
 
     /// [`Cx::event`] without fields.
@@ -2379,13 +2664,12 @@ impl<P> Cx<'_, P> {
     ) {
         // A rejection often also arrives as an auth-kind failure or `deactivate`.
         if code == log_code::AUTH_REJECTED {
-            count_auth_failure(self.io, None);
+            count_auth_failure(self.io.core, None);
         }
-        let io = &mut *self.io;
         push_event(
-            &mut io.core.actions,
-            &mut io.core.health,
-            io.core.min_level,
+            &mut self.io.core.actions,
+            &mut self.io.core.health,
+            self.io.core.min_level,
             LogEvent {
                 level,
                 code,
@@ -2396,7 +2680,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn deactivate(&mut self) {
-        count_auth_failure(self.io, None);
+        count_auth_failure(self.io.core, None);
         self.io
             .core
             .actions
@@ -2434,7 +2718,7 @@ impl<P> Cx<'_, P> {
 
     pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
         let error = error.into();
-        count_auth_failure(self.io, Some(&error));
+        count_auth_failure(self.io.core, Some(&error));
         self.io
             .core
             .actions
@@ -2574,7 +2858,7 @@ impl<P> Cx<'_, P> {
             Ok(result) => Notice::CommandDone { command, result },
             Err(error) => {
                 if credential_evidence {
-                    count_auth_failure(self.io, Some(&error));
+                    count_auth_failure(self.io.core, Some(&error));
                 }
                 Notice::CommandFailed { command, error }
             }
@@ -5442,16 +5726,16 @@ impl SocketRoles {
 }
 
 /// At most one per engine event; `error: None` is a definitive deactivation.
-fn count_auth_failure<P>(io: &mut Io<P>, error: Option<&VenueError>) {
+fn count_auth_failure(io: &mut IoCore, error: Option<&VenueError>) {
     let auth = error.is_none_or(|error| {
         matches!(
             error.kind,
             Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
         )
     });
-    if auth && !io.core.auth_failure_counted {
-        io.core.auth_failure_counted = true;
-        io.core.health.count(log_code::AUTH_REJECTED);
+    if auth && !io.auth_failure_counted {
+        io.auth_failure_counted = true;
+        io.health.count(log_code::AUTH_REJECTED);
     }
 }
 
