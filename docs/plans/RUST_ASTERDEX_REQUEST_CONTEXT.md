@@ -330,9 +330,9 @@ engine seam is needed.
 - **Clock.** Each `/time` attempt is its own Background read context; attempts
   2-3 use `http_context_with_egress(.., Egress::PublicCors)`, replacing
   `route_request`. The 5 s per-attempt bound becomes the Context deadline.
-- **Clock gating.** `awaiting_clock` keeps holding already-admitted reads and
-  writes; their Context deadline runs from admission, so time spent waiting for
-  the clock counts against it.
+- **Clock gating.** `awaiting_clock` holds unsigned requests under their
+  command root; each read's own Context is admitted when the clock settles and
+  the request is released, so its deadline starts then.
 - **Trade jobs become managed Plans** (W). Each `Planned` step is a plan leg
   (`plan_leg_context_with_intent`); the job ends through
   `done_plan`/`fail_plan`. `continue_on_error` and `successes` keep their native
@@ -349,9 +349,9 @@ engine seam is needed.
 
 ### Caller-visible changes (for CALLERS when each slice lands)
 
-- Signed and public reads gain an admission-to-expiry bound, proposed at 20 s,
-  which also covers the clock wait. Today a read has no venue deadline beyond
-  the host default.
+- Signed and public reads gain an admission-to-expiry bound (20 s, as ApeX),
+  starting after any clock wait. Today a read has no venue deadline beyond the
+  host default.
 - Read retry delays follow the shared ReadFailure backoff instead of the fixed
   1/2/3 s.
 - Typed transport and preparation failures reach command errors instead of
@@ -376,10 +376,11 @@ family and combined wasm on its composed tree, and deleting the venue retry and
 `Pending::Signed` machinery offsets part of the cost. If a slice cannot fit, it
 stops and reports; nothing is trimmed silently.
 
-Open questions for review:
+Decisions (overseer, 2026-10-25):
 
-1. Is 20 s the right read bound when it includes up to four 5 s clock
-   attempts? The alternative is to admit the signed release only after the clock
-   settles, with the command root admitted at ingress.
-2. Slice 3 depends on #2093 (dispatch nonce reservation, `sign.rs`); it rebases
-   onto whichever lands first.
+1. A signed read's Context is admitted only after the clock settles, so the
+   read gets its own full bound and clock attempts never consume it. The
+   command root is still admitted at ingress; the clock phase keeps its own
+   bounded attempts.
+2. Slice 3 waits for #2093 (`sign.rs`); slices 1 and 2 proceed now. Reviewer:
+   claude-m26ps4.
