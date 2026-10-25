@@ -588,7 +588,465 @@ def test_ranges(stream):
     return ranges
 
 
-def context_fingerprints(source, index_of=None):
+def brace_ranges(stream):
+    pending, ranges = [], []
+    for i, token in enumerate(stream):
+        if token == '{':
+            pending.append(i)
+        elif token == '}':
+            if not pending:
+                raise InventoryRefusal('unbalanced scope boundary')
+            ranges.append((pending.pop(), i + 1))
+    if pending:
+        raise InventoryRefusal('unbalanced scope boundary')
+    return sorted(ranges)
+
+
+def module_ranges(stream):
+    return [(i + 2, group_end(stream, i + 2), stream[i + 1])
+            for i, token in enumerate(stream)
+            if token == 'mod' and i + 2 < len(stream) and stream[i + 2] == '{']
+
+
+def enclosing_module(modules, index):
+    return tuple(start for start, end, _ in modules if start < index < end)
+
+
+def use_items(stream):
+    result = []
+    for i, token in enumerate(stream):
+        if token == 'use':
+            end = i + 1
+            while end < len(stream) and stream[end] != ';':
+                end += 1
+            if end == len(stream):
+                raise InventoryRefusal('unterminated use item')
+            result.append((i, end + 1))
+    return result
+
+
+def source_macro_hazard(stream, ancestor=False):
+    if any(token in {'macro_rules', 'macro_use', 'macro_export', 'macro'} for token in stream):
+        return True
+    for i, token in enumerate(stream):
+        if stream[i:i + 2] == ['extern', 'crate']:
+            return True
+        if stream[i + 1:i + 2] == ['!']:
+            if token.startswith('include') or ancestor and not any(
+                    a < i < b for a, b in brace_ranges(stream)):
+                return True
+    return False
+
+
+def plain_module_links(path, stream, sources):
+    """Only unconditional top-level out-of-line declarations, never path attrs."""
+    braces = brace_ranges(stream)
+    links = collections.defaultdict(list)
+    for i, token in enumerate(stream):
+        if token != 'mod' or i + 2 >= len(stream) or stream[i + 2] != ';':
+            continue
+        if any(start < i < end for start, end in braces):
+            continue
+        name = stream[i + 1]
+        before = i - 1
+        if stream[before:before + 1] == ['pub']:
+            before -= 1
+        if before >= 0 and stream[before] in {']', ')'}:
+            links[name].append(None)
+            continue
+        base = path.parent if path.name in {'lib.rs', 'main.rs', 'mod.rs'} else path.parent / path.stem
+        candidates = [(base / f'{name}.rs').resolve(), (base / name / 'mod.rs').resolve()]
+        links[name] += [candidate for candidate in candidates if candidate in sources]
+        if not any(candidate in sources for candidate in candidates):
+            links[name].append(None)
+    return links
+
+
+class MacroImportProof:
+    """Read-only, single-hop source proofs; unknown module graphs stay opaque."""
+
+    def __init__(self, sources, tracked):
+        self.sources = sources
+        self.tracked = tracked
+        self.streams = {path: tokens(source) for path, source in sources.items()}
+        self.links = {path: plain_module_links(path, stream, sources)
+                      for path, stream in self.streams.items()}
+        self.chains = collections.defaultdict(list)
+        for root in sources:
+            if root.name not in {'lib.rs', 'main.rs'} or root.parent.name != 'src':
+                continue
+            pending = [(root, (), ())]
+            while pending:
+                path, names, parents = pending.pop()
+                if path in parents:
+                    continue
+                self.chains[path].append((root, names, parents))
+                for name, children in self.links[path].items():
+                    if len(children) == 1 and children[0] is not None:
+                        pending.append((children[0], names + (name,), parents + (path,)))
+
+    def for_file(self, path):
+        chains = self.chains.get(path, [])
+        if len(chains) != 1 or path not in self.tracked:
+            return lambda index: None
+        root, names, parents = chains[0]
+        if any(parent not in self.tracked or source_macro_hazard(self.streams[parent], True)
+               for parent in parents):
+            return lambda index: None
+        chain_proof = [{'path': str(item.relative_to(ROOT.resolve())),
+                        'blob': hashlib.sha1(b'blob ' + str(len(self.sources[item].encode())).encode()
+                                             + b'\0' + self.sources[item].encode()).hexdigest()}
+                       for item in (*parents, path)]
+
+        def glob_proof(part, index):
+            if part[:2] != ['use', 'crate'] or len(part) != 7 \
+                    or part[2] != '::' or part[4:] != ['::', '*', ';']:
+                return None
+            target_name = part[3]
+            targets = self.links[root].get(target_name, [])
+            if len(targets) != 1 or targets[0] is None:
+                return None
+            target = targets[0]
+            if target not in self.tracked or names[:1] == (target_name,):
+                return None
+            stream = self.streams[target]
+            if source_macro_hazard(stream) or 'mod' in stream:
+                return None
+            # Re-exports with every visibility spelling are excluded.
+            for start, _ in use_items(stream):
+                before = start - 1
+                if before >= 0 and stream[before] in {'pub', ')'}:
+                    return None
+            # Unknown item-generating invocations cannot manufacture exports.
+            depth = brace_ranges(stream)
+            if any(stream[i + 1:i + 2] == ['!'] and
+                   not any(a < i < b for a, b in depth) for i in range(len(stream))):
+                return None
+            return {'module': target_name, 'declaration': ['mod', target_name, ';'],
+                    'path': str(target.relative_to(ROOT.resolve())),
+                    'blob': hashlib.sha1(b'blob ' + str(len(self.sources[target].encode())).encode()
+                                         + b'\0' + self.sources[target].encode()).hexdigest()}
+
+        return lambda index: macro_imports_at(self.streams[path], index, glob_proof, chain_proof)
+
+
+def macro_imports_at(stream, index, resolve_glob=None, chain=None):
+    modules = module_ranges(stream)
+    invocation_module = enclosing_module(modules, index)
+    scopes = brace_ranges(stream)
+    # Macro definitions and macro-use imports have distinct textual scope.
+    if any(token in {'macro_use', 'macro_export', 'macro'} for token in stream):
+        return None
+    for i, token in enumerate(stream):
+        if token == 'macro_rules' and [t.removeprefix('r#') for t in stream[i + 2:i + 3]] in [['matches'], ['format']]:
+            return None
+    # Unknown invocations may introduce textual macros or imports without arguments.
+    for at, token in enumerate(stream):
+        if stream[at + 1:at + 2] != ['!'] or stream[at + 2:at + 3] not in [['('], ['{'], ['[']]:
+            continue
+        scope = enclosing_module(modules, at)
+        if scope == invocation_module and token in {'matches', 'format'} \
+                and (not at or stream[at - 1] not in {'::', '.'}):
+            continue
+        if invocation_module[:len(scope)] != scope:
+            continue
+        if all(a < index < b for a, b in scopes if a < at < b):
+            return None
+    proofs = []
+    for start, end in use_items(stream):
+        if enclosing_module(modules, start) != invocation_module:
+            continue
+        enclosing = [(a, b) for a, b in scopes if a < start < b]
+        if not all(a < index < b for a, b in enclosing):
+            continue
+        part = stream[start:end]
+        if any(token.removeprefix('r#') in {'matches', 'format'} for token in part):
+            return None
+        if '*' in part:
+            if enclosing or resolve_glob is None or (proof := resolve_glob(part, start)) is None:
+                return None
+            proofs.append(proof)
+    return {'mod_chain': chain or [], 'imports': proofs,
+            'module_scope': list(invocation_module),
+            'block_scopes': [a for a, b in scopes if a < index < b]}
+
+
+def positional_format_literal(literal):
+    raw = RAW.match(literal)
+    try:
+        text = literal[raw.end():-len(raw[1]) - 1] if raw else json.loads(literal)
+    except (ValueError, TypeError):
+        return False
+    i = 0
+    while i < len(text):
+        if text[i:i + 2] in {'{{', '}}'}:
+            i += 2
+            continue
+        if text[i] == '}':
+            return False
+        if text[i] != '{':
+            i += 1
+            continue
+        end = text.find('}', i + 1)
+        if end < 0:
+            return False
+        field = text[i + 1:end]
+        position, _, specifier = field.partition(':')
+        if position and not position.isdecimal():
+            return False
+        if not re.fullmatch(r'[0-9 .+\-#?<>=^]*[xXobpeE?]?', specifier):
+            return False
+        i = end + 1
+    return True
+
+
+def ordinary_pattern_bindings(pattern):
+    pattern = [token.removeprefix('r#') for token in pattern]
+    while pattern[:1] in [['mut'], ['ref']]:
+        pattern.pop(0)
+    if not pattern:
+        return None
+    if pattern[0] == '(' and group_end(pattern, 0) == len(pattern):
+        nested = split_top(pattern[1:-1])
+    else:
+        cursor = 0
+        if not IDENT.fullmatch(pattern[cursor]):
+            return None
+        cursor += 1
+        while pattern[cursor:cursor + 1] == ['::']:
+            if cursor + 1 >= len(pattern) or not IDENT.fullmatch(pattern[cursor + 1]):
+                return None
+            cursor += 2
+        if cursor == len(pattern):
+            return {pattern[0]} if cursor == 1 and pattern[0] != '_' else set()
+        if pattern[cursor] != '(' or group_end(pattern, cursor) != len(pattern):
+            return None
+        nested = split_top(pattern[cursor + 1:-1])
+    names = set()
+    for part in nested:
+        found = ordinary_pattern_bindings(part)
+        if found is None:
+            return None
+        names.update(found)
+    return names
+
+
+def match_patterns(stream, at):
+    opening = at + 1
+    while opening < len(stream) and stream[opening] != '{':
+        if stream[opening] in {'(', '['}:
+            opening = group_end(stream, opening)
+        else:
+            opening += 1
+    if opening == len(stream):
+        return None
+    limit = group_end(stream, opening) - 1
+    cursor, result = opening + 1, []
+    while cursor < limit:
+        if stream[cursor] == ',':
+            cursor += 1
+            continue
+        start, guard = cursor, None
+        while cursor < limit and stream[cursor:cursor + 2] != ['=', '>']:
+            if stream[cursor] == 'if' and guard is None:
+                guard = cursor
+            if stream[cursor] in {'(', '[', '{'}:
+                cursor = group_end(stream, cursor)
+            else:
+                cursor += 1
+        if cursor == limit:
+            return None
+        result.append((stream[start:guard if guard is not None else cursor],
+                       stream[guard + 1:cursor] if guard is not None else []))
+        cursor += 2
+        if stream[cursor:cursor + 1] == ['{']:
+            cursor = group_end(stream, cursor)
+        else:
+            while cursor < limit and stream[cursor] != ',':
+                cursor = group_end(stream, cursor) if stream[cursor] in {'(', '[', '{'} else cursor + 1
+    return result
+
+
+def data_macro_proof(stream, index, end, imports):
+    if stream[index] not in {'matches', 'format'} or index and stream[index - 1] in {'::', '.'}:
+        return None
+    if stream[index + 2] != '(' or imports is None:
+        return None
+    arguments = stream[index + 3:end - 1]
+    if '!' in arguments:
+        return None
+    functions = []
+    generic_names = set()
+    for i, token in enumerate(stream):
+        if token in {'fn', 'impl', 'trait'}:
+            generic_start = i + (2 if token in {'fn', 'trait'} else 1)
+            if stream[generic_start:generic_start + 1] == ['<']:
+                for part in split_top(stream[generic_start + 1:group_end(stream, generic_start) - 1]):
+                    if part and IDENT.fullmatch(part[0]):
+                        generic_names.add(part[0])
+        if token != 'fn' or i + 2 >= len(stream) or not IDENT.fullmatch(stream[i + 1]):
+            continue
+        opening = i + 2
+        if stream[opening] == '<':
+            opening = group_end(stream, opening)
+        if stream[opening:opening + 1] != ['(']:
+            continue
+        close = group_end(stream, opening)
+        body = close
+        while body < len(stream) and stream[body] not in {'{', ';'}:
+            body += 1
+        if body < len(stream) and stream[body] == '{':
+            body_end = group_end(stream, body)
+            if body < index < body_end:
+                functions.append((body_end - body, i, opening, close, body, body_end))
+    if not functions:
+        return None
+    _, function, opening, close, body, body_end = min(functions)
+    if any(token in {'fn', 'mod'} for token in stream[body + 1:body_end - 1]):
+        return None
+    parameters = {}
+    for part in split_top(stream[opening + 1:close - 1]):
+        name, _, kind = parameter(part)
+        if not name or kind is None or any(t in {'Cx', 'Self', 'impl', 'dyn', '_', '<', '>', 'fn'}
+                                          or t in generic_names for t in kind):
+            continue
+        kind = list(kind)
+        if kind[:1] == ['&']:
+            kind.pop(0)
+            if kind[:1] == ["'"] and len(kind) >= 2:
+                kind = kind[2:]
+            if kind[:1] == ['mut']:
+                kind.pop(0)
+        if kind and all(IDENT.fullmatch(t) if j % 2 == 0 else t == '::'
+                        for j, t in enumerate(kind)) and len(kind) % 2 == 1:
+            parameters[name] = part
+    found, _, _ = bindings(stream)
+
+    excluded_bindings = []
+
+    def later_nested_let(at, pattern_end, name):
+        if at and stream[at - 1] in {'if', 'while', '&'}:
+            return False
+        scopes = [(a, b) for a, b in brace_ranges(stream) if body <= a < at < b <= body_end]
+        if not scopes:
+            return False
+        block, block_end = max(scopes)
+        # This closed implementation proves ordinary match-arm blocks only.
+        if block == body or block <= end or stream[block - 2:block] != ['=', '>']:
+            return False
+        if any(stream[k] in {'fn', 'mod'} for k in range(body + 1, at)) or any(
+                start <= at < stop and (start, stop) != (body, body_end)
+                for _, _, start, stop in found):
+            return False
+        pattern = stream[at + 1:pattern_end]
+        pattern_names = ordinary_pattern_bindings(pattern)
+        if pattern_names is None or name not in pattern_names:
+            return False
+        stop = pattern_end + 1
+        while stop < block_end:
+            if stream[stop] == ';':
+                excluded_bindings.append({'name': name, 'let': at, 'statement_end': stop + 1,
+                                          'block': [block, block_end],
+                                          'reason': 'strict later match-arm block opens after macro end'})
+                return True
+            if stream[stop] in {'(', '[', '{'}:
+                stop = group_end(stream, stop)
+            elif stream[stop] in {')', ']', '}'}:
+                return False
+            else:
+                stop += 1
+        return False
+
+    def rebound(name):
+        if any(bound == name and body <= start < body_end and (start, stop) != (body, body_end)
+               for bound, _, start, stop in found):
+            return True
+        for i in range(body + 1, body_end):
+            if closure_bar(stream, i):
+                closing = i + 1
+                while closing < body_end and stream[closing] != '|':
+                    closing = group_end(stream, closing) if stream[closing] in {'(', '['} else closing + 1
+                if closing == body_end or name in [token.removeprefix('r#')
+                                                  for token in stream[i + 1:closing]]:
+                    return True
+            if stream[i + 1:i + 2] == ['!'] and stream[i] not in {'matches', 'format'} \
+                    and stream[i + 2:i + 3] in [['('], ['{'], ['[']]:
+                if name in [token.removeprefix('r#')
+                            for token in stream[i + 3:group_end(stream, i + 2) - 1]]:
+                    return True
+            if stream[i] in {'let', 'for'}:
+                stop = i + 1
+                while stop < body_end and stream[stop] not in {'=', ';', 'in'}:
+                    stop += 1
+                pattern = [token.removeprefix('r#') for token in stream[i + 1:stop]]
+                if '!' in pattern:
+                    return True
+                if name in pattern and not (stream[i] == 'let' and
+                                            later_nested_let(i, stop, name)):
+                    return True
+                if stream[i] == 'let' and [token.removeprefix('r#') for token in stream[stop:stop + 2]] == ['=', name] \
+                        and stream[stop + 2:stop + 3] in [[';'], [',']]:
+                    return True
+            if stream[i] == 'match':
+                arms = match_patterns(stream, i)
+                if arms is None:
+                    return True
+                for pattern, guard in arms:
+                    if name in [token.removeprefix('r#') for token in pattern] or any(
+                            token in {'let', '|', '!', 'fn'} for token in guard):
+                        return True
+        return False
+
+    used = set()
+
+    def reference(part):
+        part = list(part)
+        if part[:1] == ['&']:
+            part.pop(0)
+        if not part or part[0] not in parameters or rebound(part[0]):
+            return False
+        if len(part) % 2 != 1 or any(token != '.' if j % 2 else not IDENT.fullmatch(token)
+                                   for j, token in enumerate(part[1:], 1)):
+            return False
+        used.add(part[0])
+        return True
+
+    for i, token in enumerate(arguments):
+        if token.removeprefix('r#') in METHODS:
+            if token not in parameters or i and arguments[i - 1] in {'.', '::'}:
+                return None
+    if stream[index] == 'matches':
+        if ',' not in arguments:
+            return None
+        comma = arguments.index(',')
+        if not reference(arguments[:comma]):
+            return None
+        # Guards are expressions, not the closed pattern-only grammar.
+        if any(token in {'if', '=', ';', '?', '+', '<', '>'} or
+               token.removeprefix('r#') in METHODS for token in arguments[comma + 1:]):
+            return None
+    else:
+        parts = split_top(arguments)
+        if not parts or len(parts[0]) != 1 or not parts[0][0].startswith(('"', 'r"', 'r#')):
+            return None
+        if not positional_format_literal(parts[0][0]):
+            return None
+        for part in parts[1:]:
+            literal = (len(part) == 1 and (part[0].startswith(('"', "'", 'r"', 'r#'))
+                                          or part[0] in {'true', 'false'})) or bool(
+                re.fullmatch(r'[0-9][0-9_]*(?:\.[0-9_]+)?', ''.join(part)))
+            if not literal and not reference(part):
+                return None
+    if not used or any(innermost(found, token, index) is not None
+                       and innermost(found, token, index)[0] in POSSIBLY_CX for token in arguments):
+        return None
+    return {'macro': stream[index], 'function': stream[function + 1],
+            'parameters': {name: parameters[name] for name in sorted(used)},
+            'import_scope': imports,
+            'out_of_scope_bindings': excluded_bindings}
+
+
+def context_fingerprints(source, index_of=None, macro_scope=None, removed=None):
     """(prod, test) fingerprints of legacy calls on a resolved Cx binding.
 
     `index_of` maps fn names to their workspace signatures; the source's own by default."""
@@ -652,6 +1110,13 @@ def context_fingerprints(source, index_of=None):
             end = group_end(stream, i + 2)
             if any(i + 3 <= at < end for at in counted) or (
                     escaped(i) and any(t.removeprefix('r#') in METHODS for t in stream[i + 3:end])):
+                imports = macro_scope(i) if macro_scope is not None else macro_imports_at(stream, i)
+                proof = data_macro_proof(stream, i, end, imports)
+                if not any(i + 3 <= at < end for at in counted) and proof is not None:
+                    if removed is not None:
+                        removed.append({'tokens': stream[i:end], 'proof': proof,
+                                        'test': any(a <= i < b for a, b in tests)})
+                    continue
                 add(i, end, i)
     return dict(prod), dict(test)
 
@@ -683,7 +1148,7 @@ def module_declarations(stream):
     return found
 
 
-def request_sites():
+def request_sites(removed=None):
     sources = {path.resolve(): path.read_text() for path in sorted((ROOT / 'venues').glob('*/src/**/*.rs'))}
     root = ROOT.resolve()
     children = {}
@@ -714,11 +1179,23 @@ def request_sites():
     # Clause (1) resolves a callee against every same-named fn in the workspace.
     index_of = escape_index([tokens(path.read_text()) for path in sorted(set(ROOT.glob('*/**/src/**/*.rs')))
                              if 'target' not in path.relative_to(ROOT).parts])
+    try:
+        tracked = {(ROOT / path).resolve() for path in git('ls-files', '--', 'venues').splitlines()}
+    except subprocess.CalledProcessError:
+        tracked = set()  # No tracked declaration proof: retain conservative rows.
+    macro_proofs = MacroImportProof(sources, tracked)
     prod, test = {}, {}
     for path, source in sources.items():
         relative = str(path.relative_to(root))
         try:
-            found_prod, found_test = context_fingerprints(source, index_of)
+            file_removed = []
+            found_prod, found_test = context_fingerprints(
+                source, index_of, macro_proofs.for_file(path), file_removed)
+            if removed is not None:
+                for row in file_removed:
+                    row['path'] = relative
+                    row['test'] = row['test'] or path in test_files
+                    removed.append(row)
         except InventoryRefusal as refusal:
             raise InventoryRefusal(f'{relative}: {refusal}') from None
         if path in test_files:

@@ -241,6 +241,9 @@ pub(super) struct ContextRegistry {
     /// They hold the Plan, its slots and journal; no command observes them.
     #[cfg(feature = "http-plans")]
     physical: PhysicalOwners,
+    /// Repair roots' journal owners, keyed by root generation.
+    #[cfg(feature = "repair-mutations")]
+    repairs: PhysicalOwners,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
     /// Order-read epoch at each live owner's first released Read: one logical
@@ -834,6 +837,7 @@ impl ContextRegistry {
             || matches!(context.owner(), Owner::Session { generation }
                 if !self.sessions.live(generation))
             || (matches!(context.owner(), Owner::Execution { .. }) && !self.execution_live(context))
+            || self.repair_revoked(context.owner())
         {
             return Err(Error::Revoked);
         }
@@ -851,6 +855,8 @@ impl ContextRegistry {
                 .filter(|owner| owner.generation == generation),
             #[cfg(feature = "http-plans")]
             Owner::Execution { generation } => self.physical.get(&generation),
+            #[cfg(feature = "repair-mutations")]
+            Owner::Repair { generation } => self.repairs.get(&generation),
             _ => None,
         }
     }
@@ -863,6 +869,8 @@ impl ContextRegistry {
                 .filter(|owner| owner.generation == generation),
             #[cfg(feature = "http-plans")]
             Owner::Execution { generation } => self.physical.get_mut(&generation),
+            #[cfg(feature = "repair-mutations")]
+            Owner::Repair { generation } => self.repairs.get_mut(&generation),
             _ => None,
         }
     }
@@ -877,12 +885,22 @@ impl ContextRegistry {
         false
     }
 
+    /// An owner with a write journal besides a command: a Plan-backed
+    /// execution's physical owner, or a repair root.
+    #[inline(always)]
+    fn journal_owner(&self, owner: Owner) -> bool {
+        #[cfg(feature = "repair-mutations")]
+        if let Owner::Repair { generation } = owner {
+            return self.repairs.contains_key(&generation);
+        }
+        self.physical_owner(owner)
+    }
+
     fn command_mut(&mut self, context: &Context) -> Result<&mut CommandOwner, Error> {
         if !context.issued_by(&self.issuer) {
             return Err(Error::Revoked);
         }
-        if !matches!(context.owner(), Owner::Command { .. })
-            && !self.physical_owner(context.owner())
+        if !matches!(context.owner(), Owner::Command { .. }) && !self.journal_owner(context.owner())
         {
             return Err(Error::Invalid);
         }
@@ -1085,8 +1103,7 @@ impl ContextRegistry {
     }
 
     pub(super) fn latest_write(&self, context: &Context) -> Result<Option<RequestId>, Error> {
-        if !matches!(context.owner(), Owner::Command { .. })
-            && !self.physical_owner(context.owner())
+        if !matches!(context.owner(), Owner::Command { .. }) && !self.journal_owner(context.owner())
         {
             return Err(Error::Invalid);
         }
@@ -1631,6 +1648,8 @@ impl<P> Cx<'_, P> {
             Owner::Background { .. } => Scope::Background,
             Owner::Session { .. } => return Err(Error::Invalid),
             Owner::Execution { .. } => Scope::Execution,
+            #[cfg(feature = "repair-mutations")]
+            Owner::Repair { .. } => return Err(Error::Invalid),
         };
         self.make_http_context(scope, policy, Some(parent), None)
     }
@@ -1939,11 +1958,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         if !matches!(context.owner(), Owner::Command { .. })
-            && !self
-                .io
-                .core
-                .request_contexts
-                .physical_owner(context.owner())
+            && !self.io.core.request_contexts.journal_owner(context.owner())
         {
             return Err(Error::Invalid);
         }
@@ -2349,11 +2364,7 @@ impl crate::engine::CoreRef<'_> {
             return Ok(crate::classify::Intent::Setting);
         }
         if !matches!(context.owner(), Owner::Command { .. })
-            && !self
-                .io
-                .core
-                .request_contexts
-                .physical_owner(context.owner())
+            && !self.io.core.request_contexts.journal_owner(context.owner())
         {
             return Ok(crate::classify::Intent::Place);
         }
@@ -4325,5 +4336,20 @@ mod write_tests {
             .unwrap();
         assert_eq!(registry.commands.len(), 1);
         assert_eq!(registry.contexts.len(), 1);
+    }
+}
+
+#[cfg(feature = "repair-mutations")]
+#[path = "request_context_repair.rs"]
+mod repair_owner;
+
+impl ContextRegistry {
+    #[inline(always)]
+    fn repair_revoked(&self, _owner: Owner) -> bool {
+        #[cfg(feature = "repair-mutations")]
+        if let Owner::Repair { generation } = _owner {
+            return !self.repairs.contains_key(&generation);
+        }
+        false
     }
 }

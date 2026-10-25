@@ -79,6 +79,17 @@ fn take(ids: &mut Range<u64>, count: u64) -> Range<u64> {
 }
 
 impl State {
+    /// A Mutation Plan's admitted credential, for repair mint custody.
+    #[cfg(feature = "repair-mutations")]
+    pub(in crate::engine) fn repair_write_credential(
+        &self,
+    ) -> Option<&crate::request_context::Credential> {
+        let policy = &self.body.first()?.policy;
+        (policy.operation == Operation::Mutation)
+            .then_some(policy.credential.as_ref())
+            .flatten()
+    }
+
     pub(super) fn context_current(&self, context: &Context) -> bool {
         self.body[0].entries.iter().any(|entry| {
             entry

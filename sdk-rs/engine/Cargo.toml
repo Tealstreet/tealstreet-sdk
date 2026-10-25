@@ -23,6 +23,8 @@ session-bearer = []
 # Temporary migration boundary; remove after all legacy socket families adopt.
 managed-sockets = []
 order-locks = []
+# Engine-issued repair cancel/replace authority; only Phemex and Backpack link it.
+repair-mutations = ["order-locks", "http-plans"]
 # Per-symbol settings publication and write fences for adopting venue families.
 metadata-freshness = []
 # Prediction venues opt in; other standalone builds omit metadata storage and frames.
